@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     import torch
 
+    from unigym.runtime.actions import NamedAction
+
 
 @dataclass
 class StepResult:
@@ -38,8 +40,18 @@ class Runner(Protocol):
     extending this protocol.
     """
 
-    def tick(self) -> StepResult:
-        """Advance exactly one policy tick."""
+    def tick(
+        self,
+        actions_override: "dict[str, NamedAction] | None" = None,
+    ) -> StepResult:
+        """Advance exactly one policy tick.
+
+        Args:
+            actions_override: Optional external-driver action dict.  When
+                supplied the adapter forward/postprocess is skipped and the
+                named actions go straight to the env step; ``None`` runs the
+                adapter-driven path.
+        """
         ...
 
     def run(self, stop_when: Callable[[], bool] | None = None) -> dict:
@@ -52,4 +64,9 @@ class Runner(Protocol):
 
     def close(self) -> None:
         """Stop the runner's loop/thread; does not close the instance."""
+        ...
+
+    @property
+    def ticks_done(self) -> int:
+        """Number of policy ticks completed so far (public clock read)."""
         ...

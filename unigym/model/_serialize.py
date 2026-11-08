@@ -10,18 +10,25 @@ from __future__ import annotations
 import re
 from dataclasses import fields, is_dataclass
 from enum import Enum
+from typing import Any, Iterable, Mapping, cast
 
 __all__ = ["decode", "encode", "from_row", "row_dict"]
 
 _HEX_RE = re.compile(r"^[+-]?0x[0-9a-fA-F]+(?:\.[0-9a-fA-F]+)?p[+-]?\d+$")
 
+# JSON codec boundary: the wire form is recursive and heterogeneous
+# (str/float/int/list/dict/dataclass/Enum/numpy scalar), so ``Any`` is the
+# honest type for the two directions.  Callers keep their own concrete types;
+# only this module crosses the erase boundary.
+_JSONValue = Any
 
-def encode(value):
+
+def encode(value: _JSONValue) -> _JSONValue:
     """Return a JSON-safe, deterministic representation of *value*."""
     if value is None or isinstance(value, (bool, str)):
         return value
     if isinstance(value, Enum):
-        return encode(int(value))
+        return encode(int(cast(Any, value)))
     if isinstance(value, float):
         return float.hex(value)
     if isinstance(value, int):
@@ -36,11 +43,11 @@ def encode(value):
     if is_dataclass(value) and not isinstance(value, type):
         return encode(row_dict(value))
     if type(value).__module__.split(".")[0] == "numpy":
-        return encode(value.item())
+        return encode(cast(Any, value).item())
     return value
 
 
-def decode(value):
+def decode(value: _JSONValue) -> _JSONValue:
     """Reverse :func:`encode` (hex strings back to floats)."""
     if isinstance(value, str):
         if value in ("nan", "inf", "-inf"):
@@ -55,7 +62,7 @@ def decode(value):
     return value
 
 
-def row_dict(row):
+def row_dict(row: Any) -> dict[str, Any]:
     """Return one dataclass/mapping row as a plain attribute dictionary."""
     if isinstance(row, dict):
         return dict(row)
@@ -64,7 +71,8 @@ def row_dict(row):
     return dict(vars(row))
 
 
-def from_row(cls, row, tuple_fields=()):
+def from_row(cls: type, row: Mapping[str, Any],
+             tuple_fields: Iterable[str] = ()) -> Any:
     """Build a frozen dataclass *cls* from one mapping row."""
     kwargs = {}
     for name in cls.__dataclass_fields__:

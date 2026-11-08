@@ -519,6 +519,8 @@ def requested_features(kwargs: dict) -> dict[str, bool]:
     """Map capability name -> requested? from ``build_env_backend`` kwargs."""
     adapter = kwargs.get("adapter")
     try:
+        if adapter is None:
+            raise TypeError("no adapter: no obs requests to infer")
         req_keys = {r.key for r in adapter.get_obs_requests()}
     except Exception:  # best effort: capability inference only -> no requests
         req_keys = set()

@@ -464,7 +464,9 @@ class CameraSpec:
             # deprecation notice prints there (it knows policy_hz); this
             # marker only distinguishes "declared interval" from the
             # field default (which moves to the tier fps instead).
-            spec._interval_declared = True
+            # runtime migration marker (not a declared dataclass field);
+            # setattr keeps it out of the serialized schema surface
+            setattr(spec, "_interval_declared", True)
         return spec
 
     # ---- key space ------------------------------------------------------ #
@@ -613,6 +615,13 @@ class CameraRig(Protocol):
     name: str
     spec: CameraSpec
 
+    # Live render state (camera_contract §14): ``None`` means the plain
+    # publish path.  Only capture-capable rigs (mujoco/mjwarp) set these, but
+    # the manager reads them on every rig, so they belong to the boundary.
+    render_spec: dict | None
+    render_source: str | None
+    target_env: int
+
     def setup_scene(self, scene_cfg) -> None: ...
 
     def bind_env(self, env) -> None: ...
@@ -622,3 +631,18 @@ class CameraRig(Protocol):
     def on_reset(self, env_ids) -> None: ...
 
     def read(self, env_ids=None) -> dict: ...
+
+    def apply_properties(self, pose_offset=None, yaw_deg=None,
+                         pitch_deg=None, roll_deg=None, target_env=None,
+                         env_ids=None) -> None: ...
+
+    def begin_world_pose(self, pos, quat_wxyz): ...
+
+    def end_world_pose(self, saved) -> None: ...
+
+    def set_world_pose(self, pos, quat_wxyz,
+                       env_idx: int | None = None) -> None: ...
+
+    def get_world_pose(self) -> tuple: ...
+
+    def capture_render(self, spec: dict) -> dict: ...

@@ -23,6 +23,7 @@ runner.
 
 from importlib import metadata
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 __all__ = [
     "Run",
@@ -66,6 +67,26 @@ _LAZY = {
     "UnknownExtensionError": ("unigym.model.errors",
                              "UnknownExtensionError"),
 }
+
+
+if TYPE_CHECKING:
+    # Static view of the lazy surface above: pyright resolves ``unigym.Run``
+    # etc. here while runtime importing stays PEP-562 lazy.
+    from unigym.camera import Camera
+    from unigym.errors import (
+        BackendError,
+        CapabilityError,
+        ConfigError,
+        UniGymError,
+    )
+    from unigym.model.errors import (
+        ModelIRError,
+        StaleModelError,
+        UnknownExtensionError,
+    )
+    from unigym.run.api import Run, load, make
+    from unigym.scenes.terrain import Terrain
+    from unigym.world import Box, Capsule, Cylinder, Plane, Sphere, World
 
 
 def __getattr__(name):

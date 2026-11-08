@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import torch
 
+from ..runtime.actions import NamedAction
 from .base import Adapter
 
 
@@ -74,9 +75,18 @@ class ManualAdapter(Adapter):
             "ExternalRunner.step(actions) / SyncRunner.tick(actions_override) "
             "instead")
 
-    def postprocess_action(self, raw):
-        """Identity (completeness only; external drivers skip this hook)."""
-        return raw
+    def postprocess_action(self, raw: torch.Tensor) -> dict[str, NamedAction]:
+        """Never legal: external drivers bypass adapter postprocessing.
+
+        The contract is explicit action dicts handed straight to
+        ``ExternalRunner.step`` / ``SyncRunner.tick(actions_override=...)``;
+        silently returning a tensor where the base promises named groups
+        would hide a caller bug.
+        """
+        raise NotImplementedError(
+            "ManualAdapter.postprocess_action must never be called; pass "
+            "dict[str, NamedAction] to ExternalRunner.step(actions) / "
+            "SyncRunner.tick(actions_override) instead")
 
     def on_reset(self, env_ids) -> None:
         """No history to clear."""

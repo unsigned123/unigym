@@ -258,6 +258,11 @@ class SyncRunner:
         self._obs_frame = None
         self._started = True
 
+    @property
+    def ticks_done(self) -> int:
+        """Policy ticks completed so far (rewind jumps included)."""
+        return int(self._tick)
+
     def tick(self, actions_override=None) -> StepResult:
         """Advance exactly one policy tick; returns its :class:`StepResult`.
 

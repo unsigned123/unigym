@@ -6,13 +6,19 @@ helpers.  It is a ``Sequence`` (iteration yields rows, integer/slice
 indexing works) and a ``Mapping`` (a string key resolves to one row), so
 the same object answers both "the third joint" and "the elbow joint".
 """
+# The dual protocol (Sequence + Mapping) is a deliberate design conflict:
+# integer/slice indexing yields rows while string indexing yields one row, so
+# the two ABCs cannot be satisfied simultaneously by static analysis.  The
+# runtime contract is correct (covered by tests); scope the two unavoidable
+# checker rules to this module instead of scattering per-method ignores.
+# pyright: reportGeneralTypeIssues=false, reportIncompatibleMethodOverride=false
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from html import escape
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 __all__ = ["Table"]
 
@@ -29,7 +35,7 @@ def _row_dict(row: object) -> dict:
         return {field.name: getattr(row, field.name) for field in fields(row)}
     to_dict = getattr(row, "to_dict", None)
     if callable(to_dict):
-        return dict(to_dict())
+        return dict(cast(Mapping, to_dict()))
     return dict(vars(row))
 
 
@@ -49,7 +55,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
 
     __slots__ = ("_rows", "_by_name", "_by_qualname")
 
-    def __init__(self, rows=()):
+    def __init__(self, rows: Iterable[T] = ()):
         """Build a table from *rows*, rejecting duplicate names.
 
         Args:
@@ -59,7 +65,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         Raises:
             ValueError: A row has no name or two rows share one.
         """
-        ordered = tuple(rows)
+        ordered: tuple[T, ...] = tuple(rows)
         by_name: dict[str, T] = {}
         by_qualname: dict[str, T] = {}
         for row in ordered:
@@ -83,10 +89,10 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         self._by_name = by_name
         self._by_qualname = by_qualname
 
-    def __getitem__(self, key):
+    def __getitem__(self, key) -> T:
         """Return a row by position/slice, or by name/qualname string."""
         if isinstance(key, slice):
-            return Table(self._rows[key])
+            return cast(T, Table(self._rows[key]))
         if isinstance(key, int):
             return self._rows[key]
         if isinstance(key, str):
@@ -100,11 +106,11 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         raise TypeError(
             f"Table keys are int, slice or str, not {type(key).__name__}")
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T]:
         """Iterate rows in insertion order (Sequence semantics)."""
         return iter(self._rows)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of rows."""
         return len(self._rows)
 
@@ -114,26 +120,26 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             return key in self._by_name or key in self._by_qualname
         return any(key is row or key == row for row in self._rows)
 
-    def keys(self):
+    def keys(self) -> tuple[str, ...]:
         """Return the row names (name-keyed mapping view)."""
         return tuple(self._by_name)
 
-    def values(self):
+    def values(self) -> tuple[T, ...]:
         """Return the rows (mapping-values view)."""
         return self._rows
 
-    def items(self):
+    def items(self) -> tuple[tuple[str, T], ...]:
         """Return ``(name, row)`` pairs in insertion order."""
         return tuple(self._by_name.items())
 
-    def get(self, key, default=None):
+    def get(self, key, default=None) -> T | None:
         """Return the named row, or *default* when absent."""
         try:
             return self[key]
         except KeyError:
             return default
 
-    def names(self):
+    def names(self) -> list[str]:
         """Return every row name in insertion order."""
         return list(self._by_name)
 
@@ -142,7 +148,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         pattern = re.compile(regex) if isinstance(regex, str) else regex
         selected = [
             row for row in self._rows
-            if pattern.search(row.name)
+            if pattern.search(getattr(row, "name"))
             or pattern.search(getattr(row, "qualname", "") or "")
         ]
         return Table(selected)
@@ -169,7 +175,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
 
     def to_dict(self):
         """Return ``{name: row dict}`` in insertion order."""
-        return {row.name: _row_dict(row) for row in self._rows}
+        return {getattr(row, "name"): _row_dict(row) for row in self._rows}
 
     def to_pandas(self):
         """Return a pandas ``DataFrame`` (pandas is an optional dependency).

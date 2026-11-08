@@ -45,6 +45,7 @@ import tempfile
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -55,6 +56,9 @@ from unigym.run.passive import (
 )
 from unigym.camera import CameraSet
 from unigym.run.spec import RunSpec, build_spec
+
+if TYPE_CHECKING:
+    from unigym.runner.base import Runner
 
 __all__ = ["Run", "load", "make"]
 
@@ -73,7 +77,7 @@ class BenchmarkSet:
     """
 
     def __init__(self, tasks=(), *, locked: bool = False, on_add=None):
-        self._tasks = list(tasks or ())
+        self._tasks: list = list(tasks or ())
         self._locked = bool(locked)
         self._on_add = on_add
 
@@ -416,7 +420,7 @@ class Run:
             on_add=self._on_benchmark_add)
         self._spec: RunSpec | None = None
         self._instance = None
-        self._runner = None
+        self._runner: "Runner | None" = None
         self._runner_kind: str | None = None
         self._stepped = False
         self._closed = False
@@ -769,11 +773,12 @@ class Run:
                  if c.articulation == name and c.action_face == name),
                 None)
             model = getattr(art, "model", None)
+            model_to_dict = getattr(model, "to_dict", None)
             views.append({
                 "name": name,
                 "role": "articulation",
-                "model": (model.to_dict()
-                          if hasattr(model, "to_dict") else None),
+                "model": (model_to_dict()
+                          if callable(model_to_dict) else None),
                 "root": getattr(art, "root", None),
                 "base_body": getattr(art, "base_body", None),
                 "joints": list(getattr(art, "joint_names", ()) or ()),
@@ -836,7 +841,7 @@ class Run:
     # ------------------------------------------------------------------ #
     # live faces
     # ------------------------------------------------------------------ #
-    def runner(self, kind: str | None = None, **kwargs):
+    def runner(self, kind: str | None = None, **kwargs) -> "Runner":
         """Build or return this run's active :class:`Runner`.
 
         Args:
@@ -882,11 +887,12 @@ class Run:
         """Convenience alias for ``runner("external", **kwargs)``."""
         return self.runner("external", **kwargs)
 
-    def _default_runner(self):
+    def _default_runner(self) -> "Runner":
         """Return the cached active runner, creating sync on first use."""
-        if self._runner is None:
-            self.runner("sync")
-        return self._runner
+        runner = self._runner
+        if runner is None:
+            runner = self.runner("sync")
+        return runner
 
     def reset(self, env_ids=None):
         """Reset the named envs (all when *None*) via the active runner.
@@ -919,7 +925,7 @@ class Run:
         """
         runner = self._default_runner()
         if n is None:
-            n = max(int(self.spec.total_steps) - int(runner._tick), 0)
+            n = max(int(self.spec.total_steps) - int(runner.ticks_done), 0)
         for _ in range(int(n)):
             yield self.step()
 

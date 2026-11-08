@@ -61,7 +61,7 @@ class RawObsRequest:
     key: str
     dim: int
     source: str
-    joint_names: tuple | None = None
+    joint_names: tuple[str, ...] | None = None
     articulation: str | None = None
 
     def __post_init__(self):
@@ -160,7 +160,7 @@ class Adapter(ABC):
             f"(rewindable={self.rewindable!r}); the rewind face needs the "
             f"adapter resync hook")
 
-    def snapshot_internal(self) -> dict:
+    def snapshot_internal(self) -> dict | None:
         """Serialize the adapter's internal streaming state (rewind face).
 
         Returns a numpy/JSON-safe dict carried inside every engine
@@ -248,7 +248,12 @@ class Adapter(ABC):
         """Convenience: wrap *values* as a NamedAction over
         :attr:`joint_order` (the body group)."""
 
-        return NamedAction(values=values, joint_names=list(self.joint_order),
+        order = self.joint_order
+        if order is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.named_action requires joint_order; "
+                f"declare the adapter's joint order before wrapping values")
+        return NamedAction(values=values, joint_names=list(order),
                            kind=kind)
 
     def on_reset(self, env_ids) -> None:

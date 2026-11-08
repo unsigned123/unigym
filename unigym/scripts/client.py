@@ -31,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import NoReturn
 
 from unigym.scripts.config_resolve import ConfigResolveError, resolve_config
 
@@ -48,6 +49,9 @@ def _api_base() -> str:
 class _OpError(RuntimeError):
     """A business failure reported by the daemon (message == the
     pre-daemon CLI text)."""
+
+    #: Optional next-action hint attached by rich error faces (director §6).
+    hint: str | None = None
 
 
 def _api(method: str, path: str, body: dict | None = None,
@@ -133,7 +137,7 @@ def _kv_params(pairs: list[str]) -> dict:
     return params
 
 
-def _json_exit(a, msg: str):
+def _json_exit(a, msg: str) -> NoReturn:
     """ux-9 --json error face: one JSON document on stdout, exit 1."""
     print(json.dumps({"ok": False, "error": msg}))
     sys.exit(1)
@@ -459,7 +463,7 @@ def _write_photo_sidecar(jpg_path: str, *, run: str, source: str,
 # --------------------------------------------------------------------------- #
 # capture (ux-5) -- one command, one artifact, one stdout line
 # --------------------------------------------------------------------------- #
-def _capture_exit(a, msg: str):
+def _capture_exit(a, msg: str) -> NoReturn:
     """Fail-fast that keeps the stdout contract: plain mode -> stderr +
     nonzero; --json -> a single JSON document on stdout, exit 1."""
     if getattr(a, "json", False):

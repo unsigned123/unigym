@@ -95,6 +95,7 @@ import zlib
 from glob import glob
 from multiprocessing import shared_memory
 from pathlib import Path
+from typing import Any, Callable, overload
 
 from unigym import runtime_dirs
 
@@ -229,25 +230,41 @@ L_DATA = 192
 REGISTRY_SCHEMA = 2
 
 
-def _u16(buf, off, v=None):
+@overload
+def _u16(buf, off) -> int: ...
+@overload
+def _u16(buf, off, v: int) -> None: ...
+def _u16(buf, off, v: int | None = None):
     if v is None:
         return struct.unpack_from("<H", buf, off)[0]
     struct.pack_into("<H", buf, off, v)
 
 
-def _u32(buf, off, v=None):
+@overload
+def _u32(buf, off) -> int: ...
+@overload
+def _u32(buf, off, v: int) -> None: ...
+def _u32(buf, off, v: int | None = None):
     if v is None:
         return struct.unpack_from("<I", buf, off)[0]
     struct.pack_into("<I", buf, off, v)
 
 
-def _u64(buf, off, v=None):
+@overload
+def _u64(buf, off) -> int: ...
+@overload
+def _u64(buf, off, v: int) -> None: ...
+def _u64(buf, off, v: int | None = None):
     if v is None:
         return struct.unpack_from("<Q", buf, off)[0]
     struct.pack_into("<Q", buf, off, v)
 
 
-def _f64(buf, off, v=None):
+@overload
+def _f64(buf, off) -> float: ...
+@overload
+def _f64(buf, off, v: float) -> None: ...
+def _f64(buf, off, v: float | None = None):
     if v is None:
         return struct.unpack_from("<d", buf, off)[0]
     struct.pack_into("<d", buf, off, v)
@@ -735,6 +752,20 @@ class Bridge:
     # historical parked cadence.
     PARKED_PUBLISH_PERIOD = 0.04
 
+    @property
+    def buf(self) -> memoryview:
+        """The SHM buffer as a non-Optional hot-path accessor.
+
+        ``multiprocessing.shared_memory.SharedMemory.buf`` is typed
+        ``memoryview | None`` (it becomes None after teardown); the bridge
+        owns the segment for its whole life, so the Optional is contained
+        here instead of leaking into every seqlock read/write.
+        """
+        buf = self.shm.buf
+        if buf is None:
+            raise BridgeError("shared memory segment is closed")
+        return buf
+
     def __init__(self, run_id: str, camera_manager=None, *, camera=None,
                  frame_capacity: int = DEFAULT_FRAME_CAPACITY,
                  poll_interval: float = 0.02, config: str | None = None,
@@ -765,7 +796,7 @@ class Bridge:
             raise BridgeError(
                 f"shm {self.shm_name} already exists (stale segment? run "
                 f"`unigym clean`)") from e
-        buf = self.shm.buf
+        buf = self.buf
         # fresh POSIX shm is zero-filled; write the header fields explicitly
         struct.pack_into("<4sH", buf, H_MAGIC, MAGIC, VERSION)
         _u32(buf, H_CAP, self.frame_capacity)
@@ -815,7 +846,8 @@ class Bridge:
             buf[H_PAUSED] = 1
             buf[H_PHASE] = PHASE_PAUSED
         self.console = None
-        self._handlers: dict[int, object] = {}
+        # runtime extension face: ``fn(rid, params) -> result dict``
+        self._handlers: dict[int, Callable[[int, dict], dict]] = {}
         self.out_dir = out_dir          # console npz dump root (data_out/<run>)
         self._bundle = None             # current step bundle (inspector view)
         self._watchers = None           # watchers.WatcherEngine (attach face)
@@ -931,7 +963,7 @@ class Bridge:
         watchers.md §2.1).
         """
         self._bump_heartbeat()
-        metrics = {"t": int(t)}
+        metrics: dict = {"t": int(t)}
         tm = bundle.get("term_metrics")
         if isinstance(tm, dict):
             metrics.update(tm)
@@ -999,8 +1031,8 @@ class Bridge:
         self._enter_paused()
 
     def _enter_paused(self) -> None:
-        self.shm.buf[H_PAUSED] = 1
-        self.shm.buf[H_PHASE] = PHASE_PAUSED
+        self.buf[H_PAUSED] = 1
+        self.buf[H_PHASE] = PHASE_PAUSED
         self._gate.pause()
 
     def _bump_heartbeat(self) -> None:
@@ -1011,13 +1043,13 @@ class Bridge:
         like the running one), so liveness is about the loop being
         serviced, never about the sim advancing.
         """
-        buf = self.shm.buf
+        buf = self.buf
         _u64(buf, H_HB_SEQ, _u64(buf, H_HB_SEQ) + 1)
         _f64(buf, H_HB_TS, time.time())
 
     def _write_status_locked(self, step: int, metrics: dict) -> None:
         self._last_step = int(step)   # frame header step source
-        buf = self.shm.buf
+        buf = self.buf
         seq = _u64(buf, STATUS_OFF + S_SEQ)
         _u64(buf, STATUS_OFF + S_SEQ, seq + 1)          # odd = writing
         try:
@@ -1063,7 +1095,7 @@ class Bridge:
             return None
         if len(a.shape) > MAX_DIMS:
             raise BridgeError(f"frame rank {len(a.shape)} > {MAX_DIMS}")
-        buf = self.shm.buf
+        buf = self.buf
         slot = self._frame_count & 1
         base = _slot_base(buf, slot)
         seq = _u64(buf, base)
@@ -1084,7 +1116,7 @@ class Bridge:
         # (step) + monotonic write stamp (ts) -- inside the seqlock window
         struct.pack_into("<QQ", buf, base + L_STEP, self._last_step,
                          time.monotonic_ns())
-        buf[base + L_DATA:base + L_DATA + n] = memoryview(a).cast("B")
+        buf[base + L_DATA:base + L_DATA + n] = a.data.cast("B")
         _u64(buf, base, seq + 2)                        # slot seq even
         # publish LAST (aligned u64 store): (frame_id << 8) | slot
         _u64(buf, H_FPTR, ((self._frame_count + 1) << 8) | slot)
@@ -1118,10 +1150,10 @@ class Bridge:
         """
         if not self.camera:
             return None
-        fn = getattr(self.camera_manager, "effective_fps", None)
+        fn: Any = getattr(self.camera_manager, "effective_fps", None)
         if callable(fn):
             try:
-                fps = fn(self.camera)
+                fps: Any = fn(self.camera)
                 return float(fps) if fps else None
             except Exception:              # noqa: BLE001 (status face)
                 return None
@@ -1224,7 +1256,7 @@ class Bridge:
 
     # -- command block -------------------------------------------------------
     def _serve_commands(self) -> None:
-        buf = self.shm.buf
+        buf = self.buf
         rid = _u64(buf, CMD_OFF + C_REQ)
         if rid == 0 or rid == self._last_served:
             return
@@ -1251,15 +1283,15 @@ class Bridge:
             if handler is not None:
                 result = handler(rid, params)
             elif cmd == CMD_PAUSE:
-                was = self.shm.buf[H_PAUSED]
-                self.shm.buf[H_PAUSED] = 1
-                self.shm.buf[H_PHASE] = PHASE_PAUSED
+                was = self.buf[H_PAUSED]
+                self.buf[H_PAUSED] = 1
+                self.buf[H_PHASE] = PHASE_PAUSED
                 self._gate.pause()         # pause wins over a step budget
                 result = {"paused": True, "was_paused": bool(was)}
             elif cmd == CMD_RESUME:
                 self._gate.resume()
-                self.shm.buf[H_PAUSED] = 0
-                self.shm.buf[H_PHASE] = PHASE_RUNNING
+                self.buf[H_PAUSED] = 0
+                self.buf[H_PHASE] = PHASE_RUNNING
                 result = {"paused": False}
             elif cmd == CMD_SET_PROPS:
                 name = params.get("camera") or self.camera
@@ -1310,7 +1342,7 @@ class Bridge:
             elif cmd == CMD_METRICS:
                 # typed query: document + live status counters
                 result = self._metrics.metrics_document(
-                    self.run_id, int(_u64(self.shm.buf,
+                    self.run_id, int(_u64(self.buf,
                                           STATUS_OFF + S_STEP)),
                     self._episodes)
             elif cmd == CMD_CONFIG:
@@ -1396,6 +1428,9 @@ class Bridge:
         # ux-7: a posed snapshot defaults to the debug fly camera "free"
         name = params.get("camera") or \
             ("free" if posed else self.camera)
+        if name is None:
+            raise BridgeError(
+                "no broadcast camera in this run; pass an explicit camera")
         if "flags" in params:
             # v054 owner ruling: the flags key is GONE at the bridge
             # layer (no deprecation window; the CLI's --flags is the
@@ -1547,7 +1582,7 @@ class Bridge:
     @property
     def done(self) -> bool:
         """True once the run finished (or the bridge is closing)."""
-        return self._closed or self.shm.buf[H_PHASE] == PHASE_DONE
+        return self._closed or self.buf[H_PHASE] == PHASE_DONE
 
     def register_command(self, name: str, fn) -> None:
         """Register a runtime command handler (extension face).
@@ -1569,7 +1604,7 @@ class Bridge:
         self.register_command("save_npz", console.cmd_save_npz)
 
     def _write_ack(self, rid: int, status: int, result: dict) -> None:
-        buf = self.shm.buf
+        buf = self.buf
         try:
             raw = json.dumps(result).encode()
         except (TypeError, ValueError):
@@ -1585,7 +1620,7 @@ class Bridge:
     # -- status / teardown ----------------------------------------------------
     def read_status(self) -> dict:
         """Owner-side status view (SHM status + bridge-private fields)."""
-        buf = self.shm.buf
+        buf = self.buf
         st = _read_status_block(buf)
         st.update({"run_id": self.run_id, "shm": self.shm_name,
                    "phase": PHASE_NAMES.get(buf[H_PHASE], "?"),
@@ -1622,7 +1657,7 @@ class Bridge:
             return
         self._closed = True
         try:
-            self.shm.buf[H_PHASE] = PHASE_DONE
+            self.buf[H_PHASE] = PHASE_DONE
         except (ValueError, OSError):  # best effort: idempotent close
             pass
         if self._state_path is not None:
@@ -1651,7 +1686,7 @@ class ShmClient:
     def __init__(self, run_id: str, name: str | None = None):
         self.run_id = run_id
         self.shm_name = name or (SHM_PREFIX + run_id)
-        self.buf = _attach_segment(self.shm_name)
+        self._buf: mmap.mmap | None = _attach_segment(self.shm_name)
         if bytes(self.buf[H_MAGIC:H_MAGIC + 4]) != MAGIC:
             self.close()
             raise BridgeError(f"{self.shm_name}: bad magic "
@@ -1668,6 +1703,14 @@ class ShmClient:
             raise BridgeError(
                 f"{self.shm_name}: segment version {ver} > supported "
                 f"{VERSION} (upgrade unigym)")
+
+    @property
+    def buf(self) -> mmap.mmap:
+        """Attached segment (non-Optional while the client is open)."""
+        buf = self._buf
+        if buf is None:
+            raise BridgeError("segment is closed")
+        return buf
 
     # -- header --------------------------------------------------------------
     @property
@@ -1687,13 +1730,13 @@ class ShmClient:
 
     def close(self) -> None:
         """Detach the segment (idempotent; never raises into callers)."""
-        buf = getattr(self, "buf", None)
+        buf = self._buf
         if buf is not None:
             try:
                 buf.close()
             except (BufferError, ValueError):  # best effort: export in flight
                 pass
-            self.buf = None
+            self._buf = None
 
     def __enter__(self):
         return self
