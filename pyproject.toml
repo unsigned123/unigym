@@ -1,0 +1,307 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unigym"
+version = "0.106.0"
+description = "Multi-backend robot simulation and evaluation framework"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "UniGym contributors"}]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==1.26.4",
+    "mujoco==3.11.0",
+    "torch>=2.1,<3.0",
+    "PyYAML>=6.0,<7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/unsigned123/unigym"
+Repository = "https://github.com/unsigned123/unigym"
+Issues = "https://github.com/unsigned123/unigym/issues"
+
+[project.optional-dependencies]
+daemon = [
+    "pyzmq>=24.0,<28.0",
+    "requests>=2.28,<3.0",
+]
+webui = [
+    "unigym[daemon]",
+]
+record = [
+    "pillow>=10.0,<13.0",
+    "imageio[ffmpeg]>=2.28,<3.0",
+]
+media = [
+    "av>=14.0,<18.0",
+    "aiortc>=1.9,<2.0",
+]
+usd = [
+    "usd-core>=24.0,<27.0",
+]
+warp = [
+    "mujoco-warp==3.17.0",
+    "warp-lang>=1.15",
+    "mujoco>=3.13,<3.14",
+]
+dev = [
+    "pytest>=8.0,<10.0",
+    "ruff==0.8.6",
+    "import-linter==2.15",
+]
+
+[project.scripts]
+unigym = "unigym.scripts.launch:main"
+
+# ---------------------------------------------------------------------------
+# Import-linter contracts.  The public core ships ONE adapter (manual), so the
+# historical per-adapter independence contract is reduced to the manual face.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["unigym"]
+
+[[tool.importlinter.contracts]]
+name = "Adapter subtrees stay independent"
+type = "independence"
+modules = ["unigym.adapters.manual"]
+
+[[tool.importlinter.contracts]]
+name = "unigym.core imports nothing above itself (stdlib + third-party only)"
+type = "forbidden"
+source_modules = ["unigym.core"]
+forbidden_modules = ["unigym.*"]
+ignore_imports = [
+    "unigym.core.** -> unigym.runtime.**",
+    "unigym.core.** -> unigym.backends.**",
+    "unigym.core.** -> unigym.adapters",
+    "unigym.core.** -> unigym.scripts.**",
+    "unigym.core.asset_root -> unigym.packs.refs",
+    "unigym.core.asset_root -> unigym.errors",
+]
+
+[[tool.importlinter.contracts]]
+name = "task providers import nothing above themselves (pure spec-builders)"
+type = "forbidden"
+source_modules = ["unigym.benchmarks.task_providers"]
+forbidden_modules = ["unigym.*"]
+
+[[tool.importlinter.contracts]]
+name = "props neutral zone never imports backends (v072 design §12.2)"
+type = "forbidden"
+source_modules = ["unigym.props"]
+forbidden_modules = ["unigym.backends.**"]
+ignore_imports = [
+    "unigym.props.base -> unigym.backends.registry",
+    "unigym.props.base -> unigym.core.quat",
+    "unigym.props.asset_ir.definition -> unigym.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "scenes vocabulary never imports backends (v075 design §3/§4)"
+type = "forbidden"
+source_modules = ["unigym.scenes"]
+forbidden_modules = ["unigym.backends.**"]
+
+[[tool.importlinter.contracts]]
+name = "neutral layers never import backends (v100 G0)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "unigym.model",
+    "unigym.run",
+    "unigym.cameras",
+    "unigym.contacts",
+    "unigym.director",
+]
+forbidden_modules = ["unigym.backends.**"]
+ignore_imports = [
+    "unigym.model.ir -> unigym.backends.registry",
+    "unigym.model.live -> unigym.backends.registry",
+    "unigym.cameras.capabilities -> unigym.backends.registry",
+    "unigym.cameras.manager -> unigym.backends.registry",
+    "unigym.cameras.rigs -> unigym.backends.registry",
+    "unigym.director.ops -> unigym.backends.registry",
+    "unigym.run.build -> unigym.backends.registry",
+    "unigym.run.spec -> unigym.backends.registry",
+    "unigym.run.api -> unigym.backends.registry",
+    "unigym.contacts.base -> unigym.backends.registry",
+]
+
+[[tool.importlinter.contracts]]
+name = "isaaclab backends stay out of the MuJoCo family (v100 G0)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.backends.isaaclab2", "unigym.backends.isaaclab3"]
+forbidden_modules = [
+    "unigym.backends.mujoco",
+    "unigym.backends.mujoco.**",
+    "unigym.backends.mjwarp",
+    "unigym.backends.mjwarp.**",
+    "unigym.backends.shared.mjfamily",
+    "unigym.backends.shared.mjfamily.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "mujoco family never imports an isaaclab backend (v100 G0)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.backends.mujoco", "unigym.backends.mjwarp"]
+forbidden_modules = [
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab2.**",
+    "unigym.backends.isaaclab3",
+    "unigym.backends.isaaclab3.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "shared.mjfamily is private to mujoco/mjwarp (v100 G0)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "unigym.core",
+    "unigym.model",
+    "unigym.run",
+    "unigym.props",
+    "unigym.cameras",
+    "unigym.contacts",
+    "unigym.director",
+    "unigym.scenes",
+    "unigym.adapters",
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab3",
+]
+forbidden_modules = [
+    "unigym.backends.shared.mjfamily",
+    "unigym.backends.shared.mjfamily.**",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["unigym*"]
+
+# The portal face is package data, not Python: the HTML pages + assets ship
+# inside the distribution and resolve through importlib.resources.
+[tool.setuptools.package-data]
+"unigym.webui" = ["*.html", "assets/*"]
+"unigym.props" = ["*.urdf"]
+"unigym.backends.isaaclab2" = ["obstacles/*.urdf"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["data_out", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "D"]
+extend-ignore = [
+    "E402",
+    "E203",
+    "E116",
+    "D105",
+    "D107",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# tests/ docstring rules stay out of scope.
+"tests/**" = ["D1", "D2", "D3", "D4"]
+"unigym/__init__.py" = ["D205", "D209", "D415"]
+"unigym/adapters/__init__.py" = ["D205", "D209", "D415"]
+"unigym/adapters/base.py" = ["D202", "D205", "D209", "D411", "D415"]
+"unigym/adapters/params.py" = ["D205", "D209", "D415"]
+"unigym/analysis/behavior.py" = ["D101", "D403"]
+"unigym/analysis/charts.py" = ["D403"]
+"unigym/analysis/gate.py" = ["D101", "D205", "D209", "D415"]
+"unigym/benchmarks/formula.py" = ["D102", "D205", "D209", "D415"]
+"unigym/benchmarks/packs.py" = ["D102", "D205", "D209", "D415"]
+"unigym/benchmarks/tasks.py" = ["D102"]
+"unigym/benchmarks/terms.py" = ["D205", "D209", "D415"]
+"unigym/cameras/appearance.py" = ["D205", "D209", "D415", "D417"]
+"unigym/cameras/base.py" = ["D102", "D205", "D415"]
+"unigym/cameras/decor/__init__.py" = ["D102", "D103", "D205", "D209", "D415"]
+"unigym/cameras/decor/_sdf.py" = ["D102", "D205", "D209", "D415"]
+"unigym/cameras/decor/axes.py" = ["D102"]
+"unigym/cameras/decor/cage.py" = ["D102", "D205", "D209", "D415"]
+"unigym/cameras/decor/contacts.py" = ["D102"]
+"unigym/cameras/geomflags.py" = ["D205", "D403", "D415"]
+"unigym/cameras/inspect.py" = ["D205", "D209", "D415"]
+"unigym/cameras/manager.py" = ["D205", "D209", "D402", "D415"]
+"unigym/cameras/rigs.py" = ["D102", "D205", "D209", "D415"]
+"unigym/cameras/sidecar.py" = ["D205", "D209", "D415"]
+"unigym/cameras/spec.py" = ["D103", "D205", "D208", "D209", "D415"]
+"unigym/commands/__init__.py" = ["D103"]
+"unigym/commands/fixed.py" = ["D102", "D209"]
+"unigym/commands/lhs.py" = ["D102"]
+"unigym/commands/uniform.py" = ["D102"]
+"unigym/console/__init__.py" = ["D102"]
+"unigym/console/inspector.py" = ["D403"]
+"unigym/console/stepping.py" = ["D205", "D209", "D415"]
+"unigym/contacts/base.py" = ["D102", "D205", "D209", "D415"]
+"unigym/contacts/manager.py" = ["D102", "D205", "D209", "D415"]
+"unigym/core/asset_root.py" = ["D205", "D209", "D415"]
+"unigym/core/quat.py" = ["D205", "D209", "D403", "D415"]
+"unigym/core/registry.py" = ["D209"]
+"unigym/core/run_ops.py" = ["D102", "D205", "D209", "D415"]
+"unigym/core/session.py" = ["D102", "D205", "D209", "D402", "D403", "D415"]
+"unigym/director/__init__.py" = ["D102", "D205", "D209", "D403", "D415"]
+"unigym/director/gripper.py" = ["D102"]
+"unigym/director/ops.py" = ["D102", "D103", "D205", "D209", "D403", "D415"]
+"unigym/env/backends/base.py" = ["D102"]
+"unigym/env/obs_catalog.py" = ["D205", "D209", "D415"]
+"unigym/executors.py" = ["D101", "D103", "D403"]
+"unigym/filters/base.py" = ["D402"]
+"unigym/filters/base_contact.py" = ["D102"]
+"unigym/filters/velocity.py" = ["D102", "D205", "D415"]
+"unigym/io/__init__.py" = ["D104"]
+"unigym/io/writer.py" = ["D101", "D102", "D205", "D209", "D415"]
+"unigym/language/template.py" = ["D102"]
+"unigym/logger/__init__.py" = ["D102"]
+"unigym/props/__init__.py" = ["D205", "D415"]
+"unigym/props/articulation.py" = ["D102", "D403"]
+"unigym/props/ball.py" = ["D102"]
+"unigym/props/base.py" = ["D102", "D205", "D209", "D403", "D415"]
+"unigym/props/container.py" = ["D102"]
+"unigym/props/generic.py" = ["D102"]
+"unigym/recorder/__init__.py" = ["D102", "D209"]
+"unigym/robots/__init__.py" = ["D103"]
+"unigym/robots/base.py" = ["D102"]
+"unigym/robots/g1.py" = ["D205", "D209", "D417"]
+"unigym/runner/sinks/benchmark.py" = ["D102", "D205", "D209", "D415"]
+"unigym/runner/sinks/collect.py" = ["D102"]
+"unigym/runner/sinks/fanout.py" = ["D102"]
+"unigym/scripts/analyze_cli.py" = ["D103", "D205", "D209", "D415"]
+"unigym/scripts/benchmarks_cli.py" = ["D103"]
+"unigym/scripts/client.py" = ["D103", "D205", "D209", "D415"]
+"unigym/scripts/collect_cli.py" = ["D103", "D205", "D209", "D415"]
+"unigym/scripts/doctor_cli.py" = ["D103", "D205", "D209", "D403", "D415"]
+"unigym/scripts/inspect_data.py" = ["D103"]
+"unigym/scripts/launch.py" = ["D103"]
+"unigym/scripts/orbit_cli.py" = ["D103", "D205", "D209", "D403", "D415"]
+"unigym/scripts/probe_cli.py" = ["D103", "D205", "D209", "D415"]
+"unigym/scripts/probe_contacts.py" = ["D103"]
+"unigym/scripts/shard_sha256.py" = ["D103"]
+"unigym/scripts/spawn_spec.py" = ["D101", "D102", "D103"]
+"unigym/scripts/trace_cli.py" = ["D103"]
+"unigym/scripts/vdiff_cli.py" = ["D103", "D205", "D209", "D415"]
+"unigym/stream/udp_probe.py" = ["D103"]
+"unigym/terminations/base.py" = ["D102"]
+"unigym/terminations/base_contact.py" = ["D102"]
+"unigym/terminations/composite.py" = ["D102"]
+"unigym/terminations/fall.py" = ["D102"]
+"unigym/terminations/joint_limits.py" = ["D102"]
+"unigym/trace/diverge.py" = ["D101", "D205", "D209", "D415"]
+"unigym/trace/io.py" = ["D102"]
+"unigym/trace/record.py" = ["D102", "D205", "D209", "D415"]
+"unigym/trace/replay.py" = ["D102", "D209"]
+"unigym/watchers/base.py" = ["D102", "D205", "D209", "D402", "D403", "D415"]
+"unigym/watchers/engine.py" = ["D101", "D102", "D205", "D209", "D415"]
+"unigym/watchers/spec.py" = ["D102", "D205", "D209", "D415"]
+"unigym/watchers/templates.py" = ["D103", "D205", "D209", "D415"]
+"unigym/watchers/timeline.py" = ["D102"]

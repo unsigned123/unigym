@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<!-- Minimal prismatic drawer prop (v0.30.0 actuated prototype).
+
+  - ANCHORED: the cabinet shell (base_link) is FIXED to the world at the
+    sampled placement -- the URDF root carries no joint (URDF root links
+    are world-attached by construction), matching the v0.30.0 articulation
+    semantics (a freejoint in the fragment would fail fast).
+  - Joint "drawer_slide": prismatic, slides the drawer box along +X
+    (pull direction), range [0, 0.25] rad->m, effort 100 N.
+    Mode/stiffness/damping are DECLARED in the run config (spec.joints),
+    not baked here -- the asset defines geometry + limits only.
+  - Sized for a ~1.4 m humanoid: drawer front face at ~0.35 m height.
+-->
+<robot name="drawer_prop">
+  <!-- cabinet shell: fixed base, sits on the ground (origin = bottom face) -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <mass value="8.0"/>
+      <inertia ixx="0.16" iyy="0.13" izz="0.08" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.3 0.4 0.4"/>
+      </geometry>
+      <material name="cabinet">
+        <color rgba="0.35 0.35 0.4 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.3 0.4 0.4"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- sliding drawer: 0.25 x 0.3 x 0.12 box, centred on the slide joint -->
+  <link name="drawer_box">
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.009" iyy="0.005" izz="0.008" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.25 0.3 0.12"/>
+      </geometry>
+      <material name="tray">
+        <color rgba="0.75 0.55 0.25 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.25 0.3 0.12"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- prismatic slide: +X pull, drawer starts closed (q=0).  The slide
+       origin sits PROUD of the cabinet front face (x=0.15) so the tray
+       never interpenetrates the solid shell at q=0 (solid-box minimal
+       geometry: an inset tray would be contact-locked at spawn). -->
+  <joint name="drawer_slide" type="prismatic">
+    <parent link="base_link"/>
+    <child link="drawer_box"/>
+    <origin xyz="0.3 0 0.35" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0.0" upper="0.25" effort="100.0" velocity="1.0"/>
+    <dynamics damping="2.0" friction="0.0"/>
+  </joint>
+</robot>

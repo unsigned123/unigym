@@ -1,0 +1,763 @@
+"""Programmatic world builder: ``unigym.World`` (v100 S1b-ii / S2c).
+
+A :class:`World` is a *declaration* of the world half of a run, not a live
+engine object.  It produces only the existing config schema consumed by
+:func:`unigym.run.spec.build_spec`:
+
+* a scene-bundle reference (``scene: <family>/<name>``) for
+  :meth:`World.from_pack` / :meth:`World.from_config`;
+* the ``env.params.mj_scene`` + ``mj_scene_params`` pair for
+  :meth:`World.from_generator`;
+* a unique runtime scene provider for :meth:`World.inline`;
+* the ``objects.types`` content block for dynamic free bodies added with
+  ``World.add(..., dynamic=True)``.
+
+The inline form registers a provider in the process-wide scene registry
+(``register_scene("_inline_<uuid>", provider)``).  That registry is
+**prototype-only**: it lives for the process lifetime and is never
+serialized into a config.  Use :meth:`World.from_generator` or
+:meth:`World.from_pack` for reproducible worlds.
+
+The builder adds static instances to the closed scene IR
+(:mod:`unigym.scenes.scene_ir`) through the registered payload generators.
+A ``dynamic=True`` primitive takes the content/props path instead: it is
+declared in ``objects.types``, built by the props manager as a free body
+(freejoint + mass/inertia) and therefore survives
+:meth:`unigym.Run.to_config`.
+"""
+from __future__ import annotations
+
+import copy
+import uuid
+from dataclasses import replace
+from pathlib import Path
+
+import yaml
+
+from unigym.scenes.generators import build_payload
+from unigym.scenes.registry import register_scene
+from unigym.scenes.scene_ir import (
+    Material,
+    Scene,
+    validate_scene,
+)
+from unigym.scenes.terrain import Terrain
+from unigym.world_primitives import (
+    Box,
+    Capsule,
+    Cylinder,
+    Plane,
+    Sphere,
+    _Primitive,
+    _SHAPE_TYPES,
+    _validate_dynamic_entry,
+)
+
+__all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
+
+
+class _TerrainBuilder:
+    """Pre-build terrain face of one inline :class:`World`.
+
+    Every constructor method stores a :class:`~unigym.scenes.terrain.Terrain`
+    on the world and returns the WORLD (so ``Run(world=world.terrain.stairs(...))``
+    reads naturally).  ``replace_floor`` is a live boolean: True (default)
+    makes the composer drop the base model's floor/ground plane so the
+    terrain is the ground.
+    """
+
+    def __init__(self, world: "World"):
+        self._world = world
+
+    def _check(self) -> None:
+        """Refuse bundle worlds and post-build mutation."""
+        world = self._world
+        if world.built:
+            raise RuntimeError(
+                "World.terrain: the world is already built; terrain "
+                "declarations are pre-build only")
+        if world._scene_ref is not None or world._mj_scene is not None:
+            raise RuntimeError(
+                "World.terrain requires an inline world (World() / "
+                "World.inline(scene)); bundle/generator worlds own their "
+                "ground")
+        world._ensure_inline()
+
+    def _set(self, terrain) -> "World":
+        """Store *terrain* (None = flat) and return the world."""
+        self._world._terrain = terrain
+        self._world._terrain_explicit = True
+        return self._world
+
+    @property
+    def replace_floor(self) -> bool:
+        """Whether the base model's floor/ground plane is removed."""
+        return self._world._terrain_replace_floor
+
+    @replace_floor.setter
+    def replace_floor(self, value: bool) -> None:
+        self._world._terrain_replace_floor = bool(value)
+
+    def flat(self) -> "World":
+        """Remove any declared terrain (the ground falls back to the base)."""
+        self._check()
+        return self._set(None)
+
+    def heightmap(self, heights, size=None, base_z=0.0, name="terrain",
+                  meta=None) -> "World":
+        """Use an explicit ``(ny, nx)`` elevation matrix."""
+        self._check()
+        return self._set(Terrain.heightmap(
+            heights, size=size, base_z=base_z, name=name, meta=meta))
+
+    def stairs(self, steps, rise, run, width, base_z=0.0, margin=None,
+               resolution=None, name="terrain") -> "World":
+        """Use a staircase climbing +x (see :meth:`Terrain.stairs`)."""
+        self._check()
+        return self._set(Terrain.stairs(
+            steps, rise, run, width, base_z=base_z, margin=margin,
+            resolution=resolution, name=name))
+
+    def slope(self, angle_deg, size=(4.0, 4.0), base_z=0.0, resolution=None,
+              name="terrain") -> "World":
+        """Use a linear ramp along +x (see :meth:`Terrain.slope`)."""
+        self._check()
+        return self._set(Terrain.slope(
+            angle_deg, size=size, base_z=base_z, resolution=resolution,
+            name=name))
+
+
+class World:
+    """A declarative world (scene bundle / generator / inline objects).
+
+    Construct one through the factories; the object is cheap and mutable
+    until a :class:`~unigym.run.api.Run` consumes it.  ``Run(world=...)``
+    merges :meth:`fragment` into the run config and marks the world built
+    after the env compiles.
+    """
+
+    def __init__(self):
+        self._scene_ref: str | None = None
+        self._mj_scene: str | None = None
+        self._mj_scene_params: dict = {}
+        self._world_base: dict | None = None
+        self._base_scene: Scene | None = None
+        self._inline_name: str | None = None
+        self._inline_scene_name: str | None = None
+        self._inline_material: Material | None = None
+        self._objects: list[_Primitive] = []
+        self._dynamic: list[_Primitive] = []
+        self._built = False
+        self._flat_ground = False
+        self._terrain: Terrain | None = None
+        self._terrain_explicit = False
+        self._terrain_replace_floor = True
+        self._terrain_builder: _TerrainBuilder | None = None
+        self._articulations: list[dict] = []
+        self._controls: list[dict] = []
+
+    # ------------------------------------------------------------------ #
+    # factories
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def from_pack(cls, ref, *, root=None) -> "World":
+        """Use a scene-bundle reference (``"<family>/<name>"``)."""
+        from unigym.scene_packs import load_scene_bundle
+
+        load_scene_bundle(str(ref), root)
+        world = cls()
+        world._scene_ref = str(ref)
+        return world
+
+    @classmethod
+    def base(cls, *, mjcf) -> "World":
+        """Declare an explicit world asset (emits top-level ``world_base``).
+
+        Args:
+            mjcf: Path to the world MJCF (the run-level
+                ``world_base: {mjcf: <path>}`` declaration, v101 A1).
+
+        Returns:
+            A :class:`World` whose :meth:`fragment` carries
+            ``{"world_base": {"mjcf": <path>}}``.
+        """
+        world = cls()
+        world._world_base = {"mjcf": str(mjcf)}
+        return world
+
+    @classmethod
+    def from_config(cls, source, *, root=None) -> "World":
+        """Extract the world half of a run config or scene-bundle path.
+
+        Args:
+            source: A parsed run-config mapping, a path to a run yaml, a
+                path to a ``scene.yaml`` bundle file, or a bare bundle
+                reference (``"<family>/<name>"``).
+            root: Optional scene-pack discovery root (default: the mounted
+                pack faces / the checkout's ``scene_packs/``).
+        """
+        if isinstance(source, dict):
+            return cls._from_run_cfg(source, root)
+        path = Path(source)
+        if path.is_dir() and (path / "scene.yaml").is_file():
+            path = path / "scene.yaml"
+        if path.is_file():
+            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if not isinstance(doc, dict):
+                raise ValueError(f"world source {str(source)!r} must be a "
+                                 f"yaml mapping, got {type(doc).__name__}")
+            if "run_name" in doc or "env" in doc:
+                return cls._from_run_cfg(doc, root)
+            if doc.get("name") and "backend" in doc:
+                ref = f"{path.parent.name}/{doc['name']}"
+                return cls.from_pack(ref, root=root)
+            return cls._from_run_cfg(doc, root)
+        return cls.from_pack(str(source), root=root)
+
+    @classmethod
+    def _from_run_cfg(cls, cfg: dict, root=None) -> "World":
+        """Extract a world declaration from a run-config mapping."""
+        from unigym.scene_packs import load_scene_bundle
+
+        ref = cfg.get("scene")
+        if ref is not None:
+            load_scene_bundle(str(ref), root)
+            world = cls()
+            world._scene_ref = str(ref)
+            return world
+        params = (cfg.get("env") or {}).get("params") or {}
+        if "mj_model" in params:
+            from unigym.errors import ConfigError
+
+            raise ConfigError(
+                "World.from_config: env.params.mj_model was removed in v101 "
+                "A1; declare the run-level `world_base: {mjcf: <path>}` "
+                "(scene bundles: `backend.mujoco.world_base`)")
+        mj_scene = params.get("mj_scene")
+        world_base = cfg.get("world_base")
+        if mj_scene is None and world_base is None:
+            raise ValueError(
+                "World.from_config: the config declares no world (expected "
+                "a top-level 'scene:' reference, 'world_base:', or "
+                "env.params.mj_scene)")
+        world = cls()
+        world._mj_scene = None if mj_scene is None else str(mj_scene)
+        world._mj_scene_params = dict(params.get("mj_scene_params") or {})
+        if world_base is not None:
+            world._world_base = copy.deepcopy(world_base)
+        return world
+
+    @classmethod
+    def from_generator(cls, name: str, **params) -> "World":
+        """Use a registered scene provider with its slot params."""
+        world = cls()
+        world._mj_scene = str(name)
+        world._mj_scene_params = dict(params)
+        return world
+
+    @classmethod
+    def inline(cls, scene: Scene) -> "World":
+        """Use an in-process :class:`Scene` (prototype-only registry)."""
+        validate_scene(scene)
+        world = cls()
+        world._base_scene = scene
+        world._ensure_inline()
+        return world
+
+    @property
+    def terrain(self) -> _TerrainBuilder:
+        """The terrain builder face (``world.terrain.stairs(...)``)."""
+        if self._terrain_builder is None:
+            self._terrain_builder = _TerrainBuilder(self)
+        return self._terrain_builder
+
+    def terrain_value(self) -> "Terrain | None":
+        """The effective terrain IR this world declares (``None`` = flat).
+
+        An inline world returns its declared (or inherited) ``Terrain``;
+        bundle/generator worlds own their ground and return ``None``.  This
+        is the one read the run spec uses to carry the IR to a backend.
+        """
+        if self._scene_ref is not None or self._mj_scene is not None:
+            return None
+        return self.to_scene().terrain
+
+    def to_scene(self) -> Scene:
+        """The inline :class:`Scene` this world currently declares."""
+        if self._scene_ref is not None or self._mj_scene is not None:
+            raise RuntimeError(
+                "World.to_scene requires an inline world (World() / "
+                "World.inline(scene)); bundle/generator worlds are owned by "
+                "their providers")
+        if (self._inline_name is None and self._base_scene is None
+                and not self._objects):
+            # dynamic-only world: no static scene to serve, and registering
+            # a provider would make the (fully serializable) declaration
+            # process-local -- return the transient view instead.
+            return self._scene_now()
+        self._ensure_inline()
+        return self._scene_now()
+
+    # ------------------------------------------------------------------ #
+    # inline scene registry
+    # ------------------------------------------------------------------ #
+    def _ensure_inline(self) -> None:
+        """Create + register the unique runtime provider once."""
+        if self._inline_name is not None:
+            return
+        token = uuid.uuid4().hex
+        self._inline_name = f"_inline_{token}"
+        self._inline_scene_name = f"inline_{token[:12]}"
+        world = self
+
+        def provider(slots, context):
+            """Return this World's current inline scene (runtime provider)."""
+            return world._scene_now()
+
+        register_scene(self._inline_name)(provider)
+
+    def _material(self) -> Material:
+        """The inline world's declared material (one texture declaration)."""
+        if self._inline_material is None:
+            from unigym.core.asset_root import repo_root
+
+            texture = Path(repo_root()) / "assets" / "table_wood.png"
+            name = f"inline_mat_{self._inline_name.rsplit('_', 1)[-1]}"
+            self._inline_material = Material(
+                name, {"kind": "2d", "texture_file": str(texture)})
+        return self._inline_material
+
+    def _scene_now(self) -> Scene:
+        """Compose the current inline scene (objects + base declarations)."""
+        base = self._base_scene
+        name = (base.name if base is not None
+                else (self._inline_scene_name or "inline_dynamic"))
+        instances = list(base.instances) if base is not None else []
+        materials = list(base.materials) if base is not None else []
+        if self._objects:
+            material = self._material()
+            if material.name not in {m.name for m in materials}:
+                materials.append(material)
+            instances.extend(obj._instance(material.name)
+                             for obj in self._objects)
+        inherited = not self._terrain_explicit and base is not None
+        terrain = (base.terrain if inherited else self._terrain)
+        if terrain is not None and not inherited:
+            terrain = replace(
+                terrain,
+                meta={**terrain.meta,
+                      "replace_floor": bool(self._terrain_replace_floor)})
+        scene = Scene(
+            name=name,
+            instances=tuple(instances),
+            regions=tuple(base.regions) if base is not None else (),
+            slots=tuple(base.slots) if base is not None else (),
+            materials=tuple(materials),
+            engine_hints=dict(base.engine_hints) if base is not None else {},
+            terrain=terrain,
+        )
+        validate_scene(scene)
+        return scene
+
+    # ------------------------------------------------------------------ #
+    # object composition
+    # ------------------------------------------------------------------ #
+    def _used_names(self) -> set:
+        """Every object/instance id already declared in this world."""
+        used = {o.name for o in self._objects}
+        used |= {o.name for o in self._dynamic}
+        if self._base_scene is not None:
+            used |= {inst.id for inst in self._base_scene.instances}
+        return used
+
+    def _assign_name(self, obj: _Primitive, used: set) -> None:
+        """Ensure *obj* carries a unique non-null name (mutates it)."""
+        if obj.name is None:
+            index = len(self._objects) + len(self._dynamic) + 1
+            name = f"{obj.kind}_{index}"
+            while name in used:
+                index += 1
+                name = f"{obj.kind}_{index}"
+            obj._name = name
+            used.add(name)
+        elif obj.name in used:
+            raise ValueError(f"World.add: duplicate object name "
+                             f"{obj.name!r}")
+        else:
+            used.add(obj.name)
+
+    def add(self, obj: _Primitive, dynamic: bool | None = None):
+        """Add a primitive to this world; returns the object.
+
+        Supported primitives are :class:`Box` / :class:`Sphere` /
+        :class:`Cylinder` / :class:`Capsule` / :class:`Plane`.
+
+        ``dynamic=False`` (or ``dynamic=None`` with an object whose
+        ``dynamic`` flag is false) adds STATIC scene geometry: fixed to the
+        world, no freejoint, no mass/inertia, consumed by the inline scene.
+
+        ``dynamic=True`` (or ``dynamic=None`` with ``obj.dynamic``) adds a
+        DYNAMIC free body through the existing content/props path: the
+        declaration joins the world's ``objects.types`` block, so the
+        props manager builds a freejoint body with mass/inertia and the
+        object survives :meth:`Run.to_config`.  Static and dynamic objects
+        may be mixed in one world; a plane cannot be dynamic.
+        """
+        if self._built:
+            raise RuntimeError(
+                "World.add: the world is already built; object composition "
+                "is pre-build only")
+        if not isinstance(obj, _SHAPE_TYPES):
+            raise TypeError(
+                f"World.add expects Box/Sphere/Cylinder/Capsule/Plane, "
+                f"got {type(obj).__name__}")
+        if self._scene_ref is not None or self._mj_scene is not None:
+            raise RuntimeError(
+                "World.add requires an inline world; from_pack/from_generator "
+                "worlds are immutable declarations. Start with World() / "
+                "World.inline(scene) to compose primitives")
+        is_dynamic = obj.dynamic if dynamic is None else bool(dynamic)
+        used = self._used_names()
+        if is_dynamic:
+            if obj.kind == "plane":
+                raise ValueError(
+                    f"World.add: plane {obj.name!r} cannot be dynamic -- a "
+                    f"plane is infinite static scene geometry; use Box/"
+                    f"Sphere/Cylinder/Capsule for free bodies")
+            self._assign_name(obj, used)
+            entry = obj._dynamic_declaration()
+            _validate_dynamic_entry(entry)
+            obj._world = self
+            self._dynamic.append(obj)
+            return obj
+        self._ensure_inline()
+        self._assign_name(obj, used)
+        # Validate the exact payload the composer will build (one gate).
+        build_payload(obj.kind, {
+            "name": obj.name,
+            **obj._shape_params(),
+            "material": obj.material or self._material().name,
+            "pos": list(obj.pos),
+            "quat": list(obj.quat),
+            "layer": "visual",
+        })
+        obj._world = self
+        self._objects.append(obj)
+        return obj
+
+    def add_many(self, objects, dynamic: bool | None = None) -> list:
+        """Add several primitives in one batch (static and/or dynamic).
+
+        Args:
+            objects: An iterable of :class:`Box` / :class:`Sphere` /
+                :class:`Cylinder` / :class:`Capsule` / :class:`Plane`
+                instances (each may carry its own ``dynamic`` flag).
+            dynamic: Optional override applied to every object in the
+                batch (``None`` respects each object's flag).
+
+        Returns:
+            The added objects in input order (same objects, now owned by
+            this world).
+        """
+        batch = list(objects)
+        for obj in batch:
+            if not isinstance(obj, _SHAPE_TYPES):
+                raise TypeError(
+                    f"World.add_many expects Box/Sphere/Cylinder/Capsule/"
+                    f"Plane, got {type(obj).__name__}")
+        return [self.add(obj, dynamic=dynamic) for obj in batch]
+
+    def articulation(self, name: str, *, model=None, control=None,
+                     root=None, spawn=None, joints=None, body_parts=None,
+                     passive_joints=None, params=None, adapter="manual",
+                     drive="position_pd", target="position") -> "World":
+        """Declare one articulation on this world (emits ``articulations[]``).
+
+        The declaration is the v104 neutral shape: an articulation is
+        ``root + model + joints`` (no articulation-level control mode).
+        ``model`` may be a path string or a mapping (``{"mjcf": <path>}``;
+        ``urdf``/``usd`` are accepted by the IR for future backends).  The
+        drive is emitted as a top-level ``controls[]`` group named after the
+        articulation (action face == articulation name).
+
+        Builder form::
+
+            world = World.base(mjcf=".../base_skin.xml")
+            world.articulation(
+                "g1",
+                model={"mjcf": ".../g1_29dof_with_hand.xml"},
+                adapter="manual")
+
+        Args:
+            name: Unique articulation name (the neutral ``unigym_name``;
+                backend prefixes never appear on this surface).
+            model: ``{mjcf|urdf|usd: <path>}`` or a bare MJCF path.
+            control: REMOVED (v104); passing it fails with a teaching error.
+            root: ``free`` (default) / ``fixed`` / ``welded``.
+            spawn: Root spawn declaration (kept verbatim in the IR).
+            joints: Per-joint declarations (mapping or list of mappings).
+            body_parts: Optional policy body-part table (feet/base).
+            passive_joints: Joints the articulation owns but does not drive.
+            params: Optional backend knobs (e.g. ``spawn_height``).
+            adapter: The adapter name owning this articulation's body group.
+            drive: The body control drive (default ``position_pd``).
+            target: The explicit target kind (must match ``drive``).
+
+        Returns:
+            This world (builder chaining).
+        """
+        if not isinstance(name, str) or not name:
+            raise ValueError("World.articulation: name must be a non-empty "
+                             "string")
+        if control is not None:
+            raise ValueError(
+                f"World.articulation {name!r}: the articulation-level "
+                f"`control` declaration was removed in v104; declare the "
+                f"drive as a top-level `controls:` group "
+                f"(name/adapter/articulation/drive/target) via the "
+                f"adapter/drive/target arguments")
+        entry: dict = {"name": name}
+        if model is not None:
+            entry["model"] = ({"mjcf": str(model)} if isinstance(model, str)
+                              else copy.deepcopy(model))
+        if root is not None:
+            entry["root"] = str(root)
+        if spawn is not None:
+            entry["spawn"] = copy.deepcopy(spawn)
+        if joints is not None:
+            entry["joints"] = copy.deepcopy(joints)
+        if body_parts is not None:
+            entry["body_parts"] = copy.deepcopy(body_parts)
+        if passive_joints is not None:
+            entry["passive_joints"] = [str(j) for j in passive_joints]
+        if params is not None:
+            entry["params"] = copy.deepcopy(params)
+        if any(existing["name"] == name for existing in self._articulations):
+            raise ValueError(
+                f"World.articulation: duplicate articulation name {name!r}")
+        self._articulations.append(entry)
+        group: dict = {"name": name, "adapter": str(adapter),
+                       "articulation": name, "drive": str(drive),
+                       "target": str(target)}
+        if joints is not None:
+            declared = _joint_names_from_declaration(joints)
+            if declared:
+                group["joints"] = declared
+            else:
+                # empty declaration == the recipe's body set (v105)
+                group["joint_set"] = "body"
+        else:
+            # a programmatic body group selects the recipe set explicitly;
+            # build resolves it once (no group-name inference)
+            group["joint_set"] = "body"
+        self._controls.append(group)
+        return self
+
+    def flat_ground(self) -> "World":
+        """Add a ground slab to an inline world (no-op for bundle worlds).
+
+        The common in-repo ``scene_43dof*.xml`` world assets already carry
+        a floor plane, so this helper is only meaningful for a base model
+        that lacks one.  Bundle/generator worlds own their own ground, so
+        the call is a no-op there.
+        """
+        if self._scene_ref is None and self._mj_scene is None:
+            self.add(Box((20.0, 20.0, 0.1), name=_unique_name(
+                self, "ground"), pos=(0.0, 0.0, -0.05)))
+            self._flat_ground = True
+        else:
+            self._flat_ground = True
+        return self
+
+    # ------------------------------------------------------------------ #
+    # config fragment / lifecycle
+    # ------------------------------------------------------------------ #
+    @property
+    def built(self) -> bool:
+        """True once a consuming :class:`Run` has compiled the world."""
+        return self._built
+
+    def static_declarations(self) -> list[dict]:
+        """The engine-neutral static primitive declarations (``World.add``).
+
+        Each entry carries the primitive kind, the neutral shape params and
+        the world pose, so a backend with a native static-collider face
+        (isaaclab: ``AssetBaseCfg`` + a collision-only shape spawner) can
+        map the SAME declaration the mujoco inline scene renders.  Empty for
+        bundle/generator worlds and for ``World.inline(scene)`` (those are
+        provider-owned; see :attr:`unmapped_static_scene`).
+        """
+        return [
+            {
+                "name": obj.name,
+                "kind": obj.kind,
+                "params": dict(obj._shape_params()),
+                "pos": list(obj.pos),
+                "quat": list(obj.quat),
+            }
+            for obj in self._objects
+        ]
+
+    @property
+    def unmapped_static_scene(self) -> bool:
+        """True when an inline base scene carries instances no backend maps.
+
+        ``World.add`` primitives are the closed vocabulary a static backend
+        can translate (:meth:`static_declarations`); a ``World.inline(scene)``
+        base scene can carry arbitrary scene-IR generators, so it has no
+        backend-neutral static mapping.  Callers use this to fail fast
+        instead of silently dropping the geometry.
+        """
+        return self._base_scene is not None and bool(self._base_scene.instances)
+
+    def dynamic_declarations(self) -> dict:
+        """The ``objects:`` content block for this world's dynamic objects.
+
+        ``dynamic=True`` objects are NOT scene instances: they are dynamic
+        free bodies built by the props manager, so they persist in the
+        run config (and through :meth:`Run.to_config`) instead of the
+        process-local inline scene registry.  Returns an empty mapping
+        when no dynamic object was added.
+        """
+        if not self._dynamic:
+            return {}
+        return {
+            "enabled": True,
+            "types": [obj._dynamic_declaration() for obj in self._dynamic],
+        }
+
+    def fragment(self) -> dict:
+        """The run-config fragment this world contributes.
+
+        Returns either ``{"scene": "<family>/<name>"}``,
+        ``{"world_base": {"mjcf": ...}}``, or
+        ``{"params": {"mj_scene": ..., "mj_scene_params": ...}}``, plus an
+        ``objects:`` block when the world declared dynamic free bodies and
+        an ``articulations:`` block when :meth:`articulation` was called.
+        ``world_base`` is a TOP-LEVEL run config key (v101 A1); it never
+        rides ``env.params``.
+        """
+        if self._scene_ref is not None:
+            fragment = {"scene": self._scene_ref}
+        else:
+            params: dict = {}
+            if self._inline_name is not None:
+                params["mj_scene"] = self._inline_name
+                params["mj_scene_params"] = {}
+            elif self._mj_scene is not None:
+                params["mj_scene"] = self._mj_scene
+                params["mj_scene_params"] = dict(self._mj_scene_params)
+            fragment = {"params": params} if params else {}
+            if self._world_base is not None:
+                fragment["world_base"] = copy.deepcopy(self._world_base)
+        if self._articulations:
+            fragment["articulations"] = [
+                copy.deepcopy(entry) for entry in self._articulations]
+        if self._controls:
+            fragment["controls"] = [
+                copy.deepcopy(entry) for entry in self._controls]
+        dynamic = self.dynamic_declarations()
+        if dynamic:
+            fragment["objects"] = dynamic
+        return fragment
+
+    def apply(self, cfg: dict) -> dict:
+        """Merge this world's fragment into a run config (in place)."""
+        fragment = self.fragment()
+        if "scene" in fragment:
+            cfg["scene"] = fragment["scene"]
+        if "world_base" in fragment:
+            cfg["world_base"] = copy.deepcopy(fragment["world_base"])
+        if "articulations" in fragment:
+            _merge_articulations(cfg, fragment["articulations"])
+        if "controls" in fragment:
+            _merge_controls(cfg, fragment["controls"])
+        params = fragment.get("params") or {}
+        if params:
+            cfg.setdefault("env", {}).setdefault("params", {}).update(params)
+        dynamic = fragment.get("objects")
+        if dynamic:
+            # Preserve the config's own spelling (objects: surface wins,
+            # legacy props: stays legacy) and append the world's types.
+            key = "objects" if "objects" in cfg or "props" not in cfg \
+                else "props"
+            block = cfg.setdefault(key, {})
+            block["enabled"] = True
+            block.setdefault("types", []).extend(copy.deepcopy(
+                dynamic["types"]))
+        return cfg
+
+    def _mark_built(self) -> None:
+        """Seal the world after the env compiles (mutations now fail)."""
+        self._built = True
+
+
+def _joint_names_from_declaration(joints) -> list:
+    """Joint names from a ``joints:`` declaration (mapping or list form)."""
+    if isinstance(joints, dict):
+        return [str(name) for name in joints]
+    names = []
+    for entry in joints or ():
+        if isinstance(entry, dict) and "name" in entry:
+            names.append(str(entry["name"]))
+    return names
+
+
+def _merge_controls(cfg: dict, declared: list[dict]) -> None:
+    """Merge world-declared control groups into the config list by name."""
+    existing = cfg.get("controls")
+    if not existing:
+        cfg["controls"] = copy.deepcopy(declared)
+        return
+    merged = [copy.deepcopy(entry) for entry in existing]
+    index = {entry.get("name"): position
+             for position, entry in enumerate(merged)
+             if isinstance(entry, dict)}
+    for entry in declared:
+        position = index.get(entry["name"])
+        if position is None:
+            index[entry["name"]] = len(merged)
+            merged.append(copy.deepcopy(entry))
+        else:
+            merged[position] = copy.deepcopy(entry)
+    cfg["controls"] = merged
+
+
+def _merge_articulations(cfg: dict, declared: list[dict]) -> None:
+    """Merge world-declared articulations into the config list by name.
+
+    A world entry with the same ``name`` replaces the existing declaration
+    in place (so the programmatic ``Run(robot="g1")`` stub is upgraded to
+    the world's asset-bearing entry); new names append.  Mixing two
+    policy articulations still fails later in ``normalize_articulations``.
+    """
+    existing = cfg.get("articulations")
+    if not existing:
+        cfg["articulations"] = copy.deepcopy(declared)
+        return
+    merged = [copy.deepcopy(entry) for entry in existing]
+    index = {entry.get("name"): position
+             for position, entry in enumerate(merged)
+             if isinstance(entry, dict)}
+    for entry in declared:
+        position = index.get(entry["name"])
+        if position is None:
+            index[entry["name"]] = len(merged)
+            merged.append(copy.deepcopy(entry))
+        else:
+            merged[position] = copy.deepcopy(entry)
+    cfg["articulations"] = merged
+
+
+def _unique_name(world: World, stem: str) -> str:
+    """A neutral, unused object name for a helper primitive."""
+    used = {o.name for o in world._objects}
+    used |= {o.name for o in world._dynamic}
+    if world._base_scene is not None:
+        used |= {inst.id for inst in world._base_scene.instances}
+    index = len(world._objects) + len(world._dynamic) + 1
+    name = f"{stem}_{index}"
+    while name in used:
+        index += 1
+        name = f"{stem}_{index}"
+    return name

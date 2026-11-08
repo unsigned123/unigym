@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Minimal static box obstacle for URDF-loading smoke tests (Route D).
+     A 0.6 x 0.6 x 0.15 m flat bar the quadruped can step over / jump.
+     Origin at the box centre; gravity-aligned (z-up) so no roll needed. -->
+<robot name="box_obstacle">
+  <link name="base_link">
+    <inertial>
+      <mass value="5.0"/>
+      <inertia ixx="0.05" iyy="0.05" izz="0.05" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.6 0.6 0.15"/>
+      </geometry>
+      <material name="grey">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.6 0.6 0.15"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

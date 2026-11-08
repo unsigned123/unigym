@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!-- Minimal hinged door prop for push-door data collection (P15).
+
+  - z-up (gravity aligned): base plate rests on the ground, hinge axis = z so
+    the panel swings horizontally. init_roll = 0 (unlike the flat-obstacle URDFs
+    that need -pi/2). fix_base=False (free-floating) so PropManager can re-place
+    the whole door each reset via write_root_pose_to_sim; the heavy base plate
+    (25 kg, 0.4 x 0.4 m footprint) keeps the frame from drifting when the
+    panel is pushed, while the hinge (stiffness=0) lets the panel swing freely.
+  - Hinge at base_link (0, 0.2, 0.05) [near one plate edge, plate top]. Panel
+    extends +Y when closed (angle 0), panel face normal = +X. R_z(angle)
+    rotates the panel about z: angle=+90deg -> panel extends +X, normal +Y.
+  - Sized for a quadruped (~30 cm tall): panel 0.5 m wide x 0.6 m tall x 0.03 m
+    thick, hinged at one vertical edge.
+
+  door state (computed by DoorProp from the articulation):
+    door_pos    = panel centre world pos - env origin
+    door_normal = quat_rotate(panel_body_quat_w, [1,0,0])  # panel +X face
+    door_angle  = hinge_joint position
+    left_or_right = one-hot from sampled placement y sign
+-->
+<robot name="door_prop">
+  <!-- base / frame: heavy floor plate for ground friction + hinge post -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <mass value="25.0"/>
+      <inertia ixx="0.339" iyy="0.339" izz="0.667" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.4 0.05"/>
+      </geometry>
+      <material name="frame">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.4 0.05"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- swinging door panel: thin in X (0.03), wide in Y (0.5), tall in Z (0.6) -->
+  <link name="door_panel">
+    <inertial>
+      <origin xyz="0 0.25 0.3" rpy="0 0 0"/>
+      <mass value="1.2"/>
+      <inertia ixx="0.061" iyy="0.036" izz="0.025" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0.25 0.3" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.03 0.5 0.6"/>
+      </geometry>
+      <material name="panel">
+        <color rgba="0.55 0.35 0.15 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0.25 0.3" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.03 0.5 0.6"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- revolute hinge: parent base_link -> child door_panel, axis z -->
+  <joint name="hinge_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="door_panel"/>
+    <origin xyz="0 0.2 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.356" upper="2.356" effort="50.0" velocity="10.0"/>
+    <dynamics damping="5.0" friction="0.0"/>
+  </joint>
+</robot>

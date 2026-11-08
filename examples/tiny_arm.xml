@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- Self-authored minimal MuJoCo model for the manual-driver example.
+     MIT-clean: no third-party meshes or assets. -->
+<mujoco model="unigym_tiny_arm">
+  <option timestep="0.005" gravity="0 0 -9.81"/>
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.8 0.8 0.8 1"/>
+    <body name="base" pos="0 0 0.8">
+      <freejoint name="root"/>
+      <geom name="base_geom" type="box" size="0.06 0.06 0.06" mass="1.0"/>
+      <body name="link" pos="0 0 -0.12">
+        <joint name="hinge" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
+        <geom name="link_geom" type="capsule" fromto="0 0 0 0 0 -0.2" size="0.02" mass="0.2"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="hinge_motor" joint="hinge" ctrlrange="-20 20"/>
+  </actuator>
+</mujoco>
