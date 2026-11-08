@@ -915,6 +915,20 @@ wheels = [
 ]
 
 [[package]]
+name = "mujoco-stubs"
+version = "4.0.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/72/30b036cb415f9aa2fd544e18c53d7135e3f3654024d5c7079ff944033316/mujoco_stubs-4.0.0.1.tar.gz", hash = "sha256:c17c5c5d3d6c0c22678489e00561efacfe68132dc8f8957d7939644acc15abd2", size = 212201, upload-time = "2026-11-06T20:11:32.725Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/03/54096564741db7db73a1f70ce5dec868f958f700262dd8487d492331b5dd/mujoco_stubs-4.0.0.1-py3-none-any.whl", hash = "sha256:19d5aa31f3fde3a47ecf8670d59cf70e063b31b96e640de28dfa15a45a5eac59", size = 126131, upload-time = "2026-11-06T20:11:30.886Z" },
+]
+
+[[package]]
 name = "mujoco-studio"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1749,6 +1763,7 @@ daemon = [
 ]
 dev = [
     { name = "import-linter" },
+    { name = "mujoco-stubs" },
     { name = "pyright", extra = ["nodejs"] },
     { name = "pytest" },
     { name = "ruff" },
@@ -1782,6 +1797,7 @@ requires-dist = [
     { name = "import-linter", marker = "extra == 'dev'", specifier = "==2.15" },
     { name = "mujoco", specifier = "==4.0.0" },
     { name = "mujoco", marker = "extra == 'warp'", specifier = "==4.0.0" },
+    { name = "mujoco-stubs", marker = "extra == 'dev'", specifier = "==4.0.0.1" },
     { name = "mujoco-warp", marker = "extra == 'warp'", specifier = "==4.0.0" },
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pillow", marker = "extra == 'record'", specifier = ">=10.0,<13.0" },
