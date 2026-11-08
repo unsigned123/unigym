@@ -8,7 +8,7 @@ returns an :class:`ObstacleManager` for a yaml ``obstacles:`` section, or
       enabled: true
       types:
         - name: box
-          urdf_path: obstacles/box.urdf
+          urdf_path: path/to/obstacle.urdf
           proportion: 1.0
           num_joints: 0
       placement:

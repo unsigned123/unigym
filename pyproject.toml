@@ -177,6 +177,10 @@ forbidden_modules = [
     "unigym.backends.shared.mjfamily.**",
 ]
 
+[tool.setuptools]
+include-package-data = true
+license-files = ["LICENSE", "LICENSES/*", "THIRD_PARTY_NOTICES.md"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["unigym*"]
@@ -186,7 +190,6 @@ include = ["unigym*"]
 [tool.setuptools.package-data]
 "unigym.webui" = ["*.html", "assets/*"]
 "unigym.props" = ["*.urdf"]
-"unigym.backends.isaaclab2" = ["obstacles/*.urdf"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

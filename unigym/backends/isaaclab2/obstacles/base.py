@@ -143,25 +143,18 @@ def _resolve_urdf_path(path: str, base_dir: str | None) -> str:
     """Resolve a (possibly relative) urdf path to an absolute path.
 
     Tries ``base_dir`` first; if the file isn't there, falls back to the
-    parent of ``base_dir`` so a path like ``obstacles/box.urdf`` resolves
+    parent of ``base_dir`` so a path like ``obstacles/bar.urdf`` resolves
     whether the config lives next to ``obstacles/`` or one level below it
-    (the common ``config/`` layout).  Third candidate (``obstacles/``-
-    prefixed declarations only): the vendored assets that ship with THIS
-    package (``backends/isaaclab2/obstacles/``) — they moved with the M2.5
-    backend layout, the resolution contract does not.
+    (the common ``config/`` layout).
     """
     if os.path.isabs(path) or "://" in path:
         return path
     if base_dir is None:
         base_dir = os.getcwd()
-    vendored_parent = os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))  # .../backends/isaaclab2
     candidates = [
         os.path.join(base_dir, path),
         os.path.join(os.path.dirname(base_dir), path),
     ]
-    if path.startswith("obstacles/"):
-        candidates.append(os.path.join(vendored_parent, path))
     for cand in candidates:
         if os.path.exists(cand):
             return os.path.abspath(cand)
