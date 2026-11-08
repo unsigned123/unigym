@@ -31,12 +31,15 @@ Those are separate artifacts; the public docs are being rewritten.
 ## Install
 
 ```bash
-python -m pip install -e .
-# developer tooling (pytest + ruff + import-linter)
-python -m pip install -e ".[dev]"
+uv venv .venv --python 3.11
+uv pip install --python .venv/bin/python -e ".[dev]"
+# optional warp lane in the same environment
+uv pip install --python .venv/bin/python -e ".[dev,warp]"
 ```
 
-Requires Python >= 3.10. The core runtime pins NumPy 1.26.4 and MuJoCo 3.11.0.
+Requires Python >= 3.11. The public core targets MuJoCo 4.0.0 and
+MuJoCo-Warp 4.0.0; NumPy is supported across the 1.26–2.x range, while the
+development lock records the exact tested version.
 
 ## Manual / external-driver example
 

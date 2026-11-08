@@ -1,0 +1,9 @@
+{
+  "python.analysis.typeCheckingMode": "standard",
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.useLibraryCodeForTypes": true,
+  "python.analysis.exclude": [
+    "**/unigym/webui/**",
+    "**/unigym/backends/isaaclab3/**"
+  ]
+}

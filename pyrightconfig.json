@@ -1,0 +1,13 @@
+{
+  "include": ["unigym"],
+  "exclude": [
+    "unigym/webui",
+    "unigym/backends/isaaclab3"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}
