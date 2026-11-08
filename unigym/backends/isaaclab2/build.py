@@ -1,8 +1,8 @@
 """IsaacLab run-construction hooks (v101 A2b ``BackendInfo`` faces).
 
 The neutral ``unigym.run.build`` path calls these through the registry's
-lazy factories; every isaaclab-specific import (kit, terrain, obstacles,
-actuators, DR events) stays inside this module / this package.
+lazy factories; every isaaclab-specific import (kit, terrain, actuators,
+DR events) stays inside this module / this package.
 """
 from __future__ import annotations
 
@@ -42,16 +42,6 @@ def build_terrain(cfg: dict, num_envs: int, env_spacing: float,
         "section or pass Run(world=World.terrain...)")
 
 
-def build_obstacles(section, *, num_envs: int, env_spacing: float,
-                    device: str, base_dir):
-    """Build the yaml ``obstacles:`` manager."""
-    from unigym.backends.isaaclab2.obstacles import build_obstacle_manager
-
-    return build_obstacle_manager(
-        section, num_envs=num_envs, env_spacing=env_spacing,
-        device=device, base_dir=base_dir)
-
-
 def apply_actuator_override(profile, section) -> None:
     """Apply the yaml top-level ``actuator:`` override to the ArticulationCfg."""
     from unigym.backends.isaaclab2.actuators import build_actuator
@@ -70,7 +60,6 @@ def build_events(section):
 __all__ = [
     "apply_actuator_override",
     "build_events",
-    "build_obstacles",
     "build_terrain",
     "env_kwargs",
 ]

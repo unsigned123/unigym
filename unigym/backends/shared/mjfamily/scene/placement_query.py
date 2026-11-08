@@ -32,10 +32,10 @@ class ProbeCapabilityError(RuntimeError):
 
 @dataclass(frozen=True)
 class CollisionPair:
-    """One explicitly checked candidate geom and obstacle geom pair."""
+    """One explicitly checked candidate geom and other collision geom pair."""
 
     candidate_geom: str
-    obstacle_geom: str
+    other_geom: str
     allow_support_contact: bool = False
     penetration_tolerance_m: float = 1e-7
 
@@ -115,7 +115,7 @@ def probe_freejoint_candidate(
     distances = []
     for pair in pair_list:
         geom1 = _id(model, mujoco.mjtObj.mjOBJ_GEOM, pair.candidate_geom)
-        geom2 = _id(model, mujoco.mjtObj.mjOBJ_GEOM, pair.obstacle_geom)
+        geom2 = _id(model, mujoco.mjtObj.mjOBJ_GEOM, pair.other_geom)
         try:
             tolerance = float(pair.penetration_tolerance_m)
         except (TypeError, ValueError) as exc:

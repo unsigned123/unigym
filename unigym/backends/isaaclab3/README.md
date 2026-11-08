@@ -19,11 +19,11 @@ CAMERAS_RGB / CAMERAS_DEPTH_RIG / DEPTH_OBS_LEGACY / RECORDER_VIDEO、
 CONTACTS_GROUPS / CONTACTS_OVERRIDE、PROPS_RIGID / PROPS_ARTICULATION_URDF /
 PROPS_ARTICULATION_USD / PROPS_LATCH / PROPS_ACTUATED_ACTIONS、
 DIRECTOR_TELEPORT / DIRECTOR_SETVEL / DIRECTOR_ATTACH_WELD /
-DIRECTOR_ATTACH_SLAVE / DIRECTOR_GRIPPER、TERRAIN / EVENTS_DR / OBSTACLES /
+DIRECTOR_ATTACH_SLAVE / DIRECTOR_GRIPPER、TERRAIN / EVENTS_DR /
 INIT_POSE / SPAWN_XY_YAW / MOCAP。
 
 按 R.2 布局，实现落在 `backends/isaaclab3/`（env / cameras / contacts /
-props / director_ops / terrains / obstacles / actuators / dr_events），每落
+props / director_ops / terrains / actuators / dr_events），每落
 一个能力即在 `registry.ISAACLAB3_TRAITS` 补 trait 声明并从本清单划掉。
 
 ## 3.0 破坏面的吸收原则（无 compat shim）

@@ -6,14 +6,14 @@ or mujoco) owns ALL simulator interaction and only produces RAW force arrays
 (``spec.raw_shape``); the format/component/aggregate semantics live ONCE in
 ``contacts.base.apply_format`` (two backends can never drift).
 
-Lifecycle (driven by the env backends, mirroring obstacles/props/cameras):
+Lifecycle (driven by the env backends, mirroring props/cameras):
 
 * ``build_contact_manager(cfg, backend, device)`` — collect_cli entry point;
   a missing/empty ``contacts:`` section returns ``None`` (zero-change
   guarantee for every existing config).
 * ``setup_scene() -> {field: ContactSensorCfg}`` — isaaclab only; the env
   backend merges the returned dict into the scene cfg BEFORE cloning
-  (same ``setattr`` pattern as obstacles/props).
+  (same ``setattr`` pattern as props).
 * ``bind_env(env)`` — after construction; resolves body names, grabs sensor
   handles (isaaclab) or indexes the MJ model (mujoco), and fails fast on
   resolution errors (no silent empty groups).

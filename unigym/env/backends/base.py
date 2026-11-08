@@ -50,8 +50,6 @@ Attributes:
     Soft joint limits in policy order, each ``(N, J)``; ``None`` when the
     backend cannot provide them (termination checks degrade gracefully).
 ``num_envs: int``  /  ``device: str | torch.device``
-``obstacle_manager``
-    Optional obstacle manager handle (``None`` when unused).
 
 extra-info key set (EXTRA_INFO_KEYS)
 ====================================
@@ -142,7 +140,6 @@ class BackendCapabilities:
     """
 
     events: bool = False          # yaml randomization.events (per-step/reset DR)
-    obstacles: bool = False       # yaml obstacles (URDF obstacle course)
     props: bool = False           # yaml props (interactive door/ball/generic)
     recorder: bool = False        # yaml recorder.enabled RGB recording
     depth_camera: bool = False    # yaml camera_depth (depth-encoder policy input)
@@ -170,7 +167,7 @@ class BackendCapabilities:
         mujoco-only in Round B (design v052-round-b §1.1) and ``full()``
         must keep describing exactly the isaaclab capability set.
         """
-        return cls(events=True, obstacles=True, props=True, recorder=True,
+        return cls(events=True, props=True, recorder=True,
                    depth_camera=True, init_pose=True, cameras=True,
                    contacts=True, multi_env=True)
 
@@ -186,7 +183,6 @@ class BackendCapabilities:
 
         groups = {
             "events": (Trait.EVENTS_DR,),
-            "obstacles": (Trait.OBSTACLES,),
             "props": (Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
                       Trait.PROPS_ARTICULATION_USD),
             "recorder": (Trait.RECORDER_VIDEO,),
@@ -200,7 +196,7 @@ class BackendCapabilities:
         }
         out: set = set()
         for feat, enabled in {
-            "events": self.events, "obstacles": self.obstacles,
+            "events": self.events,
             "props": self.props, "recorder": self.recorder,
             "depth_camera": self.depth_camera, "init_pose": self.init_pose,
             "cameras": self.cameras, "contacts": self.contacts,
@@ -232,7 +228,6 @@ class EnvBackend(Protocol):
     perm_il2pol: torch.Tensor
     perm_pol2il: torch.Tensor
     policy_joint_pos_limits: "tuple[torch.Tensor, torch.Tensor] | None"
-    obstacle_manager: "object | None"
 
     def step(self, actions: "dict[str, NamedAction]",
              raw_action: torch.Tensor | None = None,
@@ -442,7 +437,7 @@ def assert_backend_contract(env, exercise_step: bool = False) -> None:
                "to_policy_order", "to_il_order")
     attrs = ("num_envs", "device", "obs_cache", "controls",
              "articulations", "perm_il2pol", "perm_pol2il",
-             "policy_joint_pos_limits", "obstacle_manager")
+             "policy_joint_pos_limits")
     missing = [m for m in methods if not callable(getattr(env, m, None))]
     missing += [a for a in attrs if not hasattr(env, a)]
     if missing:
@@ -534,7 +529,6 @@ def requested_features(kwargs: dict) -> dict[str, bool]:
         n_envs = 1
     return {
         "events": kwargs.get("events_cfg") is not None,
-        "obstacles": kwargs.get("obstacle_manager") is not None,
         "props": kwargs.get("prop_manager") is not None,
         "recorder": (recorder is not None
                      and bool(getattr(recorder, "enabled", False))),
@@ -584,7 +578,6 @@ def gate_capabilities(backend_label: str, caps, kwargs: dict,
             continue
         groups = {
             "events": (Trait.EVENTS_DR,),
-            "obstacles": (Trait.OBSTACLES,),
             "props": (Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
                       Trait.PROPS_ARTICULATION_USD),
             "recorder": (Trait.RECORDER_VIDEO,),

@@ -2,10 +2,10 @@
 
 Implements the EnvBackend contract (``env/backends/base.py``) on top of a
 plain MuJoCo ``MjModel``/``MjData`` pair, for N=1 flat-ground benchmark runs
-on the host ``.venv_sim`` (no isaaclab, no kit).  N>1, obstacles,
-depth-encoder obs, DR events and init-pose are OUT OF SCOPE (capability
-bits False).  Since M2b the ``cameras`` capability is ON: a wired
-``CameraManager`` gets its rigs injected into the MJ model (MjSpec) and
+on the host ``.venv_sim`` (no isaaclab, no kit).  N>1, depth-encoder obs,
+DR events and init-pose are OUT OF SCOPE (capability bits False).  Since M2b
+the ``cameras`` capability is ON: a wired ``CameraManager`` gets its rigs
+injected into the MJ model (MjSpec) and
 renders rgb/depth in-process (``cameras/mujoco_backend.py``); the recorder
 consumes those frames through ``camera_ref`` with zero env-side coupling.
 The ``props`` capability is ON: a wired PropManager gets its
@@ -149,7 +149,7 @@ BASE_BODY = "pelvis"
 # capability bits: M2a scope + M2b cameras/recorder (camera obs + the
 # camera_ref video recorder are served by cameras/mujoco_backend.py; the
 # recorder itself is backend-agnostic and reads the manager's cache).
-# events/obstacles/depth_camera(init_pose) stay False.  contacts is
+# events/depth_camera(init_pose) stay False.  contacts is
 # ON: contact groups are served by contacts/mujoco_backend.py .
 # props is ON : box-family props are appended to the MjSpec and
 # served by props/mujoco_backend.py (object/* record keys + held groups).
@@ -367,7 +367,7 @@ class MujocoEnv:
             ``compile.json``.  ``None`` -> no artifact IO (the historical
             construction path is unchanged).
         device: must be "cpu" (all caches are cpu tensors).
-        terrain_cfg / env_spacing / events_cfg / recorder / obstacle_manager
+        terrain_cfg / env_spacing / events_cfg / recorder
         / lighting / depth_camera / init_pose: accepted for
         builder-kwargs parity and IGNORED (capabilities are all False, so
         the gate already rejected any non-None request) — EXCEPT
@@ -394,7 +394,7 @@ class MujocoEnv:
                  articulations=None,
                  device: str = "cpu",
         terrain_cfg=None, env_spacing: float = 4.0,
-        events_cfg=None, recorder=None, obstacle_manager=None,
+        events_cfg=None, recorder=None,
         prop_manager=None, lighting=None, depth_camera=None,
                  init_pose=None, camera_manager=None, contact_manager=None,
                  director_cfg=None, artifact_dir: Optional[str] = None,
@@ -411,10 +411,10 @@ class MujocoEnv:
         if str(torch.device(device)) != "cpu":
             raise NotImplementedError(
                 f"MujocoEnv is cpu-only, got device {device!r}")
-        if any(x is not None for x in (events_cfg, obstacle_manager,
+        if any(x is not None for x in (events_cfg,
                                        lighting, depth_camera, init_pose)):
             raise NotImplementedError(
-                "mujoco backend does not implement events/obstacles/"
+                "mujoco backend does not implement events/"
                 "depth_camera/init_pose; the capability gate should have "
                 "rejected this request")
         if n > 1:
@@ -717,8 +717,6 @@ class MujocoEnv:
         self._time_in_episode = torch.zeros(n)
         self._episode_dur = sample_durations(
             self._dur_lo, self._dur_hi, n, self.device)
-
-        self.obstacle_manager = None
 
         # M2b: cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:

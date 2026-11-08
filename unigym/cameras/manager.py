@@ -107,7 +107,7 @@ def validate_image_frame(req: ImageObsRequest, val: torch.Tensor,
 class CameraManager:
     """World-component manager for the declared camera rigs.
 
-    Lifecycle mirrors the obstacle/prop managers: ``setup_scene`` (before
+    Lifecycle mirrors the prop manager: ``setup_scene`` (before
     env construction) -> ``bind_env`` (after) -> per-step ``sync_pose`` at
     the step tail + ``tick_and_read`` inside the obs-cache refresh ->
     ``on_reset`` after each reset chain.

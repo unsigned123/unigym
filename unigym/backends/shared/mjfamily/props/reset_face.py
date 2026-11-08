@@ -50,12 +50,12 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
     if not candidate:
         raise PlacementCapabilityError(
             f"prop {rule.object_name!r} has no collision geoms")
-    # the narrow-phase obstacle set is the model's COLLISION truth
+    # the narrow-phase collision set is the model's COLLISION truth
     # (contype/conaffinity nonzero): region markers and visual twins
     # are compiled contype=0/conaffinity=0 and are never collision
     # evidence (docs/designs/v076-kitchen-construction-and-
     # initialization.md §6.2)
-    obstacles = [
+    blocking_geoms = [
         CollisionPair(
             geom,
             mujoco.mj_id2name(env._model, mujoco.mjtObj.mjOBJ_GEOM, other),
@@ -72,7 +72,7 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
         return probe_freejoint_candidate(
             env._model, env._active_data, joint_name, position,
             (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)),
-            obstacles, min_clearance_m=clearance)
+            blocking_geoms, min_clearance_m=clearance)
     except (AttributeError, ValueError) as exc:
         raise PlacementCapabilityError(str(exc)) from exc
 

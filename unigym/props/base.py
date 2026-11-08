@@ -1,8 +1,8 @@
 """PropManager: interactive prop (door / ball / generic) scene + state manager.
 
 Loads interactive props that expose per-step state to ``obs_cache`` for adapters
-to consume. Mirrors :class:`unigym.backends.isaaclab2.obstacles.ObstacleManager` (Route D):
-each prop *type* is spawned once per environment (cloned by GridCloner); at
+to consume. Each prop *type* is spawned once per environment (cloned by
+GridCloner); at
 reset the manager re-samples a random placement ``(x, y, z, yaw)`` from the
 prop's :class:`PropPlacement` and parks unassigned instances far below ground.
 
@@ -262,8 +262,8 @@ def _compat_class(name: str):
 def _resolve_urdf_path(path: str, base_dir: str | None) -> str:
     """Resolve a (possibly relative) urdf path to an absolute path.
 
-    Same lookup as :func:`obstacles.base._resolve_urdf_path`: try ``base_dir``
-    then its parent so ``props/door.urdf`` resolves from ``config/``.
+    Try ``base_dir`` then its parent so ``props/door.urdf`` resolves from
+    ``config/``.
     """
     if os.path.isabs(path) or "://" in path:
         return path
@@ -330,8 +330,8 @@ def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
 class PropPlacement:
     """Sample prop placements ``(x, y, z, yaw_rad)`` per environment.
 
-    Unlike :class:`obstacles.placement.PlacementStrategy` this supports an
-    explicit ``z_range`` (e.g. a ball spawned at its radius height) and
+    This supports an explicit ``z_range`` (e.g. a ball spawned at its radius
+    height) and
     optional ``yaw_range`` (a round ball has no yaw, so it may be omitted).
     ``yaw_range`` is configured in degrees for human-friendly yaml.
     """
@@ -662,7 +662,7 @@ def _resolve_generated_spec(spec: PropSpec, asset: AssetDefinition) -> None:
 
 
 class PropManager:
-    """Interactive-prop scene + state manager (mirrors ObstacleManager)."""
+    """Interactive-prop scene + state manager."""
 
     def __init__(self, config: dict, num_envs: int, env_spacing: float,
                  device: str = "cpu", base_dir: str | None = None,

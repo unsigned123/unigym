@@ -9,7 +9,7 @@ Owns the recording / logging / video side of a collection run:
   + filter-chain flush when filters are active,
 * recorder frame capture and per-episode video writing,
 * DataCollectLogger feeding (log_step / log_episode / write_summary) and
-  the n_episodes / step_metrics statistics (duty, obstacle monitor, term).
+  the n_episodes / step_metrics statistics (duty, term).
 
 Callback contract (docs/contracts/runner_contract.md):
 
@@ -277,15 +277,6 @@ class CollectSink:
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:  # P11: switch-state distribution
             step_metrics["in_recovery"] = float(in_recovery.float().mean())
-        # obstacle sanity (anchored course should never move): mean/max lateral
-        # displacement of any clone from its env origin, plus max root z.
-        obs_mon = None
-        if self.env.obstacle_manager is not None:
-            obs_mon = self.env.obstacle_manager.monitor_envs(self.env)
-        if obs_mon:
-            step_metrics["obs_disp_m"] = float(obs_mon["disp_max"].mean())
-            step_metrics["obs_disp_max"] = float(obs_mon["disp_max"].max())
-            step_metrics["obs_z_max"] = float(obs_mon["z_max"].max())
         self.logger.log_step(t, step_metrics)
 
     # ------------------------------------------------------------------ #

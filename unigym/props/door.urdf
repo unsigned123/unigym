@@ -2,8 +2,8 @@
 <!-- Minimal hinged door prop for push-door data collection (P15).
 
   - z-up (gravity aligned): base plate rests on the ground, hinge axis = z so
-    the panel swings horizontally. init_roll = 0 (unlike the flat-obstacle URDFs
-    that need -pi/2). fix_base=False (free-floating) so PropManager can re-place
+    the panel swings horizontally. init_roll = 0 (unlike flat URDFs that need
+    -pi/2). fix_base=False (free-floating) so PropManager can re-place
     the whole door each reset via write_root_pose_to_sim; the heavy base plate
     (25 kg, 0.4 x 0.4 m footprint) keeps the frame from drifting when the
     panel is pushed, while the hinge (stiffness=0) lets the panel swing freely.

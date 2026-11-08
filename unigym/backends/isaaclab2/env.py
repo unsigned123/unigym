@@ -112,7 +112,7 @@ def _az_el_to_quat(az_deg: float, el_deg: float) -> tuple:
 
 def _configure_robot_scene(cfg, robot_profile, adapter, controls,
                            articulations, recipes, prop_manager, *, events_cfg,
-                           recorder, obstacle_manager, camera_manager,
+                           recorder, camera_manager,
                            contact_manager, director_cfg, init_pose_cfg):
     """Fill the scene/action cfg for the single or partitioned layout.
 
@@ -127,7 +127,7 @@ def _configure_robot_scene(cfg, robot_profile, adapter, controls,
 
         _articulation_runtime.validate_options(
             adapter, events_cfg=events_cfg, recorder=recorder,
-            obstacle_manager=obstacle_manager, prop_manager=prop_manager,
+            prop_manager=prop_manager,
             camera_manager=camera_manager, contact_manager=contact_manager,
             director_cfg=director_cfg, init_pose_cfg=init_pose_cfg)
         fields = _articulation_runtime.configure_scene(
@@ -264,7 +264,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                  episode_length_s: float, env_spacing: float = 4.0,
                  decimation: int = 4, sim_dt: float = 0.005,
                  contact_force_threshold: float = 1.0,
-                 events_cfg=None, recorder=None, obstacle_manager=None,
+                 events_cfg=None, recorder=None,
                  prop_manager=None,
                  lighting: dict | None = None,
                  init_pose: dict | None = None,
@@ -309,9 +309,6 @@ class IsaaclabEnv(ManagerBasedEnv):
                 The recorder adds NO scene sensor — it binds a
                 CameraManager rig (``camera_ref``); video frames are read
                 from the manager's cache by the CollectSink.
-            obstacle_manager: optional :class:`unigym.backends.isaaclab2.obstacles.ObstacleManager`;
-                its ``setup_scene`` adds URDF obstacle fields to the scene and
-                ``on_reset`` re-samples obstacle placements each episode.
             prop_manager: optional :class:`unigym.props.PropManager`;
                 its ``setup_scene`` adds interactive prop (door/ball/generic)
                 fields to the scene, ``on_reset`` re-places them each episode,
@@ -385,15 +382,12 @@ class IsaaclabEnv(ManagerBasedEnv):
             _configure_robot_scene(
                 cfg, robot_profile, adapter, controls, articulations,
                 recipes, prop_manager, events_cfg=events_cfg,
-                recorder=recorder, obstacle_manager=obstacle_manager,
+                recorder=recorder,
                 camera_manager=camera_manager,
                 contact_manager=contact_manager,
                 director_cfg=director_cfg, init_pose_cfg=self._init_pose)
         # note: `recorder` intentionally unused here (no scene contribution
         # kept in the signature for capability gating kwargs).
-        if obstacle_manager is not None:  # merge URDF obstacle fields (Route D)
-            for key, value in obstacle_manager.setup_scene().items():
-                setattr(cfg.scene, key, value)
         if prop_manager is not None:  # merge interactive prop fields (P15)
             for key, value in prop_manager.setup_scene().items():
                 setattr(cfg.scene, key, value)
@@ -414,7 +408,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         if lighting is not None:  # Task 1: brighter scene for video capture
             self._apply_lighting(cfg.scene, lighting)
         # feat/camera-obs: camera-manager sensors join the scene before
-        # cloning (same pattern as obstacles/props above).  This
+        # cloning (same pattern as props above).  This
         # INCLUDES the implicit depth sugar-shim camera when the adapter
         # requests the depth alias obs keys (yaml ``camera_depth`` params
         # were folded into the manager spec by collect.py).
@@ -427,7 +421,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         if self.camera_manager is not None:
             self.camera_manager.setup_scene(cfg.scene)
         # feat/contact-manager: contact-group sensors join the scene before
-        # cloning (same pattern as obstacles/props/cameras above)
+        # cloning (same pattern as props/cameras above)
         self.contact_manager = contact_manager
         if self.contact_manager is not None:
             for key, value in self.contact_manager.setup_scene().items():
@@ -475,15 +469,6 @@ class IsaaclabEnv(ManagerBasedEnv):
             self.event_manager.apply(
                 mode="reset", env_ids=all_ids,
                 global_env_step_count=self._sim_step_counter // self.cfg.decimation)
-            self.scene.write_data_to_sim()
-            self.sim.forward()
-
-        # ---- obstacles (Route D): bind asset handles + initial placement
-        self.obstacle_manager = obstacle_manager
-        if self.obstacle_manager is not None:
-            self.obstacle_manager.bind_env(self)
-            all_ids = torch.arange(num_envs, device=self.device)
-            self.obstacle_manager.on_reset(all_ids, self)
             self.scene.write_data_to_sim()
             self.sim.forward()
 
@@ -588,7 +573,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         """The partitioned-articulation tail (one env, external/manual driver)."""
         from . import articulation_runtime as _articulation_runtime
 
-        self.obstacle_manager = None
         self.prop_manager = None
         self._obs_requests = adapter.get_obs_requests()
         if self._obs_requests:  # pragma: no cover - rejected pre-super
@@ -986,8 +970,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         if env_ids.numel() == 0:
             return env_ids
         self._reset_idx(env_ids)
-        if self.obstacle_manager is not None:
-            self.obstacle_manager.on_reset(env_ids, self)
         if self.prop_manager is not None:  # P15: re-place props + close joints
             self.prop_manager.on_reset(env_ids, self)
         if self._partitioned:

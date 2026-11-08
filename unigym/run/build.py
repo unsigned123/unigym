@@ -8,7 +8,7 @@ spawns processes, writes pid markers or parses argv; the CLI/lifecycle owns
 those (docs/designs/v097-run-construction-execution-split.md §6/§7).
 
 Construction order is the pre-split ``collect_cli.main`` order, moved
-verbatim: obstacle -> prop -> adapter -> camera -> contact -> env ->
+verbatim: prop -> adapter -> camera -> contact -> env ->
 writer/logger -> director/timeline -> sinks -> replay -> bridge -> rewind
 providers.
 """
@@ -195,7 +195,7 @@ def _control_recipes(spec, info):
 
 def _build_robot_and_props(spec, cfg, info, device, num_envs,
                            env_spacing, config_dir):
-    """Step 1: policy profile(s) + actuator/terrain/obstacle/prop + adapter."""
+    """Step 1: policy profile(s) + actuator/terrain/prop + adapter."""
     backend_label = info.name
     # backends that build an ArticulationCfg declare it on their
     # BackendInfo face; the others take the pure-constants profile
@@ -233,18 +233,6 @@ def _build_robot_and_props(spec, cfg, info, device, num_envs,
     if info.build_terrain is not None:
         terrain = info.build_terrain()(cfg, num_envs, env_spacing,
                                        spec.terrain)
-    obstacle_manager = None
-    if cfg.get("obstacles"):
-        if info.build_obstacles is None:
-            raise ValueError(
-                f"the '{backend_label}' backend declares no obstacle builder; "
-                "drop the yaml 'obstacles:' section")
-        obstacle_manager = info.build_obstacles()(
-            cfg.get("obstacles"), num_envs=num_envs, env_spacing=env_spacing,
-            device=device, base_dir=config_dir)
-    if obstacle_manager is not None:
-        print(f"[collect] obstacles enabled: "
-              f"{[s.name for s in obstacle_manager.specs]}", flush=True)
     from unigym.adapters import build_adapter
     from unigym.props import build_prop_manager
 
@@ -260,7 +248,6 @@ def _build_robot_and_props(spec, cfg, info, device, num_envs,
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(getattr(adapter, "generates_command", False))
     return {"profile": profile, "profiles": profiles, "terrain": terrain,
-            "obstacle_manager": obstacle_manager,
             "prop_manager": prop_manager, "adapter": adapter,
             "generates_command": generates_command}
 
@@ -363,7 +350,7 @@ def _build_sensing(spec, cfg, info, device, num_envs, profile, adapter,
 
 
 def _build_env_and_sampler(spec, cfg, env_cfg, info, device, num_envs,
-                           profile, adapter, prop_manager, obstacle_manager,
+                           profile, adapter, prop_manager,
                            terrain, camera_manager, contact_manager,
                            effective_lighting, director_cfg, events_cfg,
                            recorder, episode_length_s,
@@ -398,7 +385,6 @@ def _build_env_and_sampler(spec, cfg, env_cfg, info, device, num_envs,
         sim_dt=float(env_cfg.get("sim_dt", 0.005)),
         events_cfg=events_cfg,
         recorder=recorder,
-        obstacle_manager=obstacle_manager,
         prop_manager=prop_manager,
         lighting=effective_lighting,
         init_pose=cfg.get("init_pose"),
@@ -696,7 +682,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         prop_manager)
     built = _build_env_and_sampler(
         spec, cfg, env_cfg, info, device, num_envs, profile, adapter,
-        prop_manager, robot["obstacle_manager"], robot["terrain"],
+        prop_manager, robot["terrain"],
         sensing["camera_manager"], sensing["contact_manager"],
         sensing["effective_lighting"], sensing["director_cfg"],
         sensing["events_cfg"], sensing["recorder"],
@@ -856,7 +842,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         camera_manager=sensing["camera_manager"],
         prop_manager=prop_manager,
         contact_manager=sensing["contact_manager"],
-        obstacle_manager=robot["obstacle_manager"],
         recorder=sensing["recorder"],
         director=sinks["director"],
         bridge=wiring["bridge"],

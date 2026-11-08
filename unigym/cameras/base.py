@@ -586,7 +586,7 @@ class CameraRig(Protocol):
     ``backends/mujoco/cameras.build_mj_rig`` (MjSpec-injected cameras).
 
     Lifecycle (driven by :class:`cameras.manager.CameraManager`, mirroring
-    the obstacle/prop manager conventions):
+    the prop manager conventions):
 
     * ``setup_scene(scene_cfg)`` — before env construction; adds the sensor
       cfg under the rig's prim path (isaaclab import inside).

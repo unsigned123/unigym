@@ -27,7 +27,6 @@ class RunInstance:
     camera_manager: Any = None
     prop_manager: Any = None
     contact_manager: Any = None
-    obstacle_manager: Any = None
     recorder: Any = None
     director: Any = None
     bridge: Any = None

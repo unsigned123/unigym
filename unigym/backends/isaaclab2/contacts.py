@@ -134,7 +134,7 @@ def filter_prim_exprs(spec: ContactGroupSpec) -> list[str]:
 
     Bare entries are robot-body regexes (same namespace as sensor_bodies);
     entries starting with ``/`` or ``{ENV_REGEX_NS}`` pass through verbatim
-    (props ``{ENV_REGEX_NS}/Prop_*``, obstacles ``{ENV_REGEX_NS}/Obstacle_*``).
+    (props ``{ENV_REGEX_NS}/Prop_*``).
     """
     return [e if _is_explicit_prim_path(e) else f"{{ENV_REGEX_NS}}/Robot/{e}"
             for e in spec.filter_bodies]

@@ -47,7 +47,7 @@ def _contact_field(name: str, first: bool) -> str:
     return _scene_field(name, first, prefix="contact_forces")
 
 
-def validate_options(adapter, *, events_cfg, recorder, obstacle_manager,
+def validate_options(adapter, *, events_cfg, recorder,
                      prop_manager, camera_manager, contact_manager,
                      director_cfg, init_pose_cfg) -> None:
     """Reject the partition options this MVP does not implement."""
@@ -59,7 +59,6 @@ def validate_options(adapter, *, events_cfg, recorder, obstacle_manager,
             f"under articulation/<name>/... (use an external/manual driver) "
             f"| requested: {sorted({r.key for r in requests})}")
     for option, value in (
-            ("obstacle_manager", obstacle_manager),
             ("prop_manager", prop_manager),
             ("camera_manager", camera_manager),
             ("contact_manager", contact_manager),

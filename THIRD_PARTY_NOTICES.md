@@ -21,6 +21,3 @@ License text: `LICENSES/robocasa-LICENSE`.
 The retained in-package URDFs (`unigym/props/door.urdf`,
 `unigym/props/drawer.urdf`) and the example/test MJCF models are
 self-authored, MIT-clean minimal models.
-Third-party obstacle meshes (NJU TSC frames, seesaws, tunnels, tyres, poles,
-bars) are deliberately **not** included in this release because their
-redistribution terms are not established.

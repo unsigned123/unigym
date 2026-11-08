@@ -94,7 +94,6 @@ class Trait(Enum):
     SCENE_COMPOSE = "SCENE_COMPOSE"            # neutral Scene -> composed world face
     TERRAIN = "TERRAIN"
     EVENTS_DR = "EVENTS_DR"
-    OBSTACLES = "OBSTACLES"
     INIT_POSE = "INIT_POSE"
     SPAWN_XY_YAW = "SPAWN_XY_YAW"              # both backends (R6 parity)
     MOCAP = "MOCAP"                            # mocap body carrier (mujoco)
@@ -208,8 +207,6 @@ class BackendInfo:
     Returns the terrain object (or None for the native-IR pass-through);
     ``None`` on the info means the backend declares no terrain face.
     """
-    build_obstacles: "Callable[[], object] | None" = None
-    """Factory -> ``build_obstacles(section, **kwargs)`` (None = unsupported)."""
     build_actuator_override: "Callable[[], object] | None" = None
     """Factory -> ``apply_actuator_override(profile, section)``.
 
@@ -547,7 +544,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset({
     Trait.PROPS_ACTUATED_ACTIONS,
     Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,
     Trait.DIRECTOR_ATTACH_SLAVE, Trait.DIRECTOR_GRIPPER,
-    Trait.TERRAIN, Trait.EVENTS_DR, Trait.OBSTACLES, Trait.INIT_POSE,
+    Trait.TERRAIN, Trait.EVENTS_DR, Trait.INIT_POSE,
     Trait.SPAWN_XY_YAW,
     # v098 N0: the USD prim hierarchy is the isaaclab model face
     Trait.MODEL_USD_PRIMS,
@@ -782,12 +779,6 @@ def _isaaclab2_build_terrain() -> object:
     return build_terrain
 
 
-def _isaaclab2_build_obstacles() -> object:
-    from unigym.backends.isaaclab2.build import build_obstacles
-
-    return build_obstacles
-
-
 def _isaaclab2_actuator_override() -> object:
     from unigym.backends.isaaclab2.build import apply_actuator_override
 
@@ -868,7 +859,6 @@ _STATIC_INFO: "dict[str, BackendInfo]" = {
                              gripper_backend=_isaaclab2_gripper_backend,
                              env_kwargs=_isaaclab2_env_kwargs,
                              build_terrain=_isaaclab2_build_terrain,
-                             build_obstacles=_isaaclab2_build_obstacles,
                              build_actuator_override=_isaaclab2_actuator_override,
                              build_events=_isaaclab2_build_events,
                              scene_ops=_isaaclab2_scene_ops,
@@ -884,7 +874,6 @@ _STATIC_INFO: "dict[str, BackendInfo]" = {
                              gripper_backend=_isaaclab2_gripper_backend,
                              env_kwargs=_isaaclab2_env_kwargs,
                              build_terrain=_isaaclab2_build_terrain,
-                             build_obstacles=_isaaclab2_build_obstacles,
                              build_actuator_override=_isaaclab2_actuator_override,
                              build_events=_isaaclab2_build_events,
                              scene_ops=_isaaclab2_scene_ops,

@@ -280,7 +280,7 @@ class MjwarpEnv(WarpBatchMixin):
             construction path is unchanged).
         device: warp device: "cpu" or "cuda:N" (default "cuda:0" when a
             CUDA device is visible, else "cpu").  Torch caches stay CPU.
-        terrain_cfg / env_spacing / events_cfg / recorder / obstacle_manager
+        terrain_cfg / env_spacing / events_cfg / recorder
         / lighting / depth_camera / init_pose: accepted for
         builder-kwargs parity and IGNORED (capabilities are all False, so
         the gate already rejected any non-None request) — EXCEPT
@@ -308,7 +308,7 @@ class MjwarpEnv(WarpBatchMixin):
                  articulations=None,
                  device: str = "cpu",
         terrain_cfg=None, env_spacing: float = 4.0,
-        events_cfg=None, recorder=None, obstacle_manager=None,
+        events_cfg=None, recorder=None,
         prop_manager=None, lighting=None, depth_camera=None,
         init_pose=None, camera_manager=None, contact_manager=None,
         director_cfg=None, artifact_dir: Optional[str] = None,
@@ -331,10 +331,10 @@ class MjwarpEnv(WarpBatchMixin):
         # rejected.  Director ops + anchored articulation props still write
         # model-global state with no per-world face.
         reject_model_global_unsupported(n, prop_manager, None, director_cfg)
-        if any(x is not None for x in (events_cfg, obstacle_manager,
+        if any(x is not None for x in (events_cfg,
                                        lighting, depth_camera, init_pose)):
             raise NotImplementedError(
-                "mjwarp backend does not implement events/obstacles/"
+                "mjwarp backend does not implement events/"
                 "depth_camera/init_pose; the capability gate should have "
                 "rejected this request")
         self.warp_device = _resolve_warp_device(device)
@@ -667,8 +667,6 @@ class MjwarpEnv(WarpBatchMixin):
         self._time_in_episode = torch.zeros(n)
         self._episode_dur = sample_durations(
             self._dur_lo, self._dur_hi, n, self.device)
-
-        self.obstacle_manager = None
 
         # M2b: cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:

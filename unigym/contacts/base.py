@@ -85,7 +85,7 @@ class ContactGroupSpec:
         filter_bodies: pairwise filter body-name regex list; a bare entry is
             resolved under the robot prefix, an entry starting with
             ``/`` or ``{ENV_REGEX_NS}`` is used as an explicit prim path
-            (props ``Prop_*`` / obstacles ``Obstacle_*``).  Presence of a
+            (props ``Prop_*``).  Presence of a
             non-empty list makes the group pairwise.
         mode: ``general`` (no filter — net force on the sensor bodies) or
             ``pairwise`` (per-filter force matrix).  Default derived from
