@@ -149,9 +149,11 @@ class CageGrid:
             target, collision_only=True,
             types={int(ctx.box_type)})   # cage layout derives from size
         g = geoms[0]
-        half = np.asarray(ctx.model.geom_size[g][:3], dtype=np.float64)
-        pos = np.asarray(ctx.data.geom_xpos[g])
-        rot = np.asarray(ctx.data.geom_xmat[g]).reshape(3, 3)
+        model = ctx.require_model()
+        data = ctx.require_data()
+        half = np.asarray(model.geom_size[g][:3], dtype=np.float64)
+        pos = np.asarray(data.geom_xpos[g])
+        rot = np.asarray(data.geom_xmat[g]).reshape(3, 3)
         # v056 pure-ruler fallback (design v056-freeze-paradigm §3): the
         # full warm/cold/tint encoding MEANS "distance to the live bite"
         # -- with no matching contact that meaning is gone, so the cage
@@ -191,7 +193,7 @@ class CageGrid:
         tint = params["depth_tint"]
         if tint is not None:
             _, ref = ctx.target_geoms(tint["mesh_body"], collision_only=True)
-            sdf = GeomSDF.from_geoms(ctx.model, ctx.data, ref,
+            sdf = GeomSDF.from_geoms(model, data, ref,
                                      int(ctx.box_type), int(ctx.mesh_type))
             dep = sdf.depth(mids)
             inside = dep > 0

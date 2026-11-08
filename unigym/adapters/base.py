@@ -140,6 +140,10 @@ class Adapter(ABC):
     (e.g. hierarchical policies); collect.py then skips the command sampler
     and records :attr:`last_command` instead (P9d)."""
 
+    _unigym_name: str = ""
+    """Registry identity stamped by ``build_adapter`` (the controls[]
+    partition / group validation resolve ownership by this name)."""
+
     rewindable: bool = False
     """Rewind superpower declaration (Round B B1, explicit class attribute —
     never hasattr).  True means the adapter implements ``on_rewind`` and can

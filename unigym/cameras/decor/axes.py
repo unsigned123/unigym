@@ -33,8 +33,9 @@ class Axes:
                              "(no body prefix '*')")
         body, _ = ctx.target_geoms(target, collision_only=False)
         bid = ctx._body_lower.index(body.lower())
-        pos = np.asarray(ctx.data.xpos[bid], dtype=np.float64)
-        rot = np.asarray(ctx.data.xmat[bid]).reshape(3, 3)
+        data = ctx.require_data()
+        pos = np.asarray(data.xpos[bid], dtype=np.float64)
+        rot = np.asarray(data.xmat[bid]).reshape(3, 3)
         size = params["size"]
         out = []
         for i, col in enumerate(AXIS_COLORS):

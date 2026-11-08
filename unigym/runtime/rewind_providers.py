@@ -124,7 +124,7 @@ class _EpisodeBufferProvider:
     def _bufs(self) -> list:
         raise NotImplementedError
 
-    def _marks(self) -> list:
+    def _marks(self) -> list | None:
         return None
 
     def _fuse(self) -> dict:
@@ -140,10 +140,11 @@ class _EpisodeBufferProvider:
     def rewind_state(self) -> dict:
         """Deep-copied buffers + marks + episode stamp + fuse counters."""
         bufs = self._bufs()
+        marks_state = self._marks()
         state = {"bufs": [[_copy_slice(s) for s in buf] for buf in bufs],
                  "marks": ([[dict(m) for m in marks]
-                            for marks in self._marks()]
-                           if self._marks() is not None else None),
+                            for marks in marks_state]
+                           if marks_state is not None else None),
                  "episode_stamp": self._live_stamp(bufs),
                  "fuse": self._fuse()}
         return state
@@ -300,7 +301,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
     def _bufs(self) -> list:
         return self.sink.ep_bufs
 
-    def _marks(self) -> list:
+    def _marks(self) -> list | None:
         return None
 
     def _fuse(self) -> dict:

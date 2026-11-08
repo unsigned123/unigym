@@ -47,7 +47,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     import torch
@@ -236,7 +236,7 @@ def _build_actuators(spec: PropSpec, c: dict) -> dict:
     return _spawn_module()._build_actuators(spec, c)
 
 
-def _prop_backend(backend: str | None = None):
+def _prop_backend(backend: str | None = None) -> "PropBackendCap":
     """Resolve a backend's prop face through the registry (v100 G4).
 
     ``backend=None`` resolves the historical isaaclab build face (the
@@ -251,10 +251,10 @@ def _prop_backend(backend: str | None = None):
         raise ValueError(
             f"backend {build_name(backend)!r} has no prop backend face "
             f"(hint: use mujoco/mjwarp/isaaclab)")
-    return factory()
+    return cast("PropBackendCap", factory())
 
 
-def _compat_class(name: str):
+def _compat_class(name: str) -> type:
     """Resolve a legacy public handler class name (v100 G4 compat)."""
     return _prop_backend(None).compat(name)
 
@@ -294,7 +294,7 @@ def _yaw_quat(yaw: torch.Tensor) -> torch.Tensor:
     import torch  # noqa: F401  (lazy: import unigym.props stays torch-free)
     from ..core import quat
 
-    return quat.about_z(yaw)
+    return cast(torch.Tensor, quat.about_z(yaw))
 
 
 def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -302,7 +302,7 @@ def _quat_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     import torch  # noqa: F401  (lazy: import unigym.props stays torch-free)
     from ..core import quat
 
-    return quat.mul(a, b)
+    return cast(torch.Tensor, quat.mul(a, b))
 
 
 def quat_rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
@@ -355,7 +355,7 @@ class PropPlacement:
         # applied on top of the sampled z_range midpoint/sample.
         self.height_offset = float(config.get("height_offset", 0.0))
         # touch ranges so bad shapes raise early
-        self.x_range, self.y_range, self.z_range
+        _ = (self.x_range, self.y_range, self.z_range)
 
     def sample(self, num_positions: int, device: str = "cpu") -> torch.Tensor:
         """Return a ``(num_positions, 4)`` float tensor ``(x, y, z, yaw_rad)``."""
@@ -406,6 +406,13 @@ class PropHandler:
     spec: PropSpec
     num_envs: int
     device: str
+
+    def __init__(self, spec: PropSpec, num_envs: int, device: str,
+                 base_dir: str | None = None) -> None:
+        """Store the handler's declaration context (subclass hooks extend)."""
+        self.spec = spec
+        self.num_envs = int(num_envs)
+        self.device = device
 
     def setup_scene(self, *, classes=None) -> tuple[str, Any]:
         """Return ``(scene_field_name, cfg)`` to merge into the scene config."""
@@ -465,14 +472,34 @@ class PropBackendCap(Protocol):
     separate project (design §7.5) — this Protocol is the typed seam.
     """
 
-    def scene_fields(self) -> dict:
+    def scene_fields(self, manager, *, classes=None) -> dict:
         """Isaaclab form: ``{scene_field: cfg}`` to merge before cloning.
-        (mujoco: ``{}`` — no scene elements.)"""
+        (mujoco: ``{}`` — no scene elements.)
+
+        The manager is passed explicitly because the backend face formats
+        the manager's resolved handlers.
+        """
         ...
 
-    def inject_spec(self, mjspec) -> None:
+    def inject_spec(self, manager, mjspec) -> None:
         """Mujoco form: in-place MjSpec injection before compilation.
         (isaaclab: no-op.)"""
+        ...
+
+    #: whether this face implements the MjSpec injection form
+    injects_mjspec: bool
+
+    def compat(self, name: str) -> type:
+        """Resolve a legacy public handler class name (isaaclab compat)."""
+        ...
+
+    def build_handler(self, spec: PropSpec, *, num_envs: int, device: str,
+                      base_dir: str | None = None) -> PropHandler:
+        """Instantiate the declared handler for one spec."""
+        ...
+
+    def handler_for(self, spec: PropSpec) -> "type[PropHandler]":
+        """Return the handler class declared for ``spec.type`` (fail fast)."""
         ...
 
     def bind_env(self, env) -> None:
@@ -668,7 +695,7 @@ class PropManager:
                  device: str = "cpu", base_dir: str | None = None,
                  backend: str | None = None):
         self.backend = backend
-        self._prop_backend = _prop_backend(backend)
+        self._prop_backend: PropBackendCap = _prop_backend(backend)
         self.num_envs = int(num_envs)
         self.env_spacing = float(env_spacing)
         self.device = device
@@ -800,12 +827,13 @@ class PropManager:
         """
         out: dict[str, dict] = {}
         for h in self._handlers:
-            getter = getattr(h, "aabb_center", None)
-            if getter is None:
+            center = getattr(h, "aabb_center", None)
+            half = getattr(h, "aabb_half", None)
+            if center is None or half is None:
                 continue
             out[h.spec.name] = {
-                "center": [float(v) for v in h.aabb_center],
-                "half_extents": [float(v) for v in h.aabb_half],
+                "center": [float(v) for v in center],
+                "half_extents": [float(v) for v in half],
             }
         return out
 

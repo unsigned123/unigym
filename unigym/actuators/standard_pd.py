@@ -107,6 +107,10 @@ class StandardPdActuator(ActuatorBase):
                 written.
         """
         self._require_bound()
+        assert (self._qadr is not None and self._dadr is not None
+                and self._slots is not None and self._targets is not None
+                and self._kp is not None and self._kd is not None
+                and self._ctrlrange is not None)
         q = data.qpos[self._qadr]
         dq = data.qvel[self._dadr]
         if self._scale_fn is not None:

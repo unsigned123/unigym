@@ -64,8 +64,10 @@ def line_chart(path: str | Path, title: str, series: list[tuple],
         gy = py(v)
         d.line([x0, gy, x1, gy], fill="#dc2626")
         d.text((x0 + 4, gy - 11), f"th {label}", fill="#dc2626")
+    x_hi = 0
     for s_i, (label, ys) in enumerate(series):
         ys = _downsample(np.asarray(ys, dtype=np.float64).ravel())
+        x_hi = max(0, ys.size - 1)
         color = COLORS[s_i % len(COLORS)]
         pts = [(px(i, ys.size), py(v)) for i, v in enumerate(ys)
                if np.isfinite(v)]
@@ -75,6 +77,6 @@ def line_chart(path: str | Path, title: str, series: list[tuple],
                     fill=color)
         d.text((x1 - 112, y1 + 12 * s_i - 2), label[:18], fill="#333")
     d.text((x0, 6), title[:80], fill="#111")
-    d.text((x0, y0 + 6), f"{x_label} 0..{max(0, ys.size - 1)}", fill="#666")
+    d.text((x0, y0 + 6), f"{x_label} 0..{x_hi}", fill="#666")
     img.save(path)
     return Path(path)

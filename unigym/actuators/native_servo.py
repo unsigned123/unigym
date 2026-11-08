@@ -43,5 +43,6 @@ class NativeServoActuator(ActuatorBase):
                 written.
         """
         self._require_bound()
+        assert self._slots is not None and self._targets is not None
         cr = model.actuator_ctrlrange[self._slots]
         data.ctrl[self._slots] = np.clip(self._targets, cr[:, 0], cr[:, 1])

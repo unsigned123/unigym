@@ -20,6 +20,7 @@ Descriptor shape (dict, JSON-safe)::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import numpy as np
 
@@ -27,6 +28,22 @@ from ..appearance import validate_selector
 
 __all__ = ["GENERATORS", "register_gen", "DecorContext",
            "validate_decor_entry", "run_generators", "gen_names"]
+
+
+class _DecorModel(Protocol):
+    """The model fields decor generators read (MuJoCo MjModel boundary)."""
+
+    geom_type: np.ndarray
+    geom_size: np.ndarray
+
+
+class _DecorData(Protocol):
+    """The data fields decor generators read (MuJoCo MjData boundary)."""
+
+    xpos: np.ndarray
+    xmat: np.ndarray
+    geom_xpos: np.ndarray
+    geom_xmat: np.ndarray
 
 GENERATORS: dict[str, dict] = {}
 
@@ -61,8 +78,8 @@ class DecorContext:
     ``contact_*`` arrays are row-aligned snapshots of ``mj_data``'s
     active contacts (pos / frame row 0 normal / linear force from
     ``mj_contactForce`` / the (g0, g1) geom pair)."""
-    model: object = None
-    data: object = None
+    model: _DecorModel | None = None
+    data: _DecorData | None = None
     contact_pos: np.ndarray = field(default_factory=lambda:
                                    np.zeros((0, 3)))
     contact_normal: np.ndarray = field(default_factory=lambda:
@@ -83,6 +100,18 @@ class DecorContext:
     def __post_init__(self):
         self._body_lower = [("" if n is None else str(n)).lower()
                             for n in self.body_names]
+
+    def require_model(self) -> _DecorModel:
+        """The injected model handle (decor generators need it)."""
+        if self.model is None:
+            raise RuntimeError("decor context has no model handle")
+        return self.model
+
+    def require_data(self) -> _DecorData:
+        """The injected data handle (decor generators need it)."""
+        if self.data is None:
+            raise RuntimeError("decor context has no data handle")
+        return self.data
 
     # -- selectors -------------------------------------------------------- #
     def _geom_mask(self, sel: dict) -> np.ndarray:
@@ -124,7 +153,7 @@ class DecorContext:
         return self.contact_pos[idx].mean(axis=0)
 
     def target_geoms(self, target: str, *, collision_only: bool = True,
-                     types=None) -> tuple[str, list[int]]:
+                     types: "set[int] | None" = None) -> tuple[str, list[int]]:
         """Resolve a decor ``target``: case-insensitive body-name prefix
         match -> the body's geoms (collision-class by default -- decor
         annotates physical truth, not visual shells).  Fail-fast with the
@@ -141,15 +170,17 @@ class DecorContext:
                 f"decor target {target!r} matches no body; bodies: "
                 f"{[n for n in self._body_lower if n]}")
         out: list[int] = []
+        model = self.require_model() if types is not None else None
         for b in hits:
             ids = np.where(np.asarray(self.geom_bodyid) == b)[0]
             for g in ids:
                 if collision_only and not (int(self.geom_contype[g])
                                            or int(self.geom_conaffinity[g])):
                     continue
-                if types is not None and int(self.model.geom_type[g]) \
-                        not in types:
-                    continue
+                if types is not None:
+                    assert model is not None
+                    if int(model.geom_type[g]) not in types:
+                        continue
                 out.append(int(g))
         name = next((self.body_names[b] for b in hits
                      if self.body_names[b]), target)

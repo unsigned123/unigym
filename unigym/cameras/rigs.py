@@ -12,11 +12,13 @@ the backend factory lazily through :attr:`BackendInfo.camera_backend`.
 """
 from __future__ import annotations
 
+from typing import Callable, cast
+
 import numpy as np
 import torch
 
 from ..core import quat
-from .base import CameraSpec
+from .base import CameraRig, CameraSpec
 
 # recorder parity defaults for chase/world look-at
 DEFAULT_CHASE_OFFSET: dict = {
@@ -61,7 +63,7 @@ def _yaw_pitch_roll_quat_batch(yaw: torch.Tensor, pitch: torch.Tensor,
 
 def _quat_mul_batch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """Batched Hamilton product of (k, 4) wxyz quaternions."""
-    return quat.mul(a, b)
+    return cast(torch.Tensor, quat.mul(a, b))
 
 
 def build_neutral_rig(spec: CameraSpec, render_groups=None):
@@ -75,7 +77,7 @@ def build_neutral_rig(spec: CameraSpec, render_groups=None):
 
 
 def build_rig(spec: CameraSpec, backend: str = "isaaclab",
-              render_groups=None):
+              render_groups=None) -> CameraRig:
     """Factory: rig instance from the spec's ``rig.type``.
 
     ``backend`` selects the sensor stack through the registry's lazy
@@ -93,7 +95,8 @@ def build_rig(spec: CameraSpec, backend: str = "isaaclab",
         raise ValueError(
             f"camera {spec.name!r}: backend {backend!r} has no camera "
             f"rig factory (hint: use mujoco/mjwarp/isaaclab)")
-    return factory()(spec, render_groups=render_groups)
+    rig_factory = cast(Callable[..., object], factory())
+    return cast(CameraRig, rig_factory(spec, render_groups=render_groups))
 
 
 def lookat_quat(pos, lookat) -> np.ndarray:

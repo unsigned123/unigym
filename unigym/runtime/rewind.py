@@ -62,7 +62,7 @@ import collections
 import copy
 import json
 import os
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, cast, runtime_checkable
 
 import numpy as np
 
@@ -539,10 +539,11 @@ class RewindController:
             fn = getattr(p, "dump_attempt", None)
             if not callable(fn):
                 continue
+            dump = cast(Callable[[str, str], list], fn)
             ep = getattr(p, "episode_hint", lambda: 0)()
             base = f"rewind_{n}_ep{int(ep)}_tick{tick}_{p.name}"
             os.makedirs(attempts, exist_ok=True)
-            paths = fn(attempts, base)
+            paths = dump(attempts, base)
             meta = {"rewind_ordinal": n, "snap_id": int(sid),
                     "label": label, "provider": p.name,
                     "tick": tick, "restored_tick": int(restored_tick),

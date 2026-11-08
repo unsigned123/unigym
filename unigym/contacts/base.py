@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from typing import Optional, Sequence
+from typing import ClassVar, Optional, Protocol, Sequence, cast
 
 import numpy as np
 import torch
@@ -263,7 +263,22 @@ def _body_spec_list(value, where: str) -> list[str]:
     return [str(v) for v in value]
 
 
-def _contact_face(backend: str):
+class _ContactBackendFace(Protocol):
+    """The backend-native reference-resolution face (registry boundary)."""
+
+    backend_key: ClassVar[str]
+
+    def __init__(self, specs) -> None: ...
+
+    @classmethod
+    def group_bodies(cls, value, path: str) -> list[str]: ...
+
+    @classmethod
+    def prop_filter_paths(cls, name: str,
+                          articulated: bool) -> list[str]: ...
+
+
+def _contact_face(backend: str) -> "type[_ContactBackendFace]":
     """Resolve the backend contact face lazily through the registry.
 
     The face class owns BOTH the raw-reading backend object and the
@@ -282,10 +297,10 @@ def _contact_face(backend: str):
         raise NotImplementedError(
             f"contacts are not implemented for backend {backend!r} "
             f"(available: {', '.join(BACKENDS)})")
-    return factory()
+    return cast("type[_ContactBackendFace]", factory())
 
 
-def build_contact_backend(backend: str, specs):
+def build_contact_backend(backend: str, specs) -> "_ContactBackendFace":
     """Construct the backend contact object for *specs* (registry face)."""
     return _contact_face(backend)(specs)
 

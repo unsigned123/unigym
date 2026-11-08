@@ -39,7 +39,7 @@ module stays engine-free (numpy only inside the shared contact sampler).
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, cast, runtime_checkable
 
 __all__ = ["SceneOps", "SceneFace", "build_scene_ops", "attach",
            "robot_joint_groups", "joint_limit_rows", "contact_groups_state"]
@@ -90,8 +90,9 @@ def build_scene_ops(env, backend: str, robot_name: str | None = None,
     if info.scene_ops is None:
         raise ValueError(f"scene face: backend {backend!r} declares no "
                          "scene_ops face")
-    return info.scene_ops()(env, robot_name=robot_name,
-                            camera_names=camera_names)
+    scene_ops_factory = cast(Callable[..., SceneOps], info.scene_ops)
+    return scene_ops_factory(env, robot_name=robot_name,
+                             camera_names=camera_names)
 
 
 # --------------------------------------------------------------------------- #

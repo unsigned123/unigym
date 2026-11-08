@@ -91,10 +91,9 @@ class ComputedTorquePdActuator(ActuatorBase):
     def step(self, model, data) -> None:
         """One sim substep: write the per-part computed-torque ctrl slots.
 
-        Reads the mass matrix fresh via ``mj_fullM`` (legacy layout
-        fallback for mujoco < 3.2), applies each part's own diagonal
-        block to ``kp*(q* - q) - kd*dq`` plus ``qfrc_bias``, and clips
-        to the owning actuators' ctrlrange.
+        Reads the mass matrix fresh via ``mj_fullM``, applies each part's
+        own diagonal block to ``kp*(q* - q) - kd*dq`` plus ``qfrc_bias``,
+        and clips to the owning actuators' ctrlrange.
 
         Args:
             model: Live MjModel (read-only here).
@@ -102,14 +101,14 @@ class ComputedTorquePdActuator(ActuatorBase):
                 written.
         """
         self._require_bound()
+        assert (self._qadr is not None and self._dadr is not None
+                and self._slots is not None and self._targets is not None
+                and self._kp is not None and self._kd is not None)
         import mujoco
 
         nv = int(model.nv)
         M = np.zeros((nv, nv))
-        try:
-            mujoco.mj_fullM(model, data, M)          # mujoco >= 3.2
-        except TypeError:
-            mujoco.mj_fullM(model, M, data.qM)       # legacy layout
+        mujoco.mj_fullM(model, data, M)
         q = data.qpos[self._qadr]
         dq = data.qvel[self._dadr]
         bias = data.qfrc_bias

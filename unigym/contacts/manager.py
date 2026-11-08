@@ -27,7 +27,7 @@ Obs path (plan §4, decoupled from recording): adapters may request
 """
 from __future__ import annotations
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, cast, runtime_checkable
 
 import numpy as np
 import torch
@@ -185,7 +185,8 @@ class ContactManager:
             raise NotImplementedError(
                 f"contact backend {type(self.backend).__name__} has no "
                 f"per-contact detail face (contact_ops/{name})")
-        return fn(self._spec(name))
+        detail = cast(Callable[[ContactGroupSpec], list[dict]], fn)
+        return detail(self._spec(name))
 
     def _spec(self, name: str) -> ContactGroupSpec:
         for s in self.specs:
@@ -250,8 +251,8 @@ def build_contact_manager(cfg, backend: str, device: str = "cpu",
                                               body_parts=body_parts,
                                               prop_names=prop_names,
                                               articulated_props=(
-                                                  articulated_props
-                                                  or frozenset()))]
+                                                  frozenset(articulated_props
+                                                            or ())))]
     names = [s.name for s in specs]
     if len(set(names)) != len(names):
         dupes = sorted({n for n in names if names.count(n) > 1})

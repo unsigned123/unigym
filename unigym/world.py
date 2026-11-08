@@ -31,6 +31,7 @@ import copy
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -322,7 +323,12 @@ class World:
             from unigym.core.asset_root import repo_root
 
             texture = Path(repo_root()) / "assets" / "table_wood.png"
-            name = f"inline_mat_{self._inline_name.rsplit('_', 1)[-1]}"
+            inline_name = self._inline_name
+            if inline_name is None:
+                raise RuntimeError(
+                    "World material requested before the inline scene was "
+                    "registered")
+            name = f"inline_mat_{inline_name.rsplit('_', 1)[-1]}"
             self._inline_material = Material(
                 name, {"kind": "2d", "texture_file": str(texture)})
         return self._inline_material
@@ -341,7 +347,8 @@ class World:
             instances.extend(obj._instance(material.name)
                              for obj in self._objects)
         inherited = not self._terrain_explicit and base is not None
-        terrain = (base.terrain if inherited else self._terrain)
+        terrain = (base.terrain if base is not None and inherited
+                   else self._terrain)
         if terrain is not None and not inherited:
             terrain = replace(
                 terrain,
@@ -638,7 +645,7 @@ class World:
         rides ``env.params``.
         """
         if self._scene_ref is not None:
-            fragment = {"scene": self._scene_ref}
+            fragment: dict[str, Any] = {"scene": self._scene_ref}
         else:
             params: dict = {}
             if self._inline_name is not None:

@@ -146,11 +146,11 @@ class ActuatorBase:
 
     def __init__(self) -> None:
         self._joint_names: list = []
-        self._qadr = None
-        self._dadr = None
-        self._slots = None
-        self._ctrlrange = None
-        self._targets = None
+        self._qadr: np.ndarray | None = None
+        self._dadr: np.ndarray | None = None
+        self._slots: np.ndarray | None = None
+        self._ctrlrange: np.ndarray | None = None
+        self._targets: np.ndarray | None = None
         self._bound = False
 
     # ---------------------------------------------------------------- #

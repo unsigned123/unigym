@@ -107,7 +107,7 @@ def validate_flags(flags) -> dict:
         raise ValueError(
             f"capture flag 'geom' must be one of {list(GEOM_MODES)}, "
             f"got {mode!r}")
-    out = {"geom": mode}
+    out: dict[str, object] = {"geom": mode}
     for k in ("contacts", "segmentation"):
         v = flags[k]
         if not isinstance(v, bool):

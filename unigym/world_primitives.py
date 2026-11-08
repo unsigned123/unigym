@@ -14,12 +14,16 @@ keeps ``pos`` meaning the geometric centre, matching the static primitive.
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 from unigym.scenes.scene_ir import (
     Instance,
     Pose,
     require_neutral_name,
 )
+
+if TYPE_CHECKING:
+    from unigym.world import World
 
 __all__ = [
     "Box", "Sphere", "Cylinder", "Capsule", "Plane",
@@ -111,13 +115,17 @@ class _Primitive:
     """Shared placement/rotation face of the programmatic primitives."""
 
     kind = "primitive"
+    #: subclass shape fields (type-only declarations; each subclass sets its own)
+    _envelope: tuple
+    radius: float
+    half_height: float
 
     def __init__(self, name: str | None, pos, quat, *,
                  dynamic: bool = False, spawn: dict | None = None):
         self._name = name
         self._pos = _vec3(pos, f"{self.kind} pos")
         self._quat = _quat(quat)
-        self._world = None
+        self._world: "World | None" = None
         self.material: str | None = None
         self.dynamic = bool(dynamic)
         """Declared as a dynamic free body (content/props path)."""
@@ -155,17 +163,22 @@ class _Primitive:
         self._pos = _vec3(pos, f"{self.kind} pos")
         return self
 
-    def rotate(self, quat=None, *, yaw=None) -> "_Primitive":
+    def rotate(self, quat=None, *, yaw: float | None = None) -> "_Primitive":
         """Rotate in place (``quat`` wxyz, or a ``yaw`` in degrees)."""
         self._check_mutable()
         if (quat is None) == (yaw is None):
             raise ValueError(
                 "rotate() takes exactly one of quat=[w,x,y,z] or yaw=<deg>")
-        self._quat = _quat(quat) if quat is not None else _yaw_quat(yaw)
+        if quat is not None:
+            self._quat = _quat(quat)
+        else:
+            assert yaw is not None
+            self._quat = _yaw_quat(yaw)
         return self
 
     def _instance(self, material: str) -> Instance:
         """Build the scene-IR instance for this primitive."""
+        assert self._name is not None
         params = {
             "name": self._name,
             **self._shape_params(),
