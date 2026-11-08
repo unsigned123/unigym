@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 
 import numpy as np
@@ -303,11 +304,12 @@ class CameraManager:
         untouched (the render is a pure read under the v2 layout).
         """
         rspec = None
+        rig = None
         for spec, rig in zip(self.specs, self.rigs):
             if spec.name == name:
                 rspec = getattr(rig, "render_spec", None)
                 break
-        if (rspec is not None
+        if (rspec is not None and rig is not None
                 and callable(getattr(rig, "capture_render", None))):
             return rig.capture_render(rspec)["rgb"]
         val = self._last.get(rgb_key(name))
@@ -363,6 +365,8 @@ class CameraManager:
         """Resolve the get_view instance: shared -> target_env (env_id must
         agree or be omitted); per_instance -> env_id (default 0)."""
         te = self._target_env(rig)
+        if self.num_envs is None:
+            raise RuntimeError("CameraManager._view_env before bind_env")
         if state_is_shared(spec):
             if env_id is not None and int(env_id) != te:
                 raise ValueError(
@@ -439,7 +443,8 @@ class CameraManager:
         spec, rig = self._spec_and_rig(name)
         self._view_env(spec, rig, env_id)     # env_id discipline (§12.2)
         rspec, label = resolve_render(render)
-        cap_r = getattr(rig, "capture_render", None)
+        cap_r: "Callable[[dict], dict] | None" = getattr(
+            rig, "capture_render", None)
         if not callable(cap_r):
             raise ValueError(
                 f"camera {name!r}: the render= face is mujoco-only "
@@ -687,6 +692,8 @@ class CameraManager:
         rgb -> all zeros (uint8).
         """
         req = self._requests[key]
+        if self.num_envs is None:
+            raise RuntimeError("CameraManager._placeholder before bind_env")
         shape = (self.num_envs, *req.shape)
         if req.dtype == torch.uint8:
             return torch.zeros(shape, dtype=torch.uint8, device=self.device)

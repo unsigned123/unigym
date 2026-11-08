@@ -28,6 +28,8 @@ mujoco-warp 3.17; ``mjw.step`` does refresh them but is far more expensive).
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 __all__ = ["WarpRenderer"]
@@ -35,6 +37,10 @@ __all__ = ["WarpRenderer"]
 
 class WarpRenderer:
     """Per-rig batch renderer over one warp ``Model``/``Data`` (N worlds)."""
+
+    # The warp render context is an opaque mujoco_warp product (created in
+    # ``_rebuild``); ``None`` only before that first build.
+    _rc: Any
 
     def __init__(self, mjm, wm, wd, nworld: int, camera_names,
                  width: int, height: int, *, with_depth: bool = False):
@@ -112,8 +118,8 @@ class WarpRenderer:
         """``(N, H, W, 3)`` uint8 RGB for one active camera (owned copy)."""
         import warp as wp
 
-        out = wp.zeros((self._nworld, self._height, self._width),
-                       dtype=wp.vec3, device=self._rc.rgb_data.device)
+        out: Any = wp.zeros((self._nworld, self._height, self._width),
+                            dtype=wp.vec3, device=self._rc.rgb_data.device)
         self._mjw.get_rgb(self._rc, int(camera_index), out)
         arr = np.asarray(out.numpy(), dtype=np.float64)
         arr = np.rint(np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)

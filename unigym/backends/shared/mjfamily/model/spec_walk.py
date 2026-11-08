@@ -64,9 +64,25 @@ def _safe_name(kind, index, name):
     return f"<unnamed:{kind}:{index}>"
 
 
-def _vec(values):
+def _vec(values) -> tuple[float, ...]:
     """Return one numeric array as a tuple of floats."""
     return tuple(float(value) for value in values)
+
+
+def _vec2(values) -> tuple[float, float]:
+    """Return a numeric array as a fixed 2-vector (``range``/``texrepeat``)."""
+    return (float(values[0]), float(values[1]))
+
+
+def _vec3(values) -> tuple[float, float, float]:
+    """Return a numeric array as a fixed 3-vector (``pos``/``axis``/``size``)."""
+    return (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _vec4(values) -> tuple[float, float, float, float]:
+    """Return a numeric array as a fixed 4-vector (``quat``/``rgba``)."""
+    return (float(values[0]), float(values[1]),
+            float(values[2]), float(values[3]))
 
 
 def _finite(value):
@@ -192,8 +208,8 @@ def _body_row(body, info, world):
         parent=parent,
         path=path,
         qualname="/".join(path) or name,
-        pos=_vec(body.pos),
-        quat=_vec(body.quat),
+        pos=_vec3(body.pos),
+        quat=_vec4(body.quat),
         mocap=bool(body.mocap),
         explicitinertial=bool(body.explicitinertial),
     )
@@ -217,7 +233,7 @@ def _actuator_row(actuator, index):
     target = _ref_name(actuator.target)
     name = _safe_name("actuator", index, actuator.name)
     kind, owner = _actuator_kind(name, target, trntype)
-    ctrlrange = _vec(actuator.ctrlrange) if int(actuator.ctrllimited) else None
+    ctrlrange = _vec2(actuator.ctrlrange) if int(actuator.ctrllimited) else None
     return Actuator(
         name=name,
         target=target,
@@ -248,16 +264,16 @@ def _joint_row(joint, index, info, actuator_by_target):
     """Build one :class:`Joint` row from a spec joint."""
     body_name, body_path = _body_ref(joint.parent, info)
     name = _safe_name("joint", index, joint.name)
-    raw_range = _vec(joint.range)
+    raw_range = _vec2(joint.range)
     limited = int(joint.limited) != 0 and raw_range != (0.0, 0.0)
     return Joint(
         name=name,
         type=_JOINT_TYPES.get(int(joint.type), str(int(joint.type))),
         body=body_name,
-        axis=_vec(joint.axis),
+        axis=_vec3(joint.axis),
         range=raw_range if limited else None,
         limited=limited,
-        pos=_vec(joint.pos),
+        pos=_vec3(joint.pos),
         damping=float(joint.damping[0]),
         armature=float(joint.armature),
         actuator=actuator_by_target.get(joint.name),
@@ -275,9 +291,9 @@ def _geom_row(geom, index, info):
         name=name,
         type=_GEOM_TYPES.get(int(geom.type), str(int(geom.type))),
         body=body_name,
-        pos=_vec(geom.pos),
-        quat=_vec(geom.quat),
-        size=_vec(geom.size),
+        pos=_vec3(geom.pos),
+        quat=_vec4(geom.quat),
+        size=_vec3(geom.size),
         material=material or None,
         group=int(geom.group),
         contype=int(geom.contype),
@@ -298,9 +314,9 @@ def _site_row(site, index, info):
         name=name,
         type=_GEOM_TYPES.get(int(site.type), str(int(site.type))),
         body=body_name,
-        pos=_vec(site.pos),
-        quat=_vec(site.quat),
-        size=_vec(site.size),
+        pos=_vec3(site.pos),
+        quat=_vec4(site.quat),
+        size=_vec3(site.size),
         material=material or None,
         group=int(site.group),
         path=body_path + (name,),
@@ -316,8 +332,8 @@ def _camera_row(camera, index, info):
     return Camera(
         name=name,
         body=body_name,
-        pos=_vec(camera.pos),
-        quat=_vec(camera.quat),
+        pos=_vec3(camera.pos),
+        quat=_vec4(camera.quat),
         fovy=float(camera.fovy),
         mode=_CAM_MODES.get(int(camera.mode), str(int(camera.mode))),
         targetbody=target,
@@ -330,7 +346,7 @@ def _material_row(material, index):
     """Build one :class:`Material` row from a spec material."""
     return Material(
         name=_safe_name("material", index, material.name),
-        rgba=_vec(material.rgba),
+        rgba=_vec4(material.rgba),
         textures=tuple(str(item) for item in material.textures),
         reflectance=_finite(material.reflectance),
         roughness=_finite(material.roughness),
@@ -338,7 +354,7 @@ def _material_row(material, index):
         emission=_finite(material.emission),
         specular=_finite(material.specular),
         shininess=_finite(material.shininess),
-        texrepeat=_vec(material.texrepeat),
+        texrepeat=_vec2(material.texrepeat),
         texuniform=bool(material.texuniform),
     )
 
@@ -346,7 +362,7 @@ def _material_row(material, index):
 def _scalar(value):
     """Convert one option value into a plain scalar or tuple."""
     if isinstance(value, Enum):
-        return int(value)
+        return int(value.value)
     if isinstance(value, (bool, int, float, str)):
         return value
     if hasattr(value, "item"):

@@ -21,6 +21,7 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 import urllib.parse
+from typing import Any
 
 from unigym.core import registry as core_registry
 from unigym.core import run_ops
@@ -399,13 +400,17 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
 class ApiHandler(BaseHTTPRequestHandler):
     """8670 face: a thin JSON shield over :func:`api_get`/:func:`api_post`.
 
-    The DaemonService is reached via ``self.server.service`` (bridge.py's
+    The DaemonService is reached via ``self._service()`` (bridge.py's
     pattern).
     """
 
-    def log_message(self, fmt, *args):
+    def log_message(self, format: str, *args: object) -> None:
         """Quiet per-request access logging (daemon log owns the lines)."""
         pass
+
+    def _service(self) -> Any:
+        """The daemon service attached to the enclosing HTTPServer."""
+        return getattr(self.server, "service")
 
     def _json(self, code: int, doc: dict) -> None:
         raw = json.dumps(doc, default=str).encode()
@@ -440,9 +445,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         if parts.path.rstrip("/") == "/api/events":
             # (contract §1.22): the SSE stream face -- a response
             # with no end, so it bypasses the (code, doc) JSON shield
-            return events.serve_sse(self, self.server.service, qs)
+            return events.serve_sse(self, self._service(), qs)
         try:
-            return self._json(*api_get(self.server.service, parts.path, qs))
+            return self._json(*api_get(self._service(), parts.path, qs))
         except Exception as e:                 # noqa: BLE001
             return self._json(*_err(f"{type(e).__name__}: {e}", 500))
 
@@ -453,7 +458,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         """
         parts = urllib.parse.urlparse(self.path)
         try:
-            return self._json(*api_post(self.server.service, parts.path,
+            return self._json(*api_post(self._service(), parts.path,
                                         self._body()))
         except ValueError as e:                # oversized/malformed body
             return self._json(*_err(str(e)))

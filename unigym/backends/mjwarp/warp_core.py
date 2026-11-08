@@ -12,13 +12,30 @@ item indexing on 1-D arrays.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import warp as wp
 import mujoco_warp as mjw
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco optional runtime)
+    import mujoco
+
+    from unigym.backends.mjwarp.sizing import Capacity
+
 
 class WarpBatchMixin:
     """Warp <-> mirror plumbing + batched stepping for ``MjwarpEnv``."""
+
+    # Host ``MjwarpEnv`` attributes the mixin touches (declared so the mixin
+    # is analyzable on its own, without importing the env module).
+    _model: "mujoco.MjModel"
+    _datas: list["mujoco.MjData"]
+    _capacity: "Capacity"
+    num_envs: int
+    # warp ``Model`` / batched device ``Data`` / opaque warp arrays.
+    _wm: Any
+    _wdata: Any
 
     # ------------------------------------------------------------------ #
     # warp <-> mirror plumbing
@@ -44,7 +61,7 @@ class WarpBatchMixin:
         return wdata
 
     @staticmethod
-    def _source_array(dst, src) -> "object":
+    def _source_array(dst, src) -> np.ndarray:
         """NumPy staging array for a warp copy into ``dst``."""
         if dst.dtype == wp.bool:
             return np.ascontiguousarray(src, dtype=np.bool_)
@@ -133,7 +150,7 @@ class WarpBatchMixin:
                      "eq_type")
 
     @staticmethod
-    def _model_source_array(dst, src) -> "object":
+    def _model_source_array(dst, src) -> np.ndarray:
         """NumPy staging array for a model-field copy into ``dst``."""
         arr = np.asarray(src)
         if dst.dtype == wp.bool:

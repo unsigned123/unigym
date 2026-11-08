@@ -31,8 +31,13 @@ into the env's model-load seam).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from types import MappingProxyType
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco optional runtime)
+    import mujoco
 
 from unigym.core.asset_root import resolve_asset_path
 from unigym.core.region import RegionDefinition
@@ -78,8 +83,8 @@ class RegionAttachment:
 class ComposedScene:
     """A spec-delegating result with an immutable region metadata table."""
 
-    spec: object
-    regions: object
+    spec: "mujoco.MjSpec"
+    regions: Mapping[str, object]
     terrain: object = None
 
     def __getattr__(self, name):
@@ -655,7 +660,7 @@ def _add_verbatim_instance(spec, where, instance, entry, asset) -> None:
     frame.quat = [float(v) for v in instance.pose.quat_wxyz]
 
 
-def attach_composed(spec, composed, frame: str) -> object:
+def attach_composed(spec, composed, frame: str) -> Mapping[str, object]:
     """Join an ALREADY composed scene INTO a base spec at *frame*.
 
     The env model-load seam's core (v075 P1): the base spec is the

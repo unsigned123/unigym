@@ -22,11 +22,14 @@ through ``ResetPrimitives.probe_candidate``).
 """
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
 
 from unigym.initializers import InitializerBase, ResetPrimitives
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.robots.gr1_reset import Gr1ResetSpec
 
 
 def _probe_region_placement(env, rule, position, yaw, clearance):
@@ -192,7 +195,8 @@ def build_reset_primitives(env) -> ResetPrimitives:
 
 
 def wire_reset_face(env, params: dict, profile
-                    ) -> Tuple[Optional[InitializerBase], Optional[object]]:
+                    ) -> Tuple[Optional[InitializerBase],
+                               Optional["Gr1ResetSpec"]]:
     """Dispatch the declared reset face (the six-step contract).
 
     read the segment (``initializer`` or the legacy ``reset`` sugar in

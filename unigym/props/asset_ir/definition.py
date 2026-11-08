@@ -21,6 +21,22 @@ if TYPE_CHECKING:
     from unigym.model import ModelIR
 
 
+def _fvec2(values) -> tuple[float, float]:
+    """A numeric sequence as a fixed 2-vector (``range``/``texrepeat``)."""
+    return (float(values[0]), float(values[1]))
+
+
+def _fvec3(values) -> tuple[float, float, float]:
+    """A numeric sequence as a fixed 3-vector (``pos``/``axis``/``size``)."""
+    return (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _fvec4(values) -> tuple[float, float, float, float]:
+    """A numeric sequence as a fixed 4-vector (``quat``/``rgba``)."""
+    return (float(values[0]), float(values[1]),
+            float(values[2]), float(values[3]))
+
+
 def joint_names(asset: AssetDefinition) -> list[str]:
     """All generated joint names in tree order (resolve-time coverage face)."""
     return [joint.name for body in iter_asset_bodies(asset) for joint in body.joints]
@@ -194,8 +210,8 @@ class AssetDefinition:
                     parent=parent_name,
                     path=path,
                     qualname="/".join(path) or body.name,
-                    pos=tuple(float(v) for v in body.pos),
-                    quat=tuple(float(v) for v in body.quat),
+                    pos=_fvec3(body.pos),
+                    quat=_fvec4(body.quat),
                     explicitinertial=body.inertial is not None,
                 )
             )
@@ -205,14 +221,14 @@ class AssetDefinition:
                         name=joint.name,
                         type=joint.type,
                         body=body.name,
-                        axis=tuple(float(v) for v in joint.axis),
+                        axis=_fvec3(joint.axis),
                         range=(
-                            tuple(float(v) for v in joint.range)
+                            _fvec2(joint.range)
                             if joint.range is not None
                             else None
                         ),
                         limited=joint.range is not None,
-                        pos=tuple(float(v) for v in joint.pos),
+                        pos=_fvec3(joint.pos),
                         damping=float(joint.damping),
                         armature=float(joint.armature),
                         path=path + (joint.name,),
@@ -222,7 +238,7 @@ class AssetDefinition:
             for index, geom in enumerate(body.geoms):
                 geom_name = geom.name or f"{body.name}__geom_{index}"
                 size = (
-                    tuple(float(v) for v in geom.size)
+                    _fvec3(geom.size)
                     if geom.size
                     else (0.0, 0.0, 0.0)
                 )
@@ -232,8 +248,8 @@ class AssetDefinition:
                         name=geom_name,
                         type=geom.type,
                         body=body.name,
-                        pos=tuple(float(v) for v in geom.pos),
-                        quat=tuple(float(v) for v in geom.quat),
+                        pos=_fvec3(geom.pos),
+                        quat=_fvec4(geom.quat),
                         size=size,
                         material=geom.material.name if geom.material else None,
                         group=geom.group,
@@ -250,9 +266,10 @@ class AssetDefinition:
                 )
             for site in body.sites:
                 if site.size_vector is not None:
-                    size = tuple(float(v) for v in site.size_vector)
+                    size = _fvec3(site.size_vector)
                 elif site.size is not None:
-                    size = (float(site.size),) * 3
+                    size = (float(site.size), float(site.size),
+                            float(site.size))
                 else:
                     size = (0.0, 0.0, 0.0)
                 sites.append(
@@ -260,7 +277,7 @@ class AssetDefinition:
                         name=site.name,
                         type=site.type or "sphere",
                         body=body.name,
-                        pos=tuple(float(v) for v in site.pos),
+                        pos=_fvec3(site.pos),
                         size=size,
                         path=path + (site.name,),
                         qualname=f"{body.name}/{site.name}",
@@ -276,7 +293,7 @@ class AssetDefinition:
             ModelMaterial(
                 name=mat.name,
                 rgba=(
-                    tuple(float(v) for v in mat.rgba)
+                    _fvec4(mat.rgba)
                     if mat.rgba is not None
                     else (1.0, 1.0, 1.0, 1.0)
                 ),
@@ -285,7 +302,7 @@ class AssetDefinition:
                 specular=mat.specular,
                 shininess=mat.shininess,
                 texrepeat=(
-                    tuple(float(v) for v in mat.texrepeat)
+                    _fvec2(mat.texrepeat)
                     if mat.texrepeat is not None
                     else (1.0, 1.0)
                 ),

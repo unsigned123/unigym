@@ -43,7 +43,7 @@ Highlights inherited from the mujoco backend (unchanged semantics):
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import torch
@@ -58,25 +58,41 @@ from unigym._optional import MissingExtraError
 # import time); an explicit MUJOCO_GL in the environment always wins.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-try:  # mujoco is only importable in the host .venv_sim environment
+_MUJOCO_IMPORT_ERROR: BaseException | None = None
+_WARP_MISSING: str = "mujoco_warp"
+
+if TYPE_CHECKING:  # pragma: no cover - one canonical mixin for the analyzer
     import mujoco
-except ImportError as _e:  # pragma: no cover - gated by importorskip in tests
-    mujoco = None
-    _MUJOCO_IMPORT_ERROR = _e
-
-try:  # the GPU stack is an optional extra (pyproject `warp`)
-    import warp as wp
     import mujoco_warp as mjw
-except ModuleNotFoundError as _e:  # pragma: no cover - construction gate
-    wp = None
-    mjw = None
-    _WARP_MISSING = _e.name or "mujoco_warp"
+    import warp as wp
 
-if wp is not None and mjw is not None:
+    from unigym.backends.mjwarp.sizing import Capacity
     from unigym.backends.mjwarp.warp_core import WarpBatchMixin
-else:  # pragma: no cover - construction fails before the mixin is used
-    class WarpBatchMixin:
-        """Stand-in base when the warp stack is absent (lane gate raises)."""
+    from unigym.backends.shared.mjfamily.name_map import (
+        MjArticulationBinding,
+        MjControlBinding,
+    )
+    from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+else:
+    try:  # mujoco is only importable in the host .venv_sim environment
+        import mujoco
+    except ImportError as _e:  # pragma: no cover - gated by importorskip
+        mujoco = None
+        _MUJOCO_IMPORT_ERROR = _e
+
+    try:  # the GPU stack is an optional extra (pyproject `warp`)
+        import warp as wp
+        import mujoco_warp as mjw
+    except ModuleNotFoundError as _e:  # pragma: no cover - construction gate
+        wp = None
+        mjw = None
+        _WARP_MISSING = _e.name or "mujoco_warp"
+
+    if wp is not None and mjw is not None:
+        from unigym.backends.mjwarp.warp_core import WarpBatchMixin
+    else:  # pragma: no cover - construction fails before the mixin is used
+        class WarpBatchMixin:
+            """Stand-in base when the warp stack is absent (lane gate raises)."""
 
 from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.obs_catalog import (
@@ -299,6 +315,28 @@ class MjwarpEnv(WarpBatchMixin):
         ``object/<name>/{pos,quat,held}`` into ``extra`` every step, and
         served as obs (``<name>_pos_b``/``_vel_b``) on adapter request.
     """
+
+    # Backend-private runtime tables (built by ``init_tables``, not in
+    # ``__init__``: declared here so the step/obs faces see the contract).
+    articulations: dict[str, "ArticulationRuntime"]
+    controls: dict[str, "ControlRuntime"]
+    _articulation_order: list["ArticulationRuntime"]
+    _control_order: list["ControlRuntime"]
+    _mj_bindings: dict[str, "MjControlBinding"]
+    _mj_articulation_bindings: dict[str, "MjArticulationBinding"]
+    _act_of_joint: dict[str, int]
+    _prop_actuators: dict[str, dict[str, int]]
+    _prop_ctrl_mask: np.ndarray
+    _prop_targets: np.ndarray
+    _joint_limits: "tuple[torch.Tensor, torch.Tensor] | None"
+    _joint_limits_by_articulation: "dict[str, tuple[torch.Tensor, torch.Tensor]]"
+
+    # Live sim handles: always bound by ``__init__``; deliberately nulled at
+    # the explicit ``close()`` teardown boundary (see ``close``).
+    _model: "mujoco.MjModel"
+    _data: "mujoco.MjData"
+    _active_data: "mujoco.MjData"
+    _capacity: "Capacity"
 
     def __init__(self, robot_profile, adapter, num_envs: int = 1,
                  episode_length_s: float = 10.0,
@@ -1009,7 +1047,7 @@ class MjwarpEnv(WarpBatchMixin):
         try:
             mujoco.mj_fullM(self._model, d, Mfull)   # mujoco >= 3.2
         except TypeError:
-            mujoco.mj_fullM(self._model, Mfull, d.qM)  # legacy layout
+            getattr(mujoco, "mj_fullM")(self._model, Mfull, d.qM)  # legacy layout
         M = np.maximum(Mfull[dofs, dofs], 1e-9)
         ratio = dt * np.asarray(kd, dtype=np.float64) / M
         resolvable = dt * np.sqrt(np.maximum(
@@ -1084,6 +1122,9 @@ class MjwarpEnv(WarpBatchMixin):
         """
         import mujoco
 
+        if self.prop_backend is None:
+            raise RuntimeError(
+                "mjwarp backend: _prop_extents needs a wired prop backend")
         bid, _, _ = self.prop_backend.free_addresses(name)
         m = self._model
         half_xy, height = 0.0, 0.0
@@ -1112,6 +1153,10 @@ class MjwarpEnv(WarpBatchMixin):
         prev = self._active_data
         self._active_data = self._datas[e]
         try:
+            if self._initializer is None:
+                raise RuntimeError(
+                    "mjwarp backend: _apply_reset_protocol called without a "
+                    "declared initializer")
             placements = self._initializer.apply()
             declared = {s.name for s in self.prop_manager.specs} \
                 if self.prop_manager is not None else set()
@@ -1502,7 +1547,10 @@ class MjwarpEnv(WarpBatchMixin):
             self.camera_manager.close()
         if self.prop_backend is not None:
             self.prop_backend.close()
-        self._wdata = None
-        self._wm = None
-        self._data = None
-        self._model = None
+        # Teardown boundary: the live handles are deliberately invalidated.
+        # They are annotated non-Optional above so the live step/obs paths
+        # never carry a spurious Optional; writing through ``__dict__``
+        # records the released state without re-typing the class.
+        for handle in ("_wdata", "_wm", "_data", "_model", "_datas",
+                       "_active_data"):
+            self.__dict__[handle] = None

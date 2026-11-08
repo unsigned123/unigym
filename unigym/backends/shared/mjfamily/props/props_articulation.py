@@ -26,6 +26,11 @@ the ``object/<name>/joints/<jname>`` keys.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco imported lazily)
+    import mujoco
+
 import numpy as np
 import torch
 
@@ -74,7 +79,7 @@ def add_articulation_body(mjspec, handler) -> None:
                     f"articulation prop {spec.name!r}: asset joint "
                     f"{j.name!r} is a freejoint -- anchored semantics "
                     f"forbid free joints in the fragment")
-    asset_joints: dict[str, object] = {
+    asset_joints: dict[str, "mujoco.MjsJoint"] = {
         j.name: j for b in subtree for j in b.joints}
     missing = [n for n in declared if n not in asset_joints]
     if missing:
@@ -92,10 +97,11 @@ def add_articulation_body(mjspec, handler) -> None:
     # asset-declared limits pass through untouched)
     ranges: dict[str, list] = {}
     for jname, jobj in asset_joints.items():
-        jobj.damping = [declared[jname]["damping"], 0.0, 0.0]
+        jobj.damping = np.asarray(
+            [declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
         if declared[jname]["range"] is not None:
             lo, hi = declared[jname]["range"]
-            jobj.range = [lo, hi]
+            jobj.range = np.asarray([lo, hi], dtype=np.float64)
         ranges[jname] = [float(v) for v in np.asarray(jobj.range)]
     # the asset-side joint ranges, for the bind-time init re-check
     # (declaration-level validation only covers a declared range)
@@ -164,7 +170,7 @@ def add_free_articulation_body(mjspec, handler) -> None:
             f"{free[0].name!r} is the prop's live dof -- it is not a "
             f"declarable joint (declare the INTERNAL joints only)")
     subtree = list(_iter_bodies(root))
-    asset_joints: dict[str, object] = {
+    asset_joints: dict[str, "mujoco.MjsJoint"] = {
         j.name: j for b in subtree
         for j in b.joints
         if int(j.type) != int(mujoco.mjtJoint.mjJNT_FREE)}
@@ -190,10 +196,11 @@ def add_free_articulation_body(mjspec, handler) -> None:
     # asset's free damping is part of the dump-verbatim contract)
     ranges: dict[str, list] = {}
     for jname, jobj in asset_joints.items():
-        jobj.damping = [declared[jname]["damping"], 0.0, 0.0]
+        jobj.damping = np.asarray(
+            [declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
         if declared[jname]["range"] is not None:
             lo, hi = declared[jname]["range"]
-            jobj.range = [lo, hi]
+            jobj.range = np.asarray([lo, hi], dtype=np.float64)
         ranges[jname] = [float(v) for v in np.asarray(jobj.range)]
     handler._asset_ranges = ranges
     frame = mjspec.worldbody.add_frame(name=f"Prop_{spec.name}_attach")
@@ -309,9 +316,17 @@ class MujocoPropArticulation:
         mujoco.mj_forward(m, d)
 
     # ------------------------------------------------------------------ #
+    def _require_env(self):
+        """The bound env (fail-fast when the runtime is unbound/closed)."""
+        if self._env is None:
+            raise RuntimeError(
+                f"articulation prop {self.name!r} is not bound to an env")
+        return self._env
+
     def get_world_pose(self, e: int = 0):
         """``(pos (1,3) f32, quat (1,4) wxyz f32)`` anchor pose (torch)."""
-        d = self._env.mj_datas[e]
+        env = self._require_env()
+        d = env.mj_datas[e]
         pos = np.asarray(d.xpos[self.root_bid], dtype=np.float32)
         quat = np.asarray(d.xquat[self.root_bid], dtype=np.float32)
         return (torch.from_numpy(pos).unsqueeze(0),
@@ -319,7 +334,8 @@ class MujocoPropArticulation:
 
     def get_joint_states(self, e: int = 0) -> dict[str, torch.Tensor]:
         """``{jname: (1,1) f32}`` joint positions (record/state face)."""
-        d = self._env.mj_datas[e]
+        env = self._require_env()
+        d = env.mj_datas[e]
         return {n: torch.tensor([[float(d.qpos[j["qadr"]])]],
                                 dtype=torch.float32)
                 for n, j in self.joints.items()}

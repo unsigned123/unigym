@@ -54,9 +54,13 @@ on the humanoid_1 host at ~0.5 ms/frame @224², see the M2b record).
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco imported lazily)
+    import mujoco
 
 from unigym.cameras import geomflags
 from unigym.cameras.appearance import appearance_plan
@@ -152,6 +156,33 @@ class _MjRigBase:
         # refreshed per render via mj_copyData -- see _render_copy())
         self._render_buf = None
 
+    # Lazily-bound MJ handles (None before ``bind_env`` / set to None by
+    # ``close``); every live path resolves them through the ``_require_*``
+    # helpers so the Optional never leaks into the render code.
+    _env: Any
+    _renderer: "mujoco.Renderer | None"
+    _cam_id: int | None
+    _plain_opt: "mujoco.MjvOption | None"
+    _render_buf: "mujoco.MjData | None"
+
+    def _require_env(self) -> Any:
+        if self._env is None:
+            raise RuntimeError(f"mujoco camera {self.name!r}: not bound "
+                               "(bind_env)")
+        return self._env
+
+    def _require_renderer(self) -> "mujoco.Renderer":
+        if self._renderer is None:
+            raise RuntimeError(f"mujoco camera {self.name!r}: no renderer "
+                               "(bind_env)")
+        return self._renderer
+
+    def _require_cam_id(self) -> int:
+        if self._cam_id is None:
+            raise RuntimeError(f"mujoco camera {self.name!r}: no camera id "
+                               "(bind_env)")
+        return self._cam_id
+
     # -- lifecycle -------------------------------------------------------- #
     def setup_scene(self, mjspec) -> None:
         """Inject the ``<camera>`` element into the MjSpec (pre-compile)."""
@@ -195,7 +226,7 @@ class _MjRigBase:
         group (:meth:`_plain_option`), or plain renders would silently
         drop every visual-only geom (obs/recorder pixels included).
         """
-        m = self._env.mj_model
+        m = self._require_env().mj_model
         m.geom_group[:] = geomflags.reclassify_geom_groups(
             m.geom_contype, m.geom_conaffinity, m.geom_group,
             self.render_groups)
@@ -309,6 +340,9 @@ class _MjRigBase:
                              self._mount_pos + self._live_offset,
                              np.asarray(q, dtype=np.float64))
         row = self.state_table.get(self.name)
+        if row is None:
+            raise RuntimeError(
+                f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
@@ -334,10 +368,10 @@ class _MjRigBase:
         """
         import mujoco  # lazy
 
+        env = self._require_env()
         if self._render_buf is None:
-            self._render_buf = mujoco.MjData(self._env.mj_model)
-        mujoco.mj_copyData(self._render_buf, self._env.mj_model,
-                           self._env.mj_data)
+            self._render_buf = mujoco.MjData(env.mj_model)
+        mujoco.mj_copyData(self._render_buf, env.mj_model, env.mj_data)
         return self._render_buf
 
     def _update_scene(self) -> None:
@@ -357,26 +391,28 @@ class _MjRigBase:
         import mujoco  # lazy
 
         d2 = self._render_copy()
-        mujoco.mj_forward(self._env.mj_model, d2)
-        self._renderer.update_scene(
-            d2, camera=self._cam_id,
+        mujoco.mj_forward(self._require_env().mj_model, d2)
+        self._require_renderer().update_scene(
+            d2, camera=self._require_cam_id(),
             scene_option=(self._plain_opt
                           if self._plain_opt is not None
                           else self._build_plain_option()))
 
     def _read_rgb(self) -> torch.Tensor:
         """(1, H, W, 3) uint8 — OWNED copy (aliasing rule)."""
-        self._renderer.disable_depth_rendering()
+        renderer = self._require_renderer()
+        renderer.disable_depth_rendering()
         self._update_scene()
-        arr = np.asarray(self._renderer.render(), dtype=np.uint8).copy()
+        arr = np.asarray(renderer.render(), dtype=np.uint8).copy()
         return torch.from_numpy(arr).unsqueeze(0)
 
     def _read_depth(self) -> torch.Tensor:
         """(1, 1, H, W) float32 metric z-depth; >far_clip masked to inf."""
-        self._renderer.enable_depth_rendering()
+        renderer = self._require_renderer()
+        renderer.enable_depth_rendering()
         self._update_scene()
-        arr = np.asarray(self._renderer.render(), dtype=np.float32).copy()
-        self._renderer.disable_depth_rendering()
+        arr = np.asarray(renderer.render(), dtype=np.float32).copy()
+        renderer.disable_depth_rendering()
         arr = arr.reshape(int(self.spec.height), int(self.spec.width))
         arr[arr > float(self.spec.far_clip)] = np.inf  # "nothing observed"
         return torch.from_numpy(np.ascontiguousarray(arr)).reshape(1, 1,
@@ -415,7 +451,7 @@ class _MjRigBase:
         """
         import mujoco  # lazy
 
-        m = self._env.mj_model
+        m = self._require_env().mj_model
         n = int(d.ncon)
         pos = np.zeros((n, 3))
         normal = np.zeros((n, 3))
@@ -492,7 +528,7 @@ class _MjRigBase:
         import mujoco  # lazy
 
         cam = mujoco.MjvCamera()
-        mujoco.mjv_defaultFreeCamera(self._env.mj_model, cam)
+        mujoco.mjv_defaultFreeCamera(self._require_env().mj_model, cam)
         cam.lookat[:] = lookat
         cam.distance = float(dist)
         cam.azimuth = float(az)
@@ -512,7 +548,7 @@ class _MjRigBase:
         obj_geom = int(mujoco.mjtObj.mjOBJ_GEOM)
         rgba_tab, mat_tab = plan["rgba"], plan["matid"]
         painted = plan["painted"]
-        scn = self._renderer.scene
+        scn = self._require_renderer().scene
         for i in range(scn.ngeom):
             g = scn.geoms[i]
             if g.objtype != obj_geom or g.objid < 0:
@@ -535,7 +571,7 @@ class _MjRigBase:
         """
         import mujoco  # lazy
 
-        scn = self._renderer.scene
+        scn = self._require_renderer().scene
         start = scn.ngeom
         n = 0
         for k, dsc in enumerate(descs):
@@ -574,19 +610,20 @@ class _MjRigBase:
 
         ONE mjr_render (GL depth occludes natively; probe5).
         """
+        renderer = self._require_renderer()
         if cam is None:
-            self._renderer.update_scene(data, camera=self._cam_id,
-                                        scene_option=option)
+            renderer.update_scene(data, camera=self._require_cam_id(),
+                                  scene_option=option)
         else:
-            self._renderer.update_scene(data, camera=cam,
-                                        scene_option=option)
-        scn = self._renderer.scene
+            renderer.update_scene(data, camera=cam,
+                                  scene_option=option)
+        scn = renderer.scene
         self._apply_scene_flags(scn, spec)
         if plan is not None:
             self._paint_scene(plan)
         if descs:
             self._inject_decor(descs)
-        return np.asarray(self._renderer.render()).copy()
+        return np.asarray(renderer.render()).copy()
 
     @staticmethod
     def _caption(img, title, sub=None) -> np.ndarray:
@@ -629,7 +666,8 @@ class _MjRigBase:
         """
         import mujoco  # lazy
 
-        m = self._env.mj_model
+        m = self._require_env().mj_model
+        renderer = self._require_renderer()
         d = self._render_copy()
         mujoco.mj_forward(m, d)
         spec = dict(spec)
@@ -669,6 +707,7 @@ class _MjRigBase:
             camc.update(spherical_camera_keys(camc.pop("pos"),
                                               camc.pop("lookat")))
         out: dict = {}
+        az0 = float(camc.get("az", 0.0))
         label = spec.get("_label", "spec")
         out_cfg = spec["output"]
 
@@ -685,6 +724,9 @@ class _MjRigBase:
                 img = self._caption(img, frame_title(""))
             out["rgb"] = img.astype(np.uint8)
         else:
+            if ctx is None:
+                raise RuntimeError("camera: decor context missing for the "
+                                   "requested capture")
             lookat = self._resolve_lookat(camc, ctx)
             frames: list[tuple[str, np.ndarray]] = []
 
@@ -701,7 +743,6 @@ class _MjRigBase:
             else:
                 orbit = camc.get("orbit", dict(DEFAULT_ORBIT))
                 n, step = int(orbit["n"]), float(orbit["step_deg"])
-                az0 = camc.get("az", 0.0)
                 orbit_frames = []
                 for i in range(n):
                     az = az0 + i * step
@@ -746,11 +787,11 @@ class _MjRigBase:
         # seg buffer (primary frame only, model-only scene: decor is
         # segid=-1 -> honest background) + legend
         if "seg" in spec["buffers"]:
-            self._renderer.enable_segmentation_rendering()
-            self._renderer.update_scene(d, camera=self._cam_id,
-                                        scene_option=option)
-            seg_raw = np.asarray(self._renderer.render()).copy()
-            self._renderer.disable_segmentation_rendering()
+            renderer.enable_segmentation_rendering()
+            renderer.update_scene(d, camera=self._require_cam_id(),
+                                  scene_option=option)
+            seg_raw = np.asarray(renderer.render()).copy()
+            renderer.disable_segmentation_rendering()
             seg = np.asarray(seg_raw, dtype=np.int64)
             miss = seg[..., 0] < 0
             ids = np.where(miss, -1, seg[..., 0])
@@ -847,6 +888,9 @@ class MjWorldRig(_MjRigBase):
                              np.asarray(pos, dtype=np.float64),
                              np.asarray(quat_wxyz, dtype=np.float64))
         row = self.state_table.get(self.name)
+        if row is None:
+            raise RuntimeError(
+                f"camera {self.name!r}: pose table row missing after write")
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
         return saved
@@ -883,6 +927,9 @@ class MjWorldRig(_MjRigBase):
                              np.asarray(pos, dtype=np.float64),
                              np.asarray(quat_wxyz, dtype=np.float64))
         row = self.state_table.get(self.name)
+        if row is None:
+            raise RuntimeError(
+                f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
@@ -960,6 +1007,9 @@ class MjChaseRig(_MjRigBase):
                              np.asarray(pos, dtype=np.float64),
                              np.asarray(q_isaac, dtype=np.float64))
         row = self.state_table.get(self.name)
+        if row is None:
+            raise RuntimeError(
+                f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)

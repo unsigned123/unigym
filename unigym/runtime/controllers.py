@@ -20,9 +20,11 @@ This module is runtime data plus duck-typed resolution.  It names no engine.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping as AbcMapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
+import numpy as np
 import torch
 
 from unigym.runtime.controls import (
@@ -31,6 +33,9 @@ from unigym.runtime.controls import (
     ControlError,
     target_for_drive,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.env.obs_catalog import ObsCatalog
 
 __all__ = [
     "ArticulationRuntime",
@@ -127,6 +132,21 @@ class ArticulationRuntime:
     base_body: str = ""
     addresses: dict = field(default_factory=dict)
     recipe: Any = None
+    # Backend-populated MuJoCo-family runtime state (compiled address tables +
+    # per-articulation obs catalog).  Declared here so the step/obs faces can
+    # read the contract without scattered ``setattr`` unknown-attribute errors;
+    # the neutral backend (isaaclab) leaves them at their defaults.
+    robot_joint_names: tuple[str, ...] = ()
+    jadr_pol: np.ndarray | None = None
+    jdr_pol: np.ndarray | None = None
+    jadr_art: np.ndarray | None = None
+    jdr_art: np.ndarray | None = None
+    q0_mj: np.ndarray | None = None
+    free_qpos_adr: int | None = None
+    free_dof_adr: int | None = None
+    foot_body_ids: list[int] = field(default_factory=list)
+    foot_geom_sets: list[set[int]] = field(default_factory=list)
+    catalog: "ObsCatalog | None" = None
 
     def __post_init__(self):
         if not self.name:
@@ -244,6 +264,9 @@ class ControlRuntime:
     @property
     def strategy_name(self) -> str:
         """The backend strategy key (== the drive)."""
+        if self.strategy is None:
+            raise ControlError(
+                f"control runtime {self.name!r} has no resolved strategy")
         return self.strategy.strategy
 
 
@@ -403,7 +426,10 @@ class ResolvedControlPlan:
         return [control.to_dict() for control in self.controls]
 
 
-def build_control_plan(controls, runtimes) -> ResolvedControlPlan:
+def build_control_plan(
+        controls: "Sequence | None" = None,
+        runtimes: "Sequence[ControlRuntime] | None" = None,
+) -> ResolvedControlPlan:
     """Freeze the resolved-control result into a read-only plan.
 
     The joints/drive/target/q0/provenance are read from the already resolved
@@ -443,8 +469,11 @@ def _actuated_joints(art, recipe) -> tuple[str, ...]:
     return tuple(str(joint.name) for joint in (getattr(art, "joints", ()) or ()))
 
 
-def validate_resolved_coverage(articulations, recipes, controls,
-                               runtimes) -> None:
+def validate_resolved_coverage(
+        articulations: "Iterable[Any] | None",
+        recipes: "AbcMapping[str, Any] | None",
+        controls: "Iterable[Any] | None",
+        runtimes: "Iterable[ControlRuntime] | None") -> None:
     """Validate the resolved control coverage of every articulation (v105 §4).
 
     For each articulation with declared controls:

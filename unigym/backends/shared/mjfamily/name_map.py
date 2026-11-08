@@ -13,7 +13,10 @@ with the short ``<articulation>_`` prefix.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco optional at runtime)
+    import mujoco
 
 __all__ = [
     "MjArticulationBinding",
@@ -138,7 +141,7 @@ class MjNameMap:
 class MjComposition:
     """One composed ``MjSpec`` plus its backend-private name map."""
 
-    spec: object
+    spec: "mujoco.MjSpec"
     name_map: MjNameMap
     applied_prefixes: Mapping[str, str | None] = field(default_factory=dict)
 

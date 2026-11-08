@@ -47,7 +47,7 @@ import io
 import threading
 import time
 import urllib.parse
-from http.server import BaseHTTPRequestHandler
+from typing import Any, Protocol
 
 from unigym.console import parse_console, ConsoleError
 from unigym.core import registry as core_registry
@@ -74,6 +74,30 @@ FIRST_FRAME_GRACE_S = 5.0
 # of the measured unbounded 17s-at-30s lag.  ~2 chase frames.
 MJPEG_BACKLOG_BYTES = 50_000
 JPEG_QUALITY = 90            # default tier == the original wire format
+
+
+class _JsonHandler(Protocol):
+    """The HTTP handler shape the media gateway calls into.
+
+    The daemon's :class:`~unigym.daemon.portal.PortalHandler` supplies these;
+    typing the gateway against the protocol (instead of the concrete handler)
+    keeps the media face decoupled and lets ``_send`` / ``_json_send`` carry
+    their real contracts.
+    """
+
+    headers: Any
+    wfile: Any
+
+    def send_response(self, code: int, message: str | None = ...) -> None: ...
+
+    def send_header(self, keyword: str, value: str) -> None: ...
+
+    def end_headers(self) -> None: ...
+
+    def _send(self, code: int, raw: bytes, ctype: str,
+              cache: str = ...) -> None: ...
+
+    def _json_send(self, code: int, obj: dict) -> None: ...
 
 
 class TierError(ValueError):
@@ -345,7 +369,7 @@ class MediaGateway:
             rd.close()
 
     # -- MJPEG (multipart; disconnect = write failure -> cleanup) -------------
-    def mjpeg(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def mjpeg(self, handler: _JsonHandler, run_id: str,
               camera: str, query: str = "") -> None:
         """Stream GET /run/<id>/cam/<name>.mjpg (multipart MJPEG).
 
@@ -368,7 +392,7 @@ class MediaGateway:
             # a concurrent stream (the viewer refresh race)
             self.release(run_id)
 
-    def _mjpeg_stream(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def _mjpeg_stream(self, handler: _JsonHandler, run_id: str,
                       camera: str, rd: RunFrames, query: str = "") -> None:
         publishing = rd.client.camera_name
         if not publishing or camera != publishing:
@@ -442,7 +466,7 @@ class MediaGateway:
             time.sleep(0.05)
 
     # -- single frames -------------------------------------------------------
-    def frame_jpeg(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def frame_jpeg(self, handler: _JsonHandler, run_id: str,
                    camera: str) -> None:
         """Serve one JPEG from any instantiated camera.
 
@@ -460,7 +484,7 @@ class MediaGateway:
         finally:
             self.release(run_id)
 
-    def _frame_jpeg(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def _frame_jpeg(self, handler: _JsonHandler, run_id: str,
                     camera: str, rd: RunFrames) -> None:
         cams = _registry_cameras(run_id)
         if camera not in cams:
@@ -507,7 +531,7 @@ class MediaGateway:
         return None
 
     # -- latest frame (pure SHM read, zero command slot) ---------------
-    def latest_jpeg(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def latest_jpeg(self, handler: _JsonHandler, run_id: str,
                     camera: str, query: str = "") -> None:
         """Serve GET /run/<id>/cam/<name>/latest.jpg.
 
@@ -562,7 +586,7 @@ class MediaGateway:
             self.release(run_id)
 
     # -- console / control (req-ack via core.session) --------------------------
-    def console(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def console(self, handler: _JsonHandler, run_id: str,
                 obj: dict, timeout: float) -> None:
         """The console faces: POST /run/<id>/console plus inspect / save_npz.
 
@@ -589,7 +613,7 @@ class MediaGateway:
         ok = status == _bridge.ACK_OK
         handler._json_send(200, {"ok": ok, "type": cmd, "result": result})
 
-    def control(self, handler: BaseHTTPRequestHandler, run_id: str,
+    def control(self, handler: _JsonHandler, run_id: str,
                 body, timeout: float) -> None:
         """POST /run/<id>/control.
 
@@ -689,7 +713,8 @@ def run_info_document(run_id: str, gateway: "MediaGateway | None" = None) \
         try:
             st = rd.status()
         finally:
-            gateway.release(run_id)
+            if gateway is not None:
+                gateway.release(run_id)
     else:
         try:
             rd = RunFrames(run_id)         # one-shot attach (not cached)
@@ -746,7 +771,7 @@ def _split_run_path(path: str) -> tuple[str, str] | None:
     return None
 
 
-def route_run_get(handler: BaseHTTPRequestHandler, path: str, query: str,
+def route_run_get(handler: _JsonHandler, path: str, query: str,
                   svc) -> bool:
     """Serve GET /run/<id>/... ; returns False when not a run route."""
     parsed = _split_run_path(path)
@@ -793,7 +818,7 @@ def route_run_get(handler: BaseHTTPRequestHandler, path: str, query: str,
     return True
 
 
-def route_run_post(handler: BaseHTTPRequestHandler, path: str, query: str,
+def route_run_post(handler: _JsonHandler, path: str, query: str,
                    body, svc) -> bool:
     """Serve POST /run/<id>/... (tokened faces); False when not a run."""
     parsed = _split_run_path(path)
@@ -832,25 +857,30 @@ def route_run_post(handler: BaseHTTPRequestHandler, path: str, query: str,
         # (design §3).  Any import failure -- missing aiortc OR a
         # deliberately removed/blocked webrtc module -- degrades to 501.
         if not isinstance(body, dict) or not body.get("sdp"):
-            return handler._json_send(400, {
+            handler._json_send(400, {
                 "ok": False, "error": "body needs {'sdp': <offer sdp>}",
                 "hint": "create an RTCPeerConnection offer and POST its "
                         "JSON {sdp, type:'offer'}"})
+            return True
         try:
             answer = svc.webrtc_gateway().offer(run_id, str(body["sdp"]))
         except ImportError as e:
-            return handler._json_send(501, {
+            handler._json_send(501, {
                 "ok": False,
                 "error": f"WebRTC unavailable (aiortc/webrtc import "
                          f"failed: {e})",
                 "hint": "install aiortc in the daemon venv, or use the "
                         "MJPEG stream: /run/<id>/cam/<name>.mjpg"})
+            return True
         except KeyError:
-            return handler._json_send(404, {
+            handler._json_send(404, {
                 "ok": False, "error": f"no such run: {run_id}",
                 "hint": "GET / (portal) lists live runs"})
+            return True
         except Exception as e:                 # noqa: BLE001
-            return handler._json_send(500, {"ok": False, "error": str(e)})
-        return handler._json_send(200, {"sdp": answer, "type": "answer"})
+            handler._json_send(500, {"ok": False, "error": str(e)})
+            return True
+        handler._json_send(200, {"sdp": answer, "type": "answer"})
+        return True
     gw.console(handler, run_id, obj, timeout)
     return True

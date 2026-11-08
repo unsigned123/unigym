@@ -33,8 +33,13 @@ Semantics (measured, probe ``scripts/probe_contact_sign.py``):
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco is imported lazily)
+    import mujoco
 
 from unigym.contacts.base import ContactGroupSpec
 from unigym.contacts.discovery import (contact_candidate_error,
@@ -122,10 +127,12 @@ class MujocoContactBackend:
 
     def __init__(self, specs: list[ContactGroupSpec]):
         self.specs = list(specs)
-        self._model = None
-        self._data = None
-        self._env = None
         self._resolved: dict[str, dict] = {}
+
+    # typed internal handles: bound by ``bind_env`` before any read.
+    _model: "mujoco.MjModel"
+    _data: "mujoco.MjData"
+    _env: Any
 
     # ---------------------------------------------------------------- #
     # lifecycle
@@ -158,7 +165,7 @@ class MujocoContactBackend:
             entry: dict = {"sensor_ids": sensor_ids}
             if spec.mode == "pairwise":
                 filter_ids: list[int] = []
-                for j, entry_regex in enumerate(spec.filter_bodies):
+                for j, entry_regex in enumerate(spec.filter_bodies or ()):
                     ids = _resolve_bodies(
                         m, body_names, [entry_regex],
                         spec.name, f"filter_bodies[{j}]", require_geoms=True,
@@ -342,11 +349,14 @@ class MujocoContactBackend:
 
     def close(self) -> None:
         """Release the model/data handles (ContactBackend lifecycle)."""
-        self._model = self._data = None
+        # Teardown boundary: deliberately invalidate the live handles (the
+        # class annotations stay non-Optional for the read paths).
+        for handle in ("_model", "_data", "_env"):
+            self.__dict__[handle] = None
         self._resolved.clear()
 
 
-def _resolve_bodies(m, body_names: list[str], patterns: list[str],
+def _resolve_bodies(m, body_names: list[str], patterns: Sequence[str],
                     group: str, arg: str, require_geoms: bool,
                     inventory_fn=None) -> list[int]:
     """Body ids (model order) fullmatching ANY pattern; fail-fast empty.

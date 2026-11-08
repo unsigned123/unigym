@@ -60,7 +60,9 @@ def _field(entry, key, default=None):
     return getattr(entry, key, default)
 
 
-def articulation_assets(articulations: Sequence | None) -> tuple:
+def articulation_assets(
+        articulations: Sequence | None,
+) -> tuple[tuple[str, str], ...]:
     """Ordered ``(name, mjcf_path)`` for articulations declaring ``model.mjcf``.
 
     Articulations without a declared MJCF asset (the A2 declaration-only
@@ -238,7 +240,9 @@ def _build_name_map(mujoco, base, assets, *, prefixes, articulations):
                      actuators=actuators)
 
 
-def _compose_attach(mujoco, base: str, assets: tuple, *, auto_prefix: bool,
+def _compose_attach(mujoco, base: str,
+                    assets: Sequence[tuple[str, str]],
+                    *, auto_prefix: bool,
                     articulations=None):
     """Attach each asset into the base spec (short ``<name>_`` when enabled)."""
     spec = mujoco.MjSpec.from_file(base)

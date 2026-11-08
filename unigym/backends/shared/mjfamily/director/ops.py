@@ -16,6 +16,16 @@ from unigym.director.ops import (HAND_ALIAS_CANDIDATES, _OpsBase,
                                  WeldHost, strip_prop_prefix)
 
 
+def _weld_bid(host: WeldHost) -> int:
+    """Read the MJ body id out of an opaque weld host handle."""
+    bid = host.payload
+    if not isinstance(bid, int):
+        raise TypeError(
+            "mujoco director: weld host payload must be a body id, got "
+            f"{type(bid).__name__}")
+    return bid
+
+
 class MujocoDirectorOps(_OpsBase):
     """Weld-slots + qpos/ctrl addressing + mocap gripper mechanics.
 
@@ -104,7 +114,11 @@ class MujocoDirectorOps(_OpsBase):
                 raise _fail("no gripper on this run (declare "
                             "director.gripper)", "host: gripper needs the "
                             "director.gripper yaml section")
-            return WeldHost(self.gripper.bid)
+            grip_bid = getattr(self.gripper, "bid", None)
+            if not isinstance(grip_bid, int):
+                raise _fail("mujoco gripper exposes no body id",
+                            "the mujoco gripper backend must publish `bid`")
+            return WeldHost(grip_bid)
         if host == "hand":
             for cand in HAND_ALIAS_CANDIDATES:
                 for backend in self._backend_bodies(cand):
@@ -241,7 +255,7 @@ class MujocoDirectorOps(_OpsBase):
         """
         import mujoco
 
-        host_bid = host.payload
+        host_bid = _weld_bid(host)
         m, d = self.env.mj_model, self.env.mj_data
         eq = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY,
                                f"director_weld_{obj}")
@@ -279,7 +293,7 @@ class MujocoDirectorOps(_OpsBase):
 
     def host_pose(self, host: str) -> "tuple[np.ndarray, np.ndarray]":
         """Read a host's world pose (m / wxyz quat; numpy copies)."""
-        bid = self.resolve_weld_host(host).payload
+        bid = _weld_bid(self.resolve_weld_host(host))
         d = self.env.mj_data
         return (np.array(d.xpos[bid]), np.array(d.xquat[bid]))
 

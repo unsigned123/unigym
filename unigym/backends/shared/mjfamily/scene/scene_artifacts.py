@@ -113,7 +113,7 @@ def _fill_scene_content(scene, spec):
     return merged, provider.last_record
 
 
-def _views_for_scene(scene, pipeline: str, slots):
+def _views_for_scene(scene, pipeline: str | None, slots):
     """Build the draw/resolution/payload views for one neutral scene."""
     params = dict(slots or {})
     draw = Draw(
@@ -222,7 +222,7 @@ def write_fill_record(out_dir, record) -> str:
     return str(record.write(Path(out_dir) / "fill.json"))
 
 
-def write_scene_artifacts(out_dir, scene, pipeline: str, model, slots,
+def write_scene_artifacts(out_dir, scene, pipeline: str | None, model, slots,
                           composed_xml=None, fill_record=None) -> dict:
     """Write the six build artifacts (plus ``fill.json`` when content ran).
 

@@ -20,6 +20,9 @@ from .spec_walk import (
     _optional_int,
     _safe_name,
     _vec,
+    _vec2,
+    _vec3,
+    _vec4,
 )
 from unigym.model.ir import (
     Actuator,
@@ -88,15 +91,15 @@ def _body_row(model, index, paths, explicit_inertial):
         parent=parent,
         path=path_value,
         qualname="/".join(path_value) or name,
-        pos=_vec(model.body_pos[index]),
-        quat=_vec(model.body_quat[index]),
+        pos=_vec3(model.body_pos[index]),
+        quat=_vec4(model.body_quat[index]),
         mocap=int(model.body_mocapid[index]) >= 0,
         explicitinertial=bool(explicit_inertial[index]),
         body_id=index,
         mass=float(model.body_mass[index]),
-        inertia=_vec(model.body_inertia[index]),
-        ipos=_vec(model.body_ipos[index]),
-        iquat=_vec(model.body_iquat[index]),
+        inertia=_vec3(model.body_inertia[index]),
+        ipos=_vec3(model.body_ipos[index]),
+        iquat=_vec4(model.body_iquat[index]),
     )
 
 
@@ -145,7 +148,7 @@ def _actuator_row(model, index):
     name = _safe_name("actuator", index, model.actuator(index).name)
     kind, owner = _actuator_kind(name, target, trntype)
     ctrlrange = (
-        _vec(model.actuator_ctrlrange[index])
+        _vec2(model.actuator_ctrlrange[index])
         if int(model.actuator_ctrllimited[index]) else None
     )
     return Actuator(
@@ -167,7 +170,7 @@ def _joint_row(model, index, actuator_by_joint):
     """Build one compiled :class:`Joint` row."""
     name = _safe_name("joint", index, model.joint(index).name)
     body = _body_name(model, int(model.jnt_bodyid[index]))
-    raw_range = _vec(model.jnt_range[index])
+    raw_range = _vec2(model.jnt_range[index])
     limited = bool(int(model.jnt_limited[index])) and raw_range != (0.0, 0.0)
     dof = int(model.jnt_dofadr[index])
     return Joint(
@@ -175,10 +178,10 @@ def _joint_row(model, index, actuator_by_joint):
         type=_JOINT_TYPES.get(
             int(model.jnt_type[index]), str(int(model.jnt_type[index]))),
         body=body,
-        axis=_vec(model.jnt_axis[index]),
+        axis=_vec3(model.jnt_axis[index]),
         range=raw_range if limited else None,
         limited=limited,
-        pos=_vec(model.jnt_pos[index]),
+        pos=_vec3(model.jnt_pos[index]),
         damping=float(model.dof_damping[dof]),
         armature=float(model.dof_armature[dof]),
         actuator=actuator_by_joint.get(index),
@@ -196,9 +199,9 @@ def _geom_row(model, index):
         type=_GEOM_TYPES.get(
             int(model.geom_type[index]), str(int(model.geom_type[index]))),
         body=_body_name(model, int(model.geom_bodyid[index])),
-        pos=_vec(model.geom_pos[index]),
-        quat=_vec(model.geom_quat[index]),
-        size=_vec(model.geom_size[index]),
+        pos=_vec3(model.geom_pos[index]),
+        quat=_vec4(model.geom_quat[index]),
+        size=_vec3(model.geom_size[index]),
         material=_material_name(model, int(model.geom_matid[index])),
         group=int(model.geom_group[index]),
         contype=int(model.geom_contype[index]),
@@ -216,9 +219,9 @@ def _site_row(model, index):
         type=_GEOM_TYPES.get(
             int(model.site_type[index]), str(int(model.site_type[index]))),
         body=_body_name(model, int(model.site_bodyid[index])),
-        pos=_vec(model.site_pos[index]),
-        quat=_vec(model.site_quat[index]),
-        size=_vec(model.site_size[index]),
+        pos=_vec3(model.site_pos[index]),
+        quat=_vec4(model.site_quat[index]),
+        size=_vec3(model.site_size[index]),
         material=_material_name(model, int(model.site_matid[index])),
         group=int(model.site_group[index]),
         site_id=index,
@@ -233,8 +236,8 @@ def _camera_row(model, index):
     return Camera(
         name=name,
         body=_body_name(model, int(model.cam_bodyid[index])),
-        pos=_vec(model.cam_pos[index]),
-        quat=_vec(model.cam_quat[index]),
+        pos=_vec3(model.cam_pos[index]),
+        quat=_vec4(model.cam_quat[index]),
         fovy=float(model.cam_fovy[index]),
         mode=_CAM_MODES.get(
             int(model.cam_mode[index]), str(int(model.cam_mode[index]))),
@@ -260,7 +263,7 @@ def _material_row(model, index):
     """Build one compiled :class:`Material` row."""
     return Material(
         name=_safe_name("material", index, model.material(index).name),
-        rgba=_vec(model.mat_rgba[index]),
+        rgba=_vec4(model.mat_rgba[index]),
         textures=_material_textures(model, index),
         reflectance=_finite(model.mat_reflectance[index]),
         roughness=_finite(model.mat_roughness[index]),
@@ -268,7 +271,7 @@ def _material_row(model, index):
         emission=_finite(model.mat_emission[index]),
         specular=_finite(model.mat_specular[index]),
         shininess=_finite(model.mat_shininess[index]),
-        texrepeat=_vec(model.mat_texrepeat[index]),
+        texrepeat=_vec2(model.mat_texrepeat[index]),
         texuniform=bool(model.mat_texuniform[index]),
     )
 

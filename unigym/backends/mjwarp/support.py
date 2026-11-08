@@ -83,7 +83,7 @@ def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
 
     (DELEGATED to unigym.core.quat.to_rotmat, M1 convergence)
     """
-    return quat.to_rotmat(quat_wxyz)
+    return np.asarray(quat.to_rotmat(quat_wxyz))
 
 
 def _resolve_warp_device(device) -> str:

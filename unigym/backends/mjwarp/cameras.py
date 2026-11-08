@@ -32,6 +32,7 @@ Depth is METRIC planar z from ``rc.depth_data`` (never ``get_depth``); see
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import torch
@@ -48,7 +49,7 @@ from ..shared.mjfamily.cameras.helpers import (MJ_CAMERA_PREFIX,
                                               mj_camera_quat)
 
 
-def _cpu_rig_factory():
+def _cpu_rig_factory() -> Any:
     """Load the N=1 CPU-mirror rig builder without importing the backend.
 
     The concrete ``mujoco.Renderer`` rig implementation stays in
@@ -58,7 +59,11 @@ def _cpu_rig_factory():
     """
     from unigym.backends.registry import backend_info
 
-    return backend_info("mujoco").camera_backend()
+    factory = backend_info("mujoco").camera_backend
+    if factory is None:
+        raise RuntimeError(
+            "mjwarp cameras: the mujoco backend declares no camera backend")
+    return factory()
 
 __all__ = ["MjwarpRig", "build_mjwarp_rig"]
 
@@ -70,6 +75,20 @@ def _ypr_quat(yaw: float, pitch: float, roll: float) -> np.ndarray:
 
 class _WarpRigBase:
     """Shared warp-rig plumbing: pose writes, render-on-read, live state."""
+
+    # Lazily-bound handles (None before ``bind_env``): the host env and the
+    # warp renderer/device tables are typed ``Any`` at this duck-typed
+    # backend boundary; the live per-instance arrays become ndarrays at
+    # first use.
+    _env: Any
+    _renderer: Any
+    _wm: Any
+    _wd: Any
+    _cam_id: int | None
+    _pose_off: np.ndarray | None
+    _yaw: np.ndarray | None
+    _pitch: np.ndarray | None
+    _roll: np.ndarray | None
 
     def __init__(self, spec: CameraSpec):
         self.spec = spec
@@ -160,6 +179,9 @@ class _WarpRigBase:
         """Fold the live whitelist into the per-instance pose rows."""
         self._validate_ids(env_ids)
         self._ensure_live()
+        if (self._pose_off is None or self._yaw is None
+                or self._pitch is None or self._roll is None):
+            raise RuntimeError(f"camera {self.name!r}: live state unbound")
         sel = np.arange(int(self._env.num_envs)) if env_ids is None \
             else np.asarray([int(i) for i in env_ids], dtype=np.int64)
         if pose_offset is not None:
@@ -182,7 +204,8 @@ class _WarpRigBase:
         """Base mount pose ∘ this instance's live offset (isaac quat)."""
         p = np.asarray(base_pos, dtype=np.float64)
         q = np.asarray(base_quat, dtype=np.float64)
-        if self._pose_off is not None:
+        if (self._pose_off is not None and self._yaw is not None
+                and self._pitch is not None and self._roll is not None):
             p = p + self._pose_off[env_idx]
             y, pt, r = (self._yaw[env_idx], self._pitch[env_idx],
                         self._roll[env_idx])
@@ -328,6 +351,9 @@ class WarpWorldRig(_WarpRigBase):
         if row is None:
             self.sync_pose()
             row = self.state_table.get(self.name, self.target_env)
+        if row is None:
+            raise RuntimeError(
+                f"camera {self.name!r}: world-pose row missing after sync")
         return row.pos, row.quat
 
     def set_world_pose(self, pos, quat_wxyz, env_idx: int | None = None):
@@ -419,7 +445,7 @@ class MjwarpRig:
         self.spec = spec
         self.name = spec.name
         self._cpu = _cpu_rig_factory()(spec, render_groups=render_groups)
-        self._impl = None
+        self._impl: Any = None
 
     def setup_scene(self, scene_cfg) -> None:
         """Inject once through the proven mujoco rig (pre-compile)."""

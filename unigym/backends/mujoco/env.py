@@ -65,7 +65,7 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import torch
@@ -80,11 +80,22 @@ from unigym.core import quat
 # import time); an explicit MUJOCO_GL in the environment always wins.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-try:  # mujoco is only importable in the host .venv_sim environment
+_MUJOCO_IMPORT_ERROR: BaseException | None = None
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only (stubs; runtime gate below)
     import mujoco
-except ImportError as _e:  # pragma: no cover - gated by importorskip in tests
-    mujoco = None
-    _MUJOCO_IMPORT_ERROR = _e
+
+    from unigym.backends.shared.mjfamily.name_map import (
+        MjArticulationBinding,
+        MjControlBinding,
+    )
+    from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+else:
+    try:  # mujoco is only importable in the host .venv_sim environment
+        import mujoco
+    except ImportError as _e:  # pragma: no cover - gated by importorskip
+        mujoco = None
+        _MUJOCO_IMPORT_ERROR = _e
 
 from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.obs_catalog import (
@@ -236,7 +247,7 @@ def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
 
     (DELEGATED to unigym.core.quat.to_rotmat, M1 convergence)
     """
-    return quat.to_rotmat(quat_wxyz)
+    return np.asarray(quat.to_rotmat(quat_wxyz))
 
 
 def _mj_enum(val):
@@ -385,6 +396,28 @@ class MujocoEnv:
         ``object/<name>/{pos,quat,held}`` into ``extra`` every step, and
         served as obs (``<name>_pos_b``/``_vel_b``) on adapter request.
     """
+
+    # Backend-private runtime tables (built by ``init_tables``, not in
+    # ``__init__``: declared here so the step/obs faces see the contract).
+    articulations: dict[str, "ArticulationRuntime"]
+    controls: dict[str, "ControlRuntime"]
+    _articulation_order: list["ArticulationRuntime"]
+    _control_order: list["ControlRuntime"]
+    _mj_bindings: dict[str, "MjControlBinding"]
+    _mj_articulation_bindings: dict[str, "MjArticulationBinding"]
+    _act_of_joint: dict[str, int]
+    _prop_actuators: dict[str, dict[str, int]]
+    _prop_ctrl_mask: np.ndarray
+    _prop_targets: np.ndarray
+    _joint_limits: "tuple[torch.Tensor, torch.Tensor] | None"
+    _joint_limits_by_articulation: "dict[str, tuple[torch.Tensor, torch.Tensor]]"
+
+    # Live sim handles: always bound by ``__init__``; deliberately nulled at
+    # the explicit ``close()`` teardown boundary (see ``close``).
+    _model: "mujoco.MjModel"
+    _data: "mujoco.MjData"
+    _datas: list["mujoco.MjData"]
+    _active_data: "mujoco.MjData"
 
     def __init__(self, robot_profile, adapter, num_envs: int = 1,
                  episode_length_s: float = 10.0,
@@ -986,7 +1019,7 @@ class MujocoEnv:
         try:
             mujoco.mj_fullM(self._model, d, Mfull)   # mujoco >= 3.2
         except TypeError:
-            mujoco.mj_fullM(self._model, Mfull, d.qM)  # legacy layout
+            getattr(mujoco, "mj_fullM")(self._model, Mfull, d.qM)  # legacy layout
         M = np.maximum(Mfull[dofs, dofs], 1e-9)
         ratio = dt * np.asarray(kd, dtype=np.float64) / M
         resolvable = dt * np.sqrt(np.maximum(
@@ -1038,6 +1071,9 @@ class MujocoEnv:
         """
         import mujoco
 
+        if self.prop_backend is None:
+            raise RuntimeError(
+                "mujoco backend: _prop_extents needs a wired prop backend")
         bid, _, _ = self.prop_backend.free_addresses(name)
         m = self._model
         half_xy, height = 0.0, 0.0
@@ -1066,6 +1102,10 @@ class MujocoEnv:
         prev = self._active_data
         self._active_data = self._datas[e]
         try:
+            if self._initializer is None:
+                raise RuntimeError(
+                    "mujoco backend: _apply_reset_protocol called without a "
+                    "declared initializer")
             placements = self._initializer.apply()
             declared = {s.name for s in self.prop_manager.specs} \
                 if self.prop_manager is not None else set()
@@ -1448,5 +1488,9 @@ class MujocoEnv:
             self.camera_manager.close()
         if self.prop_backend is not None:
             self.prop_backend.close()
-        self._data = None
-        self._model = None
+        # Teardown boundary: the live handles are deliberately invalidated.
+        # They are annotated non-Optional above so the live step/obs paths
+        # never carry a spurious Optional; writing through ``__dict__``
+        # records the released state without re-typing the class.
+        for handle in ("_data", "_model", "_datas", "_active_data"):
+            self.__dict__[handle] = None

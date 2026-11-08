@@ -18,7 +18,7 @@ from ..model import MujocoModelProvider
 from unigym.scenes.engine import register_scene_engine
 from unigym.scenes.scene_ir import Scene
 
-from .scene_render import attach_composed, compose_scene
+from .scene_render import ComposedScene, attach_composed, compose_scene
 
 NAME = "mujoco"
 
@@ -42,20 +42,20 @@ class MujocoSceneEngine:
 
     name = NAME
 
-    def compose(self, scene: Scene) -> object:
+    def compose(self, scene: Scene) -> ComposedScene:
         """Build the composed scene product (pre-compile spec + regions)."""
         return compose_scene(scene)
 
-    def attach(self, base: object, composed: object, *,
+    def attach(self, base: object, composed: ComposedScene, *,
                frame: str) -> Mapping[str, object]:
         """Join an already composed product into *base* at *frame*."""
         return attach_composed(base, composed, frame)
 
-    def to_xml(self, composed: object) -> str:
+    def to_xml(self, composed: ComposedScene) -> str:
         """Serialize the composed product's spec."""
         return composed.spec.to_xml()
 
-    def describe(self, composed: object) -> Mapping[str, object]:
+    def describe(self, composed: ComposedScene) -> Mapping[str, object]:
         """Return the canonical declared ``ModelIR`` mapping of *composed*.
 
         This is the conformance face: it reads the neutral model IR built
@@ -82,7 +82,7 @@ class MujocoSceneEngine:
         return dict(sorted(data.items()))
 
 
-def resolve_scene_engine(name: str = NAME) -> object:
+def resolve_scene_engine(name: str = NAME) -> MujocoSceneEngine:
     """Resolve a backend's scene engine through the backend registry.
 
     Args:
@@ -101,7 +101,12 @@ def resolve_scene_engine(name: str = NAME) -> object:
         raise RuntimeError(
             f"backend {name!r}: the backend registry declares no scene engine "
             f"-- register one before composing a scene")
-    return factory()
+    engine = factory()
+    if not isinstance(engine, MujocoSceneEngine):
+        raise RuntimeError(
+            f"backend {name!r}: the registered scene engine is not a "
+            f"MujocoSceneEngine ({type(engine).__name__})")
+    return engine
 
 
 def compose_and_attach(base: object, scene: Scene,

@@ -39,6 +39,7 @@ import json
 import threading
 import time
 from fractions import Fraction
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -47,11 +48,15 @@ from unigym.runtime import bridge as _bridge
 from unigym.stream import ControlError, parse_control_json, \
     to_bridge_command
 
-av = require("av", "media", feature="the WebRTC media gateway")
-_mediastreams = require("aiortc.mediastreams", "media",
-                        feature="the WebRTC media gateway")
-MediaStreamError = _mediastreams.MediaStreamError
-VideoStreamTrack = _mediastreams.VideoStreamTrack
+if TYPE_CHECKING:  # pragma: no cover - optional media extra (lazy at runtime)
+    import av
+    from aiortc.mediastreams import MediaStreamError, VideoStreamTrack
+else:
+    av = require("av", "media", feature="the WebRTC media gateway")
+    _mediastreams = require("aiortc.mediastreams", "media",
+                            feature="the WebRTC media gateway")
+    MediaStreamError = _mediastreams.MediaStreamError
+    VideoStreamTrack = _mediastreams.VideoStreamTrack
 
 __all__ = ["FrameRelayTrack", "WebRtcGateway"]
 

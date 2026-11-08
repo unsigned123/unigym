@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
+from typing import Any
 from http.server import BaseHTTPRequestHandler
 from importlib.resources import files
 from pathlib import Path
@@ -32,9 +33,13 @@ MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=ut
 class PortalHandler(BaseHTTPRequestHandler):
     """Static webui + /api mirror + media gateway + artifact whitelist."""
 
-    def log_message(self, fmt, *args):
+    def log_message(self, format: str, *args: object) -> None:
         """Quiet per-request access logging (portal writes no access log)."""
         pass     # noqa: E704
+
+    def _service(self) -> Any:
+        """The daemon service attached to the enclosing HTTPServer."""
+        return getattr(self.server, "service")
 
     # -- plumbing
     def _send(self, code: int, raw: bytes, ctype: str,
@@ -127,17 +132,17 @@ class PortalHandler(BaseHTTPRequestHandler):
         try:
             if post:
                 route_run_post(self, parts.path, parts.query,
-                               self._read_json_body(), self.server.service)
+                               self._read_json_body(), self._service())
             else:
                 route_run_get(self, parts.path, parts.query,
-                              self.server.service)
+                              self._service())
         except (BrokenPipeError, ConnectionResetError):
             pass
         except ValueError as e:            # oversized/malformed body
             self._json_send(*_err(str(e)))
 
     def _api(self, parts, post: bool) -> None:
-        svc = self.server.service
+        svc = self._service()
         try:
             if not post and parts.path.rstrip("/") == "/api/events":
                 # (contract §1.22): the browser's subscription
@@ -168,24 +173,27 @@ class PortalHandler(BaseHTTPRequestHandler):
 
     def _static(self, path: Path, cache: str = "no-cache") -> None:
         ctype = MIME.get(path.suffix)
+        real: Path | None = None
+        raw: bytes | None = None
         try:
             real = path.resolve()
             raw = real.read_bytes()
         except OSError:
             raw = None
-        inside = raw is not None and WEBUI_DIR.resolve() in real.parents
-        if ctype is None or not inside:
+        inside = (raw is not None and real is not None
+                  and WEBUI_DIR.resolve() in real.parents)
+        if ctype is None or raw is None or not inside:
             return self._send(404, b"not found", "text/plain")
         self._send(200, raw, ctype, cache=cache)
 
     def _authorized_form(self, form: dict) -> bool:
         import hmac
-        svc = self.server.service
+        svc = self._service()
         return svc.control_token is None or bool(hmac.compare_digest(
             form.get("token") or "", svc.control_token))
 
     def _redirect_home(self) -> None:
-        tok = self.server.service.control_token
+        tok = self._service().control_token
         self._redirect("/" + (f"?token={urllib.parse.quote(tok)}"
                               if tok else ""))
 
@@ -201,7 +209,7 @@ class PortalHandler(BaseHTTPRequestHandler):
             return self._send(400, b"config required\n", "text/plain")
         ov = {"backend": form.get("backend") or None,
               "gpu": form.get("gpu") or None}
-        code, doc = control_api.api_post(self.server.service, "/api/start",
+        code, doc = control_api.api_post(self._service(), "/api/start",
                                          {"config": config,
                                           "overrides": ov})
         if code != 200:
@@ -212,7 +220,7 @@ class PortalHandler(BaseHTTPRequestHandler):
         if not self._authorized_form(form):
             return self._send(403, b"bad token\n", "text/plain")
         run = form.get("run") or ""
-        code, doc = control_api.api_post(self.server.service,
+        code, doc = control_api.api_post(self._service(),
                                          f"/api/op/{run}/shutdown", {})
         if code != 200:
             return self._form_fail(400, "terminate failed", doc)
@@ -221,7 +229,7 @@ class PortalHandler(BaseHTTPRequestHandler):
     # -- artifacts (whitelist; resolution lives in daemon.queries) --------
     def _artifact(self, qs: dict) -> None:
         code, msg, ctype, payload = queries.resolve_artifact(
-            self.server.service, (qs.get("run") or [""])[0],
+            self._service(), (qs.get("run") or [""])[0],
             (qs.get("job") or [""])[0], (qs.get("name") or [""])[0])
         if payload is None:
             return self._send(code, msg.encode(), "text/plain")
