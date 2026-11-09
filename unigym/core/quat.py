@@ -1,4 +1,4 @@
-"""The single quaternion conversion layer (backend-traits M1).
+"""The single quaternion conversion layer (backend-traits).
 
 Repo-internal convention is **wxyz** and never changes: obs record keys
 (``base_quat_w``), adapters, criteria, npz artifacts all stay wxyz.  External

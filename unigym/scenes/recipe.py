@@ -1,4 +1,4 @@
-"""Content-key normalization for run configs and scene bundles (v091 D-3).
+"""Content-key normalization for run configs and scene bundles.
 
 The yaml content block migrates from ``props:`` to ``objects:``; the old
 spelling stays a long-lived alias.  :func:`normalize_content_keys` is the

@@ -16,7 +16,7 @@ turns a scene into engine elements) lives on the backend side
 imports backends (the import-linter contract pins the direction).
 
 The production registry stays empty here: content providers ship with
-the robocasa pack's code face (v081 P5b) and self-register when that
+the robocasa pack's code face and self-register when that
 pack is imported, so this package is importable with no pack mounted.
 """
 

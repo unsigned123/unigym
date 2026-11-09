@@ -1,7 +1,7 @@
 """The closed scene-provider registry.
 
-The SIXTH closed registry (design v075 §4; isomorphic to the v071 task
-providers and the v072 prop-template providers):
+The SIXTH closed registry (design v075 §4; isomorphic to the task
+providers and the prop-template providers):
 
 * ``@register_scene`` -- closed name list, lowercase snake_case (the
   same charset rule that rejects path-like spellings by construction),
@@ -15,7 +15,7 @@ providers and the v072 prop-template providers):
 
 Declarative scene templates cover the routine needs; a scene provider
 exists for DEEP customization only -- it may call ASSET providers (the
-closed v072 prop-template registry) to assemble subtrees, but it mints
+closed prop-template registry) to assemble subtrees, but it mints
 no scene vocabulary of its own.  The registry fills from the scenes
 package's own provider modules; core stays empty so it imports with no
 content pack mounted.

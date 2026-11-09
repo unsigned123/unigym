@@ -209,13 +209,13 @@ class Session:
         body["watch_op"] = sub
         return self._send("watch", body, timeout_s=timeout_s)
 
-    # -- rewind face (Round B B1; runtime_contract §4 cmd 17-19) ----------
+    # -- rewind face (runtime_contract §4 cmd 17-19) ----------------------
     def rewind_snapshot(self, label: str | None = None,
                         timeout_s: float | None = None) -> dict:
         """Capture an engine snapshot -> {"snap_id", "tick", ...}.
 
         Two-level gated run-side (backend SNAPSHOT trait + adapter
-        rewindable); slot cap 16 LRU (v056 checkpoint ring) with the
+        rewindable); slot cap 16 LRU (checkpoint ring) with the
         eviction surfaced in the ack.
         """
         payload = {"label": label} if label else {}

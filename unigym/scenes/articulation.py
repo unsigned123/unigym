@@ -1,4 +1,4 @@
-"""Neutral articulation IR (v101 A2, v104 authoring model).
+"""Neutral articulation IR (authoring model).
 
 An articulation is ``root + model + joints + spawn``.  There is no
 articulation-level control mode: *how* a joint is driven (and which adapter
@@ -6,7 +6,7 @@ owns it) is declared explicitly in the run-level ``controls[]`` block
 (:mod:`unigym.runtime.controls`), and joints that are not driven at all are
 listed in :attr:`ArticulationSpec.passive_joints`.  The IR is pure data and
 imports only the standard library -- no engine and no backend name is
-allowed here (v100/v101 attribute neutrality).
+allowed here (attribute neutrality).
 
 v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
 / ``policy_section``: the drive declaration lives in ``controls[]`` and the
@@ -152,7 +152,7 @@ class AssetRef:
 
 @dataclass(frozen=True)
 class JointSpec:
-    """One declared joint of an articulation (v104 authoring IR).
+    """One declared joint of an articulation (authoring IR).
 
     A joint no longer carries a capability ``mode``: every declared joint is
     actuated unless it is named in :attr:`ArticulationSpec.passive_joints`,
@@ -364,7 +364,7 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
 
     The config surface is a mapping with the IR fields
     (``name/model/root/spawn/joints/body_parts/passive_joints/params``);
-    unknown keys fail fast (there is no shorthand and no alias).  The v104
+    unknown keys fail fast (there is no shorthand and no alias).  The
     articulation-level ``control:`` block is rejected with a teaching error
     (drives are declared in the run-level ``controls[]``).
     """

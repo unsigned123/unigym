@@ -757,7 +757,7 @@ class ModelIR:
         materials: Iterable[str] | None = None,
         name: str | None = None,
     ) -> ModelIR:
-        """Return a filtered view of this IR (v103.4).
+        """Return a filtered view of this IR.
 
         Every argument is an optional iterable of row names; ``None`` keeps
         that whole table.  Rows are kept by identity (their compiled data is

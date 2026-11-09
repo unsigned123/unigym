@@ -14,18 +14,18 @@ Tokens:
 ``${UNIGYM_ASSET_ROOT}``  shared asset root (audit 2026-10 P1-7): env
                           ``UNIGYM_ASSET_ROOT`` > yaml
                           ``unigym_asset_root`` (local overlay then
-                          unigym.yaml) -- unset fails fast (v101 A1
-                          removed the implicit machine default)
+                          unigym.yaml) -- unset fails fast (no implicit
+                          machine default)
 ``${UNIGYM_REPO}``        this checkout's repo root -- COMPUTED from
                           ``unigym.__file__`` (follows the worktree /
                           checkout automatically)
 ``${UNIGYM_DEPS_ROOT}``   external dependency root: env
                           ``UNIGYM_DEPS_ROOT`` > ``unigym_deps_root``
                           key in unigym.local.yaml (machine overlay)
-                          then unigym.yaml -- unset fails fast (v101 A1
-                          removed the implicit machine default)
-``${UNIGYM_ASSET_PACK}``  the unified content pack's ``assets`` face
-                          (v091 B-0): env ``UNIGYM_ASSET_PACK`` > yaml
+                          then unigym.yaml -- unset fails fast (no
+                          implicit machine default)
+``${UNIGYM_ASSET_PACK}``  the unified content pack's ``assets`` face:
+                          env ``UNIGYM_ASSET_PACK`` > yaml
                           ``unigym_asset_pack_root`` (local overlay then
                           unigym.yaml) > the mounted pack's ``assets``
                           directory
@@ -98,8 +98,8 @@ def asset_root(repo: str | None = None) -> str:
     ``repo`` is injectable for tests; defaults to :func:`repo_root`.
 
     Raises:
-        ConfigError: Neither the env var nor a yaml key is set.  v101 A1
-            removed the compiled-in machine default.
+        ConfigError: Neither the env var nor a yaml key is set (there is
+            no compiled-in machine default).
     """
     env = os.environ.get(ENV_VAR)
     if env:
@@ -134,8 +134,8 @@ def deps_root(repo: str | None = None) -> str:
     ``repo`` is injectable for tests; defaults to :func:`repo_root`.
 
     Raises:
-        ConfigError: Neither the env var nor a yaml key is set.  v101 A1
-            removed the compiled-in machine default.
+        ConfigError: Neither the env var nor a yaml key is set (there is
+            no compiled-in machine default).
     """
     env = os.environ.get(DEPS_ENV_VAR)
     if env:
@@ -384,7 +384,7 @@ def expand_placeholders(obj: JsonValue) -> JsonValue:
     if isinstance(obj, str):
         expanded = _expand_str(obj, known_tokens())
         if expanded.startswith("pack:"):
-            # v081: external-pack references resolve at this same point.
+            # External-pack references resolve at this same point.
             # Lazy import: unigym.packs sits above unigym.core (it reads
             # the deps/repo anchors from here), so a module-level import
             # would close the cycle.
