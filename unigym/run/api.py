@@ -51,7 +51,11 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import yaml
 
-from unigym._typing import JsonValue
+from unigym._typing import (
+    JsonValue,
+    is_json_object,
+    is_object_sequence,
+)
 from unigym.backends.registry import backend_info
 from unigym.run.passive import (
     declare_passive_joints as _declare_passive_joints,
@@ -112,19 +116,19 @@ def _optional_str(value: object) -> str | None:
 
 def _str_values(value: object) -> list[str]:
     """A runtime name sequence as a list of strings."""
-    if isinstance(value, (list, tuple)):
+    if is_object_sequence(value):
         return [str(item) for item in value]
     return []
 
 
 def _json_object(value: object) -> dict[str, JsonValue]:
     """A runtime mapping attribute as a copied JSON mapping."""
-    return copy.deepcopy(value) if isinstance(value, dict) else {}
+    return copy.deepcopy(value) if is_json_object(value) else {}
 
 
 def _config_mapping(value: object) -> dict[str, JsonValue]:
     """Narrow a runtime mapping (yaml load) to a config dict."""
-    if not isinstance(value, dict):
+    if not is_json_object(value):
         raise TypeError(
             f"config must be a mapping, got {type(value).__name__}")
     return value
@@ -657,7 +661,7 @@ class Run:
         """
         with open(path, encoding="utf-8") as handle:
             cfg = yaml.safe_load(handle)
-        if not isinstance(cfg, dict):
+        if not is_json_object(cfg):
             raise ValueError(
                 f"run config {path!r} must be a yaml mapping, got "
                 f"{type(cfg).__name__}")

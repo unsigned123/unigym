@@ -9,11 +9,17 @@ runtime action face.  An explicit caller declaration always wins.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
+
+from unigym._typing import JsonValue, is_json_object
 
 __all__ = ["declare_passive_joints", "declare_world_passive_joints"]
 
 
-def declare_passive_joints(entry: dict, controls: list) -> None:
+def declare_passive_joints(
+    entry: dict[str, JsonValue],
+    controls: Sequence[JsonValue],
+) -> None:
     """Declare recipe joints no emitted control group drives as passive.
 
     Args:
@@ -24,7 +30,9 @@ def declare_passive_joints(entry: dict, controls: list) -> None:
         return
     art_name = entry.get("name")
     section = copy.deepcopy(entry)
-    params = dict(section.get("params") or {})
+    raw_params = section.get("params")
+    params: dict[str, JsonValue] = (
+        dict(raw_params) if isinstance(raw_params, dict) else {})
     selector = params.pop("profile", None)
     if selector is not None:
         # v105: `params.profile` selects the recipe for a renamed
@@ -38,13 +46,13 @@ def declare_passive_joints(entry: dict, controls: list) -> None:
     except (AttributeError, KeyError, NotImplementedError, TypeError,
             ValueError):
         return
-    sets = dict(getattr(recipe, "joint_sets", None) or {})
-    actuated: list = []
+    sets = dict(recipe.joint_sets)
+    actuated: list[str] = []
     for joints in sets.values():
         for joint in joints:
             if joint not in actuated:
                 actuated.append(joint)
-    driven = set()
+    driven: set[str] = set()
     for group in controls or ():
         if not isinstance(group, dict):
             continue
@@ -52,17 +60,28 @@ def declare_passive_joints(entry: dict, controls: list) -> None:
             continue
         joints = group.get("joints")
         if joints:
-            driven.update(joints)
-        elif group.get("joint_set"):
-            driven.update(sets.get(group["joint_set"], ()))
-    passive = [joint for joint in actuated if joint not in driven]
+            if isinstance(joints, (list, tuple)):
+                driven.update(str(joint) for joint in joints)
+        else:
+            joint_set = group.get("joint_set")
+            if isinstance(joint_set, str):
+                driven.update(sets.get(joint_set, ()))
+    passive: list[JsonValue] = []
+    for joint in actuated:
+        if joint not in driven:
+            passive.append(joint)
     if passive:
         entry["passive_joints"] = passive
 
 
-def declare_world_passive_joints(cfg: dict) -> None:
+def declare_world_passive_joints(cfg: dict[str, JsonValue]) -> None:
     """Declare recipe joints of every world articulation no control drives."""
-    controls = list(cfg.get("controls") or ())
-    for entry in cfg.get("articulations") or ():
-        if isinstance(entry, dict):
+    raw_controls = cfg.get("controls")
+    controls: list[JsonValue] = (
+        list(raw_controls) if isinstance(raw_controls, list) else [])
+    raw_entries = cfg.get("articulations")
+    entries: list[JsonValue] = (
+        list(raw_entries) if isinstance(raw_entries, list) else [])
+    for entry in entries:
+        if is_json_object(entry):
             declare_passive_joints(entry, controls)

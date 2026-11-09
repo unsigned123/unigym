@@ -22,7 +22,7 @@ from unigym.core import spawn as cspawn
 LABEL_MAX = 80
 
 
-def check_label(label) -> str | None:
+def check_label(label: object) -> str | None:
     """Validate a run label; returns the teaching error or None.
 
     Shared by RunSpec.validate (daemon faces) and collect_cli --label

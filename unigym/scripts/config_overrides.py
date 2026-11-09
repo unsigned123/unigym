@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 
+from unigym._typing import JsonValue
 
-def parse_value(raw: str):
+
+def parse_value(raw: str) -> JsonValue:
     """Type inference: int -> float -> bool -> JSON list/object -> str."""
     try:
         return int(raw)
@@ -33,9 +35,9 @@ def parse_value(raw: str):
     return raw
 
 
-def parse_set_args(items: list[str] | None) -> list[tuple[str, object]]:
+def parse_set_args(items: list[str] | None) -> list[tuple[str, JsonValue]]:
     """`["a.b=1", "c=[1,2]"]` -> `[("a.b", 1), ("c", [1, 2])]` (ordered)."""
-    out: list[tuple[str, object]] = []
+    out: list[tuple[str, JsonValue]] = []
     for item in items or []:
         if "=" not in item:
             raise ValueError(
@@ -49,7 +51,10 @@ def parse_set_args(items: list[str] | None) -> list[tuple[str, object]]:
     return out
 
 
-def apply_overrides(cfg: dict, overrides: list[tuple[str, object]]) -> tuple:
+def apply_overrides(
+    cfg: dict[str, JsonValue],
+    overrides: list[tuple[str, JsonValue]],
+) -> tuple[dict[str, JsonValue], list[dict[str, JsonValue]]]:
     """Apply dot-path overrides; returns (cfg, diffs).
 
     ``diffs`` = [{path, old, new}] (old None = key was absent).  cfg is
@@ -61,7 +66,7 @@ def apply_overrides(cfg: dict, overrides: list[tuple[str, object]]) -> tuple:
     """
     if not overrides:
         return cfg, []
-    diffs: list[dict] = []
+    diffs: list[dict[str, JsonValue]] = []
     for path, value in overrides:
         node = cfg
         parts = path.split(".")
@@ -82,9 +87,9 @@ def apply_overrides(cfg: dict, overrides: list[tuple[str, object]]) -> tuple:
     return cfg, diffs
 
 
-def diff_lines(diffs: list[dict]) -> list[str]:
+def diff_lines(diffs: list[dict[str, JsonValue]]) -> list[str]:
     """One line per override: `override: <path> <old> -> <new>`."""
-    def fmt(v):
+    def fmt(v: JsonValue) -> str:
         return json.dumps(v) if isinstance(v, (dict, list)) else repr(v)
     return [f"override: {d['path']} {fmt(d['old'])} -> {fmt(d['new'])}"
             for d in diffs]

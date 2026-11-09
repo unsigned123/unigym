@@ -281,10 +281,16 @@ class MujocoPropArticulation:
             adr = -1 if act_row is None or act_row.actuator_id is None \
                 else int(act_row.actuator_id)
             joint = ir.joints[internal]
+            qpos_adr = joint.qpos_adr
+            dof_adr = joint.dof_adr
+            if qpos_adr is None or dof_adr is None:
+                raise ValueError(
+                    f"articulation prop {self.name!r}: joint {internal!r} "
+                    f"is not compiled (missing qpos/dof address)")
             self.joints[jname] = {
                 "jid": jid,
-                "qadr": int(joint.qpos_adr),
-                "dadr": int(joint.dof_adr),
+                "qadr": int(qpos_adr),
+                "dadr": int(dof_adr),
                 "act_adr": adr,   # -1 for passive joints
             }
 
@@ -378,8 +384,14 @@ class MujocoPropFreeArticulation(MujocoPropArticulation):
                 f"free_articulation prop {self.name!r}: the attached root "
                 f"body lost its freejoint (compiled model drift)")
         joint = joints[0]
-        self.free_qadr = int(joint.qpos_adr)
-        self.free_vadr = int(joint.dof_adr)
+        qpos_adr = joint.qpos_adr
+        dof_adr = joint.dof_adr
+        if qpos_adr is None or dof_adr is None:
+            raise ValueError(
+                f"free_articulation prop {self.name!r}: the attached root "
+                f"body lost its freejoint (compiled model drift)")
+        self.free_qadr = int(qpos_adr)
+        self.free_vadr = int(dof_adr)
 
     def on_reset(self, m, d, env_ids=None) -> None:
         """Write the freejoint qpos + the declared ``init`` state.

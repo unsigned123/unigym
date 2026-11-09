@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import warnings
 
+from unigym._typing import JsonValue
+
 __all__ = ["normalize_content_keys"]
 
 _INTERNAL_KEY = "props"
@@ -49,7 +51,9 @@ def _label(source: str) -> str:
     return source or "<config mapping>"
 
 
-def normalize_content_keys(cfg: dict, *, source: str = "") -> dict:
+def normalize_content_keys(
+    cfg: dict[str, JsonValue], *, source: str = "",
+) -> dict[str, JsonValue]:
     """Split the ``objects:`` surface block into props and content fill.
 
     The migration is one-way: ``objects`` is the only surface spelling and

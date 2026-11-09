@@ -424,11 +424,11 @@ class ModelIR:
     backend: str | None
     compiled: bool
     bodies: Table = field(default_factory=Table)
-    joints: Table = field(default_factory=Table)
+    joints: Table[Joint] = field(default_factory=lambda: Table[Joint]())
     geoms: Table = field(default_factory=Table)
     sites: Table = field(default_factory=Table)
     cameras: Table = field(default_factory=Table)
-    actuators: Table = field(default_factory=Table)
+    actuators: Table[Actuator] = field(default_factory=lambda: Table[Actuator]())
     materials: Table = field(default_factory=Table)
     meta: Mapping = field(default_factory=dict)
     ext: Mapping = field(default_factory=dict)

@@ -18,6 +18,8 @@ import copy
 import math
 from collections.abc import MutableMapping
 
+from unigym._typing import JsonValue
+
 __all__ = ["Camera", "CameraSet"]
 
 
@@ -133,7 +135,7 @@ class CameraSet(MutableMapping):
     """
 
     def __init__(self, entries=(), *, locked: bool = False):
-        self._entries: dict[str, dict] = {}
+        self._entries: dict[str, dict[str, JsonValue]] = {}
         self._locked = bool(locked)
         for entry in entries or ():
             self.add(entry)
@@ -172,7 +174,7 @@ class CameraSet(MutableMapping):
             self._locked = True
         return self
 
-    def to_list(self) -> list:
+    def to_list(self) -> list[dict[str, JsonValue]]:
         """Config-ready copies of the declared entries (declaration order)."""
         return [copy.deepcopy(value) for value in self._entries.values()]
 

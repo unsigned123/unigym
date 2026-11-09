@@ -47,6 +47,7 @@ from typing import Optional
 
 import yaml
 
+from unigym._typing import JsonValue, is_json_object
 from unigym.core.asset_root import repo_root
 from unigym.packs import find, repo_pack
 from unigym.scenes.recipe import normalize_content_keys
@@ -129,7 +130,9 @@ def discover_scene_packs(root: Optional[Path] = None) -> dict:
     return index
 
 
-def load_scene_bundle(ref: str, root: Optional[Path] = None) -> dict:
+def load_scene_bundle(
+    ref: str, root: Optional[Path] = None,
+) -> dict[str, JsonValue]:
     """Resolve one ``<family>/<name>`` reference to its parsed bundle."""
     index = discover_scene_packs(root)
     ref = str(ref)
@@ -141,7 +144,7 @@ def load_scene_bundle(ref: str, root: Optional[Path] = None) -> dict:
             f"{SCENES_DIR}/<family>/{SCENE_FILE} (the yaml's top-level "
             f"'name:' key is the second reference component)")
     doc = yaml.safe_load(path.read_text()) or {}
-    if not isinstance(doc, dict):
+    if not is_json_object(doc):
         raise ValueError(f"{path}: scene bundle must be a mapping")
     return doc
 
@@ -162,7 +165,9 @@ def _merge(scene, run):
     return run
 
 
-def apply_scene_bundle(cfg: dict, root: Optional[Path] = None) -> dict:
+def apply_scene_bundle(
+    cfg: dict[str, JsonValue], root: Optional[Path] = None,
+) -> dict[str, JsonValue]:
     """Resolve the run config's ``scene:`` reference (deep-copy merge).
 
     Returns the config with the bundle's blocks routed in; configs
@@ -178,7 +183,7 @@ def apply_scene_bundle(cfg: dict, root: Optional[Path] = None) -> dict:
     if ref is None:
         return cfg
     doc = normalize_content_keys(
-        load_scene_bundle(ref, root), source=f"scene bundle {ref!r}")
+        load_scene_bundle(str(ref), root), source=f"scene bundle {ref!r}")
     cfg = copy.deepcopy(cfg)
     # A direct caller (tests, the API) may hand us an un-normalized run
     # config; the collector's single load point already migrated its own
@@ -187,8 +192,19 @@ def apply_scene_bundle(cfg: dict, root: Optional[Path] = None) -> dict:
     if "objects" in cfg:
         cfg = normalize_content_keys(
             cfg, source=f"run config for scene {ref!r}")
-    params = cfg.setdefault("env", {}).setdefault("params", {})
-    mujoco_block = (doc.get("backend") or {}).get("mujoco") or {}
+    env_obj = cfg.setdefault("env", {})
+    if not isinstance(env_obj, dict):
+        raise ValueError(f"scene bundle {ref!r}: env must be a mapping")
+    params_obj = env_obj.setdefault("params", {})
+    if not isinstance(params_obj, dict):
+        raise ValueError(f"scene bundle {ref!r}: env.params must be a mapping")
+    params = params_obj
+    backend_obj = doc.get("backend") or {}
+    if not isinstance(backend_obj, dict):
+        raise ValueError(
+            f"scene bundle {ref!r}: backend must be a mapping, "
+            f"got {type(backend_obj).__name__}")
+    mujoco_block = backend_obj.get("mujoco") or {}
     if not isinstance(mujoco_block, dict):
         raise ValueError(
             f"scene bundle {ref!r}: backend.mujoco must be a mapping, "

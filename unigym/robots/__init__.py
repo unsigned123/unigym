@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from unigym._typing import JsonValue
+
 # registry name -> (module, factory function)
 _FACTORIES = {
     "g1": ("g1", "make_g1_profile"),
@@ -37,7 +39,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def build_robot_recipe(section: dict,
+def build_robot_recipe(section: dict[str, JsonValue],
                        with_isaaclab: bool = False) -> RobotRecipe:
     """Build a :class:`RobotRecipe` from one articulation declaration.
 
@@ -45,10 +47,17 @@ def build_robot_recipe(section: dict,
     :class:`~unigym.scenes.articulation.ArticulationSpec`; it is authoring
     data (joint order / q0 / feet / body parts / asset), never a policy.
     """
-    params = dict(section.get("params", {}))
+    raw_params = section.get("params")
+    params: dict[str, JsonValue] = (
+        dict(raw_params) if isinstance(raw_params, dict) else {})
     if "body_parts" in section:
         params["body_parts"] = section["body_parts"]
-    factory = __getattr__(section["name"])
+    name_value = section["name"]
+    if not isinstance(name_value, str):
+        raise TypeError(
+            f"robot recipe name must be a string, got "
+            f"{type(name_value).__name__}")
+    factory = __getattr__(name_value)
     # with_isaaclab: isaaclab backends need the ArticulationCfg (built after
     # AppLauncher); the mujoco backend passes False -> articulation_cfg=None.
     return factory(**params, with_isaaclab=with_isaaclab)

@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from unigym._typing import JsonValue
+from unigym._typing import (
+    JsonValue,
+    is_json_list,
+    is_json_object,
+    is_pair,
+)
 from unigym.backends.registry import backend_info, validate_backend_options
 from unigym.core.asset_root import expand_placeholders
 from unigym.scene_packs import apply_scene_bundle
@@ -284,7 +289,7 @@ def _require_config(value: object, what: str) -> dict[str, JsonValue]:
     """Narrow a config boundary to a string-keyed JSON mapping."""
     from unigym.errors import ConfigError
 
-    if not isinstance(value, dict):
+    if not is_json_object(value):
         raise ConfigError(f"{what} must be a mapping, got {value!r}")
     return value
 
@@ -313,9 +318,14 @@ def _override_result(
     """Unpack the ``apply_overrides`` result at its untyped boundary."""
     from unigym.errors import ConfigError
 
-    if (isinstance(value, tuple) and len(value) == 2
-            and isinstance(value[0], dict) and isinstance(value[1], list)):
-        return value[0], value[1]
+    if is_pair(value):
+        cfg_part, diffs_part = value
+        if is_json_object(cfg_part) and is_json_list(diffs_part):
+            diffs: list[dict[str, JsonValue]] = []
+            for item in diffs_part:
+                if is_json_object(item):
+                    diffs.append(item)
+            return cfg_part, diffs
     raise ConfigError(f"config overrides returned {type(value).__name__}")
 
 
@@ -325,9 +335,11 @@ def _adapter_params_result(
     """Unpack the ``apply_spawn_params`` result at its untyped boundary."""
     from unigym.errors import ConfigError
 
-    if (isinstance(value, tuple) and len(value) == 2
-            and isinstance(value[0], dict) and isinstance(value[1], list)):
-        return value[0], [str(item) for item in value[1]]
+    if is_pair(value):
+        section_part, overrides_part = value
+        if is_json_object(section_part) and is_json_list(overrides_part):
+            overrides = [str(item) for item in overrides_part]
+            return section_part, overrides
     raise ConfigError(f"adapter params returned {type(value).__name__}")
 
 
@@ -429,7 +441,7 @@ def build_spec(
     from unigym.errors import ConfigError
     raw_backend_options = env_cfg.get("backend_options")
     if raw_backend_options is not None \
-            and not isinstance(raw_backend_options, Mapping):
+            and not is_json_object(raw_backend_options):
         raise ConfigError(
             f"{args.config}: env.backend_options must be a mapping")
     try:

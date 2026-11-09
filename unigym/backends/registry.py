@@ -301,7 +301,7 @@ class BackendSelectionError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # backend-private options (v105.3)
 # --------------------------------------------------------------------------- #
-def _dotted_options(schema: Mapping, prefix: str = "") -> list[str]:
+def _dotted_options(schema: Mapping[str, object], prefix: str = "") -> list[str]:
     """Every supported option path of one nested schema (stable order)."""
     out = []
     for key, value in schema.items():
@@ -313,8 +313,9 @@ def _dotted_options(schema: Mapping, prefix: str = "") -> list[str]:
     return out
 
 
-def _validate_options_block(schema: Mapping, options: Mapping,
-                            path: str) -> dict:
+def _validate_options_block(schema: Mapping[str, object],
+                            options: Mapping[str, object],
+                            path: str) -> dict[str, object]:
     """Validate one nested option block against *schema* (fail-fast)."""
     unknown = sorted(set(options) - set(schema))
     if unknown:
@@ -349,7 +350,8 @@ _OPTION_NAMESPACES = {
 
 
 def validate_backend_options(backend: str,
-                             options: Mapping | None) -> dict:
+                             options: Mapping[str, object] | None
+                             ) -> dict[str, object]:
     """Validate ``env.backend_options`` and return only *backend*'s options.
 
     Args:
@@ -385,9 +387,10 @@ def validate_backend_options(backend: str,
     info = _STATIC_INFO[canonical]
     if not info.options_schema:
         if supplied:
+            keys = sorted(supplied) if isinstance(supplied, Mapping) else []
             raise ValueError(
                 f"backend {canonical!r} declares no backend_options (unknown "
-                f"keys {sorted(supplied)}); supported options: []")
+                f"keys {keys}); supported options: []")
         return {}
     if not isinstance(supplied, Mapping):
         raise ValueError(

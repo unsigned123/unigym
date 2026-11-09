@@ -35,6 +35,7 @@ from typing import Any
 
 import yaml
 
+from unigym._typing import JsonValue
 from unigym.scenes.generators import build_payload
 from unigym.scenes.registry import register_scene
 from unigym.scenes.scene_ir import (
@@ -55,6 +56,17 @@ from unigym.world_primitives import (
 )
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
+
+
+def _mapping_section(
+    parent: dict[str, JsonValue], key: str,
+) -> dict[str, JsonValue]:
+    """Return a nested JSON mapping child, creating it when absent."""
+    value = parent.get(key)
+    if not isinstance(value, dict):
+        value = {}
+        parent[key] = value
+    return value
 
 
 class _TerrainBuilder:
@@ -584,7 +596,7 @@ class World:
         """True once a consuming :class:`Run` has compiled the world."""
         return self._built
 
-    def static_declarations(self) -> list[dict]:
+    def static_declarations(self) -> list[dict[str, JsonValue]]:
         """The engine-neutral static primitive declarations (``World.add``).
 
         Each entry carries the primitive kind, the neutral shape params and
@@ -668,7 +680,7 @@ class World:
             fragment["objects"] = dynamic
         return fragment
 
-    def apply(self, cfg: dict) -> dict:
+    def apply(self, cfg: dict[str, JsonValue]) -> dict[str, JsonValue]:
         """Merge this world's fragment into a run config (in place)."""
         fragment = self.fragment()
         if "scene" in fragment:
@@ -681,17 +693,22 @@ class World:
             _merge_controls(cfg, fragment["controls"])
         params = fragment.get("params") or {}
         if params:
-            cfg.setdefault("env", {}).setdefault("params", {}).update(params)
+            params_section = _mapping_section(
+                _mapping_section(cfg, "env"), "params")
+            params_section.update(params)
         dynamic = fragment.get("objects")
         if dynamic:
             # Preserve the config's own spelling (objects: surface wins,
             # legacy props: stays legacy) and append the world's types.
             key = "objects" if "objects" in cfg or "props" not in cfg \
                 else "props"
-            block = cfg.setdefault(key, {})
+            block = _mapping_section(cfg, key)
             block["enabled"] = True
-            block.setdefault("types", []).extend(copy.deepcopy(
-                dynamic["types"]))
+            types_value = block.get("types")
+            if not isinstance(types_value, list):
+                types_value = []
+                block["types"] = types_value
+            types_value.extend(copy.deepcopy(dynamic["types"]))
         return cfg
 
     def _mark_built(self) -> None:

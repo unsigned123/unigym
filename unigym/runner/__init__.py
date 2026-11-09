@@ -6,13 +6,20 @@ See docs/contracts/runner_contract.md.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from .base import Runner, StepResult
 from .external import ExternalRunner
 from .gym import GymEnvRunner, GymRunner, GymVectorRunner
 from .sinks import CollectSink
 from .sync import SyncRunner
 
-_RUNNER_KINDS = {
+if TYPE_CHECKING:
+    from unigym.run.instance import RunInstance
+
+_RUNNER_KINDS: dict[
+    str, type[SyncRunner] | type[GymEnvRunner] | type[GymVectorRunner],
+] = {
     "sync": SyncRunner,
     "external": ExternalRunner,
     "gym": GymEnvRunner,
@@ -20,7 +27,12 @@ _RUNNER_KINDS = {
 }
 
 
-def make_runner(instance, kind: str = "sync", **kwargs) -> Runner:
+def make_runner(
+    # Driver options are genuinely heterogeneous (each runner kind forwards
+    # its own set to a different factory), so the channel is intentionally
+    # arbitrary.
+    instance: RunInstance, kind: str = "sync", **kwargs: Any,
+) -> Runner:
     """Build a :class:`Runner` for one live :class:`RunInstance` (v097).
 
     ``kind`` selects the driver: ``sync`` (adapter-driven rollout),

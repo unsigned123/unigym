@@ -59,6 +59,7 @@ from typing import Any, overload
 
 import yaml
 
+from unigym._typing import JsonValue
 from unigym.errors import ConfigError
 
 ENV_VAR = "UNIGYM_ASSET_ROOT"
@@ -360,18 +361,18 @@ def expand_placeholders(obj: str) -> str: ...
 
 
 @overload
-def expand_placeholders(obj: dict[Any, Any]) -> dict[Any, Any]: ...
+def expand_placeholders(obj: dict[str, JsonValue]) -> dict[str, JsonValue]: ...
 
 
 @overload
-def expand_placeholders(obj: list[Any]) -> list[Any]: ...
+def expand_placeholders(obj: list[JsonValue]) -> list[JsonValue]: ...
 
 
 @overload
-def expand_placeholders(obj: Any) -> Any: ...
+def expand_placeholders(obj: JsonValue) -> JsonValue: ...
 
 
-def expand_placeholders(obj):
+def expand_placeholders(obj: JsonValue) -> JsonValue:
     """Deep-expand every ``${TOKEN}`` in a parsed yaml document
     (dict/list/str tree).  Non-strings pass through; unknown tokens
     raise :class:`PlaceholderError`.

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
+
+from unigym._typing import JsonValue
 
 from .base import Adapter, RawObsRequest  # noqa: F401  (package-level re-export)
 from .params import (  # noqa: F401  (package-level re-export)
@@ -29,12 +32,13 @@ class AdapterParamsError(ValueError):
     source (the v0581 teaching-error style).
     """
 
-    def __init__(self, message: str, doc: dict):
+    def __init__(self, message: str, doc: dict[str, object]):
         super().__init__(message)
         self.doc = doc
 
 
-def _teaching_doc(message: str, *, legal, example, hint: str) -> dict:
+def _teaching_doc(message: str, *, legal: object, example: object,
+                  hint: str) -> dict[str, object]:
     return {"ok": False, "error_code": "bad_adapter_params",
             "error": message, "legal": legal, "example": example,
             "hint": hint}
@@ -48,7 +52,7 @@ _SPAWN_HINT = ("spawn params overlay ONLY the yaml 'adapter:' section "
                "scalar lists")
 
 
-def validate_spawn_params(params) -> dict:
+def validate_spawn_params(params: object) -> dict[str, JsonValue]:
     """Value-domain gate for the spawn-params channel (fail-fast).
 
     Legal: ``None`` / bool / int / float / str, or a flat list of those.
@@ -114,7 +118,10 @@ def _legal_keys(name: str) -> set[str] | None:
     return {p.name for p in params} - {"self", "num_envs", "device"}
 
 
-def apply_spawn_params(section: dict, params) -> tuple:
+def apply_spawn_params(
+    section: Mapping[str, JsonValue],
+    params: object,
+) -> tuple[dict[str, JsonValue], list[str]]:
     """Overlay spawn adapter_params onto the yaml adapter section (shallow).
 
     Priority chain: defaults < config yaml < spawn adapter_params (the
