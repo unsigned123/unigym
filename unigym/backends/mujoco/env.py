@@ -1,9 +1,9 @@
-"""MuJoCo single-environment backend (M2a: flat-ground benchmark; M2b: cameras).
+"""MuJoCo single-environment backend (flat-ground benchmark; cameras).
 
 Implements the EnvBackend contract (``env/backends/base.py``) on top of a
 plain MuJoCo ``MjModel``/``MjData`` pair, for N=1 flat-ground benchmark runs
 on the host ``.venv_sim`` (no isaaclab, no kit).  N>1, depth-encoder obs,
-DR events and init-pose are OUT OF SCOPE (capability bits False).  Since M2b
+DR events and init-pose are OUT OF SCOPE (capability bits False).  The
 the ``cameras`` capability is ON: a wired ``CameraManager`` gets its rigs
 injected into the MJ model (MjSpec) and
 renders rgb/depth in-process (``cameras/mujoco_backend.py``); the recorder
@@ -31,7 +31,7 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
   observable — the obs catalog publishes the full
   43-joint articulation (MJ hinge order) and requests select a named
   subset (fingers carry q0 = 0, so relative == absolute there).
-* Actuator seam (v063 D2/D9): the per-substep ctrl write face is pluggable
+* Actuator seam: the per-substep ctrl write face is pluggable
   (``unigym/actuators``, first-class package).  Default = the standard_pd
   law above -- the legacy code path, bit-identical.  ``env.params.
   actuators`` declares per-group laws; a non-standard law switches the
@@ -41,7 +41,7 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
   ``qvel[0:3]``/``qvel[3:6]`` are BOTH world-frame, so body-frame angular
   velocity is ``R^T @ qvel[3:6]`` (contract semantics; NOTE the official
   playground forwards ``qvel[3:6]`` unrotated as the "IMU" gyro — a known
-  single-channel difference, evaluation R5).
+  single-channel difference).
 * applied_torque records ``qfrc_actuator`` in policy order (the post-clip
   dof-space actuator force; gear=1 => the clipped PD torque).
 * foot contacts: the sole collision shapes are UNNAMED box geoms on the
@@ -49,7 +49,7 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
   per contact ``mj_contactForce`` gives the contact-frame force whose world
   z component (via the contact frame rows) is aggregated per foot.  The
   1.0 N threshold matches isaaclab2/env.py but is NOT calibrated across
-  engines (evaluation R2) — treat cross-sim duty comparisons accordingly.
+  engines — treat cross-sim duty comparisons accordingly.
 * Joint order: the controller's ``asset_joint_names`` is the MJ model's
   hinge order (43, fingers included, L hand between the arms); its
   ``joint_names`` is the adapter/profile IL order (29).  Both perms are
@@ -74,7 +74,7 @@ from unigym.env.backends.base import BackendCapabilities
 from unigym.cameras.manager import validate_image_frame
 from unigym.core import quat
 
-# M2b: the camera backend needs a GL context (mujoco.Renderer); EGL is the
+# the camera backend needs a GL context (mujoco.Renderer); EGL is the
 # verified headless backend on the humanoid_1 host (~0.5 ms/frame @224²).
 # MUST be set before the first `import mujoco` (gl_context reads it at
 # import time); an explicit MUJOCO_GL in the environment always wins.
@@ -157,7 +157,7 @@ from unigym.actuators import StandardPdActuator, build_actuator
 BASE_BODY = "pelvis"
 
 
-# capability bits: M2a scope + M2b cameras/recorder (camera obs + the
+# capability bits: scope + cameras/recorder (camera obs + the
 # camera_ref video recorder are served by cameras/mujoco_backend.py; the
 # recorder itself is backend-agnostic and reads the manager's cache).
 # events/depth_camera(init_pose) stay False.  contacts is
@@ -165,7 +165,7 @@ BASE_BODY = "pelvis"
 # props is ON : box-family props are appended to the MjSpec and
 # served by props/mujoco_backend.py (object/* record keys + held groups).
 # actuator_seam is ON: the pluggable ctrl laws (unigym/actuators,
-# env.params.actuators; v063 D2) -- isaaclab backends reject non-standard
+# env.params.actuators) -- isaaclab backends reject non-standard
 # declarations at the capability gate until their ActuatorBase mapping lands.
 BACKEND_CAPABILITIES = BackendCapabilities(recorder=True, cameras=True,
                                            contacts=True, props=True,
@@ -245,7 +245,7 @@ class _ActuatorTargetFeed:
 def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
     """(4,) wxyz unit quat -> (3,3) rotation matrix (world<-body rows).
 
-    (DELEGATED to unigym.core.quat.to_rotmat, M1 convergence)
+    (DELEGATED to unigym.core.quat.to_rotmat)
     """
     return np.asarray(quat.to_rotmat(quat_wxyz))
 
@@ -284,21 +284,21 @@ class MujocoEnv:
             string for direct construction).  ``mjcf`` is required; there
             is no default model (v101 A1 removed ``DEFAULT_MJ_MODEL`` and
             ``env.params.mj_model``).
-        articulations: the run's ordered neutral articulation specs (v101
-            A2/A3).  Entries declaring ``model.mjcf`` are composed into
+        articulations: the run's ordered neutral articulation specs.
+            Entries declaring ``model.mjcf`` are composed into
             the world base before the scene/props/camera injections;
             ``None``/no declared asset keeps the historical fused load
             path byte-identically.
         backend_params: yaml ``env.params`` dict.  Keys:
             mj_scene_params: optional slot dict passed through to the
                 registered ``mj_scene`` provider's dispatch verbatim
-                (v078; e.g. ``{seed: 2026}`` for
+                (e.g. ``{seed: 2026}`` for
                 robocasa_kitchen_random).  ABSENT -> ``{}`` -- the
                 provider's own fail-closed slot gates stay the single
                 truth.  Ignored (and validated nowhere) when
                 ``mj_scene`` is not declared.
             spawn_base_pose: optional fixed-base spawn declaration
-                (v078) -- ``{body: <name>, pos: [x, y, z], yaw: rad}``
+                -- ``{body: <name>, pos: [x, y, z], yaw: rad}``
                 rewrites the declared body's SPEC pose before compile
                 (the declared yaw IS the base's world yaw; the baked
                 quat is replaced).  For fixed-base models whose base
@@ -312,7 +312,7 @@ class MujocoEnv:
                 (default [0, 0]); written into the freejoint qpos every reset.
             spawn_yaw: planar spawn heading in radians, finite scalar
                 (default 0.0); reset writes the (w,x,y,z) freejoint quat.
-                mujoco-only capability (R6): the isaaclab backend manages its
+                mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
             contact_force_threshold: foot-contact threshold in N (default
@@ -338,7 +338,7 @@ class MujocoEnv:
                 actuator.step -> mj_step2 phase split (fresh per-substep
                 M/bias).  The isaaclab backends reject non-standard
                 declarations at the capability gate (error + hint).
-            reset: optional T1.4 reset-protocol block (legacy face; the
+            reset: optional reset-protocol block (legacy face; the
                 scene-bundle wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
                 at dispatch, see ``initializer``).  ABSENT -> the legacy
@@ -382,7 +382,7 @@ class MujocoEnv:
         / lighting / depth_camera / init_pose: accepted for
         builder-kwargs parity and IGNORED (capabilities are all False, so
         the gate already rejected any non-None request) — EXCEPT
-        ``camera_manager`` (M2b): a wired CameraManager gets its cameras
+        ``camera_manager``: a wired CameraManager gets its cameras
         injected into the MJ model (MjSpec, pre-compile), renders rgb/depth
         in-process at every obs refresh (``cameras/mujoco_backend.py``) and
         is the frame source for the recorder's ``camera_ref``.
@@ -476,7 +476,7 @@ class MujocoEnv:
         # pre-compile; None -> the model is byte-identical (regression red
         # line)
         self.director_cfg = director_cfg
-        # v075 P1 scene-chain: env.params.mj_scene names a REGISTERED
+        # scene-chain: env.params.mj_scene names a REGISTERED
         # scene definition (build_scene_definition) composed + attached
         # into the base spec (the robot world-part XML -- it owns the
         # world-level option/size/visual settings; attach never
@@ -488,7 +488,7 @@ class MujocoEnv:
         self._placement_regions = {}
         _require_content_scene(self._content_spec, self.mj_scene)
         spawn_base = params.get("spawn_base_pose")
-        # v101 A3: compose the declared articulation assets into the world
+        # compose the declared articulation assets into the world
         # base BEFORE the scene/props/camera/director injections.  None
         # means the base is already fused (no articulation declares
         # model.mjcf) and the historical load path stays byte-identical.
@@ -524,7 +524,7 @@ class MujocoEnv:
             composed_xml = capture_composed_xml(
                 mjspec, self.artifact_dir, scene)
             if self.camera_manager is not None:
-                # M2b: inject the declared rigs as <camera> elements BEFORE
+                # inject the declared rigs as <camera> elements BEFORE
                 # compilation (MjSpec path; see cameras/mujoco_backend.py)
                 self.camera_manager.setup_scene(mjspec)
             if self.prop_manager is not None:
@@ -536,7 +536,7 @@ class MujocoEnv:
                                     self.prop_manager)
             from unigym.backends.shared.mjfamily.model.provider import MujocoModelProvider
             self._model = mjspec.compile()
-            # M2: the assembled IR is the COMPILED one (addresses/ids
+            # the assembled IR is the COMPILED one (addresses/ids
             # filled from MjModel); the conformance digest still builds
             # the declared IR separately in ``scene_engine.describe``.
             self._model_ir = MujocoModelProvider().describe(self._model)
@@ -585,7 +585,7 @@ class MujocoEnv:
             self._boost_fz = float(boost.get("force_z", 0.0))
         else:
             self._boost_body_id, self._boost_fz = -1, 0.0
-        # v063 T3.2 EEF site record family (env.params.record_sites)
+        # EEF site record family (env.params.record_sites)
         self._record_sites = self._resolve_record_sites(params)
         self._datas = [mujoco.MjData(self._model) for _ in range(n)]
         self._data = self._datas[0]   # legacy alias: tests/scene/director read it
@@ -612,7 +612,7 @@ class MujocoEnv:
                 or not np.isfinite(self._spawn_yaw)):
             raise ValueError(
                 "spawn_xy must be finite xy; spawn_yaw must be finite radians")
-        # B8 (T1.2b): fixed-base (no freejoint) state-readout constants --
+        # fixed-base (no freejoint) state-readout constants --
         # the base frame IS the configured spawn pose (the base is welded
         # to the world and never moves), velocities are zero, projected
         # gravity follows the spawn yaw.  The freejoint path never reads
@@ -641,7 +641,7 @@ class MujocoEnv:
             self.prop_backend.bind_env(self)
             self.prop_backend.on_reset([0], self)
 
-        # v104.2: every engine iterates env.articulations / env.controls.
+        # every engine iterates env.articulations / env.controls.
         # The run layer built the neutral control runtimes from RunSpec.controls
         # + the robot recipes; this backend resolves their addresses + drive
         # strategies against the compiled model.
@@ -751,7 +751,7 @@ class MujocoEnv:
         self._episode_dur = sample_durations(
             self._dur_lo, self._dur_hi, n, self.device)
 
-        # M2b: cameras bind after the model/data exist (renderers, cam ids)
+        # cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:
             self.camera_manager.bind_env(self)
 
@@ -799,7 +799,7 @@ class MujocoEnv:
         """Gather index: ``data_pol[:, perm_pol2il]`` -> MJ hinge order."""
         return self._perm_pol2il
 
-    # M2b: the camera rigs consume the raw simulator handles
+    # the camera rigs consume the raw simulator handles
     @property
     def mj_model(self):
         """The live ``mujoco.MjModel`` (camera rigs + director ops).
@@ -911,7 +911,7 @@ class MujocoEnv:
         return torch.stack(rows, dim=0)
 
     def _refresh_obs_cache(self, raw_action=None, cmd=None) -> None:
-        # M2b/v057/object-state source keys are injected every step by the
+        # object-state source keys are injected every step by the
         # shared helper (camera render+read at the tick-read fixed point,
         # contact/<name>, contact_ops/<name>, prop reads).  The multi-articulation
         # constructor swaps this whole method for the namespaced publisher.
@@ -939,7 +939,7 @@ class MujocoEnv:
                         f"obs '{req.key}' dim {val.shape[-1]} != requested "
                         f"{req.dim}")
                 continue
-            # v057 ops detail keys: dict-record lists served above -- no
+            # ops detail keys: dict-record lists served above -- no
             # tensor validation (the adapter consumes the records as-is)
             if req.key.startswith("contact_ops/"):
                 continue
@@ -982,7 +982,7 @@ class MujocoEnv:
         return multienv.foot_contact_forces(self, d)
 
     def _build_extra(self, state: dict, e: int = 0) -> dict:
-        """The recorded keys (per-articulation state namespaced; v103.5)."""
+        """The recorded keys (per-articulation state namespaced)."""
         del state, e
         extra = collect_core.build_extra(self, None, include_state=False)
         for art in self._articulation_order:
@@ -1030,7 +1030,7 @@ class MujocoEnv:
     # actuator seam (docs/designs/v063-gr00t-adapter.md D2/D9)
     # ------------------------------------------------------------------ #
     def _settle_substeps(self, n: int) -> None:
-        """Zero-action settle loop (T1.4 stage 2).
+        """Zero-action settle loop.
 
         Exactly ``step()``'s per-substep physics with the targets PINNED
         to the stage-1 q0 (the audited ``composite_controller.reset()``
@@ -1124,7 +1124,7 @@ class MujocoEnv:
             self._active_data = prev
 
     # ------------------------------------------------------------------ #
-    # multi-articulation tables (v101 A5; backend-internal)
+    # multi-articulation tables (backend-internal)
     # ------------------------------------------------------------------ #
     def _resolve_record_sites(self, params: dict) -> list:
         """Declarative ``site/<name>/pos`` record ids (unknown name fails)."""
@@ -1159,7 +1159,7 @@ class MujocoEnv:
         ABSENT ``actuators`` key -> the legacy body: the two default
         standard_pd laws bound to the exact policy/hand slot tables;
         ``_apply_pd`` (the retired inline formula) keeps its signature and
-        the default code path stays bit-identical (D9).  A DECLARED map
+        the default code path stays bit-identical.  A DECLARED map
         must cover every robot joint (policy + hands) exactly once
         (fail-fast gaps/duplicates/prop-slot collisions); a non-standard
         law in the map switches the loop into the
@@ -1207,7 +1207,7 @@ class MujocoEnv:
             for s in slot_list:
                 claimed[s] = gname
             acts.append(act)
-        # B6 (T1.2b): the coverage universe is the ACTUATED robot joints
+        # the coverage universe is the ACTUATED robot joints
         # (policy + hands) -- a fixed-base scene carries unactuated device
         # hinges / baked freejoints that no ctrl law may or must address
         # (for G1 this is exactly the non-Prop hinge set, unchanged)
@@ -1260,7 +1260,7 @@ class MujocoEnv:
         The ctrl write face is the actuator seam (``_setup_actuator_seam``):
         default = the legacy explicit-PD body; a declared
         ``env.params.actuators`` map with a non-standard law runs the
-        mj_step1/step2 phase split (D9).
+        mj_step1/step2 phase split.
         """
         targets = route_actions(self, actions, label="mujoco backend")
         for e, d in enumerate(self._datas):
@@ -1269,7 +1269,7 @@ class MujocoEnv:
             d.ctrl[self._prop_ctrl_mask] = \
                 self._prop_targets[e][self._prop_ctrl_mask]
             if self._actuator_seam_declared:
-                # declared ctrl laws (v063 D9 fresh-forward): targets fed once
+                # declared ctrl laws (fresh-forward): targets fed once
                 # per control step (held across the substeps); laws recompute
                 # per substep.  Non-standard laws run the phase split
                 # mj_step1 -> actuator.step -> mj_step2: mj_step alone would
@@ -1332,7 +1332,7 @@ class MujocoEnv:
             d.qvel[:] = 0.0
             d.ctrl[:] = 0.0
             if self.prop_backend is not None:
-                # P15 parity: re-place props BEFORE the forward (reset chain
+                # parity: re-place props BEFORE the forward (reset chain
                 # mirrors isaaclab2/env.py: robot reset -> props placement ->
                 # forward)
                 self.prop_backend.on_reset([e], self)

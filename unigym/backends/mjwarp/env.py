@@ -1,4 +1,4 @@
-"""MuJoCo Warp backend (v094 P3/P4).
+"""MuJoCo Warp backend.
 
 Independent copy of the mujoco env orchestration: the same
 ``MjModel``/``MjData`` contract, driven by ``mujoco_warp`` instead of the
@@ -7,11 +7,11 @@ as the CPU **mirror** read face:
 ``mjw.step(wm, wd)`` advances every device world in one kernel pass, then
 ``mjw.get_data_into(mirror, mjm, wd, e)`` refreshes every derived quantity
 (props / contacts / director / state readout consume the mirror unchanged;
-v095 C3 cameras at N>1 render from the warp batch directly, N=1 from the
+cameras at N>1 render from the warp batch directly, N=1 from the
 mirror's CPU ``mujoco.Renderer``).
 
-P4 scope: ``nworld=N`` batched worlds on ONE warp ``Model`` + ONE ``Data``;
-the N CPU ``MjData`` mirrors stay the read face.  N=1 keeps the P3 code path
+Batch scope: ``nworld=N`` batched worlds on ONE warp ``Model`` + ONE ``Data``;
+the N CPU ``MjData`` mirrors stay the read face.  N=1 keeps the single-world path
 (one-element batch).  Device choice is warp's (``cpu`` or ``cuda:N``; default
 ``cuda:0`` when available).  Torch caches stay CPU, exactly like the mujoco
 backend.
@@ -22,7 +22,7 @@ Divergences from the CPU mujoco backend (documented, not bugs):
   chaotic and are NOT expected to agree.
 * Snapshot/restore is mirror-faithful (``mj_getState``/``mj_setState`` plus a
   per-world device re-seed), not CPU-bitwise: the warp device is rebuilt from
-  the mirrors on restore.  Batched worlds are independent (the P4 test pins
+  the mirrors on restore.  Batched worlds are independent (the test pins
   N>1 against N=1 runs).
 * Contact sets are warp's (``nacon``/``nefc`` + ``get_data_into`` contacts),
   not CPU mujoco's; ``ncon``/force values are mirror reads of warp's solve.
@@ -52,7 +52,7 @@ from unigym.env.backends.base import BackendCapabilities
 from unigym.cameras.manager import validate_image_frame
 from unigym._optional import MissingExtraError
 
-# M2b: the camera backend needs a GL context (mujoco.Renderer); EGL is the
+# The camera backend needs a GL context (mujoco.Renderer); EGL is the
 # verified headless backend on the humanoid_1 host (~0.5 ms/frame @224²).
 # MUST be set before the first `import mujoco` (gl_context reads it at
 # import time); an explicit MUJOCO_GL in the environment always wins.
@@ -151,13 +151,13 @@ from unigym.actuators import StandardPdActuator, build_actuator
 
 BASE_BODY = "pelvis"
 
-# capability bits: P4 runs N>1 as ONE batched warp Data (nworld=N) with N CPU
+# capability bits: runs N>1 as ONE batched warp Data (nworld=N) with N CPU
 # mirrors.  contacts/props/recorder ride the CPU mirror; cameras are per-world
-# (N=1 CPU mirror renderer, N>1 native warp batch renderer, v095 C3); the
+# (N=1 CPU mirror renderer, N>1 native warp batch renderer); the
 # actuator seam is the same software ctrl face as the mujoco backend.
-# v096 D1: bits must stay a CHECKED subset of MJWARP_TRAITS.  E1/E2 proved
-# both paths (tests/backends/mjwarp/test_recorder.py +
-# test_actuator_seam.py) and declared the matching traits.
+# bits must stay a CHECKED subset of MJWARP_TRAITS.  Both paths are
+# proved by tests/backends/mjwarp/test_recorder.py and
+# test_actuator_seam.py; the matching traits are declared.
 BACKEND_CAPABILITIES = BackendCapabilities(recorder=True, cameras=True,
                                            contacts=True, props=True,
                                            actuator_seam=True,
@@ -179,10 +179,10 @@ class _ActuatorTargetFeed:
 
 
 class MjwarpEnv(WarpBatchMixin):
-    """MuJoCo Warp backend (P4: N batched worlds, N CPU mirror read faces).
+    """MuJoCo Warp backend (N batched worlds, N CPU mirror read faces).
 
     Director dispatch is injected by the run layer (``BackendInfo.
-    director_ops``, v101 A1.5); this env advertises no backend name.
+    director_ops``); this env advertises no backend name.
     ``MjwarpDirectorOps`` adds the mirror->device push per write.
 
     Args (``build_env_backend`` kwargs; backend-specific keys come from the
@@ -191,7 +191,7 @@ class MjwarpEnv(WarpBatchMixin):
             unused — the simulator model is the MJ XML).
         adapter: Adapter (declares obs requests / orders).
         num_envs: native N>1 batched worlds (one warp ``nworld=N`` Data; N
-            CPU mirrors).  Cameras are per-world from v095 C3; director ops /
+            CPU mirrors).  Cameras are per-world; director ops /
             anchored articulation props still fail fast at N>1.
         episode_length_s: scalar or [lo, hi] (``env.episode_length_s``).
         decimation / sim_dt: policy/sim rate chain (4 x 0.005 -> 50 Hz).
@@ -201,21 +201,21 @@ class MjwarpEnv(WarpBatchMixin):
             string for direct construction).  ``mjcf`` is required; there
             is no default model (v101 A1 removed ``DEFAULT_MJ_MODEL`` and
             ``env.params.mj_model``).
-        articulations: the run's ordered neutral articulation specs (v101
-            A2/A3).  Entries declaring ``model.mjcf`` are composed into
+        articulations: the run's ordered neutral articulation specs.
+            Entries declaring ``model.mjcf`` are composed into
             the world base before the scene/props/camera injections;
             ``None``/no declared asset keeps the historical fused load
             path byte-identically.
         backend_params: yaml ``env.params`` dict.  Keys:
             mj_scene_params: optional slot dict passed through to the
                 registered ``mj_scene`` provider's dispatch verbatim
-                (v078; e.g. ``{seed: 2026}`` for
+                (e.g. ``{seed: 2026}`` for
                 robocasa_kitchen_random).  ABSENT -> ``{}`` -- the
                 provider's own fail-closed slot gates stay the single
                 truth.  Ignored (and validated nowhere) when
                 ``mj_scene`` is not declared.
             spawn_base_pose: optional fixed-base spawn declaration
-                (v078) -- ``{body: <name>, pos: [x, y, z], yaw: rad}``
+                -- ``{body: <name>, pos: [x, y, z], yaw: rad}``
                 rewrites the declared body's SPEC pose before compile
                 (the declared yaw IS the base's world yaw; the baked
                 quat is replaced).  For fixed-base models whose base
@@ -229,7 +229,7 @@ class MjwarpEnv(WarpBatchMixin):
                 (default [0, 0]); written into the freejoint qpos every reset.
             spawn_yaw: planar spawn heading in radians, finite scalar
                 (default 0.0); reset writes the (w,x,y,z) freejoint quat.
-                mujoco-only capability (R6): the isaaclab backend manages its
+                mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
             contact_force_threshold: foot-contact threshold in N (default
@@ -255,7 +255,7 @@ class MjwarpEnv(WarpBatchMixin):
                 actuator.step -> mj_step2 phase split (fresh per-substep
                 M/bias).  The isaaclab backends reject non-standard
                 declarations at the capability gate (error + hint).
-            reset: optional T1.4 reset-protocol block (legacy face; the
+            reset: optional reset-protocol block (legacy face; the
                 scene-bundle wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
                 at dispatch, see ``initializer``).  ABSENT -> the legacy
@@ -300,7 +300,7 @@ class MjwarpEnv(WarpBatchMixin):
         / lighting / depth_camera / init_pose: accepted for
         builder-kwargs parity and IGNORED (capabilities are all False, so
         the gate already rejected any non-None request) — EXCEPT
-        ``camera_manager`` (M2b/C3): a wired CameraManager gets its cameras
+        ``camera_manager``: a wired CameraManager gets its cameras
         injected into the MJ model (MjSpec, pre-compile) and renders at every
         obs refresh (N=1 CPU mirror renderer; N>1 the native warp batch
         renderer, ``backends/mjwarp/cameras.py``); it is the frame source for
@@ -364,7 +364,7 @@ class MjwarpEnv(WarpBatchMixin):
         if n < 1:
             raise ValueError(
                 f"MjwarpEnv requires num_envs>=1, got {num_envs}")
-        # v095 C3: cameras ARE per-world here (native warp batch renderer at
+        # Cameras ARE per-world here (native warp batch renderer at
         # N>1; the N=1 mirror path is unchanged), so the camera branch is not
         # rejected.  Director ops + anchored articulation props still write
         # model-global state with no per-world face.
@@ -399,7 +399,7 @@ class MjwarpEnv(WarpBatchMixin):
         # pre-compile; None -> the model is byte-identical (regression red
         # line)
         self.director_cfg = director_cfg
-        # v075 P1 scene-chain: env.params.mj_scene names a REGISTERED
+        # Scene-chain: env.params.mj_scene names a REGISTERED
         # scene definition (build_scene_definition) composed + attached
         # into the base spec (the robot world-part XML -- it owns the
         # world-level option/size/visual settings; attach never
@@ -411,7 +411,7 @@ class MjwarpEnv(WarpBatchMixin):
         self._placement_regions = {}
         _require_content_scene(self._content_spec, self.mj_scene)
         spawn_base = params.get("spawn_base_pose")
-        # v101 A3: compose the declared articulation assets into the world
+        # Compose the declared articulation assets into the world
         # base BEFORE the scene/props/camera/director injections.  None
         # means the base is already fused (no articulation declares
         # model.mjcf) and the historical load path stays byte-identical.
@@ -448,7 +448,7 @@ class MjwarpEnv(WarpBatchMixin):
             composed_xml = capture_composed_xml(
                 mjspec, self.artifact_dir, scene)
             if self.camera_manager is not None:
-                # M2b: inject the declared rigs as <camera> elements BEFORE
+                # Inject the declared rigs as <camera> elements BEFORE
                 # compilation (MjSpec path; see cameras/mujoco_backend.py)
                 self.camera_manager.setup_scene(mjspec)
             if self.prop_manager is not None:
@@ -459,7 +459,7 @@ class MjwarpEnv(WarpBatchMixin):
                 add_director_bodies(mjspec, self.director_cfg,
                                     self.prop_manager)
             self._model = mjspec.compile()
-            # M2: the assembled IR is the COMPILED one (addresses/ids
+            # The assembled IR is the COMPILED one (addresses/ids
             # filled from MjModel); the conformance digest still builds
             # the declared IR separately in ``scene_engine.describe``.
             self._model_ir = MjwarpModelProvider().describe(self._model)
@@ -508,7 +508,7 @@ class MjwarpEnv(WarpBatchMixin):
             self._boost_fz = float(boost.get("force_z", 0.0))
         else:
             self._boost_body_id, self._boost_fz = -1, 0.0
-        # v063 T3.2 EEF site record family (env.params.record_sites):
+        # EEF site record family (env.params.record_sites):
         # declarative per-step ``site/<name>/pos`` record keys (world
         # frame) -- the pack criteria's far predicates consume the GR1
         # grip sites.  Additive only: absent/empty declaration -> no ids,
@@ -540,7 +540,7 @@ class MjwarpEnv(WarpBatchMixin):
         # put_model snapshots the compiled model; every opt/timestep write
         # above has already landed, and the CPU MjModel stays the read face.
         # put_data broadcasts world 0 to every world -- the initial state.
-        # v095 C3: N>1 cameras need per-world cam_pos/cam_quat (batch_sizes);
+        # N>1 cameras need per-world cam_pos/cam_quat (batch_sizes);
         # N=1 keeps the unbatched model path bit-identical.
         self._wm = _put_warp_model(self._model, self.camera_manager, n)
         self._capacity = sizing.capacity_for(
@@ -573,7 +573,7 @@ class MjwarpEnv(WarpBatchMixin):
                 or not np.isfinite(self._spawn_yaw)):
             raise ValueError(
                 "spawn_xy must be finite xy; spawn_yaw must be finite radians")
-        # B8 (T1.2b): fixed-base (no freejoint) state-readout constants --
+        # Fixed-base (no freejoint) state-readout constants --
         # the base frame IS the configured spawn pose (the base is welded
         # to the world and never moves), velocities are zero, projected
         # gravity follows the spawn yaw.  The freejoint path never reads
@@ -602,7 +602,7 @@ class MjwarpEnv(WarpBatchMixin):
             self.prop_backend.bind_env(self)
             self.prop_backend.on_reset([0], self)
 
-        # v104.2: every engine iterates env.articulations / env.controls.
+        # Every engine iterates env.articulations / env.controls.
         # The run layer built the neutral control runtimes from RunSpec.controls
         # + the robot recipes; this backend resolves their addresses + drive
         # strategies against the compiled model.
@@ -706,7 +706,7 @@ class MjwarpEnv(WarpBatchMixin):
         self._episode_dur = sample_durations(
             self._dur_lo, self._dur_hi, n, self.device)
 
-        # M2b: cameras bind after the model/data exist (renderers, cam ids)
+        # Cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:
             self.camera_manager.bind_env(self)
 
@@ -754,7 +754,7 @@ class MjwarpEnv(WarpBatchMixin):
         """Gather index: ``data_pol[:, perm_pol2il]`` -> MJ hinge order."""
         return self._perm_pol2il
 
-    # M2b: the camera rigs consume the raw simulator handles
+    # The camera rigs consume the raw simulator handles
     @property
     def mj_model(self):
         """The live ``mujoco.MjModel`` (camera rigs + director ops).
@@ -880,7 +880,7 @@ class MjwarpEnv(WarpBatchMixin):
     def _refresh_obs_cache(self, raw_action=None, cmd=None) -> None:
         if len(self._articulation_order) > 1:
             refresh_articulation_obs(self)
-        # M2b: image keys come from the CameraManager — render + read at the
+        # Image keys come from the CameraManager — render + read at the
         # fixed point of the tick-read contract (docs/contracts/camera_contract.md §6):
         # the chase pose written at the PREVIOUS step tail is what this
         # render captures; sync_pose at THIS step tail writes the next one.
@@ -895,7 +895,7 @@ class MjwarpEnv(WarpBatchMixin):
             for k, v in self.contact_manager.read().items():
                 if k in self.contact_manager.obs_keys():
                     self.obs_cache[k] = v
-        # v057 ops detail face: adapter-requested contact_ops/<name> keys
+        # Ops detail face: adapter-requested contact_ops/<name> keys
         # carry the per-contact records (force/normal/v_t) for the
         # decision package + slip criterion; backend without the detail
         # face -> keys stay absent (the adapter degrades honestly)
@@ -919,7 +919,7 @@ class MjwarpEnv(WarpBatchMixin):
             self._serve_obs_request(req, fetch)
 
     def _serve_obs_request(self, req, fetch) -> None:
-        """Validate/serve ONE adapter observation request (v104.4 split)."""
+        """Validate/serve ONE adapter observation request."""
         # camera-served keys (ImageObsRequest or depth alias): validate
         # by FULL SHAPE + dtype (the manager contract), not last-dim
         if (self.camera_manager is not None
@@ -939,7 +939,7 @@ class MjwarpEnv(WarpBatchMixin):
                     f"obs '{req.key}' dim {val.shape[-1]} != requested "
                     f"{req.dim}")
             return
-        # v057 ops detail keys: dict-record lists served above -- no
+        # Ops detail keys: dict-record lists served above -- no
         # tensor validation (the adapter consumes the records as-is)
         if req.key.startswith("contact_ops/"):
             return
@@ -1010,7 +1010,7 @@ class MjwarpEnv(WarpBatchMixin):
         return out
 
     def _build_extra(self, state: dict, e: int = 0) -> dict:
-        """The recorded keys (per-articulation state namespaced; v103.5)."""
+        """The recorded keys (per-articulation state namespaced)."""
         del state, e
         extra = collect_core.build_extra(self, None, include_state=False)
         for art in self._articulation_order:
@@ -1058,7 +1058,7 @@ class MjwarpEnv(WarpBatchMixin):
     # actuator seam (docs/designs/v063-gr00t-adapter.md D2/D9)
     # ------------------------------------------------------------------ #
     def _settle_substeps(self, n: int) -> None:
-        """Zero-action settle loop (T1.4 stage 2).
+        """Zero-action settle loop.
 
         Exactly ``step()``'s per-substep physics with the targets PINNED
         to the stage-1 q0 (the audited ``composite_controller.reset()``
@@ -1180,7 +1180,7 @@ class MjwarpEnv(WarpBatchMixin):
         ABSENT ``actuators`` key -> the legacy body: the two default
         standard_pd laws bound to the exact policy/hand slot tables;
         ``_apply_pd`` (the retired inline formula) keeps its signature and
-        the default code path stays bit-identical (D9).  A DECLARED map
+        the default code path stays bit-identical.  A DECLARED map
         must cover every robot joint (policy + hands) exactly once
         (fail-fast gaps/duplicates/prop-slot collisions); a non-standard
         law in the map switches the loop into the
@@ -1228,7 +1228,7 @@ class MjwarpEnv(WarpBatchMixin):
             for s in slot_list:
                 claimed[s] = gname
             acts.append(act)
-        # B6 (T1.2b): the coverage universe is the ACTUATED robot joints
+        # The coverage universe is the ACTUATED robot joints
         # (policy + hands) -- a fixed-base scene carries unactuated device
         # hinges / baked freejoints that no ctrl law may or must address
         # (for G1 this is exactly the non-Prop hinge set, unchanged)
@@ -1281,7 +1281,7 @@ class MjwarpEnv(WarpBatchMixin):
         The ctrl write face is the actuator seam (``_setup_actuator_seam``):
         default = the legacy explicit-PD body; a declared
         ``env.params.actuators`` map with a non-standard law runs the
-        mj_step1/step2 phase split (D9).
+        mj_step1/step2 phase split.
         """
         targets = route_actions(self, actions, label="mjwarp backend")
         for e, d in enumerate(self._datas):
@@ -1290,7 +1290,7 @@ class MjwarpEnv(WarpBatchMixin):
             d.ctrl[self._prop_ctrl_mask] = \
                 self._prop_targets[e][self._prop_ctrl_mask]
         if self._actuator_seam_declared:
-            # declared ctrl laws (v063 D9 fresh-forward): targets fed once
+            # declared ctrl laws (fresh-forward): targets fed once
             # per control step (held across the substeps); laws recompute
             # per substep.  Non-standard laws run the phase split
             # mj_step1 -> actuator.step -> mj_step2: mj_step alone would
@@ -1366,7 +1366,7 @@ class MjwarpEnv(WarpBatchMixin):
             d.qvel[:] = 0.0
             d.ctrl[:] = 0.0
             if self.prop_backend is not None:
-                # P15 parity: re-place props BEFORE the forward (reset chain
+                # Parity: re-place props BEFORE the forward (reset chain
                 # mirrors isaaclab2/env.py: robot reset -> props placement ->
                 # forward)
                 self.prop_backend.on_reset([e], self)

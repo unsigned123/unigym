@@ -1,4 +1,4 @@
-"""build_instance: the ONE construction point for a run (v097 R1).
+"""build_instance: the ONE construction point for a run.
 
 Turns a frozen :class:`~unigym.run.spec.RunSpec` into a live
 :class:`~unigym.run.instance.RunInstance` -- robot profile + adapter,
@@ -287,7 +287,7 @@ def _lighting_json(values: Mapping[str, float]) -> dict[str, JsonValue]:
 
 
 def _policy_hz_of(adapter: Adapter) -> float | None:
-    """The v069 wall render scheduler's clock.
+    """The wall render scheduler's clock.
 
     ``1 / adapter.control_dt`` (camera_contract §16); None when the adapter
     exposes no positive control period (probe doubles).
@@ -325,7 +325,7 @@ def _body_control_for(env: EnvBackend, articulation: str) -> ControlRuntime:
 def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[str, ...]]:
     """``{adapter_name: tuple[group_name, ...]}`` from ``RunSpec.controls``.
 
-    This is the authoritative control partition (v104.3): the config's
+    This is the authoritative control partition: the config's
     ``controls[]`` names exactly which control group each adapter drives.
     One group cannot be claimed by two adapters; recipe-derived extra faces
     and articulated props are NOT implicitly added here (an adapter that
@@ -377,7 +377,7 @@ def _build_replay(spec: ReplaySpec, num_envs: int) -> TraceReplay | None:
 
 
 def _recipe_section(art: ArticulationSpec) -> dict[str, JsonValue]:
-    """Project one articulation into the recipe-builder section (v104)."""
+    """Project one articulation into the recipe-builder section."""
     section: dict[str, JsonValue] = {"name": art.name}
     if art.params:
         section["params"] = dict(art.params)
@@ -427,7 +427,7 @@ def _control_recipes(
         except (AttributeError, KeyError, NotImplementedError, ValueError):
             # recipe-less articulations are legal only when every control
             # declares its joints/q0 explicitly (e.g. a future prop face);
-            # a `joint_set` selector REQUIRES a recipe (v105).
+            # a `joint_set` selector REQUIRES a recipe.
             if any(g.joint_set is not None for g in groups):
                 raise ValueError(
                     f"control articulation {art.name!r} has no RobotRecipe "
@@ -464,7 +464,7 @@ def _build_robot_and_props(
     # env.params (PD lives inside the backend) -- reject explicitly.
     # The pluggable ctrl laws on the mujoco side go through
     # env.params.actuators (the unigym/actuators top-level package,
-    # v063 D2/D9: standard_pd / computed_torque_pd / native_servo) --
+    # standard_pd / computed_torque_pd / native_servo) --
     # the top-level "actuator" key semantics unchanged (isaaclab-only).
     if "actuator" in cfg:
         if info.build_actuator_override is None \
@@ -501,7 +501,7 @@ def _build_robot_and_props(
         raise TypeError("run config 'adapter' section must be a mapping")
     adapter = build_adapter(adapter_section, num_envs=num_envs, device=device,
                             body_parts=_profile_body_parts(profile))
-    # P9d: hierarchical adapters generate their own command each step ->
+    # hierarchical adapters generate their own command each step ->
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(adapter.generates_command)
     return {"profile": profile, "profiles": profiles, "terrain": terrain,
@@ -676,7 +676,7 @@ def _build_env_and_sampler(
         device=device,
         # backend-specific params (yaml env.params; mujoco: spawn_height /
         # contact_force_threshold / kp / kd).  The run-level world_base is
-        # an explicit kwarg (v101 A1), never an env.params key.  isaaclab's
+        # an explicit kwarg, never an env.params key.  isaaclab's
         # IsaaclabEnv does not accept this key -> isaaclab-only parity.
         # The artifact dir is an explicit mujoco kwarg (not an
         # env.params key): it is run wiring, never scene configuration.
@@ -899,7 +899,7 @@ def _build_bridge_and_wiring(
     attach_scene(bridge, env, backend_label, robot_name=robot_name)
     # watchers: cmd-15 handler + per-tick hook (before the step gate);
     # born-armed specs came from --watch (fail-fast parsed above).
-    # v068: watcher artifacts live under <runtime_dir>/watch/<run_id>/
+    # watcher artifacts live under <runtime_dir>/watch/<run_id>/
     # (watch/ + watchers.json; design §2) -- events.jsonl stays in the
     # run's output dir (the daemon tail-face reads it there).
     from unigym import runtime_dirs
@@ -931,22 +931,22 @@ def _build_bridge_and_wiring(
             base_stop() if base_stop is not None else False)
     stop_when = _stop_when
 
-    # rewind face (Round B B1): the providers are constructed here; the
+    # rewind face: the providers are constructed here; the
     # controller attach needs the engine (built by the CLI after this).
-    # v057 providers: the sink facilities' open-episode state joins every
+    # providers: the sink facilities' open-episode state joins every
     # checkpoint payload and is restored fail-fast with the engine+adapter
     from unigym.runtime.rewind_providers import build_rewind_providers
     initializer: object | None = getattr(env, "_initializer", None)
     rewind_providers = build_rewind_providers(
         sink, initializer=initializer)
-    # freeze face (v056 freeze paradigm): skill halt -> world freeze.
+    # freeze face (freeze paradigm): skill halt -> world freeze.
     # Engine-thread park hook for adapters that declare it (agent_g1);
     # a no-op mount for every other adapter.
     from unigym.runtime.freeze import attach as attach_freeze
     attach_freeze(bridge, adapter)
     # born-paused truth: a --serve_pause run parks via the gate at
     # construction -- adopt that park as the time proxy's command
-    # truth so /health.paused is honest from tick 0 (v056)
+    # truth so /health.paused is honest from tick 0
     set_paused: object = getattr(adapter, "set_time_truth_paused", None)
     if _config_bool(spec.bridges["serve_pause"]) and callable(set_paused):
         set_paused(True)
@@ -989,7 +989,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     adapter = robot["adapter"]
     prop_manager = robot["prop_manager"]
     generates_command = robot["generates_command"]
-    # v104.2/v105.2: RunSpec.controls is authoritative.  Build one
+    # RunSpec.controls is authoritative.  Build one
     # ControlRuntime per declared group by expanding `joint_set` from the
     # recipe (or using explicit `joints`) -- once.  The same resolved
     # controls freeze into the read-only plan; no guessing path remains.
@@ -1034,8 +1034,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
         names = [type(f).__name__ for f in filter_chain]
         print(f"[collect] filter chain ({len(filter_chain)}): {names}", flush=True)
 
-    # P10: unified termination checks (detection-only; episodes still end by
-    # duration).  v106.1: terminations are explicit; no default fall group is
+    # unified termination checks (detection-only; episodes still end by
+    # duration).  Terminations are explicit; no default fall group is
     # synthesised when the config omits the section.
     term_group = build_termination_group(_config_list(cfg.get("terminations")))
     print(f"[collect] terminations: {term_group.names} "

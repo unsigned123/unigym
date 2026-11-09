@@ -20,7 +20,7 @@ Responsibilities (design doc §1.1, owner rulings ①②③):
   annotator output is degenerate; the manager serves an all-inf frame
   (depth) / all-zero frame (RGB) instead (generalization of the classic
   ``_raw_depth_frame`` all-far mechanism), warning ONCE per key.
-* **Render scheduling** — per-camera wall-clock fps (v069; tier defaults
+* **Render scheduling** — per-camera wall-clock fps (tier defaults
   by name, declared intervals fold to ``target_fps = policy_hz/N``);
   between due times the last cached frame is served
   (stale-until-next-read).
@@ -77,11 +77,11 @@ free debug fly camera is a world rig by the console convention)."""
 LIVE_PROPERTY_KEYS = ("fps", "interval", "pitch_deg", "pose_offset",
                       "render", "roll_deg", "target_env", "yaw_deg")
 """camera_set_properties live whitelist (owner ruling): pose offset,
-yaw-pitch, target_env, interval -- plus the v054 ``render`` live key
+yaw-pitch, target_env, interval -- plus the ``render`` live key
 (the publish loop's ONLY render state: ``{"view": name}`` or a RenderSpec
 fragment, resolved to a COMPLETE spec on write -- full-write semantics)
-and the v069 ``fps`` wall-rate key (target_fps; the wall scheduler's live
-knob; ``interval`` is the deprecated v069 alias -- v070 removes it).
+and the ``fps`` wall-rate key (target_fps; the wall scheduler's live
+knob; ``interval`` is the deprecated alias -- v070 removes it).
 EVERY other property (resolution, kind, types, hfov, depth_type, clips,
 ...) is construction-frozen and must go through a restart."""
 
@@ -120,7 +120,7 @@ class CameraManager:
                  policy_hz: float | None = None):
         self.specs = list(specs)
         self.rigs = list(rigs)
-        # the policy control rate (1 / adapter.control_dt) -- the v069
+        # the policy control rate (1 / adapter.control_dt) -- the
         # wall-clock render scheduler's clock reference: declared
         # intervals fold to target_fps = policy_hz / N and tier defaults
         # need it.  None (probe/test managers) keeps the legacy per-tick
@@ -143,7 +143,7 @@ class CameraManager:
         self._counter = 0
         self._last: dict[str, torch.Tensor] = {}
         self._warned: set[str] = set()
-        # v069 wall scheduler: last render wall-clock (monotonic) per rig
+        # wall scheduler: last render wall-clock (monotonic) per rig
         # name -- the tick_and_read due check
         self._last_read: dict[str, float] = {}
         self.num_envs: int | None = None
@@ -203,7 +203,7 @@ class CameraManager:
     def bind_env(self, env) -> None:
         """Bind every rig to the constructed env (grabs sensor handles).
 
-        v095 C2: validate ``env_poses`` against the REAL ``num_envs`` and
+        validate ``env_poses`` against the REAL ``num_envs`` and
         apply the declared pose table (single pose -> shared row;
         ``env_poses`` -> per-instance rows) right after binding.
         """
@@ -245,7 +245,7 @@ class CameraManager:
         the last read (stale); pre-render placeholders are substituted per
         the module docstring.  Every returned tensor is validated against
         its :class:`ImageObsRequest` (shape + dtype) — fail-fast on
-        annotator surprises.  v069: the due check is WALL-CLOCK per
+        annotator surprises.  The due check is WALL-CLOCK per
         camera (§16.1); no policy clock keeps the legacy counter bitwise.
         """
         if self.num_envs is None:
@@ -297,7 +297,7 @@ class CameraManager:
         follow/pose semantics apply through ``sync_pose`` (chase = video
         follow).  NOTE the known trade-off: the video shares the obs
         camera's resolution/interval (docs/contracts/camera_contract.md).
-        WYSIWYG (v054): when the rig carries a NON-default live render
+        WYSIWYG: when the rig carries a NON-default live render
         state (the ``render`` live key), the frame is re-rendered through
         the RenderSpec capture face with that state, so the recording
         shows what the live stream shows -- the policy obs cache stays
@@ -318,7 +318,7 @@ class CameraManager:
         return val[env_idx].detach().cpu().numpy()
 
     def render_state(self, name: str) -> dict | None:
-        """One rig's current live render state (the v054 ``render`` live
+        """One rig's current live render state (the ``render`` live
         key; the publish loop's ONLY render state).  ``None`` = the plain
         publish path (unset / explicitly reset / non-mujoco rig).  The
         capture face never reads this -- the publish loop, status faces
@@ -418,7 +418,7 @@ class CameraManager:
         return np.array(val[idx].detach().cpu().numpy())
 
     # ------------------------------------------------------------------ #
-    # RenderSpec capture (v054; camera_contract §14)
+    # RenderSpec capture (camera_contract §14)
     # ------------------------------------------------------------------ #
     def capture(self, name: str, env_id: int | None = None,
                 pos=None, lookat=None, *, render) -> dict:
@@ -555,9 +555,9 @@ class CameraManager:
         Whitelist : ``pose_offset`` (mount-frame ``[dx, dy, dz]``),
         ``yaw_deg`` / ``pitch_deg`` (mount-frame orientation offset,
         positive pitch = down), ``roll_deg`` (rotation about the view
-        axis), ``target_env``, ``interval`` (DEPRECATED
-        v069: folds to target_fps when the policy clock is known) and
-        ``fps`` (v069 wall render rate; wins over interval) -- plus the
+        axis), ``target_env``, ``interval`` (DEPRECATED: folds to
+        target_fps when the policy clock is known) and
+        ``fps`` (wall render rate; wins over interval) -- plus the
         Freecam face ``pos`` + ``lookat`` (absolute world-frame
         pose, fixed rigs only, both keys together and alone in the call).
         Any other key raises ``ValueError`` "...requires restart".
@@ -604,7 +604,7 @@ class CameraManager:
         if "interval" in params or "fps" in params:
             self._apply_rate_keys(name, spec, params)
         if "render" in params:
-            # v054 live render key: the publish loop's ONLY render
+            # live render key: the publish loop's ONLY render
             # state.  The value is a RenderSpec ({"view": name} or a
             # fragment) -- resolved ONCE here to the COMPLETE spec and
             # stored on the rig (full-write semantics; a partial update
@@ -645,7 +645,7 @@ class CameraManager:
 
     def _apply_rate_keys(self, name: str, spec: CameraSpec,
                          params: dict) -> None:
-        """The v069 rate keys of one live write (§16; pure in base)."""
+        """The rate keys of one live write (§16; pure in base)."""
         apply_rate_keys(spec, name, params, self.policy_hz)
 
     def _apply_absolute_pose(self, name: str, spec: CameraSpec,
@@ -730,15 +730,15 @@ def build_camera_manager(cameras_cfg, obs_requests,
             overrides applied to the IMPLICIT shim camera only (verbatim
             semantics; a user-declared ``depth`` camera wins instead).
         backend: ``"isaaclab"`` (default; kit sensors), ``"mujoco"``
-            (M2b; MjSpec-injected cameras + in-process renderers) or
+            (MjSpec-injected cameras + in-process renderers) or
             ``"mjwarp"`` (C3; N=1 mirror renderer, N>1 native warp batch).
         render_groups: optional per-config geom-class declaration for the
             capture flags face (``env.params.render_groups``; §14).  Only
             consumed by mujoco rigs (v1).
         policy_hz: the policy control rate (1 / adapter.control_dt) --
-            the v069 wall scheduler's clock (§16); None keeps the legacy
+            the wall scheduler's clock (§16); None keeps the legacy
             per-tick counter semantics (probe scripts).
-        num_envs: the run's environment count for the v096 ``TraitScope``
+        num_envs: the run's environment count for the ``TraitScope``
             availability check (``None`` = no scope check).
 
     Returns ``None`` when nothing is requested (no-camera runs are

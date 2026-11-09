@@ -9,7 +9,7 @@ the world -- is the SHM segment:
 
 * status block seqlock writes (step / episodes / last_metrics JSON /
   timestamps)
-* **unconditional wall-scheduled frame publishing** (v069): a run publishes
+* **unconditional wall-scheduled frame publishing**: a run publishes
   the broadcasting camera's frame whenever the camera's render schedule
   comes due -- wall-clock target fps when resolvable (the scheduler's
   resolution lives in the camera manager; camera_contract §16), the legacy
@@ -863,7 +863,7 @@ class Bridge:
 
     # Wall-clock floor of the FROZEN RENDER PUMP for counter-mode
     # managers (no wall fps resolvable -- test doubles / probe runs).
-    # Managers WITH a wall fps (the v069 scheduler) pump at the camera's
+    # Managers WITH a wall fps (the wall scheduler) pump at the camera's
     # own target period instead (§16); a property write always publishes
     # on the next pump beat via the force flag.  0.04s = 25Hz, the
     # historical parked cadence.
@@ -950,7 +950,7 @@ class Bridge:
         self._frozen = False
         self._closed = False
         self.shutdown_requested = False
-        # v069 wall scheduler: a camera property write (set_props /
+        # wall scheduler: a camera property write (set_props /
         # set_camera) invalidates the render schedule -- the next pump
         # / tick publishes IMMEDIATELY (the aim→new-frame ≤50ms beat:
         # the parked service loop iterates at poll_interval, so a pose
@@ -976,7 +976,7 @@ class Bridge:
         # flags when a live apply lands while the gate is PARKED -- the
         # parked loop serves commands but runs no ticks)
         self._last_metrics: dict[str, JsonValue] = {}
-        # rewind face (Round B B1): the controller registers the snapshot/
+        # rewind face (Round B): the controller registers the snapshot/
         # rewind/snapshots handlers; the boundary slot arms the one-shot
         # RewindBoundary raise at the end of the tick that applied a
         # rewind; rewind_log is the process-truth record of rewinds
@@ -1022,7 +1022,7 @@ class Bridge:
                  "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
                  "obs_catalog_keys": self.obs_catalog_keys,
                  "started": time.strftime("%Y-%m-%d %H:%M:%S")}
-        # v068: default registry home is <runtime_dir>/serve
+        # default registry home is <runtime_dir>/serve
         # (designs/v068-runtime-layout.md §3); the explicit --serve_state_dir
         # and the UNIGYM_SERVE_DIR legacy entry keep winning.
         sdir = Path(state_dir or os.environ.get("UNIGYM_SERVE_DIR")
@@ -1076,7 +1076,7 @@ class Bridge:
         """The whole foreground cost, per engine tick.
 
         ① heartbeat bump ② status seqlock write ③ watcher evaluation
-        ④ step-gate boundary ⑤ scheduled publish (v069 wall fps;
+        ④ step-gate boundary ⑤ scheduled publish (wall fps;
         legacy interval counter without a policy clock) ⑥ command serving.
 
         The heartbeat leads: every loop iteration is a liveness proof,
@@ -1092,7 +1092,7 @@ class Bridge:
         if self._watchers is not None:
             self._watchers.on_tick(int(t), bundle)
             metrics["watchers"] = self._watchers.status_brief()
-        # v054: the live render state rides the status JSON block so
+        # the live render state rides the status JSON block so
         # cross-process readers (daemon status/run-info, webui badge)
         # see the live toggle without a command round-trip; the capture
         # backend face rides too (webui auto-disable signal)
@@ -1142,7 +1142,7 @@ class Bridge:
         self._enter_paused()
 
     def pause_for_halt(self) -> None:
-        """v056 freeze paradigm: skill halt -> world freeze.
+        """Freeze paradigm: skill halt -> world freeze.
 
         Called by the adapter on the ENGINE thread at the halt point,
         so the gate parks at the halt tick's own step boundary -- zero
@@ -1255,7 +1255,7 @@ class Bridge:
     def _camera_interval(self) -> int:
         """The broadcast camera's legacy render interval (ticks/frame).
 
-        Rig spec.interval; the counter path of the v069 scheduler —
+        Rig spec.interval; the counter path of the wall scheduler —
         only used when no wall fps is resolvable (managers without a
         policy clock: test doubles / probe runs).  Duck-typed: managers
         without specs publish every tick.
@@ -1269,7 +1269,7 @@ class Bridge:
         return 1
 
     def _camera_fps(self) -> float | None:
-        """The broadcast camera's effective wall fps (v069; §16.1).
+        """The broadcast camera's effective wall fps (§16.1).
 
         Duck-asks the manager's ``effective_fps`` face (the ONE
         resolution point: target_fps > interval fold > tier default);
@@ -1294,7 +1294,7 @@ class Bridge:
         return None
 
     def _publish_due(self) -> bool:
-        """True this tick at the camera's render schedule (v069).
+        """True this tick at the camera's render schedule.
 
         Force flag (a property write just landed) > wall fps due >
         legacy interval counter.  Frames publish UNCONDITIONALLY
@@ -1308,7 +1308,7 @@ class Bridge:
         return self._tick_count % self._camera_interval() == 0
 
     def _pump_due(self) -> bool:
-        """The frozen-pump due check (v069 §2.2; parked service loop).
+        """The frozen-pump due check (§2.2; parked service loop).
 
         Same schedule as :meth:`_publish_due` except the counter-mode
         fallback uses the wall ``PARKED_PUBLISH_PERIOD`` floor (a parked
@@ -1321,7 +1321,7 @@ class Bridge:
         return (time.time() - self._last_publish) >= period
 
     def _render_state(self) -> dict[str, JsonValue] | None:
-        """The publishing camera's live render state (v054 ``render``).
+        """The publishing camera's live render state (``render``).
 
         ``None`` = the plain publish path / no such face.
         """
@@ -1340,7 +1340,7 @@ class Bridge:
     def _refresh_status_block(self) -> None:
         """Re-publish the per-tick status JSON with fresh render state.
 
-        v054: a live apply while PARKED must be visible cross-process
+        A live apply while PARKED must be visible cross-process
         immediately -- the parked loop serves commands but runs no
         ticks.  Best effort: the next tick rewrites it anyway.
         """
@@ -1360,12 +1360,12 @@ class Bridge:
     def _copy_broadcast_frame(self) -> None:
         """Camera copy; never raises into the sim loop.
 
-        §8.3→v054: the publish loop reads the camera's live render
+        §8.3: the publish loop reads the camera's live render
         STATE (the ``render`` live key); a non-default state renders
         through the RenderSpec capture face with that state (WYSIWYG --
         the stream shows the toggled render), the default (``None``)
         keeps the plain path bit-for-bit.  The capture face itself stays
-        stateless.  v069: consumes the force flag (a property write
+        stateless.  The publish path consumes the force flag (a property write
         landed -- the schedule restarts from HERE).
         """
         self._last_publish = time.time()
@@ -1434,7 +1434,7 @@ class Bridge:
                     name, _as_mapping(params.get("params")),
                     _as_int(params.get("env_id")))
                 result = {"applied": True, "camera": name}
-                # v054: the ack echoes the resulting live render state
+                # the ack echoes the resulting live render state
                 # (the applied source label; the full spec rides when
                 # non-default), and the status JSON block is refreshed
                 # NOW -- a parked run runs no ticks, so the
@@ -1447,7 +1447,7 @@ class Bridge:
                 else:
                     result["render_source"] = "default"
                 self._refresh_status_block()
-                # v069: the render schedule restarts NOW -- the next
+                # the render schedule restarts NOW -- the next
                 # tick / pump beat publishes the new state immediately
                 # (the aim -> new-frame <=50ms beat, §16.4)
                 self._publish_now = True
@@ -1530,14 +1530,14 @@ class Bridge:
     def _gate_park(self) -> None:
         """Park the engine in the StepGate until resume / step budget.
 
-        While parked the bridge runs the FROZEN RENDER PUMP (v069 §2.2):
+        While parked the bridge runs the FROZEN RENDER PUMP (§2.2):
         the world is frozen (no step), so a periodic wall-clock check
         re-renders the broadcasting camera from the stable mjData and
         publishes to SHM -- camera moves (aim / pose writes) and style
         changes show up on the stream within one poll interval, and the
         parked feed holds the camera's wall fps (the orbit cruise of a
         frozen scene is a smooth video at zero tick cost).  Rendering
-        runs on THIS thread -- the engine's EGL-bound thread (v0611
+        runs on THIS thread -- the engine's EGL-bound thread (the
         copy-render path; no new render thread / GL context anywhere).
         Commands (get_view / set_props / inspect / step / ...) keep
         being served between pump beats.
@@ -1567,7 +1567,7 @@ class Bridge:
             raise BridgeError(
                 "no broadcast camera in this run; pass an explicit camera")
         if "flags" in params:
-            # v054 owner ruling: the flags key is GONE at the bridge
+            # owner ruling: the flags key is GONE at the bridge
             # layer (no deprecation window; the CLI's --flags is the
             # only surviving alias and it expands BEFORE the wire).  The
             # RenderSpec key is `render`; both keys together fail-fast
@@ -1778,7 +1778,7 @@ class Bridge:
                    "frame_id": _u64(buf, H_FPTR) >> 8,
                    "frames_dropped": self._frames_dropped,
                    "rewinds": len(self.rewind_log)})
-        # v054: the owner-side status carries the live render state
+        # the owner-side status carries the live render state
         # (the applied source label; null = plain path) + the capture
         # backend face (the webui auto-disable signal) directly; the
         # cross-process copies ride the status JSON block

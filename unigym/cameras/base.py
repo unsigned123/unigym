@@ -50,14 +50,14 @@ DEPTH_ALIAS_KEYS = ("depth_image", "depth_image_raw")
 
 
 # --------------------------------------------------------------------------- #
-# wall-clock render scheduling (v069; docs/contracts/camera_contract.md §16)
+# wall-clock render scheduling (docs/contracts/camera_contract.md §16)
 # --------------------------------------------------------------------------- #
 CAMERA_TIER_FPS = {
     "ego": 30.0, "wrist": 30.0, "zoom": 30.0,      # close observation tier
     "closeup": 15.0, "chase": 15.0, "free": 15.0,  # panoramic / debug tier
     "top": 15.0, "side": 15.0,
 }
-"""v069 render fps tiers (design §2.3): 30 fps for the close observation
+"""render fps tiers (design §2.3): 30 fps for the close observation
 surfaces, 15 fps for the panoramic / debug surfaces.  A camera name not in
 the table defaults to 30 (the "默认 30" rule)."""
 
@@ -69,7 +69,7 @@ def default_target_fps(name: str) -> float:
 
 def render_due(spec, policy_hz: float | None, counter: int,
                last_read: float | None, now: float) -> bool:
-    """The v069 wall-clock due check for one read tick (§16.1).
+    """The wall-clock due check for one read tick (§16.1).
 
     A resolvable fps renders on the wall schedule (``now`` past
     ``last_read`` by one fps period); without one (no policy clock) the
@@ -84,7 +84,7 @@ def render_due(spec, policy_hz: float | None, counter: int,
 
 def apply_rate_keys(spec, name: str, params: dict,
                     policy_hz: float | None) -> None:
-    """The v069 rate keys of one live ``apply_properties`` write (§16).
+    """The rate keys of one live ``apply_properties`` write (§16).
 
     ``interval`` (DEPRECATED, removed v070) folds to
     ``target_fps = policy_hz / N`` under a policy clock (the counter
@@ -116,7 +116,7 @@ def apply_rate_keys(spec, name: str, params: dict,
 
 def fold_declared_intervals(cameras_cfg, policy_hz: float | None) \
         -> list:
-    """Parse the yaml camera list with the v069 interval migration
+    """Parse the yaml camera list with the interval migration
     (§16.2): a DECLARED interval folds to ``target_fps = policy_hz/N``
     (same average rate, wall scheduling; v070 removes the key) with the
     deprecation notice printed.  An explicit ``target_fps`` wins -- the
@@ -140,14 +140,14 @@ def fold_declared_intervals(cameras_cfg, policy_hz: float | None) \
 
 def effective_target_fps(spec, policy_hz: float | None = None) \
         -> float | None:
-    """One camera's effective wall render fps (v069 scheduler).
+    """One camera's effective wall render fps (scheduler).
 
     Resolution order (docs/contracts/camera_contract.md §16.1):
 
     1. ``spec.target_fps`` -- explicit (yaml ``target_fps:`` or the live
        ``fps`` property) always wins;
     2. a DECLARED ``interval`` folds to ``policy_hz / interval`` (the
-       v069 migration: same average rate, wall semantics);
+       migration: same average rate, wall semantics);
     3. otherwise the tier default (§2.3) -- needs a policy clock;
     4. ``None`` -- no policy clock available: the caller keeps the legacy
        per-tick counter semantics (probe/test doubles without a run
@@ -169,7 +169,7 @@ def effective_target_fps(spec, policy_hz: float | None = None) \
 
 
 def rig_hide_geom_groups(rig, name: str) -> tuple[int, ...]:
-    """Parse the mujoco-only ``hide_geom_groups`` rig key (v063 T1.3).
+    """Parse the mujoco-only ``hide_geom_groups`` rig key.
 
     Value: geom-group indices force-hidden in this camera's MjvOption
     (BOTH the plain render and the RenderSpec capture path).  The GR1
@@ -253,7 +253,7 @@ class CameraSpec:
             ``target_fps = policy_hz / interval`` at manager build (same
             average rate, wall-clock scheduling); declare ``target_fps``
             instead.
-        target_fps: wall-clock render rate (fps; v069 scheduler).  ``None``
+        target_fps: wall-clock render rate (fps; scheduler).  ``None``
             = tier default by camera name (§16.1: ego/wrist/zoom 30,
             closeup/chase/free/top/side 15, else 30).  Wins over a
             declared ``interval`` (new key priority).
@@ -271,14 +271,14 @@ class CameraSpec:
             (pose-sync + read only touch the target_env instance), not a
             single physical sensor.  The obs path stays batched (N, ·) in
             every case.
-        count: request axis (v095), ``global`` (one scene-wide instance) or
+        count: request axis, ``global`` (one scene-wide instance) or
             ``per_env`` (one instance per env).  Default derived from
             ``instance`` (legacy mapping below): ``per_env`` -> per_env.
-        state: request axis (v095), ``shared`` (one pose broadcast) or
+        state: request axis, ``shared`` (one pose broadcast) or
             ``per_instance`` (each ``(camera, env)`` has its own state).
             Default derived from ``instance``: ``per_env`` -> per_instance,
             ``shared`` -> shared (NOT global).
-        env_poses: optional per-env DECLARED world poses (v095 C2), a list
+        env_poses: optional per-env DECLARED world poses, a list
             of ``{"pos": [x, y, z], "quat": [w, x, y, z]}`` dicts (world
             convention).  Length must be 1 (one pose broadcast over the N
             instances) or exactly ``num_envs`` (validated at manager bind);
@@ -415,7 +415,7 @@ class CameraSpec:
                 f"lengths are 1 (broadcast) or num_envs={int(num_envs)}")
 
     def _resolve_request_axes(self) -> None:
-        """Derive/validate the v095 ``count × state`` request axes."""
+        """Derive/validate the ``count × state`` request axes."""
         if self.count is None:
             self.count = "per_env"
         if self.state is None:
@@ -459,7 +459,7 @@ class CameraSpec:
             kwargs["types"] = tuple(kwargs["types"])
         spec = cls(rig=rig, **kwargs)
         if "interval" in kwargs and "target_fps" not in kwargs:
-            # v069 migration marker (camera_contract §16.2): a DECLARED
+            # migration marker (camera_contract §16.2): a DECLARED
             # interval folds to policy_hz/interval at manager build.  The
             # deprecation notice prints there (it knows policy_hz); this
             # marker only distinguishes "declared interval" from the

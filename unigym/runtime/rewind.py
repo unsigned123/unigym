@@ -1,4 +1,4 @@
-"""Rewind face: the snapshot/rewind/snapshots command handlers (Round B B1).
+"""Rewind face: the snapshot/rewind/snapshots command handlers (Round B).
 
 The time-travel superpower (design v052-round-b §1): a step boundary
 snapshot of the WHOLE run state, and a restore that forks the timeline
@@ -14,7 +14,7 @@ back to it.  Everything the next ``adapter.act`` consumes is covered:
   ``on_rewind(restored_tick)`` resync hook (in-flight skill drop -> hold,
   EventCompiler seq rollback, TimeAccount/TimeControl resync, ledger
   rewind marker);
-* providers -- :class:`RewindStateProvider` facilities (v057, design
+* providers -- :class:`RewindStateProvider` facilities (design
   v057-rewind-v2 §1): each provider's ``rewind_state()`` joins the SAME
   checkpoint payload (one freeze point, one package) and is applied
   after the adapter during the restore; any failure aborts the whole
@@ -22,7 +22,7 @@ back to it.  Everything the next ``adapter.act`` consumes is covered:
   back).  The abandoned branch's provider buffers are dumped under
   ``<out_dir>/attempts/`` BEFORE the restore (dump, don't discard).
 
-v063 pre-flight two-phase (design v063-rewind-preflight, owner ruling
+Pre-flight two-phase (design v063-rewind-preflight, owner ruling
 batch 1): the whole refusal surface -- the controller-level cross-episode
 guard, per-provider state presence, per-provider ``validate_rewind_state``
 (the SAME judgment its apply enforces) -- runs READ-ONLY before the
@@ -45,7 +45,7 @@ never hasattr.  Snapshot slots are an engine-side LRU ring capped at 8:
 admitting a ninth evicts the OLDEST and the eviction is surfaced
 explicitly in the ack (never silent); rewinding to an evicted id is an
 explicit error.  v1 is memory-only (restart loses every snapshot — honest
-note, no persistence).  v056 checkpoint ring: the slot cap is 16 (the
+note, no persistence).  The checkpoint ring: the slot cap is 16 (the
 freeze paradigm spends slots — every freeze point auto-snapshots) and
 each snapshot lands one append-only ``checkpoint`` line in the adapter
 ledger (the undo anchor trail).
@@ -192,7 +192,7 @@ class RewindController:
             present).
         engine: SyncRunner (loop counter + iteration-state seam).
         backend_label: canonical backend name (registry trait lookup).
-        providers: optional :class:`RewindStateProvider` list (v057) --
+        providers: optional :class:`RewindStateProvider` list --
             each one's ``rewind_state()`` joins every checkpoint payload
             under its ``name`` and is applied during the restore, after
             the adapter (fail-fast: any failure aborts the whole rewind).
@@ -254,7 +254,7 @@ class RewindController:
             # (a random resampler's RNG/timers live outside the
             # snapshot).  A sampler that declares itself rewind_inert
             # (explicit class attribute, the rewindable discipline) is
-            # stateless by construction -- the v056 checkpoint ring
+            # stateless by construction -- the checkpoint ring
             # needs it: agent_g1 session configs carry an IGNORED fixed
             # command sampler (the adapter never reads it) and would
             # otherwise lose every checkpoint.
@@ -299,12 +299,12 @@ class RewindController:
                         if callable(getattr(self.adapter,
                                             "snapshot_internal", None))
                         else None),
-            # v057 provider states: the SAME freeze point packages the
+            # provider states: the SAME freeze point packages the
             # engine + adapter + every facility's necessary state (the
             # consistency guarantee is constructional -- one package)
             "providers": {p.name: p.rewind_state()
                           for p in self.providers},
-            # v063 pre-flight face: the backend's episode counter at the
+            # pre-flight face: the backend's episode counter at the
             # freeze point (env 0; process truth per contract §4.1 --
             # never rewinds).  The rewind pre-flight compares it against
             # the live bundle: the controller-level cross-episode guard
@@ -337,7 +337,7 @@ class RewindController:
                   f"cap {MAX_SNAPSHOTS} reached; rewinding to it now "
                   f"errors explicitly", flush=True)
         self._snaps[rec["snap_id"]] = rec
-        # v056 checkpoint ring: every snapshot is a freeze point's undo
+        # checkpoint ring: every snapshot is a freeze point's undo
         # anchor -- one append-only ledger line (the ledger lives on the
         # adapter; absent = bookkeeping-only mount, honest no-op)
         ledger = getattr(self.adapter, "_ledger", None)
@@ -393,7 +393,7 @@ class RewindController:
         payload = rec["payload"]
         restored_tick = int(payload["tick"])
 
-        # v063 pre-flight two-phase (design v063-rewind-preflight, owner
+        # pre-flight two-phase (design v063-rewind-preflight, owner
         # ruling batch 1): the WHOLE refusal surface runs read-only
         # BEFORE the sidecar dump, the safety capture or any restore --
         # a rejected rewind is a ZERO-CHANGE rejection.  F4's root was
@@ -402,7 +402,7 @@ class RewindController:
         # the shard dir on disk by the time a later provider refused.
         self._preflight_rewind(sid, payload)
 
-        # v057 sidecar (design §1.4, "dump, don't discard"): BEFORE any
+        # sidecar (design §1.4, "dump, don't discard"): BEFORE any
         # restore, the providers' current buffers land under
         # <out_dir>/attempts/ -- the abandoned branch's episode frames
         # are data, never waste.  A failed dump aborts the rewind
@@ -411,7 +411,7 @@ class RewindController:
         self._dump_attempts(sid, restored_tick, rec.get("label"))
 
         # safety net: capture the pre-rewind engine state so a mid-flight
-        # failure never leaves the run half-restored (v057: the providers'
+        # failure never leaves the run half-restored (the providers'
         # live states ride the same net -- a provider failing mid-apply
         # rolls the earlier ones back, never a partial restore)
         bundle = self.bridge._bundle or {}
@@ -424,7 +424,7 @@ class RewindController:
             "cmd": _snap_val(bundle.get("cmd")),
             "torch_rng": _torch_rng_state(),
             "tick": int(getattr(self.bridge, "_last_step", 0) or 0),
-            # v063 (F3): the adapter rides the net too -- the v057
+            # Adapter in the safety net: it rides the net too -- the
             # docstring always claimed "engine + adapter + providers";
             # the capture was missing the adapter
             "adapter": (self.adapter.snapshot_internal()
@@ -445,10 +445,10 @@ class RewindController:
             if payload.get("adapter") is not None and callable(
                     getattr(self.adapter, "restore_internal", None)):
                 self.adapter.restore_internal(payload["adapter"])
-            # v057 restore order: engine -> adapter -> providers (design
+            # restore order: engine -> adapter -> providers (design
             # §1.2); any provider failure raises through -- the except
             # below rolls EVERYTHING back (engine + adapter + providers).
-            # State presence was pre-flighted above (v063); each
+            # State presence was pre-flighted above; each
             # provider's semantic guards stay on the apply face as the
             # second line (same judgment its validate runs).
             for p in self.providers:
@@ -467,10 +467,10 @@ class RewindController:
                 sc.update({k: _snap_val(v)
                            for k, v in safety["obs_cache"].items()})
             _set_torch_rng(safety["torch_rng"])
-            # v063 (F3): adapter rollback, restore order env -> adapter ->
+            # Adapter rollback: restore order env -> adapter ->
             # providers mirroring the apply order -- a refused rewind no
             # longer leaves the adapter cursor at the checkpoint value
-            # while the world marched on (the T4.2 live misalignment)
+            # while the world marched on (the live misalignment)
             sad = safety.get("adapter")
             if sad is not None and callable(getattr(
                     self.adapter, "restore_internal", None)):
@@ -482,11 +482,11 @@ class RewindController:
                           f"({type(rb).__name__}: {rb}) -- continuing; "
                           f"the original error below is authoritative",
                           flush=True)
-            # v063 (F4) except-hardening: each provider rollback is
+            # Except-hardening: each provider rollback is
             # individually guarded with NARROWED types (no new catch-all
-            # -- the v049 baseline stays at 32); a rollback failure is
+            # -- the baseline stays at 32); a rollback failure is
             # logged and must NEVER mask the original exception (the
-            # T4.2 live case: the rollback's restore_commit ValueError
+            # Live case: the rollback's restore_commit ValueError
             # buried the cross-episode refusal)
             for p in self.providers:
                 pre = safety["providers"].get(p.name)
@@ -531,7 +531,7 @@ class RewindController:
                         f"timeline"}
 
     # ---------------------------------------------------------------- #
-    # v063 pre-flight two-phase: zero-change rejection (design
+    # pre-flight two-phase: zero-change rejection (design
     # v063-rewind-preflight, owner ruling batch 1)
     # ---------------------------------------------------------------- #
     def _preflight_rewind(self, sid: int, payload: RewindPayload) -> None:
@@ -541,11 +541,11 @@ class RewindController:
         episode counter vs the live bundle's (both process truth,
         contract §4.1).  This closes the bufferless blind spot: a plain
         collect run's provider stamps are all None, so the provider
-        face alone was structurally blind on exactly the T4.2 repro
+        face alone was structurally blind on exactly the repro
         shape.  Degradation: either side missing the key (older
         payloads, doubles without ``extra``) skips the guard, never
         false-kills -- the providers' stamp guards remain the second
-        line.  ② every provider's payload state must exist (the v057
+        line.  ② every provider's payload state must exist (the
         mid-apply missing-state refusal, moved up here) and pass its
         ``validate_rewind_state`` -- the same judgment its apply
         enforces (single source).  Any refusal raises
@@ -577,7 +577,7 @@ class RewindController:
                 fn(state)
 
     # ---------------------------------------------------------------- #
-    # v057 sidecar: the abandoned branch's buffers are data (§1.4)
+    # sidecar: the abandoned branch's buffers are data (§1.4)
     # ---------------------------------------------------------------- #
     def _dump_attempts(self, sid: int, restored_tick: int,
                        label: str | None) -> None:
@@ -637,7 +637,7 @@ def attach(bridge: Bridge, env: _SnapshotBackend, adapter: Adapter,
 # helpers (torch kept lazy so the stdlib-only bridge import path stays clean)
 # --------------------------------------------------------------------------- #
 def _episode_stamp(bundle: Mapping[str, JsonValue] | None) -> int | None:
-    """The bundle's backend episode counter, env 0 (v063 pre-flight face).
+    """The bundle's backend episode counter, env 0 (pre-flight face).
 
     ``episode_id`` is process truth (contract §4.1 -- never rewinds),
     so snapshot-vs-live equality is exactly the same-episode test.  An
@@ -665,7 +665,7 @@ def _snap_val(x: SnapshotValue) -> SnapshotValue:
     """Snapshot-safe copy of one obs_cache / obs-frame value.
 
     The cache is tensor-first (the engine's passthrough keys), but the
-    v057 decision-package face legitimately parks structured payloads
+    The decision-package face legitimately parks structured payloads
     in it too (``contact_ops/<name>`` -> ``list[dict]``).  Tensors take
     the detach-clone path; numpy copies; JSON-safe structures deepcopy
     (snapshot AND restore must hand out private copies -- a rewind

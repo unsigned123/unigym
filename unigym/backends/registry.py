@@ -62,7 +62,7 @@ class Trait(Enum):
     JOINT_PERMUTATION = "JOINT_PERMUTATION"    # policy/il orders + inverse perm
     # --- env shape (optional: single-env backends omit it) ---
     MULTI_ENV = "MULTI_ENV"                    # native N>1 parallel-env runs
-    # --- env layout (v095; exactly one ENV_LAYOUT_* per registered backend) ---
+    # --- env layout (exactly one ENV_LAYOUT_* per registered backend) ---
     ENV_LAYOUT_TILED = "ENV_LAYOUT_TILED"          # env_spacing; one view spans envs
     ENV_LAYOUT_COINCIDENT = "ENV_LAYOUT_COINCIDENT"  # same-coordinate worlds
     # --- observation / recording ---
@@ -71,8 +71,8 @@ class Trait(Enum):
     CAMERAS_PER_ENV = "CAMERAS_PER_ENV"        # one camera instance per env (N>=1)
     CAMERAS_PER_ENV_STATE = "CAMERAS_PER_ENV_STATE"  # (camera, env) own pose state
     CAMERAS_BATCH_RENDER = "CAMERAS_BATCH_RENDER"    # one render covers all instances
-    CAMERAS_PER_ENV_RESOLUTION = "CAMERAS_PER_ENV_RESOLUTION"  # reserved (C3+)
-    CAMERAS_PER_ENV_INTRINSICS = "CAMERAS_PER_ENV_INTRINSICS"  # reserved (C3+)
+    CAMERAS_PER_ENV_RESOLUTION = "CAMERAS_PER_ENV_RESOLUTION"  # reserved
+    CAMERAS_PER_ENV_INTRINSICS = "CAMERAS_PER_ENV_INTRINSICS"  # reserved
     CAMERAS_DEPTH_RIG = "CAMERAS_DEPTH_RIG"    # rig-level metric z-depth
     DEPTH_OBS_ALIASES = "DEPTH_OBS_ALIASES"    # depth obs alias keys (isaaclab)
     RECORDER_VIDEO = "RECORDER_VIDEO"          # recorder.enabled mp4
@@ -96,7 +96,7 @@ class Trait(Enum):
     TERRAIN = "TERRAIN"
     EVENTS_DR = "EVENTS_DR"
     INIT_POSE = "INIT_POSE"
-    SPAWN_XY_YAW = "SPAWN_XY_YAW"              # both backends (R6 parity)
+    SPAWN_XY_YAW = "SPAWN_XY_YAW"              # both backends (parity)
     MOCAP = "MOCAP"                            # mocap body carrier (mujoco)
     # --- rewind (Round B B1; design v052-round-b §1.1) ---
     SNAPSHOT = "SNAPSHOT"                      # mjSTATE-exact snapshot()/restore()
@@ -111,7 +111,7 @@ class Trait(Enum):
 
 
 # --------------------------------------------------------------------------- #
-# TraitScope (v096): per-backend availability predicate
+# TraitScope: per-backend availability predicate
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class TraitScope:
@@ -137,7 +137,7 @@ class BackendInfo:
     version: tuple[int, int]   # engine version (probe; (0, 0) when absent)
     traits: frozenset[Trait]   # capability set (registration declares it)
     options_schema: Mapping[str, object] = field(default_factory=dict)
-    """Backend-private ``env.backend_options.<backend>`` schema (v105.3).
+    """Backend-private ``env.backend_options.<backend>`` schema.
 
     Nested mappings declare option groups; a non-mapping leaf is the default
     and its type is validated (bool leaves require a bool).  An empty schema
@@ -150,7 +150,7 @@ class BackendInfo:
     called lazily so this module stays stdlib-only at import time.
     """
     scopes: Mapping[Trait, TraitScope] = field(default_factory=dict)
-    """Per-trait availability narrowing (v096); keys must be declared traits."""
+    """Per-trait availability narrowing; keys must be declared traits."""
     env_class: Callable[[], type] | None = None
     """Optional zero-argument factory for the backend env class.
 
@@ -165,14 +165,14 @@ class BackendInfo:
     layer imports no engine.  ``mujoco`` and ``mjwarp`` share the same
     ``MjModel``/``MjData`` binder.
     """
-    # v100 face placeholders (G0 reserves them; later phases fill the bodies).
+    # Optional construction faces (default None; each backend fills them in).
     model_provider: Callable[[], Callable[[], Any]] | None = None
     model_handle: Callable[[], Callable[[object], object | None]] | None = None
     """Optional factory for the backend's compiled-model handle resolver.
 
     Returns a callable ``handle(env) -> model-or-None``.  The neutral
     ``describe --compiled`` face asks the registry for this instead of
-    sniffing env attributes (v101 A1.5); ``None`` means the backend
+    sniffing env attributes; ``None`` means the backend
     exposes no compiled model handle.
     """
     prop_backend: Callable[[], object] | None = None
@@ -193,7 +193,7 @@ class BackendInfo:
     factory so the neutral director layer imports no engine.
     """
     terrain_presets: Callable[[], object] | None = None
-    # --- v101 A2b neutral construction faces (lazy factories) ---
+    # --- neutral construction faces (lazy factories) ---
     # The neutral run/camera/scene layers ask these faces instead of
     # comparing ``backend`` strings; every engine import stays inside the
     # backend package.
@@ -299,7 +299,7 @@ class BackendSelectionError(RuntimeError):
 
 
 # --------------------------------------------------------------------------- #
-# backend-private options (v105.3)
+# backend-private options
 # --------------------------------------------------------------------------- #
 def _dotted_options(schema: Mapping[str, object], prefix: str = "") -> list[str]:
     """Every supported option path of one nested schema (stable order)."""
@@ -400,7 +400,7 @@ def validate_backend_options(backend: str,
 
 
 # --------------------------------------------------------------------------- #
-# trait rules (v095: the single source of truth for cross-trait relations)
+# trait rules (the single source of truth for cross-trait relations)
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class TraitRule:
@@ -439,7 +439,7 @@ def validate_trait_rules(backends=None) -> None:
     infos = _STATIC_INFO if backends is None else backends
     for name, info in infos.items():
         traits = set(info.traits)
-        # v096: a scope may only narrow a DECLARED trait, never add one.
+        # A scope may only narrow a DECLARED trait, never add one.
         for trait, scope in info.scopes.items():
             if trait not in traits:
                 raise RuntimeError(
@@ -479,7 +479,7 @@ _CORE = frozenset({
     Trait.ENV_STEP_RESET, Trait.ACTION_FACES_NAMED, Trait.JOINT_PERMUTATION,
 })
 
-# v105.3: MuJoCo-family compose options (backend-private).
+# MuJoCo-family compose options (backend-private).
 _MJ_COMPOSE_OPTIONS = {"compose": {"auto_prefix": False}}
 
 MUJOCO_TRAITS = _CORE | frozenset({
@@ -495,14 +495,14 @@ MUJOCO_TRAITS = _CORE | frozenset({
     Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,
     Trait.DIRECTOR_ATTACH_WELD, Trait.DIRECTOR_GRIPPER,
     Trait.SPAWN_XY_YAW, Trait.MOCAP, Trait.SNAPSHOT,
-    Trait.ACTUATORS_PLUGGABLE,                # unigym/actuators seam (v063 D2)
-    # v098 N0 model introspection: the compiled MjModel carries them all
+    Trait.ACTUATORS_PLUGGABLE,                # unigym/actuators seam
+    # Model introspection: the compiled MjModel carries them all
     Trait.MODEL_ADDRESSES, Trait.MODEL_MASS_INERTIA, Trait.MODEL_MOCAP,
     Trait.MODEL_EQ_SLOTS,
 })
 
-# v094 P3/P4: the independent MuJoCo Warp backend.  N>1 is ONE batched warp
-# Data (nworld=N) with N CPU mirrors (P4), plus scene compose through the
+# The independent MuJoCo Warp backend.  N>1 is ONE batched warp
+# Data (nworld=N) with N CPU mirrors, plus scene compose through the
 # shared MujocoSceneEngine, box-family props, contact groups, RGB rigs,
 # planar spawn, and the mirror-faithful snapshot/restore face.
 MJWARP_TRAITS = _CORE | frozenset({
@@ -510,23 +510,23 @@ MJWARP_TRAITS = _CORE | frozenset({
     Trait.ENV_LAYOUT_COINCIDENT,               # N same-coordinate worlds
     Trait.SCENE_COMPOSE,
     Trait.PROPS_RIGID,
-    Trait.PROPS_ARTICULATION_URDF,             # E5: free-joint articulation N>1
-    Trait.PROPS_ACTUATED_ACTIONS,              # E3: prop-name NamedAction -> servo
+    Trait.PROPS_ARTICULATION_URDF,             # free-joint articulation N>1
+    Trait.PROPS_ACTUATED_ACTIONS,              # prop-name NamedAction -> servo
     Trait.CONTACTS_GROUPS,
-    Trait.CONTACTS_OVERRIDE,                   # E4: manager-level record override
+    Trait.CONTACTS_OVERRIDE,                   # manager-level record override
     Trait.CAMERAS_RGB,
-    Trait.CAMERAS_DEPTH_RIG,                   # C3: metric z from rc.depth_data
+    Trait.CAMERAS_DEPTH_RIG,                   # metric z from rc.depth_data
     Trait.CAMERAS_PER_ENV,                     # CPU mirror per world
     Trait.CAMERAS_PER_ENV_STATE,
-    Trait.CAMERAS_BATCH_RENDER,                # C3: native warp renderer
-    Trait.RECORDER_VIDEO,                      # E1: manager cache -> mp4
-    Trait.ACTUATORS_PLUGGABLE,                 # E2: step1 -> law -> step2
-    Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,   # E6: N=1 mirror + push
+    Trait.CAMERAS_BATCH_RENDER,                # native warp renderer
+    Trait.RECORDER_VIDEO,                      # manager cache -> mp4
+    Trait.ACTUATORS_PLUGGABLE,                 # step1 -> law -> step2
+    Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,   # N=1 mirror + push
     Trait.DIRECTOR_ATTACH_WELD, Trait.DIRECTOR_GRIPPER,
     Trait.MOCAP,
     Trait.SPAWN_XY_YAW,
     Trait.SNAPSHOT,
-    # v098 N0: same compiled MjModel as mujoco
+    # Same compiled MjModel as mujoco
     Trait.MODEL_ADDRESSES, Trait.MODEL_MASS_INERTIA, Trait.MODEL_MOCAP,
     Trait.MODEL_EQ_SLOTS,
 })
@@ -536,7 +536,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset({
     Trait.ENV_LAYOUT_TILED,                    # env_spacing clone grid
     Trait.CAMERAS_RGB, Trait.CAMERAS_DEPTH_RIG, Trait.DEPTH_OBS_ALIASES,
     # CAMERAS_GLOBAL is the 1-prim mechanism (num_instances = parent prim
-    # matches = 1); upstream docs do not name it -- container-verify in C2.
+    # matches = 1); upstream docs do not name it -- container-verify.
     Trait.CAMERAS_GLOBAL,
     Trait.CAMERAS_PER_ENV,
     Trait.CAMERAS_PER_ENV_STATE,
@@ -550,7 +550,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset({
     Trait.DIRECTOR_ATTACH_SLAVE, Trait.DIRECTOR_GRIPPER,
     Trait.TERRAIN, Trait.EVENTS_DR, Trait.INIT_POSE,
     Trait.SPAWN_XY_YAW,
-    # v098 N0: the USD prim hierarchy is the isaaclab model face
+    # The USD prim hierarchy is the isaaclab model face
     Trait.MODEL_USD_PRIMS,
 })
 
@@ -559,8 +559,8 @@ ISAACLAB2_TRAITS = _CORE | frozenset({
 # NotImplementedError).  Traits fill in as capabilities land.
 ISAACLAB3_TRAITS = frozenset()
 
-# v096 D1: mujoco's model-global writes are one-MjModel only (no per-env
-# face); they stay declared traits but are unavailable at N>1.  mjwarp E6
+# mujoco's model-global writes are one-MjModel only (no per-env
+# face); they stay declared traits but are unavailable at N>1.  mjwarp
 # declares the same N=1 scope (director writes the CPU mirror + pushes the
 # device; one MjModel / one mocap namespace).  isaaclab supports these at
 # N>1 (no scope).
@@ -681,77 +681,77 @@ def _mjwarp_rig_factory() -> object:
 
 
 def _isaaclab2_rig_factory() -> object:
-    """Load the IsaacLab camera rig builder lazily (v100 G3)."""
+    """Load the IsaacLab camera rig builder lazily."""
     from unigym.backends.isaaclab2.cameras.rigs import build_isaaclab_rig
 
     return build_isaaclab_rig
 
 
 def _mujoco_prop_backend() -> object:
-    """Load the MuJoCo prop backend face lazily (v100 G4)."""
+    """Load the MuJoCo prop backend face lazily."""
     from unigym.backends.shared.mjfamily.props.props import build_mujoco_prop_backend
 
     return build_mujoco_prop_backend()
 
 
 def _isaaclab2_prop_backend() -> object:
-    """Load the IsaacLab prop backend face lazily (v100 G4)."""
+    """Load the IsaacLab prop backend face lazily."""
     from unigym.backends.isaaclab2.props import build_isaaclab_prop_backend
 
     return build_isaaclab_prop_backend()
 
 
 def _mujoco_director_ops() -> object:
-    """Load the MuJoCo director ops class lazily (v100 G5)."""
+    """Load the MuJoCo director ops class lazily."""
     from unigym.backends.shared.mjfamily.director.ops import MujocoDirectorOps
 
     return MujocoDirectorOps
 
 
 def _mjwarp_director_ops() -> object:
-    """Load the MuJoCo-Warp director ops class lazily (v100 G5)."""
+    """Load the MuJoCo-Warp director ops class lazily."""
     from unigym.backends.mjwarp.director_ops import MjwarpDirectorOps
 
     return MjwarpDirectorOps
 
 
 def _isaaclab2_director_ops() -> object:
-    """Load the IsaacLab director ops class lazily (v100 G5)."""
+    """Load the IsaacLab director ops class lazily."""
     from unigym.backends.isaaclab2.director_ops import IsaacLabDirectorOps
 
     return IsaacLabDirectorOps
 
 
 def _mujoco_contact_backend() -> object:
-    """Load the MuJoCo contact backend class lazily (v100 G5)."""
+    """Load the MuJoCo contact backend class lazily."""
     from unigym.backends.mujoco.contacts import MujocoContactBackend
 
     return MujocoContactBackend
 
 
 def _isaaclab2_contact_backend() -> object:
-    """Load the IsaacLab contact backend class lazily (v100 G5)."""
+    """Load the IsaacLab contact backend class lazily."""
     from unigym.backends.isaaclab2.contacts import IsaacLabContactBackend
 
     return IsaacLabContactBackend
 
 
 def _mujoco_gripper_backend() -> object:
-    """Load the MuJoCo gripper runtime class lazily (v100 G5)."""
+    """Load the MuJoCo gripper runtime class lazily."""
     from unigym.backends.mujoco.director.gripper import MujocoGripper
 
     return MujocoGripper
 
 
 def _isaaclab2_gripper_backend() -> object:
-    """Load the IsaacLab gripper runtime class lazily (v100 G5)."""
+    """Load the IsaacLab gripper runtime class lazily."""
     from unigym.backends.isaaclab2.director.gripper import IsaacLabGripper
 
     return IsaacLabGripper
 
 
 # --------------------------------------------------------------------------- #
-# v101 A2b construction faces (lazy: engine imports stay in the packages)
+# construction faces (lazy: engine imports stay in the packages)
 # --------------------------------------------------------------------------- #
 def _mujoco_env_kwargs() -> object:
     from unigym.backends.mujoco.build import env_kwargs
@@ -900,7 +900,7 @@ validate_trait_rules()
 # default name; it resolves to isaaclab2/isaaclab3 by version probe.
 BACKEND_ALIASES: dict[str, str] = {"isaaclab": "isaaclab:auto"}
 
-# build-name aliases (v100 G0): the single truth for the env factory table.
+# build-name aliases: the single truth for the env factory table.
 # "isaaclab" is the historical build spelling of the 2.3-series module.
 _BUILD_ALIASES: dict[str, str] = {"isaaclab": "isaaclab2"}
 
