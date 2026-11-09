@@ -24,12 +24,20 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
-from unigym.runtime.bridge import (M_CK, M_FPS_P, M_FPS_S, M_GEN, M_JSON,
-                                   M_SEQ, M_SIMT, M_TS, METRICS_JSON,
+from unigym._typing import JsonValue
+from unigym.runtime.bridge import (Buf, M_CK, M_FPS_P, M_FPS_S, M_GEN,
+                                   M_JSON, M_SEQ, M_SIMT, M_TS, METRICS_JSON,
                                    METRICS_OFF, BridgeError, _f64,
                                    _payload_ck, _put_bytes, _seqlock_read,
                                    _u64)
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    import torch
+
+    from unigym.runtime.bridge import MetricsSource
 
 __all__ = ["MetricsRing", "MetricsWriter", "read_metrics_block",
            "RING_CAP"]
@@ -47,17 +55,17 @@ class MetricsRing:
 
     def __init__(self, cap: int = RING_CAP):
         self._cap = int(cap)
-        self._buf: list = [None] * self._cap
+        self._buf: list[JsonValue] = [None] * self._cap
         self._head = 0
         self._n = 0
 
-    def push(self, value) -> None:
+    def push(self, value: JsonValue) -> None:
         """Append one item (oldest silently drops once full)."""
         self._buf[self._head] = value
         self._head = (self._head + 1) % self._cap
         self._n = min(self._n + 1, self._cap)
 
-    def to_list(self) -> list:
+    def to_list(self) -> list[JsonValue]:
         """Chronological snapshot (oldest first, at most ``cap`` items)."""
         if self._n < self._cap:
             return list(self._buf[:self._n])
@@ -78,21 +86,21 @@ class MetricsWriter:
     available to every other process.
     """
 
-    def __init__(self, buf):
+    def __init__(self, buf: Buf):
         self._buf = buf
         self._gen = 0
         self._fps_policy: float | None = None
         self._fps_sim: float | None = None
         self._sim_time: float | None = None
         self._last_tick_wall: float | None = None
-        self.task: dict | None = None
-        self.progress: dict | None = None
+        self.task: dict[str, JsonValue] | None = None
+        self.progress: dict[str, JsonValue] | None = None
         self.rewards = MetricsRing()
         self.successes = MetricsRing()
-        self.last: dict | None = None
+        self.last: dict[str, JsonValue] | None = None
 
     # -- run-side update points (existing sink hooks; runner_contract §3) --
-    def note_tick(self, t: int, env=None) -> None:
+    def note_tick(self, t: int, env: object | None = None) -> None:
         """Timing scalars only (tick-level cost budget: microseconds)."""
         now = time.time()
         prev = self._last_tick_wall
@@ -114,10 +122,12 @@ class MetricsWriter:
             self._sim_time = float(t) * float(step_dt)
         self._write_scalars()
 
-    def note_episode(self, env_ids, bundle, source=None) -> None:
+    def note_episode(self, env_ids: torch.Tensor,
+                     bundle: Mapping[str, JsonValue],
+                     source: MetricsSource | None = None) -> None:
         """Episode-level update (the engine's on_episode_end hook)."""
         steps = self._episode_steps(env_ids, bundle)
-        scored = []
+        scored: list[Mapping[str, JsonValue]] = []
         if source is not None:
             try:
                 scored = list(source.metrics_drain() or [])
@@ -126,7 +136,8 @@ class MetricsWriter:
         reward = success = None
         directed = False
         for i, _ in enumerate(env_ids):
-            tel = scored[i] if i < len(scored) else {}
+            tel: Mapping[str, JsonValue] = (
+                scored[i] if i < len(scored) else {})
             reward, success = tel.get("reward"), tel.get("success")
             directed = bool(tel.get("directed"))
             self.rewards.push(reward)
@@ -136,14 +147,18 @@ class MetricsWriter:
                      "steps": steps[-1] if steps else None}
         if source is not None:
             try:
-                self.task = source.metrics_task() or self.task
-                self.progress = source.metrics_progress()
+                task = source.metrics_task()
+                if task is not None:
+                    self.task = dict(task)
+                progress = source.metrics_progress()
+                if progress is not None:
+                    self.progress = dict(progress)
             except Exception:               # noqa: BLE001 (telemetry only)
                 pass
         self.set_document(self.document())
 
     # -- document --------------------------------------------------------------
-    def document(self) -> dict:
+    def document(self) -> dict[str, JsonValue]:
         """Typed metrics document, runtime_contract §2 schema.
 
         Task identity + last episode {reward, success, steps} + the
@@ -155,12 +170,13 @@ class MetricsWriter:
                             "successes": self.successes.to_list()},
                 "progress": self.progress}
 
-    def timing(self) -> dict:
+    def timing(self) -> dict[str, JsonValue]:
         """Live timing scalars (fps EMA / sim time), runtime_contract §2."""
         return {"fps_sim": self._fps_sim, "fps_policy": self._fps_policy,
                 "sim_time": self._sim_time}
 
-    def metrics_document(self, run_id: str, step: int, episodes: int) -> dict:
+    def metrics_document(self, run_id: str, step: int,
+                         episodes: int) -> dict[str, JsonValue]:
         """Full query answer: document + live status counters (cmd 10)."""
         doc = self.document()
         doc["run_id"] = run_id
@@ -168,7 +184,7 @@ class MetricsWriter:
                          **self.timing()}
         return doc
 
-    def set_document(self, doc: dict) -> None:
+    def set_document(self, doc: Mapping[str, JsonValue]) -> None:
         """Rewrite the JSON document (episode end / progress changes)."""
         try:
             raw = json.dumps(doc).encode()
@@ -208,30 +224,35 @@ class MetricsWriter:
         _f64(buf, METRICS_OFF + M_TS, time.time())
 
     @staticmethod
-    def _episode_steps(env_ids, bundle) -> list[int]:
+    def _episode_steps(env_ids: torch.Tensor,
+                       bundle: Mapping[str, JsonValue]) -> list[int]:
         """Per-ended-env policy step count (time_in_episode / step_dt)."""
-        extra = bundle.get("extra") if isinstance(bundle, dict) else None
-        times = extra.get("time_in_episode") if extra is not None else None
-        env = bundle.get("env") if isinstance(bundle, dict) else None
+        extra = bundle.get("extra")
+        times = (extra.get("time_in_episode")
+                 if isinstance(extra, Mapping) else None)
+        env = bundle.get("env")
         step_dt = getattr(env, "step_dt", None)
         if times is None or not isinstance(step_dt, (int, float)) \
                 or step_dt <= 0:
             return []
         try:
-            return [int(round(float(times[int(ei)]) / float(step_dt)))
+            import numpy as np
+
+            arr = np.asarray(times)
+            return [int(round(float(arr[int(ei)]) / float(step_dt)))
                     for ei in env_ids]
         except (TypeError, ValueError, IndexError):
             return []
 
 
-def read_metrics_block(buf) -> dict:
+def read_metrics_block(buf: Buf) -> dict[str, JsonValue]:
     """Reader primitive: tear-free metrics block snapshot (any process).
 
     Returns the published scalars + parsed document ({} document when the
     writer has not published one yet or the JSON is momentarily invalid).
     """
     raw = _seqlock_read(buf, METRICS_OFF, M_JSON, METRICS_JSON)
-    doc = {}
+    doc: JsonValue = {}
     if raw is not None:
         raw = raw.split(b"\x00", 1)[0]
         if raw:

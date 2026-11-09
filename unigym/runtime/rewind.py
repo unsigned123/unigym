@@ -62,11 +62,60 @@ import collections
 import copy
 import json
 import os
-from typing import Callable, Protocol, cast, runtime_checkable
+from collections.abc import Callable, Mapping, Sequence
+from typing import (TYPE_CHECKING, Any, Protocol, TypeAlias, TypedDict,
+                    runtime_checkable)
 
 import numpy as np
 
+from unigym._typing import JsonValue
+from unigym.runtime.bridge import AckResult, RewindInfo
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.adapters.base import Adapter
+    from unigym.runtime.bridge import Bridge
+
 MAX_SNAPSHOTS = 64
+
+#: Opaque engine / adapter / provider snapshot payloads: the runtime stores
+#: and hands them back, never introspects them (arbitrary by construction).
+SnapshotValue: TypeAlias = Any
+
+#: The runner-loop seam is duck-typed (Runner protocol | SyncRunner); the
+#: controller reads replay/sampler and jumps the loop via setattr.
+RewindEngine: TypeAlias = Any
+
+
+class RewindPayload(TypedDict):
+    """One checkpoint's packaged run state (engine + adapter + providers)."""
+
+    tick: int
+    env: SnapshotValue
+    obs_cache: dict[str, SnapshotValue]
+    adapter: SnapshotValue
+    providers: dict[str, SnapshotValue]
+    episode_id: int | None
+    obs_frame: SnapshotValue
+    cmd: SnapshotValue
+    torch_rng: SnapshotValue
+
+
+class RewindRecord(TypedDict):
+    """One live snapshot slot record."""
+
+    snap_id: int
+    tick: int
+    label: str | None
+    ts: float
+    payload: RewindPayload
+
+
+class _SnapshotBackend(Protocol):
+    """The engine snapshot/restore face the rewind controller requires."""
+
+    def snapshot(self) -> SnapshotValue: ...
+
+    def restore(self, state: SnapshotValue) -> None: ...
 
 __all__ = ["RewindStateProvider", "RewindController", "RewindGateError",
            "attach", "MAX_SNAPSHOTS"]
@@ -95,13 +144,13 @@ class RewindStateProvider(Protocol):
 
     name: str          # "benchmark" / "episode_runner" (payload key)
 
-    def rewind_state(self):
+    def rewind_state(self) -> SnapshotValue:
         """The facility's necessary state at the freeze point."""
 
-    def apply_rewind_state(self, state) -> None:
+    def apply_rewind_state(self, state: SnapshotValue) -> None:
         """Restore to the snapshotted state (in place, same objects)."""
 
-    def validate_rewind_state(self, state) -> None:
+    def validate_rewind_state(self, state: SnapshotValue) -> None:
         """Pre-flight half of the two-phase rewind.
 
         Design v063-rewind-preflight, owner ruling batch 1: refuse a
@@ -149,18 +198,20 @@ class RewindController:
             the adapter (fail-fast: any failure aborts the whole rewind).
     """
 
-    def __init__(self, bridge, env, adapter, engine, backend_label: str,
-                 providers=None):
+    def __init__(self, bridge: Bridge, env: _SnapshotBackend,
+                 adapter: Adapter, engine: RewindEngine,
+                 backend_label: str,
+                 providers: Sequence[RewindStateProvider] | None = None):
         self.bridge = bridge
         self.env = env
         self.adapter = adapter
         self.engine = engine
         self.backend_label = str(backend_label)
-        self.providers: list = list(providers or [])
+        self.providers: list[RewindStateProvider] = list(providers or [])
         names = [p.name for p in self.providers]
         if len(set(names)) != len(names):
             raise ValueError(f"duplicate rewind provider names: {names}")
-        self._snaps: collections.OrderedDict[int, dict] = \
+        self._snaps: collections.OrderedDict[int, RewindRecord] = \
             collections.OrderedDict()
         self._next_id = 1
         bridge.register_command("snapshot", self.cmd_snapshot)
@@ -207,7 +258,7 @@ class RewindController:
             # needs it: agent_g1 session configs carry an IGNORED fixed
             # command sampler (the adapter never reads it) and would
             # otherwise lose every checkpoint.
-            sampler = self.engine.sampler
+            sampler: object | None = self.engine.sampler
             if not getattr(sampler, "rewind_inert", False):
                 raise RewindGateError(
                     "sampler-based runs are not rewindable in v1 "
@@ -221,7 +272,8 @@ class RewindController:
     # ---------------------------------------------------------------- #
     # command handlers (engine thread; errors land in the ack)
     # ---------------------------------------------------------------- #
-    def cmd_snapshot(self, rid: int, params: dict) -> dict:
+    def cmd_snapshot(self, rid: int,
+                     params: dict[str, JsonValue]) -> AckResult:
         """Cmd "snapshot": capture engine+adapter+providers into the ring.
 
         Raises:
@@ -234,8 +286,9 @@ class RewindController:
                                   "string when given")
         bundle = self.bridge._bundle or {}
         tick = int(getattr(self.bridge, "_last_step", 0) or 0)
-        cache = getattr(self.env, "obs_cache", None) or {}
-        payload = {
+        cache: Mapping[str, SnapshotValue] = getattr(
+            self.env, "obs_cache", None) or {}
+        payload: RewindPayload = {
             "tick": tick,
             "env": self.env.snapshot(),
             # obs cache: passthrough keys ("command"/"prev_action") survive
@@ -265,17 +318,20 @@ class RewindController:
             "torch_rng": _torch_rng_state(),
         }
         import time as _time
-        rec = {"snap_id": self._next_id, "tick": tick,
-               "label": (str(label).strip() if label else None),
-               "ts": _time.time(), "payload": payload}
+        rec: RewindRecord = {
+            "snap_id": self._next_id, "tick": tick,
+            "label": (str(label).strip() if label else None),
+            "ts": _time.time(), "payload": payload}
         self._next_id += 1
-        result = {"snap_id": rec["snap_id"], "tick": tick,
-                  "label": rec["label"]}
+        result: AckResult = {"snap_id": rec["snap_id"], "tick": tick,
+                             "label": rec["label"]}
         if len(self._snaps) >= MAX_SNAPSHOTS:
             _, evicted = self._snaps.popitem(last=False)   # LRU: oldest
-            result["evicted"] = {"snap_id": evicted["snap_id"],
-                                 "tick": evicted["tick"],
-                                 "label": evicted["label"]}
+            evicted_doc: dict[str, JsonValue] = {
+                "snap_id": evicted["snap_id"],
+                "tick": evicted["tick"],
+                "label": evicted["label"]}
+            result["evicted"] = evicted_doc
             print(f"[rewind] LRU evicted snapshot "
                   f"{evicted['snap_id']} (tick {evicted['tick']}) -- slot "
                   f"cap {MAX_SNAPSHOTS} reached; rewinding to it now "
@@ -298,7 +354,8 @@ class RewindController:
                           tick)
         return result
 
-    def cmd_snapshots(self, rid: int, params: dict) -> dict:
+    def cmd_snapshots(self, rid: int,
+                      params: dict[str, JsonValue]) -> AckResult:
         """Cmd "snapshots": the live slot list + the LRU cap."""
         self._gate()
         return {"snapshots": [{"snap_id": r["snap_id"], "tick": r["tick"],
@@ -306,7 +363,8 @@ class RewindController:
                               for r in self._snaps.values()],
                 "cap": MAX_SNAPSHOTS}
 
-    def cmd_rewind(self, rid: int, params: dict) -> dict:
+    def cmd_rewind(self, rid: int,
+                   params: dict[str, JsonValue]) -> AckResult:
         """Cmd "rewind": fork the timeline back to a snapshot.
 
         Dumps the abandoned branch's provider buffers first, restores
@@ -357,30 +415,33 @@ class RewindController:
         # live states ride the same net -- a provider failing mid-apply
         # rolls the earlier ones back, never a partial restore)
         bundle = self.bridge._bundle or {}
-        cache = getattr(self.env, "obs_cache", None) or {}
-        safety = {"env": self.env.snapshot(),
-                  "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
-                  "obs_frame": _snap_val(bundle.get("obs_frame")),
-                  "cmd": _snap_val(bundle.get("cmd")),
-                  "torch_rng": _torch_rng_state(),
-                  "tick": int(getattr(self.bridge, "_last_step", 0) or 0),
-                  # v063 (F3): the adapter rides the net too -- the v057
-                  # docstring always claimed "engine + adapter + providers";
-                  # the capture was missing the adapter
-                  "adapter": (self.adapter.snapshot_internal()
-                              if callable(getattr(self.adapter,
-                                                  "snapshot_internal", None))
-                              else None),
-                  "providers": {p.name: p.rewind_state()
-                                for p in self.providers}}
+        cache: Mapping[str, SnapshotValue] = getattr(
+            self.env, "obs_cache", None) or {}
+        safety: dict[str, SnapshotValue] = {
+            "env": self.env.snapshot(),
+            "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
+            "obs_frame": _snap_val(bundle.get("obs_frame")),
+            "cmd": _snap_val(bundle.get("cmd")),
+            "torch_rng": _torch_rng_state(),
+            "tick": int(getattr(self.bridge, "_last_step", 0) or 0),
+            # v063 (F3): the adapter rides the net too -- the v057
+            # docstring always claimed "engine + adapter + providers";
+            # the capture was missing the adapter
+            "adapter": (self.adapter.snapshot_internal()
+                        if callable(getattr(self.adapter,
+                                            "snapshot_internal", None))
+                        else None),
+            "providers": {p.name: p.rewind_state()
+                          for p in self.providers}}
         applied: list[str] = []
         try:
             self.env.restore(payload["env"])
-            cache = getattr(self.env, "obs_cache", None)
-            if cache is not None:
-                cache.clear()
-                cache.update({k: _snap_val(v)
-                              for k, v in payload["obs_cache"].items()})
+            live_cache: dict[str, SnapshotValue] | None = getattr(
+                self.env, "obs_cache", None)
+            if live_cache is not None:
+                live_cache.clear()
+                live_cache.update({k: _snap_val(v)
+                                   for k, v in payload["obs_cache"].items()})
             if payload.get("adapter") is not None and callable(
                     getattr(self.adapter, "restore_internal", None)):
                 self.adapter.restore_internal(payload["adapter"])
@@ -453,12 +514,13 @@ class RewindController:
         self.engine._rewind_state = {"obs_frame": payload["obs_frame"],
                                      "cmd": payload["cmd"]}
         # process-truth record + one-shot boundary + auto-pause (§5-③)
-        info = {"tick": int(getattr(self.bridge, "_last_step", 0) or 0),
-                "restored_tick": restored_tick, "snap_id": int(sid),
-                "label": rec["label"]}
-        self.bridge.rewind_log.append(dict(info))
+        info: RewindInfo = {
+            "tick": int(getattr(self.bridge, "_last_step", 0) or 0),
+            "restored_tick": restored_tick, "snap_id": int(sid),
+            "label": rec["label"]}
+        self.bridge.rewind_log.append(info)
         self.bridge._rewind_next_tick = restored_tick + 1
-        self.bridge._rewind_info = dict(info)
+        self.bridge._rewind_info = info
         self.bridge.pause_for_rewind()
         return {"restored_tick": restored_tick, "snap_id": int(sid),
                 "paused": True,
@@ -472,7 +534,7 @@ class RewindController:
     # v063 pre-flight two-phase: zero-change rejection (design
     # v063-rewind-preflight, owner ruling batch 1)
     # ---------------------------------------------------------------- #
-    def _preflight_rewind(self, sid: int, payload: dict) -> None:
+    def _preflight_rewind(self, sid: int, payload: RewindPayload) -> None:
         """The refusal surface, READ-ONLY, before dump/capture/restore.
 
         ① controller-level episode guard -- the snapshot's backend
@@ -518,7 +580,7 @@ class RewindController:
     # v057 sidecar: the abandoned branch's buffers are data (§1.4)
     # ---------------------------------------------------------------- #
     def _dump_attempts(self, sid: int, restored_tick: int,
-                       label) -> None:
+                       label: str | None) -> None:
         """Dump every provider's current buffers to the attempts sidecar.
 
         ``<out_dir>/attempts/rewind_{n}_ep{E}_tick{T}.npz`` + a meta json
@@ -539,18 +601,20 @@ class RewindController:
             fn = getattr(p, "dump_attempt", None)
             if not callable(fn):
                 continue
-            dump = cast(Callable[[str, str], list], fn)
+            dump: Callable[[str, str], list[str]] = getattr(
+                p, "dump_attempt")
             ep = getattr(p, "episode_hint", lambda: 0)()
             base = f"rewind_{n}_ep{int(ep)}_tick{tick}_{p.name}"
             os.makedirs(attempts, exist_ok=True)
             paths = dump(attempts, base)
-            meta = {"rewind_ordinal": n, "snap_id": int(sid),
-                    "label": label, "provider": p.name,
-                    "tick": tick, "restored_tick": int(restored_tick),
-                    "reason": ("timeline forked back to the checkpoint "
-                               "state; this branch's frames are kept "
-                               "here (design v057 §1.4)"),
-                    "files": list(paths)}
+            meta: dict[str, SnapshotValue] = {
+                "rewind_ordinal": n, "snap_id": int(sid),
+                "label": label, "provider": p.name,
+                "tick": tick, "restored_tick": int(restored_tick),
+                "reason": ("timeline forked back to the checkpoint "
+                           "state; this branch's frames are kept "
+                           "here (design v057 §1.4)"),
+                "files": list(paths)}
             meta_path = os.path.join(attempts, base + ".meta.json")
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=1, ensure_ascii=False)
@@ -559,8 +623,10 @@ class RewindController:
               flush=True)
 
 
-def attach(bridge, env, adapter, engine, backend_label: str,
-           providers=None) -> RewindController:
+def attach(bridge: Bridge, env: _SnapshotBackend, adapter: Adapter,
+           engine: RewindEngine, backend_label: str,
+           providers: Sequence[RewindStateProvider] | None = None
+           ) -> RewindController:
     """Mount the rewind face on a live bridge (collect_cli wiring)."""
     return RewindController(bridge, env=env, adapter=adapter, engine=engine,
                             backend_label=backend_label,
@@ -570,7 +636,7 @@ def attach(bridge, env, adapter, engine, backend_label: str,
 # --------------------------------------------------------------------------- #
 # helpers (torch kept lazy so the stdlib-only bridge import path stays clean)
 # --------------------------------------------------------------------------- #
-def _episode_stamp(bundle) -> int | None:
+def _episode_stamp(bundle: Mapping[str, JsonValue] | None) -> int | None:
     """The bundle's backend episode counter, env 0 (v063 pre-flight face).
 
     ``episode_id`` is process truth (contract §4.1 -- never rewinds),
@@ -578,8 +644,8 @@ def _episode_stamp(bundle) -> int | None:
     absent key (older payloads, doubles without ``extra``) answers
     None: the controller guard degrades to skip, never false-kills.
     """
-    extra = (bundle or {}).get("extra") or {}
-    eid = extra.get("episode_id")
+    extra = (bundle or {}).get("extra")
+    eid = extra.get("episode_id") if isinstance(extra, Mapping) else None
     if eid is None:
         return None
     try:
@@ -588,14 +654,14 @@ def _episode_stamp(bundle) -> int | None:
         return None
 
 
-def _clone(x):
+def _clone(x: SnapshotValue) -> SnapshotValue:
     """Detach-clone a tensor iteration-state entry (None passes through)."""
     if x is None:
         return None
     return x.detach().clone()
 
 
-def _snap_val(x):
+def _snap_val(x: SnapshotValue) -> SnapshotValue:
     """Snapshot-safe copy of one obs_cache / obs-frame value.
 
     The cache is tensor-first (the engine's passthrough keys), but the
@@ -617,7 +683,7 @@ def _snap_val(x):
     return x
 
 
-def _torch_rng_state():
+def _torch_rng_state() -> SnapshotValue:
     try:
         import torch
         return torch.get_rng_state().clone()
@@ -625,7 +691,7 @@ def _torch_rng_state():
         return None
 
 
-def _set_torch_rng(state) -> None:
+def _set_torch_rng(state: SnapshotValue) -> None:
     if state is None:
         return
     import torch

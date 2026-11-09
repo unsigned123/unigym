@@ -66,15 +66,33 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 
 import numpy as np
 
 from unigym.io.writer import validate_commit_state
-from unigym.runtime.rewind import RewindGateError
+from unigym.runtime.rewind import (RewindGateError, RewindStateProvider,
+                                   SnapshotValue)
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.io.writer import ShardWriter
 
 __all__ = ["BenchmarkSinkProvider", "CollectSinkProvider",
            "InitializerStateProvider",
            "build_rewind_providers"]
+
+
+EpisodeBuffers: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
+MarksState: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
+
+
+class _ShardWriterFace(Protocol):
+    """The shard recording-cursor face the collect provider restores."""
+
+    def commit_state(self) -> SnapshotValue: ...
+
+    def restore_commit(self, state: SnapshotValue) -> None: ...
 
 
 class InitializerStateProvider:
@@ -82,18 +100,20 @@ class InitializerStateProvider:
 
     name = "initializer"
 
-    def __init__(self, initializer):
+    def __init__(self, initializer: object):
         self.initializer = initializer
 
-    def rewind_state(self):
+    def rewind_state(self) -> SnapshotValue:
         """Return an isolated copy of the initializer's declared state."""
-        return copy.deepcopy(self.initializer.snapshot_state())
+        snapshot = getattr(self.initializer, "snapshot_state")
+        return copy.deepcopy(snapshot())
 
-    def apply_rewind_state(self, state) -> None:
+    def apply_rewind_state(self, state: SnapshotValue) -> None:
         """Restore from a private copy so the checkpoint remains reusable."""
-        self.initializer.restore_state(copy.deepcopy(state))
+        restore = getattr(self.initializer, "restore_state")
+        restore(copy.deepcopy(state))
 
-    def validate_rewind_state(self, state) -> None:
+    def validate_rewind_state(self, state: SnapshotValue) -> None:
         """Reject malformed or unsupported snapshots before changing state."""
         if not callable(getattr(self.initializer, "restore_state", None)):
             raise ValueError("active initializer cannot restore rewind state")
@@ -116,18 +136,18 @@ class _EpisodeBufferProvider:
 
     name = ""
 
-    def __init__(self, sink):
+    def __init__(self, sink: object):
         self.sink = sink
         self.num_envs = int(getattr(sink, "num_envs", 1))
 
     # -- the sink attributes (subclass pins) -------------------------- #
-    def _bufs(self) -> list:
+    def _bufs(self) -> EpisodeBuffers:
         raise NotImplementedError
 
-    def _marks(self) -> list | None:
+    def _marks(self) -> MarksState:
         return None
 
-    def _fuse(self) -> dict:
+    def _fuse(self) -> dict[str, SnapshotValue]:
         """The facility's episode-fuse counters (v0581).
 
         They ride the fork so the restored timeline re-earns its
@@ -137,19 +157,21 @@ class _EpisodeBufferProvider:
         return {}
 
     # -- provider protocol --------------------------------------------- #
-    def rewind_state(self) -> dict:
+    def rewind_state(self) -> dict[str, SnapshotValue]:
         """Deep-copied buffers + marks + episode stamp + fuse counters."""
         bufs = self._bufs()
         marks_state = self._marks()
-        state = {"bufs": [[_copy_slice(s) for s in buf] for buf in bufs],
-                 "marks": ([[dict(m) for m in marks]
-                            for marks in marks_state]
-                           if marks_state is not None else None),
-                 "episode_stamp": self._live_stamp(bufs),
-                 "fuse": self._fuse()}
+        state: dict[str, SnapshotValue] = {
+            "bufs": [[_copy_slice(s) for s in buf]
+                     for buf in (bufs or [])],
+            "marks": ([[dict(m) for m in marks]
+                       for marks in marks_state]
+                      if marks_state is not None else None),
+            "episode_stamp": self._live_stamp(bufs),
+            "fuse": self._fuse()}
         return state
 
-    def validate_rewind_state(self, state: dict) -> None:
+    def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
         """Pre-flight (v063-rewind-preflight, owner ruling batch 1).
 
         The SAME refusal judgment :meth:`apply_rewind_state` enforces,
@@ -160,7 +182,7 @@ class _EpisodeBufferProvider:
         """
         self._guard_state(self._bufs(), state)
 
-    def apply_rewind_state(self, state: dict) -> None:
+    def apply_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
         """Write the snapshot back in place (list identity preserved).
 
         Raises:
@@ -179,13 +201,14 @@ class _EpisodeBufferProvider:
         if marks is not None and state.get("marks") is not None:
             marks[:] = [[dict(m) for m in m_list]
                         for m_list in state["marks"]]
-        fuse = state.get("fuse") or {}
+        fuse: Mapping[str, SnapshotValue] = state.get("fuse") or {}
         live_fuse = self._fuse()
         for k, v in fuse.items():
             if k in live_fuse:
                 setattr(self.sink, k, v)
 
-    def _guard_state(self, live_bufs, state: dict) -> None:
+    def _guard_state(self, live_bufs: EpisodeBuffers,
+                     state: dict[str, SnapshotValue]) -> None:
         """The shared refusal judgment (v063 single source).
 
         Buffer shape drift + the cross-episode stamp check.  Raises
@@ -215,7 +238,7 @@ class _EpisodeBufferProvider:
         return int(getattr(self.sink, "n_episodes", 0))
 
     # -- internals ------------------------------------------------------ #
-    def _live_stamp(self, bufs) -> int | None:
+    def _live_stamp(self, bufs: EpisodeBuffers) -> int | None:
         """Episode id of the open buffer's last frame (None otherwise).
 
         None when the buffer is empty -- episode boundaries carry no
@@ -232,7 +255,7 @@ class _EpisodeBufferProvider:
         return None
 
     # -- §1.4 sidecar ----------------------------------------------------- #
-    def dump_attempt(self, out_dir: str, base: str) -> list:
+    def dump_attempt(self, out_dir: str, base: str) -> list[str]:
         """The current (abandoned-branch) buffers -> one npz under *out_dir*.
 
         Returns the written paths (meta json is the controller's).  A
@@ -249,11 +272,12 @@ class _EpisodeBufferProvider:
         if bufs is None:
             return []
         path = f"{os.path.join(out_dir, base)}.npz"
-        arrays: dict = {}
+        arrays: dict[str, Any] = {}
         for ei, buf in enumerate(bufs):
             if not buf:
                 continue
-            for k, v in assemble_episode(buf).items():
+            assembled: dict[str, SnapshotValue] = assemble_episode(buf)
+            for k, v in assembled.items():
                 arr = v if isinstance(v, np.ndarray) else np.asarray(v)
                 arrays[f"env{ei}/{k}"] = arr
         np.savez(path, **arrays)
@@ -275,13 +299,13 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
         # rewound retry from tripping a premature run_end on a count the
         # abandoned branch already spent.
 
-    def _bufs(self) -> list:
-        return self.sink.ep_bufs
+    def _bufs(self) -> EpisodeBuffers:
+        return getattr(self.sink, "ep_bufs", None)
 
-    def _marks(self) -> list:
-        return self.sink._ep_rewinds
+    def _marks(self) -> MarksState:
+        return getattr(self.sink, "_ep_rewinds", None)
 
-    def _fuse(self) -> dict:
+    def _fuse(self) -> dict[str, SnapshotValue]:
         return {"n_episodes": int(getattr(self.sink, "n_episodes", 0)),
                 "_stop": bool(getattr(self.sink, "_stop", False))}
 
@@ -298,17 +322,17 @@ class CollectSinkProvider(_EpisodeBufferProvider):
 
     name = "episode_runner"
 
-    def _bufs(self) -> list:
-        return self.sink.ep_bufs
+    def _bufs(self) -> EpisodeBuffers:
+        return getattr(self.sink, "ep_bufs", None)
 
-    def _marks(self) -> list | None:
+    def _marks(self) -> MarksState:
         return None
 
-    def _fuse(self) -> dict:
+    def _fuse(self) -> dict[str, SnapshotValue]:
         return {"n_episodes": int(getattr(self.sink, "n_episodes", 0))} \
             if hasattr(self.sink, "n_episodes") else {}
 
-    def _writer(self):
+    def _writer(self) -> ShardWriter | None:
         """The sink's shard writer (absent on provider-protocol doubles).
 
         The shard face simply does not ride those.
@@ -316,7 +340,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
         w = getattr(self.sink, "writer", None)
         return w if callable(getattr(w, "commit_state", None)) else None
 
-    def rewind_state(self) -> dict:
+    def rewind_state(self) -> dict[str, SnapshotValue]:
         """Base state + the shard recording cursor when a writer exists.
 
         Buffer-less collect runs (no filter chain) carry only the fuse
@@ -329,8 +353,9 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             # shard cursor is the whole state (the recursive provider
             # walk made this shape reachable in production: plain
             # collect runs now mount the provider too)
-            state = {"bufs": None, "marks": None, "episode_stamp": None,
-                     "fuse": self._fuse()}
+            state: dict[str, SnapshotValue] = {
+                "bufs": None, "marks": None, "episode_stamp": None,
+                "fuse": self._fuse()}
         else:
             state = super().rewind_state()
         w = self._writer()
@@ -338,7 +363,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             state["shard_commit"] = w.commit_state()
         return state
 
-    def validate_rewind_state(self, state: dict) -> None:
+    def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
         """Pre-flight the shard commit state (read-only, F4).
 
         Runs the base provider's judgment, then the SAME
@@ -375,7 +400,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
                          "shard dir; rewind refuses rather than "
                          "truncate") from e
 
-    def apply_rewind_state(self, state: dict) -> None:
+    def apply_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
         """Restore the buffers (base) and then the shard cursor.
 
         The shard cursor restore is plain file+cursor surgery -- a
@@ -384,7 +409,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
         """
         if state.get("bufs") is None:
             # buffer-less shape: only the fuse counter rides the fork
-            fuse = state.get("fuse") or {}
+            fuse: Mapping[str, SnapshotValue] = state.get("fuse") or {}
             for k, v in fuse.items():
                 if hasattr(self.sink, k):
                     setattr(self.sink, k, v)
@@ -401,7 +426,9 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             w.restore_commit(commit)
 
 
-def build_rewind_providers(sink, initializer=None) -> list:
+def build_rewind_providers(sink: object,
+                           initializer: object | None = None
+                           ) -> list[RewindStateProvider]:
     """One provider per provider-capable sink in the fan-out chain.
 
     collect_cli wiring; a plain sink or None -> whatever applies.
@@ -413,10 +440,10 @@ def build_rewind_providers(sink, initializer=None) -> list:
     undo artifacts are that hole's symptom).  Depth-first in
     construction order; identity-deduped against diamond re-visits.
     """
-    out: list = []
-    seen: list = []
+    out: list[RewindStateProvider] = []
+    seen: list[object] = []
 
-    def walk(s) -> None:
+    def walk(s: object | None) -> None:
         if s is None or any(s is x for x in seen):
             return
         seen.append(s)
@@ -441,13 +468,13 @@ def build_rewind_providers(sink, initializer=None) -> list:
     return out
 
 
-def _copy_slice(s: dict) -> dict:
+def _copy_slice(s: dict[str, SnapshotValue]) -> dict[str, SnapshotValue]:
     """One buffered step slice, deep-copied.
 
     numpy/tensor free per ``slice_step_for_env`` -- cpu clones; numpy
     copied, the rest passed by value.
     """
-    out = {}
+    out: dict[str, SnapshotValue] = {}
     for k, v in s.items():
         if isinstance(v, np.ndarray):
             out[k] = v.copy()

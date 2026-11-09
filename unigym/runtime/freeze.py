@@ -20,10 +20,18 @@ adapter) mount nothing -- zero behavior change.
 """
 from __future__ import annotations
 
+from typing import Protocol
+
 __all__ = ["attach"]
 
 
-def attach(bridge, adapter) -> None:
+class _FreezeBridge(Protocol):
+    """The bridge hook surface the freeze mount needs."""
+
+    def pause_for_halt(self) -> None: ...
+
+
+def attach(bridge: _FreezeBridge, adapter: object) -> None:
     """Mount the halt-freeze hook on a live bridge (collect_cli wiring).
 
     No-op for adapters that do not declare the face (explicit duck-typed

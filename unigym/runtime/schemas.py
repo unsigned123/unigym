@@ -21,6 +21,8 @@ Design rules:
 """
 from __future__ import annotations
 
+from unigym._typing import JsonValue
+
 __all__ = ["SCHEMA_VERSION", "CONTROL_SCHEMA", "CONSOLE_SCHEMA",
            "INSPECT_SCHEMA", "SAVE_NPZ_SCHEMA"]
 
@@ -28,18 +30,18 @@ SCHEMA_VERSION = 1
 
 _DRAFT = "https://json-schema.org/draft/2020-12/schema"
 
-_CAMERA = {"type": "string", "minLength": 1, "maxLength": 63,
+_CAMERA: dict[str, JsonValue] = {"type": "string", "minLength": 1, "maxLength": 63,
            "description": "an INSTANTIATED camera name (GET /info -> "
                           "cameras.instantiated)"}
-_NON_NEG_INT = {"type": "integer", "minimum": 0}
-_NUMBER = {"type": "number"}
-_VEC3 = {"type": "array", "items": {"type": "number"},
+_NON_NEG_INT: dict[str, JsonValue] = {"type": "integer", "minimum": 0}
+_NUMBER: dict[str, JsonValue] = {"type": "number"}
+_VEC3: dict[str, JsonValue] = {"type": "array", "items": {"type": "number"},
          "minItems": 3, "maxItems": 3}
 
-_BARE = {"type": "object", "additionalProperties": False,
+_BARE: dict[str, JsonValue] = {"type": "object", "additionalProperties": False,
          "description": "no keys beyond 'type'"}
 
-_CONTROL_SNAPSHOT = {
+_CONTROL_SNAPSHOT: dict[str, JsonValue] = {
     "type": "object",
     "properties": {"type": {"const": "snapshot"},
                    "camera": _CAMERA,
@@ -58,7 +60,7 @@ _CONTROL_SNAPSHOT = {
                    "after the frame)",
 }
 
-CONTROL_SCHEMA = {
+CONTROL_SCHEMA: dict[str, JsonValue] = {
     "$schema": _DRAFT, "$id": "unigym:control", "title": "POST /control body",
     "version": SCHEMA_VERSION,
     "type": "object", "required": ["type"],
@@ -99,7 +101,7 @@ CONTROL_SCHEMA = {
                    "an executable 'hint' (ux-8)",
 }
 
-_CONSOLE_INSPECT = {
+_CONSOLE_INSPECT: dict[str, JsonValue] = {
     "type": "object",
     "properties": {"type": {"const": "inspect"},
                    "target": {"enum": ["summary", "obs", "extra"]},
@@ -116,7 +118,7 @@ _CONSOLE_INSPECT = {
     ],
 }
 
-_CONSOLE_EVAL = {
+_CONSOLE_EVAL: dict[str, JsonValue] = {
     "type": "object",
     "properties": {"type": {"const": "eval"},
                    "expr": {"type": "string", "minLength": 1}},
@@ -131,7 +133,7 @@ _CONSOLE_EVAL = {
                    "result.error, the run never dies)",
 }
 
-CONSOLE_SCHEMA = {
+CONSOLE_SCHEMA: dict[str, JsonValue] = {
     "$schema": _DRAFT, "$id": "unigym:console",
     "title": "POST /console body", "version": SCHEMA_VERSION,
     "type": "object", "required": ["type"],
@@ -165,7 +167,7 @@ CONSOLE_SCHEMA = {
                 "machine-checkable twin",
 }
 
-INSPECT_SCHEMA = {
+INSPECT_SCHEMA: dict[str, JsonValue] = {
     "$schema": _DRAFT, "$id": "unigym:inspect",
     "title": "POST /inspect body (bare console-inspect payload)",
     "version": SCHEMA_VERSION,
@@ -189,7 +191,7 @@ INSPECT_SCHEMA = {
     ],
 }
 
-SAVE_NPZ_SCHEMA = {
+SAVE_NPZ_SCHEMA: dict[str, JsonValue] = {
     "$schema": _DRAFT, "$id": "unigym:save_npz",
     "title": "POST /save_npz body (bare console save_npz payload)",
     "version": SCHEMA_VERSION,

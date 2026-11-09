@@ -39,7 +39,16 @@ module stays engine-free (numpy only inside the shared contact sampler).
 """
 from __future__ import annotations
 
-from typing import Callable, Protocol, cast, runtime_checkable
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+
+from unigym._typing import JsonValue
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from numpy.typing import NDArray
+
+    from unigym.contacts.manager import ContactManager
+    from unigym.runtime.bridge import Bridge
 
 __all__ = ["SceneOps", "SceneFace", "build_scene_ops", "attach",
            "robot_joint_groups", "joint_limit_rows", "contact_groups_state"]
@@ -56,15 +65,15 @@ class SceneOps(Protocol):
 
     backend: str
 
-    def tree(self) -> dict:
+    def tree(self) -> dict[str, JsonValue]:
         """Curated static structure (cached by the face, not here)."""
         ...
 
-    def state(self) -> dict:
+    def state(self) -> dict[str, JsonValue]:
         """Live dynamics, sampled fresh per call."""
         ...
 
-    def full_tree(self) -> dict:
+    def full_tree(self) -> dict[str, JsonValue]:
         """``?full=1`` raw face.
 
         Unbounded-ish; the 8KB ack cap is the honest failure mode --
@@ -73,8 +82,8 @@ class SceneOps(Protocol):
         ...
 
 
-def build_scene_ops(env, backend: str, robot_name: str | None = None,
-                    camera_names=None) -> SceneOps:
+def build_scene_ops(env: object, backend: str, robot_name: str | None = None,
+                    camera_names: Iterable[str] | None = None) -> SceneOps:
     """Factory: the ops object for *env* (single dispatch point).
 
     The implementations live in the backend packages -- lazy
@@ -98,7 +107,7 @@ def build_scene_ops(env, backend: str, robot_name: str | None = None,
 # --------------------------------------------------------------------------- #
 # shared curated helpers (backend-free; both ops implementations reuse these)
 # --------------------------------------------------------------------------- #
-def robot_joint_groups(joint_names) -> dict[str, list[str]]:
+def robot_joint_groups(joint_names: Iterable[str]) -> dict[str, list[str]]:
     """G1 joint groups folded into the curated robot tree.
 
     ``legs`` / ``waist`` / ``arms`` come from the profile body_parts
@@ -109,19 +118,27 @@ def robot_joint_groups(joint_names) -> dict[str, list[str]]:
     listing joints it does not have.
     """
     from ..robots.g1_constants import G1_BODY_PARTS, G1_HAND_JOINTS
+    parts: Mapping[str, object] = G1_BODY_PARTS
+    hand_joints: Sequence[str] = G1_HAND_JOINTS
     have = list(joint_names)
     groups: dict[str, list[str]] = {}
     for key in ("legs", "waist", "arms"):
-        names = [j for j in have if j in set(G1_BODY_PARTS.get(key) or [])]
+        body = parts.get(key)
+        if not isinstance(body, (list, tuple)):
+            continue
+        names = [j for j in have if j in body]
         if names:
             groups[key] = names
-    hands = [j for j in have if j in set(G1_HAND_JOINTS)]
+    hands = [j for j in have if j in hand_joints]
     if hands:
         groups["hands"] = hands
     return groups
 
 
-def joint_limit_rows(names, limits) -> list[dict]:
+def joint_limit_rows(
+        names: Sequence[str],
+        limits: Mapping[str, tuple[float, float] | None],
+) -> list[dict[str, JsonValue]]:
     """``tree.robot.joints`` / prop-articulation limit rows.
 
     ``names``: ordered joint names -- ALL ACTUATED robot joints for the
@@ -136,25 +153,29 @@ def joint_limit_rows(names, limits) -> list[dict]:
     """
     groups = robot_joint_groups(names)
     gname = {j: g for g, js in groups.items() for j in js}
-    return [{"name": n,
-             "group": gname.get(n),
-             "range": [float(limits[n][0]), float(limits[n][1])]
-             if limits.get(n) is not None else None,
-             "limited": limits.get(n) is not None}
-            for n in names]
+    rows: list[dict[str, JsonValue]] = []
+    for n in names:
+        lim = limits.get(n)
+        rows.append({"name": n,
+                     "group": gname.get(n),
+                     "range": ([float(lim[0]), float(lim[1])]
+                               if lim is not None else None),
+                     "limited": lim is not None})
+    return rows
 
 
-def _to_numpy(x):
+def _to_numpy(x: object) -> NDArray[Any] | None:
     """torch/numpy -> numpy (cpu); None passthrough."""
     if x is None:
         return None
-    if hasattr(x, "detach"):
-        x = x.detach().cpu().numpy()
+    detach = getattr(x, "detach", None)
+    if detach is not None:
+        x = detach().cpu().numpy()
     import numpy as np
     return np.asarray(x)
 
 
-def _any_truthy(val) -> bool:
+def _any_truthy(val: object) -> bool:
     """``any()`` over a group value in its native face.
 
     torch -> cpu numpy -> object-with-any -> numpy; a missing value is
@@ -162,15 +183,17 @@ def _any_truthy(val) -> bool:
     """
     if val is None:
         return False
-    if hasattr(val, "detach"):          # torch tensor (isaaclab face)
-        return bool(val.detach().cpu().numpy().any())
-    if hasattr(val, "any"):
-        return bool(val.any())
+    detach = getattr(val, "detach", None)
+    if detach is not None:              # torch tensor (isaaclab face)
+        return bool(detach().cpu().numpy().any())
+    anyfn = getattr(val, "any", None)
+    if anyfn is not None:
+        return bool(anyfn())
     import numpy as np
     return bool(np.asarray(val).any())
 
 
-def contact_groups_state(cm) -> dict:
+def contact_groups_state(cm: ContactManager | None) -> dict[str, JsonValue]:
     """Curated contact-group state from a bound ContactManager.
 
     ``on`` comes from the manager's FORMATTED value (respects each
@@ -182,18 +205,22 @@ def contact_groups_state(cm) -> dict:
     """
     if cm is None:
         return {}
-    vals = cm.read()
-    out: dict = {}
+    vals: Mapping[str, object] = cm.read()
+    out: dict[str, JsonValue] = {}
+    read_raw = getattr(cm.backend, "read_raw", None)
     for spec in cm.specs:
-        on = _any_truthy(vals.get(f"contact/{spec.name}"))
+        spec_name = getattr(spec, "name")
+        on = _any_truthy(vals.get(f"contact/{spec_name}"))
         fz = None
         try:
-            raw = _to_numpy(cm.backend.read_raw(spec))
+            if read_raw is None:
+                raise NotImplementedError
+            raw = _to_numpy(read_raw(spec))
             if raw is not None and raw.size:
                 fz = float(abs(raw[..., 2]).max())
         except (AttributeError, NotImplementedError, RuntimeError):
             fz = None                      # honest null (contract §1.23)
-        out[spec.name] = {"on": on, "force_z": fz}
+        out[spec_name] = {"on": on, "force_z": fz}
     return out
 
 
@@ -209,18 +236,19 @@ class SceneFace:
     ``scene`` bridge command -- the console/watchers/director pattern.
     """
 
-    def __init__(self, env, backend: str, robot_name: str | None = None,
-                 camera_names=None):
+    def __init__(self, env: object, backend: str,
+                 robot_name: str | None = None,
+                 camera_names: Iterable[str] | None = None):
         self._env = env
         self._backend = str(backend)
         self._robot_name = robot_name
         self._camera_names = list(camera_names or [])
-        self._ops = None
-        self._tree: dict | None = None
+        self._ops: SceneOps | None = None
+        self._tree: dict[str, JsonValue] | None = None
         self.n_queries = 0
 
     @property
-    def ops(self):
+    def ops(self) -> SceneOps:
         """The backend SceneOps (built lazily on first access)."""
         if self._ops is None:
             self._ops = build_scene_ops(self._env, self._backend,
@@ -228,7 +256,7 @@ class SceneFace:
                                         camera_names=self._camera_names)
         return self._ops
 
-    def tree_face(self) -> dict:
+    def tree_face(self) -> dict[str, JsonValue]:
         """Lazy cached tree (computed at most once per run).
 
         The engine has no scene-rebuild operation, so there is nothing
@@ -238,7 +266,9 @@ class SceneFace:
             self._tree = self.ops.tree()
         return self._tree
 
-    def handle(self, rid: int, params: dict | None = None) -> dict:
+    def handle(self, rid: int,
+               params: Mapping[str, JsonValue] | None = None
+               ) -> dict[str, JsonValue]:
         """Cmd-16 handler: curated doc, or ``full`` raw tree on demand."""
         self.n_queries += 1
         if params and params.get("full"):
@@ -248,8 +278,8 @@ class SceneFace:
                           "state": self.ops.state()}}
 
 
-def attach(bridge, env, backend: str, robot_name: str | None = None) \
-        -> SceneFace:
+def attach(bridge: Bridge, env: object, backend: str,
+           robot_name: str | None = None) -> SceneFace:
     """Wire the scene face onto the bridge (collect_cli face).
 
     Registers the cmd-16 handler via the bridge's extension surface
