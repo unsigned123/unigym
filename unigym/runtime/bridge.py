@@ -690,14 +690,14 @@ def _encode_jpeg(arr) -> bytes:
             a = ((a - lo) / (hi - lo) * 255.0).astype(np.uint8)
     try:
         from PIL import Image
-        buf = io.BytesIO()
-        Image.fromarray(a).save(buf, "JPEG", quality=90)
-        return buf.getvalue()
-    except ImportError:
-        import imageio
-        buf = io.BytesIO()
-        imageio.imwrite(buf, a, format="JPEG")
-        return buf.getvalue()
+    except ImportError as exc:
+        from unigym._optional import MissingExtraError
+
+        raise MissingExtraError(
+            "PIL.Image", "record", "JPEG capture") from exc
+    buf = io.BytesIO()
+    Image.fromarray(a).save(buf, "JPEG", quality=90)
+    return buf.getvalue()
 
 
 # --------------------------------------------------------------------------- #
@@ -1543,7 +1543,6 @@ class Bridge:
         if d is None:
             return None
         import numpy as np
-        from PIL import Image
 
         path = os.path.join(
             d, f"{time.strftime('%Y%m%d_%H%M%S')}_{name}_{fid}{suffix}")
@@ -1551,6 +1550,13 @@ class Bridge:
             with open(path, "wb") as f:
                 f.write(payload)
             return path
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            from unigym._optional import MissingExtraError
+
+            raise MissingExtraError(
+                "PIL.Image", "record", "image capture") from exc
         arr = np.asarray(payload)
         if arr.ndim == 2:                     # (H, W) int id buffer safety
             from unigym.cameras.geomflags import colorize_seg
