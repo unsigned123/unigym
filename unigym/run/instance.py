@@ -7,13 +7,77 @@ owned recorder close hook and the env backend (the pre-split
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from .spec import RunSpec
 
 if TYPE_CHECKING:
+    from unigym.adapters.base import Adapter
+    from unigym.cameras.manager import CameraManager
+    from unigym.commands.base import CommandSampler
+    from unigym.contacts.manager import ContactManager
+    from unigym.director import Director
+    from unigym.env.backends.base import EnvBackend
+    from unigym.io.writer import ShardWriter
+    from unigym.logger import DataCollectLogger
     from unigym.model.live import LiveModel
+    from unigym.props.base import PropManager
+    from unigym.recorder import Recorder
+    from unigym.robots.base import RobotRecipe
+    from unigym.runtime.bridge import Bridge
+    from unigym.runtime.controllers import (
+        ResolvedControl,
+        ResolvedControlPlan,
+    )
+    from unigym.runtime.rewind_providers import RewindStateProvider
+    from unigym.terminations.composite import TerminationGroup
+    from unigym.trace.replay import TraceReplay
+
+
+if TYPE_CHECKING:
+    class RunEnv(EnvBackend, Protocol):
+        """Env backend plus the run-layer wiring and snapshot faces.
+
+        ``adapter_groups`` is stamped by :func:`build_instance`; the
+        snapshot/restore pair is the rewind face (all registered backends
+        implement it, and rewind gates on the SNAPSHOT trait before use).
+        """
+
+        adapter_groups: dict[str, tuple[str, ...]]
+
+        def snapshot(self) -> object:
+            """Capture the engine state for a rewind checkpoint."""
+            ...
+
+        def restore(self, state: object) -> None:
+            """Restore a state captured by :meth:`snapshot`."""
+            ...
+
+
+class Sink(Protocol):
+    """The engine sink contract (collect/benchmark/fan-out/bridge chain)."""
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        """Consume one pre-reset engine step."""
+
+    def on_episode_end(
+        self, env_ids: object, bundle: dict[str, object]) -> None:
+        """Consume the episode-end data side before the reset chain."""
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        """Consume one post-reset engine step (metrics side)."""
+
+    def on_run_end(self) -> dict[str, object]:
+        """Flush the run and return the sink summary."""
+        ...
+
+
+def _empty_providers() -> list[RewindStateProvider]:
+    """Typed empty default for :attr:`RunInstance.rewind_providers`."""
+    return []
 
 
 @dataclass
@@ -21,31 +85,32 @@ class RunInstance:
     """Live resources of one run (env / managers / sinks / bridge)."""
 
     spec: RunSpec
-    profile: Any
-    adapter: Any
-    sampler: Any
-    term_group: Any
-    env: Any
-    plan: Any = None
-    camera_manager: Any = None
-    prop_manager: Any = None
-    contact_manager: Any = None
-    recorder: Any = None
-    director: Any = None
-    bridge: Any = None
-    sink: Any = None
-    writer: Any = None
-    logger: Any = None
-    replay: Any = None
-    rewind_providers: list = field(default_factory=list)
-    stop_when: Any = None
-    artifacts_dir: Any = None
+    profile: RobotRecipe
+    adapter: Adapter
+    sampler: CommandSampler | None
+    term_group: TerminationGroup
+    env: RunEnv
+    bridge: Bridge
+    plan: ResolvedControlPlan | None = None
+    camera_manager: CameraManager | None = None
+    prop_manager: PropManager | None = None
+    contact_manager: ContactManager | None = None
+    recorder: Recorder | None = None
+    director: Director | None = None
+    sink: Sink | None = None
+    writer: ShardWriter | None = None
+    logger: DataCollectLogger | None = None
+    replay: TraceReplay | None = None
+    rewind_providers: list[RewindStateProvider] = field(
+        default_factory=_empty_providers)
+    stop_when: Callable[[], bool] | None = None
+    artifacts_dir: Path | None = None
     out_dir: str | None = None
     reset_on_termination: bool = False
     _closed: bool = field(default=False, init=False, repr=False)
 
     @property
-    def resolved_controls(self) -> tuple:
+    def resolved_controls(self) -> tuple[ResolvedControl, ...]:
         """The frozen :class:`ResolvedControl` rows of :attr:`plan`."""
         return () if self.plan is None else tuple(self.plan.controls)
 
@@ -58,7 +123,7 @@ class RunInstance:
         the bridge's ``StepGate``.  This reads that declaration (the
         transient paused/stepping state is never duplicated here).
         """
-        bridges = getattr(self.spec, "bridges", None) or {}
+        bridges = self.spec.bridges or {}
         return bool(bridges.get("serve_pause", False))
 
     @property
