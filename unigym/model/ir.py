@@ -217,8 +217,8 @@ class Camera:
 
     name: str
     body: str
-    pos: tuple[float, ...] = (0.0, 0.0, 0.0)
-    quat: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     fovy: float | None = None
     mode: str = "fixed"
     targetbody: str | None = None

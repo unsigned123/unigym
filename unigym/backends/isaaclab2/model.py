@@ -86,6 +86,24 @@ def _vec(values, size, default):
     return tuple(float(item) for item in seq[:size])
 
 
+def _fixed_vec3(values, default: tuple[float, float, float]
+                ) -> tuple[float, float, float]:
+    """Return an exact 3-tuple from *values*, else *default* (validated)."""
+    seq = _as_sequence(values)
+    if seq is None or len(seq) < 3:
+        return default
+    return (float(seq[0]), float(seq[1]), float(seq[2]))
+
+
+def _fixed_vec4(values, default: tuple[float, float, float, float]
+                ) -> tuple[float, float, float, float]:
+    """Return an exact 4-tuple from *values*, else *default* (validated)."""
+    seq = _as_sequence(values)
+    if seq is None or len(seq) < 4:
+        return default
+    return (float(seq[0]), float(seq[1]), float(seq[2]), float(seq[3]))
+
+
 def _prim_path(cfg):
     """Return a cfg's declared ``prim_path`` (``None`` when absent)."""
     path = getattr(cfg, "prim_path", None)
@@ -192,8 +210,9 @@ def _declared_camera(name, cfg, body_name, attrs, prim_paths):
     """Build one declared camera row plus its USD extras."""
     path = _prim_path(cfg)
     offset = getattr(cfg, "offset", None)
-    pos = _vec(getattr(offset, "pos", None), 3, (0.0, 0.0, 0.0))
-    quat = _vec(getattr(offset, "rot", None), 4, (1.0, 0.0, 0.0, 0.0))
+    pos = _fixed_vec3(getattr(offset, "pos", None), (0.0, 0.0, 0.0))
+    quat = _fixed_vec4(getattr(offset, "rot", None),
+                       (1.0, 0.0, 0.0, 0.0))
     if path:
         prim_paths[str(name)] = path
     attrs[f"camera/{name}"] = {
