@@ -25,12 +25,36 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+
+from unigym._typing import JsonValue
 
 if TYPE_CHECKING:
     from .terrain import Terrain
+
+#: one instance parameter value: JSON data plus the tuple form the engine seam
+#: forwards (pose vectors).  The IR stores it verbatim and never reads it.
+ParamValue: TypeAlias = JsonValue | tuple[float, ...]
+
+_T = TypeVar("_T")
+
+
+def _empty_slots() -> dict[str, JsonValue]:
+    """An empty material binding table (typed dataclass default)."""
+    return {}
+
+
+def _empty_hints() -> dict[str, Any]:
+    """An empty engine-hints table (typed dataclass default)."""
+    return {}
+
+
+#: engine knobs are an opaque, engine-owned payload: the core never reads
+#: or interprets a hint value (only the backend does), so ``Any`` is honest
+#: here rather than a placeholder for an unknown type.
+_EngineHints: TypeAlias = Mapping[str, Any]
 
 #: the closed instance-role vocabulary (a hint, never a dispatch branch).
 INSTANCE_ROLES = ("rigid", "articulated", "terrain", "sensor")
@@ -119,33 +143,40 @@ def require_neutral_name(kind: str, name: str) -> str:
     return name
 
 
-def _require_text(owner: str, name: str, value) -> str:
+def _require_text(owner: str, name: str, value: object) -> str:
     """Validate one non-empty string field."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{owner}: {name} must be a non-empty string, got {value!r}")
     return value
 
 
-def _require_vec(owner: str, name: str, value, lengths: tuple) -> tuple:
+def _require_vec(
+    owner: str, name: str, value: Sequence[object], lengths: int | tuple[int, ...],
+) -> tuple[float, ...]:
     """Validate a fixed-length finite float vector (one of *lengths*)."""
-    if (
-        not isinstance(value, (list, tuple))
-        or len(value) not in lengths
-        or any(
-            isinstance(v, bool)
-            or not isinstance(v, (int, float))
-            or not math.isfinite(v)
-            for v in value
+    allowed = (lengths,) if isinstance(lengths, int) else lengths
+    if not isinstance(value, (list, tuple)):
+        wanted = " or ".join(str(n) for n in allowed)
+        raise ValueError(
+            f"{owner}: {name} must be a {wanted}-vector of finite numbers, "
+            f"got {value!r}"
         )
+    if len(value) not in allowed or any(
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or not math.isfinite(v)
+        for v in value
     ):
-        want = " or ".join(str(n) for n in lengths)
+        want = " or ".join(str(n) for n in allowed)
         raise ValueError(
             f"{owner}: {name} must be a {want}-vector of finite numbers, got {value!r}"
         )
-    return tuple(float(v) for v in value)
+    return tuple(
+        float(v) for v in value if isinstance(v, (int, float))
+    )
 
 
-def _require_quat(owner: str, value) -> tuple:
+def _require_quat(owner: str, value: Sequence[object]) -> tuple[float, ...]:
     """Validate a non-zero ``(w, x, y, z)`` quaternion."""
     quat = _require_vec(owner, "quat_wxyz", value, (4,))
     if sum(v * v for v in quat) < 1e-24:
@@ -153,7 +184,7 @@ def _require_quat(owner: str, value) -> tuple:
     return quat
 
 
-def _require_source(owner: str, value, optional: bool = False) -> str:
+def _require_source(owner: str, value: object, optional: bool = False) -> str:
     """Validate a ``file:line`` provenance string (design v091 invariant 3)."""
     if optional and value == "":
         return ""
@@ -180,8 +211,8 @@ class Pose:
     """
 
     frame: str = "world"
-    xyz: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
     def __post_init__(self):
         """Validate the frame name, the translation and the rotation."""
@@ -203,7 +234,7 @@ class Instance:
 
     id: str
     generator: str
-    params: Mapping
+    params: Mapping[str, ParamValue]
     pose: Pose
     source: str
     role: str = "rigid"
@@ -246,7 +277,7 @@ class Region:
     name: str
     owner: str
     frame: str
-    extent: tuple
+    extent: tuple[float, float] | tuple[float, float, float]
     source: str
 
     def __post_init__(self):
@@ -280,9 +311,9 @@ class Slot:
 
     id: str
     frame: str
-    extent: tuple
+    extent: tuple[float, float] | tuple[float, float, float]
     owner: str = ""
-    tags: tuple = ()
+    tags: tuple[str, ...] = ()
     source: str = ""
 
     def __post_init__(self):
@@ -320,7 +351,7 @@ class Material:
     """
 
     name: str
-    slots: Mapping = field(default_factory=dict)
+    slots: Mapping[str, JsonValue] = field(default_factory=_empty_slots)
 
     def __post_init__(self):
         """Validate the name and the binding mapping."""
@@ -344,34 +375,20 @@ class Scene:
     """
 
     name: str
-    instances: tuple = ()
-    regions: tuple = ()
-    slots: tuple = ()
-    materials: tuple = ()
-    engine_hints: Mapping = field(default_factory=dict)
+    instances: tuple[Instance, ...] = ()
+    regions: tuple[Region, ...] = ()
+    slots: tuple[Slot, ...] = ()
+    materials: tuple[Material, ...] = ()
+    engine_hints: _EngineHints = field(default_factory=_empty_hints)
     terrain: Terrain | None = None
 
     def __post_init__(self):
         """Validate the name, the typed sequences, hints, terrain and uniqueness."""
         object.__setattr__(self, "name", require_neutral_name("scene", self.name))
-        for field_name, entry_type in (
-            ("instances", Instance),
-            ("regions", Region),
-            ("slots", Slot),
-            ("materials", Material),
-        ):
-            entries = getattr(self, field_name)
-            if not isinstance(entries, tuple):
-                raise ValueError(
-                    f"scene {field_name} must be a tuple of {entry_type.__name__}, "
-                    f"got {type(entries).__name__}"
-                )
-            for entry in entries:
-                if not isinstance(entry, entry_type):
-                    raise ValueError(
-                        f"scene {field_name} entries must be {entry_type.__name__}, "
-                        f"got {type(entry).__name__}"
-                    )
+        _require_entries("instances", self.instances, Instance)
+        _require_entries("regions", self.regions, Region)
+        _require_entries("slots", self.slots, Slot)
+        _require_entries("materials", self.materials, Material)
         if not isinstance(self.engine_hints, Mapping):
             raise ValueError(
                 f"scene engine_hints must be a mapping, got "
@@ -389,23 +406,49 @@ class Scene:
         _validate_uniqueness(self)
 
 
+def _require_entries(
+    field_name: str, entries: tuple[object, ...], entry_type: type[_T],
+) -> None:
+    """Validate one typed tuple member (a sequence of *entry_type*)."""
+    if not isinstance(entries, tuple):
+        raise ValueError(
+            f"scene {field_name} must be a tuple of {entry_type.__name__}, "
+            f"got {type(entries).__name__}"
+        )
+    for entry in entries:
+        if not isinstance(entry, entry_type):
+            raise ValueError(
+                f"scene {field_name} entries must be {entry_type.__name__}, "
+                f"got {type(entry).__name__}"
+            )
+
+
+def _check_unique(
+    kind: str, key: str, names: Iterable[str], scene_name: str,
+) -> None:
+    """Reject a duplicate declaration name within one kind."""
+    seen: set[str] = set()
+    for value in names:
+        if value in seen:
+            raise ValueError(
+                f"duplicate {kind} {key} {value!r} in scene {scene_name!r} -- "
+                f"every declaration must have a unique {key}"
+            )
+        seen.add(value)
+
+
 def _validate_uniqueness(scene: Scene) -> None:
     """Reject duplicate instance ids, region names, slot ids and materials."""
-    for kind, entries, key in (
-        ("instance", scene.instances, "id"),
-        ("region", scene.regions, "name"),
-        ("slot", scene.slots, "id"),
-        ("material", scene.materials, "name"),
-    ):
-        seen: set[str] = set()
-        for entry in entries:
-            value = getattr(entry, key)
-            if value in seen:
-                raise ValueError(
-                    f"duplicate {kind} {key} {value!r} in scene {scene.name!r} -- "
-                    f"every declaration must have a unique {key}"
-                )
-            seen.add(value)
+    _check_unique(
+        "instance", "id", (entry.id for entry in scene.instances), scene.name
+    )
+    _check_unique(
+        "region", "name", (entry.name for entry in scene.regions), scene.name
+    )
+    _check_unique("slot", "id", (entry.id for entry in scene.slots), scene.name)
+    _check_unique(
+        "material", "name", (entry.name for entry in scene.materials), scene.name
+    )
 
 
 def validate_scene(scene: Scene) -> None:

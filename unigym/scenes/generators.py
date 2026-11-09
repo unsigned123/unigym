@@ -26,9 +26,9 @@ here.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
-from typing import cast
+from typing import Required, TypeAlias, TypedDict, TypeGuard
 
 from .primitives import (
     SHAPE_LAYERS,
@@ -40,9 +40,25 @@ from .primitives import (
     ShapePayload,
     SphereShape,
 )
-from .scene_ir import require_neutral_name
+from .scene_ir import ParamValue, require_neutral_name
 
-_ROOM_SHELL_SCHEMA = MappingProxyType(
+
+class _Rule(TypedDict, total=False):
+    """One parameter-schema rule (the closed generator declaration)."""
+
+    type: Required[str]
+    required: bool
+    default: ParamValue
+    nullable: bool
+
+
+_Schema: TypeAlias = Mapping[str, _Rule]
+
+#: a normalized builder payload: the keys come from the generator schema
+#: (validated by :func:`_apply_schema`); the typed accessors below narrow it.
+_Builder: TypeAlias = Callable[[Mapping[str, object]], ShapePayload]
+
+_ROOM_SHELL_SCHEMA: _Schema = MappingProxyType(
     {
         "name": {"type": "name", "required": True},
         "width": {"type": "positive", "required": True},
@@ -55,7 +71,7 @@ _ROOM_SHELL_SCHEMA = MappingProxyType(
     }
 )
 
-_BOX_SCHEMA = MappingProxyType(
+_BOX_SCHEMA: _Schema = MappingProxyType(
     {
         "name": {"type": "name", "required": True},
         "size": {"type": "envelope", "required": True},
@@ -68,7 +84,7 @@ _BOX_SCHEMA = MappingProxyType(
 )
 
 
-def _shape_schema(*dim_rules: tuple[str, Mapping]) -> MappingProxyType:
+def _shape_schema(*dim_rules: tuple[str, _Rule]) -> _Schema:
     """Build one single-shape schema mirroring ``box``.
 
     Args:
@@ -79,16 +95,17 @@ def _shape_schema(*dim_rules: tuple[str, Mapping]) -> MappingProxyType:
     Returns:
         The read-only schema mapping.
     """
-    schema: dict[str, object] = {"name": {"type": "name", "required": True}}
+    schema: dict[str, _Rule] = {"name": {"type": "name", "required": True}}
     for key, rule in dim_rules:
         schema[key] = rule
-    schema.update({
+    common: dict[str, _Rule] = {
         "material": {"type": "name", "required": True},
         "pos": {"type": "vector3", "default": (0.0, 0.0, 0.0)},
         "quat": {"type": "rotation", "default": (1.0, 0.0, 0.0, 0.0)},
         "contact": {"type": "contact", "default": None},
         "layer": {"type": "layer", "default": "visual"},
-    })
+    }
+    schema.update(common)
     return MappingProxyType(schema)
 
 
@@ -105,35 +122,120 @@ _CAPSULE_SCHEMA = _shape_schema(
 _PLANE_SCHEMA = _shape_schema(
     ("size", {"type": "extent2", "required": True}))
 
-_REGISTRY: dict[str, tuple[Mapping, Callable]] = {}
+_REGISTRY: dict[str, tuple[_Schema, _Builder]] = {}
 
 
-def _finite_vector(where: str, value, length: int) -> tuple:
+def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    """Narrow a runtime value to a list/tuple (leaf shape trusted)."""
+    return isinstance(value, (list, tuple))
+
+
+def _finite_vector(where: str, value: object, length: int) -> tuple[float, ...]:
     """Validate a finite float vector of exactly *length* components."""
-    if (
-        not isinstance(value, (list, tuple))
-        or len(value) != length
-        or any(
-            isinstance(v, bool)
-            or not isinstance(v, (int, float))
-            or not math.isfinite(v)
-            for v in value
+    if not _is_sequence(value):
+        raise ValueError(
+            f"{where} must be a {length}-vector of finite numbers, got {value!r}"
         )
+    if len(value) != length or any(
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or not math.isfinite(v)
+        for v in value
     ):
         raise ValueError(
             f"{where} must be a {length}-vector of finite numbers, got {value!r}"
         )
-    return tuple(float(v) for v in value)
+    return tuple(
+        float(v) for v in value if isinstance(v, (int, float))
+    )
 
 
-def _coerce(gen_name: str, key: str, rule: Mapping, value):
+def _str_param(params: Mapping[str, object], key: str) -> str:
+    """Read one normalized string parameter (schema-validated)."""
+    value = params.get(key)
+    if not isinstance(value, str):
+        raise ValueError(
+            f"generator normalized param {key!r} must be a string, got {value!r}"
+        )
+    return value
+
+
+def _opt_str_param(params: Mapping[str, object], key: str) -> str | None:
+    """Read one nullable normalized string parameter (schema-validated)."""
+    value = params.get(key)
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError(
+        f"generator normalized param {key!r} must be a string or None, "
+        f"got {value!r}"
+    )
+
+
+def _number_param(params: Mapping[str, object], key: str) -> float:
+    """Read one normalized numeric parameter (schema-validated)."""
+    value = params.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"generator normalized param {key!r} must be a number, got {value!r}"
+        )
+    return float(value)
+
+
+def _vec_param(
+    params: Mapping[str, object], key: str, length: int,
+) -> tuple[float, ...]:
+    """Read one normalized vector parameter (schema-validated)."""
+    return _finite_vector(key, params.get(key), length)
+
+
+def _vec2_param(params: Mapping[str, object], key: str) -> tuple[float, float]:
+    """Read one normalized 2-vector parameter."""
+    nums = _vec_param(params, key, 2)
+    return (nums[0], nums[1])
+
+
+def _vec3_param(
+    params: Mapping[str, object], key: str,
+) -> tuple[float, float, float]:
+    """Read one normalized 3-vector parameter."""
+    nums = _vec_param(params, key, 3)
+    return (nums[0], nums[1], nums[2])
+
+
+def _vec4_param(
+    params: Mapping[str, object], key: str,
+) -> tuple[float, float, float, float]:
+    """Read one normalized 4-vector parameter."""
+    nums = _vec_param(params, key, 4)
+    return (nums[0], nums[1], nums[2], nums[3])
+
+
+def _contact_param(
+    params: Mapping[str, object], key: str,
+) -> ContactSpec | None:
+    """Read the normalized contact hint (a ContactSpec or None)."""
+    value = params.get(key)
+    if value is None or isinstance(value, ContactSpec):
+        return value
+    raise ValueError(
+        f"generator normalized param {key!r} must be a ContactSpec or None, "
+        f"got {type(value).__name__}"
+    )
+
+
+def _coerce(gen_name: str, key: str, rule: _Rule, value: ParamValue) -> object:
     """Validate one parameter against its schema rule (fail closed)."""
     where = f"generator {gen_name!r} param {key!r}"
     kind = rule["type"]
     if kind == "name":
         if value is None and rule.get("nullable"):
             return None
-        return require_neutral_name(where, cast(str, value))
+        if not isinstance(value, str):
+            raise ValueError(
+                f"{where} name {value!r} must be a lowercase snake_case "
+                f"identifier (path-like spellings are rejected)"
+            )
+        return require_neutral_name(where, value)
     if kind == "positive":
         if (
             isinstance(value, bool)
@@ -173,7 +275,9 @@ def _coerce(gen_name: str, key: str, rule: Mapping, value):
     raise ValueError(f"generator {gen_name!r}: schema type {kind!r} is not defined")
 
 
-def _apply_schema(gen_name: str, schema: Mapping, params: Mapping) -> dict:
+def _apply_schema(
+    gen_name: str, schema: _Schema, params: Mapping[str, ParamValue],
+) -> dict[str, object]:
     """Validate + normalize *params* against *schema*; fill defaults."""
     legal = sorted(schema)
     unknown = sorted(set(params) - set(legal))
@@ -196,7 +300,9 @@ def _apply_schema(gen_name: str, schema: Mapping, params: Mapping) -> dict:
     }
 
 
-def register_generator(name: str, schema: Mapping, builder: Callable) -> None:
+def register_generator(
+    name: str, schema: _Schema, builder: _Builder,
+) -> None:
     """Register one built-in generator in the closed registry.
 
     Args:
@@ -228,7 +334,7 @@ def registered_generators() -> list[str]:
     return list(_REGISTRY)
 
 
-def generator_schema(name: str) -> Mapping:
+def generator_schema(name: str) -> _Schema:
     """Return the declared parameter schema of one registered generator.
 
     The engine side reads it to decide which declaration fields a given
@@ -252,7 +358,7 @@ def generator_schema(name: str) -> Mapping:
     return _REGISTRY[name][0]
 
 
-def build_payload(name: str, params: Mapping) -> ShapePayload:
+def build_payload(name: str, params: Mapping[str, ParamValue]) -> ShapePayload:
     """Validate *params* against the named schema and build its payload.
 
     Args:
@@ -293,7 +399,7 @@ def build_payload(name: str, params: Mapping) -> ShapePayload:
     return payload
 
 
-def _build_room_shell(params: Mapping) -> ShapePayload:
+def _build_room_shell(params: Mapping[str, object]) -> ShapePayload:
     """Build the six-slab room envelope from interior dimensions.
 
     Args:
@@ -311,21 +417,24 @@ def _build_room_shell(params: Mapping) -> ShapePayload:
     would change every room-shell world outside the frozen baselines'
     coverage.
     """
-    name = params["name"]
-    thickness = params["thickness"]
-    w_half = params["width"] / 2.0
-    d_half = params["depth"] / 2.0
-    h_half = params["height"] / 2.0
+    name = _str_param(params, "name")
+    thickness = _number_param(params, "thickness")
+    w_half = _number_param(params, "width") / 2.0
+    d_half = _number_param(params, "depth") / 2.0
+    h_half = _number_param(params, "height") / 2.0
     big_w = w_half + thickness
     big_d = d_half + thickness
     big_h = h_half + thickness
-    wall = params["wall_material"]
-    ceiling = params["ceiling_material"] or wall
-    rows = (
+    wall = _str_param(params, "wall_material")
+    ceiling = _opt_str_param(params, "ceiling_material") or wall
+    rows: tuple[
+        tuple[str, tuple[float, float, float], tuple[float, float, float], str],
+        ...,
+    ] = (
         ("floor", (2.0 * big_w, 2.0 * big_d, thickness),
-         (0.0, 0.0, -thickness / 2.0), params["floor_material"]),
+         (0.0, 0.0, -thickness / 2.0), _str_param(params, "floor_material")),
         ("ceiling", (2.0 * big_w, 2.0 * big_d, thickness),
-         (0.0, 0.0, params["height"] + thickness / 2.0), ceiling),
+         (0.0, 0.0, _number_param(params, "height") + thickness / 2.0), ceiling),
         ("wall_xp", (thickness, 2.0 * big_d, 2.0 * big_h),
          (w_half + thickness / 2.0, 0.0, h_half), wall),
         ("wall_xm", (thickness, 2.0 * big_d, 2.0 * big_h),
@@ -343,7 +452,7 @@ def _build_room_shell(params: Mapping) -> ShapePayload:
     return ShapePayload(shapes)
 
 
-def _build_box(params: Mapping) -> ShapePayload:
+def _build_box(params: Mapping[str, object]) -> ShapePayload:
     """Build one box slab from an OUTER envelope.
 
     Args:
@@ -354,53 +463,69 @@ def _build_box(params: Mapping) -> ShapePayload:
         engine side halves it, never this generator).
     """
     shape = BoxShape(
-        name=f"{params['name']}_geom",
-        size=params["size"],
-        material=params["material"],
-        pos=params["pos"],
-        quat_wxyz=params["quat"],
-        contact=params["contact"],
-        layer=params["layer"],
+        name=f"{_str_param(params, 'name')}_geom",
+        size=_vec3_param(params, "size"),
+        material=_str_param(params, "material"),
+        pos=_vec3_param(params, "pos"),
+        quat_wxyz=_vec4_param(params, "quat"),
+        contact=_contact_param(params, "contact"),
+        layer=_str_param(params, "layer"),
     )
     return ShapePayload((shape,))
 
 
-def _shape_kwargs(params: Mapping) -> dict:
-    """Common constructor kwargs for one single-shape payload entry."""
-    return {
-        "name": f"{params['name']}_geom",
-        "material": params["material"],
-        "pos": params["pos"],
-        "quat_wxyz": params["quat"],
-        "contact": params["contact"],
-        "layer": params["layer"],
-    }
-
-
-def _build_sphere(params: Mapping) -> ShapePayload:
+def _build_sphere(params: Mapping[str, object]) -> ShapePayload:
     """Build one sphere shape from its normalized parameters."""
-    return ShapePayload((SphereShape(radius=params["radius"],
-                                      **_shape_kwargs(params)),))
+    return ShapePayload((SphereShape(
+        name=f"{_str_param(params, 'name')}_geom",
+        radius=_number_param(params, "radius"),
+        material=_str_param(params, "material"),
+        pos=_vec3_param(params, "pos"),
+        quat_wxyz=_vec4_param(params, "quat"),
+        contact=_contact_param(params, "contact"),
+        layer=_str_param(params, "layer"),
+    ),))
 
 
-def _build_cylinder(params: Mapping) -> ShapePayload:
+def _build_cylinder(params: Mapping[str, object]) -> ShapePayload:
     """Build one cylinder shape from its normalized parameters."""
-    return ShapePayload((CylinderShape(radius=params["radius"],
-                                       half_height=params["half_height"],
-                                       **_shape_kwargs(params)),))
+    return ShapePayload((CylinderShape(
+        name=f"{_str_param(params, 'name')}_geom",
+        radius=_number_param(params, "radius"),
+        half_height=_number_param(params, "half_height"),
+        material=_str_param(params, "material"),
+        pos=_vec3_param(params, "pos"),
+        quat_wxyz=_vec4_param(params, "quat"),
+        contact=_contact_param(params, "contact"),
+        layer=_str_param(params, "layer"),
+    ),))
 
 
-def _build_capsule(params: Mapping) -> ShapePayload:
+def _build_capsule(params: Mapping[str, object]) -> ShapePayload:
     """Build one capsule shape from its normalized parameters."""
-    return ShapePayload((CapsuleShape(radius=params["radius"],
-                                      half_height=params["half_height"],
-                                      **_shape_kwargs(params)),))
+    return ShapePayload((CapsuleShape(
+        name=f"{_str_param(params, 'name')}_geom",
+        radius=_number_param(params, "radius"),
+        half_height=_number_param(params, "half_height"),
+        material=_str_param(params, "material"),
+        pos=_vec3_param(params, "pos"),
+        quat_wxyz=_vec4_param(params, "quat"),
+        contact=_contact_param(params, "contact"),
+        layer=_str_param(params, "layer"),
+    ),))
 
 
-def _build_plane(params: Mapping) -> ShapePayload:
+def _build_plane(params: Mapping[str, object]) -> ShapePayload:
     """Build one plane shape from its normalized parameters."""
-    return ShapePayload((PlaneShape(size=params["size"],
-                                    **_shape_kwargs(params)),))
+    return ShapePayload((PlaneShape(
+        name=f"{_str_param(params, 'name')}_geom",
+        size=_vec2_param(params, "size"),
+        material=_str_param(params, "material"),
+        pos=_vec3_param(params, "pos"),
+        quat_wxyz=_vec4_param(params, "quat"),
+        contact=_contact_param(params, "contact"),
+        layer=_str_param(params, "layer"),
+    ),))
 
 
 register_generator("room_shell", _ROOM_SHELL_SCHEMA, _build_room_shell)

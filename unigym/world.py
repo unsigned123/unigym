@@ -29,21 +29,23 @@ from __future__ import annotations
 
 import copy
 import uuid
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import yaml
 
-from unigym._typing import JsonValue
+from unigym._typing import JsonValue, is_json_object
 from unigym.scenes.generators import build_payload
-from unigym.scenes.registry import register_scene
+from unigym.scenes.registry import SceneContext, register_scene
 from unigym.scenes.scene_ir import (
+    Instance,
     Material,
     Scene,
     validate_scene,
 )
-from unigym.scenes.terrain import Terrain
+from unigym.scenes.terrain import HeightsInput, Terrain
 from unigym.world_primitives import (
     Box,
     Capsule,
@@ -56,6 +58,17 @@ from unigym.world_primitives import (
 )
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
+
+
+class WorldFragment(TypedDict, total=False):
+    """The run-config fragment a :class:`World` contributes."""
+
+    scene: str
+    world_base: dict[str, JsonValue]
+    params: dict[str, JsonValue]
+    articulations: list[dict[str, JsonValue]]
+    controls: list[dict[str, JsonValue]]
+    objects: dict[str, JsonValue]
 
 
 def _mapping_section(
@@ -96,7 +109,7 @@ class _TerrainBuilder:
                 "ground")
         world._ensure_inline()
 
-    def _set(self, terrain) -> World:
+    def _set(self, terrain: Terrain | None) -> World:
         """Store *terrain* (None = flat) and return the world."""
         self._world._terrain = terrain
         self._world._terrain_explicit = True
@@ -116,23 +129,44 @@ class _TerrainBuilder:
         self._check()
         return self._set(None)
 
-    def heightmap(self, heights, size=None, base_z=0.0, name="terrain",
-                  meta=None) -> World:
+    def heightmap(
+        self,
+        heights: HeightsInput,
+        size: tuple[float, float] | None = None,
+        base_z: float = 0.0,
+        name: str = "terrain",
+        meta: Mapping[str, JsonValue] | None = None,
+    ) -> World:
         """Use an explicit ``(ny, nx)`` elevation matrix."""
         self._check()
         return self._set(Terrain.heightmap(
             heights, size=size, base_z=base_z, name=name, meta=meta))
 
-    def stairs(self, steps, rise, run, width, base_z=0.0, margin=None,
-               resolution=None, name="terrain") -> World:
+    def stairs(
+        self,
+        steps: int,
+        rise: float,
+        run: float,
+        width: float,
+        base_z: float = 0.0,
+        margin: float | None = None,
+        resolution: tuple[int, int] | None = None,
+        name: str = "terrain",
+    ) -> World:
         """Use a staircase climbing +x (see :meth:`Terrain.stairs`)."""
         self._check()
         return self._set(Terrain.stairs(
             steps, rise, run, width, base_z=base_z, margin=margin,
             resolution=resolution, name=name))
 
-    def slope(self, angle_deg, size=(4.0, 4.0), base_z=0.0, resolution=None,
-              name="terrain") -> World:
+    def slope(
+        self,
+        angle_deg: float,
+        size: tuple[float, float] = (4.0, 4.0),
+        base_z: float = 0.0,
+        resolution: tuple[int, int] | None = None,
+        name: str = "terrain",
+    ) -> World:
         """Use a linear ramp along +x (see :meth:`Terrain.slope`)."""
         self._check()
         return self._set(Terrain.slope(
@@ -152,8 +186,8 @@ class World:
     def __init__(self):
         self._scene_ref: str | None = None
         self._mj_scene: str | None = None
-        self._mj_scene_params: dict = {}
-        self._world_base: dict | None = None
+        self._mj_scene_params: dict[str, JsonValue] = {}
+        self._world_base: dict[str, JsonValue] | None = None
         self._base_scene: Scene | None = None
         self._inline_name: str | None = None
         self._inline_scene_name: str | None = None
@@ -166,14 +200,16 @@ class World:
         self._terrain_explicit = False
         self._terrain_replace_floor = True
         self._terrain_builder: _TerrainBuilder | None = None
-        self._articulations: list[dict] = []
-        self._controls: list[dict] = []
+        self._articulations: list[dict[str, JsonValue]] = []
+        self._controls: list[dict[str, JsonValue]] = []
 
     # ------------------------------------------------------------------ #
     # factories
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_pack(cls, ref, *, root=None) -> World:
+    def from_pack(
+        cls, ref: str, *, root: Path | None = None,
+    ) -> World:
         """Use a scene-bundle reference (``"<family>/<name>"``)."""
         from unigym.scene_packs import load_scene_bundle
 
@@ -183,7 +219,7 @@ class World:
         return world
 
     @classmethod
-    def base(cls, *, mjcf) -> World:
+    def base(cls, *, mjcf: str | Path) -> World:
         """Declare an explicit world asset (emits top-level ``world_base``).
 
         Args:
@@ -199,7 +235,10 @@ class World:
         return world
 
     @classmethod
-    def from_config(cls, source, *, root=None) -> World:
+    def from_config(
+        cls, source: dict[str, JsonValue] | str | Path, *,
+        root: Path | None = None,
+    ) -> World:
         """Extract the world half of a run config or scene-bundle path.
 
         Args:
@@ -215,10 +254,12 @@ class World:
         if path.is_dir() and (path / "scene.yaml").is_file():
             path = path / "scene.yaml"
         if path.is_file():
-            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            if not isinstance(doc, dict):
+            raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            loaded: object = {} if raw_doc is None else raw_doc
+            if not is_json_object(loaded):
                 raise ValueError(f"world source {str(source)!r} must be a "
-                                 f"yaml mapping, got {type(doc).__name__}")
+                                 f"yaml mapping, got {type(loaded).__name__}")
+            doc = loaded
             if "run_name" in doc or "env" in doc:
                 return cls._from_run_cfg(doc, root)
             if doc.get("name") and "backend" in doc:
@@ -228,7 +269,9 @@ class World:
         return cls.from_pack(str(source), root=root)
 
     @classmethod
-    def _from_run_cfg(cls, cfg: dict, root=None) -> World:
+    def _from_run_cfg(
+        cls, cfg: dict[str, JsonValue], root: Path | None = None,
+    ) -> World:
         """Extract a world declaration from a run-config mapping."""
         from unigym.scene_packs import load_scene_bundle
 
@@ -238,7 +281,12 @@ class World:
             world = cls()
             world._scene_ref = str(ref)
             return world
-        params = (cfg.get("env") or {}).get("params") or {}
+        env = cfg.get("env")
+        params: Mapping[str, JsonValue] = {}
+        if isinstance(env, dict):
+            raw_params = env.get("params")
+            if isinstance(raw_params, dict):
+                params = raw_params
         if "mj_model" in params:
             from unigym.errors import ConfigError
 
@@ -255,13 +303,16 @@ class World:
                 "env.params.mj_scene)")
         world = cls()
         world._mj_scene = None if mj_scene is None else str(mj_scene)
-        world._mj_scene_params = dict(params.get("mj_scene_params") or {})
-        if world_base is not None:
+        raw_scene_params = params.get("mj_scene_params")
+        world._mj_scene_params = (
+            dict(raw_scene_params) if isinstance(raw_scene_params, dict) else {}
+        )
+        if isinstance(world_base, dict):
             world._world_base = copy.deepcopy(world_base)
         return world
 
     @classmethod
-    def from_generator(cls, name: str, **params) -> World:
+    def from_generator(cls, name: str, **params: JsonValue) -> World:
         """Use a registered scene provider with its slot params."""
         world = cls()
         world._mj_scene = str(name)
@@ -323,7 +374,9 @@ class World:
         self._inline_scene_name = f"inline_{token[:12]}"
         world = self
 
-        def provider(slots, context):
+        def provider(
+            slots: Mapping[str, JsonValue], context: SceneContext,
+        ) -> Scene:
             """Return this World's current inline scene (runtime provider)."""
             return world._scene_now()
 
@@ -350,8 +403,10 @@ class World:
         base = self._base_scene
         name = (base.name if base is not None
                 else (self._inline_scene_name or "inline_dynamic"))
-        instances = list(base.instances) if base is not None else []
-        materials = list(base.materials) if base is not None else []
+        instances: list[Instance] = (
+            list(base.instances) if base is not None else [])
+        materials: list[Material] = (
+            list(base.materials) if base is not None else [])
         if self._objects:
             material = self._material()
             if material.name not in {m.name for m in materials}:
@@ -381,7 +436,7 @@ class World:
     # ------------------------------------------------------------------ #
     # object composition
     # ------------------------------------------------------------------ #
-    def _used_names(self) -> set:
+    def _used_names(self) -> set[str | None]:
         """Every object/instance id already declared in this world."""
         used = {o.name for o in self._objects}
         used |= {o.name for o in self._dynamic}
@@ -389,7 +444,7 @@ class World:
             used |= {inst.id for inst in self._base_scene.instances}
         return used
 
-    def _assign_name(self, obj: _Primitive, used: set) -> None:
+    def _assign_name(self, obj: _Primitive, used: set[str | None]) -> None:
         """Ensure *obj* carries a unique non-null name (mutates it)."""
         if obj.name is None:
             index = len(self._objects) + len(self._dynamic) + 1
@@ -405,7 +460,9 @@ class World:
         else:
             used.add(obj.name)
 
-    def add(self, obj: _Primitive, dynamic: bool | None = None):
+    def add(
+        self, obj: _Primitive, dynamic: bool | None = None,
+    ) -> _Primitive:
         """Add a primitive to this world; returns the object.
 
         Supported primitives are :class:`Box` / :class:`Sphere` /
@@ -464,7 +521,9 @@ class World:
         self._objects.append(obj)
         return obj
 
-    def add_many(self, objects, dynamic: bool | None = None) -> list:
+    def add_many(
+        self, objects: Iterable[_Primitive], dynamic: bool | None = None,
+    ) -> list[_Primitive]:
         """Add several primitives in one batch (static and/or dynamic).
 
         Args:
@@ -486,10 +545,22 @@ class World:
                     f"Plane, got {type(obj).__name__}")
         return [self.add(obj, dynamic=dynamic) for obj in batch]
 
-    def articulation(self, name: str, *, model=None, control=None,
-                     root=None, spawn=None, joints=None, body_parts=None,
-                     passive_joints=None, params=None, adapter="manual",
-                     drive="position_pd", target="position") -> World:
+    def articulation(
+        self,
+        name: str,
+        *,
+        model: str | Mapping[str, JsonValue] | None = None,
+        control: object | None = None,
+        root: str | None = None,
+        spawn: Mapping[str, JsonValue] | None = None,
+        joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]] | None = None,
+        body_parts: Mapping[str, JsonValue] | None = None,
+        passive_joints: Sequence[object] | None = None,
+        params: Mapping[str, JsonValue] | None = None,
+        adapter: str = "manual",
+        drive: str = "position_pd",
+        target: str = "position",
+    ) -> World:
         """Declare one articulation on this world (emits ``articulations[]``).
 
         The declaration is the v104 neutral shape: an articulation is
@@ -535,33 +606,36 @@ class World:
                 f"drive as a top-level `controls:` group "
                 f"(name/adapter/articulation/drive/target) via the "
                 f"adapter/drive/target arguments")
-        entry: dict = {"name": name}
+        entry: dict[str, JsonValue] = {"name": name}
         if model is not None:
             entry["model"] = ({"mjcf": str(model)} if isinstance(model, str)
-                              else copy.deepcopy(model))
+                              else copy.deepcopy(dict(model)))
         if root is not None:
             entry["root"] = str(root)
         if spawn is not None:
-            entry["spawn"] = copy.deepcopy(spawn)
+            entry["spawn"] = copy.deepcopy(dict(spawn))
         if joints is not None:
-            entry["joints"] = copy.deepcopy(joints)
+            entry["joints"] = _joints_json(joints)
         if body_parts is not None:
-            entry["body_parts"] = copy.deepcopy(body_parts)
+            entry["body_parts"] = copy.deepcopy(dict(body_parts))
         if passive_joints is not None:
             entry["passive_joints"] = [str(j) for j in passive_joints]
         if params is not None:
-            entry["params"] = copy.deepcopy(params)
+            entry["params"] = copy.deepcopy(dict(params))
         if any(existing["name"] == name for existing in self._articulations):
             raise ValueError(
                 f"World.articulation: duplicate articulation name {name!r}")
         self._articulations.append(entry)
-        group: dict = {"name": name, "adapter": str(adapter),
-                       "articulation": name, "drive": str(drive),
-                       "target": str(target)}
+        group: dict[str, JsonValue] = {
+            "name": name, "adapter": str(adapter),
+            "articulation": name, "drive": str(drive),
+            "target": str(target),
+        }
         if joints is not None:
             declared = _joint_names_from_declaration(joints)
             if declared:
-                group["joints"] = declared
+                joints_json: list[JsonValue] = [name for name in declared]
+                group["joints"] = joints_json
             else:
                 # empty declaration == the recipe's body set (v105)
                 group["joint_set"] = "body"
@@ -629,7 +703,7 @@ class World:
         """
         return self._base_scene is not None and bool(self._base_scene.instances)
 
-    def dynamic_declarations(self) -> dict:
+    def dynamic_declarations(self) -> dict[str, JsonValue]:
         """The ``objects:`` content block for this world's dynamic objects.
 
         ``dynamic=True`` objects are NOT scene instances: they are dynamic
@@ -645,7 +719,7 @@ class World:
             "types": [obj._dynamic_declaration() for obj in self._dynamic],
         }
 
-    def fragment(self) -> dict:
+    def fragment(self) -> WorldFragment:
         """The run-config fragment this world contributes.
 
         Returns either ``{"scene": "<family>/<name>"}``,
@@ -656,17 +730,19 @@ class World:
         ``world_base`` is a TOP-LEVEL run config key (v101 A1); it never
         rides ``env.params``.
         """
+        fragment = WorldFragment()
         if self._scene_ref is not None:
-            fragment: dict[str, Any] = {"scene": self._scene_ref}
+            fragment["scene"] = self._scene_ref
         else:
-            params: dict = {}
+            params: dict[str, JsonValue] = {}
             if self._inline_name is not None:
                 params["mj_scene"] = self._inline_name
                 params["mj_scene_params"] = {}
             elif self._mj_scene is not None:
                 params["mj_scene"] = self._mj_scene
                 params["mj_scene_params"] = dict(self._mj_scene_params)
-            fragment = {"params": params} if params else {}
+            if params:
+                fragment["params"] = params
             if self._world_base is not None:
                 fragment["world_base"] = copy.deepcopy(self._world_base)
         if self._articulations:
@@ -691,7 +767,7 @@ class World:
             _merge_articulations(cfg, fragment["articulations"])
         if "controls" in fragment:
             _merge_controls(cfg, fragment["controls"])
-        params = fragment.get("params") or {}
+        params = fragment.get("params")
         if params:
             params_section = _mapping_section(
                 _mapping_section(cfg, "env"), "params")
@@ -704,11 +780,13 @@ class World:
                 else "props"
             block = _mapping_section(cfg, key)
             block["enabled"] = True
-            types_value = block.get("types")
-            if not isinstance(types_value, list):
-                types_value = []
-                block["types"] = types_value
-            types_value.extend(copy.deepcopy(dynamic["types"]))
+            raw_types = block.get("types")
+            types_list: list[JsonValue] = (
+                raw_types if isinstance(raw_types, list) else [])
+            block["types"] = types_list
+            dynamic_types = dynamic.get("types")
+            if isinstance(dynamic_types, list):
+                types_list.extend(copy.deepcopy(dynamic_types))
         return cfg
 
     def _mark_built(self) -> None:
@@ -716,38 +794,62 @@ class World:
         self._built = True
 
 
-def _joint_names_from_declaration(joints) -> list:
+def _joints_json(
+    joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]],
+) -> JsonValue:
+    """A deep-copied JSON view of a ``joints:`` declaration."""
+    if isinstance(joints, Mapping):
+        return copy.deepcopy(dict(joints))
+    return [copy.deepcopy(dict(entry)) for entry in joints]
+
+
+def _joint_names_from_declaration(
+    joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]],
+) -> list[str]:
     """Joint names from a ``joints:`` declaration (mapping or list form)."""
-    if isinstance(joints, dict):
+    if isinstance(joints, Mapping):
         return [str(name) for name in joints]
-    names = []
-    for entry in joints or ():
-        if isinstance(entry, dict) and "name" in entry:
+    names: list[str] = []
+    for entry in joints:
+        if "name" in entry:
             names.append(str(entry["name"]))
     return names
 
 
-def _merge_controls(cfg: dict, declared: list[dict]) -> None:
+def _merge_controls(
+    cfg: dict[str, JsonValue], declared: list[dict[str, JsonValue]],
+) -> None:
     """Merge world-declared control groups into the config list by name."""
     existing = cfg.get("controls")
     if not existing:
-        cfg["controls"] = copy.deepcopy(declared)
+        initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
+        cfg["controls"] = initial
         return
-    merged = [copy.deepcopy(entry) for entry in existing]
-    index = {entry.get("name"): position
-             for position, entry in enumerate(merged)
-             if isinstance(entry, dict)}
+    existing_list: list[JsonValue] = (
+        existing if isinstance(existing, list) else [])
+    merged: list[JsonValue] = [
+        copy.deepcopy(entry) for entry in existing_list]
+    index: dict[str, int] = {}
+    for position, entry in enumerate(merged):
+        if isinstance(entry, dict):
+            name_value = entry.get("name")
+            if isinstance(name_value, str):
+                index[name_value] = position
     for entry in declared:
-        position = index.get(entry["name"])
+        name_value = entry["name"]
+        assert isinstance(name_value, str)
+        position = index.get(name_value)
         if position is None:
-            index[entry["name"]] = len(merged)
+            index[name_value] = len(merged)
             merged.append(copy.deepcopy(entry))
         else:
             merged[position] = copy.deepcopy(entry)
     cfg["controls"] = merged
 
 
-def _merge_articulations(cfg: dict, declared: list[dict]) -> None:
+def _merge_articulations(
+    cfg: dict[str, JsonValue], declared: list[dict[str, JsonValue]],
+) -> None:
     """Merge world-declared articulations into the config list by name.
 
     A world entry with the same ``name`` replaces the existing declaration
@@ -757,16 +859,25 @@ def _merge_articulations(cfg: dict, declared: list[dict]) -> None:
     """
     existing = cfg.get("articulations")
     if not existing:
-        cfg["articulations"] = copy.deepcopy(declared)
+        initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
+        cfg["articulations"] = initial
         return
-    merged = [copy.deepcopy(entry) for entry in existing]
-    index = {entry.get("name"): position
-             for position, entry in enumerate(merged)
-             if isinstance(entry, dict)}
+    existing_list: list[JsonValue] = (
+        existing if isinstance(existing, list) else [])
+    merged: list[JsonValue] = [
+        copy.deepcopy(entry) for entry in existing_list]
+    index: dict[str, int] = {}
+    for position, entry in enumerate(merged):
+        if isinstance(entry, dict):
+            name_value = entry.get("name")
+            if isinstance(name_value, str):
+                index[name_value] = position
     for entry in declared:
-        position = index.get(entry["name"])
+        name_value = entry["name"]
+        assert isinstance(name_value, str)
+        position = index.get(name_value)
         if position is None:
-            index[entry["name"]] = len(merged)
+            index[name_value] = len(merged)
             merged.append(copy.deepcopy(entry))
         else:
             merged[position] = copy.deepcopy(entry)

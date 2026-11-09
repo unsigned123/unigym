@@ -22,6 +22,9 @@ import dataclasses
 import json
 import os
 from collections.abc import Mapping
+from typing import TypeGuard
+
+from unigym._typing import JsonValue
 
 __all__ = [
     "write_build_artifacts",
@@ -34,7 +37,12 @@ __all__ = [
 ]
 
 
-def _artifact_mapping(value):
+def _is_json_mapping(value: object) -> TypeGuard[Mapping[str, JsonValue]]:
+    """Narrow a runtime value to a JSON mapping (leaf shape trusted)."""
+    return isinstance(value, Mapping)
+
+
+def _artifact_mapping(value: object) -> Mapping[str, JsonValue]:
     """Return the JSON-ready mapping a writer should persist.
 
     Args:
@@ -50,8 +58,14 @@ def _artifact_mapping(value):
     """
     to_mapping = getattr(value, "to_mapping", None)
     if callable(to_mapping):
-        return to_mapping()
-    if isinstance(value, Mapping):
+        result = to_mapping()
+        if not _is_json_mapping(result):
+            raise TypeError(
+                f"artifact value {type(value).__name__}.to_mapping() returned "
+                f"{type(result).__name__}, expected a mapping"
+            )
+        return dict(result)
+    if _is_json_mapping(value):
         return dict(value)
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return dataclasses.asdict(value)
@@ -62,7 +76,11 @@ def _artifact_mapping(value):
     )
 
 
-def _write_json(out_dir, filename: str, payload) -> str:
+def _write_json(
+    out_dir: str | os.PathLike[str],
+    filename: str,
+    payload: Mapping[str, JsonValue],
+) -> str:
     """Write one deterministic JSON file and return its path.
 
     Args:
@@ -84,7 +102,7 @@ def _write_json(out_dir, filename: str, payload) -> str:
     return path
 
 
-def write_draw(out_dir, draw) -> str:
+def write_draw(out_dir: str | os.PathLike[str], draw: object) -> str:
     """Write ``draw.json`` (what the pipeline decided to draw).
 
     Args:
@@ -98,7 +116,7 @@ def write_draw(out_dir, draw) -> str:
     return _write_json(out_dir, "draw.json", _artifact_mapping(draw))
 
 
-def write_resolution(out_dir, resolution) -> str:
+def write_resolution(out_dir: str | os.PathLike[str], resolution: object) -> str:
     """Write ``resolution.json`` (the id-level view of the built scene).
 
     Args:
@@ -114,7 +132,7 @@ def write_resolution(out_dir, resolution) -> str:
     )
 
 
-def write_scene_json(out_dir, scene) -> str:
+def write_scene_json(out_dir: str | os.PathLike[str], scene: object) -> str:
     """Write ``scene.json`` (the neutral scene container).
 
     Args:
@@ -127,7 +145,7 @@ def write_scene_json(out_dir, scene) -> str:
     return _write_json(out_dir, "scene.json", _artifact_mapping(scene))
 
 
-def write_payload_index(out_dir, payload_set) -> str:
+def write_payload_index(out_dir: str | os.PathLike[str], payload_set: object) -> str:
     """Write ``payload_index.json`` (instance -> payload view).
 
     Args:
@@ -143,7 +161,7 @@ def write_payload_index(out_dir, payload_set) -> str:
     )
 
 
-def write_composed_xml(out_dir, composed_xml: str) -> str:
+def write_composed_xml(out_dir: str | os.PathLike[str], composed_xml: str) -> str:
     """Write ``composed.xml`` (the pre-compile composed scene text).
 
     Args:
@@ -169,7 +187,11 @@ def write_composed_xml(out_dir, composed_xml: str) -> str:
     return path
 
 
-def write_compile_report(out_dir, compiled, composed_xml=None) -> str:
+def write_compile_report(
+    out_dir: str | os.PathLike[str],
+    compiled: object,
+    composed_xml: str | None = None,
+) -> str:
     """Write ``compile.json`` and, when given, ``composed.xml``.
 
     Args:
@@ -189,7 +211,13 @@ def write_compile_report(out_dir, compiled, composed_xml=None) -> str:
     )
 
 
-def write_build_artifacts(out_dir, scene, draw, resolution, payloads) -> dict:
+def write_build_artifacts(
+    out_dir: str | os.PathLike[str],
+    scene: object,
+    draw: object,
+    resolution: object,
+    payloads: object,
+) -> dict[str, str]:
     """Write the four build-stage artifacts in one call.
 
     Args:

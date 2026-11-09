@@ -24,9 +24,11 @@ from __future__ import annotations
 import os
 import random
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Protocol, overload
+from typing import Protocol, TypeGuard, overload
+
+from unigym._typing import JsonValue
 
 from .generators import registered_generators
 from .scene_ir import Instance, Scene, validate_scene
@@ -37,8 +39,11 @@ PROVIDER_WHENS = ("build", "reset")
 #: the neutral parameter keys through which an instance's params cite a slot.
 SLOT_REFERENCE_KEYS = ("slot", "slot_id")
 
+#: a content-provider factory (called by an engine with its own keyword facts).
+_ContentFactory = Callable[..., "ContentProvider"]
+
 #: the closed content-provider registry (name -> factory callable).
-_CONTENT_PROVIDERS: dict[str, Callable] = {}
+_CONTENT_PROVIDERS: dict[str, _ContentFactory] = {}
 _CONTENT_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -46,24 +51,56 @@ class SceneBindingError(ValueError):
     """One pipeline/content binding rule failed (fail closed, teaching)."""
 
 
-@overload
-def _jsonify(value: Mapping, path: str = "params") -> dict[str, object]: ...
+def _empty_mounts() -> dict[str, str | os.PathLike[str]]:
+    """An empty mount table (typed dataclass default)."""
+    return {}
+
+
+def _empty_facts() -> dict[str, JsonValue]:
+    """An empty compile-facts table (typed dataclass default)."""
+    return {}
+
+
+def _is_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Narrow a runtime value to a mapping (leaf shape trusted)."""
+    return isinstance(value, Mapping)
+
+
+def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    """Narrow a runtime value to a list/tuple (leaf shape trusted)."""
+    return isinstance(value, (list, tuple))
+
+
+def _is_set(value: object) -> TypeGuard[set[object] | frozenset[object]]:
+    """Narrow a runtime value to a set/frozenset (leaf shape trusted)."""
+    return isinstance(value, (set, frozenset))
+
+
+def _is_pathlike(value: object) -> TypeGuard[os.PathLike[str]]:
+    """Narrow a runtime value to a filesystem path."""
+    return isinstance(value, os.PathLike)
 
 
 @overload
-def _jsonify(value: object, path: str = "params") -> object: ...
+def _jsonify(
+    value: Mapping[str, JsonValue], path: str = "params",
+) -> dict[str, JsonValue]: ...
 
 
-def _jsonify(value, path: str = "params"):
+@overload
+def _jsonify(value: object, path: str = "params") -> JsonValue: ...
+
+
+def _jsonify(value: object, path: str = "params") -> JsonValue:
     """Convert *value* into a JSON-ready structure (sorted keys, no sets)."""
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
         return value
-    if isinstance(value, os.PathLike):
+    if _is_pathlike(value):
         return os.fspath(value)
-    if isinstance(value, Mapping):
-        result = {}
+    if _is_mapping(value):
+        result: dict[str, JsonValue] = {}
         for key in sorted(value, key=str):
             if not isinstance(key, str):
                 raise TypeError(
@@ -71,10 +108,15 @@ def _jsonify(value, path: str = "params"):
                 )
             result[key] = _jsonify(value[key], f"{path}.{key}")
         return result
-    if isinstance(value, (list, tuple)):
-        return [_jsonify(entry, f"{path}[{index}]") for index, entry in enumerate(value)]
-    if isinstance(value, (set, frozenset)):
-        return sorted((_jsonify(entry, f"{path}[]") for entry in value), key=repr)
+    if _is_sequence(value):
+        return [
+            _jsonify(entry, f"{path}[{index}]")
+            for index, entry in enumerate(value)
+        ]
+    if _is_set(value):
+        return sorted(
+            (_jsonify(entry, f"{path}[]") for entry in value), key=repr
+        )
     raise TypeError(
         f"{path}: {type(value).__name__} is not JSON-ready -- recipe values "
         f"must be plain data (mapping, sequence, set, string, number or None)"
@@ -85,8 +127,9 @@ def _jsonify(value, path: str = "params"):
 class BuildContext:
     """What a pipeline needs to build one scene (data, never a handle)."""
 
-    recipe: Mapping
-    mounts: Mapping = field(default_factory=dict)
+    recipe: Mapping[str, JsonValue]
+    mounts: Mapping[str, str | os.PathLike[str]] = field(
+        default_factory=_empty_mounts)
     seed: int | None = None
     recipe_path: str = ""
 
@@ -132,13 +175,19 @@ class ContentProvider(Protocol):
 
     name: str
     when: str
+    last_record: object
+    """Opaque fill record the provider exposes after :meth:`fill`."""
 
-    def fill(self, scene: Scene, spec: Mapping, rng) -> tuple[Instance, ...]:
+    def fill(
+        self, scene: Scene, spec: Mapping[str, JsonValue], rng: random.Random,
+    ) -> tuple[Instance, ...]:
         """Return the instances this provider adds to *scene*."""
         ...
 
 
-def register_content_provider(name: str, factory: Callable) -> Callable:
+def register_content_provider(
+    name: str, factory: _ContentFactory,
+) -> _ContentFactory:
     """Register one content-provider factory under a snake_case name.
 
     The core owns the PROTOCOL, never the content: a pack declares its
@@ -177,7 +226,7 @@ def register_content_provider(name: str, factory: Callable) -> Callable:
     return factory
 
 
-def content_provider(name: str) -> Callable:
+def content_provider(name: str) -> _ContentFactory:
     """Return the registered factory for *name* (fail closed, teaching).
 
     Args:
@@ -216,9 +265,9 @@ class Draw:
     pipeline: str
     seed: int | None
     recipe_path: str
-    params: Mapping
+    params: Mapping[str, JsonValue]
 
-    def to_mapping(self) -> dict:
+    def to_mapping(self) -> dict[str, JsonValue]:
         """Return the JSON-ready artifact view of this draw."""
         return {
             "pipeline": self.pipeline,
@@ -232,12 +281,12 @@ class Draw:
 class Resolution:
     """What came out: the id-level view of the built scene."""
 
-    instances: tuple = ()
-    regions: tuple = ()
-    slots: tuple = ()
-    materials: tuple = ()
+    instances: tuple[Mapping[str, JsonValue], ...] = ()
+    regions: tuple[Mapping[str, JsonValue], ...] = ()
+    slots: tuple[Mapping[str, JsonValue], ...] = ()
+    materials: tuple[Mapping[str, JsonValue], ...] = ()
 
-    def to_mapping(self) -> dict:
+    def to_mapping(self) -> dict[str, JsonValue]:
         """Return the JSON-ready artifact view of this resolution."""
         return {
             "instances": [dict(entry) for entry in self.instances],
@@ -251,9 +300,9 @@ class Resolution:
 class PayloadSet:
     """The instance -> payload view (kind only; the engine resolves files)."""
 
-    entries: tuple = ()
+    entries: tuple[Mapping[str, JsonValue], ...] = ()
 
-    def to_mapping(self) -> dict:
+    def to_mapping(self) -> dict[str, JsonValue]:
         """Return the JSON-ready artifact view of this payload set."""
         return {"entries": [dict(entry) for entry in self.entries]}
 
@@ -262,9 +311,9 @@ class PayloadSet:
 class CompiledScene:
     """Engine-side facts recorded after compile (filled by the backend)."""
 
-    facts: Mapping = field(default_factory=dict)
+    facts: Mapping[str, JsonValue] = field(default_factory=_empty_facts)
 
-    def to_mapping(self) -> dict:
+    def to_mapping(self) -> dict[str, JsonValue]:
         """Return the JSON-ready artifact view of the compile facts."""
         return {"facts": dict(self.facts)}
 
@@ -281,7 +330,9 @@ def _slot_references(instance: Instance) -> list[str]:
         elif isinstance(value, (list, tuple)) and all(
             isinstance(entry, str) and entry for entry in value
         ):
-            references.extend(value)
+            references.extend(
+                entry for entry in value if isinstance(entry, str)
+            )
         else:
             raise SceneBindingError(
                 f"instance {instance.id!r}: params[{key!r}] must name a slot id "
@@ -290,7 +341,11 @@ def _slot_references(instance: Instance) -> list[str]:
     return references
 
 
-def validate_binding(scene, generator_exists, slot_ids=None) -> None:
+def validate_binding(
+    scene: Scene,
+    generator_exists: Callable[[str], bool],
+    slot_ids: Iterable[str] | None = None,
+) -> None:
     """The four core checks (v085 section 4), fail closed and teaching.
 
     Args:
@@ -355,7 +410,12 @@ def validate_binding(scene, generator_exists, slot_ids=None) -> None:
 class Scaffold:
     """Run one pipeline through the fixed order, returning the artifact views."""
 
-    def __init__(self, pipeline, providers=(), generator_exists=None):
+    def __init__(
+        self,
+        pipeline: ScenePipeline,
+        providers: Iterable[ContentProvider] = (),
+        generator_exists: Callable[[str], bool] | None = None,
+    ):
         """Validate the pipeline and providers; the closed timing set is checked."""
         name = getattr(pipeline, "name", None)
         if not isinstance(name, str) or not name:
@@ -367,8 +427,8 @@ class Scaffold:
             raise SceneBindingError(
                 f"scaffold: pipeline {name!r} must expose a callable build(context)"
             )
-        self._pipeline = pipeline
-        self._generator_exists = (
+        self._pipeline: ScenePipeline = pipeline
+        self._generator_exists: Callable[[str], bool] = (
             registered_generators().__contains__
             if generator_exists is None
             else generator_exists
@@ -378,9 +438,9 @@ class Scaffold:
                 "scaffold: generator_exists must be callable -- pass a registry "
                 "predicate (a wider one may include the prop-template registry)"
             )
-        self._build_providers = []
-        self._reset_providers = []
-        seen = set()
+        self._build_providers: list[ContentProvider] = []
+        self._reset_providers: list[ContentProvider] = []
+        seen: set[str] = set()
         for provider in providers:
             provider_name = getattr(provider, "name", None)
             when = getattr(provider, "when", None)
@@ -411,7 +471,7 @@ class Scaffold:
             else:
                 self._reset_providers.append(provider)
 
-    def build(self, context) -> tuple[Scene, Draw, Resolution, PayloadSet]:
+    def build(self, context: BuildContext) -> tuple[Scene, Draw, Resolution, PayloadSet]:
         """Build the scene, validate, fill the build providers, validate again.
 
         Args:
@@ -446,7 +506,7 @@ class Scaffold:
         return scene, draw, _resolution(scene), _payload_set(scene)
 
     @staticmethod
-    def _fill(scene: Scene, provider, context: BuildContext) -> Scene:
+    def _fill(scene: Scene, provider: ContentProvider, context: BuildContext) -> Scene:
         """Run one build-timed provider and merge its instances (additive)."""
         seed = None if context.seed is None else f"{context.seed}:{provider.name}:build"
         rng = random.Random(seed)

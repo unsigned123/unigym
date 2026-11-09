@@ -76,7 +76,9 @@ class SceneEngine(Protocol):
 _ENGINES: dict[str, Callable[[], object]] = {}
 
 
-def register_scene_engine(name: str, factory: Callable) -> Callable:
+def register_scene_engine(
+    name: str, factory: Callable[[], object],
+) -> Callable[[], object]:
     """Register one scene-engine factory under a lowercase name.
 
     The core owns the protocol, never an implementation: a backend calls

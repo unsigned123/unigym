@@ -17,7 +17,9 @@ asset-IR package.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol, TypeAlias
 
 from .scene_ir import require_neutral_name
 
@@ -30,28 +32,34 @@ CONDIMS = (1, 3, 4, 6)
 SHAPE_LAYERS = ("visual", "collision")
 
 
-def _require_vec(owner: str, name: str, value, lengths) -> tuple:
+def _require_vec(
+    owner: str, name: str, value: Sequence[object], lengths: int | tuple[int, ...],
+) -> tuple[float, ...]:
     """Validate a finite float vector whose length is one of *lengths*."""
-    allowed = (lengths,) if isinstance(lengths, int) else tuple(lengths)
-    if (
-        not isinstance(value, (list, tuple))
-        or len(value) not in allowed
-        or any(
-            isinstance(v, bool)
-            or not isinstance(v, (int, float))
-            or not math.isfinite(v)
-            for v in value
+    allowed = (lengths,) if isinstance(lengths, int) else lengths
+    if not isinstance(value, (list, tuple)):
+        wanted = " or ".join(str(n) for n in allowed)
+        raise ValueError(
+            f"{owner}: {name} must be a {wanted}-vector of finite numbers, "
+            f"got {value!r}"
         )
+    if len(value) not in allowed or any(
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or not math.isfinite(v)
+        for v in value
     ):
         want = " or ".join(str(n) for n in allowed)
         raise ValueError(
             f"{owner}: {name} must be a {want}-vector of finite numbers, "
             f"got {value!r}"
         )
-    return tuple(float(v) for v in value)
+    return tuple(
+        float(v) for v in value if isinstance(v, (int, float))
+    )
 
 
-def _require_positive(owner: str, name: str, value) -> float:
+def _require_positive(owner: str, name: str, value: object) -> float:
     """Validate one finite strictly-positive scalar."""
     if (
         isinstance(value, bool)
@@ -72,11 +80,11 @@ class ContactSpec:
     Every field is optional; a silent field keeps the engine default.
     """
 
-    friction: tuple | None = None
+    friction: tuple[float, float, float] | None = None
     condim: int | None = None
     priority: int | None = None
-    solver_ref: tuple | None = None
-    solver_impedance: tuple | None = None
+    solver_ref: tuple[float, float] | None = None
+    solver_impedance: tuple[float, ...] | None = None
     margin: float | None = None
     gap: float | None = None
 
@@ -120,7 +128,29 @@ class ContactSpec:
                 )
 
 
-def _validate_shape_fields(shape, kind: str) -> str:
+class _ShapeLike(Protocol):
+    """The common fields every neutral shape declares (validated once)."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def material(self) -> str: ...
+
+    @property
+    def pos(self) -> tuple[float, float, float]: ...
+
+    @property
+    def quat_wxyz(self) -> tuple[float, float, float, float]: ...
+
+    @property
+    def contact(self) -> ContactSpec | None: ...
+
+    @property
+    def layer(self) -> str: ...
+
+
+def _validate_shape_fields(shape: _ShapeLike, kind: str) -> str:
     """Validate the common fields shared by every neutral shape.
 
     Args:
@@ -164,8 +194,8 @@ class SphereShape:
     name: str
     radius: float
     material: str
-    pos: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     contact: ContactSpec | None = None
     layer: str = "visual"
 
@@ -184,8 +214,8 @@ class CylinderShape:
     radius: float
     half_height: float
     material: str
-    pos: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     contact: ContactSpec | None = None
     layer: str = "visual"
 
@@ -207,8 +237,8 @@ class CapsuleShape:
     radius: float
     half_height: float
     material: str
-    pos: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     contact: ContactSpec | None = None
     layer: str = "visual"
 
@@ -231,10 +261,10 @@ class PlaneShape:
     """
 
     name: str
-    size: tuple
+    size: tuple[float, float]
     material: str
-    pos: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     contact: ContactSpec | None = None
     layer: str = "visual"
 
@@ -262,10 +292,10 @@ class BoxShape:
     """
 
     name: str
-    size: tuple
+    size: tuple[float, float, float]
     material: str
-    pos: tuple = (0.0, 0.0, 0.0)
-    quat_wxyz: tuple = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     contact: ContactSpec | None = None
     layer: str = "visual"
 
@@ -302,12 +332,15 @@ class BoxShape:
 SHAPE_CLASSES = (
     BoxShape, SphereShape, CylinderShape, CapsuleShape, PlaneShape)
 
+Shape: TypeAlias = (
+    BoxShape | SphereShape | CylinderShape | CapsuleShape | PlaneShape)
+
 
 @dataclass(frozen=True)
 class ShapePayload:
     """The built-in generators' payload: an ordered tuple of neutral shapes."""
 
-    shapes: tuple = ()
+    shapes: tuple[Shape, ...] = ()
 
     def __post_init__(self):
         """Validate the shape tuple."""
