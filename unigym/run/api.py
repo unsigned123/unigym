@@ -69,6 +69,7 @@ if TYPE_CHECKING:
         ResolvedControl,
         ResolvedControlPlan,
     )
+    from unigym.robots.base import RobotRecipe
     from unigym.run.instance import RunInstance
     from unigym.runner.base import Runner, StepResult
     from unigym.world import World
@@ -304,7 +305,7 @@ def _controls_entries(
         "target": "position",
     }
     groups: list[dict[str, JsonValue]] = [body]
-    recipe: object | None = None
+    recipe: RobotRecipe | None = None
     try:
         from unigym.robots import build_robot_recipe
 
@@ -317,9 +318,8 @@ def _controls_entries(
         # here: an adapter that emits a face the recipe does not declare
         # (e.g. the G1 ``hand`` face) must get it from its config's
         # ``controls[]`` -- the v104 partition is the single authority.
-        raw_terms = getattr(recipe, "extra_action_terms", None)
-        terms: Mapping[str, object] = (
-            raw_terms if isinstance(raw_terms, Mapping) else {})
+        terms: Mapping[str, Sequence[str]] = (
+            recipe.extra_action_terms or {})
         for face in terms:
             groups.append({
                 "name": str(face),
