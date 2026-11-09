@@ -1,0 +1,10 @@
+{
+  "extends": "./pyrightconfig.json",
+  "include": ["unigym/model"],
+  "reportUnknownParameterType": "error",
+  "reportUnknownArgumentType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownMemberType": "warning",
+  "reportUnknownLambdaType": "error",
+  "reportUnnecessaryCast": "error"
+}
