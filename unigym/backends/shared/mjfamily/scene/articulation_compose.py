@@ -1,8 +1,8 @@
-"""Compose a world base + declared articulation assets into one MjSpec (v101 A3).
+"""Compose a world base + declared articulation assets into one MjSpec.
 
 The historical G1 runs fused the robot into the world asset
 (``scene_43dof_*.xml`` carries ``<include file="g1_29dof_with_hand.xml"/>``).
-v101 A3 splits that asset into a :class:`world_base` scene and an ordered
+This splits that asset into a :class:`world_base` scene and an ordered
 ``articulations[]`` list.  This module is the ONE composition engine that
 turns the split declaration back into a single compiled model.
 

@@ -1,4 +1,4 @@
-"""Articulation observation + record + termination keys (v101 A5/A6, v104.2).
+"""Articulation observation + record + termination keys.
 
 Every articulation publishes its robot state under ``articulation/<name>/``.
 These helpers are shared by the CPU ``MujocoEnv`` and the ``MjwarpEnv`` (same

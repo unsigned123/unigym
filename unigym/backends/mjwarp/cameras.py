@@ -1,4 +1,4 @@
-"""MuJoCo-Warp camera rigs (v095 C3).
+"""MuJoCo-Warp camera rigs.
 
 Two render paths behind one factory:
 
@@ -53,7 +53,7 @@ def _cpu_rig_factory() -> Any:
     """Load the N=1 CPU-mirror rig builder without importing the backend.
 
     The concrete ``mujoco.Renderer`` rig implementation stays in
-    ``backends/mujoco/cameras.py`` (v100 G6); the neutral registry is the
+    ``backends/mujoco/cameras.py``; the neutral registry is the
     sanctioned lazy hub, so mjwarp reuses the exact same rig classes while
     importing no other backend module.
     """
@@ -473,5 +473,5 @@ class MjwarpRig:
 
 
 def build_mjwarp_rig(spec: CameraSpec, render_groups=None) -> MjwarpRig:
-    """Factory for the mjwarp backend's camera rigs (v095 C3)."""
+    """Factory for the mjwarp backend's camera rigs."""
     return MjwarpRig(spec, render_groups=render_groups)

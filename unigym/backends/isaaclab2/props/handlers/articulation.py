@@ -142,7 +142,7 @@ class PropArticulation(PropHandler):
         self._asset.write_root_pose_to_sim(pose, env_ids=env_ids)
         vel = torch.zeros(n, 6, device=env.device, dtype=world_pos.dtype)
         self._asset.write_root_velocity_to_sim(vel, env_ids=env_ids)
-        # declared joint reset state (T-B1 ``init``, default 0.0) for the
+        # declared joint reset state (``init``, default 0.0) for the
         # subset -- position + velocity (the velocity is always zeroed)
         inits = torch.tensor(
             [self.joints[n]["init"] for n in self.joints],
@@ -387,7 +387,7 @@ class UsdArticulationProp(PropArticulation):
 class FreeArticulationProp(PropArticulation):
     """``type: free_articulation`` : a FREE-FLOATING articulated prop.
 
-    The GAP-A kind (T-B3, the robocasa Laptop family): the asset's ROOT
+    The GAP-A kind (the robocasa Laptop family): the asset's ROOT
     body KEEPS its freejoint (a pushable/knockable table object -- the
     root pose is live physics state) plus internal passive joints (the
     laptop lid hinge).  Everything the anchored kind declares about the

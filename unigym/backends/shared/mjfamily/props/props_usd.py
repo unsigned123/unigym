@@ -7,7 +7,7 @@ file-size discipline).  Two pieces:
 * ``_add_material`` -- ``spawn.texture`` -> an MJCF 2d texture + material
   (cosmetic albedo for box-family props and the ``box_texture`` tier).
 * ``_add_usd_body`` -- the mujoco representation of a declared-
-  representation prop: ``type: usd`` and (T2.4) ``type: rigid_object``
+  representation prop: ``type: usd`` and ``type: rigid_object``
   carrying a ``mujoco:`` block; ``mjcf_file`` (fragment, ATTACHED with
   the ``Prop_`` prefix), ``box_texture`` / ``box`` (declared envelope-box
   tiers).
@@ -52,7 +52,7 @@ def add_usd_body(mjspec, spec, body) -> None:
     """Append the mujoco representation of a declared-representation prop.
 
     Reached for ``type: usd`` props and for ``type: rigid_object`` props
-    carrying a ``mujoco:`` block (T2.4 URDF-less mesh declaration -- the
+    carrying a ``mujoco:`` block (URDF-less mesh declaration -- the
     fragment carries its own mass/inertia).  Three DECLARED tiers
     (PropSpec.mujoco; the declaration is mandatory for the usd kind, a
     missing/unknown one fails fast listing the options):

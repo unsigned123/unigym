@@ -1,4 +1,4 @@
-"""Engine-family shared code (v100 G0).
+"""Engine-family shared code.
 
 Only a backend family's own members may import a ``shared/<family>``
 package; the family contract for the MuJoCo pair lives in

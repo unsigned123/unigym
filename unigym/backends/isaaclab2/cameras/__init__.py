@@ -1,6 +1,6 @@
 """IsaacLab camera face: sensor construction, frame reads and rig classes.
 
-The package map (v100 G3 layout move):
+The package map (layout move):
 
 * :mod:`.cfg` -- ``build_sensor_cfg`` / ``read_frames`` /
   ``push_state_table_poses`` (lazy isaaclab imports inside the functions);

@@ -1,8 +1,8 @@
 """MuJoCo-specific multi-env helpers (N independent MjData, one MjModel).
 
 Only the pieces that genuinely need the MuJoCo engine live here; the
-engine-agnostic bookkeeping moved to ``unigym.backends.collect_core`` (v094
-P2.5).  Every function takes the live env as its first argument and reads the
+engine-agnostic bookkeeping moved to ``unigym.backends.collect_core``.
+Every function takes the live env as its first argument and reads the
 same private tables the inline bodies used; N=1 output is unchanged.
 """
 from __future__ import annotations

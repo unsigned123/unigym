@@ -1,6 +1,6 @@
 """Mujoco scene-bundle reset face: base semantics + initializer wiring.
 
-The v067 scene-bundle consumption helpers for the mujoco backend
+The scene-bundle consumption helpers for the mujoco backend
 (docs/designs/v067-scene-bundle-and-initializers.md §2/§3).  An
 initializer never touches engine handles directly: sampling reads the
 model and every mutation goes through a :class:`ResetPrimitives`

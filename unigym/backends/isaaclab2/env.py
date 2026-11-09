@@ -1,6 +1,6 @@
 """IsaaclabEnv: ManagerBasedEnv wrapper for policy rollout data collection.
 
-No reward/termination (pure kinematic/dynamic logging). P2 episode handling is
+No reward/termination (pure kinematic/dynamic logging). Episode handling is
 **per-env**: each env carries its own episode clock and (possibly randomized)
 duration; ``step()`` returns ``extra["reset_env_ids"]`` listing envs whose
 episode just ended. The caller records the final step first (data invariant:
@@ -105,7 +105,7 @@ def _az_el_to_quat(az_deg: float, el_deg: float) -> tuple:
     (above the XY plane). The result is (w, x, y, z) as expected by
     ``AssetBaseCfg.InitialStateCfg.rot``.
 
-    (DELEGATED to unigym.core.quat.az_el, M1 convergence)
+    (DELEGATED to unigym.core.quat.az_el)
     """
     return quat.az_el(az_deg, el_deg)
 
@@ -141,7 +141,7 @@ def _configure_robot_scene(cfg, robot_profile, adapter, controls,
     # existing robot profiles).
     cfg.scene.contact_forces.prim_path = contact_sensor_prim_path(
         (robot_profile.body_parts or {}).get("feet"))
-    # P3 (G1): the Nucleus g1.usd carries 14 finger DOFs beyond the 29
+    # G1: the Nucleus g1.usd carries 14 finger DOFs beyond the 29
     # policy joints, so the action term must target exactly the profile's
     # declared joints instead of all asset DOFs.  When joint_order covers
     # the full asset set, the resolved joint ids (and thus the behavior) are
@@ -313,7 +313,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 its ``setup_scene`` adds interactive prop (door/ball/generic)
                 fields to the scene, ``on_reset`` re-places them each episode,
                 and ``get_state`` injects per-step prop state into obs_cache
-                for adapters that request it (P15).
+                for adapters that request it.
             lighting: optional dict from yaml ``env.lighting``; configures a
                 DomeLight (sky fill) and/or overrides the DistantLight to
                 brighten the camera image (Task 1).
@@ -388,7 +388,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 director_cfg=director_cfg, init_pose_cfg=self._init_pose)
         # note: `recorder` intentionally unused here (no scene contribution
         # kept in the signature for capability gating kwargs).
-        if prop_manager is not None:  # merge interactive prop fields (P15)
+        if prop_manager is not None:  # merge interactive prop fields
             for key, value in prop_manager.setup_scene().items():
                 setattr(cfg.scene, key, value)
         # static World primitives (S2b): the same declarations the mujoco
@@ -472,7 +472,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             self.scene.write_data_to_sim()
             self.sim.forward()
 
-        # ---- props (P15): bind asset handles + initial placement + close joints
+        # ---- props: bind asset handles + initial placement + close joints
         self.prop_manager = prop_manager
         if self.prop_manager is not None:
             self.prop_manager.bind_env(self)
@@ -481,7 +481,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             self.scene.write_data_to_sim()
             self.sim.forward()
 
-        # ---- articulation/control runtimes (v104.2) ----
+        # ---- articulation/control runtimes ----
         from . import articulation_runtime as _articulation_runtime
 
         _articulation_runtime.bind_articulations(self, robot_profile)
@@ -696,7 +696,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         Shape ``(N, num_joints)`` each, gathered from the articulation's
         ``joint_pos_limits`` (IL order, (N, dof, 2)).  Returns ``None``
         when the underlying data is unavailable (older Isaac Lab or before
-        sim init).  Feeds ``TerminationState.joint_pos_limits`` (P10).
+        sim init).  Feeds ``TerminationState.joint_pos_limits``.
         """
         lim = getattr(self.robot.data, "joint_pos_limits", None)
         if lim is None:
@@ -763,7 +763,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             from . import articulation_runtime as _articulation_runtime
 
             _articulation_runtime.refresh_obs_cache(self, raw_action, cmd)
-        # P15: prop state (when present) -- injected every step so adapters that
+        # prop state (when present) -- injected every step so adapters that
         # request prop keys (door/ball) read live values. No props -> the fetch
         # loop below zero-fills any prop key the adapter still requests.
         if self.prop_manager is not None:
@@ -798,9 +798,9 @@ class IsaaclabEnv(ManagerBasedEnv):
                 self.contact.data.net_forces_w[:, self._foot_perm], dim=-1),
             "base_yaw": lambda: math_utils.euler_xyz_from_quat(d.root_quat_w)[2]
                 .unsqueeze(-1),
-            # additive obs source (P11: recovery-switching termination state)
+            # additive obs source (recovery-switching termination state)
             "base_pos_w": lambda: d.root_pos_w,
-            # additive obs source (P14: SymmLoco projected_forward_vec needs
+            # additive obs source (SymmLoco projected_forward_vec needs
             # the full base orientation; pure-raw quat in (w,x,y,z))
             "base_quat_w": lambda: d.root_quat_w,
         }
@@ -970,7 +970,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         if env_ids.numel() == 0:
             return env_ids
         self._reset_idx(env_ids)
-        if self.prop_manager is not None:  # P15: re-place props + close joints
+        if self.prop_manager is not None:  # re-place props + close joints
             self.prop_manager.on_reset(env_ids, self)
         if self._partitioned:
             from . import articulation_runtime as _articulation_runtime
@@ -1037,11 +1037,11 @@ class IsaaclabEnv(ManagerBasedEnv):
         return env_ids
 
     def reset_all(self) -> torch.Tensor:
-        """Batch-synchronous episode reset (the P1 shorthand)."""
+        """Batch-synchronous episode reset (the shorthand)."""
         return self.reset_envs(torch.arange(self.num_envs, device=self.device))
 
     # ------------------------------------------------------------------ #
-    # snapshot / restore (Round B B1 rewind): DECLARED ABSENT
+    # snapshot / restore (Round B rewind): DECLARED ABSENT
     # ------------------------------------------------------------------ #
     def snapshot(self) -> dict:
         """Not implemented on isaaclab v1 (rewind is mujoco-only, Round B)."""

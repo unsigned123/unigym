@@ -1,4 +1,4 @@
-"""Small engine/device helpers for the mjwarp backend (v094 P3/P4).
+"""Small engine/device helpers for the mjwarp backend.
 
 Split out of ``env.py`` so that module keeps its maintainability index; the
 helpers are stateless (gain tables, action-feed scatter, device resolution,
@@ -81,7 +81,7 @@ def _override_hit(name: str, override) -> Optional[float]:
 def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
     """(4,) wxyz unit quat -> (3,3) rotation matrix (world<-body rows).
 
-    (DELEGATED to unigym.core.quat.to_rotmat, M1 convergence)
+    (DELEGATED to unigym.core.quat.to_rotmat.)
     """
     return np.asarray(quat.to_rotmat(quat_wxyz))
 
@@ -130,7 +130,7 @@ def _mj_enum(val):
 def _put_warp_model(model, camera_manager, num_envs: int):
     """``put_model`` with per-world camera poses batched at N>1.
 
-    v095 C3: a camera manager at N>1 needs ``cam_pos``/``cam_quat`` as batch
+    A camera manager at N>1 needs ``cam_pos``/``cam_quat`` as batch
     fields (one pose column per world).  N=1 -- or no cameras -- keeps the
     exact historical unbatched ``put_model`` call (bit-identical path).
     """

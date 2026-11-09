@@ -1,4 +1,4 @@
-"""Backend-private name map for composed MuJoCo-family assets (v105.3).
+"""Backend-private name map for composed MuJoCo-family assets.
 
 The neutral contract speaks only ``unigym_name`` (the name declared by the
 run config).  A composed backend asset may carry a backend-owned prefix; the
@@ -152,7 +152,7 @@ class MjComposition:
 
 @dataclass(frozen=True)
 class MjControlBinding:
-    """Backend-private binding of one control face (v105.3 §6.4).
+    """Backend-private binding of one control face (§6.4).
 
     ``ControlRuntime.joint_names`` stays the neutral ``unigym_name`` tuple;
     this row carries the compiled names and addresses the step loop writes.

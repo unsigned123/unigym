@@ -1,1 +1,1 @@
-"""Shared MuJoCo-family scene face (v100 G6)."""
+"""Shared MuJoCo-family scene face."""

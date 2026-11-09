@@ -1,4 +1,4 @@
-"""Shared MuJoCo-family model walkers and provider (v100 G2).
+"""Shared MuJoCo-family model walkers and provider.
 
 Both ``backends/mujoco`` and ``backends/mjwarp`` consume the same
 ``MjSpec``/``MjModel``, so the IR walkers and the provider live here; the

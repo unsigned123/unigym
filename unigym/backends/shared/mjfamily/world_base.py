@@ -1,10 +1,10 @@
 """Resolve the run-level ``world_base`` declaration to a MJCF path.
 
-v101 A1 moved the world asset out of ``env.params.mj_model`` into the
-run config's top-level ``world_base: {mjcf: <path>}`` (scene bundles
-declare the same key under ``backend.mujoco.world_base``).  The backend
-constructors receive that declaration as an explicit ``world_base``
-keyword and resolve it here.
+The world asset is no longer read from ``env.params.mj_model``; it is
+declared by the run config's top-level ``world_base: {mjcf: <path>}``
+(scene bundles declare the same key under ``backend.mujoco.world_base``).
+The backend constructors receive that declaration as an explicit
+``world_base`` keyword and resolve it here.
 
 There is deliberately **no default model and no alias**: an absent or
 malformed declaration fails fast with a teaching error, and the legacy
@@ -29,7 +29,7 @@ def resolve_world_base_mjcf(world_base) -> str:
 
     Raises:
         ConfigError: The declaration is absent or malformed.  There is no
-            implicit default model in v101 A1.
+            implicit default model.
     """
     if world_base is None:
         raise ConfigError(

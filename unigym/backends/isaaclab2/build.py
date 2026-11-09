@@ -1,4 +1,4 @@
-"""IsaacLab run-construction hooks (v101 A2b ``BackendInfo`` faces).
+"""IsaacLab run-construction hooks (``BackendInfo`` faces).
 
 The neutral ``unigym.run.build`` path calls these through the registry's
 lazy factories; every isaaclab-specific import (kit, terrain, actuators,
@@ -15,7 +15,7 @@ def env_kwargs(env_cfg: dict, artifacts_dir, world_base, spec=None, *,
     (the world is the cloned scene); it takes the native ``terrain`` IR
     and the ``static_shapes`` declarations from the run spec.
     ``controls`` / ``recipes`` carry the neutral control runtimes and the
-    per-articulation RobotRecipes (v104.2).
+    per-articulation RobotRecipes.
     """
     del (env_cfg, artifacts_dir, world_base)
     return {"terrain": getattr(spec, "terrain", None),

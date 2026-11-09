@@ -1,4 +1,4 @@
-"""Shared MuJoCo-family contract package (v100).
+"""Shared MuJoCo-family contract package.
 
 The family covers ``backends/mujoco`` and ``backends/mjwarp``: both operate
 on the same ``MjModel`` / ``MjData`` types.  G6 moved the remaining shared

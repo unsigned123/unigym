@@ -1,4 +1,4 @@
-"""MuJoCo Warp native backend package (v094 P3).
+"""MuJoCo Warp native backend package.
 
 ``MjwarpEnv`` is an INDEPENDENT env orchestration (a copy of the mujoco
 backend adapted to ``mujoco_warp``); it shares only the engine-agnostic

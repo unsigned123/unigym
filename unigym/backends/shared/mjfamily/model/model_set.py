@@ -1,8 +1,8 @@
-"""Assemble a per-articulation ``ModelSet`` for the MuJoCo family (v103.4).
+"""Assemble a per-articulation ``ModelSet`` for the MuJoCo family.
 
 The compiled ``MjModel`` IR is the whole-scene ``merged`` view.  Each policy
 articulation's IR is a ``ModelIR.subset`` filtered to that runtime's
-compiled backend names.  v105.3 translates every published row back to the
+compiled backend names.  Every published row is translated back to the
 neutral ``unigym_name`` through the backend-private :class:`MjNameMap`; the
 internal raw IR stays backend-native.
 
@@ -87,7 +87,7 @@ def translate_model_ir(ir: ModelIR, name_map) -> ModelIR:
     """Return *ir* with articulation-owned backend names translated.
 
     Non-articulation scene entities (world base, props) keep their compiled
-    asset names: the v105 contract translates the *articulation* vocabulary,
+    asset names: the contract translates the *articulation* vocabulary,
     not arbitrary scene geometry.  Empty/identity maps are a no-op.
     """
     from ..name_map import MjNameMap

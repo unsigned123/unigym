@@ -34,14 +34,14 @@ Runtime is the REUSED ``MujocoPropArticulation``: the compiled ``Prop_``
 subtree this renderer produces is exactly what the shared bind/reset/
 state faces address, so no new runtime lifecycle exists.
 
-v072 §13 step 3 adds the FREE face (:func:`add_ir_free_body`): the
-robocasa data objects are jointless free bodies -- the payload carries
-no IR joint and the renderer INJECTS the root freejoint (the prop's
-live dof) with the official sampling-path damping; runtime is the
-reused ``MujocoPropFreeArticulation``.  Step 5 (the composite pilot)
-adds the BALL-joint face (the composite chains' quaternion dofs with
-their mass-spring ``springdamper`` parametrization) and the material
-``specular`` appearance attribute.
+The FREE face (:func:`add_ir_free_body`) covers the robocasa data
+objects: jointless free bodies -- the payload carries no IR joint and
+the renderer INJECTS the root freejoint (the prop's live dof) with the
+official sampling-path damping; runtime is the reused
+``MujocoPropFreeArticulation``.  The BALL-joint face (the composite
+chains' quaternion dofs with their mass-spring ``springdamper``
+parametrization) and the material ``specular`` appearance attribute
+are also rendered.
 """
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ _OFFICIAL_FREE_DAMPING = 0.0005
 def add_ir_free_body(mjspec, handler, asset: AssetDefinition) -> None:
     """Render a JOINTLESS generated payload with an INJECTED root freejoint.
 
-    The v072 §13 step-3 face (the robocasa data objects): the IR keeps
+    The free-body face (the robocasa data objects): the IR keeps
     its no-freejoint guard (a provider can never spell an engine joint),
     so the freejoint is ATTACH MACHINERY here -- added mechanically to
     the payload's root body with the official sampling-path damping,
@@ -268,7 +268,7 @@ def _add_body(mujoco, parent, body, hints, joints) -> None:
     mjs_body = parent.add_body(name=body.name,
                                pos=list(body.pos), quat=list(body.quat))
     if body.inertial is not None:
-        # the explicit-inertial face (v075 P2): the dump's full-precision
+        # the explicit-inertial face: the dump's full-precision
         # row verbatim; the engine flags the body explicitinertial and
         # skips the geom mass aggregation, exactly like the XML spelling
         mjs_body.ipos = list(body.inertial.pos)
@@ -347,9 +347,9 @@ def _add_site(mjs_body, site) -> None:
     component only, post-add, so the trailing components keep the
     engine's default vector (the compiled-residue semantics of a
     scalar-authored reference; an ``add_site(size=[s])`` kwarg would
-    zero-pad them instead).  A declared non-sphere type (v072 s13 step
-    5: the composite cylinder markers) is assigned post-add the same
-    way -- the element identity, never a payload free-form string.
+    zero-pad them instead).  A declared non-sphere type (the composite
+    cylinder markers) is assigned post-add the same way -- the element
+    identity, never a payload free-form string.
     """
     import mujoco
 
@@ -399,7 +399,7 @@ def _contact_kwargs(contact: ContactHints) -> dict:
 def _add_joint(mujoco, mjs_body, joint, hints):
     """Add one IR joint; returns the MjsJoint (for declaration overrides).
 
-    A ball joint (v072 §13 step 5, the composite chains) carries no
+    A ball joint (the composite chains) carries no
     axis (quaternion dofs) and its ``springdamper`` parametrization --
     set AFTER the explicit damping default so the engine derives the
     compiled stiffness/damping from the parametrization (the official
@@ -438,7 +438,7 @@ _SOLREFLIMIT_DEFAULT_TAIL = (1.0,)
 def _apply_joint_hints(jobj, hints: JointHints) -> None:
     """Interpret the neutral joint limit hints into engine parameters.
 
-    MJCF prefix-form padding (v074): authored prefix + engine-default
+    MJCF prefix-form padding: authored prefix + engine-default
     tail -- the same element-wise convention the geom solimp face
     speaks.
     """

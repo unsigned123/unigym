@@ -15,8 +15,8 @@ from .steps import StepTerrain
 TERRAIN_REGISTRY = {
     "flat": FlatTerrain,
     "flat_plane": FlatTerrain,   # user-config key (asset continuity)
-    "steps": StepTerrain,        # P4
-    "generator": GeneratorTerrain,   # P7 route A+C: Isaac Lab TerrainGenerator + custom:
+    "steps": StepTerrain,
+    "generator": GeneratorTerrain,   # route A+C: Isaac Lab TerrainGenerator + custom:
 }
 
 

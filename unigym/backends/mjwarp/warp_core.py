@@ -1,4 +1,4 @@
-"""Batched warp ``Data`` plumbing for the mjwarp backend (v094 P4).
+"""Batched warp ``Data`` plumbing for the mjwarp backend.
 
 Kept out of ``env.py`` to hold that module's maintainability index: the mixin
 only touches documented attributes (``_model``, ``_capacity``, ``_datas``,
@@ -128,7 +128,7 @@ class WarpBatchMixin:
         """Re-seed device world ``e`` from the CPU mirror (reset/restore).
 
         Only world ``e``'s slice is written -- other worlds keep their live
-        state (the P4 subset-reset contract).  The solver warm-start is
+        state (the subset-reset contract).  The solver warm-start is
         re-asserted explicitly so a restored snapshot replays the same
         trajectory.
         """
@@ -142,7 +142,7 @@ class WarpBatchMixin:
 
     # ---- director writes: mirror state + model-global fields -> device --- #
     #: model arrays a director op can mutate after ``put_model`` (one
-    #: MjModel is shared by every world; E6 pushes these to the batched
+    #: MjModel is shared by every world; director writes push these to the batched
     #: device model).  ``eq_data`` is padded 11 -> 12 by mujoco_warp on
     #: mujoco < 3.16, so the source is padded to the device component
     #: count rather than copied verbatim.

@@ -1,4 +1,4 @@
-"""IsaacLab prop handlers (v100 G4).
+"""IsaacLab prop handlers.
 
 The concrete isaaclab handler classes moved out of the neutral
 ``unigym/props`` package; the neutral modules keep the spec vocabulary,

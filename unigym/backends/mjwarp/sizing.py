@@ -1,13 +1,13 @@
-"""Per-world MuJoCo Warp buffer sizing (v094 P3).
+"""Per-world MuJoCo Warp buffer sizing.
 
 ``mujoco_warp`` sizes its contact (``nconmax``/``naconmax``) and constraint
 (``njmax``) buffers at data-construction time; overflow is reported from
-inside the kernel (it cannot be caught).  The P0 probe measured the budget a
+inside the kernel (it cannot be caught).  A probe measured the budget a
 world actually uses on a CPU ``mj_step`` rollout, so this module sizes the
 device buffers from that probe with a safety factor and exposes a retry
 ladder for worlds that saturate later.
 
-Measured baselines (P0, 100 CPU steps): the 45-dof tabletop worlds need
+Measured baselines (100 CPU steps): the 45-dof tabletop worlds need
 288/932, ``kitchen_layout009`` 768/2508.  The floor is 64 contacts / 128
 constraints so a contact-free world still gets a usable buffer.
 

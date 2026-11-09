@@ -1,4 +1,4 @@
-"""Shared MuJoCo-family joint-limit reader (v100 G6).
+"""Shared MuJoCo-family joint-limit reader.
 
 The write-joints range gate and the curated scene tree consult the same
 number: the compiled ``MjModel`` limit table.  Living in the family library

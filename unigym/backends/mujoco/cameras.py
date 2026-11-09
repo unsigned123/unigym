@@ -1,4 +1,4 @@
-"""MuJoCo camera backend (M2b): MjSpec injection + convention bridge + rigs.
+"""MuJoCo camera backend: MjSpec injection + convention bridge + rigs.
 
 This is the mujoco counterpart of ``cameras/isaaclab_backend.py`` + the
 scene-side halves of ``cameras/rigs.py``: it injects the declared camera
@@ -49,7 +49,7 @@ GL backend
 ==========
 ``MUJOCO_GL=egl`` must be set before the first mujoco import (done by
 ``env/backends/mujoco_env.py`` via ``os.environ.setdefault``; verified
-on the humanoid_1 host at ~0.5 ms/frame @224², see the M2b record).
+on the humanoid_1 host at ~0.5 ms/frame @224²).
 """
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ class _MjRigBase:
         # the contype/conaffinity audit rule; a dict = per-config group
         # declaration (validated at classify time)
         self.render_groups = render_groups
-        # the publish-path live render state (v054 spec-ified §8.3):
+        # the publish-path live render state (§8.3):
         # the COMPLETE RenderSpec when non-default, ``None`` = the plain
         # publish path (the default view is bitwise the historical
         # render).  Written ONLY by the manager's apply_properties
@@ -133,7 +133,7 @@ class _MjRigBase:
         self.render_source = None
         rig = spec.rig or {}
         self.target_env = int(rig.get("target_env", 0))
-        # v063 T1.3: per-camera MJ geom-group visibility override (mujoco
+        # per-camera MJ geom-group visibility override (mujoco
         # only; the GR1 tabletop scene renders like the omniforge reference
         # with group 0 hidden -- robosuite render_collision_mesh=False
         # parity).  Opt-in only: absent -> (), the historical plain option
@@ -143,7 +143,7 @@ class _MjRigBase:
         self._live_yaw = 0.0    # rad
         self._live_pitch = 0.0  # rad
         self._live_roll = 0.0   # rad (view-axis roll)
-        # v095 C2: single-world pose state (mujoco has exactly ONE world;
+        # single-world pose state (mujoco has exactly ONE world;
         # the table's shared None row is the authoritative pose -- see
         # ``_apply_live_pose`` / ``get_world_pose``).
         self.state_table = make_state_table(self.name, "shared")
@@ -438,7 +438,7 @@ class _MjRigBase:
                 raise KeyError(key)
         return out
 
-    # -- RenderSpec capture (render-layers P1; camera_contract §14.9) ----- #
+    # -- RenderSpec capture (camera_contract §14.9) --------------------- #
     def _build_decor_context(self, d) -> DecorContext:
         """Engine-side context for the decor generators.
 
@@ -692,7 +692,7 @@ class _MjRigBase:
                 m.geom_group, self.render_groups)
         camc = spec["camera"]
         if "pos" in camc or "lookat" in camc:
-            # v0621: the absolute-pose free-camera form (camera_contract
+            # the absolute-pose free-camera form (camera_contract
             # §14 -- the camera(aim) semantics) -- converted to the
             # spherical keys the render loop consumes BEFORE anything
             # reads them (exact round-trip: el = asin(-vz/d),
@@ -978,10 +978,10 @@ class MjChaseRig(_MjRigBase):
             return
         env = self._env
         if not getattr(env, "_has_freejoint", True):
-            # T1.3 (v063): fixed base -- qpos[0:7] belong to the robot's
+            # fixed base -- qpos[0:7] belong to the robot's
             # own hinges here (GR1 waist/arms), NOT a base frame; reading
-            # them was the T1.2b-prime handoff garbage.  The base frame IS
-            # the configured spawn pose (construction-time B8 constants,
+            # them was stale handoff garbage.  The base frame IS
+            # the configured spawn pose (construction-time constants,
             # backends/mujoco/env.py) and it never moves.
             root = env._fixed_base_pos_w
             w, x, y, z = env._fixed_base_quat_w

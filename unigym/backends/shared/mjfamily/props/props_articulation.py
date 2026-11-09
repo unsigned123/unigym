@@ -131,7 +131,7 @@ def add_articulation_body(mjspec, handler) -> None:
 def add_free_articulation_body(mjspec, handler) -> None:
     """Attach the FREE-FLOATING articulation asset into the main MjSpec.
 
-    T-B3 GAP-A (the laptop family): same attach face as
+    The laptop family: same attach face as
     :func:`add_articulation_body` (``Prop_<name>_`` prefix at a
     worldbody frame) with the polarity of the freejoint gate REVERSED --
     the ROOT body must carry EXACTLY ONE freejoint and no other joint
@@ -303,7 +303,7 @@ class MujocoPropArticulation:
     def on_reset(self, m, d, env_ids=None) -> None:
         """Re-anchor at the sampled placement + write the declared state.
 
-        Per-joint reset position = the declared ``init`` (T-B1, default
+        Per-joint reset position = the declared ``init`` (default
         0.0 -- the robocasa fixture semantics write their open fraction
         straight into qpos; a fixture must be able to START open and
         stay freely movable, which the passive declaration guarantees:

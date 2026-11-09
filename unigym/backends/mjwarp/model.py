@@ -1,4 +1,4 @@
-"""MuJoCo Warp backend model face (v100 G2).
+"""MuJoCo Warp backend model face.
 
 The compiled model is the same ``MjModel`` the CPU backend reads, so the
 shared family provider does the work; only the IR backend label differs.

@@ -1,4 +1,4 @@
-"""MuJoCo run-construction hooks (v101 A2b ``BackendInfo`` faces).
+"""MuJoCo run-construction hooks (``BackendInfo`` faces).
 
 The neutral ``unigym.run.build`` path calls these through the registry's
 lazy factories; the backend-name knowledge lives here, not there.
@@ -11,12 +11,12 @@ def env_kwargs(env_cfg: dict, artifacts_dir, world_base, spec=None, *,
     """Builder kwargs ``MujocoEnv`` accepts (the mj-family shape + artifact dir).
 
     ``backend_params`` is the yaml ``env.params`` block and ``world_base``
-    is the run-level world declaration (v101 A1).  The per-run scene
+    is the run-level world declaration.  The per-run scene
     artifact directory is mujoco-only wiring (never an ``env.params`` key).
-    ``articulations`` is the neutral run spec's ordered list (v101 A3): the
+    ``articulations`` is the neutral run spec's ordered list: the
     env composes entries declaring ``model.mjcf`` into the world base.
     ``controls`` / ``recipes`` carry the neutral control runtimes and the
-    per-articulation RobotRecipes (v104.2).
+    per-articulation RobotRecipes.
     """
     return {"backend_params": env_cfg.get("params") or {},
             "world_base": world_base,

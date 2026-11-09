@@ -1,7 +1,7 @@
 """IsaacLab camera rigs: the three mountings (body / world / chase).
 
 This is the backend-side home of the rig classes that used to live in the
-neutral ``unigym/cameras/rigs.py`` (v100 G3).  The module is **torch-only at
+neutral ``unigym/cameras/rigs.py``.  The module is **torch-only at
 import time**; isaaclab imports happen inside methods
 (``setup_scene``/``sync_pose``/``read``), mirroring the lazy-import
 convention of the package.
@@ -86,7 +86,7 @@ class _RigBase:
         self._yaw = None        # (N,) torch, rad
         self._pitch = None      # (N,) torch, rad
         self._roll = None       # (N,) torch, rad (view-axis roll)
-        # v095 C2: the (camera, env) pose state.  ``world``/``chase`` WRITE
+        # the (camera, env) pose state.  ``world``/``chase`` WRITE
         # resolved poses here and the sensor write is driven from these
         # rows; ``body`` stays derived (FK ∘ offset, never stored).
         self.state_table = CameraStateTable()
@@ -124,7 +124,7 @@ class _RigBase:
         del env_ids
         return read_frames(self._sensor, self.spec, self._env.num_envs)
 
-    # -- (camera, env) state (v095 C2) -------------------------------- #
+    # -- (camera, env) state -------------------------------- #
     def _state_shared(self) -> bool:
         return self.spec.state == "shared"
 

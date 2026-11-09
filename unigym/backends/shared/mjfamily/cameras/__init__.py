@@ -1,1 +1,1 @@
-"""Shared MuJoCo-family camera helpers (v100 G6)."""
+"""Shared MuJoCo-family camera helpers."""

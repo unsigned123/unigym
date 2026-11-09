@@ -1,4 +1,4 @@
-"""Articulation + control runtime tables (v104.2, MuJoCo family).
+"""Articulation + control runtime tables (MuJoCo family).
 
 Every engine iterates ``env.articulations`` and ``env.controls``; there is no
 single/multi mode switch.  This module owns the shared, engine-agnostic half
@@ -340,7 +340,7 @@ def _build_articulation(env, spec, recipe, name_map, params, label):
     art.joint_names = tuple(robot_names)
     art.q0 = torch.tensor(q0_mj, dtype=torch.float32)
     art.robot_joint_names = tuple(robot_names)
-    # v103 fingerprint parity: the reset write uses the float32-rounded q0
+    # Fingerprint parity: the reset write uses the float32-rounded q0
     # (the historical binding.q0), not the raw float64 recipe defaults.
     art.q0_mj = np.asarray(art.q0, dtype=np.float64)
     art.base_body = base_body
@@ -395,7 +395,7 @@ def _add_prop_controls(env, controls: dict) -> None:
     for name, table in (env._prop_actuators or {}).items():
         if not table:
             # passive articulated props (all joints declared passive) expose
-            # no actuated table: they are NOT control groups (v104: undriven
+            # no actuated table: they are NOT control groups (undriven
             # joints live in passive_joints, never a servo face)
             continue
         if name in controls:
@@ -439,7 +439,7 @@ def _bind_articulation_limits(env, art_order, model) -> None:
     for art in art_order:
         body = _body_control(env, art.name)
         # the record/extra policy-order view is the body control's order (the
-        # v103 ``jadr_pol`` semantics); the full asset order stays on
+        # ``jadr_pol`` semantics); the full asset order stays on
         # ``jadr_art`` / ``robot_joint_names`` for the obs catalog.
         if body is not None:
             art.jadr_pol = np.asarray(body.addresses["jadr"], dtype=np.int64)
@@ -535,7 +535,7 @@ def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
 # action routing + physics
 # --------------------------------------------------------------------------- #
 
-# v104.4: action routing/physics split into a sibling module (MI floor);
+# action routing/physics split into a sibling module (MI floor);
 # re-exported here so every existing import face stays stable.
 from .articulation_actions import (  # noqa: E402,F401
     apply_control_substep,

@@ -1,4 +1,4 @@
-"""Native MuJoCo-Warp batch renderer (v095 C3).
+"""Native MuJoCo-Warp batch renderer.
 
 One render context covers the N worlds of the backend's batched warp ``Data``
 (``nworld=N``); cameras are addressed by their compiled MuJoCo camera name and

@@ -1,6 +1,6 @@
 """IsaacLab prop spawners: cfg-class resolution + spawn/actuator builders.
 
-The isaaclab half of the old neutral ``unigym/props`` package (v100 G4).
+The isaaclab half of the old neutral ``unigym/props`` package.
 Every isaaclab import stays inside :func:`_resolve`; the module body is
 import-safe without the kit so unit tests can inject fake cfg classes.
 """

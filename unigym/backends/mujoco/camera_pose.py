@@ -1,4 +1,4 @@
-"""World-pose read-back for the mujoco camera rigs (v095 C2).
+"""World-pose read-back for the mujoco camera rigs.
 
 Kept in its own small module so the backend's main file stays above the
 complexity gate's per-file MI floor.  The rig passes itself; every engine

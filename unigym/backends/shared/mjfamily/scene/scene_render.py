@@ -25,7 +25,7 @@ here -- ONE loop over the instances, no engine-special scene branch:
 
 Generated assets never touch disk (built + attached in memory, like
 props).  Runtime integration is NOT part of this module: the composer
-returns the compiled-ready spec (the P1 tabletop decomposition wires it
+returns the compiled-ready spec (the tabletop decomposition wires it
 into the env's model-load seam).
 """
 from __future__ import annotations
@@ -638,7 +638,7 @@ def _asset_regions(instance, asset, prefix: str) -> dict:
 
 
 def _add_verbatim_instance(spec, where, instance, entry, asset) -> None:
-    """Attach one instance WITHOUT the Prop_ prefix (v075 P1).
+    """Attach one instance WITHOUT the Prop_ prefix.
 
     The baked-assembly face: the payload's element names are the scene's
     own (the retired live scene's constructor namespace, cited by name
@@ -666,7 +666,7 @@ def _add_verbatim_instance(spec, where, instance, entry, asset) -> None:
 def attach_composed(spec, composed, frame: str) -> Mapping[str, object]:
     """Join an ALREADY composed scene INTO a base spec at *frame*.
 
-    The env model-load seam's core (v075 P1): the base spec is the
+    The env model-load seam's core: the base spec is the
     robot world-part XML (it owns the world-level option/size/visual
     settings -- attach does not transfer child options); the composed
     scene spec's content (primitive payload anchors, prop instances,

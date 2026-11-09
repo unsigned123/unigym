@@ -2,8 +2,7 @@
 
 mjwarp keeps one CPU-mirror ``MjModel`` backing its batched worlds; the
 resolver is the mjwarp-labelled twin of the mujoco face.  The neutral CLI
-asks the registry for this handle instead of sniffing env attributes
-(v101 A1.5).
+asks the registry for this handle instead of sniffing env attributes.
 """
 from __future__ import annotations
 

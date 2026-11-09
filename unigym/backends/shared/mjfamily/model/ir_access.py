@@ -1,7 +1,7 @@
 """Resolve the compiled ModelIR a mujoco-family env assembled.
 
-Production envs publish ``model_set`` from the compiled ``MjModel`` (M2 /
-v103.4); the whole-scene IR is ``model_set.merged``.  Test doubles and older
+Production envs publish ``model_set`` from the compiled ``MjModel``; the
+whole-scene IR is ``model_set.merged``.  Test doubles and older
 stand-alone probes may bind a backend with only ``mj_model``/``mj_data``;
 describing the model keeps those paths working without a second, divergent
 parser in the backend code.

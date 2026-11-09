@@ -1,4 +1,4 @@
-"""IsaacLab kit launcher (v101 A2b ``BackendInfo.kit_launcher`` face).
+"""IsaacLab kit launcher (``BackendInfo.kit_launcher`` face).
 
 The kit must start before any isaaclab-dependent builder runs (robot
 profiles import ``isaaclab_assets``).  ``unigym.scripts.collect_cli`` asks

@@ -1,4 +1,4 @@
-"""Shared MuJoCo-family camera helpers (v100 G6).
+"""Shared MuJoCo-family camera helpers.
 
 Pure convention/geometry helpers shared by the mujoco ``Renderer`` rigs and
 the mjwarp warp camera rigs: the ``<camera>`` MjSpec injection, the
@@ -129,7 +129,7 @@ def _rig_offset_quat(spec: CameraSpec) -> np.ndarray:
 def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
     """Add the rig's ``<camera>`` element to an ``mujoco.MjSpec``.
 
-    Mounting (M2b ruling; ``attach`` = the BodyRig link mount):
+    Mounting (``attach`` = the BodyRig link mount):
       * ``body``  -> attached to the mount body (``rig.attach``; default
         ``pelvis``) with the mount-frame ``rig.pos`` offset — the body
         attach makes the camera follow the robot for free (no per-step

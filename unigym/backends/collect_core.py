@@ -1,4 +1,4 @@
-"""Engine-agnostic env bookkeeping shared by every backend (v094 P2.5).
+"""Engine-agnostic env bookkeeping shared by every backend.
 
 These functions operate on any env exposing the documented attribute set;
 engine actions belong to the backend.  They take the live env as their first
@@ -79,7 +79,7 @@ def build_extra(env, state: dict | None, e: int = 0,
     """Recorded extra keys (cpu tensors), per-articulation state namespaced.
 
     With *include_state* the 13 per-articulation state keys are emitted under
-    ``articulation/<articulation>/...`` (v103.5: single and multi use the same
+    ``articulation/<articulation>/...`` (single and multi use the same
     rule; there is no bare projection).  *include_state=False* emits only the
     global bookkeeping keys (time/episode/contact/object/site) -- the multi
     path publishes each binding through
@@ -153,7 +153,7 @@ def build_extra(env, state: dict | None, e: int = 0,
         extra.update(build_object_extra(
             env.prop_manager, env.prop_backend.get_world_poses(),
             joint_states=env.prop_backend.get_joint_states()))
-    # v063 T3.2 EEF site record family: site/<name>/pos (world frame,
+    # EEF site record family: site/<name>/pos (world frame,
     # (N, 3) f32) -- additive; empty declaration emits nothing.
     for sname, sid in env._record_sites:
         if env.num_envs == 1:
@@ -177,7 +177,7 @@ def read_state(env, e: int = 0) -> dict:
         lin_vel_w = d.qvel[0:3].copy()              # world (freejoint)
         ang_vel_w = d.qvel[3:6].copy()              # world (measured)
     else:
-        # B8 (T1.2b): fixed base -- qpos[0:7]/qvel[0:6] belong to the
+        # fixed base -- qpos[0:7]/qvel[0:6] belong to the
         # robot's own hinges here (GR1 waist/arms), NOT a base frame.
         # The base frame is the spawn pose and it never moves.
         pos_w = env._fixed_base_pos_w.copy()

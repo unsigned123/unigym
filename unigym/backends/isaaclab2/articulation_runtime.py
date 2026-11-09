@@ -1,4 +1,4 @@
-"""IsaacLab 2.x articulation/control runtime (v104.2).
+"""IsaacLab 2.x articulation/control runtime.
 
 Every engine iterates ``env.articulations`` and ``env.controls``.  This
 module owns the IsaacLab-side runtime tables: one scene field per

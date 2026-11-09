@@ -1,4 +1,4 @@
-"""MJCF loading with path-token expansion (v080 P2).
+"""MJCF loading with path-token expansion.
 
 Prop fragments are MJCF documents.  Runtime fragments (``mjcf_file``)
 and the sealed test references spell asset leaves with

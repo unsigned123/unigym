@@ -2,8 +2,8 @@
 
 Rigid-prop half; its mujoco-facing siblings are ``props_usd.py`` (the usd
 representation tiers), ``props_articulation.py`` (anchored + free
-articulations) and ``asset_render.py`` (generated IR payloads, v072
-S2.0) -- the props-package modules allowed to touch the mujoco API, all
+articulations) and ``asset_render.py`` (generated IR payloads) -- the
+props-package modules allowed to touch the mujoco API, all
 lazily imported by the mujoco env backend when a ``props:`` section is
 wired.
 
@@ -281,11 +281,11 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
         spec = handler.spec
         asset = prop_manager.asset_definitions.get(spec.name)
         if asset is not None:
-            # generated payload (v072 S2.0): the neutral IR renders here;
+            # generated payload: the neutral IR renders here;
             # runtime is the REUSED articulation view (the compiled Prop_
             # subtree is exactly what it addresses).  Two attach forms:
-            # anchored (S2.0 fixtures) and free-root (v072 §13 step 3,
-            # the jointless robocasa data objects -- the renderer
+            # anchored (fixtures) and free-root (the jointless
+            # robocasa data objects -- the renderer
             # injects the root freejoint).
             if spec.type == "free_articulation":
                 from ..scene.asset_render import add_ir_free_body
@@ -311,7 +311,7 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
             add_articulation_body(mjspec, handler)
             continue
         if spec.type == "free_articulation":
-            # free-floating articulated props (T-B3 GAP-A: the root
+            # free-floating articulated props (the root
             # keeps its freejoint; build + runtime in props_articulation.py)
             from .props_articulation import add_free_articulation_body
             add_free_articulation_body(mjspec, handler)
@@ -320,7 +320,7 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
         if spec.type == "usd" or (
                 spec.type == "rigid_object"
                 and (spec.mujoco or {}).get("representation")):
-            # declared mjcf representation (usd kind, or the T2.4
+            # declared mjcf representation (usd kind, or the
             # URDF-less rigid_object declaration): attachable fragment /
             # envelope tiers live in props_usd.add_usd_body
             from .props_usd import add_usd_body
@@ -514,7 +514,7 @@ class MujocoPropBackend:
         ``<name>_pos_b``: R_b^T (prop_pos - base_pos);
         ``<name>_vel_b``: R_b^T (prop_vel - base_vel) -- the mujoco mirror
         of the isaaclab handlers' obs semantics.
-        ``<name>_quat_b`` (v057 additive): the prop orientation relative
+        ``<name>_quat_b``: the prop orientation relative
         to the base, ``q_b^-1 (x) q_prop`` (wxyz) -- the decision
         package's obj_pose quat source (design v057 §2; requested keys
         only, never a default).

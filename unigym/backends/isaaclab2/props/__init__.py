@@ -1,4 +1,4 @@
-"""IsaacLab prop backend face (v100 G4).
+"""IsaacLab prop backend face.
 
 The neutral ``unigym.props`` manager resolves this object through
 :attr:`BackendInfo.prop_backend`; it owns the type -> handler registry, the

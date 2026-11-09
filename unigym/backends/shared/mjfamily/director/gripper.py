@@ -2,7 +2,7 @@
 
 ``mujoco`` and ``mjwarp`` speak the same pre-compile ``MjSpec``, so the
 director's spec-side injection lives here instead of in either backend
-package (v100 design §3 ``shared/mjfamily/director``).  Engine access stays
+package (design §3 ``shared/mjfamily/director``).  Engine access stays
 function-local; the public runtime hands live in the backend packages.
 """
 from __future__ import annotations

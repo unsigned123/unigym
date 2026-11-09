@@ -135,7 +135,7 @@ def push_state_table_poses(sensor, table, camera: str, env_ids, *,
                            force_env_ids: bool = False) -> list[int]:
     """Drive ``sensor.set_world_poses`` from the ``(camera, env)`` state table.
 
-    v095 C2: the rig computes/writes resolved world poses into
+    The rig computes/writes resolved world poses into
     :class:`unigym.cameras.base.CameraStateTable` rows; this backend helper
     is the ONLY sensor write for world/chase rigs.  One prim already
     exists per env (``{ENV_REGEX_NS}``), so ``env_ids`` selects the prims
@@ -144,7 +144,7 @@ def push_state_table_poses(sensor, table, camera: str, env_ids, *,
 
     ``force_env_ids`` keeps the historical explicit-index call (chase
     always passed ``env_ids=[target_env]``); otherwise a full-range write
-    goes through ``env_ids=None`` (the pre-C2 call shape, bit-identical).
+    goes through ``env_ids=None`` (the historical call shape, bit-identical).
     Returns the env ids written.  Pure torch -- import-safe without the kit.
     """
     ids = [int(i) for i in env_ids]

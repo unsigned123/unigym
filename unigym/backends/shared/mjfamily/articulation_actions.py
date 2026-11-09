@@ -1,6 +1,6 @@
 """Action routing + physics application for the MuJoCo-family backends.
 
-Split out of :mod:`articulation_runtime` (v104.4) to keep each module small
+Split out of :mod:`articulation_runtime` to keep each module small
 and maintainable.  Every engine still iterates the neutral
 ``env._control_order`` tables built there.
 """

@@ -249,7 +249,7 @@ class MujocoContactBackend:
         return raw
 
     def read_detail(self, spec: ContactGroupSpec) -> list[dict]:
-        """Per-contact records for the decision package (v057, design §2/§3).
+        """Per-contact records for the decision package (design §2/§3).
 
         One dict per ACTIVE contact point matching the group,
         each with the bodies, the world contact position, the normal

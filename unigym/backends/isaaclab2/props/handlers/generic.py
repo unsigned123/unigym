@@ -80,7 +80,7 @@ class GenericProp(PropHandler):
         else:
             self._pos_key = f"{_STATE_PREFIX}_pos_b"
             self._vel_key = f"{_STATE_PREFIX}_vel_b"
-        # v057 additive decision-package feed (design v057 §2): the
+        # additive decision-package feed (design v057 §2): the
         # orientation key rides the pos key's stem; backends that emit
         # it (mujoco get_state) serve it, the rest leave obs_cache
         # without it -- the adapter degrades honestly to quat None
@@ -199,7 +199,7 @@ class GenericProp(PropHandler):
         return [
             RawObsRequest(self._pos_key, 3, "prop"),
             RawObsRequest(self._vel_key, 3, "prop"),
-            # v057 §2: the catalog face of the additive quat feed (the
+            # §2: the catalog face of the additive quat feed (the
             # mujoco backend emits it; backends without the emission
             # never fill obs_cache -- "requested keys only", the
             # adapter's .get() degrades to None)

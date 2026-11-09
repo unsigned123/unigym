@@ -1,4 +1,4 @@
-"""MuJoCo-family live model binder (v100 G1).
+"""MuJoCo-family live model binder.
 
 The engine half of :mod:`unigym.model.live`: resolves compiled joint/body
 addresses from the backend's ``MjModel`` and hands out the env's ``MjData``
