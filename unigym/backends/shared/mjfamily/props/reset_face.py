@@ -120,14 +120,12 @@ def build_reset_primitives(env) -> ResetPrimitives:
     def joint_group(name: str):
         raise NotImplementedError(
             "ResetPrimitives.joint_group: the robot-side joint seam "
-            "arrives with the robot-body reset migration "
-            "(docs/designs/v067-scene-bundle-and-initializers.md §5)")
+            "arrives with the robot-body reset migration")
 
     def set_targets(idx, vals) -> None:
         raise NotImplementedError(
             "ResetPrimitives.set_targets: the robot-side joint seam "
-            "arrives with the robot-body reset migration "
-            "(docs/designs/v067-scene-bundle-and-initializers.md §5)")
+            "arrives with the robot-body reset migration")
 
     def forward() -> None:
         import mujoco

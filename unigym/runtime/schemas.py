@@ -124,7 +124,7 @@ _CONSOLE_EVAL: dict[str, JsonValue] = {
                    "expr": {"type": "string", "minLength": 1}},
     "required": ["expr"],
     "additionalProperties": False,
-    "description": "PASS-THROUGH eval (owner ruling: the old "
+    "description": "PASS-THROUGH eval (the old "
                    "restricted namespace is gone -- full builtins, "
                    "imports, assignments, multi-line statements all "
                    "execute; injected convenience names np torch "

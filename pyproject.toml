@@ -98,7 +98,7 @@ source_modules = ["unigym.benchmarks.task_providers"]
 forbidden_modules = ["unigym.*"]
 
 [[tool.importlinter.contracts]]
-name = "props neutral zone never imports backends (v072 design §12.2)"
+name = "props neutral zone never imports backends (design §12.2)"
 type = "forbidden"
 source_modules = ["unigym.props"]
 forbidden_modules = ["unigym.backends.**"]
@@ -109,13 +109,13 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "scenes vocabulary never imports backends (v075 design §3/§4)"
+name = "scenes vocabulary never imports backends (design §3/§4)"
 type = "forbidden"
 source_modules = ["unigym.scenes"]
 forbidden_modules = ["unigym.backends.**"]
 
 [[tool.importlinter.contracts]]
-name = "neutral layers never import backends (v100 G0)"
+name = "neutral layers never import backends"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = [
@@ -140,7 +140,7 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "isaaclab backends stay out of the MuJoCo family (v100 G0)"
+name = "isaaclab backends stay out of the MuJoCo family"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["unigym.backends.isaaclab2", "unigym.backends.isaaclab3"]
@@ -154,7 +154,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "mujoco family never imports an isaaclab backend (v100 G0)"
+name = "mujoco family never imports an isaaclab backend"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["unigym.backends.mujoco", "unigym.backends.mjwarp"]
@@ -166,7 +166,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "shared.mjfamily is private to mujoco/mjwarp (v100 G0)"
+name = "shared.mjfamily is private to mujoco/mjwarp"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = [

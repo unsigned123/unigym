@@ -1047,12 +1047,12 @@ class IsaaclabEnv(ManagerBasedEnv):
         """Not implemented on isaaclab v1 (rewind is mujoco-only, Round B)."""
         raise NotImplementedError(
             "isaaclab2 backend does not implement snapshot()/restore() "
-            "(rewind superpower, design v052-round-b §1.1); run the "
+            "(rewind is mujoco-only); run the "
             "rewind face against env.backend: mujoco")
 
     def restore(self, state) -> int:
         """Not implemented on isaaclab v1 (rewind is mujoco-only, Round B)."""
         raise NotImplementedError(
             "isaaclab2 backend does not implement snapshot()/restore() "
-            "(rewind superpower, design v052-round-b §1.1); run the "
+            "(rewind is mujoco-only); run the "
             "rewind face against env.backend: mujoco")

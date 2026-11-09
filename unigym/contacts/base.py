@@ -140,9 +140,8 @@ class ContactGroupSpec:
                              f"{FORMATS}, got {self.format!r}")
         if self.frame not in FRAMES:
             raise ValueError(
-                f"contact {self.name!r}: frame is REQUIRED with no default "
-                f"(owner ruling ①); must be one of {FRAMES}, got "
-                f"{self.frame!r}")
+                f"contact {self.name!r}: frame is REQUIRED with no default; "
+                f"must be one of {FRAMES}, got {self.frame!r}")
         if self.component not in COMPONENTS:
             raise ValueError(f"contact {self.name!r}: component must be one "
                              f"of {COMPONENTS}, got {self.component!r}")
@@ -195,7 +194,7 @@ class ContactGroupSpec:
                    if entry.get(k) is None]
         if missing:
             raise ValueError(f"contact spec missing required keys {missing} "
-                             f"(frame is mandatory, owner ruling ①)")
+                             f"(frame is mandatory)")
         for arg in ("sensor_bodies", "filter_bodies"):
             if isinstance(entry.get(arg), dict):
                 raise ValueError(

@@ -106,7 +106,7 @@ def _require_name(kind: str, name: str) -> str:
     if name in _ENGINE_ELEMENT_NAMES:
         raise ValueError(
             f"{kind} name {name!r} is an engine element name -- providers "
-            f"speak the neutral IR vocabulary only (design v072 §12.4-1)"
+            f"speak the neutral IR vocabulary only"
         )
     return name
 

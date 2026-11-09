@@ -62,7 +62,7 @@ def _name(kind: str, value: str) -> str:
     if value in _ENGINE_ELEMENT_NAMES:
         raise ValueError(
             f"{kind} name {value!r} is an engine element name -- providers "
-            f"speak the neutral IR vocabulary only (design v072 §12.4-1)")
+            f"speak the neutral IR vocabulary only")
     return value
 
 

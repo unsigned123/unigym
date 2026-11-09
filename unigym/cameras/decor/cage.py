@@ -18,8 +18,8 @@ freeze-paradigm fallback (design §3): with NO matching active
 contact the encoding's meaning (distance to the live bite) is gone, so
 the generator returns a NEUTRAL ruler (uniform gray, anchored at the
 body center) instead of raising -- one behavior branch, zero new
-params.  Contact present -> the full encoding, bit-identical to
-pre-v056.
+params.  Contact present -> the full encoding, bit-identical
+output.
 """
 from __future__ import annotations
 
@@ -159,7 +159,7 @@ class CageGrid:
         # -- with no matching contact that meaning is gone, so the cage
         # degrades to a NEUTRAL ruler anchored at the body center.  One
         # behavior branch, zero new params; the contact-present path is
-        # bit-identical to the pre-v056 generator.
+        # bit-identical to the full encoding.
         idx = ctx.contacts_where(params["contact_select"])
         if len(idx):
             center = ctx.contact_pos[idx].mean(axis=0)

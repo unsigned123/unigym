@@ -1844,8 +1844,8 @@ class ShmClient:
                 # foreign-layout segment: zero fallback reading -- it shows
                 # up as an UNKNOWN row, visible / killable / deletable
                 raise BridgeError(
-                    f"{self.shm_name}: pre-v0.50 segment (no heartbeat; "
-                    f"spawn/upgrade to v0.50+)")
+                    f"{self.shm_name}: legacy segment layout (no heartbeat; "
+                    f"respawn the run process)")
             raise BridgeError(
                 f"{self.shm_name}: segment version {ver} > supported "
                 f"{VERSION} (upgrade unigym)")

@@ -155,7 +155,8 @@ def query_run(svc, run_id: str, kind: str, timeout: float = 10.0,
     except SessionError as e:
         msg = str(e)
         if ("bad magic" in msg or "bad version" in msg
-                or "pre-v0.50 segment" in msg or "segment version" in msg):
+                or "legacy segment layout" in msg
+                or "segment version" in msg):
             # UNKNOWN segment (exists, unreadable -- a foreign layout or
             # corrupt magic).  The attach face is honestly dead; say so as
             # an error doc (never a 500) and point at the live view.

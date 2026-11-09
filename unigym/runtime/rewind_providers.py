@@ -231,7 +231,7 @@ class _EpisodeBufferProvider:
                 f"rewind provider '{self.name}': cross-episode rewind "
                 f"refused (checkpoint episode {int(stamp)} != live "
                 f"episode {int(live)}) -- cross-set rewind is out of the "
-                f"v1 scope (design v057 §0)")
+                f"v1 scope")
 
     def episode_hint(self) -> int:
         """The episode ordinal for the sidecar filename (process truth)."""

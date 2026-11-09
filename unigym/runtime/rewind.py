@@ -560,7 +560,7 @@ class RewindController:
                 f"{int(snap_ep)} != live episode {int(live_ep)})",
                 hint="the checkpoint belongs to a different episode "
                      "than the live run -- cross-set rewind is out of "
-                     "the v1 scope (design v057 §0); take a fresh "
+                     "the v1 scope; take a fresh "
                      "checkpoint in the live episode and rewind to it")
         for p in self.providers:
             state = (payload.get("providers") or {}).get(p.name)
@@ -611,8 +611,7 @@ class RewindController:
                 "label": label, "provider": p.name,
                 "tick": tick, "restored_tick": int(restored_tick),
                 "reason": ("timeline forked back to the checkpoint "
-                           "state; this branch's frames are kept "
-                           "here (design v057 §1.4)"),
+                           "state; this branch's frames are kept here"),
                 "files": list(paths)}
             meta_path = os.path.join(attempts, base + ".meta.json")
             with open(meta_path, "w", encoding="utf-8") as f:
