@@ -52,6 +52,7 @@ dev = [
     "import-linter==2.15",
     "pyright[nodejs]==1.1.414",
     "mujoco-stubs==4.0.0.1",
+    "pre-commit==3.8.0",
 ]
 
 [project.scripts]
