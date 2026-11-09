@@ -43,12 +43,15 @@ import logging
 import os
 import tempfile
 from argparse import Namespace
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import TracebackType
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import yaml
 
+from unigym._typing import JsonValue
 from unigym.backends.registry import backend_info
 from unigym.run.passive import (
     declare_passive_joints as _declare_passive_joints,
@@ -58,7 +61,99 @@ from unigym.camera import CameraSet
 from unigym.run.spec import RunSpec, build_spec
 
 if TYPE_CHECKING:
-    from unigym.runner.base import Runner
+    from unigym.adapters.base import Adapter
+    from unigym.model.live import LiveModel
+    from unigym.runtime.actions import NamedAction
+    from unigym.runtime.controllers import (
+        ControlRuntime,
+        ResolvedControl,
+        ResolvedControlPlan,
+    )
+    from unigym.run.instance import RunInstance
+    from unigym.runner.base import Runner, StepResult
+    from unigym.world import World
+
+BenchmarkTask = str | dict[str, JsonValue]
+
+
+class _FromConfigKwargs(TypedDict, total=False):
+    """Override knobs shared by :meth:`Run.from_config` and :func:`load`."""
+
+    num_envs: int | None
+    seed: int | None
+    backend: str | None
+    device: str | None
+    steps: int | None
+    episode_length_s: float | None
+    output_dir: str | None
+    label: str | None
+    set: Sequence[str]
+    adapter_params: dict[str, JsonValue] | None
+    no_artifacts: bool
+    inspect: bool
+
+
+def _task_name(task: dict[str, JsonValue]) -> str | None:
+    """The declared ``name`` of a benchmark task mapping (when a string)."""
+    name = task.get("name")
+    return name if isinstance(name, str) else None
+
+
+def _json_list(values: Iterable[JsonValue]) -> list[JsonValue]:
+    """Materialize an iterable as a JSON list (the recursive alias's form)."""
+    return list(values)
+
+
+def _optional_str(value: object) -> str | None:
+    """A string runtime attribute, or None when it is not a string."""
+    return value if isinstance(value, str) else None
+
+
+def _str_values(value: object) -> list[str]:
+    """A runtime name sequence as a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
+
+
+def _json_object(value: object) -> dict[str, JsonValue]:
+    """A runtime mapping attribute as a copied JSON mapping."""
+    return copy.deepcopy(value) if isinstance(value, dict) else {}
+
+
+def _config_mapping(value: object) -> dict[str, JsonValue]:
+    """Narrow a runtime mapping (yaml load) to a config dict."""
+    if not isinstance(value, dict):
+        raise TypeError(
+            f"config must be a mapping, got {type(value).__name__}")
+    return value
+
+
+def _section(cfg: dict[str, JsonValue], key: str) -> dict[str, JsonValue]:
+    """Return a nested config section, creating an empty mapping if absent."""
+    value = cfg.get(key)
+    if not isinstance(value, dict):
+        value = {}
+        cfg[key] = value
+    return value
+
+
+def _existing_section(
+    cfg: dict[str, JsonValue], key: str,
+) -> dict[str, JsonValue]:
+    """Return a nested config section without creating it when absent."""
+    value = cfg.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _list_section(cfg: dict[str, JsonValue], key: str) -> list[JsonValue]:
+    """Return a nested config list section, creating one if absent."""
+    value = cfg.get(key)
+    if not isinstance(value, list):
+        value = []
+        cfg[key] = value
+    return value
+
 
 __all__ = ["Run", "load", "make"]
 
@@ -76,12 +171,16 @@ class BenchmarkSet:
     section is data), so it is deferred with the exact reason.
     """
 
-    def __init__(self, tasks=(), *, locked: bool = False, on_add=None):
-        self._tasks: list = list(tasks or ())
+    def __init__(
+        self, tasks: Iterable[BenchmarkTask] = (), *,
+        locked: bool = False,
+        on_add: Callable[[str], None] | None = None,
+    ) -> None:
+        self._tasks: list[BenchmarkTask] = list(tasks or ())
         self._locked = bool(locked)
         self._on_add = on_add
 
-    def add(self, task) -> None:
+    def add(self, task: str) -> None:
         """Declare one benchmark task by name (pre-build only)."""
         if self._locked:
             raise RuntimeError(
@@ -106,25 +205,25 @@ class BenchmarkSet:
         self._locked = True
         return self
 
-    def names(self) -> list:
+    def names(self) -> list[str | None]:
         """Declared task names (string entries or dict ``name`` fields)."""
-        return [task if isinstance(task, str) else task.get("name")
+        return [task if isinstance(task, str) else _task_name(task)
                 for task in self._tasks]
 
-    def to_list(self) -> list:
+    def to_list(self) -> list[BenchmarkTask]:
         """Config-ready copies of the declared task entries."""
         return copy.deepcopy(self._tasks)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str | None]:
         return iter(self.names())
 
     def __len__(self) -> int:
         return len(self._tasks)
 
-    def __contains__(self, item) -> bool:
+    def __contains__(self, item: object) -> bool:
         return item in self.names()
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> str | None:
         return self.names()[index]
 
     def __repr__(self) -> str:
@@ -132,7 +231,9 @@ class BenchmarkSet:
         return f"BenchmarkSet({self.names()!r}, {state})"
 
 
-def _runner_kwargs(kind: str, kwargs: dict) -> dict:
+def _runner_kwargs(
+    kind: str, kwargs: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
     """Validate the runner kind before a build (fail fast, no side effects)."""
     from unigym.runner import _RUNNER_KINDS
 
@@ -143,7 +244,7 @@ def _runner_kwargs(kind: str, kwargs: dict) -> dict:
     return kwargs
 
 
-def _adapter_section(adapter) -> dict:
+def _adapter_section(adapter: JsonValue) -> dict[str, JsonValue]:
     """Normalize an adapter declaration into the existing ``adapter:`` dict."""
     if adapter is None:
         return {"name": "manual"}
@@ -158,13 +259,14 @@ def _adapter_section(adapter) -> dict:
         "(ManualAdapter) instead, or register the class under a name")
 
 
-def _articulation_entry(robot) -> dict:
+def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
     """Builder convenience: one ``articulations[]`` entry (v104 shape).
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
     config alias: it emits the same authoring shape a yaml file declares
     (``{name, params?, body_parts?}`` -- no articulation-level control).
     """
+    entry: dict[str, JsonValue]
     if isinstance(robot, str):
         entry = {"name": robot}
     elif isinstance(robot, dict):
@@ -180,7 +282,9 @@ def _articulation_entry(robot) -> dict:
     return entry
 
 
-def _controls_entries(robot, adapter) -> list:
+def _controls_entries(
+    robot: JsonValue, adapter: JsonValue,
+) -> list[dict[str, JsonValue]]:
     """Builder convenience: the top-level ``controls:`` groups (v105).
 
     The body group is named after the articulation (the historical action
@@ -192,15 +296,15 @@ def _controls_entries(robot, adapter) -> list:
     entry = _articulation_entry(robot)
     name = str(entry["name"])
     adapter_name = str(_adapter_section(adapter).get("name") or "manual")
-    body = {
+    body: dict[str, JsonValue] = {
         "name": name,
         "adapter": adapter_name,
         "articulation": name,
         "drive": "position_pd",
         "target": "position",
     }
-    groups = [body]
-    recipe = None
+    groups: list[dict[str, JsonValue]] = [body]
+    recipe: object | None = None
     try:
         from unigym.robots import build_robot_recipe
 
@@ -213,7 +317,9 @@ def _controls_entries(robot, adapter) -> list:
         # here: an adapter that emits a face the recipe does not declare
         # (e.g. the G1 ``hand`` face) must get it from its config's
         # ``controls[]`` -- the v104 partition is the single authority.
-        terms = dict(getattr(recipe, "extra_action_terms", None) or {})
+        raw_terms = getattr(recipe, "extra_action_terms", None)
+        terms: Mapping[str, object] = (
+            raw_terms if isinstance(raw_terms, Mapping) else {})
         for face in terms:
             groups.append({
                 "name": str(face),
@@ -226,36 +332,44 @@ def _controls_entries(robot, adapter) -> list:
     return groups
 
 
-def _minimal_cfg(*, run_name: str, seed: int, articulations: list,
-                 controls: list, backend: str, num_envs: int, adapter: dict,
-                 steps: int, episode_length_s: float) -> dict:
+def _minimal_cfg(
+    *, run_name: str, seed: int, articulations: list[dict[str, JsonValue]],
+    controls: list[dict[str, JsonValue]], backend: str, num_envs: int,
+    adapter: dict[str, JsonValue], steps: int, episode_length_s: float,
+) -> dict[str, JsonValue]:
     """The programmatic base config (existing schema only; no YAML).
 
     The world asset is NOT injected here: callers pass it explicitly via
     ``world_base`` / a :class:`~unigym.world.World` declaration (v101 A1).
     """
-    return {
+    env_section: dict[str, JsonValue] = {
+        "backend": backend,
+        "num_envs": int(num_envs),
+        "episode_length_s": float(episode_length_s),
+        "decimation": 4,
+        "sim_dt": 0.005,
+        "params": {},
+    }
+    command_section: dict[str, JsonValue] = {
+        "name": "fixed", "dim": 0, "values": []}
+    collect_section: dict[str, JsonValue] = {
+        "steps": int(steps), "shard_steps": 1000}
+    config: dict[str, JsonValue] = {
         "run_name": run_name,
         "output_root": "data_out",
         "seed": int(seed),
         "mode": "collect",
         "adapter": copy.deepcopy(adapter),
-        "articulations": copy.deepcopy(articulations),
-        "controls": copy.deepcopy(controls),
-        "env": {
-            "backend": backend,
-            "num_envs": int(num_envs),
-            "episode_length_s": float(episode_length_s),
-            "decimation": 4,
-            "sim_dt": 0.005,
-            "params": {},
-        },
-        "command": {"name": "fixed", "dim": 0, "values": []},
-        "collect": {"steps": int(steps), "shard_steps": 1000},
+        "articulations": _json_list(copy.deepcopy(articulations)),
+        "controls": _json_list(copy.deepcopy(controls)),
+        "env": env_section,
+        "command": command_section,
+        "collect": collect_section,
     }
+    return config
 
 
-def _world_base_section(world_base) -> dict:
+def _world_base_section(world_base: JsonValue) -> dict[str, JsonValue]:
     """Normalize a ``world_base=`` constructor value into the config shape."""
     if isinstance(world_base, str):
         return {"mjcf": world_base}
@@ -266,16 +380,34 @@ def _world_base_section(world_base) -> dict:
         f"got {type(world_base).__name__}")
 
 
-def _camera_entries(cameras) -> list:
+def _camera_entries(
+    cameras: CameraSet | JsonValue,
+) -> list[dict[str, JsonValue]]:
     """Normalize the ``cameras=`` constructor form to a list of entries."""
     if cameras is None:
         return []
     if isinstance(cameras, CameraSet):
-        return cameras.to_list()
+        raw_entries = cameras.to_list()
+        entries: list[dict[str, JsonValue]] = []
+        for entry in raw_entries:
+            if isinstance(entry, dict):
+                entries.append(copy.deepcopy(entry))
+            else:
+                raise TypeError(
+                    f"CameraSet.to_list() yielded {type(entry).__name__}")
+        return entries
     if isinstance(cameras, dict):
         return [copy.deepcopy(cameras)]
     if isinstance(cameras, (list, tuple)):
-        return [copy.deepcopy(entry) for entry in cameras]
+        entries = []
+        for entry in cameras:
+            if isinstance(entry, dict):
+                entries.append(copy.deepcopy(entry))
+            else:
+                raise TypeError(
+                    f"cameras= entries must be dicts, got "
+                    f"{type(entry).__name__}")
+        return entries
     raise TypeError(
         f"cameras= expects a camera dict / list / CameraSet, got "
         f"{type(cameras).__name__}")
@@ -331,13 +463,20 @@ class Run:
         **overrides: Extra top-level config keys (existing schema only).
     """
 
-    def __init__(self, cfg: dict | None = None, *, world=None, world_base=None,
-                 cameras=None, adapter=None, robot="g1", backend=None,
-                 backend_options=None, num_envs=None, seed=None, device=None,
-                 steps=None,
-                 episode_length_s=None, output_dir=None, label=None, set=(),
-                 adapter_params=None, no_artifacts=False, inspect=False,
-                 _config_path: str | None = None, **overrides):
+    def __init__(
+        self, cfg: dict[str, JsonValue] | None = None, *,
+        world: World | None = None, world_base: JsonValue = None,
+        cameras: CameraSet | JsonValue = None, adapter: JsonValue = None,
+        robot: JsonValue = "g1", backend: str | None = None,
+        backend_options: dict[str, JsonValue] | None = None,
+        num_envs: int | None = None, seed: int | None = None,
+        device: str | None = None, steps: int | None = None,
+        episode_length_s: float | None = None,
+        output_dir: str | None = None, label: str | None = None,
+        set: Sequence[str] = (), adapter_params: dict[str, JsonValue] | None = None,
+        no_artifacts: bool = False, inspect: bool = False,
+        _config_path: str | None = None, **overrides: JsonValue,
+    ) -> None:
         if cfg is not None and not isinstance(cfg, dict):
             raise TypeError(
                 f"Run() config must be a mapping, got {type(cfg).__name__}")
@@ -355,6 +494,7 @@ class Run:
                                  if backend_options is not None else None)
         self._inspect = bool(inspect)
         self._logs = ""
+        raw: dict[str, JsonValue]
         if cfg is None:
             raw = self._assemble_minimal(
                 world=world, cameras=cameras, adapter=adapter, robot=robot,
@@ -363,7 +503,7 @@ class Run:
             if world_base is not None:
                 raw["world_base"] = _world_base_section(world_base)
             if self._backend_options is not None:
-                raw.setdefault("env", {})["backend_options"] = \
+                _section(raw, "env")["backend_options"] = \
                     copy.deepcopy(self._backend_options)
         else:
             raw = copy.deepcopy(cfg)
@@ -373,10 +513,10 @@ class Run:
             if world_base is not None:
                 raw["world_base"] = _world_base_section(world_base)
             if self._backend_options is not None:
-                raw.setdefault("env", {})["backend_options"] = \
+                _section(raw, "env")["backend_options"] = \
                     copy.deepcopy(self._backend_options)
             if cameras is not None:
-                raw["cameras"] = _camera_entries(cameras)
+                raw["cameras"] = _json_list(_camera_entries(cameras))
             if adapter is not None:
                 raw["adapter"] = _adapter_section(adapter)
             if robot != "g1":
@@ -385,20 +525,20 @@ class Run:
                     robot, adapter if adapter is not None
                     else raw.get("adapter"))
                 _declare_passive_joints(entry, cfg_controls)
-                arts = raw.setdefault("articulations", [])
+                arts = _list_section(raw, "articulations")
                 if arts:
                     arts[0] = entry
                 else:
                     arts.append(entry)
-                raw["controls"] = cfg_controls
+                raw["controls"] = _json_list(cfg_controls)
             elif "articulations" not in raw:
-                entry = {"name": "g1"}
+                entry: dict[str, JsonValue] = {"name": "g1"}
                 cfg_controls = _controls_entries(
                     "g1", adapter if adapter is not None
                     else raw.get("adapter"))
                 _declare_passive_joints(entry, cfg_controls)
-                raw["articulations"] = [entry]
-                raw["controls"] = cfg_controls
+                raw["articulations"] = _json_list([entry])
+                raw["controls"] = _json_list(cfg_controls)
         for key, value in overrides.items():
             raw[key] = copy.deepcopy(value)
         self._raw_cfg = raw
@@ -419,7 +559,7 @@ class Run:
             self._benchmark_tasks(raw),
             on_add=self._on_benchmark_add)
         self._spec: RunSpec | None = None
-        self._instance = None
+        self._instance: RunInstance | None = None
         self._runner: Runner | None = None
         self._runner_kind: str | None = None
         self._stepped = False
@@ -428,8 +568,12 @@ class Run:
     # ------------------------------------------------------------------ #
     # construction
     # ------------------------------------------------------------------ #
-    def _assemble_minimal(self, *, world, cameras, adapter, robot, backend,
-                          num_envs, seed, steps, episode_length_s) -> dict:
+    def _assemble_minimal(
+        self, *, world: World | None, cameras: CameraSet | JsonValue,
+        adapter: JsonValue, robot: JsonValue, backend: str | None,
+        num_envs: int | None, seed: int | None, steps: int | None,
+        episode_length_s: float | None,
+    ) -> dict[str, JsonValue]:
         """The programmatic base config (existing schema; no world asset)."""
         articulation_entry = _articulation_entry(robot)
         adapter_section = _adapter_section(adapter)
@@ -453,20 +597,44 @@ class Run:
             world.apply(raw)
             _declare_world_passive_joints(raw)
         if cameras is not None:
-            raw["cameras"] = _camera_entries(cameras)
+            raw["cameras"] = _json_list(_camera_entries(cameras))
         return raw
 
     @classmethod
-    def minimal(cls, **kwargs) -> Run:
+    def minimal(
+        cls, *, world: World | None = None, world_base: JsonValue = None,
+        cameras: CameraSet | JsonValue = None, adapter: JsonValue = None,
+        robot: JsonValue = "g1", backend: str | None = None,
+        backend_options: dict[str, JsonValue] | None = None,
+        num_envs: int | None = None, seed: int | None = None,
+        device: str | None = None, steps: int | None = None,
+        episode_length_s: float | None = None,
+        output_dir: str | None = None, label: str | None = None,
+        set: Sequence[str] = (),
+        adapter_params: dict[str, JsonValue] | None = None,
+        no_artifacts: bool = False, inspect: bool = False,
+    ) -> Run:
         """Same as ``Run(**kwargs)``; a world/base is required (no default)."""
-        return cls(None, **kwargs)
+        return cls(
+            None, world=world, world_base=world_base, cameras=cameras,
+            adapter=adapter, robot=robot, backend=backend,
+            backend_options=backend_options, num_envs=num_envs, seed=seed,
+            device=device, steps=steps,
+            episode_length_s=episode_length_s, output_dir=output_dir,
+            label=label, set=set, adapter_params=adapter_params,
+            no_artifacts=no_artifacts, inspect=inspect)
 
     @classmethod
-    def from_config(cls, path, *, num_envs=None, seed=None, backend=None,
-                    device=None, steps=None, episode_length_s=None,
-                    output_dir=None, label=None, set=(),
-                    adapter_params=None, no_artifacts=False,
-                    inspect=False) -> Run:
+    def from_config(
+        cls, path: str | os.PathLike[str], *, num_envs: int | None = None,
+        seed: int | None = None, backend: str | None = None,
+        device: str | None = None, steps: int | None = None,
+        episode_length_s: float | None = None,
+        output_dir: str | None = None, label: str | None = None,
+        set: Sequence[str] = (),
+        adapter_params: dict[str, JsonValue] | None = None,
+        no_artifacts: bool = False, inspect: bool = False,
+    ) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
         Args:
@@ -494,11 +662,11 @@ class Run:
                 f"run config {path!r} must be a yaml mapping, got "
                 f"{type(cfg).__name__}")
         return cls(
-            cfg, num_envs=num_envs, seed=seed, backend=backend,
-            device=device, steps=steps, episode_length_s=episode_length_s,
-            output_dir=output_dir, label=label, set=set,
-            adapter_params=adapter_params, no_artifacts=no_artifacts,
-            inspect=inspect,
+            _config_mapping(cfg), num_envs=num_envs, seed=seed,
+            backend=backend, device=device, steps=steps,
+            episode_length_s=episode_length_s, output_dir=output_dir,
+            label=label, set=set, adapter_params=adapter_params,
+            no_artifacts=no_artifacts, inspect=inspect,
             _config_path=os.path.abspath(os.fspath(path)))
 
     def _args(self) -> Namespace:
@@ -543,16 +711,17 @@ class Run:
         # add() made after a spec read still reaches build_spec.
         if len(self._camera_set):
             cfg = copy.deepcopy(cfg)
-            cfg["cameras"] = self._camera_set.to_list()
+            cfg["cameras"] = _json_list(self._camera_set.to_list())
         if len(self._benchmark_set):
             cfg = copy.deepcopy(cfg)
-            cfg.setdefault("benchmark", {})["tasks"] = \
-                self._benchmark_set.to_list()
+            _section(cfg, "benchmark")["tasks"] = _json_list(
+                self._benchmark_set.to_list())
         if self._backend is not None:
             cfg = copy.deepcopy(cfg)
-            cfg.setdefault("env", {})["backend"] = self._backend
-        backend = str((cfg.get("env") or {}).get("backend", "isaaclab"))
-        static_shapes: tuple = ()
+            _section(cfg, "env")["backend"] = self._backend
+        backend = str(_existing_section(cfg, "env").get(
+            "backend", "isaaclab"))
+        static_shapes: tuple[JsonValue, ...] = ()
         if self._world is not None \
                 and not backend_info(backend).inline_static_scene:
             if not self._world.unmapped_static_scene:
@@ -562,7 +731,7 @@ class Run:
                     # SAME primitives.  The isaaclab run receives them as
                     # native static colliders instead (no silent drop).
                     cfg = copy.deepcopy(cfg)
-                    params = cfg.setdefault("env", {}).setdefault("params", {})
+                    params = _section(_section(cfg, "env"), "params")
                     params.pop("mj_scene", None)
                     params.pop("mj_scene_params", None)
         spec = build_spec(cfg, self._args())
@@ -580,7 +749,7 @@ class Run:
         self._output_dir = tempfile.mkdtemp(prefix="unigym_inspect_")
         self._spec = None
 
-    def build(self, inspect: bool = False):
+    def build(self, inspect: bool = False) -> RunInstance:
         """Build (once) and return the live :class:`RunInstance`.
 
         Args:
@@ -609,7 +778,7 @@ class Run:
             self._world._mark_built()
         return self._instance
 
-    def _build_now(self):
+    def _build_now(self) -> RunInstance:
         """Run the one existing construction path (``build_instance``)."""
         _LOG.debug("Run(%s): building instance lazily", self._display_name())
         from unigym.run.build import build_instance
@@ -633,7 +802,10 @@ class Run:
         """Enter the session (the run builds on first live access)."""
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self, exc_type: type[BaseException] | None,
+        exc: BaseException | None, tb: TracebackType | None,
+    ) -> None:
         """Exit the session, closing the owned instance."""
         self.close()
 
@@ -646,7 +818,7 @@ class Run:
 
     def __repr__(self) -> str:
         """``<Run name=... backend=... num_envs=... built=...>``."""
-        env = self._raw_cfg.get("env") or {}
+        env = _existing_section(self._raw_cfg, "env")
         backend = self._backend or env.get("backend") or "isaaclab"
         num_envs = (self._num_envs if self._num_envs is not None
                     else env.get("num_envs", "?"))
@@ -655,8 +827,8 @@ class Run:
 
     def _repr_html_(self) -> str:
         """A small HTML table for notebooks (same facts as ``__repr__``)."""
-        env = self._raw_cfg.get("env") or {}
-        rows = {
+        env = _existing_section(self._raw_cfg, "env")
+        rows: dict[str, JsonValue] = {
             "name": self._display_name(),
             "backend": self._backend or env.get("backend", "isaaclab"),
             "num_envs": (self._num_envs if self._num_envs is not None
@@ -688,12 +860,12 @@ class Run:
         return self._spec
 
     @property
-    def controls(self) -> dict:
+    def controls(self) -> dict[str, ControlRuntime]:
         """The neutral control runtime views (``{group: ControlRuntime}``)."""
         return dict(self.build().env.controls)
 
     @property
-    def plan(self):
+    def plan(self) -> ResolvedControlPlan | None:
         """The frozen :class:`ResolvedControlPlan` of this run (read-only).
 
         Built once with the run instance from the resolved controls; the
@@ -702,13 +874,13 @@ class Run:
         return self.build().plan
 
     @property
-    def resolved_controls(self) -> tuple:
+    def resolved_controls(self) -> tuple[ResolvedControl, ...]:
         """The plan's :class:`ResolvedControl` rows (read-only tuple)."""
         plan = self.plan
         return () if plan is None else tuple(plan.controls)
 
     @property
-    def cfg(self) -> dict:
+    def cfg(self) -> dict[str, JsonValue]:
         """The normalized effective config mapping."""
         return self.spec.cfg
 
@@ -726,7 +898,7 @@ class Run:
             return self._instance.model
         return self.build().model
 
-    def live_for(self, name=None):
+    def live_for(self, name: str | None = None) -> LiveModel:
         """Zero-copy live proxies for one articulation's IR (v103.4).
 
         Args:
@@ -744,7 +916,7 @@ class Run:
         return self.build().live_for(name)
 
     @property
-    def live(self):
+    def live(self) -> LiveModel:
         """Zero-copy live proxies over the single articulation (built on demand).
 
         A one-articulation run binds its only IR; a multi-articulation run
@@ -757,7 +929,7 @@ class Run:
         return self.live_for()
 
     @property
-    def articulations(self) -> list:
+    def articulations(self) -> list[dict[str, JsonValue]]:
         """The neutral per-articulation views derived from the live runtime.
 
         One entry per ``env.articulations`` runtime: name/model/root/joints/
@@ -766,7 +938,7 @@ class Run:
         """
         env = self.build().env
         controls = getattr(env, "controls", {}) or {}
-        views = []
+        views: list[dict[str, JsonValue]] = []
         for name, art in (getattr(env, "articulations", {}) or {}).items():
             body = next(
                 (c for c in controls.values()
@@ -774,18 +946,21 @@ class Run:
                 None)
             model = getattr(art, "model", None)
             model_to_dict = getattr(model, "to_dict", None)
+            model_view = model_to_dict() if callable(model_to_dict) else None
             views.append({
-                "name": name,
+                "name": str(name),
                 "role": "articulation",
-                "model": (model_to_dict()
-                          if callable(model_to_dict) else None),
-                "root": getattr(art, "root", None),
-                "base_body": getattr(art, "base_body", None),
-                "joints": list(getattr(art, "joint_names", ()) or ()),
-                "feet": list(getattr(art, "feet", ()) or ()),
-                "body_parts": dict(getattr(art, "body_parts", {}) or {}),
-                "spawn": dict(getattr(art, "spawn", {}) or {}),
-                "action_face": (body.action_face if body is not None else None),
+                "model": (None if model_view is None
+                          else _json_object(model_view)),
+                "root": _optional_str(getattr(art, "root", None)),
+                "base_body": _optional_str(getattr(art, "base_body", None)),
+                "joints": _json_list(
+                    _str_values(getattr(art, "joint_names", ()))),
+                "feet": _json_list(_str_values(getattr(art, "feet", ()))),
+                "body_parts": _json_object(getattr(art, "body_parts", {})),
+                "spawn": _json_object(getattr(art, "spawn", {})),
+                "action_face": (None if body is None
+                                else _optional_str(body.action_face)),
             })
         return views
 
@@ -795,15 +970,23 @@ class Run:
         return self._camera_set
 
     @staticmethod
-    def _benchmark_tasks(cfg: dict) -> list:
+    def _benchmark_tasks(
+        cfg: dict[str, JsonValue],
+    ) -> list[BenchmarkTask]:
         """The declared benchmark task list from a config mapping."""
-        return list((cfg.get("benchmark") or {}).get("tasks") or [])
+        tasks = _existing_section(cfg, "benchmark").get("tasks")
+        if not isinstance(tasks, list):
+            return []
+        out: list[BenchmarkTask] = []
+        for task in tasks:
+            if isinstance(task, str) or isinstance(task, dict):
+                out.append(task)
+        return out
 
     def _on_benchmark_add(self, task: str) -> None:
         """Mirror a pre-build ``benchmarks.add`` into the raw config."""
-        bench = self._raw_cfg.setdefault("benchmark", {})
-        tasks = bench.setdefault("tasks", [])
-        tasks.append(task)
+        bench = _section(self._raw_cfg, "benchmark")
+        _list_section(bench, "tasks").append(task)
 
     @property
     def benchmarks(self) -> BenchmarkSet:
@@ -811,11 +994,11 @@ class Run:
         return self._benchmark_set
 
     @property
-    def adapter(self):
+    def adapter(self) -> Adapter:
         """The live adapter of the built instance (builds on first access)."""
         return self.build().adapter
 
-    def to_config(self, path) -> str:
+    def to_config(self, path: str | os.PathLike[str]) -> str:
         """Write the normalized effective config as yaml; return its path.
 
         The world asset serializes as the run-level ``world_base: {mjcf:
@@ -841,7 +1024,7 @@ class Run:
     # ------------------------------------------------------------------ #
     # live faces
     # ------------------------------------------------------------------ #
-    def runner(self, kind: str | None = None, **kwargs) -> Runner:
+    def runner(self, kind: str | None = None, **kwargs: JsonValue) -> Runner:
         """Build or return this run's active :class:`Runner`.
 
         Args:
@@ -879,11 +1062,11 @@ class Run:
         self._runner_kind = kind
         return runner
 
-    def gym(self, **kwargs):
+    def gym(self, **kwargs: JsonValue) -> Runner:
         """Convenience alias for ``runner("gym", **kwargs)``."""
         return self.runner("gym", **kwargs)
 
-    def external(self, **kwargs):
+    def external(self, **kwargs: JsonValue) -> Runner:
         """Convenience alias for ``runner("external", **kwargs)``."""
         return self.runner("external", **kwargs)
 
@@ -894,7 +1077,7 @@ class Run:
             runner = self.runner("sync")
         return runner
 
-    def reset(self, env_ids=None):
+    def reset(self, env_ids: Sequence[int] | None = None) -> StepResult:
         """Reset the named envs (all when *None*) via the active runner.
 
         Returns:
@@ -902,7 +1085,9 @@ class Run:
         """
         return self._default_runner().reset(env_ids)
 
-    def step(self, actions=None):
+    def step(
+        self, actions: dict[str, NamedAction] | None = None,
+    ) -> StepResult:
         """Advance one policy tick and return its ``StepResult``.
 
         Args:
@@ -916,7 +1101,7 @@ class Run:
             return runner.tick()
         return runner.tick(actions_override=actions)
 
-    def steps(self, n=None):
+    def steps(self, n: int | None = None) -> Iterator[StepResult]:
         """Yield ``StepResult`` objects for *n* ticks (remaining by default).
 
         Args:
@@ -930,7 +1115,9 @@ class Run:
             yield self.step()
 
 
-def load(path, **kwargs) -> Run:
+def load(
+    path: str | os.PathLike[str], **kwargs: Unpack[_FromConfigKwargs],
+) -> Run:
     """Load a run config path into a lazy :class:`Run`.
 
     Args:
@@ -943,7 +1130,10 @@ def load(path, **kwargs) -> Run:
     return Run.from_config(path, **kwargs)
 
 
-def make(target, kind: str = "gym", **kwargs):
+def make(
+    target: Run | str | os.PathLike[str], kind: str = "gym",
+    **kwargs: JsonValue,
+) -> Runner:
     """Build a runner facade for a ``Run`` (or a config path).
 
     Args:

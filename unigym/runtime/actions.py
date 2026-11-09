@@ -23,10 +23,17 @@ isaaclab/mujoco; the mujoco resolver imports mujoco lazily).
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
+
+if TYPE_CHECKING:
+    import numpy as np
+    from mujoco import MjModel
+
+    from unigym.model.ir import ModelIR
 
 #: legal NamedAction target kinds (must equal the owning ControlRuntime.target)
 LEGAL_ACTION_KINDS = ("position", "velocity", "torque", "effort", "current")
@@ -56,7 +63,7 @@ class NamedAction:
     """
 
     values: torch.Tensor
-    joint_names: list
+    joint_names: list[str]
     kind: str
 
     def __post_init__(self):
@@ -92,8 +99,9 @@ class NamedAction:
         return int(self.values.shape[1])
 
     @classmethod
-    def zeros(cls, num_envs: int, joint_names, kind: str, device="cpu",
-              dtype=torch.float32) -> NamedAction:
+    def zeros(cls, num_envs: int, joint_names: Sequence[str], kind: str,
+              device: str | torch.device = "cpu",
+              dtype: torch.dtype = torch.float32) -> NamedAction:
         """All-zero action over *joint_names* with an explicit *kind*."""
         names = list(joint_names)
         return cls(torch.zeros(int(num_envs), len(names), dtype=dtype,
@@ -114,8 +122,11 @@ class JointResolver(Protocol):
     Both are cached per name-tuple and fail fast on unknown names.
     """
 
-    def resolve(self, joint_names):
+    def resolve(
+        self, joint_names: Sequence[str],
+    ) -> ResolvedJointTargets | torch.Tensor:
         """Resolve entry names to the backend addressing primitive."""
+        ...
 
 
 # --------------------------------------------------------------------------- #
@@ -132,12 +143,13 @@ class IsaaclabJointResolver:
     Unknown names fail fast listing the accepted names.
     """
 
-    def __init__(self, term_joint_names):
-        self.term_names = list(term_joint_names)
-        self._index = {n: i for i, n in enumerate(self.term_names)}
-        self._cache: dict = {}
+    def __init__(self, term_joint_names: Sequence[str]) -> None:
+        self.term_names: list[str] = list(term_joint_names)
+        self._index: dict[str, int] = {
+            n: i for i, n in enumerate(self.term_names)}
+        self._cache: dict[tuple[str, ...], torch.Tensor] = {}
 
-    def gather(self, joint_names) -> torch.Tensor:
+    def gather(self, joint_names: Sequence[str]) -> torch.Tensor:
         """``(len(joint_names),)`` int64 gather index.
 
         For each entry column its position in the term's flat input
@@ -178,9 +190,9 @@ class ResolvedJointTargets:
     value when no entry addresses them).
     """
 
-    pol_idx: object   # np.ndarray int64, -1 where not a policy joint
-    hand_idx: object  # np.ndarray int64, -1 where not a hand joint
-    prop_adr: object  # np.ndarray int64, ctrl adr where a prop joint
+    pol_idx: np.ndarray   # int64, -1 where not a policy joint
+    hand_idx: np.ndarray  # int64, -1 where not a hand joint
+    prop_adr: np.ndarray  # int64, ctrl adr where a prop joint
 
 
 class MujocoJointResolver:
@@ -195,17 +207,25 @@ class MujocoJointResolver:
     actuator) fail fast listing the accepted names.
     """
 
-    def __init__(self, model, policy_names, hand_joint_names,
-                 prop_actuators=None, model_ir=None):
+    def __init__(
+        self,
+        model: MjModel,
+        policy_names: Sequence[str],
+        hand_joint_names: Sequence[str],
+        prop_actuators: Mapping[str, Mapping[str, int]] | None = None,
+        model_ir: ModelIR | None = None,
+    ) -> None:
         import mujoco
 
         self._mujoco = mujoco
-        self._pol_names = list(policy_names)
-        self._hand_names = list(hand_joint_names)
-        self._pol = {n: i for i, n in enumerate(self._pol_names)}
-        self._hand = {n: i for i, n in enumerate(self._hand_names)}
-        self._prop = {str(k): dict(v)
-                      for k, v in (prop_actuators or {}).items()}
+        self._pol_names: list[str] = list(policy_names)
+        self._hand_names: list[str] = list(hand_joint_names)
+        self._pol: dict[str, int] = {
+            n: i for i, n in enumerate(self._pol_names)}
+        self._hand: dict[str, int] = {
+            n: i for i, n in enumerate(self._hand_names)}
+        self._prop: dict[str, dict[str, int]] = {
+            str(k): dict(v) for k, v in (prop_actuators or {}).items()}
         conflict = sorted({n for t in self._prop.values() for n in t}
                           & (set(self._pol) | set(self._hand)))
         if conflict:
@@ -217,6 +237,7 @@ class MujocoJointResolver:
         # The MjModel fallback is the pre-M2 legacy path for stand-alone
         # callers (tests) that do not assemble an IR: this module stays
         # torch-only and may not import unigym.model (layer contract).
+        self.addresses: dict[str, tuple[int, int]]
         if model_ir is None:
             self.addresses = {
                 model.joint(idx).name: (int(model.jnt_qposadr[idx]),
@@ -240,9 +261,12 @@ class MujocoJointResolver:
         if missing_act:
             raise ValueError(
                 f"mujoco action resolver: no actuator for joints {missing_act}")
-        self._cache: dict = {}
+        self._cache: dict[
+            tuple[str | None, tuple[str, ...]], ResolvedJointTargets] = {}
 
-    def resolve(self, joint_names, prop=None) -> ResolvedJointTargets:
+    def resolve(
+        self, joint_names: Sequence[str], prop: str | None = None,
+    ) -> ResolvedJointTargets:
         """Resolve entry names to pol/hand/prop addresses (cached).
 
         Args:
@@ -261,7 +285,9 @@ class MujocoJointResolver:
         out = self._cache.get(key)
         if out is None:
             import numpy as np
-            pol_idx, hand_idx, prop_adr = [], [], []
+            pol_idx: list[int] = []
+            hand_idx: list[int] = []
+            prop_adr: list[int] = []
             if prop is not None:
                 table = self._prop.get(prop)
                 if table is None:

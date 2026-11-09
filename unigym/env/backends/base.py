@@ -69,12 +69,55 @@ Failure semantics
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 
 import torch
 
+from ..._typing import JsonValue
 from ...runtime.actions import NamedAction
+
+if TYPE_CHECKING:
+    from ...backends.registry import Trait, TraitScope
+    from ...runtime.controllers import ArticulationRuntime, ControlRuntime
+
+
+class _ObsRequestLike(Protocol):
+    """One adapter observation request (only the cache key is read)."""
+
+    key: str
+
+
+@runtime_checkable
+class _BackendInfoLike(Protocol):
+    """The registry-info surface the capability gate reads."""
+
+    @property
+    def traits(self) -> frozenset[Trait]: ...
+
+    def blocked(
+        self, traits: Iterable[Trait], num_envs: int | None = None,
+    ) -> Sequence[tuple[Trait, TraitScope]]: ...
+
+
+def _as_backend_info(value: object) -> _BackendInfoLike | None:
+    """View a registry info object through the gate's protocol."""
+    return value if isinstance(value, _BackendInfoLike) else None
+
+
+def _is_obs_request_sequence(
+    value: object,
+) -> TypeGuard[Sequence[_ObsRequestLike]]:
+    """True for an iterable of observation requests (not a str/mapping)."""
+    return (hasattr(value, "__iter__")
+            and not isinstance(value, (str, bytes))
+            and not isinstance(value, Mapping))
+
+
+def _is_json_mapping(value: object) -> TypeGuard[Mapping[str, JsonValue]]:
+    """True for a mapping (the JSON config shape)."""
+    return isinstance(value, Mapping)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,7 +135,7 @@ class ExtraKeySpec:
     for a plain python bool.
     """
 
-    dims: tuple
+    dims: tuple[int | str, ...]
     dtype: torch.dtype | str
     batch: bool = True
 
@@ -171,7 +214,7 @@ class BackendCapabilities:
                    depth_camera=True, init_pose=True, cameras=True,
                    contacts=True, multi_env=True)
 
-    def traits(self) -> frozenset:
+    def traits(self) -> frozenset[Trait]:
         """Trait view of the capability bits (unigym.backends.registry).
 
         The booleans are the low-bit projection of the central Trait
@@ -181,7 +224,7 @@ class BackendCapabilities:
         """
         from ...backends.registry import Trait
 
-        groups = {
+        groups: dict[str, tuple[Trait, ...]] = {
             "events": (Trait.EVENTS_DR,),
             "props": (Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
                       Trait.PROPS_ARTICULATION_USD),
@@ -194,7 +237,7 @@ class BackendCapabilities:
             "snapshot": (Trait.SNAPSHOT,),
             "actuator_seam": (Trait.ACTUATORS_PLUGGABLE,),
         }
-        out: set = set()
+        out: set[Trait] = set()
         for feat, enabled in {
             "events": self.events,
             "props": self.props, "recorder": self.recorder,
@@ -222,16 +265,20 @@ class EnvBackend(Protocol):
     # attributes (populated by the backend implementation)
     num_envs: int
     device: str | torch.device
-    obs_cache: dict
-    controls: dict
-    articulations: dict
+    obs_cache: dict[str, torch.Tensor]
+    controls: dict[str, ControlRuntime]
+    articulations: dict[str, ArticulationRuntime]
     perm_il2pol: torch.Tensor
     perm_pol2il: torch.Tensor
     policy_joint_pos_limits: tuple[torch.Tensor, torch.Tensor] | None
 
-    def step(self, actions: dict[str, NamedAction],
-             raw_action: torch.Tensor | None = None,
-             cmd: torch.Tensor | None = None) -> tuple[dict, dict]: ...
+    def step(
+        self, actions: dict[str, NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
+    ) -> tuple[
+        dict[str, torch.Tensor], dict[str, torch.Tensor | bool],
+    ]: ...
 
     def reset_envs(self, env_ids: torch.Tensor) -> torch.Tensor: ...
 
@@ -265,9 +312,12 @@ class BackendContractError(AssertionError):
 # --------------------------------------------------------------------------- #
 # structural validator (pure torch, offline-runnable)
 # --------------------------------------------------------------------------- #
-def _resolve_dims(spec: ExtraKeySpec, n_joints: int, n_feet: int) -> tuple:
-    table = {"J": n_joints, "F": n_feet, "K": -1}  # -1 == wildcard axis
-    out = []
+def _resolve_dims(
+    spec: ExtraKeySpec, n_joints: int, n_feet: int,
+) -> tuple[int, ...]:
+    table: dict[str, int] = {
+        "J": n_joints, "F": n_feet, "K": -1}  # -1 == wildcard axis
+    out: list[int] = []
     for d in spec.dims:
         if isinstance(d, str):
             if d not in table:
@@ -278,7 +328,7 @@ def _resolve_dims(spec: ExtraKeySpec, n_joints: int, n_feet: int) -> tuple:
     return tuple(out)
 
 
-def _shape_matches(actual: tuple, expected: tuple) -> bool:
+def _shape_matches(actual: tuple[int, ...], expected: tuple[int, ...]) -> bool:
     """Axis-wise shape match; a -1 axis in *expected* is a wildcard."""
     return (len(actual) == len(expected)
             and all(e == -1 or a == e for a, e in zip(actual, expected)))
@@ -288,7 +338,9 @@ _EXTRA_BOOKKEEPING = frozenset({"time_in_episode", "episode_id",
                                 "reset_env_ids", "should_reset"})
 
 
-def _extra_candidates(extra: dict, key: str) -> list[str]:
+def _extra_candidates(
+    extra: dict[str, torch.Tensor | bool], key: str,
+) -> list[str]:
     """Record keys serving *key*: bare (legacy) or namespaced (v103.5).
 
     Per-articulation state is published as ``articulation/<name>/<key>``;
@@ -303,8 +355,10 @@ def _extra_candidates(extra: dict, key: str) -> list[str]:
             and k.endswith(suffix)]
 
 
-def check_extra_info(extra: dict, num_envs: int, n_joints: int, n_feet: int,
-                     device="cpu") -> None:
+def check_extra_info(
+    extra: dict[str, torch.Tensor | bool], num_envs: int, n_joints: int,
+    n_feet: int, device: str | torch.device = "cpu",
+) -> None:
     """Validate one ``step()`` extra dict against ``EXTRA_INFO_KEYS``.
 
     Checks key completeness (15 record keys + 2 control keys), shapes and
@@ -347,7 +401,10 @@ def check_extra_info(extra: dict, num_envs: int, n_joints: int, n_feet: int,
                     f"expected {device}")
 
 
-def check_obs_cache(obs: dict, num_envs: int, device="cpu") -> None:
+def check_obs_cache(
+    obs: dict[str, torch.Tensor], num_envs: int,
+    device: str | torch.device = "cpu",
+) -> None:
     """Validate obs-cache entries: (N, ...) tensors on ``device``."""
     if not isinstance(obs, dict):
         raise BackendContractError(
@@ -366,10 +423,10 @@ def check_obs_cache(obs: dict, num_envs: int, device="cpu") -> None:
                 f"obs_cache['{key}'] on device {val.device}, expected {device}")
 
 
-def _validate_control_runtimes(env):
+def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
     """Validate ``env.controls`` / ``env.articulations``; return body controls."""
-    controls = getattr(env, "controls", None)
-    articulations = getattr(env, "articulations", None)
+    controls = env.controls
+    articulations = env.articulations
     if not isinstance(controls, dict) or not controls:
         raise BackendContractError(
             "controls must be a non-empty {name: ControlRuntime} mapping")
@@ -405,7 +462,10 @@ def _validate_control_runtimes(env):
     return bodies
 
 
-def _validate_flat_permutations(env, p12, p21, il, j, n):
+def _validate_flat_permutations(
+    env: EnvBackend, p12: torch.Tensor, p21: torch.Tensor, il: list[str],
+    j: int, n: int,
+) -> None:
     """The single-policy flat permutation/round-trip face."""
     if tuple(p12.shape) != (j,):
         raise BackendContractError(f"perm_il2pol must have shape ({j},)")
@@ -424,7 +484,9 @@ def _validate_flat_permutations(env, p12, p21, il, j, n):
         raise BackendContractError("to_il_order must map (N, J) -> (N, J)")
 
 
-def assert_backend_contract(env, exercise_step: bool = False) -> None:
+def assert_backend_contract(
+    env: EnvBackend, exercise_step: bool = False,
+) -> None:
     """Structurally validate *env* against the EnvBackend contract.
 
     Pure-torch and offline-runnable.  With ``exercise_step=True`` the
@@ -495,7 +557,9 @@ def assert_backend_contract(env, exercise_step: bool = False) -> None:
 # --------------------------------------------------------------------------- #
 # capability gate (used by build_env_backend; needs no backend instance)
 # --------------------------------------------------------------------------- #
-def _requests_pluggable_actuators(backend_params) -> bool:
+def _requests_pluggable_actuators(
+    backend_params: Mapping[str, JsonValue] | None,
+) -> bool:
     """Does ``env.params.actuators`` declare a non-default ctrl law?
 
     Capability-gate inference (v063 D2): software laws beyond standard_pd
@@ -504,8 +568,8 @@ def _requests_pluggable_actuators(backend_params) -> bool:
     default face and never gates.  Missing ``type`` counts as standard
     here (the backend's own config validation fails fast on it).
     """
-    act = (backend_params or {}).get("actuators") \
-        if hasattr(backend_params, "get") else None
+    act = backend_params.get("actuators") \
+        if backend_params is not None else None
     if not isinstance(act, dict):
         return False
     for group in act.values():
@@ -515,20 +579,34 @@ def _requests_pluggable_actuators(backend_params) -> bool:
     return False
 
 
-def requested_features(kwargs: dict) -> dict[str, bool]:
+def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
     """Map capability name -> requested? from ``build_env_backend`` kwargs."""
     adapter = kwargs.get("adapter")
+    req_keys: set[str]
     try:
         if adapter is None:
             raise TypeError("no adapter: no obs requests to infer")
-        req_keys = {r.key for r in adapter.get_obs_requests()}
+        get_requests = getattr(adapter, "get_obs_requests", None)
+        if not callable(get_requests):
+            raise TypeError("adapter exposes no get_obs_requests")
+        raw_requests = get_requests()
+        if not _is_obs_request_sequence(raw_requests):
+            raise TypeError("adapter obs requests expose no string key")
+        req_keys = {r.key for r in raw_requests}
     except Exception:  # best effort: capability inference only -> no requests
         req_keys = set()
     recorder = kwargs.get("recorder")
+    raw_n = kwargs.get("num_envs")
     try:
-        n_envs = int(kwargs.get("num_envs") or 1)
+        if not isinstance(raw_n, (int, float, str)):
+            raise TypeError("num_envs is not numeric")
+        n_envs = int(raw_n)
     except (TypeError, ValueError):
         n_envs = 1
+    raw_params = kwargs.get("backend_params")
+    backend_params: Mapping[str, JsonValue] | None = None
+    if _is_json_mapping(raw_params):
+        backend_params = raw_params
     return {
         "events": kwargs.get("events_cfg") is not None,
         "props": kwargs.get("prop_manager") is not None,
@@ -539,16 +617,17 @@ def requested_features(kwargs: dict) -> dict[str, bool]:
         "cameras": kwargs.get("camera_manager") is not None,
         "contacts": kwargs.get("contact_manager") is not None,
         "multi_env": n_envs > 1,
-        "actuator_seam": _requests_pluggable_actuators(
-            kwargs.get("backend_params")),
+        "actuator_seam": _requests_pluggable_actuators(backend_params),
         # director is not a capability bit: the registry trait table is its
         # truth (see the gate's director branch below).
         "director": kwargs.get("director_cfg") is not None,
     }
 
 
-def gate_capabilities(backend_label: str, caps, kwargs: dict,
-                      num_envs: int | None = None) -> None:
+def gate_capabilities(
+    backend_label: str, caps: BackendCapabilities | frozenset[Trait],
+    kwargs: Mapping[str, object], num_envs: int | None = None,
+) -> None:
     """Raise ``NotImplementedError`` when a request exceeds the backend.
 
     ``caps`` is a :class:`BackendCapabilities` (or anything exposing a
@@ -560,25 +639,26 @@ def gate_capabilities(backend_label: str, caps, kwargs: dict,
     """
     from . import known_backends  # local: avoids a package-import cycle
 
+    trait_view: frozenset[Trait]
     if isinstance(caps, BackendCapabilities):
         trait_view = caps.traits()
     elif hasattr(caps, "traits"):
-        trait_view = frozenset(caps.traits())
+        trait_view = frozenset(getattr(caps, "traits")())
     else:
         trait_view = frozenset(caps)
     from ...backends.registry import BackendSelectionError, Trait, backend_info
 
-    info = None
+    info_view: _BackendInfoLike | None = None
     if num_envs is not None:
         try:
-            info = backend_info(backend_label)
+            info_view = _as_backend_info(backend_info(backend_label))
         except BackendSelectionError:  # unregistered fake names: no scopes
-            info = None
+            info_view = None
 
     for feat, wanted in requested_features(kwargs).items():
         if not wanted:
             continue
-        groups = {
+        groups: dict[str, tuple[Trait, ...]] = {
             "events": (Trait.EVENTS_DR,),
             "props": (Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
                       Trait.PROPS_ARTICULATION_USD),
@@ -596,10 +676,10 @@ def gate_capabilities(backend_label: str, caps, kwargs: dict,
             "director": (Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,
                          Trait.DIRECTOR_ATTACH_WELD, Trait.DIRECTOR_GRIPPER),
         }
-        view = trait_view
-        if feat == "director" and info is not None:
+        view: set[Trait] | frozenset[Trait] = trait_view
+        if feat == "director" and info_view is not None:
             # no director capability bit exists: the registry declares it
-            view = set(trait_view) | set(info.traits)
+            view = set(trait_view) | set(info_view.traits)
         present = set(groups[feat]) & set(view)
         if not present:
             # multi_env gets the actionable spawn hint (the num_envs knob is
@@ -617,9 +697,9 @@ def gate_capabilities(backend_label: str, caps, kwargs: dict,
                 f"'{feat}' but the yaml/adapter requests it "
                 f"(capabilities: {caps}); available backends: "
                 f"{known_backends()}{hint}")
-        if info is None:
+        if info_view is None:
             continue
-        blocked = info.blocked(present, num_envs)
+        blocked = list(info_view.blocked(present, num_envs))
         # only fail when EVERY present trait of the group is scoped out;
         # an unscoped sibling still serves the request.
         if blocked and {t for t, _ in blocked} == present:

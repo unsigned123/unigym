@@ -8,9 +8,12 @@ owned recorder close hook and the env backend (the pre-split
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .spec import RunSpec
+
+if TYPE_CHECKING:
+    from unigym.model.live import LiveModel
 
 
 @dataclass
@@ -80,7 +83,7 @@ class RunInstance:
                 f"ModelSet)")
         return model_set
 
-    def live_for(self, name=None):
+    def live_for(self, name: str | None = None) -> LiveModel:
         """Live proxies for one articulation's IR (v103.4).
 
         Args:
@@ -111,7 +114,7 @@ class RunInstance:
         return LiveModel(ir, self.env)
 
     @property
-    def live(self):
+    def live(self) -> LiveModel:
         """Live, zero-copy proxies over :attr:`model` (v098 N3 / v103.4).
 
         A fresh binding is returned on every access; nothing mutable is

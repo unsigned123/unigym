@@ -13,11 +13,30 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import NamedTuple
+from typing import Any, NamedTuple, Protocol, TypedDict, Unpack
 
 import torch
 
+from .._typing import JsonValue
 from ..runtime.actions import NamedAction
+
+
+class AdapterEnv(Protocol):
+    """The env attributes an adapter may read at the observation boundary."""
+
+    num_envs: int
+    device: str | torch.device
+    obs_cache: dict[str, torch.Tensor]
+
+
+class _RawObsChanges(TypedDict, total=False):
+    """Keyword payload accepted by :meth:`RawObsRequest._replace`."""
+
+    key: str
+    dim: int
+    source: str
+    joint_names: tuple[str, ...] | None
+    articulation: str | None
 
 #: robot-state keys that are scoped to ONE articulation.  Kept in sync with
 #: :data:`unigym.env.obs_catalog.PER_ARTICULATION_KEYS`; the import is local
@@ -85,7 +104,7 @@ class RawObsRequest:
                     f"RawObsRequest({key!r}) has duplicate joint names "
                     f"{dupes}")
 
-    def _replace(self, **changes):
+    def _replace(self, **changes: Unpack[_RawObsChanges]) -> RawObsRequest:
         """NamedTuple-compatible update helper (canonicalization)."""
         return replace(self, **changes)
 
@@ -114,7 +133,7 @@ class ImageObsRequest(NamedTuple):
     """
 
     key: str
-    shape: tuple
+    shape: tuple[int, ...]
     dtype: torch.dtype
     source: str
     camera: str
@@ -164,7 +183,7 @@ class Adapter(ABC):
             f"(rewindable={self.rewindable!r}); the rewind face needs the "
             f"adapter resync hook")
 
-    def snapshot_internal(self) -> dict | None:
+    def snapshot_internal(self) -> dict[str, JsonValue] | None:
         """Serialize the adapter's internal streaming state (rewind face).
 
         Returns a numpy/JSON-safe dict carried inside every engine
@@ -173,7 +192,7 @@ class Adapter(ABC):
         on_rewind re-seed path and the warmup hole is disclosed)."""
         return None
 
-    def restore_internal(self, state: dict) -> None:
+    def restore_internal(self, state: dict[str, JsonValue]) -> None:
         """Restore a :meth:`snapshot_internal` payload (rewind face)."""
         raise NotImplementedError(
             f"{type(self).__name__} does not implement restore_internal")
@@ -193,7 +212,8 @@ class Adapter(ABC):
         """Adapter control period in seconds (e.g. 0.02 for 50 Hz)."""
 
     @abstractmethod
-    def compute_obs(self, obs_cache: dict, cmd: torch.Tensor, env) -> torch.Tensor:
+    def compute_obs(self, obs_cache: dict[str, torch.Tensor],
+                    cmd: torch.Tensor, env: AdapterEnv) -> torch.Tensor:
         """Assemble the single-frame adapter observation from raw quantities.
 
         Includes scales and concatenation order.  May also update internal
@@ -202,8 +222,9 @@ class Adapter(ABC):
         state under ``articulation/<name>/...``).
         """
 
-    def compute_obs_collect(self, obs_frame: torch.Tensor, obs_cache: dict,
-                            cmd: torch.Tensor, env) -> torch.Tensor:
+    def compute_obs_collect(self, obs_frame: torch.Tensor,
+                            obs_cache: dict[str, torch.Tensor],
+                            cmd: torch.Tensor, env: AdapterEnv) -> torch.Tensor:
         """Dataset-facing observation frame (recorded as ``rec["obs"]``).
 
         Default: return *obs_frame* unchanged — record exactly the frame the
@@ -260,14 +281,14 @@ class Adapter(ABC):
         return NamedAction(values=values, joint_names=list(order),
                            kind=kind)
 
-    def on_reset(self, env_ids) -> None:
+    def on_reset(self, env_ids: torch.Tensor) -> None:
         """Called on episode reset for the given env ids (clear history etc.)."""
 
-    def bind_env(self, env) -> None:
+    def bind_env(self, env: AdapterEnv) -> None:
         """Called once by the env backend after perms are ready (hook for adapters
         that need the policy->isaaclab permutation)."""
 
-    def extra_sinks(self, env, out_dir) -> list:
+    def extra_sinks(self, env: AdapterEnv, out_dir: str) -> list[Any]:
         """Adapter-provided diagnostics sinks (default: none).
 
         Mounted by collect_cli AHEAD of the standard recording/scoring
@@ -276,6 +297,8 @@ class Adapter(ABC):
         standard sinks in the same step.  The engine stays
         adapter-agnostic: it never names adapters, it only asks.
         """
+        # Any: adapter-provided sink objects are opaque drain plugins; the
+        # collect chain composes them structurally (no shared sink base).
         return []
 
     # ------------------------------------------------------------ #
@@ -292,7 +315,9 @@ class Adapter(ABC):
         """
         return None
 
-    def build_language_states(self, extra_info: dict, cmd: torch.Tensor) -> dict:
+    def build_language_states(
+        self, extra_info: dict[str, torch.Tensor], cmd: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
         """Assemble the per-env language *states* dict from env data + command.
 
         The default implementation uses :meth:`get_command_meanings` to map
@@ -305,7 +330,7 @@ class Adapter(ABC):
                 ``"vx"``, ``"vy"``, ``"wz"``, ``"base_z"``.
             cmd: ``(N, dim)`` command tensor.
         """
-        states: dict = {}
+        states: dict[str, torch.Tensor] = {}
         meanings = self.get_command_meanings()
         if meanings is not None:
             for name, idx in meanings.items():

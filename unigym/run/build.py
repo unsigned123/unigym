@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from unigym._typing import JsonValue
 from unigym.backends.registry import backend_info
 from unigym.benchmarks import build_tasks
 from unigym.env.backends import build_env_backend
@@ -37,6 +38,25 @@ from unigym.terminations import (
 
 from .instance import RunInstance
 from .spec import ReplaySpec, RunSpec
+
+
+def _config_int(value: JsonValue) -> int:
+    """Narrow a config scalar to an int (bool/int/float/str only)."""
+    if isinstance(value, bool) or isinstance(value, (int, float, str)):
+        return int(value)
+    raise TypeError(f"expected an integer config value, got {value!r}")
+
+
+def _config_float(value: JsonValue) -> float:
+    """Narrow a config scalar to a float (bool/int/float/str only)."""
+    if isinstance(value, bool) or isinstance(value, (int, float, str)):
+        return float(value)
+    raise TypeError(f"expected a numeric config value, got {value!r}")
+
+
+def _config_list(value: JsonValue) -> list[JsonValue] | None:
+    """Narrow a config value to a list section (None when absent)."""
+    return value if isinstance(value, list) else None
 
 
 def _policy_hz_of(adapter) -> float | None:
@@ -653,15 +673,17 @@ def build_instance(spec: RunSpec) -> RunInstance:
     np.random.seed(seed)
 
     device = spec.device
-    env_cfg = cfg["env"]
-    col_cfg = cfg["collect"]
-    num_envs = int(env_cfg["num_envs"])
-    total_steps = int(col_cfg["steps"])
+    env_value = cfg["env"]
+    env_cfg: dict[str, JsonValue] = env_value if isinstance(env_value, dict) else {}
+    col_value = cfg["collect"]
+    col_cfg: dict[str, JsonValue] = col_value if isinstance(col_value, dict) else {}
+    num_envs = _config_int(env_cfg["num_envs"])
+    total_steps = _config_int(col_cfg["steps"])
     # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
     # reset_on_termination merges terminated rows.  runner.reset_mask_fn is
     # a reserved key (not deserialized here; inject via SyncRunner).
     reset_on_termination = bool(spec.runner.get("reset_on_termination", False))
-    env_spacing = float(env_cfg.get("env_spacing", 4.0))
+    env_spacing = _config_float(env_cfg.get("env_spacing", 4.0))
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
 
     robot = _build_robot_and_props(
@@ -710,7 +732,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # pluggable filter chain (episode-level)
     articulation_names = list(getattr(env, "articulations", {}) or {})
     filter_chain = build_filter_chain(
-        cfg.get("filters"), articulations=articulation_names)
+        _config_list(cfg.get("filters")), articulations=articulation_names)
     filter_active = len(filter_chain) > 0
     if filter_active:
         names = [type(f).__name__ for f in filter_chain]
@@ -720,7 +742,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # duration).  v104.2: the default fall group is per articulation; an
     # explicit config may omit `articulation` only when the run proves exactly
     # one articulation (injected here; several must be explicit).
-    term_cfg = cfg.get("terminations")
+    term_cfg = _config_list(cfg.get("terminations"))
     articulation_specs = list((getattr(env, "articulations", {}) or {}).values())
     if term_cfg:
         term_group = build_termination_group(
@@ -810,13 +832,14 @@ def build_instance(spec: RunSpec) -> RunInstance:
     from unigym.io.writer import ShardWriter
 
     writer = ShardWriter(
-        built["out_dir"], shard_steps=int(col_cfg.get("shard_steps", 1000)),
+        built["out_dir"],
+        shard_steps=_config_int(col_cfg.get("shard_steps", 1000)),
         meta=meta)
     logger = DataCollectLogger(
         cfg, built["out_dir"], num_envs,
         total_steps=total_steps,
         policy_dt=policy_dt,
-        log_interval=int(col_cfg.get("log_interval", 500)),
+        log_interval=_config_int(col_cfg.get("log_interval", 500)),
     )
     print(f"[collect] output dir: {built['out_dir']}", flush=True)
 
