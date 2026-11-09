@@ -56,11 +56,10 @@ if TYPE_CHECKING:
     from unigym.robots.base import RobotRecipe
     from unigym.runner.sinks.benchmark import BenchmarkSink
     from unigym.runtime.bridge import Bridge
-    from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+    from unigym.runtime.controllers import ControlRuntime
     from unigym.runtime.rewind_providers import RewindStateProvider
     from unigym.scenes.articulation import ArticulationSpec
     from unigym.scenes.terrain import Terrain
-    from unigym.terminations.composite import TerminationGroup
     from unigym.trace.replay import TraceReplay
     from unigym.watchers.timeline import EventLog, TimelineSink
 
@@ -353,18 +352,6 @@ def _announce_artifacts(path: str | Path | None) -> None:
         print("[collect] run artifacts: off", flush=True)
     else:
         print(f"[collect] run artifacts: {path}", flush=True)
-
-
-def _per_articulation_fall_group(
-        articulations: Sequence[ArticulationRuntime]) -> TerminationGroup:
-    """OR-combine one default fall term per articulation."""
-    from unigym.terminations import (FallTermination, Termination,
-                                     TerminationGroup)
-
-    terms: list[Termination] = [
-        FallTermination({"articulation": art.name}, name=f"fall_{art.name}")
-        for art in articulations]
-    return TerminationGroup(terms)
 
 
 def _build_replay(spec: ReplaySpec, num_envs: int) -> TraceReplay | None:
@@ -1048,16 +1035,9 @@ def build_instance(spec: RunSpec) -> RunInstance:
         print(f"[collect] filter chain ({len(filter_chain)}): {names}", flush=True)
 
     # P10: unified termination checks (detection-only; episodes still end by
-    # duration).  v104.2: the default fall group is per articulation; an
-    # explicit config may omit `articulation` only when the run proves exactly
-    # one articulation (injected here; several must be explicit).
-    term_cfg = _config_list(cfg.get("terminations"))
-    articulation_specs = list((env.articulations or {}).values())
-    if term_cfg:
-        term_group = build_termination_group(
-            term_cfg, articulations=articulation_names)
-    else:
-        term_group = _per_articulation_fall_group(articulation_specs)
+    # duration).  v106.1: terminations are explicit; no default fall group is
+    # synthesised when the config omits the section.
+    term_group = build_termination_group(_config_list(cfg.get("terminations")))
     print(f"[collect] terminations: {term_group.names} "
           f"(mode={term_group.mode})", flush=True)
 

@@ -19,19 +19,15 @@ from __future__ import annotations
 
 import math
 
-from .base import (
-    Termination,
-    TerminationState,
-    body_tilt_exceeded,
-    require_articulation,
-)
+from .articulation import ArticulationTermination
+from .base import TerminationState, body_tilt_exceeded
 
 DEFAULT_HEIGHT_THRESHOLD = 0.15  # m below which the height term fires
 DEFAULT_TILT_THRESHOLD = 0.8     # rad (~46 deg) body tilt from vertical
 COS_DEFAULT_TILT = math.cos(DEFAULT_TILT_THRESHOLD)
 
 
-class FallTermination(Termination):
+class FallTermination(ArticulationTermination):
     """Fire when the base is too low OR the body is tilted past a threshold.
 
     params:
@@ -46,8 +42,6 @@ class FallTermination(Termination):
 
     def __init__(self, params: dict | None = None, name: str | None = None):
         super().__init__(params, name)
-        self.articulation = require_articulation(self.params,
-                                                  "FallTermination")
         self.height_threshold = float(
             self.params.get("height_threshold", DEFAULT_HEIGHT_THRESHOLD))
         tilt = self.params.get("tilt_threshold", DEFAULT_TILT_THRESHOLD)
@@ -55,12 +49,8 @@ class FallTermination(Termination):
         self._cos_tilt = (None if self.tilt_threshold is None
                           else math.cos(self.tilt_threshold))
 
-    def _source(self, state: TerminationState):
-        """This term's articulation state map (``articulation/<name>/...``)."""
-        return state.articulation(self.articulation, term="FallTermination")
-
     def check(self, state: TerminationState):
-        source = self._source(state)
+        source = self.source(state)
         base_pos_w = source.get("base_pos_w")
         gravity_b = source.get("gravity_b")
         if base_pos_w is None:

@@ -6,7 +6,7 @@ logging/filtering; nothing actually resets in collection mode)::
 
     terminations:
       - name: fall
-        articulation: g1            # OPTIONAL iff exactly one policy binding
+        articulation: g1            # REQUIRED for per-articulation terms
         params: {height_threshold: 0.15, tilt_threshold: 0.8}
       - name: base_contact
         articulation: g1
@@ -15,13 +15,14 @@ logging/filtering; nothing actually resets in collection mode)::
         articulation: g1
         params: {margin: 0.05}
 
-v103.6 cardinality rule: every per-articulation term carries an explicit
-``articulation``.  When a term omits it and the run proves exactly ONE policy
-binding, the run layer injects that name (a cardinality convenience, not a
-primary).  With several bindings an omitted ``articulation`` is a fail-fast.
+v106.1 explicit articulation ownership: every per-articulation term carries an
+explicit ``articulation`` (top-level or under ``params``).  There is no
+single-binding injection: a missing ``articulation`` fails fast at
+construction, whether the run has one binding or several.
 """
 from __future__ import annotations
 
+from .articulation import ArticulationTermination
 from .base import Termination, TerminationState
 from .composite import InvertedTermination, TerminationGroup
 from .fall import (
@@ -40,35 +41,12 @@ TERMINATION_REGISTRY = {
 }
 
 
-def _entry_articulation(entry: dict, name, articulations) -> str | None:
-    """Resolve the term's articulation under the v103.6 cardinality rule.
-
-    Explicit ``articulation`` (top-level or under ``params``) wins.  When it
-    is omitted and *articulations* names exactly one policy binding, inject
-    that name; with several bindings, fail-fast naming the legal set.
-    """
-    explicit = entry.get("articulation")
-    if explicit is None:
-        explicit = dict(entry.get("params") or {}).get("articulation")
-    if explicit is not None:
-        return str(explicit)
-    if articulations is None:
-        return None  # let the term's own requirement raise
-    names = list(articulations)
-    if len(names) == 1:
-        return str(names[0])
-    raise ValueError(
-        f"termination {name!r} omits 'articulation' but the run has "
-        f"{len(names)} policy articulations; declare one of "
-        f"{sorted(names)} explicitly (v103.6: no primary binding)")
-
-
-def build_terminations(cfg: list | None,
-                       articulations=None) -> list[Termination]:
+def build_terminations(cfg: list | None) -> list[Termination]:
     """Build a list of terminations from the yaml ``terminations`` section.
 
-    *articulations* is the run's ordered policy-binding names (or ``None``
-    when unknown); see :func:`_entry_articulation` for the injection rule.
+    Per-articulation terms must carry an explicit ``articulation`` (top-level
+    or under ``params``); the term's own base class enforces it.  ``None``/
+    empty cfg -> empty list.
     """
     terms: list[Termination] = []
     if not cfg:
@@ -80,9 +58,9 @@ def build_terminations(cfg: list | None,
                 f"unknown termination '{name}'; "
                 f"available: {sorted(TERMINATION_REGISTRY)}")
         params = dict(entry.get("params", {}))
-        articulation = _entry_articulation(entry, name, articulations)
-        if articulation is not None:
-            params["articulation"] = articulation
+        explicit = entry.get("articulation")
+        if explicit is not None:
+            params["articulation"] = explicit
         term = TERMINATION_REGISTRY[name](params, name=name)
         if entry.get("invert", False):  # P11: NOT(term) health conditions
             term = InvertedTermination(term, name=name)
@@ -90,38 +68,19 @@ def build_terminations(cfg: list | None,
     return terms
 
 
-def build_termination_group(cfg: list | None, mode: str = "or",
-                            articulations=None) -> TerminationGroup:
+def build_termination_group(cfg: list | None, mode: str = "or"
+                            ) -> TerminationGroup:
     """Build an OR (default) TerminationGroup from the yaml section.
 
-    ``None``/empty cfg -> empty group that never fires (pure collection
-    mode stays unaffected; callers fall back to a per-binding fall group for
-    progress-log semantics, see :func:`default_fall_group`).
+    ``None``/empty cfg -> empty group that never fires (no default fall
+    group is synthesised).
     """
-    return TerminationGroup(
-        build_terminations(cfg, articulations=articulations), mode=mode)
-
-
-def default_fall_group(
-        articulation: str,
-        height_threshold: float = DEFAULT_HEIGHT_THRESHOLD,
-        tilt_threshold: float | None = DEFAULT_TILT_THRESHOLD,
-) -> TerminationGroup:
-    """The inline height+tilt rule for ONE articulation (the P9-fix semantics).
-
-    Used when no ``terminations`` section is configured.  *articulation* is
-    required (v103.6): a per-policy-binding builder calls this once per
-    binding; there is no flat single-robot fallback.
-    """
-    return TerminationGroup([FallTermination({
-        "articulation": articulation,
-        "height_threshold": height_threshold,
-        "tilt_threshold": tilt_threshold,
-    })])
+    return TerminationGroup(build_terminations(cfg), mode=mode)
 
 
 __all__ = [
     "Termination",
+    "ArticulationTermination",
     "TerminationState",
     "TerminationGroup",
     "InvertedTermination",
@@ -134,5 +93,4 @@ __all__ = [
     "COS_DEFAULT_TILT",
     "build_terminations",
     "build_termination_group",
-    "default_fall_group",
 ]

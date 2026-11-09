@@ -167,6 +167,10 @@ class TerminationState:
 class Termination(ABC):
     """Single termination-condition checker.
 
+    A pure condition over :class:`TerminationState`; it carries no
+    articulation knowledge (see :class:`ArticulationTermination` for terms
+    that judge exactly one articulation).
+
     Args:
         params: the yaml ``params`` section for this termination.
         name: optional yaml-level name (defaults to the class name); used
@@ -177,7 +181,8 @@ class Termination(ABC):
     #: collect.py fetch limits from the env only when required
     requires_joint_limits = False
 
-    def __init__(self, params: dict | None = None, name: str | None = None):
+    def __init__(self, params: Mapping | None = None,
+                 name: str | None = None):
         self.params = dict(params or {})
         self._cfg_name = name
 
@@ -188,16 +193,6 @@ class Termination(ABC):
     @property
     def name(self) -> str:
         return self._cfg_name or type(self).__name__
-
-
-def require_articulation(params: dict, term: str):
-    """The term's explicit ``articulation`` param (v103.6: no flat fallback)."""
-    articulation = params.get("articulation")
-    if articulation is None:
-        raise ValueError(
-            f"{term} requires an 'articulation' param (v103.6: "
-            f"per-articulation state; there is no flat single-robot fallback)")
-    return articulation
 
 
 def parse_body_names(body_names) -> list[str]:

@@ -10,15 +10,11 @@ supplies a ``{name: (lower, upper)}`` mapping.
 """
 from __future__ import annotations
 
-from .base import (
-    Termination,
-    TerminationState,
-    all_false,
-    require_articulation,
-)
+from .articulation import ArticulationTermination
+from .base import TerminationState, all_false
 
 
-class JointLimitTermination(Termination):
+class JointLimitTermination(ArticulationTermination):
     """Fire when any joint exceeds its soft limit by more than *margin*.
 
     params:
@@ -32,13 +28,10 @@ class JointLimitTermination(Termination):
 
     def __init__(self, params: dict | None = None, name: str | None = None):
         super().__init__(params, name)
-        self.articulation = require_articulation(
-            self.params, "JointLimitTermination")
         self.margin = float(self.params.get("margin", 0.05))
 
     def check(self, state: TerminationState):
-        source = state.articulation(self.articulation,
-                                    term="JointLimitTermination")
+        source = self.source(state)
         joint_pos = source.get("joint_pos")
         if joint_pos is None:
             raise ValueError(

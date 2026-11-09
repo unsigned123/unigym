@@ -26,18 +26,17 @@ from __future__ import annotations
 
 import math
 
+from .articulation import ArticulationTermination
 from .base import (
-    Termination,
     TerminationState,
     all_false,
     body_tilt_exceeded,
     parse_body_names,
-    require_articulation,
 )
 from .fall import DEFAULT_HEIGHT_THRESHOLD, DEFAULT_TILT_THRESHOLD
 
 
-class BaseContactTermination(Termination):
+class BaseContactTermination(ArticulationTermination):
     """Fire when a non-foot body (base, head, ...) carries ground contact.
 
     params:
@@ -53,8 +52,6 @@ class BaseContactTermination(Termination):
 
     def __init__(self, params: dict | None = None, name: str | None = None):
         super().__init__(params, name)
-        self.articulation = require_articulation(
-            self.params, "BaseContactTermination")
         self.body_names = parse_body_names(self.params.get("body_names"))
         self.force_threshold = float(self.params.get("force_threshold", 5.0))
         self.height_threshold = float(
@@ -79,8 +76,7 @@ class BaseContactTermination(Termination):
 
     def _check_approx(self, state: TerminationState):
         """Height+tilt approximation (subset of FallTermination's OR)."""
-        source = state.articulation(self.articulation,
-                                    term="BaseContactTermination")
+        source = self.source(state)
         base_pos_w = source.get("base_pos_w")
         gravity_b = source.get("gravity_b")
         if base_pos_w is None or gravity_b is None or self._cos_tilt is None:

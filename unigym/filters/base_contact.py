@@ -109,6 +109,24 @@ class FallenFilter(EpisodeFilter):
         return ratio <= self.max_fallen_ratio
 
 
+def _bind_cfg_articulation(cfg: list, articulation: str) -> list:
+    """Bind the filter's explicit articulation into sub-term configs.
+
+    The termination builder no longer injects an articulation; this filter
+    owns its one explicit articulation, so sub-terms that omit one inherit it.
+    """
+    bound = []
+    for entry in cfg:
+        item = dict(entry)
+        params = dict(item.get("params") or {})
+        if (item.get("articulation") is None
+                and params.get("articulation") is None):
+            params["articulation"] = articulation
+        item["params"] = params
+        bound.append(item)
+    return bound
+
+
 class TerminationFilter(EpisodeFilter):
     """Generic episode filter on top of the termination system.
 
@@ -131,17 +149,17 @@ class TerminationFilter(EpisodeFilter):
         self.max_terminated_ratio = float(max_terminated_ratio)
         self._cfg = list(terminations or [])
         self.articulation = articulation
-        self.group = (build_termination_group(self._cfg,
-                                              articulations=[articulation])
-                      if articulation is not None else None)
+        self.group = (build_termination_group(
+            _bind_cfg_articulation(self._cfg, articulation))
+            if articulation is not None else None)
 
     def __call__(self, episode_data: dict) -> bool:
         state = TerminationState.from_episode_data(episode_data)
         if self.group is None:
             name = self.articulation or _single_articulation(
                 state, "TerminationFilter")
-            self.group = build_termination_group(self._cfg,
-                                                 articulations=[name])
+            self.group = build_termination_group(
+                _bind_cfg_articulation(self._cfg, name))
         if len(self.group) == 0:
             return True  # nothing configured -> keep everything
         ratio = float(self.group.check(state).mean())
