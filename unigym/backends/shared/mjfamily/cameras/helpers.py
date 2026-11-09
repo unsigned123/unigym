@@ -34,7 +34,7 @@ def bridge_quat() -> np.ndarray:
 
 def _quat_mul_np(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Hamilton product of two (4,) wxyz quaternions."""
-    return quat.mul(a, b)
+    return np.asarray(quat.mul(a, b))
 
 
 def mj_camera_quat(q_isaac_wxyz) -> np.ndarray:
@@ -48,12 +48,12 @@ def mj_camera_quat(q_isaac_wxyz) -> np.ndarray:
 
 def _quat_conj(q: np.ndarray) -> np.ndarray:
     """Conjugate of a (4,) wxyz quaternion (= inverse for unit quats)."""
-    return quat.conj(q)
+    return np.asarray(quat.conj(q))
 
 
 def quat_to_rotmat(q_wxyz: np.ndarray) -> np.ndarray:
     """(4,) wxyz unit quat -> (3,3) rotation matrix (world <- local)."""
-    return quat.to_rotmat(q_wxyz)
+    return np.asarray(quat.to_rotmat(q_wxyz))
 
 
 def rotmat_to_quat(R: np.ndarray) -> np.ndarray:

@@ -26,6 +26,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from unigym.core import alloc
 from unigym.core import registry as core_registry
@@ -58,12 +59,13 @@ def _bind_loopback(port: int, scan: bool = False) -> tuple:
     Returns (httpd, bound_port, port_note) -- port_note non-None when
     the bound port differs from the requested one.
     """
-    from http.server import ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     ports = [port] if not scan else list(range(port, port + 60))
     last: OSError | None = None
     for p in ports:
         try:
-            httpd = ThreadingHTTPServer(("127.0.0.1", p), None)
+            httpd = ThreadingHTTPServer(("127.0.0.1", p),
+                                        BaseHTTPRequestHandler)
             bound = int(httpd.server_address[1])   # ephemeral-aware
             return httpd, bound, (bound if (scan and bound != port)
                                   else None)
@@ -128,7 +130,7 @@ class DaemonService:
         # + the rebuild-loop edge caches (per-run baselines; pruned
         # against each fresh view so they never grow with history)
         self.events = EventBus()
-        self._phase_snap: dict[str, str] = {}
+        self._phase_snap: dict[str, str | None] = {}
         self._draft_ep: dict[str, int] = {}
         self._draft_ts: dict[str, float] = {}
         self._tl_off: dict[str, int] = {}
@@ -219,7 +221,7 @@ class DaemonService:
                 if e.get("reason") or pid not in deaths:
                     continue
                 d = deaths[pid]
-                lines = (d.get("reason") or "").splitlines()
+                lines = str(d.get("reason") or "").splitlines()
                 if len(lines) < 2:
                     continue
                 runrec.mark_exit(
@@ -301,7 +303,7 @@ class DaemonService:
             return
         registered: set[str] = set()
         try:
-            registered |= {r.get("run_id") for r in self._rebuild()
+            registered |= {str(r.get("run_id")) for r in self._rebuild()
                            if r.get("run_id")}
         except (OSError, ValueError, TypeError, KeyError) as e:
             # the view scan is file/json work -- a unreadable ledger or
@@ -455,8 +457,8 @@ class DaemonService:
                 try:
                     self._relocate_ledger(int(pid), meta, r)
                     meta["run_id"] = r["run_id"]
-                    runrec.attach_run_id(meta.get("out_dir"), pid,
-                                         r["run_id"])
+                    runrec.attach_run_id(cast(str, meta.get("out_dir")),
+                                         pid, r["run_id"])
                 except OSError as e:
                     _log(f"run record backfill failed "
                          f"(pid={pid}): {e!r}")
@@ -749,7 +751,7 @@ class DaemonService:
 
     def _complete_ledger(self, pid: int, meta: dict,
                          exit_code: int | None,
-                         signal_num: int | None) -> None:
+                         signal_num: int | None) -> dict | None:
         """run.json terminal write at reap.
 
         Exit segment + the light results summary + the task face

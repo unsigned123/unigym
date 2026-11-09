@@ -186,7 +186,7 @@ def query_status(svc, run_id: str) -> tuple[int, dict]:
     """
     gw = getattr(svc, "media", None)
     rd = gw.reader(run_id) if gw is not None else None
-    if rd is None:
+    if rd is None or gw is None:
         # "no such run" would flatten unreadable into absent --
         # an UNKNOWN view row must say what is actually wrong (v049 §1)
         for r in svc.view():
@@ -625,7 +625,7 @@ def history_rows(svc, limit: int = DEFAULT_HISTORY_LIMIT) -> tuple[int, dict]:
     # for admin ops.
     live_by_id = {r["run_id"]: r for r in svc.view(fresh=False)
                   if r.get("run_id")}
-    rows: list[dict] = []
+    rows: list[tuple[float, dict]] = []
     seen: set[str] = set()
     # oversample so the merge keeps `limit` rows after live replacement
     for rec in runrec.scan(svc.output_root, limit=limit * 2 + len(live_by_id)):

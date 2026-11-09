@@ -50,6 +50,9 @@ class ProbeResult:
 
 
 def _id(model, kind, name: str) -> int:
+    if mujoco is None:  # pragma: no cover
+        raise ProbeCapabilityError(
+            f"MuJoCo placement probes are unavailable: {_MUJOCO_IMPORT_ERROR}")
     value = mujoco.mj_name2id(model, kind, name)
     if value < 0:
         raise ProbeError(f"MuJoCo {kind.name} {name!r} was not found")

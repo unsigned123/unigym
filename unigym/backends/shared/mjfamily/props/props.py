@@ -29,6 +29,8 @@ to (1, ...) so the object layer is backend-agnostic.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 
@@ -371,6 +373,8 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
 
 class MujocoPropBackend:
     """Runtime side of the wired props (mujoco, N=1)."""
+
+    _env: Any
 
     def __init__(self, prop_manager):
         self.prop_manager = prop_manager

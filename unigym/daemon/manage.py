@@ -104,7 +104,7 @@ def stop(timeout_s: float = 15.0) -> dict:
         return {"ok": True, "stopped": None,
                 "note": "no daemon state file (nothing to stop)"}
     pid = st.get("pid")
-    if not pid_alive(pid):
+    if not isinstance(pid, int) or pid <= 0 or not pid_alive(pid):
         dstate.clear_state()
         return {"ok": True, "stopped": pid,
                 "note": f"stale state file (pid {pid} already dead)"}

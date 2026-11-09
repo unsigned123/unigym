@@ -21,7 +21,7 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 import urllib.parse
-from typing import Any
+from typing import Any, cast
 
 from unigym.core import registry as core_registry
 from unigym.core import run_ops
@@ -333,7 +333,7 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
                         params["pos"] = body.get("pos")
                     if body.get("lookat") is not None:
                         params["lookat"] = body.get("lookat")
-                    res = s.camera_set(body.get("name"),
+                    res = s.camera_set(cast(str, body.get("name")),
                                        params,
                                        env=body.get("env"),
                                        timeout_s=timeout)

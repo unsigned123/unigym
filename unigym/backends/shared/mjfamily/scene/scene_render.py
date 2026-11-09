@@ -34,10 +34,11 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from types import MappingProxyType
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco optional runtime)
     import mujoco
+    from unigym.props.asset_ir import AssetDefinition
 
 from unigym.core.asset_root import resolve_asset_path
 from unigym.core.region import RegionDefinition
@@ -121,7 +122,7 @@ class BoundRegion:
         return tuple(float(v) for v in pos), tuple(float(v) for v in quat)
 
 
-def bind_regions(model, data, regions) -> object:
+def bind_regions(model, data, regions) -> Mapping[str, BoundRegion]:
     """Validate composed body/site references and return immutable bindings."""
     import mujoco
 
@@ -591,9 +592,11 @@ def _add_prop_instance(spec, scene_name, instance) -> dict:
         _add_verbatim_instance(spec, where, instance, entry, asset)
         return _asset_regions(instance, asset, "")
     if entry.get("type") == "free_articulation":
-        add_ir_free_body(spec, _InstanceHandler(instance.id, entry), asset)
+        add_ir_free_body(spec, _InstanceHandler(instance.id, entry),
+                         cast("AssetDefinition", asset))
     elif entry.get("type") == "articulation":
-        add_ir_body(spec, _InstanceHandler(instance.id, entry), asset)
+        add_ir_body(spec, _InstanceHandler(instance.id, entry),
+                    cast("AssetDefinition", asset))
     else:
         raise ValueError(
             f"{where}: generator {instance.generator!r} produced prop type "

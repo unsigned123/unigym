@@ -23,6 +23,8 @@ the historical model-load path stays byte-identical.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 
 
@@ -39,7 +41,7 @@ def needs_spec(camera_manager=None, prop_manager=None, director_cfg=None,
         camera_manager, prop_manager, director_cfg, mj_scene, spawn_base))
 
 
-def compose_declared_scene(mjspec, name: str, slots) -> dict:
+def compose_declared_scene(mjspec, name: str, slots) -> Mapping[str, object]:
     """Compose + attach one registered scene definition into *mjspec*.
 
     The provider dispatch is the registry's closed face
