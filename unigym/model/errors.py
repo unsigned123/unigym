@@ -1,4 +1,4 @@
-"""Errors raised by the model IR and its live proxies (design v098 N3).
+"""Errors raised by the model IR and its live proxies.
 
 They live in their own module so the neutral IR and the backend-bound
 live face share one import site.  ``StaleModelError`` is the lifecycle

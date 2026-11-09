@@ -62,8 +62,7 @@ from unigym.backends.registry import backend_info
 parser = argparse.ArgumentParser(description="General robot locomotion data collection")
 parser.add_argument("--config", type=str, required=True, help="path to run yaml")
 # flag aliases: every underscore flag carries its hyphen spelling
-# (dest is ALWAYS the underscore form -- docs and CLI stay interchangeable;
-# design v040-debug-toolkit-r3 §1 A1)
+# (dest is ALWAYS the underscore form -- docs and CLI stay interchangeable)
 parser.add_argument("--num_envs", "--num-envs", dest="num_envs", type=int,
                     default=None, help="override env.num_envs")
 parser.add_argument("--steps", type=int, default=None, help="override collect.steps")
@@ -72,7 +71,7 @@ parser.add_argument("--episode_length_s", "--episode-length-s",
                     help="override env.episode_length_s (long-single-episode video runs)")
 parser.add_argument("--output_dir", "--output-dir", dest="output_dir",
                     type=str, default=None, help="override output dir")
-# per-run scene artifacts (design v091 D14): ON by default; the flag turns
+# per-run scene artifacts: ON by default; the flag turns
 # them off.  Six files land under <run output dir>/scene/.
 parser.add_argument("--no-artifacts", dest="no_artifacts", action="store_true",
                     help="disable the per-run scene artifacts "
@@ -102,7 +101,7 @@ parser.add_argument("--adapter_params", "--adapter-params",
                          "'{\"name\": \"manual\", \"control_dt\": "
                          "\"data_out/<run>\"}' (shallow merge; scalars / "
                          "scalar lists only; unknown keys fail fast)")
-# run label (designs/v0611): display metadata only -- the WebUI ledger shows
+# run label: display metadata only -- the WebUI ledger shows
 # label || run_name || run_id; it never enters any filesystem path.
 parser.add_argument("--label", dest="label", type=str, default=None,
                     metavar="TEXT",
@@ -324,7 +323,7 @@ def main():
     spec = build_spec(cfg, args_cli)
 
     # the run output dir resolves BEFORE the backend build: the recorded
-    # scene artifacts (design v091 D14) are written during env construction
+    # scene artifacts are written during env construction
     # and land under <run output dir>/scene/.  The daemon drops the run.json
     # ledger (as run.json.pending-<mypid>) into out_dir BEFORE the worker
     # starts, so "exists"/"non-empty" is no longer the collision signal --

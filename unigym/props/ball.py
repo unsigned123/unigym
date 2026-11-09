@@ -1,4 +1,4 @@
-"""Compatibility shim for the isaaclab BallProp handler (v100 G4).
+"""Compatibility shim for the isaaclab BallProp handler.
 
 The handler lives in ``unigym.backends.isaaclab2.props.handlers.ball``;
 the public name stays importable here for existing users/tests.

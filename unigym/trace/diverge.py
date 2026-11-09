@@ -1,5 +1,5 @@
 """`unigym trace diverge` -- replay divergence profile, one command
-(design v040-debug-toolkit-r3 §4; absorbs p14_divergence_profile.py --
+(absorbs p14_divergence_profile.py --
 probe retired in git history, v063 cleanup).
 
 Inputs are two trace bundles (REPLAYED typically produced by

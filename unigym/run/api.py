@@ -17,8 +17,7 @@ path (no second config parser):
   :mod:`unigym.camera`);
 * ``Run()`` / ``Run.minimal()`` with neither a cfg nor a world/base raise
   :class:`~unigym.errors.ConfigError`: there is no zero-argument default
-  model (v101 A1 removed ``DEFAULT_MJ_MODEL`` and
-  ``env.params.mj_model``).
+  model: ``DEFAULT_MJ_MODEL`` and ``env.params.mj_model`` were removed.
 
 The three introspection levels are deliberately separate surfaces:
 
@@ -433,7 +432,7 @@ class Run:
     * ``Run(world=..., world_base=..., cameras=..., adapter=..., robot=...)``
       -- assemble the config from programmatic builders;
     * ``Run()`` / ``Run.minimal()`` with no cfg/world/base raise
-      :class:`~unigym.errors.ConfigError` -- the v101 A1 removal of
+      :class:`~unigym.errors.ConfigError` -- the removal of
       ``DEFAULT_MJ_MODEL`` / ``env.params.mj_model`` leaves no implicit
       world.
 

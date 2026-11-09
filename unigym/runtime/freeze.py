@@ -1,6 +1,6 @@
 """Freeze face (freeze paradigm): skill halt -> world freeze.
 
-The paradigm (design ``docs/designs/v056-freeze-paradigm.md``): the
+The paradigm: the
 agent thinks while the world stands still -- world time advances only
 through explicit grants (``drive`` a skill / ``step`` a batch /
 ``time.resume``), and every skill halt is a freeze point.

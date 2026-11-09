@@ -7,7 +7,7 @@ mujoco / isaaclab.
 
 the run-side HTTP face moved to the daemon media gateway
 (unigym/daemon/media.py + webrtc.py) -- BridgeServer is gone; the run is
-a pure SHM worker (design docs/designs/v027-media-gateway.md §2).
+a pure SHM worker.
 """
 from __future__ import annotations
 

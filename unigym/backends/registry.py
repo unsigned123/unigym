@@ -98,11 +98,11 @@ class Trait(Enum):
     INIT_POSE = "INIT_POSE"
     SPAWN_XY_YAW = "SPAWN_XY_YAW"              # both backends (parity)
     MOCAP = "MOCAP"                            # mocap body carrier (mujoco)
-    # --- rewind (Round B B1; design v052-round-b §1.1) ---
+    # --- rewind (Round B B1) ---
     SNAPSHOT = "SNAPSHOT"                      # mjSTATE-exact snapshot()/restore()
-    # --- actuator seam (docs/designs/v063-gr00t-adapter.md D2/D9) ---
+    # --- actuator seam ---
     ACTUATORS_PLUGGABLE = "ACTUATORS_PLUGGABLE"  # env.params.actuators software ctrl laws
-    # --- model introspection (design v098 N0; no second capability enum) ---
+    # --- model introspection (no second capability enum) ---
     MODEL_ADDRESSES = "MODEL_ADDRESSES"            # qpos/dof/geom/actuator ids
     MODEL_MASS_INERTIA = "MODEL_MASS_INERTIA"      # compiled mass/inertia
     MODEL_MOCAP = "MODEL_MOCAP"                    # mocap body carriers

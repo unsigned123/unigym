@@ -1,7 +1,7 @@
 """Fourier GR1 robot profile (GR1ArmsAndWaistFourierHands, tabletop).
 
 Asset: the T1.1 bitwise-reconstructed gr1 tabletop world -- since the
-v075 P1 retirement it is assembled from the robot world-part XML
+scene retirement it is assembled from the robot world-part XML
 (``assets/gr1_tabletop/gr1_tabletop_robot.xml``) plus the registered
 ``gr1_tabletop`` scene (the retired live scene XMLs live in
 the anchors machine domain, set gr00t-r1 ``scene_retirement/``); 39
@@ -11,7 +11,7 @@ backend as pure constants (``articulation_cfg=None``): joint order, reset
 pose tables, hand drive faces and body parts all come from
 :mod:`unigym.robots.gr1_constants` (audit-transcribed, provenance there).
 
-Action face (docs/designs/v063-gr00t-adapter.md D2, T1.2b): the 5-group
+Action face (T1.2b): the 5-group
 29-dim GR00T layout maps onto TWO NamedAction faces:
 
 * body 17 -- ``right_arm 7 | left_arm 7 | waist 3`` absolute position

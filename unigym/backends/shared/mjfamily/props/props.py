@@ -516,8 +516,8 @@ class MujocoPropBackend:
         of the isaaclab handlers' obs semantics.
         ``<name>_quat_b``: the prop orientation relative
         to the base, ``q_b^-1 (x) q_prop`` (wxyz) -- the decision
-        package's obj_pose quat source (design v057 §2; requested keys
-        only, never a default).
+        package's obj_pose quat source (requested keys only, never a
+        default).
         """
         datas = getattr(env, "mj_datas", None) or [env.mj_data]
         base = int(getattr(env, "_base_body_id"))

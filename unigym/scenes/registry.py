@@ -1,6 +1,6 @@
 """The closed scene-provider registry.
 
-The SIXTH closed registry (design v075 §4; isomorphic to the task
+The SIXTH closed registry (isomorphic to the task
 providers and the prop-template providers):
 
 * ``@register_scene`` -- closed name list, lowercase snake_case (the
@@ -11,7 +11,7 @@ providers and the prop-template providers):
   import-linter contract);
 * ``build_scene_definition(name, slots)`` -- the pure dispatch: every
   provider output passes the SAME :func:`~unigym.scenes.scene_ir.validate_scene`
-  gate (one output type, one gate -- v075 §4).
+  gate (one output type, one gate).
 
 Declarative scene templates cover the routine needs; a scene provider
 exists for DEEP customization only -- it may call ASSET providers (the
@@ -40,7 +40,7 @@ _NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 @dataclass(frozen=True)
 class SceneContext:
-    """The provider's resolution context (the v075 §4 sketch face).
+    """The provider's resolution context.
 
     ``name`` is the scene being built (the provider's error-message
     face); further resolution facts join here as the consumer face
@@ -53,7 +53,7 @@ class SceneContext:
 def register_scene(name: str) -> Callable[[SceneProvider], SceneProvider]:
     """Register a closed scene provider under a snake_case name.
 
-    The registry discipline (v075 §4): closed list, path-like spellings
+    The registry discipline: closed list, path-like spellings
     rejected by the charset rule, duplicates rejected, docstring forced
     (config citations name scenes, never provider paths).
     """

@@ -1,4 +1,4 @@
-"""Gymnasium facades over one run (v097 R3.1).
+"""Gymnasium facades over one run.
 
 Two distinct Gym semantics, never conflated:
 

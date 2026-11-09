@@ -1,4 +1,4 @@
-"""Provider conformance kit (v079 §5).
+"""Provider conformance kit.
 
 Seven mechanical checks over a provider manifest, shared by the core
 synthetic providers and the source-side family sweep:

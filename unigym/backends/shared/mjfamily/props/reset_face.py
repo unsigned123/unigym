@@ -1,7 +1,6 @@
 """Mujoco scene-bundle reset face: base semantics + initializer wiring.
 
-The scene-bundle consumption helpers for the mujoco backend
-(docs/designs/v067-scene-bundle-and-initializers.md §2/§3).  An
+The scene-bundle consumption helpers for the mujoco backend.  An
 initializer never touches engine handles directly: sampling reads the
 model and every mutation goes through a :class:`ResetPrimitives`
 primitive built here (``write_freejoint`` is the existing prop
@@ -56,8 +55,7 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
     # the narrow-phase collision set is the model's COLLISION truth
     # (contype/conaffinity nonzero): region markers and visual twins
     # are compiled contype=0/conaffinity=0 and are never collision
-    # evidence (docs/designs/v076-kitchen-construction-and-
-    # initialization.md §6.2)
+    # evidence
     blocking_geoms = [
         CollisionPair(
             geom,

@@ -1,7 +1,6 @@
 """Runtime scene face: the ``scene`` typed query (cmd 16).
 
-One curated scene document per query (design docs/designs/v045-scene-face.md
-§1) in two tiers:
+One curated scene document per query in two tiers:
 
 * ``tree``  -- STATIC structure, computed lazily ONCE (props/contact
   groups/cameras do not change short of a scene rebuild, which does not

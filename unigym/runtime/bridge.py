@@ -1,7 +1,7 @@
 """Runtime bridge: SHM double buffer + step-boundary soft interrupt.
 
-(feat/media-gateway) -- **run slimmed down to a pure simulation worker**
-(design docs/designs/v027-media-gateway.md §2): the run-side HTTP face (bridge
+(feat/media-gateway) -- **run slimmed down to a pure simulation worker**:
+the run-side HTTP face (bridge
 server, token logic, webui static mount, MJPEG/WebRTC streaming) moved
 WHOLESALE into the daemon media gateway (unigym/daemon/media.py +
 webrtc.py).  What remains here -- and the ONLY channel between a run and
@@ -74,7 +74,7 @@ attaches via a direct /dev/shm open+mmap (stdlib, zero tracker
 involvement); the owner side still uses multiprocessing.shared_memory
 (create + unlink semantics are owner-exclusive).
 
-Same-host pledge (docs/designs/v027-media-gateway.md red line): SHM never
+Same-host pledge: SHM never
 crosses machines -- the daemon and all runs must be on one machine;
 multi-machine = one daemon per machine. This module depends only on stdlib
 + numpy (lazy: the pure status/command paths do not trigger the numpy
@@ -598,7 +598,7 @@ def active_run_ids() -> list[str]:
 def serve_state_paths(state_dir: str | os.PathLike[str] | None = None) -> list[Path]:
     """Serve-registry json paths across the scanned directories.
 
-    Layout (designs/v068-runtime-layout.md §3): the ONE scan lives
+    Layout: the ONE scan lives
     in :func:`unigym.runtime_dirs.serve_registry_paths` -- scan set
     [explicit state_dir, UNIGYM_SERVE_DIR, runtime serve dir, repo root
     (docker registries mount the repo)]; no /tmp-root fallback.
@@ -710,7 +710,7 @@ def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
     Zombie = header phase DONE (run finished but segment leaked) or
     heartbeat expired (the worker stopped ticking -- killed, crashed, or
     wedged past HB_TIMEOUT_S).  Unattachable segments are REPORTED by
-    class and only removed with ``force`` (design v049 §4 -- the
+    class and only removed with ``force`` (the
     classification shares the UNKNOWN probe semantics): a wrong VERSION
     reads "version-mismatch" (the orphan shape), garbage magic reads
     "corrupt".  A heartbeat-fresh segment ("leaked-live") is never
@@ -1022,8 +1022,8 @@ class Bridge:
                  "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
                  "obs_catalog_keys": self.obs_catalog_keys,
                  "started": time.strftime("%Y-%m-%d %H:%M:%S")}
-        # default registry home is <runtime_dir>/serve
-        # (designs/v068-runtime-layout.md §3); the explicit --serve_state_dir
+        # default registry home is <runtime_dir>/serve;
+        # the explicit --serve_state_dir
         # and the UNIGYM_SERVE_DIR legacy entry keep winning.
         sdir = Path(state_dir or os.environ.get("UNIGYM_SERVE_DIR")
                     or runtime_dirs.serve_dir())

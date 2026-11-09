@@ -1,4 +1,4 @@
-"""mujoco scene composer: neutral scene IR -> MjSpec (design v075 §3).
+"""mujoco scene composer: neutral scene IR -> MjSpec.
 
 The L1 mechanism half of the scenes package: a neutral
 :class:`~unigym.scenes.scene_ir.Scene` is BUILT into a single MjSpec

@@ -1,6 +1,6 @@
 """IsaacLab model provider: declared ``build`` and live ``describe``.
 
-Design v098 §9.9 splits the two faces explicitly:
+The two faces are split explicitly:
 
 * :meth:`IsaacLabModelProvider.build` reads a scene/articulation ``cfg``
   BEFORE the sim exists and emits the declared IR (``compiled=False``).

@@ -65,9 +65,9 @@ __all__ = ["RunFrames", "MediaGateway", "TierError", "parse_tier",
            "run_info_document", "route_run_get", "route_run_post"]
 
 STALE_AFTER_S = 5.0          # RUNNING run with no fid/status progress
-MJPEG_FPS = 25.0             # v069 (design §3.3): ~4-5 Mbps @ 480p
+MJPEG_FPS = 25.0             # ~4-5 Mbps @ 480p
 FIRST_FRAME_GRACE_S = 5.0
-# QoS (designs/v048-stream-qos §4-a): SIOCOUTQ drop-oldest gate.
+# QoS: SIOCOUTQ drop-oldest gate.
 # A consumer whose kernel send queue holds more unacked bytes than this
 # gets its frames SKIPPED (never queued) -- the backlog stays bounded and
 # staleness converges to <= threshold / consumer rate (~0.2-0.5s) instead
@@ -539,7 +539,7 @@ class MediaGateway:
         the SHM slots (never the command slot; a non-publishing camera
         is an explicit 404, it must not wake the engine).
         ``X-Frame-Id`` carries the source frame id; ?q=&scale= tiers
-        apply (design v048 §4-b/c).
+        apply.
         """
         rd = self.reader(run_id)
         if rd is None:

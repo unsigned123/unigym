@@ -1,4 +1,4 @@
-"""Per-instance camera state (v095 C2; design §4).
+"""Per-instance camera state (design §4).
 
 Engine-free helpers shared by the camera manager and both backends.  The
 ``(camera_key, env_id | None)`` row table itself lives here; ``body`` rigs

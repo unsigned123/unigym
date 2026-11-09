@@ -121,9 +121,9 @@ class SyncRunner:
             ``sampler.reset`` chain -- the classic single-env ``gym.Env``
             leaves the terminal state in place until the caller resets.
             Default True keeps the three collect/benchmark/both modes
-            bit-identical (v097 R3.1).
+            bit-identical.
 
-    Rewind seam (Round B B1, design v052-round-b §1.3): ``_tick`` is the
+    Rewind seam (Round B B1): ``_tick`` is the
     loop counter as INSTANCE state.  The rewind controller sets it back to
     ``restored_tick + 1`` and arms a one-shot :class:`RewindBoundary`
     raise inside ``bridge.tick``; the loop catches it around
@@ -136,7 +136,7 @@ class SyncRunner:
 
     @classmethod
     def from_instance(cls, instance) -> SyncRunner:
-        """Build a SyncRunner from a live :class:`RunInstance` (v097 R2).
+        """Build a SyncRunner from a live :class:`RunInstance`.
 
         The constructor arguments are exactly the ones ``collect_cli`` used
         to pass inline: the run cfg, the instance's profile/adapter/sampler/
@@ -266,7 +266,7 @@ class SyncRunner:
     def tick(self, actions_override=None) -> StepResult:
         """Advance exactly one policy tick; returns its :class:`StepResult`.
 
-        ``actions_override`` is the additive external-driver hook (v097 R3):
+        ``actions_override`` is the additive external-driver hook:
         when it is a ``dict[str, NamedAction]`` the adapter forward and its
         postprocess are skipped and the provided actions go straight to
         ``env.step``.  Every other line (obs refresh, termination, sink

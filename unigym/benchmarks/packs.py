@@ -10,7 +10,7 @@ to add a task.  Layout (§7 of docs/contracts/benchmark_contract.md):
                 tasks/*.py   # hand-written Task plugins (see guardrail below)
                 references/  # pack-owned reference npz files; a relative
                              # ``reference:`` in reference_mpjpe resolves here
-                templates/*.yaml  # task templates (v071 §2): a FormulaTask
+                templates/*.yaml  # task templates: a FormulaTask
                                   # skeleton with ``{slot}`` references; the
                                   # ``slots:`` head declares every slot and
                                   # its type (scalar/enum/ref/node)
@@ -137,7 +137,7 @@ class Pack:
         return len(self.tasks)
 
     def dump_resolved(self) -> dict[str, dict]:
-        """Introspection (v071 §2.2 rule 4): ``{task name: resolved spec}``
+        """Introspection: ``{task name: resolved spec}``
         for every formula task of the pack -- materialized and
         template-resolved alike.  The dump is a deep copy: one-way stream
         (load-time resolve -> consumers), the runtime never writes back."""
@@ -357,7 +357,7 @@ def load_pack(root: Path) -> Pack:
 
     Three task sources share one namespace: materialized tasks/*.yaml,
     Python plugins, and (when pack.yaml declares ``templates:`` +
-    ``task_rows:``) template x parameter-row resolutions -- v071 §2."""
+    ``task_rows:``) template x parameter-row resolutions."""
     root = Path(root)
     meta = _load_pack_yaml(root)
     name = meta["name"].strip()

@@ -1,6 +1,6 @@
 """daemon.runrec -- the run ledger: ``<output_dir>/run.json``.
 
-output_dir IS the ledger (docs/designs/v043-run-record.md §1): every run
+output_dir IS the ledger: every run
 records itself in its own output dir -- the daemon writes the spec
 segment at spawn, completes exit+results at reap.  No central registry,
 no unlink decisions: retention = the user's everyday data_out hygiene,
@@ -184,7 +184,7 @@ def attach_run_id(output_dir: str | Path, pid: int,
 
 
 def set_label(output_dir: str | Path, pid: int, label) -> dict | None:
-    """The WORKER-side label write (designs/v0611).
+    """The WORKER-side label write.
 
     The label's single-writer principle: the run process writes its own
     run.json -- the daemon only reads.  Pid-aware like every mutation

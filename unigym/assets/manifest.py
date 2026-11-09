@@ -1,4 +1,4 @@
-"""Asset manifests: the closed ``unigym.asset/1`` schema (v086 §4).
+"""Asset manifests: the closed ``unigym.asset/1`` schema.
 
 The manifest is the L0 fact sheet of ONE asset: its stable id, its
 carrier kind, the files it ships, its capability vocabulary, its license
@@ -8,7 +8,7 @@ because scene knowledge belongs to L1.
 
 This module validates SHAPE only.  It never touches the filesystem and
 never resolves a pack: file existence, id-vs-directory agreement and
-``uses`` resolvability belong to the catalog and the guards (v086 §9).
+``uses`` resolvability belong to the catalog and the guards.
 """
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ import yaml
 #: the manifest schema id every document must carry verbatim.
 SCHEMA = "unigym.asset/1"
 
-#: the closed carrier-kind set (v086 §4); anything else is an error.
+#: the closed carrier-kind set; anything else is an error.
 KINDS = frozenset({"model", "texture_set", "mesh", "material"})
 
 #: keys that would smuggle L1 scene knowledge into an L0 manifest (R3).
 FORBIDDEN_KEYS = frozenset({"scene", "layout", "style", "engine"})
 
-#: keys every manifest must carry (v086 R2/R4, narrowed by the v091 card).
+#: keys every manifest must carry.
 REQUIRED_KEYS = ("schema", "id", "kind", "files", "capabilities", "license",
                  "provenance")
 
@@ -295,7 +295,7 @@ def validate_manifest(doc: dict) -> dict:
 
     Shape only: no filesystem touch, no pack resolution.  Raises
     :class:`ManifestError` on the first violated rule, naming the key and
-    the fix (v086 §9 fail-closed/teach style).
+    the fix (fail-closed/teach style).
     """
     return _validate(doc)
 

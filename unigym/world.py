@@ -1,4 +1,4 @@
-"""Programmatic world builder: ``unigym.World`` (v100 S1b-ii / S2c).
+"""Programmatic world builder: ``unigym.World``.
 
 A :class:`World` is a *declaration* of the world half of a run, not a live
 engine object.  It produces only the existing config schema consumed by
@@ -224,7 +224,7 @@ class World:
 
         Args:
             mjcf: Path to the world MJCF (the run-level
-                ``world_base: {mjcf: <path>}`` declaration, v101 A1).
+                ``world_base: {mjcf: <path>}`` declaration).
 
         Returns:
             A :class:`World` whose :meth:`fragment` carries
@@ -727,7 +727,7 @@ class World:
         ``{"params": {"mj_scene": ..., "mj_scene_params": ...}}``, plus an
         ``objects:`` block when the world declared dynamic free bodies and
         an ``articulations:`` block when :meth:`articulation` was called.
-        ``world_base`` is a TOP-LEVEL run config key (v101 A1); it never
+        ``world_base`` is a TOP-LEVEL run config key; it never
         rides ``env.params``.
         """
         fragment = WorldFragment()

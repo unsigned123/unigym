@@ -353,8 +353,7 @@ def build_spec(
     # it references both migrate through the one function.
     cfg = _require_config(
         normalize_content_keys(raw_cfg, source=args.config), "content keys")
-    # scene bundle (docs/designs/v067-scene-bundle-and-initializers.md
-    # §1): the `scene:` reference resolves BEFORE placeholder expansion
+    # scene bundle: the `scene:` reference resolves BEFORE placeholder expansion
     # so the pack's ${UNIGYM_REPO} tokens ride the same single
     # expansion point as the run yaml
     cfg = _require_config(apply_scene_bundle(cfg), "scene bundle")

@@ -45,7 +45,7 @@ def joint_names(asset: AssetDefinition) -> list[str]:
 def asset_roots(asset: AssetDefinition) -> tuple:
     """The payload's root bodies: the anchored root or the forest.
 
-    The FOREST form (v075 P1: the verbatim tabletop kitchen bake)
+    The FOREST form (the verbatim tabletop kitchen bake)
     carries several WORLDBODY-LEVEL roots -- the attach machinery lands
     each under the attach frame, so a composed scene reproduces the
     source scene's sibling layout with no synthetic wrapper body.
@@ -92,7 +92,7 @@ class AssetDefinition:
     every logical reference to them) together with the tree.
 
     The payload is an ANCHORED single root (``root``) or a FOREST of
-    worldbody-level roots (``forest``, v075 P1: the verbatim tabletop
+    worldbody-level roots (``forest``, the verbatim tabletop
     kitchen bake) -- exactly one of the two.  The prop-runtime attach
     faces consume the anchored form only; the forest rides the scene
     composer's verbatim face (:mod:`unigym.backends.shared.mjfamily.scene.scene_render`).

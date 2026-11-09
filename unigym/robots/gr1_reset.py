@@ -19,8 +19,7 @@ The audited GR1 reset is NOT a single qpos0 -- it is a four-stage chain
 This module is the robot-body half ONLY (stage constants + the validated
 stage spec + the stage runners).  The declarative SplitA placement half
 lives in ``unigym/initializers/splita_tabletop.py`` (the scene-bundle
-initializer; migration per docs/designs/v067-scene-bundle-and-
-initializers.md §2) -- placement sampling and the stage-4 noise share
+initializer) -- placement sampling and the stage-4 noise share
 ONE numpy stream (the initializer's ``rng``), consumed in the fixed
 documented order: placement draws first, then the 14 cotrain noise
 draws (model document order, stage 4).

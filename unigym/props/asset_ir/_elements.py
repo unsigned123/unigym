@@ -40,7 +40,7 @@ class MatRef:
     The name gate is the reference-namespace face: most references are
     snake material names, but a material's TEXTURE reference cites the
     robocasa texture namespace (segment-shaped -- ``flat/gray``; the
-    v075 P1 verbatim bake reproduces it), so each ``/`` segment follows
+    verbatim bake reproduces it), so each ``/`` segment follows
     the lowercase snake rule instead of the whole string.
     """
 
@@ -66,7 +66,7 @@ class MatRef:
 class Joint:
     """One generated hinge/slide/ball joint (closed set; no freejoint).
 
-    ``springdamper`` (v072 §13 step 5, the composite pilot) is the
+    ``springdamper`` (the composite pilot) is the
     optional mass-spring parametrization ``(timeconst, damping_ratio)``
     of the official composite chains: when authored, the engine DERIVES
     the joint stiffness and damping from it at compile time (the
@@ -123,7 +123,7 @@ class Site:
     an authored multi-component engine size (thin cylinder fixture
     markers). The renderer assigns scalar sizes component-wise, keeping
     unspecified trailing defaults intact.
-    ``type`` (v072 §13 step 5) is the optional marker projection (a
+    ``type`` is the optional marker projection (a
     :data:`SITE_TYPES` name); ``None`` keeps the engine's sphere
     default.
     """
@@ -258,7 +258,7 @@ class Geom:
 
 @dataclass(frozen=True)
 class Inertial:
-    """One explicit body inertial (v075 P2: the dressing-dump face).
+    """One explicit body inertial (the dressing-dump face).
 
     The SplitA dressing dumps pin explicit ``<inertial>`` blocks whose
     values embed the original compile-time state (the visual mesh
@@ -269,7 +269,7 @@ class Inertial:
     ``explicitinertial`` semantics -- the compiler skips the geom mass
     aggregation for that body, exactly like the XML spelling).  The
     kitchen bake does NOT use this face: its bodies' inertials recompute
-    from their geoms bit-identically (v075 P1 ruling).
+    from their geoms bit-identically.
     """
 
     pos: tuple

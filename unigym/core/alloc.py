@@ -1,6 +1,6 @@
 """core.alloc -- port/GPU allocation for parallel runs .
 
-docs/designs/v026-unigymd.md §2: the daemon allocates before every
+The daemon allocates before every
 spawn so parallel runs never collide on a bridge HTTP port and land on
 the freest GPUs.  Pure functions, explicit arguments, no global state
 (daemon/tests/`python -c` equally callable).  Minimal implementation:

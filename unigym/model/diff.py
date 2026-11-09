@@ -1,4 +1,4 @@
-"""Face-by-face model diffing (design v098 N5).
+"""Face-by-face model diffing.
 
 A ``ModelDiff`` answers "what changed between these two models?" without
 reaching into a backend: rows are matched by name, every dataclass field

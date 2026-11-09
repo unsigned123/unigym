@@ -1,8 +1,8 @@
 """Pluggable Actuator seam top-level package: registry + three built-ins.
 
-Provenance and semantics: docs/designs/v063-gr00t-adapter.md D2/D9 (the
+Semantics: the
     backend Actuator seam; a first-class package, sibling of
-adapters/benchmarks).  The backend's per-substep ctrl write face
+adapters/benchmarks.  The backend's per-substep ctrl write face
 converges onto pluggable control laws; the action-face semantics are
 untouched (NamedAction = absolute position targets, routing stays with
 the backend).  The three built-ins:

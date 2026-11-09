@@ -2,8 +2,7 @@
 
 Every spawn-side artifact lives under ONE root, ``runtime_dir``
 (default ``/tmp/unigym``; unigym.yaml / unigym.local.yaml key
-``runtime_dir``), instead of littering the /tmp root (design
-docs/designs/v068-runtime-layout.md §2):
+``runtime_dir``), instead of littering the /tmp root:
 
     <runtime_dir>/logs/               unigym-run-<ts>.log
     <runtime_dir>/state/              unigym-run-<ts>.json  (spawn state)

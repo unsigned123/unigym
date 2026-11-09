@@ -4,7 +4,7 @@ The engine-neutral parts of the old rig module stay here: the recorder
 parity defaults, the quaternion pose helpers and the backend-resolving
 factory.  The IsaacLab rig classes (``BodyRig`` / ``WorldRig`` /
 ``ChaseRig``) now live in ``unigym/backends/isaaclab2/cameras/rigs.py``
-(v100 G3); the mujoco/mjwarp rigs already lived in their backends.
+and the mujoco/mjwarp rigs already lived in their backends.
 
 The module is **torch-only at import time** and imports no backend at
 module level: both :func:`build_rig` and :func:`build_neutral_rig` resolve
@@ -69,7 +69,7 @@ def _quat_mul_batch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 def build_neutral_rig(spec: CameraSpec, render_groups=None):
     """Engine-neutral compatibility name for the IsaacLab rig builder.
 
-    Kept neutral (v100 G3): the rig classes moved into
+    Kept neutral: the rig classes moved into
     ``backends/isaaclab2/cameras`` and this name resolves that backend
     factory through the registry, exactly like :func:`build_rig`.
     """

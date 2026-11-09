@@ -187,7 +187,7 @@ def _default_out_dir(ops: RecorderOps, run: str, name: str) -> Path:
 # the loop
 # --------------------------------------------------------------------------- #
 def _policy_profile_name(cfg: dict) -> str | None:
-    """The policy articulation's name from a run config (v101 A2)."""
+    """The policy articulation's name from a run config."""
     for art in cfg.get("articulations") or []:
         if isinstance(art, dict) and \
                 (art.get("control") or {}).get("mode") == "policy":

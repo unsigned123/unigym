@@ -1,9 +1,9 @@
-"""Task meta-package engine (v071 §2): templates x parameter rows.
+"""Task meta-package engine: templates x parameter rows.
 
 A pack can declare ``templates:`` + ``task_rows:`` in its pack.yaml: the
 templates are FormulaTask skeletons whose strings carry ``{slot}``
-references ONLY (any other brace fails the load -- the no-logic rule of
-v071 §2.2 rule 1, enforced mechanically: conditions/loops/functions
+references ONLY (any other brace fails the load -- the no-logic rule,
+enforced mechanically: conditions/loops/functions
 cannot even be spelled); the rows are parameter lines, one per task,
 instantiating one template each.  Resolution happens at pack-LOAD time
 and the resolved spec crosses the exact same gate as a materialized task
@@ -38,7 +38,7 @@ from .formula import validate_formula_spec
 from .task_providers import build_provider_spec
 
 # --------------------------------------------------------------------------- #
-# task meta-package: templates x parameter rows (v071 §2)
+# task meta-package: templates x parameter rows
 # --------------------------------------------------------------------------- #
 TASK_ROWS_SCHEMA = "unigym.benchmarks.task_rows/1"
 """The only accepted ``schema:`` value of a ``task_rows`` table."""
@@ -140,7 +140,7 @@ def _string_slot_names(s: str, where: str) -> list[str]:
 
     Every brace in a template string must belong to a well-formed slot
     reference -- literal braces, ``{% ... %}``, ``${...}``, ``{{ }}`` all
-    fail the load.  That is the no-logic rule (v071 §2.2 rule 1) made
+    fail the load.  That is the no-logic rule made
     mechanical: a template is data references and nothing else.
     """
     out: list[str] = []
@@ -277,7 +277,7 @@ def load_meta_package(root: Path, meta: dict) -> tuple[dict, dict, Path, dict]:
 def load_task_rows(path: Path) -> dict[str, dict]:
     """One task-rows table -> ``{task name: normalized row}``.
 
-    The v071 §2.3 load-time schema gate: row types, required fields,
+    The load-time schema gate: row types, required fields,
     sign-off presence.  All errors aggregate into one ValueError, every
     message named ``<table>/<row>/<field>`` -- this is the correctness
     insurance for hand-maintained rows (a new task is one table line,
@@ -324,7 +324,7 @@ def load_task_rows(path: Path) -> dict[str, dict]:
                 f"{sorted(_ROW_KEYS)})")
         template = row.get("template")
         provider = row.get("provider")
-        # v071 §3: exactly one instantiation source; providers are
+        # exactly one instantiation source; providers are
         # referenced BY NAME, never by path (a path-shaped value is
         # rejected here, before the registry even sees it).
         if bool(template) == bool(provider):
@@ -375,10 +375,10 @@ def resolve_row(name: str, row: dict, templates: dict,
 
     Slot presence + value types check first (naming
     ``<table>/<row>/<field>``), then the instantiation -- a template
-    substitution, or a provider call (v071 §3: pure spec-builder, the
+    substitution, or a provider call (pure spec-builder, the
     loader owns the gate) -- then the resolved spec crosses the EXACT
     same gate as a materialized task: the shared reference rewrite +
-    ``validate_formula_spec`` (v071 §2.2 rule 2 -- the gate's position
+    ``validate_formula_spec`` (the gate's position
     does not move).
     """
     errors: list[str] = []

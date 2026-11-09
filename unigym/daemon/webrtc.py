@@ -63,7 +63,7 @@ __all__ = ["FrameRelayTrack", "WebRtcGateway"]
 PUMP_HZ = 60.0
 MAX_WIDTH = 1280                 # downscale guard (16-aligned below)
 
-# pts pacing (v069 §3.2): frame timestamps follow the WALL arrival
+# pts pacing: frame timestamps follow the WALL arrival
 # spacing of the SHM pump, clamped to the pump ceiling (60 fps) -- the
 # fixed 1/30 next_timestamp() step capped delivery at 30 fps and lied
 # about arrival jitter.  Presentation rate = source publish rate; the
@@ -120,7 +120,7 @@ class FrameRelayTrack(asyncio.Event, VideoStreamTrack):
 
     ``feed()`` is called from the pump thread; ``recv()`` resolves with
     the newest frame (duplicate frame ids are skipped).  pts follows the
-    WALL spacing between emits (v069 §3.2), clamped below by
+    WALL spacing between emits, clamped below by
     ``MIN_FRAME_S`` -- pts never runs ahead of the pump ceiling and never
     regresses (the fixed 1/30 ``next_timestamp()`` step capped delivery
     at 30 fps regardless of arrival rate).  KEEPALIVE (the docstring
@@ -345,7 +345,7 @@ class WebRtcGateway:
         if rd is None:
             raise KeyError(run_id)
         self.media.release(run_id)  # existence check only; long usage refs belong to the pump
-        # v069 STUN ruling (camera_contract §16.6 / design §3.1): the
+        # STUN ruling (camera_contract §16.6 / design §3.1): the
         # iceServers list is passed EXPLICITLY, empty by default.
         # configuration=None makes aiortc fall back to its default
         # stun:stun.l.google.com:19302 -- unreachable from this network,

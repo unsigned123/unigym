@@ -1,4 +1,4 @@
-"""Typed quaternion component orders (design v098 §2.5).
+"""Typed quaternion component orders.
 
 Two nominal types make the component order part of the type itself:
 ``QuatWXYZ`` is the repo-internal order (mujoco / IsaacLab 2.x) and

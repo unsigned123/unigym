@@ -1,16 +1,16 @@
-"""Task providers: the fifth registry (v071 §3).
+"""Task providers: the fifth registry.
 
 The scripted fallback seam for pack tasks -- a task provider is a PURE
 FUNCTION from data to a FormulaTask spec dict.  It is the escape
 hatch for pack tasks whose spec COMBINATION cannot be spelled as
-a template x parameter row (v071 §2) -- the same role the terms
+a template x parameter row -- the same role the terms
 whitelist plays for judge terms and the Python plugin seam plays for
 whole Task classes, one axis per seam:
 
 A task provider is a PURE FUNCTION from data to a FormulaTask spec dict:
 ``provider(slots, tables) -> spec``.  It is the escape
 hatch for pack tasks whose spec COMBINATION cannot be spelled as a
-template x parameter row (v071 §2) -- the same role the terms whitelist
+template x parameter row -- the same role the terms whitelist
 plays for judge terms and the Python plugin seam plays for whole Task
 classes, one axis per seam:
 
@@ -33,7 +33,7 @@ Contract (mirrors the terms registry discipline):
     * One-way stream: providers BUILD specs at load time; nothing writes
       back at runtime.
 
-YAGNI note (v071 §3): today the registry carries exactly one documented
+YAGNI note: today the registry carries exactly one documented
 example and zero real consumers; the first real task that cannot be a
 template row registers here and sets the precedent.
 """
@@ -54,7 +54,7 @@ def register(name: str) -> Callable[[Provider], Provider]:
     """Register a provider under ``name`` (lowercase snake_case).
 
     Duplicate names and path-shaped values fail fast -- a provider row
-    references the registry entry, never a file (v071 §3: data cites
+    references the registry entry, never a file (data cites
     NAMES, never paths).
     """
     def deco(fn: Provider) -> Provider:
@@ -108,7 +108,7 @@ def build_provider_spec(name: str, slots: dict, tables: dict) -> dict:
 
 @register("example_shape")
 def _example_shape(slots: dict, tables: dict) -> dict:
-    """Documented minimal example (v071 §3).
+    """Documented minimal example.
 
     A single-metric presence task built from scalar slots.
 

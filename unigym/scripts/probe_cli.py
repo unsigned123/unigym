@@ -1,5 +1,4 @@
-"""`unigym probe` -- one-command e2e probe: launch -> wait -> scorecard
-(design v040-debug-toolkit-r3 §2).
+"""`unigym probe` -- one-command e2e probe: launch -> wait -> scorecard.
 
 The campaign burned ~30 calls per probe on the launch->poll->glob->numpy
 manual chain; this composes the existing faces instead of adding paths:

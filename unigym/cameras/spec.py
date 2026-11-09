@@ -43,7 +43,7 @@ scn-flag control); ``output.views`` dropped (duplicate of
 centroid is hand-contact filtered); ``depth_tint`` carries explicit
 shallow/deep tint colors (the probe gradient).
 
-v0621: ``camera.pos`` + ``camera.lookat`` (world metres) join the
+``camera.pos`` + ``camera.lookat`` (world metres) join the
 schema -- the absolute-pose free-camera form (the camera aim
 semantics), mutually exclusive with the spherical ``target``/``d``/
 ``el``/``az`` form in the SAME dict.  The backend converts it to the
@@ -146,7 +146,7 @@ def _check_camera(cam, label: str) -> dict:
         raise ValueError(f"{label}: camera.mode must be one of "
                          f"{list(VIEW_MODES)}, got {mode!r}")
     out["mode"] = mode
-    # v0621: the absolute-pose form (pos/lookat, world metres -- the
+    # the absolute-pose form (pos/lookat, world metres -- the
     # camera(aim) semantics) is mutually exclusive with the spherical
     # form (target/d/el/az) in the SAME dict -- co-occurrence is a
     # teaching error, never a silent priority.  The backend converts
@@ -389,7 +389,7 @@ def complete_spec(fragment: dict) -> dict:
            "contact_select": None}
     cam.update(fragment.get("camera", {}))
     if "pos" in cam or "lookat" in cam:
-        # v0621: pos/lookat IS the pose -- the contact_centroid default
+        # pos/lookat IS the pose -- the contact_centroid default
         # target must not linger beside it (the spherical form is
         # excluded from the same dict)
         cam.pop("target", None)
@@ -536,7 +536,7 @@ def resolve_render(render) -> tuple[dict, str]:
 
 def expand_flags_alias(flags: dict) -> dict:
     """Legacy flags triple -> COMPLETE RenderSpec (design §5 migration
-    map; v054 Phase 2: the ONLY surviving flags path -- the CLI
+    map; the ONLY surviving flags path -- the CLI
     ``--flags`` deprecated alias.  The CLI expands its payload through
     this function BEFORE anything hits the wire; the webui/daemon/
     bridge layers have no flags form at all).
@@ -563,7 +563,7 @@ def expand_flags_alias(flags: dict) -> dict:
 
 
 # --------------------------------------------------------------------- #
-# builtin presets + views (probe5-faithful; v054 design §5)
+# builtin presets + views (probe5-faithful; design §5)
 # --------------------------------------------------------------------- #
 _WHITE = [1.0, 1.0, 1.0]
 _CYAN = [0.05, 0.75, 0.95]

@@ -20,7 +20,7 @@ Prop kinds (see articulation.py / ball.py / generic.py):
     passive joints are declared like ``articulation`` (``init`` reset
     face included); ``placement`` is the freejoint qpos0/reset pose.
     Two asset forms: a fragment file carrying the freejoint (the
-    laptop family), or a generated payload (v072 §13 step 3) whose
+    laptop family), or a generated payload whose
     freejoint the backend INJECTS -- the jointless robocasa data
     objects. Both mujoco-only (the isaaclab face refuses with an
     error+hint; generated payloads refuse at setup_scene).
@@ -81,7 +81,7 @@ class PropSpec:
     """Articulation joint declarations (``type: articulation``):
     ``{jname: {mode: passive|actuated, damping?, stiffness?, range?, init?}}``.
     fail-fast: ``actuated`` requires ``stiffness``; a ``passive`` damping
-    is OPTIONAL (v072 s13 step 5: an asset-driven joint -- e.g. the
+    is OPTIONAL (an asset-driven joint -- e.g. the
     composite chains' springdamper -- keeps the asset's own dynamics when
     the declaration is silent); every asset joint must be declared
     (checked at backend bind time, when the asset joint names are known).
@@ -190,7 +190,7 @@ def _prop_shape(spec) -> str:
     """Coarse shape family for the curated scene tree (honest bucket).
 
     Declared-size box family -> box; usd asset -> usd; sphere -> sphere;
-    urdf/mjcf asset -> mesh.  Pure ``PropSpec`` read (v100 G1): both
+    urdf/mjcf asset -> mesh.  Pure ``PropSpec`` read: both
     backend scene faces import this one neutral definition.
     """
     if getattr(spec, "usd_path", None):
@@ -203,14 +203,14 @@ def _prop_shape(spec) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# backward-compatible lazy spawner names (v100 G4)
+# backward-compatible lazy spawner names
 # --------------------------------------------------------------------------- #
 # The isaaclab builders moved to ``backends/isaaclab2/props/spawn.py``.  The
 # old names stay importable from here for existing callers/tests; the import is
 # resolved lazily (and dynamically) so this neutral module keeps no static
 # backend edge and imports no engine at module load.
 def _spawn_module():
-    """Load the isaaclab spawner module on first use (v100 G4 compat)."""
+    """Load the isaaclab spawner module on first use."""
     import importlib
 
     return importlib.import_module("unigym.backends.isaaclab2.props.spawn")
@@ -237,7 +237,7 @@ def _build_actuators(spec: PropSpec, c: dict) -> dict:
 
 
 def _prop_backend(backend: str | None = None) -> PropBackendCap:
-    """Resolve a backend's prop face through the registry (v100 G4).
+    """Resolve a backend's prop face through the registry.
 
     ``backend=None`` resolves the historical isaaclab build face (the
     direct-construction default); the registry factory keeps every engine
@@ -255,7 +255,7 @@ def _prop_backend(backend: str | None = None) -> PropBackendCap:
 
 
 def _compat_class(name: str) -> type:
-    """Resolve a legacy public handler class name (v100 G4 compat)."""
+    """Resolve a legacy public handler class name."""
     return _prop_backend(None).compat(name)
 
 
@@ -543,8 +543,8 @@ def _resolve_spec_paths(spec: PropSpec, base_dir: str | None,
     requires it on the root body) and additionally requires at least
     one declared internal joint.
 
-    A prop carrying a generated payload (``asset`` is not None, v072
-    S2.0) takes the generated branch instead: no asset path exists to
+    A prop carrying a generated payload (``asset`` is not None)
+    takes the generated branch instead: no asset path exists to
     resolve, and the joint-COVERAGE check runs HERE -- the IR joint
     names are known at resolve time, vs bind time for static assets.
     """
@@ -630,14 +630,14 @@ _PASSIVE_IR_JOINTS = frozenset({"hinge", "slide"})
 
 
 def _resolve_generated_spec(spec: PropSpec, asset: AssetDefinition) -> None:
-    """Generated-payload branch (v072 S2.0, design §12.3-2).
+    """Generated-payload branch.
 
     The asset lives in the IR: there is no path to resolve.  Two shapes
     are supported: the anchored ``articulation`` kind (S2.0; every IR
     joint must be declared and every declaration must hit an IR joint
     -- the fragment bind-time coverage gate moved HERE, to resolve
-    time), and the ``free_articulation`` data-object form (v072 §13
-    step 3): the renderer INJECTS the root freejoint (the prop's live
+    time), and the ``free_articulation`` data-object form: the renderer
+    INJECTS the root freejoint (the prop's live
     dof, never declarable).  v074 relaxes the v1 jointless ruling: the
     payload may carry PASSIVE hinge/slide internal joints (the zoo
     laptop's ``lid_hinge``) with exact declared coverage.
@@ -702,7 +702,7 @@ class PropManager:
         self.base_dir = base_dir
         self.specs: list[PropSpec] = []
         self.asset_definitions: dict[str, AssetDefinition] = {}
-        """Generated payloads by prop name (v072 S2.0; empty = all-static)."""
+        """Generated payloads by prop name (empty = all-static)."""
         from .templates import resolve_prop_entries
         for entry, asset in resolve_prop_entries(config):
             spec = PropSpec(**entry)
@@ -724,7 +724,7 @@ class PropManager:
         """Return ``{SceneCfg field: cfg}`` to merge into the scene config.
 
         A prop carrying a generated payload fails fast here (the isaaclab
-        scene form; design v072 §12.3-4): generated payloads are
+        scene form): generated payloads are
         mujoco-only -- the free_articulation refusal precedent (an honest
         refusal beats a silently substituted asset).
         """

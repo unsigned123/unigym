@@ -1,7 +1,7 @@
 """Camera capability gate (v095): the single request-side trait check.
 
-``CameraSpec.count × state`` (docs/designs/v095-camera-capability-model.md
-§3) maps onto the flat ``Trait`` enum; the backend's own declaration table
+``CameraSpec.count × state`` maps onto the flat ``Trait`` enum; the
+backend's own declaration table
 is the only truth.  No second capability type, no second gate.
 """
 from __future__ import annotations

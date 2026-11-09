@@ -1,14 +1,12 @@
 """Scene packs: discovery + the run-config ``scene:`` reference merge.
 
-A scene bundle answers "what is this world" (docs/designs/v067-scene-
-bundle-and-initializers.md §1): the MJ model, the base joint semantics,
+A scene bundle answers "what is this world": the MJ model, the base joint semantics,
 the dynamic props and the reset initializer.  Run configs reference one
 by name (``scene: <family>/<name>``) and the merge routes the bundle's
 blocks into the run config's existing consumption points BEFORE
 placeholder expansion (the pack's ``${UNIGYM_REPO}`` tokens ride the
 same single expansion point as the run yaml).  The actuator laws are
-part of the world declaration (docs/designs/v067-scene-bundle-and-
-initializers.md §3): a bundle WITHOUT its ``backend.mujoco.actuators``
+part of the world declaration: a bundle WITHOUT its ``backend.mujoco.actuators``
 block leaves the seam on its legacy default path, and a run config
 that dropped its ``env.params.actuators`` block on the migration
 intent must therefore fall through to the scene declaration, never
@@ -16,17 +14,17 @@ silently to ``standard_pd``.
 
 =======================  =============================================
 ``backend.mujoco``       routed: ``world_base`` -> the run config TOP
-                         LEVEL (the v101 A1 world declaration); the rest
+                         LEVEL (the world declaration); the rest
                          (``mj_scene``, ``mj_scene_params``, ``base``,
                          ``actuators``) -> ``env.params`` -- backend
                          content lives under ``backend: <name>:`` blocks
                          (per-backend hole; ``mj_scene`` names a REGISTERED
                          scene definition the mujoco backend composes +
-                         attaches into the ``world_base.mjcf`` base spec,
-                         v075 P1; ``mj_scene_params`` rides the provider
-                         dispatch verbatim, v078)
+                         attaches into the ``world_base.mjcf`` base spec;
+                         ``mj_scene_params`` rides the provider
+                         dispatch verbatim)
 ``objects``              the run-level content block (run wins); the
-                         internal name stays ``props`` (v091 D-3)
+                         internal name stays ``props``
 ``initializer``          routed into ``env.params.initializer``
 =======================  =============================================
 
@@ -214,7 +212,7 @@ def apply_scene_bundle(
             f"scene bundle {ref!r}: backend.mujoco.mj_model was removed in "
             f"v101 A1; declare `world_base: {{mjcf: <path>}}` there instead "
             f"(it routes to the run config top level) -- no alias/fallback")
-    # v101 A1: the world asset is run-level, not a backend param.
+    # the world asset is run-level, not a backend param.
     if "world_base" in mujoco_block:
         cfg["world_base"] = _merge(mujoco_block["world_base"],
                                    cfg.get("world_base"))

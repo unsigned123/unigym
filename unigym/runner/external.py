@@ -1,4 +1,4 @@
-"""ExternalRunner: user-driven single-step loop (v097 R3).
+"""ExternalRunner: user-driven single-step loop.
 
 The runner borrows the same :class:`~unigym.runner.sync.SyncRunner` engine
 (reset chain, termination, sink callbacks, RNG order) and adds exactly one

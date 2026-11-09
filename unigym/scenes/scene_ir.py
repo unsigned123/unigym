@@ -2,7 +2,7 @@
 
 Pure data + validation -- standard library only (``dataclasses``,
 ``typing``, ``math``): no engine import, no content import, no IO.  The
-vocabulary is the closed IR of design v085 section 3:
+vocabulary is the closed IR:
 
 * :class:`Instance` -- the ONLY geometry carrier (``generator`` +
   ``params`` + ``pose``), with a mandatory provenance ``source``;
@@ -18,8 +18,8 @@ the ONE explicitly NON-neutral member: it is the engine's escape hatch
 
 The neutral-name guard mirrors the asset-IR neutral-name guard without
 importing it: one mechanical rule, a local copy, so this module stays
-standard-library only (design v075 section 3 shares the rule between the
-asset and scene vocabularies).
+standard-library only (the rule is shared between the asset and scene
+vocabularies).
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ _EngineHints: TypeAlias = Mapping[str, Any]
 INSTANCE_ROLES = ("rigid", "articulated", "terrain", "sensor")
 
 CORE_SLOT_TAGS = ("support", "interior", "opening")
-"""The slot tags the CORE itself understands (v091 #2).
+"""The slot tags the CORE itself understands.
 
 Tags stay FREE by design: a Slot may carry any string, and a pack adds its
 own vocabulary (``front``, ``shelf`` ...) without registering anything --
@@ -185,7 +185,7 @@ def _require_quat(owner: str, value: Sequence[object]) -> tuple[float, ...]:
 
 
 def _require_source(owner: str, value: object, optional: bool = False) -> str:
-    """Validate a ``file:line`` provenance string (design v091 invariant 3)."""
+    """Validate a ``file:line`` provenance string."""
     if optional and value == "":
         return ""
     if not isinstance(value, str) or not value:

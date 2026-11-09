@@ -5,7 +5,7 @@ backend=None)`` returns a :class:`PropManager` for a yaml ``props:``
 section, or ``None`` when the section is absent / disabled / declares no
 types -- so callers can treat the result uniformly.
 
-The handler implementations are backend-owned (v100 G4): the concrete
+The handler implementations are backend-owned: the concrete
 IsaacLab handlers live in ``unigym.backends.isaaclab2.props.handlers`` and
 the MuJoCo side in ``unigym.backends.shared.mjfamily.props.props``.  This package keeps the
 neutral vocabulary (:class:`PropSpec`, :class:`PropManager`, placement,

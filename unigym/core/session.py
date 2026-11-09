@@ -1,6 +1,6 @@
 """core.session -- attached run operations .
 
-docs/designs/v026-unigymd.md §2: the bodies of the client.py SHM-family
+The bodies of the client.py SHM-family
 commands (pause/resume/step/inspect/snapshot/capture/camera) extracted
 behind explicit-argument methods.  A Session is a STATELESS-ATTACH
 object: one temporary SHM attach (design §1(4)), one command at a time

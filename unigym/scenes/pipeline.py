@@ -2,7 +2,7 @@
 
 Standard library plus the sibling neutral modules (``.scene_ir`` and
 ``.generators``) only -- no engine import, no content import.  This is the
-whole bridge design v085 section 4 asks for:
+whole bridge design section 4 asks for:
 
 * :class:`ScenePipeline` builds one :class:`~unigym.scenes.scene_ir.Scene`
   from a :class:`BuildContext` (data, never a handle);
@@ -346,7 +346,7 @@ def validate_binding(
     generator_exists: Callable[[str], bool],
     slot_ids: Iterable[str] | None = None,
 ) -> None:
-    """The four core checks (v085 section 4), fail closed and teaching.
+    """The four core checks (section 4), fail closed and teaching.
 
     Args:
         scene: The scene whose instances are checked.

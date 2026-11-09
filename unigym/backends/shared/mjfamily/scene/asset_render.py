@@ -1,6 +1,6 @@
 """mujoco generated-asset renderer: AssetDefinition IR -> MjSpec elements.
 
-The stage-2 render half (design v072 §12.1): a prop whose resolution
+The stage-2 render half: a prop whose resolution
 produced a neutral :class:`~unigym.props.asset_ir.AssetDefinition` payload
 is BUILT and ATTACHED here instead of loaded from a fragment file.  The
 attach face is REUSED from :mod:`unigym.backends.shared.mjfamily.props.props_articulation`

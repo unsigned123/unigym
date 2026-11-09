@@ -1,4 +1,4 @@
-"""Startup orphan sweep (v0581): stale ``/dev/shm/unigym_*`` segments.
+"""Startup orphan sweep: stale ``/dev/shm/unigym_*`` segments.
 
 Evidence (the 2026-10-16 12:21 daemon restart): yesterday's quota-dead
 collect_cli (pid 2269908, run 69908) survived the restart and lived 14

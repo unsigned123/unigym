@@ -5,7 +5,7 @@ Accumulates per-step (N, D) tensors in memory and flushes one
 float32, bools stay bool, ints stay int. ``meta.json`` (config snapshot +
 ordering info + field dims) is written alongside the first shard.
 
-Undo-aware shard (design v0622-undo-aware-shard §2.1): the
+Undo-aware shard: the
 recording cursor joins the rewind world.  ``commit_state`` distills the
 committed on-disk state to two integers (full shards + the total row
 count); ``restore_commit`` rolls the writer back to a commit state so the
@@ -121,7 +121,7 @@ class ShardWriter:
         self._flush()
 
     # ------------------------------------------------------------------ #
-    # undo-aware shard (design v0622-undo-aware-shard §2.1)
+    # undo-aware shard
     # ------------------------------------------------------------------ #
     def commit_state(self) -> dict:
         """The recording cursor as a checkpoint payload entry: two
@@ -145,7 +145,7 @@ class ShardWriter:
         Fail-fast on a corrupt state / boundary shard: raise BEFORE any
         mutation (the rewind safety net then rolls the whole world back
         -- never a partially truncated shard dir).  The validation is
-        :func:`validate_commit_state` (module level, v063-rewind-preflight:
+        :func:`validate_commit_state` (module level;
         the rewind pre-flight runs the SAME judgment read-only before the
         controller touches the world -- single source, no drift)."""
         n_shards, n_rows, r, head = validate_commit_state(state, self)
@@ -191,7 +191,7 @@ class ShardWriter:
 
 def validate_commit_state(state: dict, writer: ShardWriter) -> tuple:
     """Pure-read validation of a commit state against *writer*'s shard
-    dir + buffer (v063-rewind-preflight: split out of
+    dir + buffer (split out of
     ``ShardWriter.restore_commit`` so the rewind pre-flight can run the
     SAME judgment read-only before the controller touches the world --
     validate and apply single-source).  Returns ``(n_shards, n_rows, r,

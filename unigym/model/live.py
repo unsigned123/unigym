@@ -1,4 +1,4 @@
-"""Live zero-copy proxies over the static model IR (design v098 N3).
+"""Live zero-copy proxies over the static model IR.
 
 ``LiveModel`` binds one :class:`~unigym.model.ir.ModelIR` to a live env
 without copying any static row: every proxy keeps a reference to its

@@ -72,7 +72,7 @@ def _bounds(value, label: str) -> tuple[tuple[float, float, float], tuple[float,
 def _rectangle(region: RegionDefinition, relation: str):
     """Return the region frame: center, extents, yaw, and z limits.
 
-    The v078 F4 face extends the v076 world-aligned boundary to
+    This face extends the v076 world-aligned boundary to
     yaw-only frames (the official sampler works in the fixture frame:
     ``reference_rot`` carries the fixture yaw and the ranges ride it).
     A non-yaw rotation stays refused.
@@ -152,7 +152,7 @@ def sample_placements(
     """Sample placements without backend access or live-state mutation.
 
     Bounds are object-origin-local min/max XYZ tuples. Region geometry
-    may be world-aligned or yaw-only (the v078 F4 face: sampling runs
+    may be world-aligned or yaw-only (sampling runs
     in the region's frame, the official ``reference_rot`` semantics --
     the rule's yaw range is region-relative). The predicate receives
     (rule, origin position, yaw radians, minimum clearance metres) and

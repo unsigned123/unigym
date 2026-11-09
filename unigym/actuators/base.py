@@ -2,8 +2,8 @@
 
 One first-class package (sibling of adapters/benchmarks) --
 the "absolute position target -> per-substep torque/servo ctrl write" law
-retires out of backend hardcode into pluggable actuators
-(docs/designs/v063-gr00t-adapter.md D2/D9).  The action-face semantics are
+retires out of backend hardcode into pluggable actuators.  The action-face
+semantics are
 untouched (NamedAction = absolute position targets; routing stays with the
 backend); an actuator owns ONLY the ctrl slots assigned at bind time, and
 out-of-bounds/duplicate coverage fails fast.

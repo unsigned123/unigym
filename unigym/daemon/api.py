@@ -2,7 +2,7 @@
 
 127.0.0.1:<api_port> (default 8670, unigym.yaml ``daemon_api_port``),
 stdlib http.server in the bridge.py style -- zero new dependencies,
-curl-friendly JSON everywhere (docs/designs/v026-unigymd.md §3).
+curl-friendly JSON everywhere.
 
 the routing lives in MODULE-LEVEL :func:`api_get` /
 :func:`api_post` so the portal (8600 -- the browser's single source)
@@ -39,7 +39,7 @@ def _err(msg: str, code: int = 400, hint: str | None = None) -> tuple[int, dict]
 
 
 def thread_census() -> dict:
-    """Named thread buckets + total (v068 §5 observation face).
+    """Named thread buckets + total (observation face).
 
     Request/SSE handler threads arrive as generic ``Thread-N`` names;
     every unigym-owned loop carries an ``unigymd-*`` name, so the
@@ -66,7 +66,7 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
         # "deaths" = spawn children that exited non-zero
         # (reason = exit code + run-log tail) -- additive key
         # ?history=1 -> the run.json ledger scan face (§1.21)
-        # v068 §4: read faces consume the cached view -- a request
+        # read faces consume the cached view -- a request
         # never triggers a rebuild (the loop publishes every 2s)
         if (qs.get("history") or [""])[0].lower() in ("1", "true"):
             try:
@@ -134,7 +134,7 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
     if route == "/api/status":
         # the pending/running/done buckets are GONE with the
         # submit queue (design §2) -- live view + deaths only;
-        # v068 §5: thread census + live SSE subscription count
+        # thread census + live SSE subscription count
         return 200, {"ok": True, "runs_root": str(svc.runs_root),
                      "shm_runs": svc.view(),
                      "deaths": svc.deaths(),
@@ -234,7 +234,7 @@ def _unknown_view_row(svc, run: str) -> dict | None:
         # cache miss is INCONCLUSIVE: the rebuild loop may lag the serve
         # registry (a just-spawned run writes its serve json before the
         # loop's next tick).  a cheap trace check decides: trace present
-        # -> one fresh rebuild for the honest classification (v049 §1);
+        # -> one fresh rebuild for the honest classification;
         # no trace anywhere -> the attach-time 404 stands.
         from unigym.runtime_dirs import serve_registry_trace
         if serve_registry_trace(rid):
@@ -255,7 +255,7 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
     if op != "shutdown":
         # an UNKNOWN run has no readable command slot -- pause/
         # step/... would fail inside attach anyway; refuse with the
-        # honest 409 instead of a generic attach error (v049 §1)
+        # honest 409 instead of a generic attach error
         row = _unknown_view_row(svc, run)
         if row is not None and row.get("phase") == "UNKNOWN":
             return _err(f"run {run} is UNKNOWN: {row.get('error')}", 409,

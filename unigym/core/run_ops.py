@@ -1,6 +1,6 @@
 """core.run_ops -- run lifecycle: spawn + completion wait .
 
-docs/designs/v026-unigymd.md §2/§6: launch.py `cmd_run`'s body (and the
+launch.py `cmd_run`'s body (and the
 `unigym wait` primitive) as explicit-argument functions.  start_run()
 ALWAYS spawns a detached session (subprocess.Popen(start_new_session=
 True) via SpawnSpec.spawn; no PDEATHSIG anywhere) -- the daemon calls
@@ -73,7 +73,7 @@ class RunSpec:
     # scalars / scalar lists only; the channel cannot touch any config
     # section beyond 'adapter'.
     adapter_params: dict = field(default_factory=dict)
-    # display-only run label (designs/v0611): shown by the WebUI ledger as
+    # display-only run label: shown by the WebUI ledger as
     # label || run_name || run_id.  Pure metadata -- NEVER a path
     # component (run_id/out_dir derivation is untouched); soft-capped at
     # LABEL_MAX chars.  Serialized onto --label at spawn.

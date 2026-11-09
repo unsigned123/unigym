@@ -80,10 +80,10 @@ class GenericProp(PropHandler):
         else:
             self._pos_key = f"{_STATE_PREFIX}_pos_b"
             self._vel_key = f"{_STATE_PREFIX}_vel_b"
-        # additive decision-package feed (design v057 §2): the
-        # orientation key rides the pos key's stem; backends that emit
-        # it (mujoco get_state) serve it, the rest leave obs_cache
-        # without it -- the adapter degrades honestly to quat None
+        # additive decision-package feed: the orientation key rides the
+        # pos key's stem; backends that emit it (mujoco get_state) serve
+        # it, the rest leave obs_cache without it -- the adapter degrades
+        # honestly to quat None
         self._quat_key = self._pos_key.replace("_pos_", "_quat_")
 
     # ------------------------------------------------------------------ #

@@ -72,8 +72,8 @@ _DEFAULTS = {
     "device": "cpu",
     "headless": True,
     "output_root": "data_out",
-    # v068 runtime layout: spawn artifacts live under ONE root
-    # (design docs/designs/v068-runtime-layout.md §2); log_dir/state_dir/
+    # runtime layout: spawn artifacts live under ONE root
+    # log_dir/state_dir/
     # serve_dir derive from it in load_cfg (explicit yaml keys win --
     # unigym.local.yaml's legacy log_dir stays honored).
     "runtime_dir": runtime_dirs.DEFAULT_RUNTIME_DIR,
@@ -190,8 +190,7 @@ def worker_args(serve_camera: str | None, state_dir: str,
     """collect_cli flags for the ALWAYS-ON SHM worker .
 
     The old ``--serve``/``--serve_port``/``--serve_webui``/``--serve_token``
-    spawn flags are gone: every run is a pure SHM worker (design
-    docs/designs/v027-media-gateway.md §2), so only the registry directory,
+    spawn flags are gone: every run is a pure SHM worker, so only the registry directory,
     the run's own log path (registry v2 carries it) and the publishing
     camera remain selectable at spawn time.
     """
@@ -219,7 +218,7 @@ class SpawnSpec:
     env_delta: dict = field(default_factory=dict)
     env_setdefault: bool = False       # True: apply env_delta via setdefault
     use_nohup: bool = False            # isaaclab bg wraps argv with nohup
-    # (docs/designs/v026-unigymd.md §9.2): HARD-set env (daemon GPU
+    # HARD-set env (daemon GPU
     # alloc -- CUDA_VISIBLE_DEVICES must not inherit the daemon's own env,
     # so setdefault semantics are wrong here).  Empty by default: L1
     # snapshots and the historical env behavior are untouched.

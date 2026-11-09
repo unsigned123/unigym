@@ -188,7 +188,7 @@ def query_status(svc, run_id: str) -> tuple[int, dict]:
     rd = gw.reader(run_id) if gw is not None else None
     if rd is None or gw is None:
         # "no such run" would flatten unreadable into absent --
-        # an UNKNOWN view row must say what is actually wrong (v049 §1)
+        # an UNKNOWN view row must say what is actually wrong
         for r in svc.view():
             if r.get("run_id") == run_id and r.get("phase") == "UNKNOWN":
                 return _err(f"run {run_id} is UNKNOWN: {r.get('error')}",
@@ -428,7 +428,7 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
             passthrough += ["--steps", str(int(ov["steps"]))]
         if ov.get("instruction"):
             passthrough += ["--instruction", str(ov["instruction"])]
-        # run label (designs/v0611): the wizard face carries overrides.label,
+        # run label: the wizard face carries overrides.label,
         # the replay face a flat top-level body.label (same thread --
         # RunSpec.label -> collect_cli --label; the run process writes
         # it into run.json/meta.json, the daemon only reads it back).
@@ -489,7 +489,7 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
 
 
 def _preflight(spec, warnings) -> tuple[int, dict]:
-    """Server-side debug preflight (docs/designs/v026-unigymd.md §9.5).
+    """Server-side debug preflight.
 
     Defense in depth: reruns the client's preflight in the daemon
     before spawning.
@@ -620,7 +620,7 @@ def history_rows(svc, limit: int = DEFAULT_HISTORY_LIMIT) -> tuple[int, dict]:
     started_ts desc, top ``limit``.
     """
     limit = max(1, min(int(limit or DEFAULT_HISTORY_LIMIT), 1000))
-    # v068 §4: the CACHED view (the rebuild loop publishes every 2s) --
+    # the CACHED view (the rebuild loop publishes every 2s) --
     # a request must not pay for a rebuild; fresh=True stays reserved
     # for admin ops.
     live_by_id = {r["run_id"]: r for r in svc.view(fresh=False)
@@ -664,7 +664,7 @@ def _history_row(rec: dict, live: dict | None) -> dict:
     row["task_face"] = live.get("task_face") or row["task_face"]
     row["pid"] = live.get("pid") or row["pid"]
     row["started_ts"] = float(live.get("start_ts") or row["started_ts"])
-    # an UNKNOWN live row carries its read-failure text (v049 §1)
+    # an UNKNOWN live row carries its read-failure text
     row["error"] = live.get("error") or None
     return row
 
@@ -693,7 +693,7 @@ def _live_history_row(live: dict) -> dict:
 
 
 def shutdown_unknown(svc, run: str) -> tuple[int, dict] | None:
-    """Shutdown fallback for UNKNOWN runs (design v049 §1).
+    """Shutdown fallback for UNKNOWN runs.
 
     The segment exists but cannot attach (older VERSION / corrupt), so
     there is no command slot -- the kill IS the pid signal, with

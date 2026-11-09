@@ -198,8 +198,7 @@ class BackendCapabilities:
                                     # Round B B1: mujoco only; isaaclab v1 stays
                                     # False -> the rewind gate fail-fasts)
     actuator_seam: bool = False     # pluggable ctrl laws (env.params.actuators,
-                                    # unigym/actuators; docs/designs/
-                                    # v063-gr00t-adapter.md D2 -- mujoco only
+                                    # unigym/actuators; mujoco only
                                     # for now, isaaclab maps ActuatorBase later)
 
     @classmethod
@@ -207,7 +206,7 @@ class BackendCapabilities:
         """All capabilities enabled (the isaaclab backend).
 
         ``snapshot`` is deliberately excluded: the rewind superpower is
-        mujoco-only in Round B (design v052-round-b §1.1) and ``full()``
+        mujoco-only in Round B and ``full()``
         must keep describing exactly the isaaclab capability set.
         """
         return cls(events=True, props=True, recorder=True,
@@ -562,7 +561,7 @@ def _requests_pluggable_actuators(
 ) -> bool:
     """Does ``env.params.actuators`` declare a non-default ctrl law?
 
-    Capability-gate inference (v063 D2): software laws beyond standard_pd
+    Capability-gate inference: software laws beyond standard_pd
     (computed_torque_pd / native_servo / custom registrations) are
     mujoco-only for now; a standard-only declaration rides the shared
     default face and never gates.  Missing ``type`` counts as standard

@@ -1,8 +1,8 @@
 """``unigym asset``: the L0 asset primitive's query and pin faces.
 
 The launcher owns the argparse wiring (``unigym/scripts/launch.py``); this
-module owns four commands over the derived catalog (v086 §5) and the
-selection lock (v086 §6):
+module owns four commands over the derived catalog and the
+selection lock:
 
     unigym asset catalog build [--out DIR]
     unigym asset catalog search [--kind K] [--tag T ...] [--pack P]
@@ -261,7 +261,7 @@ def _payload_base(document: Mapping, asset_dir: Path) -> Path:
 def _payload_path(entry: dict) -> Path:
     """Resolve one file asset's primary payload to an absolute path.
 
-    The id path is relative to the owning pack root (v086 R0), so the
+    The id path is relative to the owning pack root, so the
     manifest sits at ``<root>/<id path>/asset.yaml`` and the payload path is
     relative to that directory.
     """

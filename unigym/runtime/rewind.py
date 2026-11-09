@@ -1,6 +1,6 @@
 """Rewind face: the snapshot/rewind/snapshots command handlers (Round B).
 
-The time-travel superpower (design v052-round-b §1): a step boundary
+The time-travel superpower: a step boundary
 snapshot of the WHOLE run state, and a restore that forks the timeline
 back to it.  Everything the next ``adapter.act`` consumes is covered:
 
@@ -14,15 +14,15 @@ back to it.  Everything the next ``adapter.act`` consumes is covered:
   ``on_rewind(restored_tick)`` resync hook (in-flight skill drop -> hold,
   EventCompiler seq rollback, TimeAccount/TimeControl resync, ledger
   rewind marker);
-* providers -- :class:`RewindStateProvider` facilities (design
-  v057-rewind-v2 §1): each provider's ``rewind_state()`` joins the SAME
+* providers -- :class:`RewindStateProvider` facilities: each provider's
+  ``rewind_state()`` joins the SAME
   checkpoint payload (one freeze point, one package) and is applied
   after the adapter during the restore; any failure aborts the whole
   rewind (fail-fast, the safety net rolls engine + adapter + providers
   back).  The abandoned branch's provider buffers are dumped under
   ``<out_dir>/attempts/`` BEFORE the restore (dump, don't discard).
 
-Pre-flight two-phase (design v063-rewind-preflight): the whole refusal
+Pre-flight two-phase: the whole refusal
 surface -- the controller-level cross-episode
 guard, per-provider state presence, per-provider ``validate_rewind_state``
 (the SAME judgment its apply enforces) -- runs READ-ONLY before the
@@ -123,7 +123,7 @@ __all__ = ["RewindStateProvider", "RewindController", "RewindGateError",
 
 @runtime_checkable
 class RewindStateProvider(Protocol):
-    """One facility's rewindable state (design v057-rewind-v2 §1.1).
+    """One facility's rewindable state.
 
     The checkpoint ring snapshots the ENGINE + ADAPTER state; every other
     facility that accumulates state a restored timeline must agree with
@@ -153,7 +153,7 @@ class RewindStateProvider(Protocol):
     def validate_rewind_state(self, state: SnapshotValue) -> None:
         """Pre-flight half of the two-phase rewind.
 
-        Design v063-rewind-preflight: refuse a
+        Refuse a
         rewind this provider could not apply, READ-ONLY, before the
         controller touches the world -- a refusal here is a zero-change
         rejection (no sidecar dump, no safety capture, no restore).
@@ -393,7 +393,7 @@ class RewindController:
         payload = rec["payload"]
         restored_tick = int(payload["tick"])
 
-        # pre-flight two-phase (design v063-rewind-preflight): the WHOLE
+        # pre-flight two-phase: the WHOLE
         # refusal surface runs read-only
         # BEFORE the sidecar dump, the safety capture or any restore --
         # a rejected rewind is a ZERO-CHANGE rejection.  F4's root was
@@ -531,8 +531,7 @@ class RewindController:
                         f"timeline"}
 
     # ---------------------------------------------------------------- #
-    # pre-flight two-phase: zero-change rejection (design
-    # v063-rewind-preflight)
+    # pre-flight two-phase: zero-change rejection
     # ---------------------------------------------------------------- #
     def _preflight_rewind(self, sid: int, payload: RewindPayload) -> None:
         """The refusal surface, READ-ONLY, before dump/capture/restore.

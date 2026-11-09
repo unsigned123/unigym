@@ -213,7 +213,7 @@ def build_ops(env, director_ops) -> DirectorPropOps:
     """Factory: instantiate the INJECTED per-backend ops face.
 
     ``director_ops`` is the zero-argument ``BackendInfo.director_ops``
-    factory resolved by the run layer (v101 A1.5).  This helper never
+    factory resolved by the run layer.  This helper never
     inspects ``env`` to guess a backend.
     """
     if director_ops is None:

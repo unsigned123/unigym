@@ -5,7 +5,7 @@ An appearance entry is pure JSON::
     {"select": {"body_prefix": "right_"}, "rgba": [1, 1, 1, 1.0],
      "matid": -1}
 
-selector vocabulary (v054 design §3): ``body`` (exact body name) /
+selector vocabulary: ``body`` (exact body name) /
 ``body_prefix`` / ``class("collision"|"visual")`` (resolved through the
 load-time reclassification's contype/conaffinity audit rule -- the SAME
 rule as the flags face) / ``all``.

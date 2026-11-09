@@ -144,8 +144,7 @@ def status() -> dict:
 def cmd_daemon(a) -> int:
     """`unigym daemon start|stop|status` subcommand dispatch.
 
-    The thin CLI's ONLY local process commands
-    (docs/designs/v026-unigymd.md §4).
+    The thin CLI's ONLY local process commands.
 
     Args:
         a: argparse namespace from launch.py (`a.daemon_cmd`,

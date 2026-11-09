@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """doctor_cli.py -- `unigym doctor`: health check / discovery / overlay
-writer (docs/designs/v041-exec-profiles.md §4).
+writer.
 
     unigym doctor                    # exam: executors + platform (exit 1 = FAIL)
     unigym doctor --suggest          # print a unigym.local.yaml fragment
@@ -350,7 +350,7 @@ def discover(cfg: dict) -> dict:
         # envs that cannot be carriers anyway (no unigym).
         info["has"]["torch"] = (_import_ok(info["python"], "torch")
                                 if info["has"]["unigym"] else False)
-        # the MuJoCo Warp backend carrier (v094 P3): probe only where the
+        # the MuJoCo Warp backend carrier: probe only where the
         # base mujoco stack exists (mujoco_warp imports mujoco + warp).
         info["has"]["mujoco_warp"] = (
             _import_ok(info["python"], "mujoco_warp")

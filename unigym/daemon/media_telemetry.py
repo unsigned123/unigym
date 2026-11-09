@@ -1,8 +1,7 @@
 """daemon.media_telemetry -- frame-path telemetry counters .
 
 publish/consumed rates + dropped-frame (gap) accounting for the media
-gateway's shared :class:`~unigym.daemon.media.RunFrames` reader (design
-docs/designs/v029-frame-telemetry.md §3).  Extracted from media.py --
+gateway's shared :class:`~unigym.daemon.media.RunFrames` reader.  Extracted from media.py --
 which is deliberately self-contained but already at scale -- the same
 spirit as webrtc.py: pure bookkeeping over (fid, t) observations, no
 I/O and no SHM access of its own, fully unit-testable with fake fid

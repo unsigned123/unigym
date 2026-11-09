@@ -8,7 +8,7 @@ addresses?") without stepping physics.
 
 Output faces are pure ``Table`` reprs (no pandas); ``--json`` emits the
 canonical IR document (hex floats, stable keys, backend extensions).
-The assembled IR is the COMPILED one since v098 M2 (addresses / masses /
+The assembled IR is the COMPILED one (addresses / masses /
 ids filled); ``--compiled`` is retained as an explicit synonym of that
 live-model description.
 """
@@ -131,8 +131,8 @@ def _set_json(model_set) -> dict:
 def _compiled_model(instance):
     """Return the compiled-model description for the live env.
 
-    Resolves the backend's ``model_handle`` face from the registry (v101
-    A1.5) instead of sniffing env attributes.
+    Resolves the backend's ``model_handle`` face from the registry
+    instead of sniffing env attributes.
 
     Raises:
         SystemExit: The backend exposes no compiled model handle.

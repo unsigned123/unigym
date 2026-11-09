@@ -2,7 +2,7 @@
 """executors.py -- launch-shape profiles, decoupled from backends.
 
 backend = engine code path; executor = how one python process is
-materialized (docs/designs/v041-exec-profiles.md).  An Executor wraps the
+materialized.  An Executor wraps the
 collect_cli primitive argv ["-m", "unigym.scripts.collect_cli", ...] into
 the concrete command via wrap(), maps host->env paths via map_path(), and
 reports doctor diagnostics via check().  Four kinds (whitelist-structured,

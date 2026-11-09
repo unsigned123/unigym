@@ -1,8 +1,8 @@
-"""Asset catalog: the rebuildable fact index over asset manifests (v086 §5).
+"""Asset catalog: the rebuildable fact index over asset manifests.
 
 The catalog answers "what exists" -- it is derived from ``unigym.asset/1``
 manifests and generator metadata and can be rebuilt at any time.  It never
-records a selection: that is the decision layer (v086 §6), which pins a
+records a selection: that is the decision layer, which pins a
 catalog digest and resolves to explicit ids.
 
 This module is L0.  It imports the standard library plus
@@ -30,7 +30,7 @@ SCHEMA = "unigym.catalog/1"
 """The catalog document schema id."""
 
 CARRIERS = frozenset({"file", "generator"})
-"""The two asset carriers (v086 §2.1): fixed payload vs computed payload."""
+"""The two asset carriers: fixed payload vs computed payload."""
 
 CATALOG_NAME = "catalog.json"
 """The catalog document file name inside an output directory."""
@@ -200,7 +200,7 @@ def build_catalog(entries: Iterable[dict]) -> dict:
 
     Raises:
         CatalogError: An entry is malformed (and the message names it), or
-            two entries share one asset id (ids are unique, v086 R0).
+            two entries share one asset id (ids are unique).
     """
     normalized: list[dict] = []
     seen: dict[str, int] = {}

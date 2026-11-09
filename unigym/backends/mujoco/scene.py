@@ -6,7 +6,7 @@ tree, all READ-ONLY over the existing ``mj_model``/``mj_data`` (the
 zero-engine boundary -- this module never writes to the model, the
 data, or any manager).  mujoco stays a lazy function-body import.
 
-Curated depth (design v045-scene-face §1): robot (base + joints folded
+Curated depth: robot (base + joints folded
 into G1 groups) / props (type + declared joints + shape family) /
 contact groups (resolved member bodies) / cameras (the bridge's
 instantiated rig names).  Addressing reuses the existing accessors --

@@ -1,4 +1,4 @@
-"""Selection specs and locks: the decision layer over the asset catalog (v086 §6).
+"""Selection specs and locks: the decision layer over the asset catalog.
 
 The catalog answers "what exists" and is rebuildable from the manifests.  A
 selection answers "which of those did we choose, and by what rule" -- a
@@ -40,7 +40,7 @@ SCHEMA = "unigym.selection/1"
 """The selection lock schema id."""
 
 SPEC_KEYS = ("name", "selector")
-"""The keys a selection spec carries (a closed set, v086 §6)."""
+"""The keys a selection spec carries (a closed set)."""
 
 SELECTOR_KEYS = ("kind", "tags", "any_tags", "pack", "choose", "seed")
 """The keys a selector carries; ``choose`` is the only required one."""

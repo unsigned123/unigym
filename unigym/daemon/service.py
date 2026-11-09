@@ -1,6 +1,6 @@
 """daemon.service -- DaemonService: the unigymd process body .
 
-Owns four pieces (docs/designs/v026-unigymd.md §3):
+Owns four pieces:
 
 * control API server   (127.0.0.1:<api_port>, routes in api.py)
 * webui portal server  (127.0.0.1:<webui_port>, pages in portal.py)
@@ -14,8 +14,7 @@ Owns four pieces (docs/designs/v026-unigymd.md §3):
 
 Supervision is REPORT-ONLY (§1(5)): a dead run is logged and the view
 marks it; no restart policy is enabled by default.  (The submit
-queue -- pending/running/done jobs + the claim loop -- is GONE:
-designs/v043-run-record.md §2.)
+queue -- pending/running/done jobs + the claim loop -- is GONE.)
 """
 from __future__ import annotations
 
@@ -44,7 +43,7 @@ from . import state as dstate
 from .events import EventBus
 
 #: a spawn that never registered a fresh heartbeat within this wall
-#: budget is half-dead: killed + reaped instead of ghosting (v0581: the
+#: budget is half-dead: killed + reaped instead of ghosting (a
 #: 13:46 spawn hung unclaimed for 28 minutes)
 SPAWN_HANDSHAKE_TIMEOUT_S = 120.0
 
@@ -116,7 +115,7 @@ class DaemonService:
             else queries.REPO_ROOT / root
         self._stop = threading.Event()
         self._view: list[dict] = []
-        # v068 (design §4): the published read cache -- the rebuild loop
+        # the published read cache -- the rebuild loop
         # refreshes it on its own cadence; HTTP read faces consume it
         # WITHOUT rebuilding per request.  `_view` stays the write target
         # of every _rebuild (fresh=True admin ops included).
@@ -247,7 +246,7 @@ class DaemonService:
         # (the runs_root pending/running/done subdirs are no
         # longer created -- the submit queue is gone, design §2; runs
         # record themselves in their own output_dir instead)
-        # v068 §2: the artifact tree is mkdir -p'ed here (idempotent);
+        # the artifact tree is mkdir -p'ed here (idempotent);
         # failures only log -- per-writer call sites re-run their
         # one-level mkdir, so the daemon still comes up.
         _log(f"runtime tree: {runtime_dirs.ensure_tree_safe(self.cfg, _log)}")
@@ -266,7 +265,7 @@ class DaemonService:
         else:
             print("[webui] portal auth=none (no token)", flush=True)
 
-    # -- startup orphan sweep (v0581) -----------------------------------
+    # -- startup orphan sweep -----------------------------------
     def _probe_ports(self) -> list[int]:
         """Peer daemon API ports to consult for the orphan sweep.
 
@@ -348,7 +347,7 @@ class DaemonService:
                 with contextlib.suppress(Exception):
                     self._webrtc.close()
         finally:
-            # the reap guarantee (v0581): every direct child is waited
+            # the reap guarantee: every direct child is waited
             # on the way down -- no spawn dies unobserved because the
             # daemon was shutting down
             with contextlib.suppress(Exception):
@@ -363,7 +362,7 @@ class DaemonService:
 
         ``fresh=True`` forces a rebuild -- ADMIN-OP ONLY (GPU alloc,
         shutdown interlocks); the HTTP read faces read the cached view
-        the rebuild loop publishes (design v068 §4: a request never pays
+        the rebuild loop publishes (a request never pays
         for a rebuild).  ``_rebuild`` maintains ``_cached_view`` and
         ``_view`` together, so the cache alone is authoritative here.
         """
@@ -401,7 +400,7 @@ class DaemonService:
         return view
 
     def _fill_unknown_from_ledger(self, view: list[dict]) -> None:
-        """Keep UNKNOWN rows actionable (design v049 §1).
+        """Keep UNKNOWN rows actionable.
 
         A segment that exists but cannot be read cannot speak for
         itself, and its serve registry may already be gone (clean
@@ -503,7 +502,7 @@ class DaemonService:
             except Exception as e:                 # noqa: BLE001
                 _log(f"rebuild failed: {e!r}")
 
-    # -- retention sweeper (v068 §6) -------------------------------------
+    # -- retention sweeper -------------------------------------
     def _retention_loop(self) -> None:
         """Hourly pass: aged artifacts go, live-run paths are protected.
 
@@ -516,9 +515,9 @@ class DaemonService:
                                                  log=_log),
             log=_log)
 
-    # -- spawn handshake watchdog (v0581) -------------------------------
+    # -- spawn handshake watchdog -------------------------------
     def _watch_spawn_handshakes(self) -> None:
-        """Spawn handshake watchdog (v0581).
+        """Spawn handshake watchdog.
 
         A spawned run must register a FRESH heartbeat within
         ``handshake_timeout_s`` -- past that it is a half-dead spawn:
@@ -903,7 +902,7 @@ class DaemonService:
 
         Lifecycle: one gateway per daemon (event-loop thread +
         pump thread started once); ``ice_servers`` rides the daemon
-        cfg (unigym.yaml ``webrtc.ice_servers``, v069 -- default
+        cfg (unigym.yaml ``webrtc.ice_servers`` -- default
         EMPTY, camera_contract §16.6: the aiortc Google-STUN fallback
         is unreachable on the box and costs every answer a flat 5s
         aioice gather; host-only candidates answer in ~20ms).  The
@@ -911,7 +910,7 @@ class DaemonService:
         (ONE attach per run) and never touches the command slot.
         """
         if self._webrtc is None:
-            # v069: stun default EMPTY (camera_contract §16.6) -- the
+            # stun default EMPTY (camera_contract §16.6) -- the
             # aiortc Google-STUN fallback costs every answer a flat 5s
             from .webrtc import WebRtcGateway
             stun = tuple((self.cfg.get("webrtc") or {})
@@ -924,7 +923,7 @@ class DaemonService:
                           poll: float = 1.0) -> dict | None:
         """Wait for a NEW serve registry whose heartbeat is fresh.
 
-        Debug flow, docs/designs/v026-unigymd.md §4.
+        Debug flow.
         """
         deadline = time.time() + timeout
         while time.time() < deadline:

@@ -1,4 +1,4 @@
-"""Test-support faces that ship with the product (v079 §5).
+"""Test-support faces that ship with the product.
 
 The conformance kit lives here rather than under ``tests/`` so the
 contract it asserts is available to a cut source package as well: a

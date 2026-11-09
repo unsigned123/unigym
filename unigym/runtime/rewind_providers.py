@@ -1,4 +1,4 @@
-"""Rewind state providers (design v057-rewind-v2 §1.3).
+"""Rewind state providers.
 
 The sink facilities whose open-episode state a restored timeline must
 agree with.
@@ -34,7 +34,7 @@ Providers (v1 coverage, design §1.3 table):
 * ``CollectSinkProvider`` (name ``episode_runner``) -- the collect
   writer's episode slicing state (``ep_bufs``), same buffer mechanism;
   its ``n_episodes`` fuse counter rides the fork for the same reason.
-  The undo-aware shard design (v0622-undo-aware-shard §2.1) puts the
+  The undo-aware shard design puts the
   SHARD RECORDING CURSOR on the same package (``shard_commit`` =
   ``{committed_shards, committed_rows}`` off the sink's
   :class:`~unigym.io.writer.ShardWriter`).  The restore deletes the
@@ -54,7 +54,7 @@ buffers are episode-scoped lists of per-step slice dicts (numpy/tensor
 free after ``slice_step_for_env`` -- cpu clones), so the round trip is a
 deep copy away from byte-exact.
 
-pre-flight (design v063-rewind-preflight):
+pre-flight:
 both providers implement ``validate_rewind_state(state)`` -- the SAME
 refusal judgment their ``apply_rewind_state`` enforces, run read-only
 by the controller BEFORE the sidecar dump / safety capture / restore
@@ -172,7 +172,7 @@ class _EpisodeBufferProvider:
         return state
 
     def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
-        """Pre-flight (v063-rewind-preflight).
+        """Pre-flight.
 
         The SAME refusal judgment :meth:`apply_rewind_state` enforces,
         run read-only BEFORE the controller touches the world -- a
@@ -317,7 +317,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
     The undo-aware shard design puts the shard recording
     cursor (``ShardWriter.commit_state``, two integers) on the same
     package; its restore truncates the shard directory back to the
-    committed winning timeline (design v0622-undo-aware-shard §2.1).
+    committed winning timeline.
     """
 
     name = "episode_runner"

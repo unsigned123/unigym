@@ -1,12 +1,12 @@
 """Virtual gripper: neutral config face + per-backend factory.
 
-The director's manipulable hand (design v033 §4, contract §4).  Declarative
+The director's manipulable hand (contract §4).  Declarative
 opt-in in the run config::
 
     director:
       gripper: {name: vgrip, size: [...], pos: [...], quat: [...], ...}
 
-The backend implementations live in the backend packages (v100 G5):
+The backend implementations live in the backend packages:
 
 * ``unigym/backends/mujoco/director/gripper.py`` -- the MuJoCo mocap hand
   (non-colliding box + grasp site + camera) and its spec-side injection
@@ -17,8 +17,8 @@ The backend implementations live in the backend packages (v100 G5):
 
 This module stays engine-free at module level: the runtime class is
 INJECTED as the :attr:`unigym.backends.registry.BackendInfo.gripper_backend`
-factory by the backend ops that already knows its identity (v101 A1.5 --
-no env attribute sniffing, no compatibility shim).
+factory by the backend ops that already knows its identity --
+no env attribute sniffing, no compatibility shim.
 """
 from __future__ import annotations
 

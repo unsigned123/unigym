@@ -1,7 +1,6 @@
 """unigymd -- the resident daemon (media gateway).
 
-docs/designs/v026-unigymd.md §3 + docs/designs/v027-media-gateway.md §3:
-three-layer architecture thin-CLI -> unigymd -> N x self-contained run
+Three-layer architecture thin-CLI -> unigymd -> N x self-contained run
 instances; the runs are PURE SHM workers (zero ports, zero
 tokens) and the daemon terminates all browser traffic (single 8600
 source).

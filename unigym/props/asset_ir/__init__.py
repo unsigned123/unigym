@@ -1,7 +1,7 @@
-"""Neutral asset-definition IR for provider-generated prop payloads (v072 S2.0).
+"""Neutral asset-definition IR for provider-generated prop payloads.
 
 Pure data + validation: no IO, no engine import, no path resolution.  A
-provider speaks ONLY this vocabulary (design v072 §12.1) -- the frozen
+provider speaks ONLY this vocabulary -- the frozen
 dataclasses plus the closed type/name guards make it mechanically
 impossible to spell an engine ELEMENT name (``body`` / ``geom`` /
 ``freejoint`` / actuator ShortNames / ...): there is no free-form field a
@@ -45,7 +45,7 @@ tree-element dataclasses in ``_elements``, the declaration tables in
 ``definition``.  Every historical ``unigym.props.asset_ir`` name is
 re-exported here unchanged.
 
-Naming note (v099 M1): the unprefixed names are the historical spelling;
+Naming note: the unprefixed names are the historical spelling;
 new code should use the ``Asset*`` aliases to avoid collision with
 ``unigym.model`` entities.
 """
@@ -90,7 +90,7 @@ from .definition import iter_asset_bodies as iter_asset_bodies
 from .definition import joint_names as joint_names
 from .definition import validate_asset_definition as validate_asset_definition
 
-# Unambiguous aliases (v099 M1): the unprefixed names above are the
+# Unambiguous aliases: the unprefixed names above are the
 # historical spelling; these never shadow the same-named unigym.model
 # entities.
 from ._declarations import MaterialDef as AssetMaterialDef  # noqa: F401

@@ -36,7 +36,7 @@ def default_dir() -> Path:
     """Directory holding death records.
 
     UNIGYM_SERVE_DIR stays honored (the legacy entry); otherwise
-    ``<runtime_dir>/deaths`` (design v068 §3).
+    ``<runtime_dir>/deaths``.
     """
     return runtime_dirs.deaths_dir()
 
@@ -82,7 +82,7 @@ def record(pid: int, exit_code: int | None, signal_num: int | None,
         "reason": reason_head + "\n" + log_tail_lines(log, tail_lines),
     }
     p = death_path(pid, state_dir)
-    p.parent.mkdir(parents=True, exist_ok=True)    # idempotent (v068 §2)
+    p.parent.mkdir(parents=True, exist_ok=True)    # idempotent
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(doc, indent=1))
     os.replace(tmp, p)                              # atomic publish

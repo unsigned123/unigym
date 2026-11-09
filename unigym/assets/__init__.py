@@ -1,4 +1,4 @@
-"""Asset manifests and the L0 asset primitive (design v086, v091 Phase 2).
+"""Asset manifests and the L0 asset primitive.
 
 :mod:`.manifest` is the closed ``unigym.asset/1`` schema gate: one
 manifest = one asset's stable id, carrier kind, shipped files,

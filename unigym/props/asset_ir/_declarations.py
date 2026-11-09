@@ -41,7 +41,7 @@ class TextureDef:
     The name gate is the CONSTRUCTOR NAMESPACE face, not the element
     guard: a texture's compiled identity is the source constructor's
     texture name (robocasa spells them segment-shaped -- ``flat/gray``,
-    ``marble/marble_2_2d``; the v075 P1 verbatim bake must reproduce
+    ``marble/marble_2_2d``; the verbatim bake must reproduce
     them), so each ``/`` segment follows the constructor segment rule
     instead of the whole string.  Payload-local texture declarations
     (the F1-F3 appliance generators) use plain lowercase snake_case
@@ -115,7 +115,7 @@ class MaterialDef:
     every element name); ``None`` is the texture-less color-only
     material (§13 step 3: 378 of the robocasa data-object materials
     carry rgba only).  Appearance attributes are optional; a silent one
-    keeps the engine default.  ``specular`` (v072 §13 step 5) rides the
+    keeps the engine default.  ``specular`` rides the
     same optional-appearance face -- the robosuite CustomMaterial metal
     family authors it beside shininess.
     """

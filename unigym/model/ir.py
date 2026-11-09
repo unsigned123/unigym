@@ -4,7 +4,7 @@ The dataclasses here are pure data (``frozen=True, slots=True``): declared
 fields are populated before compilation, compiled fields stay ``None``
 until a backend's ``describe`` fills them.  A ``ModelIR`` never invents a
 value -- a ``None`` means "this backend has no such concept" or "not
-compiled yet", exactly as design v098 section 9.4 requires.
+compiled yet".
 """
 from __future__ import annotations
 
@@ -845,7 +845,7 @@ class ModelIR:
         self, other: ModelIR, *, include_ext: bool = False,
         ignore_compiled: bool = False,
     ) -> ModelDiff:
-        """Return the face-by-face difference to *other* (design v098 N5).
+        """Return the face-by-face difference to *other*.
 
         Comparing a declared IR with a compiled one is allowed but noisy:
         every compiled-only field shows as a ``None`` -> value change.

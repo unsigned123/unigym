@@ -3,8 +3,8 @@
 A scene pack declares HOW the world initializes each episode through an
 ``initializer:`` block (``type:`` + ``params:``); the engine dispatches it
 through ``INITIALIZER_REGISTRY`` and knows nothing else -- no key names,
-no protocol names, no robot names (docs/designs/v067-scene-bundle-and-
-initializers.md §2, engine contract).  An initializer owns one slice of
+no protocol names, no robot names (engine contract).  An initializer owns one
+slice of
 reset knowledge: geometry resolution, sampling/rejection math and the
 prop placement writes; everything it writes goes through
 :class:`ResetPrimitives` (never raw engine handles).
@@ -73,7 +73,7 @@ class ResetPrimitives:
     is the declared prop-name set (the neutrality check's reference).
     ``joint_group``/``set_targets`` are the robot-side write seams for
     future initializer types -- interface-complete stubs until the
-    robot-body reset migrates (design v067 §5 route).
+    robot-body reset migrates (planned).
     """
 
     model: Any

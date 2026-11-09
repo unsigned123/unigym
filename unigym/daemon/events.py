@@ -1,6 +1,6 @@
 """daemon.events -- the control-plane EventBus + the SSE stream face.
 
-docs/designs/v044-events-sse.md: daemon state changes are
+Daemon state changes are
 fanned out to in-process subscribers as tiny notifications; the SSE
 handler turns one subscription into one HTTP stream on /api/events
 (both faces: the 8670 control API + the 8600 portal mirror).  Events
@@ -35,7 +35,7 @@ from collections import deque
 RING_SIZE = 256                    # replayed history (design §2 self-healing)
 QUEUE_SIZE = 256                   # per-subscriber buffer (drop-oldest)
 PING_S = 15.0                      # ": ping" keepalive cadence
-# v068 §5 thread convergence: a client that vanished without a TCP reset
+# thread convergence: a client that vanished without a TCP reset
 # (half-open) never triggers a write error -- the heartbeat gains the
 # same disconnect detection the MJPEG stream has (media._backlog_ok
 # pattern): a write timeout bounds any blocked write, and the socket's
@@ -219,7 +219,7 @@ def serve_sse(handler, svc, qs: dict) -> None:
     mirror gates the subscription like a POST face -- EventSource cannot
     send headers, so the token rides the query).
 
-    Thread convergence (design v068 §5): a client disconnect surfaces
+    Thread convergence: a client disconnect surfaces
     as (a) a failed write (broken pipe / reset), (b) a write blocked
     past ``SSE_WRITE_TIMEOUT_S`` (socket timeout), or (c) an unacked
     send queue that stops draining across ``SSE_STALL_CHECKS``

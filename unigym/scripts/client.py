@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """client.py -- thin CLI command layer .
 
-Shell/core split end state (docs/designs/v026-unigymd.md §4): every
+Shell/core split end state: every
 subcommand is a CONTROL-API REQUEST + output formatting.  There is NO
 business logic here and NO unigym.core import -- the CLI never attaches
 SHM, never spawns, never reads run state itself; unigymd does all of it

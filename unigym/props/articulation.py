@@ -9,8 +9,8 @@ The articulated-prop kind done through the existing named surfaces:
   (props/door.py) is subsumed by this one -- door.urdf is reused as-is.
   The ``type: usd_articulation`` kind: a native USD articulation asset
   (embedded revolute joints) spawned via ``UsdFileCfg`` with
-  ``fix_root_link`` anchoring -- the HumanoidArena open_door door route
-  (docs/designs/v031-ha-open-door.md). isaaclab-only (the mujoco backend
+  ``fix_root_link`` anchoring -- the HumanoidArena open_door door route.
+  isaaclab-only (the mujoco backend
   has no USD articulation loader and fails fast at spec-build time).
 * **action surface** -- every joint declared ``mode: actuated``
   automatically becomes a NamedAction entry named after the prop
@@ -72,8 +72,8 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
     omits one).  Both backends write ``init`` on every reset (was: an
     unconditional zero).
 
-    v072 §13 step 5 (the composite pilot): a ``passive`` joint's
-    ``damping`` is now OPTIONAL.  The requirement existed for the
+    A ``passive`` joint's ``damping`` is OPTIONAL (the composite pilot).
+    The requirement existed for the
     damping-INJECTION face (a passive joint with no asset-authored
     dynamics needs declared damping to be movable at all); the composite
     chains carry their dynamics IN the asset (the official
@@ -98,7 +98,7 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
             raise ValueError(
                 f"articulation prop {spec.name!r}: actuated joint "
                 f"{jname!r} requires stiffness")
-        # a passive damping is OPTIONAL since v072 s13 step 5: an
+        # a passive damping is OPTIONAL: an
         # asset-driven passive joint (the composite chains' springdamper)
         # declares none -- a required declaration could only override the
         # asset's own mass-derived dynamics with wrong numbers
@@ -130,7 +130,7 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
     if not out and spec.type == "usd_articulation":
         # the usd_articulation kind keeps its >= 1 net here (mirroring
         # the resolve-time gate in props.base).  The anchored kinds
-        # carry no gate anymore since v072 §13 step 4: the jointless
+        # carry no gate anymore: the jointless
         # robocasa Counter is a legitimate anchored fragment with zero
         # joints, and the REAL protection is joint-set coverage, which
         # lives elsewhere and still applies -- generated payloads

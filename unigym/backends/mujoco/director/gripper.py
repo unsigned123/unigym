@@ -1,6 +1,6 @@
 """MuJoCo virtual gripper: spec-side injection + the mocap runtime hand.
 
-The director's manipulable hand (design v033 §4, contract §4).  Declarative
+The director's manipulable hand (contract §4).  Declarative
 opt-in in the run config::
 
     director:

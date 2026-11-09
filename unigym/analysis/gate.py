@@ -1,4 +1,4 @@
-"""Gate metrics + series face (design v040-debug-toolkit-r3 §3).
+"""Gate metrics + series face.
 
 "What gets analyzed" is decided by declarations, not hardcoded:
 

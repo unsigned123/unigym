@@ -5,7 +5,7 @@ returns it; ``SyncRunner.run()`` is the loop around it.  The fields are a
 verbatim mapping of the values the engine already computes per tick -- no
 new semantics, no extra RNG.
 
-``Runner`` is the structural contract every driver implements (v097 R2):
+``Runner`` is the structural contract every driver implements:
 four methods only, no ownership of the underlying ``RunInstance``.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ class StepResult:
 
 @runtime_checkable
 class Runner(Protocol):
-    """Time/control-flow owner of one constructed run (v097 §5).
+    """Time/control-flow owner of one constructed run.
 
     A runner *borrows* a ``RunInstance``: it never closes it.  The four
     methods are the whole contract; new drivers compose them instead of

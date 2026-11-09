@@ -14,7 +14,7 @@ The layout derives from the target's BOX ``geom_size`` (probe4 lesson:
 never from the body AABB -- rotated boxes lie).  Deterministic: same
 context -> same segments (the quadtree and endpoint dedup are stable).
 
-v056 freeze-paradigm fallback (design §3): with NO matching active
+freeze-paradigm fallback (design §3): with NO matching active
 contact the encoding's meaning (distance to the live bite) is gone, so
 the generator returns a NEUTRAL ruler (uniform gray, anchored at the
 body center) instead of raising -- one behavior branch, zero new
@@ -154,7 +154,7 @@ class CageGrid:
         half = np.asarray(model.geom_size[g][:3], dtype=np.float64)
         pos = np.asarray(data.geom_xpos[g])
         rot = np.asarray(data.geom_xmat[g]).reshape(3, 3)
-        # v056 pure-ruler fallback (design v056-freeze-paradigm §3): the
+        # pure-ruler fallback: the
         # full warm/cold/tint encoding MEANS "distance to the live bite"
         # -- with no matching contact that meaning is gone, so the cage
         # degrades to a NEUTRAL ruler anchored at the body center.  One

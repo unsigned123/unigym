@@ -1,4 +1,4 @@
-"""Engine-neutral model IR and its collections (design v098 N0).
+"""Engine-neutral model IR and its collections.
 
 Importing this package must stay light: no mujoco, no torch.  Backend
 providers import their native engine only inside their methods.

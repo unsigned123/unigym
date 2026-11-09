@@ -7,7 +7,7 @@ mapping passes through the ordinary PropSpec and path-validation path.
 A provider MAY additionally return a generated asset payload --
 :class:`PropTemplateResult` carrying a neutral
 :class:`~unigym.props.asset_ir.AssetDefinition` -- as the stage-2 result
-contract (design v072 §7/§12).  A plain mapping stays legal as the
+contract.  A plain mapping stays legal as the
 legacy no-payload form; closed names, typed params, and fail-fast
 validation are unchanged.
 """
@@ -44,7 +44,7 @@ def _validate_template_metadata(name: str, tags: Any, uses: Any,
                                 variants: Any) -> dict[str, Any]:
     """Validate and normalize one template's optional asset metadata.
 
-    Tags and uses follow the ``unigym.asset/1`` rules (v086 R4/R7); the
+    Tags and uses follow the ``unigym.asset/1`` rules (R4/R7); the
     synthetic manifest below reuses :func:`validate_manifest` so the
     registry cannot accept metadata the asset catalog could not index.
     Variants are the sorted index of generated variant names -- the facts
@@ -103,7 +103,7 @@ def register_prop_template(name: str, *, params: dict[str, dict],
     """Register a closed PropSpec builder, its params and asset metadata.
 
     ``tags`` are namespaced manifest tags (``pack:<ns>/tag=<name>``) and
-    ``uses`` are asset ids; both follow ``unigym.asset/1`` (v086 R4/R7).
+    ``uses`` are asset ids; both follow ``unigym.asset/1`` (R4/R7).
     ``variants`` is the sorted index of generated variant names (the facts
     stay in the ``_data`` tables).  The registry stores the three fields
     for the asset catalog; the build path never reads them.
@@ -159,10 +159,9 @@ def _check_number_list(key: str, value: Any, errors: list) -> None:
 
 
 def _check_size_spec(key: str, value: Any, errors: list) -> None:
-    """The official registry size triple (v078 §4 scale face).
+    """The official registry size triple (the scale face).
 
-    Entries are None (native-fallback axis) or finite positive metres,
-    per docs/designs/v078-variant-and-axis-completion.md §4.
+    Entries are None (native-fallback axis) or finite positive metres.
     """
     if (not isinstance(value, (list, tuple))
             or len(value) != 3
@@ -177,7 +176,7 @@ def _check_size_spec(key: str, value: Any, errors: list) -> None:
 
 
 def _check_half_size_spec(key: str, value: Any, errors: list) -> None:
-    """The registry ``handle_config.half_size`` pair (v079 card E).
+    """The registry ``handle_config.half_size`` pair (card E).
 
     Entries are None (the model's raw ``reg_main`` axis) or finite
     positive metres; exactly two entries (the x/y override face of the

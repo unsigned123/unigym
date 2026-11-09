@@ -1,4 +1,4 @@
-"""Director mode: the directable state space (design v033, v046 console).
+"""Director mode: the directable state space.
 
 A Director mounted on a ``--direct`` run turns the scene into a settable
 fixture: props teleport, velocities overwrite, contact sensors override,
@@ -30,7 +30,7 @@ model is byte-identical (regression red line).
 Backend mechanics (teleport/setvel/attach/host-pose addressing) live in
 per-backend :class:`director.ops.DirectorPropOps` implementations.  The
 ops face is INJECTED by the run layer through ``BackendInfo.director_ops``
-(v101 A1.5); the former backend-name branches collapsed
+and the former backend-name branches collapsed
 into one dispatch point, and the weld/kinematic split is a registry trait
 check (``Trait.DIRECTOR_ATTACH_WELD`` / ``..._SLAVE``), not a string
 compare.
@@ -125,7 +125,7 @@ class Director:
             (the bridge's read_status -- used to stamp ``tick`` into the
             command log); optional.
         director_ops: the ``BackendInfo.director_ops`` zero-argument factory
-            injected by the run layer (v101 A1.5).  Required: the neutral
+            injected by the run layer.  Required: the neutral
             Director never inspects ``env`` to discover a backend.
     """
 

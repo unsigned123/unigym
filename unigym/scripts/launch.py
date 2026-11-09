@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """unigym launcher -- one CLI for both backends (thin dispatch shell).
 
-(docs/designs/v026-unigymd.md): thin-CLI architecture -- every
+Thin-CLI architecture -- every
 business subcommand is a unigymd CONTROL-API request + formatting
 (zero unigym.core imports; `unigym daemon start|stop|status` is the
 only local process command).  This file remains ONLY argparse wiring
@@ -51,7 +51,7 @@ Hand contact fix : isaaclab contact sensor_bodies entries may
 Server world (REMOVED): `unigym submit` / `unigym server` and the
 runs/ pending/running/done protocol are gone (zero users; batch =
 `unigym run a.yaml b.yaml ...`).  Run verdicts now live in the run's
-own output_dir (`run.json` ledger; designs/v043-run-record.md):
+own output_dir (`run.json` ledger):
     status           -> live SHM runs + spawn deaths
 Runtime bridge (docs/contracts/runtime_contract.md -- run with --serve):
     runs     -> list live bridge runs (SHM scan + serve registry)
@@ -274,7 +274,7 @@ def _register_status(sub) -> None:
     from unigym.scripts import client as cli
 
     # ---- server world ---------------------------------------------------------
-    # REMOVAL (designs/v043-run-record.md §2): the submit queue is
+    # REMOVAL: the submit queue is
     # gone (zero users; batch = `unigym run a.yaml b.yaml ...`).  The
     # `submit` word stays as an argparse stub so old muscle memory gets
     # the migration hint, not "invalid choice".

@@ -36,7 +36,7 @@ What the catalog locks
   (record-only, never obs).
 * **Contact keys** — ``contact/<name>`` from the wired ContactManager
   (requestable; shapes resolved from the bound backend).
-* **Articulation namespace (v101 A4 rule)** — a run with exactly ONE
+* **Articulation namespace (A4 rule)** — a run with exactly ONE
   policy controller keeps every historical bare key above (byte-identical).
   When the catalog is built for more than one controller, or for a
   non-policy (named/passive) articulation, that articulation's keys use
@@ -473,7 +473,7 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
         articulation: the articulation name every per-articulation robot
             state key is namespaced under (required; v103.5).
         record_sites: optional tuple of MJ site names the backend records
-            (v063 T3.2 EEF site family: ``site/<name>/pos`` world-frame
+            (T3.2 EEF site family: ``site/<name>/pos`` world-frame
             record keys, e.g. the GR1 grip sites the pack criteria's far
             predicates consume).  Record-only (never obs_cache); empty /
             ``None`` (the default) joins nothing -- zero behavior diff.
@@ -547,7 +547,7 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
                                        frame=spec.frame, source="contact")
             requestable.add(ops_key)
 
-    # ---- declared record sites (v063 T3.2 EEF site family): the
+    # ---- declared record sites (T3.2 EEF site family): the
     # backend emits ``site/<name>/pos`` per step; record-only keys
     # (never obs_cache), consumed by pack criteria (FormulaTask keys).
     for name in tuple(record_sites or ()):

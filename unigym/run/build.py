@@ -5,7 +5,7 @@ Turns a frozen :class:`~unigym.run.spec.RunSpec` into a live
 prop/camera/contact managers, env compile, recorder/director/timeline/
 bridge, sink composition, rewind providers and run metadata.  It never
 spawns processes, writes pid markers or parses argv; the CLI/lifecycle owns
-those (docs/designs/v097-run-construction-execution-split.md §6/§7).
+those.
 
 Construction order is the pre-split ``collect_cli.main`` order, moved
 verbatim: prop -> adapter -> camera -> contact -> env ->
@@ -630,7 +630,7 @@ def _build_env_and_sampler(
         recipes: Mapping[str, RobotRecipe] | None = None) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
     # the run output dir resolves BEFORE the backend build: the recorded
-    # scene artifacts (design v091 D14) are written during env construction
+    # scene artifacts are written during env construction
     # and land under <run output dir>/scene/.  The daemon drops the run.json
     # ledger (as run.json.pending-<mypid>) into out_dir BEFORE the worker
     # starts, so "exists"/"non-empty" is no longer the collision signal --
@@ -1041,7 +1041,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     print(f"[collect] terminations: {term_group.names} "
           f"(mode={term_group.mode})", flush=True)
 
-    # label single-writer (designs/v0611): the run process stamps its OWN
+    # label single-writer: the run process stamps its OWN
     # ledger with the display label (pid-aware, no-op without a ledger
     # -- CLI runs keep the label in meta.json only); failures are
     # swallowed by the mutation face (bookkeeping never kills a run).

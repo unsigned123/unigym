@@ -4,8 +4,8 @@ Playground-authority form (playground_official_sonic.py::apply_pd):
 ``tau = kp*(q_target - q) - kd*dq``, clipped to the actuator ctrlrange,
 recomputed from the CURRENT q/dq on every call.  This is the mujoco
 backend's retired inline ``_apply_pd`` body, float-op for float-op
-(docs/designs/v063-gr00t-adapter.md D2: the default law must keep the
-legacy formula/op order -- the MJ4/I2 guard tests lock the identity).
+(the default law must keep the legacy formula/op order -- the MJ4/I2
+guard tests lock the identity).
 The damping term runs through the per-dof damping-stability scale when
 the env provides one (``_damping_stability_scale``) -- a no-op (scale 1)
 for every dof inside the explicit-integration stability bound.

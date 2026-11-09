@@ -282,8 +282,8 @@ class MujocoEnv:
         world_base: the run-level world declaration from the config's
             top-level ``world_base`` (``{mjcf: <path>}``, or a bare path
             string for direct construction).  ``mjcf`` is required; there
-            is no default model (v101 A1 removed ``DEFAULT_MJ_MODEL`` and
-            ``env.params.mj_model``).
+            is no default model (``DEFAULT_MJ_MODEL`` and
+            ``env.params.mj_model`` were removed).
         articulations: the run's ordered neutral articulation specs.
             Entries declaring ``model.mjcf`` are composed into
             the world base before the scene/props/camera injections;
@@ -320,8 +320,7 @@ class MujocoEnv:
             kp / kd: optional per-joint-name-or-regex PD gain overrides.
             hand_kp / hand_kd: optional hand-DOF soft-PD gain overrides
                 (defaults G1_KP_HANDS/G1_KD_HANDS = 20/2).
-            actuators: optional ctrl-law map (docs/designs/
-                v063-gr00t-adapter.md D2/D9).  ABSENT -> the legacy path
+            actuators: optional ctrl-law map.  ABSENT -> the legacy path
                 (standard_pd on the policy + hand joints), bit-identical.
                 Present: {group: {type, regex | joint_names, ...law
                 fields}}; every robot joint (policy + hands) must be
@@ -348,8 +347,7 @@ class MujocoEnv:
                 0.2); elbow_joints / elbow_mix (defaults = the audit's
                 r/l_elbow_pitch 0.7/0.3); placement (SplitA declarative
                 range table, requires wired props).
-            initializer: scene-bundle reset face (docs/designs/
-                v067-scene-bundle-and-initializers.md §2):
+            initializer: scene-bundle reset face:
                 {type: <registry name> | module: "pkg.mod:factory",
                 params: {...}} dispatched through INITIALIZER_REGISTRY
                 (validate -> resolve -> per-episode apply -> the sampled
@@ -678,7 +676,7 @@ class MujocoEnv:
             self._perm_pol2il = torch.zeros(0, dtype=torch.int64)
             self._restricted_to_policy = torch.zeros(0, dtype=torch.int64)
 
-        # ---- actuator seam (docs/designs/v063-gr00t-adapter.md D2/D9):
+        # ---- actuator seam:
         # explicit per-substep ctrl laws over pluggable actuators.  The
         # default laws ALWAYS exist (the retired inline _apply_pd body);
         # a declared env.params.actuators map replaces the loop's write
@@ -1027,7 +1025,7 @@ class MujocoEnv:
         return np.where((ratio > 1.0) & resolvable, 1.0 / (1.0 + ratio), 1.0)
 
     # ------------------------------------------------------------------ #
-    # actuator seam (docs/designs/v063-gr00t-adapter.md D2/D9)
+    # actuator seam
     # ------------------------------------------------------------------ #
     def _settle_substeps(self, n: int) -> None:
         """Zero-action settle loop.
@@ -1367,7 +1365,7 @@ class MujocoEnv:
             torch.arange(self.num_envs, dtype=torch.int64))
 
     # ------------------------------------------------------------------ #
-    # snapshot / restore (Round B B1 rewind; design v052-round-b §1.1)
+    # snapshot / restore (Round B B1 rewind)
     # ------------------------------------------------------------------ #
     def snapshot(self) -> dict:
         """Bit-exact engine snapshot for the rewind face.

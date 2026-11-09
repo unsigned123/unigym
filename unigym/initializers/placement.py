@@ -22,12 +22,12 @@ class PlacementRule:
     The region face names either one region (``region_key``) or an
     ordered candidate list (``region_keys``); a list rule resolves to
     exactly one region per reset through the initializer's RNG
-    (docs/designs/v078-variant-and-axis-completion.md §8, the official
+    (the official
     ``sample_reset_region`` selection face).  ``anchor_percent`` is the
     official ``obj_x_percent``/``obj_y_percent`` anchor: ``[x, y]``
     fractions of the region's free placement extent in [0, 1] (0.5 =
     centered), or ``None`` for uniform sampling.  Each axis may
-    alternatively be ``None`` (v078 F4: the official ``pos`` pairs mix
+    alternatively be ``None`` (the official ``pos`` pairs mix
     anchored and free axes -- ``[null, 1.0]`` anchors y and leaves x
     uniform), so the anchor face is per-axis nullable.
     """

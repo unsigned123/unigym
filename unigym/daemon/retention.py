@@ -1,6 +1,6 @@
-"""daemon.retention -- hourly mtime sweeper for the runtime tree (v068).
+"""daemon.retention -- hourly mtime sweeper for the runtime tree.
 
-Design docs/designs/v068-runtime-layout.md §6: the daemon deletes aged
+The daemon deletes aged
 spawn artifacts so the dedicated tree cannot re-grow the /tmp-root
 problem it replaced:
 
@@ -78,12 +78,12 @@ def service_loop(stop_event, sweep_fn, log=_log) -> None:
 
     The catch-all is load-bearing: a bookkeeping error must never kill
     the sweeper thread (same shape as the daemon's counted rebuild-loop
-    net; v068 §6 -- counted against the v049 catch-all baseline).
+    net -- counted against the catch-all baseline).
     """
     while not stop_event.wait(INTERVAL_S):
         try:
             sweep_fn()
-        except Exception as e:                 # noqa: BLE001 (v068 §6)
+        except Exception as e:                 # noqa: BLE001
             log(f"retention sweep failed: {e!r}")
 
 

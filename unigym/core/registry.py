@@ -1,6 +1,6 @@
 """core.registry -- the run instance view (registry v2).
 
-docs/designs/v027-media-gateway.md §2: state lives in the instances --
+State lives in the instances --
 each run writes its own serve registry v2 (/tmp/unigym-serve-<id>.json,
 unigym/runtime/bridge.py):
 
@@ -19,7 +19,7 @@ and kill-target only, never a liveness signal.
 
 The daemon's instance table is a rebuildable cache of exactly this
 function -- kill -9 of the daemon loses nothing
-(docs/designs/v026-unigymd.md §3: startup
+(startup
 rebuilds the view; manually nohup'd runs are equally visible because
 discovery is registry/SHM based, never parent-child).
 """
@@ -54,7 +54,7 @@ class RunInfo:
     gpu: str | None = None
     # read-failure text for UNKNOWN rows ("" otherwise) -- a
     # segment that exists but cannot be read is actionable state, not
-    # absence (design v049 §0/§1)
+    # absence
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -225,6 +225,6 @@ def clean(state_dir: str | None = None, dry_run: bool = False,
     """Zombie SHM segments + stale registries hygiene (bridge primitive).
 
     ``force`` also removes the unattachable segments reported as
-    version-mismatch / corrupt (design v049 §4)."""
+    version-mismatch / corrupt."""
     return _bridge.clean_zombies(state_dir=state_dir, dry_run=dry_run,
                                  force=force)
