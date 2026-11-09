@@ -5,6 +5,8 @@ providers import their native engine only inside their methods.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .diff import ModelDiff
 from .errors import (
     ModelIRError,
@@ -32,6 +34,13 @@ from .ir import (
 )
 from .table import Table
 from .set import ModelSet
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from .live import LiveBody, LiveJoint, LiveModel, LiveTable
+
+    MujocoModelProvider: Any
 
 
 def __getattr__(name):

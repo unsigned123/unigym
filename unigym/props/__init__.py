@@ -14,6 +14,8 @@ re-exports for the long-standing public class names.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .base import (
     PropHandler,
     PropManager,
@@ -32,6 +34,17 @@ _COMPAT_NAMES = frozenset({
     "BallProp", "BoxProp", "FreeArticulationProp", "GenericProp",
     "PrimitiveProp", "PropArticulation", "UsdArticulationProp",
 })
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    BallProp: Any
+    BoxProp: Any
+    FreeArticulationProp: Any
+    GenericProp: Any
+    PrimitiveProp: Any
+    PropArticulation: Any
+    UsdArticulationProp: Any
 
 
 
