@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYRIGHT_PYTHON_GLOBAL_NODE: "false"
+  UV_LINK_MODE: copy
+
+jobs:
+  precommit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Cache pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Run pre-commit
+        run: .venv/bin/pre-commit run --all-files
+
+  types:
+    name: pyright gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Hard gates and ratchets
+        run: |
+          .venv/bin/python tools/ci/check_pyright.py \
+            --hard pyrightconfig.api.json pyrightconfig.model.json pyrightconfig.scene.json
+
+  types-main-report:
+    name: pyright main report (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Report main config
+        run: .venv/bin/pyright -p pyrightconfig.json
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Run tests
+        run: .venv/bin/python -m pytest tests -q -p no:cacheprovider
+
+  imports:
+    name: import contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Run import-linter
+        run: .venv/bin/lint-imports --no-cache
+
+  package:
+    name: package smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Build wheel
+        run: uv build
+      - name: Install wheel in a clean environment
+        run: |
+          uv venv --python 3.11 /tmp/unigym-wheel-test
+          uv pip install --python /tmp/unigym-wheel-test/bin/python dist/*.whl
+      - name: Import wheel outside the checkout
+        run: |
+          cd /tmp
+          /tmp/unigym-wheel-test/bin/python -c "import unigym; print(unigym.__version__)"

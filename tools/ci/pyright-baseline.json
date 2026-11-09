@@ -1,0 +1,12 @@
+{
+  "runtime": {
+    "config": "pyrightconfig.runtime.json",
+    "errors": 51,
+    "warnings": 29
+  },
+  "run": {
+    "config": "pyrightconfig.run.json",
+    "errors": 26,
+    "warnings": 8
+  }
+}
