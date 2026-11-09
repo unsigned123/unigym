@@ -10,6 +10,7 @@ Importing this module self-registers the engine under ``mujoco`` so the
 backend registry and the neutral registry agree without the core naming
 a backend.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -46,8 +47,7 @@ class MujocoSceneEngine:
         """Build the composed scene product (pre-compile spec + regions)."""
         return compose_scene(scene)
 
-    def attach(self, base: object, composed: ComposedScene, *,
-               frame: str) -> Mapping[str, object]:
+    def attach(self, base: object, composed: ComposedScene, *, frame: str) -> Mapping[str, object]:
         """Join an already composed product into *base* at *frame*."""
         return attach_composed(base, composed, frame)
 
@@ -100,17 +100,20 @@ def resolve_scene_engine(name: str = NAME) -> MujocoSceneEngine:
     if factory is None:
         raise RuntimeError(
             f"backend {name!r}: the backend registry declares no scene engine "
-            f"-- register one before composing a scene")
+            f"-- register one before composing a scene"
+        )
     engine = factory()
     if not isinstance(engine, MujocoSceneEngine):
         raise RuntimeError(
             f"backend {name!r}: the registered scene engine is not a "
-            f"MujocoSceneEngine ({type(engine).__name__})")
+            f"MujocoSceneEngine ({type(engine).__name__})"
+        )
     return engine
 
 
-def compose_and_attach(base: object, scene: Scene,
-                       frame: str | None = None) -> Mapping[str, object]:
+def compose_and_attach(
+    base: object, scene: Scene, frame: str | None = None
+) -> Mapping[str, object]:
     """Compose *scene* through the engine and attach it at one frame.
 
     The historical frame spelling is preserved when *frame* is omitted, so
@@ -118,8 +121,7 @@ def compose_and_attach(base: object, scene: Scene,
     """
     engine = resolve_scene_engine()
     composed = engine.compose(scene)
-    return engine.attach(
-        base, composed, frame=frame or f"Scene_{scene.name}_attach")
+    return engine.attach(base, composed, frame=frame or f"Scene_{scene.name}_attach")
 
 
 register_scene_engine(NAME, MujocoSceneEngine)

@@ -26,6 +26,7 @@ Pose updates: the renderer reads ``d.cam_xpos``/``d.cam_xmat``.  Writing
 ``mjw.camlight`` runs (``mjw.kinematics`` only updates bodies/geoms/sites in
 mujoco-warp 3.17; ``mjw.step`` does refresh them but is far more expensive).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -42,8 +43,18 @@ class WarpRenderer:
     # ``_rebuild``); ``None`` only before that first build.
     _rc: Any
 
-    def __init__(self, mjm, wm, wd, nworld: int, camera_names,
-                 width: int, height: int, *, with_depth: bool = False):
+    def __init__(
+        self,
+        mjm,
+        wm,
+        wd,
+        nworld: int,
+        camera_names,
+        width: int,
+        height: int,
+        *,
+        with_depth: bool = False,
+    ):
         import mujoco_warp as mjw
 
         self._mjw = mjw
@@ -81,8 +92,7 @@ class WarpRenderer:
 
     def reconfigure(self, camera_names=None, width=None, height=None) -> None:
         """Rebuild the context when the active set/resolution changes."""
-        names = (self._names if camera_names is None
-                 else self._normalize(camera_names))
+        names = self._names if camera_names is None else self._normalize(camera_names)
         w = self._width if width is None else int(width)
         h = self._height if height is None else int(height)
         if (names, w, h) == (self._names, self._width, self._height):
@@ -103,8 +113,11 @@ class WarpRenderer:
         self._adr = {
             name: {
                 "rgb": int(np.asarray(self._rc.rgb_adr.numpy()).ravel()[i]),
-                "depth": (int(np.asarray(self._rc.depth_adr.numpy())
-                              .ravel()[i]) if self._with_depth else None),
+                "depth": (
+                    int(np.asarray(self._rc.depth_adr.numpy()).ravel()[i])
+                    if self._with_depth
+                    else None
+                ),
             }
             for i, name in enumerate(self._names)
         }
@@ -118,8 +131,11 @@ class WarpRenderer:
         """``(N, H, W, 3)`` uint8 RGB for one active camera (owned copy)."""
         import warp as wp
 
-        out: Any = wp.zeros((self._nworld, self._height, self._width),
-                            dtype=wp.vec3, device=self._rc.rgb_data.device)
+        out: Any = wp.zeros(
+            (self._nworld, self._height, self._width),
+            dtype=wp.vec3,
+            device=self._rc.rgb_data.device,
+        )
         self._mjw.get_rgb(self._rc, int(camera_index), out)
         arr = np.asarray(out.numpy(), dtype=np.float64)
         arr = np.rint(np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
@@ -132,8 +148,7 @@ class WarpRenderer:
         raw = np.asarray(self._rc.depth_data.numpy(), dtype=np.float32)
         adr = self._adr[self._names[int(camera_index)]]["depth"]
         n_pix = self._height * self._width
-        z = raw[:, adr:adr + n_pix].reshape(self._nworld, self._height,
-                                            self._width).copy()
-        z[z <= 0.0] = np.inf          # no ray hit -> "nothing observed"
-        z[z > float(far)] = np.inf    # contract far-clip sentinel
+        z = raw[:, adr : adr + n_pix].reshape(self._nworld, self._height, self._width).copy()
+        z[z <= 0.0] = np.inf  # no ray hit -> "nothing observed"
+        z[z > float(far)] = np.inf  # contract far-clip sentinel
         return z[:, None, :, :]

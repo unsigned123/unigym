@@ -15,6 +15,7 @@ point (load error, wrong type, missing manifest) raises
 :class:`~unigym.packs.PackError` naming the entry point and the reason;
 it is never silently skipped.
 """
+
 from __future__ import annotations
 
 import os
@@ -111,9 +112,7 @@ def _entrypoint_target(entry_point) -> Path:
         if callable(value):
             value = value()
     except Exception as err:
-        raise PackError(
-            f"unigym.packs entry point {name!r} failed to load: {err}"
-        ) from err
+        raise PackError(f"unigym.packs entry point {name!r} failed to load: {err}") from err
     if not isinstance(value, (str, os.PathLike)):
         raise PackError(
             f"unigym.packs entry point {name!r} must resolve to a "
@@ -122,8 +121,7 @@ def _entrypoint_target(entry_point) -> Path:
     root = Path(value).expanduser()
     if not (root / MANIFEST_NAME).is_file():
         raise PackError(
-            f"unigym.packs entry point {name!r} root has no "
-            f"{MANIFEST_NAME}: {root}"
+            f"unigym.packs entry point {name!r} root has no " f"{MANIFEST_NAME}: {root}"
         )
     return root
 
@@ -134,9 +132,7 @@ def _entrypoint_roots() -> list[Path]:
 
     return [
         _entrypoint_target(entry_point)
-        for entry_point in sorted(
-            entry_points(group=ENTRY_POINT_GROUP), key=lambda ep: ep.name
-        )
+        for entry_point in sorted(entry_points(group=ENTRY_POINT_GROUP), key=lambda ep: ep.name)
     ]
 
 
@@ -171,9 +167,7 @@ def _add_mount(mounts: list[MountedPack], pack: MountedPack, root: Path) -> None
         if _shadow_declared(root):
             mounts[index] = pack
             return
-        raise PackError(
-            f"duplicate pack name {pack.name!r}: {existing.root} and {root}"
-        )
+        raise PackError(f"duplicate pack name {pack.name!r}: {existing.root} and {root}")
     mounts.append(pack)
 
 

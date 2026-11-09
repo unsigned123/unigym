@@ -24,6 +24,7 @@ no code path runs (the env backends gate on ``prop_manager is not None``).
 The BenchmarkSink/CollectSink extra buffering is key-agnostic (passthrough),
 so the keys reach npz shards and FormulaTask metrics without sink changes.
 """
+
 from __future__ import annotations
 
 import torch
@@ -36,14 +37,14 @@ def object_record_keys(prop_manager) -> list[str]:
         name = h.spec.name
         keys += [f"object/{name}/pos", f"object/{name}/quat"]
         # articulation handlers carry the normalized declared joint table
-        for jname in (getattr(h, "joints", None) or {}):
+        for jname in getattr(h, "joints", None) or {}:
             keys.append(f"object/{name}/joints/{jname}")
     return keys
 
 
-def build_object_extra(prop_manager, world_poses: dict,
-                       joint_states: dict | None = None
-                       ) -> dict[str, torch.Tensor]:
+def build_object_extra(
+    prop_manager, world_poses: dict, joint_states: dict | None = None
+) -> dict[str, torch.Tensor]:
     """Assemble the ``object/*`` extras for one step.
 
     Args:

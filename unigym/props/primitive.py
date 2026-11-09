@@ -31,6 +31,7 @@ isaaclab for the single-box kind, generated URDF for container/table, and
 ``SphereCfg`` respectively) so their long-standing configs and state keys
 are unchanged; they share :func:`resolve_mass` for the density vocabulary.
 """
+
 from __future__ import annotations
 
 import math
@@ -48,8 +49,12 @@ DEFAULT_MASS = {"sphere": 0.1, "cylinder": 0.1, "capsule": 0.1, "box": 0.1}
 
 def _positive(value, what: str) -> float:
     """Validate one finite strictly-positive scalar."""
-    if (isinstance(value, bool) or not isinstance(value, (int, float))
-            or not math.isfinite(value) or value <= 0):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise ValueError(f"{what} must be a finite number > 0, got {value!r}")
     return float(value)
 
@@ -62,27 +67,26 @@ def primitive_volume(kind: str, spec: PropSpec) -> float:
     """
     if kind == "sphere":
         radius = _dimension(spec, "radius")
-        return 4.0 / 3.0 * math.pi * radius ** 3
+        return 4.0 / 3.0 * math.pi * radius**3
     if kind == "cylinder":
         radius = _dimension(spec, "radius")
         half = _dimension(spec, "half_height")
-        return math.pi * radius ** 2 * (2.0 * half)
+        return math.pi * radius**2 * (2.0 * half)
     if kind == "capsule":
         radius = _dimension(spec, "radius")
         half = _dimension(spec, "half_height")
-        return (math.pi * radius ** 2 * (2.0 * half)
-                + 4.0 / 3.0 * math.pi * radius ** 3)
+        return math.pi * radius**2 * (2.0 * half) + 4.0 / 3.0 * math.pi * radius**3
     if kind == "box":
-        if (not isinstance(spec.size, (list, tuple)) or len(spec.size) != 3):
+        if not isinstance(spec.size, (list, tuple)) or len(spec.size) != 3:
             raise ValueError(
-                f"prop {spec.name!r} (type 'box'): size must be "
-                f"[sx, sy, sz], got {spec.size!r}")
-        sides = [_positive(v, f"prop {spec.name!r} size component")
-                 for v in spec.size]
+                f"prop {spec.name!r} (type 'box'): size must be " f"[sx, sy, sz], got {spec.size!r}"
+            )
+        sides = [_positive(v, f"prop {spec.name!r} size component") for v in spec.size]
         return sides[0] * sides[1] * sides[2]
     raise ValueError(
         f"prop {spec.name!r}: no primitive volume for kind {kind!r} "
-        f"(known: sphere | cylinder | capsule | box)")
+        f"(known: sphere | cylinder | capsule | box)"
+    )
 
 
 def _dimension(spec: PropSpec, name: str) -> float:
@@ -92,8 +96,8 @@ def _dimension(spec: PropSpec, name: str) -> float:
         value = dict(spec.spawn or {}).get(name)
     if value is None:
         raise ValueError(
-            f"primitive prop {spec.name!r} (type {spec.type!r}): "
-            f"{name} is required")
+            f"primitive prop {spec.name!r} (type {spec.type!r}): " f"{name} is required"
+        )
     return _positive(value, f"prop {spec.name!r} {name}")
 
 
@@ -111,7 +115,8 @@ def resolve_mass(spec: PropSpec, default: float | None = None) -> float:
     if mass is not None and density is not None:
         raise ValueError(
             f"prop {spec.name!r}: spawn.mass and spawn.density are "
-            f"mutually exclusive (declare one)")
+            f"mutually exclusive (declare one)"
+        )
     if mass is not None:
         return _positive(mass, f"prop {spec.name!r} spawn.mass")
     if density is not None:
@@ -120,16 +125,14 @@ def resolve_mass(spec: PropSpec, default: float | None = None) -> float:
     if default is None:
         default = DEFAULT_MASS.get(spec.type)
     if default is None:
-        raise ValueError(
-            f"prop {spec.name!r}: no default mass for kind {spec.type!r}")
+        raise ValueError(f"prop {spec.name!r}: no default mass for kind {spec.type!r}")
     return _positive(default, f"prop {spec.name!r} default mass")
 
 
 def material_colors(spawn: dict) -> tuple[float, float, float]:
     """The cosmetic colour from ``spawn.color`` / ``spawn.rgba``."""
     raw = spawn.get("color", spawn.get("rgba", (0.8, 0.6, 0.2)))
-    return cast("tuple[float, float, float]",
-                tuple(float(v) for v in list(raw)[:3]))
+    return cast("tuple[float, float, float]", tuple(float(v) for v in list(raw)[:3]))
 
 
 def validate_primitive_spec(spec: PropSpec) -> None:
@@ -138,7 +141,7 @@ def validate_primitive_spec(spec: PropSpec) -> None:
         return
     spec.radius = _dimension(spec, "radius")
     spec.half_height = _dimension(spec, "half_height")
-    resolve_mass(spec)   # validates mass/density exclusivity + positivity
+    resolve_mass(spec)  # validates mass/density exclusivity + positivity
 
 
 def __getattr__(name: str):
@@ -146,7 +149,6 @@ def __getattr__(name: str):
     if name in ("PrimitiveProp", "_build_primitive_spawn"):
         from importlib import import_module
 
-        handler = import_module(
-            "unigym.backends.isaaclab2.props.handlers.primitive")
+        handler = import_module("unigym.backends.isaaclab2.props.handlers.primitive")
         return getattr(handler, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

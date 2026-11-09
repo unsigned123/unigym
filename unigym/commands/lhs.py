@@ -13,6 +13,7 @@ Long-run marginal properties vs plain uniform sampling:
     clustering gaps larger than ``1/num_strata`` of the range;
   * each env keeps its own deck per dimension, so envs are independent.
 """
+
 from __future__ import annotations
 
 import torch
@@ -31,10 +32,15 @@ class LHSSampler(CommandSampler):
         num_strata: strata per dimension (deck size). Default 20.
     """
 
-    def __init__(self, dim: int, device, num_envs: int = 1,
-                 ranges: list | None = None,
-                 resample_interval_s: tuple | None = None,
-                 num_strata: int = 20):
+    def __init__(
+        self,
+        dim: int,
+        device,
+        num_envs: int = 1,
+        ranges: list | None = None,
+        resample_interval_s: tuple | None = None,
+        num_strata: int = 20,
+    ):
         super().__init__(dim, device, num_envs)
         if ranges is None or len(ranges) != dim:
             raise ValueError(f"LHSSampler: need {dim} [lo,hi] ranges, got {ranges!r}")
@@ -54,15 +60,15 @@ class LHSSampler(CommandSampler):
 
         # strata decks: (num_envs, dim, num_strata), each row a permutation
         self._decks = torch.argsort(
-            torch.rand(num_envs, dim, self.num_strata, device=device), dim=-1)
+            torch.rand(num_envs, dim, self.num_strata, device=device), dim=-1
+        )
         # next card index per (env, dim)
         self._ptr = torch.zeros(num_envs, dim, dtype=torch.int64, device=device)
 
     def _sample(self, ids: torch.Tensor) -> None:
         n = ids.shape[0]
         # pop next card from each (env, dim) deck
-        cards = self._decks[ids].gather(
-            2, self._ptr[ids].unsqueeze(-1)).squeeze(-1)  # (n, dim)
+        cards = self._decks[ids].gather(2, self._ptr[ids].unsqueeze(-1)).squeeze(-1)  # (n, dim)
         u = torch.rand(n, self.dim, device=self.device)
         x01 = (cards.to(torch.float32) + u) / self.num_strata
         self.cmd[ids] = self._lo + (self._hi - self._lo) * x01
@@ -70,15 +76,15 @@ class LHSSampler(CommandSampler):
         new_ptr = self._ptr[ids] + 1
         exhausted = new_ptr >= self.num_strata
         self._ptr[ids] = torch.where(exhausted, torch.zeros_like(new_ptr), new_ptr)
-        fresh = torch.argsort(
-            torch.rand(n, self.dim, self.num_strata, device=self.device), dim=-1)
+        fresh = torch.argsort(torch.rand(n, self.dim, self.num_strata, device=self.device), dim=-1)
         self._decks[ids] = torch.where(exhausted.unsqueeze(-1), fresh, self._decks[ids])
         # resample timers (same policy as UniformSampler)
         if self.resample_interval_s is None:
             self._timers[ids] = float("inf")
         else:
             self._timers[ids] = self._int_lo + (self._int_hi - self._int_lo) * torch.rand(
-                n, device=self.device)
+                n, device=self.device
+            )
 
     def reset(self, env_ids=None) -> torch.Tensor:
         ids = self._resolve_ids(env_ids)

@@ -6,6 +6,7 @@ are plain attribute readers and are loaded only when a provider method is
 called.  ``mjwarp`` reuses this provider (with ``backend="mjwarp"``)
 because it consumes the same ``MjModel``.
 """
+
 from __future__ import annotations
 
 __all__ = ["MujocoModelProvider"]

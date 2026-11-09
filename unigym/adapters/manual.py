@@ -12,6 +12,7 @@ arbitrary named actions), so it returns the first tensor found in the live
 tensor.  The cache itself is therefore already the observation surface for
 manual drivers.
 """
+
 from __future__ import annotations
 
 import torch
@@ -32,9 +33,15 @@ class ManualAdapter(Adapter):
 
     generates_command = False
 
-    def __init__(self, control_dt: float = 0.02, obs_dim: int = 0,
-                 num_envs: int = 1, device: str = "cpu",
-                 body_parts: dict | None = None, **kwargs):
+    def __init__(
+        self,
+        control_dt: float = 0.02,
+        obs_dim: int = 0,
+        num_envs: int = 1,
+        device: str = "cpu",
+        body_parts: dict | None = None,
+        **kwargs,
+    ):
         # num_envs/device/body_parts are the registry-injected kwargs
         # (build_adapter always supplies them); a manual adapter ignores
         # them -- there is no policy to bind or joint map to use.
@@ -73,7 +80,8 @@ class ManualAdapter(Adapter):
         raise RuntimeError(
             "ManualAdapter.act must never be called; drive "
             "ExternalRunner.step(actions) / SyncRunner.tick(actions_override) "
-            "instead")
+            "instead"
+        )
 
     def postprocess_action(self, raw: torch.Tensor) -> dict[str, NamedAction]:
         """Never legal: external drivers bypass adapter postprocessing.
@@ -86,7 +94,8 @@ class ManualAdapter(Adapter):
         raise NotImplementedError(
             "ManualAdapter.postprocess_action must never be called; pass "
             "dict[str, NamedAction] to ExternalRunner.step(actions) / "
-            "SyncRunner.tick(actions_override) instead")
+            "SyncRunner.tick(actions_override) instead"
+        )
 
     def on_reset(self, env_ids) -> None:
         """No history to clear."""

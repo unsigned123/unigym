@@ -8,6 +8,7 @@ this for /api/start, and a daemon restart/upgrade can never take a
 benchmark down (§1(1)/(2)).  The old foreground exec is gone by
 design (§9.7): the CLI has zero local process operations.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,9 +34,11 @@ def check_label(label: object) -> str | None:
     if not isinstance(label, str):
         return f"'label' must be a string, got {type(label).__name__}"
     if len(label) > LABEL_MAX:
-        return (f"'label' is display metadata, keep it <= {LABEL_MAX} "
-                f"chars (got {len(label)}: {label[:60]!r}...) -- it never "
-                "enters the filesystem paths, so brevity is the whole point")
+        return (
+            f"'label' is display metadata, keep it <= {LABEL_MAX} "
+            f"chars (got {len(label)}: {label[:60]!r}...) -- it never "
+            "enters the filesystem paths, so brevity is the whole point"
+        )
     return None
 
 
@@ -49,12 +52,12 @@ class RunSpec:
     only picks the publishing camera.
     """
 
-    config: str                                  # collect yaml path
-    backend: str | None = None                   # None = read from yaml
+    config: str  # collect yaml path
+    backend: str | None = None  # None = read from yaml
     passthrough: list[str] = field(default_factory=list)
-    serve_camera: str | None = None              # publishing camera choice
-    env: dict = field(default_factory=dict)      # HARD env, e.g. CUDA_VISIBLE_DEVICES
-    multi: bool = False                          # multi-config naming suffix
+    serve_camera: str | None = None  # publishing camera choice
+    env: dict = field(default_factory=dict)  # HARD env, e.g. CUDA_VISIBLE_DEVICES
+    multi: bool = False  # multi-config naming suffix
     # daemon scheduling: "auto" -> alloc.pick_gpu (registry+free
     # memory) and a HARD CUDA_VISIBLE_DEVICES; anything else = no GPU
     # allocation (the old default; new knob, off unless requested).
@@ -86,8 +89,7 @@ class RunSpec:
         if not self.config or not isinstance(self.config, str):
             errs.append("'config' must be a non-empty path string")
         if self.backend is not None and self.backend not in cspawn.BACKENDS:
-            errs.append(f"backend must be one of {cspawn.BACKENDS}, "
-                        f"got {self.backend!r}")
+            errs.append(f"backend must be one of {cspawn.BACKENDS}, " f"got {self.backend!r}")
         if any(not isinstance(x, str) for x in self.passthrough):
             errs.append("'passthrough' must be a list of strings")
         if not isinstance(self.paused, bool):
@@ -97,8 +99,8 @@ class RunSpec:
         if not isinstance(self.adapter_params, dict):
             errs.append("'adapter_params' must be an object")
         else:
-            from unigym.adapters import AdapterParamsError, \
-                validate_spawn_params
+            from unigym.adapters import AdapterParamsError, validate_spawn_params
+
             try:
                 validate_spawn_params(self.adapter_params)
             except AdapterParamsError as e:
@@ -114,8 +116,9 @@ class RunSpec:
         known = {f for f in cls.__dataclass_fields__}  # noqa: C416
         unknown = set(d) - known
         if unknown:
-            raise ValueError(f"unknown RunSpec keys: {sorted(unknown)} "
-                             f"(known: {sorted(known)})")
+            raise ValueError(
+                f"unknown RunSpec keys: {sorted(unknown)} " f"(known: {sorted(known)})"
+            )
         return cls(
             config=d.get("config", ""),
             backend=d.get("backend"),
@@ -127,10 +130,12 @@ class RunSpec:
             paused=bool(d.get("paused")),
             direct=bool(d.get("direct")),
             label=(d.get("label") or None),
-            adapter_params=(dict(d.get("adapter_params") or {})
-                            if isinstance(d.get("adapter_params"), (dict,))
-                            or d.get("adapter_params") is None
-                            else cast(dict, d.get("adapter_params"))))
+            adapter_params=(
+                dict(d.get("adapter_params") or {})
+                if isinstance(d.get("adapter_params"), (dict,)) or d.get("adapter_params") is None
+                else cast(dict, d.get("adapter_params"))
+            ),
+        )
 
 
 @dataclass
@@ -146,10 +151,15 @@ class RunHandle:
     state_path: str | None = None
 
     def to_dict(self) -> dict:
-        return {"pid": self.pid, "backend": self.backend,
-                "log_path": self.log_path, "out_dir": self.out_dir,
-                "config": self.config, "container": self.container,
-                "state_path": self.state_path}
+        return {
+            "pid": self.pid,
+            "backend": self.backend,
+            "log_path": self.log_path,
+            "out_dir": self.out_dir,
+            "config": self.config,
+            "container": self.container,
+            "state_path": self.state_path,
+        }
 
 
 def start_run(spec: RunSpec, cfg: dict | None = None) -> RunHandle:
@@ -171,27 +181,40 @@ def start_run(spec: RunSpec, cfg: dict | None = None) -> RunHandle:
     if spec.adapter_params:
         # structured channel -> the collect_cli flag (JSON round-trip is
         # exact for the scalar / scalar-list value domain)
-        passthrough += ["--adapter-params",
-                        json.dumps(spec.adapter_params, sort_keys=True)]
+        passthrough += ["--adapter-params", json.dumps(spec.adapter_params, sort_keys=True)]
     if spec.label:
         passthrough += ["--label", str(spec.label)]
     ss = cspawn.build_spawn(
-        cfg, config_path, backend=spec.backend, passthrough=passthrough,
-        serve_camera=spec.serve_camera, bg=True, multi=spec.multi,
-        paused=spec.paused, direct=spec.direct)
+        cfg,
+        config_path,
+        backend=spec.backend,
+        passthrough=passthrough,
+        serve_camera=spec.serve_camera,
+        bg=True,
+        multi=spec.multi,
+        paused=spec.paused,
+        direct=spec.direct,
+    )
     if spec.env:
         ss.env_force.update(dict(spec.env))
     proc = ss.spawn()
-    return RunHandle(pid=proc.pid, backend=ss.backend,
-                     log_path=str(ss.log_path), out_dir=str(ss.out_dir),
-                     config=str(config_path), container=ss.container,
-                     state_path=str(ss.state_path)
-                     if ss.state_path else None)
+    return RunHandle(
+        pid=proc.pid,
+        backend=ss.backend,
+        log_path=str(ss.log_path),
+        out_dir=str(ss.out_dir),
+        config=str(config_path),
+        container=ss.container,
+        state_path=str(ss.state_path) if ss.state_path else None,
+    )
 
 
-def wait_once(log: str | Path, out_dir: str | Path,
-              container: str | None = None, teardown: bool = True,
-              ) -> dict:
+def wait_once(
+    log: str | Path,
+    out_dir: str | Path,
+    container: str | None = None,
+    teardown: bool = True,
+) -> dict:
     """Single-shot completion check -- the `unigym wait` loop primitive.
 
     The CLI keeps the loop/verdict formatting; this reports the facts:
@@ -205,5 +228,9 @@ def wait_once(log: str | Path, out_dir: str | Path,
     action = None
     if complete and teardown and container:
         action = cspawn.teardown_container(container)
-    return {"complete": complete, "container_state": cstate,
-            "teardown": action, "log_tail": cspawn.log_tail(log)}
+    return {
+        "complete": complete,
+        "container_state": cstate,
+        "teardown": action,
+        "log_tail": cspawn.log_tail(log),
+    }

@@ -39,6 +39,7 @@ unknown mode / ``actuated`` without ``stiffness`` / ``passive`` without
 ``damping`` / an asset joint left undeclared / a declared joint missing
 from the asset / a latch naming a joint outside the declared table.
 """
+
 from __future__ import annotations
 
 import math
@@ -57,18 +58,17 @@ from unigym.props.base import (
 )
 from ..spawn import _build_urdf_spawn
 
+
 class PropArticulation(PropHandler):
     """Anchored articulated prop (root pose + joints state surface)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         self.spec = spec
         self.num_envs = num_envs
         self.device = device
         self.joints = validate_joints(spec)
         """Declared joint table (yaml order preserved)."""
-        self.actuated_joints = [n for n, p in self.joints.items()
-                                if p["mode"] == "actuated"]
+        self.actuated_joints = [n for n, p in self.joints.items() if p["mode"] == "actuated"]
         self.latch = validate_latch(spec, self.joints)
         """Normalized latch table, or None ."""
         self.latch_enabled = self.latch is not None
@@ -92,8 +92,7 @@ class PropArticulation(PropHandler):
             spawn=spawn,
             init_state=c["ArticulationCfg"].InitialStateCfg(
                 pos=(0.0, 0.0, self.placement.height_offset),
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
                 joint_pos={".*": 0.0},
             ),
             actuators=_build_actuators(self.joints, c),
@@ -113,13 +112,15 @@ class PropArticulation(PropHandler):
         if missing:
             raise ValueError(
                 f"articulation prop {self.spec.name!r}: declared joints "
-                f"{missing} not in the asset joints {asset_joints}")
+                f"{missing} not in the asset joints {asset_joints}"
+            )
         undeclared = [n for n in asset_joints if n not in self.joints]
         if undeclared:
             raise ValueError(
                 f"articulation prop {self.spec.name!r}: asset joints "
                 f"{undeclared} are not declared in spec.joints "
-                f"(every asset joint must be declared)")
+                f"(every asset joint must be declared)"
+            )
         self._jidx = {n: asset_joints.index(n) for n in self.joints}
 
     def on_reset(self, env_ids, env) -> None:
@@ -145,24 +146,27 @@ class PropArticulation(PropHandler):
         # declared joint reset state (``init``, default 0.0) for the
         # subset -- position + velocity (the velocity is always zeroed)
         inits = torch.tensor(
-            [self.joints[n]["init"] for n in self.joints],
-            device=env.device, dtype=world_pos.dtype).expand(n, -1)
+            [self.joints[n]["init"] for n in self.joints], device=env.device, dtype=world_pos.dtype
+        ).expand(n, -1)
         self._asset.write_joint_state_to_sim(
-            inits, torch.zeros(n, len(self.joints), device=env.device,
-                               dtype=world_pos.dtype),
+            inits,
+            torch.zeros(n, len(self.joints), device=env.device, dtype=world_pos.dtype),
             joint_ids=[self._jidx[n] for n in self.joints],
-            env_ids=env_ids)
+            env_ids=env_ids,
+        )
         # latch: re-lock (upstream semantics -- reset always re-locks and the
         # unlocked set starts empty; move_open_door reset_open_door_latch)
         for eid in env_ids.tolist():
             self._latch_unlocked.discard(int(eid))
         if self.latch_enabled:
             self._write_drive(
-                env, env_ids,
+                env,
+                env_ids,
                 self.latch["locked"]["stiffness"],
                 self.latch["locked"]["damping"],
                 self.latch["locked"]["friction"],
-                self.latch["lock_joint"])
+                self.latch["lock_joint"],
+            )
 
     # ------------------------------------------------------------------ #
     # latch : per-control-step poll + drive switching
@@ -180,8 +184,7 @@ class PropArticulation(PropHandler):
         """
         if not self.latch_enabled or self._asset is None:
             return
-        pending = [i for i in range(self.num_envs)
-                   if i not in self._latch_unlocked]
+        pending = [i for i in range(self.num_envs) if i not in self._latch_unlocked]
         if not pending:
             return
         deg = self._sense_deg(env)
@@ -196,11 +199,13 @@ class PropArticulation(PropHandler):
             return
         ids = torch.tensor(crossed, dtype=torch.int64, device=env.device)
         self._write_drive(
-            env, ids,
+            env,
+            ids,
             self.latch["unlocked"]["stiffness"],
             self.latch["unlocked"]["damping"],
             self.latch["unlocked"]["friction"],
-            self.latch["lock_joint"])
+            self.latch["lock_joint"],
+        )
         self._latch_unlocked.update(crossed)
 
     def _sense_deg(self, env) -> torch.Tensor | None:
@@ -209,8 +214,9 @@ class PropArticulation(PropHandler):
         jp = self._asset.data.joint_pos
         return jp[:, self._jidx[sense]] * (180.0 / math.pi)
 
-    def _write_drive(self, env, env_ids, stiffness: float, damping: float,
-                     friction: float, joint_name: str) -> None:
+    def _write_drive(
+        self, env, env_ids, stiffness: float, damping: float, friction: float, joint_name: str
+    ) -> None:
         """Write drive gains (+ joint friction) for one joint, one env subset.
 
         Uses the same runtime surfaces the upstream latch uses
@@ -224,27 +230,22 @@ class PropArticulation(PropHandler):
         n = env_ids.shape[0] if torch.is_tensor(env_ids) else len(env_ids)
         dev = env.device
         jid = [self._jidx[joint_name]]
-        vals = torch.full((n, 1), float(stiffness), device=dev,
-                          dtype=torch.float32)
-        self._asset.write_joint_stiffness_to_sim(vals, joint_ids=jid,
-                                                 env_ids=env_ids)
-        vals = torch.full((n, 1), float(damping), device=dev,
-                          dtype=torch.float32)
-        self._asset.write_joint_damping_to_sim(vals, joint_ids=jid,
-                                               env_ids=env_ids)
+        vals = torch.full((n, 1), float(stiffness), device=dev, dtype=torch.float32)
+        self._asset.write_joint_stiffness_to_sim(vals, joint_ids=jid, env_ids=env_ids)
+        vals = torch.full((n, 1), float(damping), device=dev, dtype=torch.float32)
+        self._asset.write_joint_damping_to_sim(vals, joint_ids=jid, env_ids=env_ids)
         if friction != 0.0 or self.latch_enabled:
-            writer = getattr(self._asset,
-                             "write_joint_friction_coefficient_to_sim", None)
+            writer = getattr(self._asset, "write_joint_friction_coefficient_to_sim", None)
             if writer is None:
                 if friction != 0.0:
                     raise RuntimeError(
                         f"articulation prop {self.spec.name!r}: latch "
                         f"friction {friction} requested but the backend "
                         f"articulation lacks "
-                        f"write_joint_friction_coefficient_to_sim")
+                        f"write_joint_friction_coefficient_to_sim"
+                    )
                 return
-            vals = torch.full((n, 1), float(friction), device=dev,
-                              dtype=torch.float32)
+            vals = torch.full((n, 1), float(friction), device=dev, dtype=torch.float32)
             writer(vals, joint_ids=jid, env_ids=env_ids)
 
     def latch_unlocked_mask(self, env) -> torch.Tensor:
@@ -254,8 +255,7 @@ class PropArticulation(PropHandler):
         ``latch_enabled=False -> latch_unlocked=True`` equivalence is the
         FormulaTask's job via its ``required: false`` face).
         """
-        mask = torch.zeros(self.num_envs, dtype=torch.bool,
-                           device=env.device)
+        mask = torch.zeros(self.num_envs, dtype=torch.bool, device=env.device)
         for i in self._latch_unlocked:
             mask[i] = True
         return mask
@@ -264,15 +264,14 @@ class PropArticulation(PropHandler):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame ANCHOR pose."""
         if self._asset is None or not hasattr(self._asset, "data"):
             return None
-        return (self._asset.data.root_pos_w.clone(),
-                self._asset.data.root_quat_w.clone())
+        return (self._asset.data.root_pos_w.clone(), self._asset.data.root_quat_w.clone())
 
     def get_joint_positions(self, env) -> dict[str, torch.Tensor]:
         """``{jname: (N,1) f32}`` joint positions (record/state surface)."""
         if self._asset is None or not hasattr(self._asset, "data"):
             return {}
         jp = self._asset.data.joint_pos
-        return {n: jp[:, i:i + 1].clone() for n, i in self._jidx.items()}
+        return {n: jp[:, i : i + 1].clone() for n, i in self._jidx.items()}
 
     @property
     def state_requests(self) -> list:
@@ -332,8 +331,7 @@ class UsdArticulationProp(PropArticulation):
             spawn=spawn,
             init_state=c["ArticulationCfg"].InitialStateCfg(
                 pos=(0.0, 0.0, self.placement.height_offset),
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
                 joint_pos={".*": 0.0},
             ),
             actuators=_build_actuators(self.joints, c),
@@ -366,8 +364,7 @@ class UsdArticulationProp(PropArticulation):
                 angular_damping=0.0,
                 max_linear_velocity=1000.0,
                 max_angular_velocity=1000.0,
-                max_depenetration_velocity=float(
-                    s.get("max_depenetration_velocity", 5.0)),
+                max_depenetration_velocity=float(s.get("max_depenetration_velocity", 5.0)),
             ),
             articulation_props=ArticulationRootPropertiesCfg(
                 fix_root_link=True,
@@ -416,4 +413,5 @@ class FreeArticulationProp(PropArticulation):
             f"free_articulation prop {self.spec.name!r}: mujoco-only kind "
             f"(the isaaclab articulation spawner keeps no free root: "
             f"fix_root_link=True anchors the laptop, False has no "
-            f"converted-URDF route) -- run this pack on backend: mujoco")
+            f"converted-URDF route) -- run this pack on backend: mujoco"
+        )

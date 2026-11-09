@@ -3,6 +3,7 @@
 numpy-only, zero isaaclab -- offline unit-testable.  Concrete tasks live in
 ``tasks.py`` and self-register via ``@register`` on import.
 """
+
 from __future__ import annotations
 
 from .base import (

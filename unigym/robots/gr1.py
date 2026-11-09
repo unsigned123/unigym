@@ -28,6 +28,7 @@ Action face (T1.2b): the 5-group
   is ``native_servo`` (ctrl = clip(target, ctrlrange); the servo gain
   lives in the MJCF gainprm -- software gains are rejected there).
 """
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -44,9 +45,11 @@ from .gr1_constants import (
 )
 
 
-def make_gr1_profile(default_q: Optional[Dict[str, float]] = None,
-                     body_parts: Optional[Dict] = None,
-                     with_isaaclab: bool = False) -> RobotRecipe:
+def make_gr1_profile(
+    default_q: Optional[Dict[str, float]] = None,
+    body_parts: Optional[Dict] = None,
+    with_isaaclab: bool = False,
+) -> RobotRecipe:
     """Build the GR1 (arms+waist+Fourier hands) RobotRecipe.
 
     Args:
@@ -66,7 +69,8 @@ def make_gr1_profile(default_q: Optional[Dict[str, float]] = None,
             "make_gr1_profile: no isaaclab ArticulationCfg exists for the "
             "GR1 tabletop asset; the isaaclab backend cannot carry the "
             "computed-torque laws yet (design D2 defers the ActuatorModel "
-            "mapping) | hint: run the GR1 campaign on the mujoco backend")
+            "mapping) | hint: run the GR1 campaign on the mujoco backend"
+        )
     joint_pos = dict(GR1_INIT_QPOS)
     # fingers rest at 0 (audit §7: gripper.init_qpos = [0]*11) -- same
     # convention as the G1 profile's hand block
@@ -78,7 +82,8 @@ def make_gr1_profile(default_q: Optional[Dict[str, float]] = None,
             raise ValueError(
                 f"make_gr1_profile: default_q names {unknown} are not GR1 "
                 f"joints | hint: keys are literal names over the 39-joint "
-                f"articulation (17 body + 11 + 11 finger joints)")
+                f"articulation (17 body + 11 + 11 finger joints)"
+            )
         joint_pos.update({k: float(v) for k, v in default_q.items()})
     bp = dict(GR1_BODY_PARTS)
     if body_parts:
@@ -87,11 +92,13 @@ def make_gr1_profile(default_q: Optional[Dict[str, float]] = None,
         articulation_cfg=None,
         # v105: the named joint vocabulary.  ``body`` is the 17 policy
         # joints; the two hand faces keep their exact drive order.
-        joint_sets={"body": tuple(GR1_JOINT_ORDER),
-                    "right_hand": tuple(GR1_RIGHT_HAND_DRIVE_ORDER),
-                    "left_hand": tuple(GR1_LEFT_HAND_DRIVE_ORDER)},
+        joint_sets={
+            "body": tuple(GR1_JOINT_ORDER),
+            "right_hand": tuple(GR1_RIGHT_HAND_DRIVE_ORDER),
+            "left_hand": tuple(GR1_LEFT_HAND_DRIVE_ORDER),
+        },
         default_joint_pos=joint_pos,
-        foot_bodies=[],                      # world-fixed base: no feet
+        foot_bodies=[],  # world-fixed base: no feet
         body_parts=bp,
         # document-order preservation for the full-articulation obs keys;
         # the set union is body+right_hand+left_hand, not MJ document order
@@ -99,8 +106,10 @@ def make_gr1_profile(default_q: Optional[Dict[str, float]] = None,
         # the two hand NamedAction faces (11 drive-order names each; the
         # 6 -> 11 repetition is adapter-side arithmetic over
         # GR1_HAND_EXPANSION -- module docstring)
-        _extra_action_terms={"right_hand": list(GR1_RIGHT_HAND_DRIVE_ORDER),
-                             "left_hand": list(GR1_LEFT_HAND_DRIVE_ORDER)},
+        _extra_action_terms={
+            "right_hand": list(GR1_RIGHT_HAND_DRIVE_ORDER),
+            "left_hand": list(GR1_LEFT_HAND_DRIVE_ORDER),
+        },
     )
 
 

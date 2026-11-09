@@ -30,6 +30,7 @@ Semantics (measured, probe ``scripts/probe_contact_sign.py``):
 * N is always 1 (MujocoEnv is single-env); read_raw returns the
   batched (1, B, ...) array so the manager layer is backend-agnostic.
 """
+
 from __future__ import annotations
 
 import re
@@ -42,8 +43,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco is imported lazily)
     import mujoco
 
 from unigym.contacts.base import ContactGroupSpec
-from unigym.contacts.discovery import (contact_candidate_error,
-                                        mujoco_body_inventory)
+from unigym.contacts.discovery import contact_candidate_error, mujoco_body_inventory
 
 # measured probe result (scripts/probe_contact_sign.py): the 6D force
 # returned by mj_contactForce acts on the geom2 body.
@@ -53,8 +53,7 @@ MJ_FORCE_ON_GEOM2 = True
 # --------------------------------------------------------------------------- #
 # pure conversion helpers (unit-testable without a simulator)
 # --------------------------------------------------------------------------- #
-def contact_frame_to_world(frame3x3: np.ndarray,
-                           f_contact: np.ndarray) -> np.ndarray:
+def contact_frame_to_world(frame3x3: np.ndarray, f_contact: np.ndarray) -> np.ndarray:
     """Contact-frame force -> world frame.
 
     ``frame3x3`` rows are the contact axes (normal, t1, t2) in world
@@ -71,16 +70,17 @@ def rotate_to_frame(vec_w: np.ndarray, quat_wxyz: np.ndarray) -> np.ndarray:
     components are ``R^T @ v_world``.
     """
     w, x, y, z = np.asarray(quat_wxyz, dtype=np.float64)
-    rot = np.asarray([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ])
+    rot = np.asarray(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
     return rot.T @ np.asarray(vec_w, dtype=np.float64)
 
 
-def contact_force_on_body(f_world: np.ndarray, body1: int, body2: int,
-                          body_id: int) -> np.ndarray:
+def contact_force_on_body(f_world: np.ndarray, body1: int, body2: int, body_id: int) -> np.ndarray:
     """Force applied to ``body_id`` from one contact (sign convention).
 
     ``f_world`` is the raw mj_contactForce world rotation (the geom2-body
@@ -115,7 +115,8 @@ class MujocoContactBackend:
             group = path.rsplit(".", 1)[-1]
             raise ValueError(
                 f"body_parts path {path!r}: group {group!r} declares no "
-                f"{cls.backend_key!r} bodies (available: {sorted(gval)})")
+                f"{cls.backend_key!r} bodies (available: {sorted(gval)})"
+            )
         return gval[cls.backend_key]
 
     @classmethod
@@ -158,18 +159,28 @@ class MujocoContactBackend:
 
         body_names = [m.body(i).name for i in range(m.nbody)]
         for spec in self.specs:
-            sensor_ids = _resolve_bodies(m, body_names, spec.sensor_bodies,
-                                         spec.name, "sensor_bodies",
-                                         require_geoms=True,
-                                         inventory_fn=inventory)
+            sensor_ids = _resolve_bodies(
+                m,
+                body_names,
+                spec.sensor_bodies,
+                spec.name,
+                "sensor_bodies",
+                require_geoms=True,
+                inventory_fn=inventory,
+            )
             entry: dict = {"sensor_ids": sensor_ids}
             if spec.mode == "pairwise":
                 filter_ids: list[int] = []
                 for j, entry_regex in enumerate(spec.filter_bodies or ()):
                     ids = _resolve_bodies(
-                        m, body_names, [entry_regex],
-                        spec.name, f"filter_bodies[{j}]", require_geoms=True,
-                        inventory_fn=inventory)
+                        m,
+                        body_names,
+                        [entry_regex],
+                        spec.name,
+                        f"filter_bodies[{j}]",
+                        require_geoms=True,
+                        inventory_fn=inventory,
+                    )
                     filter_ids.extend(ids)
                 entry["filter_ids"] = filter_ids
             self._resolved[spec.name] = entry
@@ -235,13 +246,10 @@ class MujocoContactBackend:
                         continue  # self-pair would double count; not expected
                     f_idx = None
                 mujoco.mj_contactForce(m, d, i, frc6)
-                f_world = contact_frame_to_world(
-                    frames[i].reshape(3, 3), frc6[:3])
-                f_on_sensor = contact_force_on_body(f_world, b1, b2,
-                                                    sensor_ids[s_idx])
+                f_world = contact_frame_to_world(frames[i].reshape(3, 3), frc6[:3])
+                f_on_sensor = contact_force_on_body(f_world, b1, b2, sensor_ids[s_idx])
                 if spec.frame == "body":
-                    f_on_sensor = rotate_to_frame(
-                        f_on_sensor, d.xquat[sensor_ids[s_idx]])
+                    f_on_sensor = rotate_to_frame(f_on_sensor, d.xquat[sensor_ids[s_idx]])
                 if f_idx is None:
                     raw[e, s_idx] += f_on_sensor
                 else:
@@ -300,16 +308,12 @@ class MujocoContactBackend:
                 frame = frames[i].reshape(3, 3)
                 pos = poss[i]
                 f_world = contact_frame_to_world(frame, frc6[:3])
-                f_on_sensor = contact_force_on_body(f_world, b1, b2,
-                                                    sensor_ids[s_idx])
+                f_on_sensor = contact_force_on_body(f_world, b1, b2, sensor_ids[s_idx])
                 if spec.frame == "body":
-                    f_on_sensor = rotate_to_frame(
-                        f_on_sensor, d.xquat[sensor_ids[s_idx]])
+                    f_on_sensor = rotate_to_frame(f_on_sensor, d.xquat[sensor_ids[s_idx]])
                 # tangential relative velocity at the contact point (world)
-                v1 = self._body_point_velocity(mj=m, d=d, body=b1,
-                                               point=pos, vel_buf=vel)
-                v2 = self._body_point_velocity(mj=m, d=d, body=b2,
-                                               point=pos, vel_buf=vel)
+                v1 = self._body_point_velocity(mj=m, d=d, body=b1, point=pos, vel_buf=vel)
+                v2 = self._body_point_velocity(mj=m, d=d, body=b2, point=pos, vel_buf=vel)
                 v_rel = v2 - v1
                 n = np.asarray(frame[0], dtype=np.float64)
                 v_t_vec = v_rel - float(v_rel @ n) * n
@@ -330,8 +334,7 @@ class MujocoContactBackend:
         return out
 
     @staticmethod
-    def _body_point_velocity(mj, d, body: int, point,
-                             vel_buf) -> np.ndarray:
+    def _body_point_velocity(mj, d, body: int, point, vel_buf) -> np.ndarray:
         """World velocity of *body*'s frame origin + the omega lever to point.
 
         ``mj_objectVelocity`` world frame: [ang(3), lin(3)].
@@ -340,8 +343,7 @@ class MujocoContactBackend:
 
         # module-level mj function (an MjModel carries no mj_* methods --
         # the e2e caught this the first time a real contact went active)
-        mujoco.mj_objectVelocity(mj, d, mujoco.mjtObj.mjOBJ_BODY, body,
-                                 vel_buf, 0)
+        mujoco.mj_objectVelocity(mj, d, mujoco.mjtObj.mjOBJ_BODY, body, vel_buf, 0)
         ang = np.asarray(vel_buf[0:3])
         lin = np.asarray(vel_buf[3:6])
         r = np.asarray(point) - np.asarray(d.xpos[body])
@@ -356,9 +358,15 @@ class MujocoContactBackend:
         self._resolved.clear()
 
 
-def _resolve_bodies(m, body_names: list[str], patterns: Sequence[str],
-                    group: str, arg: str, require_geoms: bool,
-                    inventory_fn=None) -> list[int]:
+def _resolve_bodies(
+    m,
+    body_names: list[str],
+    patterns: Sequence[str],
+    group: str,
+    arg: str,
+    require_geoms: bool,
+    inventory_fn=None,
+) -> list[int]:
     """Body ids (model order) fullmatching ANY pattern; fail-fast empty.
 
     ``require_geoms`` rejects bodies without COLLISION geoms (zero geoms,
@@ -369,26 +377,28 @@ def _resolve_bodies(m, body_names: list[str], patterns: Sequence[str],
     a bare list-dump error.
     """
     compiled = [re.compile(p) for p in patterns]
-    ids = [i for i, n in enumerate(body_names)
-           if any(c.fullmatch(n) for c in compiled)]
+    ids = [i for i, n in enumerate(body_names) if any(c.fullmatch(n) for c in compiled)]
     if not ids:
         inventory = (inventory_fn or (lambda: []))()
         raise contact_candidate_error(
-            group, arg, patterns, inventory, "mujoco",
-            reason="matched no MJ body")
+            group, arg, patterns, inventory, "mujoco", reason="matched no MJ body"
+        )
 
     def _no_collision(i: int) -> bool:
         adr, n = int(m.body_geomadr[i]), int(m.body_geomnum[i])
-        return not any(m.geom_contype[g] != 0
-                       for g in range(adr, adr + n) if g >= 0)
+        return not any(m.geom_contype[g] != 0 for g in range(adr, adr + n) if g >= 0)
 
-    empty = [body_names[i] for i in ids
-             if require_geoms and
-             (m.body_geomnum[i] == 0 or _no_collision(i))]
+    empty = [
+        body_names[i] for i in ids if require_geoms and (m.body_geomnum[i] == 0 or _no_collision(i))
+    ]
     if empty:
         inventory = (inventory_fn or (lambda: []))()
         raise contact_candidate_error(
-            group, arg, empty, inventory, "mujoco",
-            reason="have no collision geoms (contacts can never involve "
-                   "them)")
+            group,
+            arg,
+            empty,
+            inventory,
+            "mujoco",
+            reason="have no collision geoms (contacts can never involve " "them)",
+        )
     return ids

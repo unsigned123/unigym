@@ -4,6 +4,7 @@ Split out of ``env.py`` so that module keeps its maintainability index; the
 helpers are stateless (gain tables, action-feed scatter, device resolution,
 option-enum resolution).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -26,6 +27,7 @@ from unigym.robots.g1_constants import (
 def _gather_gain(joint: str, table) -> Optional[float]:
     """First regex (fullmatch) hit in a g1_constants gain group table."""
     import re
+
     for expr, val in table.items():
         if re.fullmatch(expr, joint):
             return float(val)
@@ -60,7 +62,8 @@ def _policy_gains(joint_names, kp_override=None, kd_override=None):
             raise ValueError(
                 f"mujoco backend: no PD gain group matches policy joint "
                 f"{name!r} (kp={kv}, kd={dv}); extend the gain tables or "
-                f"set env.params.kp/kd")
+                f"set env.params.kp/kd"
+            )
         kp.append(kv)
         kd.append(dv)
     return np.asarray(kp, dtype=np.float64), np.asarray(kd, dtype=np.float64)
@@ -70,6 +73,7 @@ def _override_hit(name: str, override) -> Optional[float]:
     if not override:
         return None
     import re
+
     if name in override:
         return float(override[name])
     for expr, val in override.items():
@@ -103,8 +107,7 @@ def _resolve_warp_device(device) -> str:
     elif name == "cuda":
         name = "cuda:0"
     if name != "cpu" and not name.startswith("cuda:"):
-        raise ValueError(
-            f"MjwarpEnv device must be 'cpu' or 'cuda:N', got {device!r}")
+        raise ValueError(f"MjwarpEnv device must be 'cpu' or 'cuda:N', got {device!r}")
     _wp.set_device(name)
     print(f"[mjwarp_env] warp device: {name}", flush=True)
     return name
@@ -119,8 +122,14 @@ def _mj_enum(val):
     if isinstance(val, (int, float)):
         return int(val)
     import mujoco
-    for enum_t in (mujoco.mjtIntegrator, mujoco.mjtCone, mujoco.mjtJoint,
-                   mujoco.mjtSolver, mujoco.mjtEnableBit):
+
+    for enum_t in (
+        mujoco.mjtIntegrator,
+        mujoco.mjtCone,
+        mujoco.mjtJoint,
+        mujoco.mjtSolver,
+        mujoco.mjtEnableBit,
+    ):
         member = getattr(enum_t, str(val), None)
         if member is not None:
             return int(member)
@@ -138,6 +147,5 @@ def _put_warp_model(model, camera_manager, num_envs: int):
 
     n = int(num_envs)
     if camera_manager is not None and n > 1:
-        return mjw.put_model(model, batch_sizes={"cam_pos": n,
-                                                 "cam_quat": n})
+        return mjw.put_model(model, batch_sizes={"cam_pos": n, "cam_quat": n})
     return mjw.put_model(model)

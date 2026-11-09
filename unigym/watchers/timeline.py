@@ -15,6 +15,7 @@ Consumers: ``GET /api/runs/<id>/events`` (daemon, file tail) and
 ``unigym timeline <run>``.  Sinks are read-only observers, so mounting
 the timeline never perturbs recording or physics (no RNG consumption).
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,7 @@ from pathlib import Path
 
 __all__ = ["EventLog", "TimelineSink", "read_tail"]
 
-MAX_DATA_BYTES = 8192          # per-line data guard (fail-safe truncation)
+MAX_DATA_BYTES = 8192  # per-line data guard (fail-safe truncation)
 
 
 class EventLog:
@@ -33,13 +34,27 @@ class EventLog:
         self.path = Path(out_dir) / "events.jsonl" if out_dir else None
         self.count = 0
 
-    def append(self, kind: str, name: str, *, tick: int, env=None,
-               ep: int = 0, level: str | None = None,
-               data: dict | None = None) -> None:
+    def append(
+        self,
+        kind: str,
+        name: str,
+        *,
+        tick: int,
+        env=None,
+        ep: int = 0,
+        level: str | None = None,
+        data: dict | None = None,
+    ) -> None:
         if self.path is None:
             return
-        line = {"tick": int(tick), "ts_wall": round(time.time(), 3),
-                "ep": int(ep), "env": env, "kind": kind, "name": name}
+        line = {
+            "tick": int(tick),
+            "ts_wall": round(time.time(), 3),
+            "ep": int(ep),
+            "env": env,
+            "kind": kind,
+            "name": name,
+        }
         if level is not None:
             line["level"] = level
         raw = json.dumps(data or {}, default=str)
@@ -50,7 +65,7 @@ class EventLog:
             with open(self.path, "a") as f:
                 f.write(json.dumps(line, default=str) + "\n")
             self.count += 1
-        except OSError as e:                       # additive face, never fatal
+        except OSError as e:  # additive face, never fatal
             print(f"[timeline] append failed: {e}", flush=True)
 
 
@@ -64,7 +79,7 @@ def read_tail(path, tail: int = 50, kind: str | None = None) -> list[dict]:
     except OSError:
         return []
     out = []
-    for line in lines[-max(1, int(tail)) * (4 if kind else 1):]:
+    for line in lines[-max(1, int(tail)) * (4 if kind else 1) :]:
         try:
             doc = json.loads(line)
         except ValueError:
@@ -72,7 +87,7 @@ def read_tail(path, tail: int = 50, kind: str | None = None) -> list[dict]:
         if kind and doc.get("kind") != kind:
             continue
         out.append(doc)
-    return out[-int(tail):]
+    return out[-int(tail) :]
 
 
 class TimelineSink:
@@ -100,13 +115,15 @@ class TimelineSink:
         term = bundle.get("terminated")
         if term is not None:
             import torch
-            ids = set(int(i) for i in
-                      torch.nonzero(term).squeeze(-1).tolist()) \
-                if getattr(term, "numel", lambda: 0)() else set()
+
+            ids = (
+                set(int(i) for i in torch.nonzero(term).squeeze(-1).tolist())
+                if getattr(term, "numel", lambda: 0)()
+                else set()
+            )
             fresh = ids - self._prev_terminated
             if fresh:
-                log.append("fall", "terminated", tick=int(t),
-                           data={"envs": sorted(fresh)})
+                log.append("fall", "terminated", tick=int(t), data={"envs": sorted(fresh)})
             self._prev_terminated = ids
         for key in self.contact_keys:
             val = extra.get(key)
@@ -119,8 +136,12 @@ class TimelineSink:
             prev = self._prev_contact.get(key, set())
             fresh = cur - prev
             if fresh:
-                log.append("first_contact", key[len("contact/"):],
-                           tick=int(t), data={"envs": sorted(fresh)})
+                log.append(
+                    "first_contact",
+                    key[len("contact/") :],
+                    tick=int(t),
+                    data={"envs": sorted(fresh)},
+                )
             self._prev_contact[key] = cur
 
     @staticmethod
@@ -135,8 +156,8 @@ class TimelineSink:
         1-D-only path crashed on every multi-body group).
         """
         import numpy as np
-        arr = val.detach().cpu().numpy() if hasattr(val, "detach") \
-            else np.asarray(val)
+
+        arr = val.detach().cpu().numpy() if hasattr(val, "detach") else np.asarray(val)
         if arr.ndim > 1:
             arr = arr.any(axis=-1)
         return {int(i) for i in np.asarray(arr).nonzero()[0].tolist()}
@@ -149,16 +170,17 @@ class TimelineSink:
             envs = [int(i) for i in env_ids.tolist()]
         except AttributeError:
             envs = []
-        self.event_log.append("episode_end", "episode", tick=int(
-            bundle.get("t", -1) if isinstance(bundle, dict) else -1),
-            data={"envs": envs, "episodes": self._episodes})
+        self.event_log.append(
+            "episode_end",
+            "episode",
+            tick=int(bundle.get("t", -1) if isinstance(bundle, dict) else -1),
+            data={"envs": envs, "episodes": self._episodes},
+        )
 
     def on_step_end(self, t, bundle) -> None:
         pass
 
     def on_run_end(self) -> dict:
         if self.event_log is not None:
-            self.event_log.append("run_end", "run", tick=-1,
-                                  data={"episodes": self._episodes})
-        return {"events_written": self.event_log.count
-                if self.event_log is not None else 0}
+            self.event_log.append("run_end", "run", tick=-1, data={"episodes": self._episodes})
+        return {"events_written": self.event_log.count if self.event_log is not None else 0}

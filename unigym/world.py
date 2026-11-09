@@ -25,6 +25,7 @@ declared in ``objects.types``, built by the props manager as a free body
 (freejoint + mass/inertia) and therefore survives
 :meth:`unigym.Run.to_config`.
 """
+
 from __future__ import annotations
 
 import copy
@@ -72,7 +73,8 @@ class WorldFragment(TypedDict, total=False):
 
 
 def _mapping_section(
-    parent: dict[str, JsonValue], key: str,
+    parent: dict[str, JsonValue],
+    key: str,
 ) -> dict[str, JsonValue]:
     """Return a nested JSON mapping child, creating it when absent."""
     value = parent.get(key)
@@ -101,12 +103,14 @@ class _TerrainBuilder:
         if world.built:
             raise RuntimeError(
                 "World.terrain: the world is already built; terrain "
-                "declarations are pre-build only")
+                "declarations are pre-build only"
+            )
         if world._scene_ref is not None or world._mj_scene is not None:
             raise RuntimeError(
                 "World.terrain requires an inline world (World() / "
                 "World.inline(scene)); bundle/generator worlds own their "
-                "ground")
+                "ground"
+            )
         world._ensure_inline()
 
     def _set(self, terrain: Terrain | None) -> World:
@@ -139,8 +143,7 @@ class _TerrainBuilder:
     ) -> World:
         """Use an explicit ``(ny, nx)`` elevation matrix."""
         self._check()
-        return self._set(Terrain.heightmap(
-            heights, size=size, base_z=base_z, name=name, meta=meta))
+        return self._set(Terrain.heightmap(heights, size=size, base_z=base_z, name=name, meta=meta))
 
     def stairs(
         self,
@@ -155,9 +158,18 @@ class _TerrainBuilder:
     ) -> World:
         """Use a staircase climbing +x (see :meth:`Terrain.stairs`)."""
         self._check()
-        return self._set(Terrain.stairs(
-            steps, rise, run, width, base_z=base_z, margin=margin,
-            resolution=resolution, name=name))
+        return self._set(
+            Terrain.stairs(
+                steps,
+                rise,
+                run,
+                width,
+                base_z=base_z,
+                margin=margin,
+                resolution=resolution,
+                name=name,
+            )
+        )
 
     def slope(
         self,
@@ -169,9 +181,9 @@ class _TerrainBuilder:
     ) -> World:
         """Use a linear ramp along +x (see :meth:`Terrain.slope`)."""
         self._check()
-        return self._set(Terrain.slope(
-            angle_deg, size=size, base_z=base_z, resolution=resolution,
-            name=name))
+        return self._set(
+            Terrain.slope(angle_deg, size=size, base_z=base_z, resolution=resolution, name=name)
+        )
 
 
 class World:
@@ -208,7 +220,10 @@ class World:
     # ------------------------------------------------------------------ #
     @classmethod
     def from_pack(
-        cls, ref: str, *, root: Path | None = None,
+        cls,
+        ref: str,
+        *,
+        root: Path | None = None,
     ) -> World:
         """Use a scene-bundle reference (``"<family>/<name>"``)."""
         from unigym.scene_packs import load_scene_bundle
@@ -236,7 +251,9 @@ class World:
 
     @classmethod
     def from_config(
-        cls, source: dict[str, JsonValue] | str | Path, *,
+        cls,
+        source: dict[str, JsonValue] | str | Path,
+        *,
         root: Path | None = None,
     ) -> World:
         """Extract the world half of a run config or scene-bundle path.
@@ -257,8 +274,10 @@ class World:
             raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
             loaded: object = {} if raw_doc is None else raw_doc
             if not is_json_object(loaded):
-                raise ValueError(f"world source {str(source)!r} must be a "
-                                 f"yaml mapping, got {type(loaded).__name__}")
+                raise ValueError(
+                    f"world source {str(source)!r} must be a "
+                    f"yaml mapping, got {type(loaded).__name__}"
+                )
             doc = loaded
             if "run_name" in doc or "env" in doc:
                 return cls._from_run_cfg(doc, root)
@@ -270,7 +289,9 @@ class World:
 
     @classmethod
     def _from_run_cfg(
-        cls, cfg: dict[str, JsonValue], root: Path | None = None,
+        cls,
+        cfg: dict[str, JsonValue],
+        root: Path | None = None,
     ) -> World:
         """Extract a world declaration from a run-config mapping."""
         from unigym.scene_packs import load_scene_bundle
@@ -293,14 +314,16 @@ class World:
             raise ConfigError(
                 "World.from_config: env.params.mj_model was removed in v101 "
                 "A1; declare the run-level `world_base: {mjcf: <path>}` "
-                "(scene bundles: `backend.mujoco.world_base`)")
+                "(scene bundles: `backend.mujoco.world_base`)"
+            )
         mj_scene = params.get("mj_scene")
         world_base = cfg.get("world_base")
         if mj_scene is None and world_base is None:
             raise ValueError(
                 "World.from_config: the config declares no world (expected "
                 "a top-level 'scene:' reference, 'world_base:', or "
-                "env.params.mj_scene)")
+                "env.params.mj_scene)"
+            )
         world = cls()
         world._mj_scene = None if mj_scene is None else str(mj_scene)
         raw_scene_params = params.get("mj_scene_params")
@@ -352,9 +375,9 @@ class World:
             raise RuntimeError(
                 "World.to_scene requires an inline world (World() / "
                 "World.inline(scene)); bundle/generator worlds are owned by "
-                "their providers")
-        if (self._inline_name is None and self._base_scene is None
-                and not self._objects):
+                "their providers"
+            )
+        if self._inline_name is None and self._base_scene is None and not self._objects:
             # dynamic-only world: no static scene to serve, and registering
             # a provider would make the (fully serializable) declaration
             # process-local -- return the transient view instead.
@@ -375,7 +398,8 @@ class World:
         world = self
 
         def provider(
-            slots: Mapping[str, JsonValue], context: SceneContext,
+            slots: Mapping[str, JsonValue],
+            context: SceneContext,
         ) -> Scene:
             """Return this World's current inline scene (runtime provider)."""
             return world._scene_now()
@@ -391,36 +415,29 @@ class World:
             inline_name = self._inline_name
             if inline_name is None:
                 raise RuntimeError(
-                    "World material requested before the inline scene was "
-                    "registered")
+                    "World material requested before the inline scene was " "registered"
+                )
             name = f"inline_mat_{inline_name.rsplit('_', 1)[-1]}"
-            self._inline_material = Material(
-                name, {"kind": "2d", "texture_file": str(texture)})
+            self._inline_material = Material(name, {"kind": "2d", "texture_file": str(texture)})
         return self._inline_material
 
     def _scene_now(self) -> Scene:
         """Compose the current inline scene (objects + base declarations)."""
         base = self._base_scene
-        name = (base.name if base is not None
-                else (self._inline_scene_name or "inline_dynamic"))
-        instances: list[Instance] = (
-            list(base.instances) if base is not None else [])
-        materials: list[Material] = (
-            list(base.materials) if base is not None else [])
+        name = base.name if base is not None else (self._inline_scene_name or "inline_dynamic")
+        instances: list[Instance] = list(base.instances) if base is not None else []
+        materials: list[Material] = list(base.materials) if base is not None else []
         if self._objects:
             material = self._material()
             if material.name not in {m.name for m in materials}:
                 materials.append(material)
-            instances.extend(obj._instance(material.name)
-                             for obj in self._objects)
+            instances.extend(obj._instance(material.name) for obj in self._objects)
         inherited = not self._terrain_explicit and base is not None
-        terrain = (base.terrain if base is not None and inherited
-                   else self._terrain)
+        terrain = base.terrain if base is not None and inherited else self._terrain
         if terrain is not None and not inherited:
             terrain = replace(
-                terrain,
-                meta={**terrain.meta,
-                      "replace_floor": bool(self._terrain_replace_floor)})
+                terrain, meta={**terrain.meta, "replace_floor": bool(self._terrain_replace_floor)}
+            )
         scene = Scene(
             name=name,
             instances=tuple(instances),
@@ -455,13 +472,14 @@ class World:
             obj._name = name
             used.add(name)
         elif obj.name in used:
-            raise ValueError(f"World.add: duplicate object name "
-                             f"{obj.name!r}")
+            raise ValueError(f"World.add: duplicate object name " f"{obj.name!r}")
         else:
             used.add(obj.name)
 
     def add(
-        self, obj: _Primitive, dynamic: bool | None = None,
+        self,
+        obj: _Primitive,
+        dynamic: bool | None = None,
     ) -> _Primitive:
         """Add a primitive to this world; returns the object.
 
@@ -481,17 +499,18 @@ class World:
         """
         if self._built:
             raise RuntimeError(
-                "World.add: the world is already built; object composition "
-                "is pre-build only")
+                "World.add: the world is already built; object composition " "is pre-build only"
+            )
         if not isinstance(obj, _SHAPE_TYPES):
             raise TypeError(
-                f"World.add expects Box/Sphere/Cylinder/Capsule/Plane, "
-                f"got {type(obj).__name__}")
+                f"World.add expects Box/Sphere/Cylinder/Capsule/Plane, " f"got {type(obj).__name__}"
+            )
         if self._scene_ref is not None or self._mj_scene is not None:
             raise RuntimeError(
                 "World.add requires an inline world; from_pack/from_generator "
                 "worlds are immutable declarations. Start with World() / "
-                "World.inline(scene) to compose primitives")
+                "World.inline(scene) to compose primitives"
+            )
         is_dynamic = obj.dynamic if dynamic is None else bool(dynamic)
         used = self._used_names()
         if is_dynamic:
@@ -499,7 +518,8 @@ class World:
                 raise ValueError(
                     f"World.add: plane {obj.name!r} cannot be dynamic -- a "
                     f"plane is infinite static scene geometry; use Box/"
-                    f"Sphere/Cylinder/Capsule for free bodies")
+                    f"Sphere/Cylinder/Capsule for free bodies"
+                )
             self._assign_name(obj, used)
             entry = obj._dynamic_declaration()
             _validate_dynamic_entry(entry)
@@ -509,20 +529,25 @@ class World:
         self._ensure_inline()
         self._assign_name(obj, used)
         # Validate the exact payload the composer will build (one gate).
-        build_payload(obj.kind, {
-            "name": obj.name,
-            **obj._shape_params(),
-            "material": obj.material or self._material().name,
-            "pos": list(obj.pos),
-            "quat": list(obj.quat),
-            "layer": "visual",
-        })
+        build_payload(
+            obj.kind,
+            {
+                "name": obj.name,
+                **obj._shape_params(),
+                "material": obj.material or self._material().name,
+                "pos": list(obj.pos),
+                "quat": list(obj.quat),
+                "layer": "visual",
+            },
+        )
         obj._world = self
         self._objects.append(obj)
         return obj
 
     def add_many(
-        self, objects: Iterable[_Primitive], dynamic: bool | None = None,
+        self,
+        objects: Iterable[_Primitive],
+        dynamic: bool | None = None,
     ) -> list[_Primitive]:
         """Add several primitives in one batch (static and/or dynamic).
 
@@ -542,7 +567,8 @@ class World:
             if not isinstance(obj, _SHAPE_TYPES):
                 raise TypeError(
                     f"World.add_many expects Box/Sphere/Cylinder/Capsule/"
-                    f"Plane, got {type(obj).__name__}")
+                    f"Plane, got {type(obj).__name__}"
+                )
         return [self.add(obj, dynamic=dynamic) for obj in batch]
 
     def articulation(
@@ -597,19 +623,20 @@ class World:
             This world (builder chaining).
         """
         if not isinstance(name, str) or not name:
-            raise ValueError("World.articulation: name must be a non-empty "
-                             "string")
+            raise ValueError("World.articulation: name must be a non-empty " "string")
         if control is not None:
             raise ValueError(
                 f"World.articulation {name!r}: the articulation-level "
                 f"`control` declaration was removed in v104; declare the "
                 f"drive as a top-level `controls:` group "
                 f"(name/adapter/articulation/drive/target) via the "
-                f"adapter/drive/target arguments")
+                f"adapter/drive/target arguments"
+            )
         entry: dict[str, JsonValue] = {"name": name}
         if model is not None:
-            entry["model"] = ({"mjcf": str(model)} if isinstance(model, str)
-                              else copy.deepcopy(dict(model)))
+            entry["model"] = (
+                {"mjcf": str(model)} if isinstance(model, str) else copy.deepcopy(dict(model))
+            )
         if root is not None:
             entry["root"] = str(root)
         if spawn is not None:
@@ -623,12 +650,13 @@ class World:
         if params is not None:
             entry["params"] = copy.deepcopy(dict(params))
         if any(existing["name"] == name for existing in self._articulations):
-            raise ValueError(
-                f"World.articulation: duplicate articulation name {name!r}")
+            raise ValueError(f"World.articulation: duplicate articulation name {name!r}")
         self._articulations.append(entry)
         group: dict[str, JsonValue] = {
-            "name": name, "adapter": str(adapter),
-            "articulation": name, "drive": str(drive),
+            "name": name,
+            "adapter": str(adapter),
+            "articulation": name,
+            "drive": str(drive),
             "target": str(target),
         }
         if joints is not None:
@@ -655,8 +683,9 @@ class World:
         the call is a no-op there.
         """
         if self._scene_ref is None and self._mj_scene is None:
-            self.add(Box((20.0, 20.0, 0.1), name=_unique_name(
-                self, "ground"), pos=(0.0, 0.0, -0.05)))
+            self.add(
+                Box((20.0, 20.0, 0.1), name=_unique_name(self, "ground"), pos=(0.0, 0.0, -0.05))
+            )
             self._flat_ground = True
         else:
             self._flat_ground = True
@@ -746,11 +775,9 @@ class World:
             if self._world_base is not None:
                 fragment["world_base"] = copy.deepcopy(self._world_base)
         if self._articulations:
-            fragment["articulations"] = [
-                copy.deepcopy(entry) for entry in self._articulations]
+            fragment["articulations"] = [copy.deepcopy(entry) for entry in self._articulations]
         if self._controls:
-            fragment["controls"] = [
-                copy.deepcopy(entry) for entry in self._controls]
+            fragment["controls"] = [copy.deepcopy(entry) for entry in self._controls]
         dynamic = self.dynamic_declarations()
         if dynamic:
             fragment["objects"] = dynamic
@@ -769,20 +796,17 @@ class World:
             _merge_controls(cfg, fragment["controls"])
         params = fragment.get("params")
         if params:
-            params_section = _mapping_section(
-                _mapping_section(cfg, "env"), "params")
+            params_section = _mapping_section(_mapping_section(cfg, "env"), "params")
             params_section.update(params)
         dynamic = fragment.get("objects")
         if dynamic:
             # Preserve the config's own spelling (objects: surface wins,
             # legacy props: stays legacy) and append the world's types.
-            key = "objects" if "objects" in cfg or "props" not in cfg \
-                else "props"
+            key = "objects" if "objects" in cfg or "props" not in cfg else "props"
             block = _mapping_section(cfg, key)
             block["enabled"] = True
             raw_types = block.get("types")
-            types_list: list[JsonValue] = (
-                raw_types if isinstance(raw_types, list) else [])
+            types_list: list[JsonValue] = raw_types if isinstance(raw_types, list) else []
             block["types"] = types_list
             dynamic_types = dynamic.get("types")
             if isinstance(dynamic_types, list):
@@ -817,7 +841,8 @@ def _joint_names_from_declaration(
 
 
 def _merge_controls(
-    cfg: dict[str, JsonValue], declared: list[dict[str, JsonValue]],
+    cfg: dict[str, JsonValue],
+    declared: list[dict[str, JsonValue]],
 ) -> None:
     """Merge world-declared control groups into the config list by name."""
     existing = cfg.get("controls")
@@ -825,10 +850,8 @@ def _merge_controls(
         initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
         cfg["controls"] = initial
         return
-    existing_list: list[JsonValue] = (
-        existing if isinstance(existing, list) else [])
-    merged: list[JsonValue] = [
-        copy.deepcopy(entry) for entry in existing_list]
+    existing_list: list[JsonValue] = existing if isinstance(existing, list) else []
+    merged: list[JsonValue] = [copy.deepcopy(entry) for entry in existing_list]
     index: dict[str, int] = {}
     for position, entry in enumerate(merged):
         if isinstance(entry, dict):
@@ -848,7 +871,8 @@ def _merge_controls(
 
 
 def _merge_articulations(
-    cfg: dict[str, JsonValue], declared: list[dict[str, JsonValue]],
+    cfg: dict[str, JsonValue],
+    declared: list[dict[str, JsonValue]],
 ) -> None:
     """Merge world-declared articulations into the config list by name.
 
@@ -862,10 +886,8 @@ def _merge_articulations(
         initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
         cfg["articulations"] = initial
         return
-    existing_list: list[JsonValue] = (
-        existing if isinstance(existing, list) else [])
-    merged: list[JsonValue] = [
-        copy.deepcopy(entry) for entry in existing_list]
+    existing_list: list[JsonValue] = existing if isinstance(existing, list) else []
+    merged: list[JsonValue] = [copy.deepcopy(entry) for entry in existing_list]
     index: dict[str, int] = {}
     for position, entry in enumerate(merged):
         if isinstance(entry, dict):

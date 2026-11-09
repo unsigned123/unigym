@@ -14,6 +14,7 @@ instantiated rig names).  Addressing reuses the existing accessors --
 backend's resolved body ids -- the same tables director uses, so the
 scene vocabulary and the director vocabulary can never drift.
 """
+
 from __future__ import annotations
 
 from unigym.backends.shared.mjfamily.model.joint_limits import (  # noqa: F401
@@ -22,13 +23,13 @@ from unigym.backends.shared.mjfamily.model.joint_limits import (  # noqa: F401
 )
 from unigym.props.base import _prop_shape
 
+
 class MujocoSceneOps:
     """Curated scene face over ``MjModel``/``MjData`` (mujoco, N=1)."""
 
     backend = "mujoco"
 
-    def __init__(self, env, robot_name: str | None = None,
-                 camera_names=None):
+    def __init__(self, env, robot_name: str | None = None, camera_names=None):
         self.env = env
         self.robot_name = robot_name or "g1"
         self.camera_names = list(camera_names or [])
@@ -56,22 +57,24 @@ class MujocoSceneOps:
         joints = self._robot_joints()
         backend_joints = self._backend_joints()
         self._jadr = {
-            j: (int(m.jnt_qposadr[m.joint(b).id]),
-                int(m.jnt_dofadr[m.joint(b).id]))
-            for j, b in zip(joints, backend_joints)}
+            j: (int(m.jnt_qposadr[m.joint(b).id]), int(m.jnt_dofadr[m.joint(b).id]))
+            for j, b in zip(joints, backend_joints)
+        }
         # Limit rows over ALL actuated robot
         # joints -- the model is the source (``jnt_range`` by name; the
         # 29-joint policy table stays an action-face concern), computed
         # in the same lazy batch as the joint addressing (model-static,
         # cached by the face).
         backend_limits = model_joint_limits(m, backend_joints)
-        limits = {j: backend_limits[b]
-                  for j, b in zip(joints, backend_joints)}
+        limits = {j: backend_limits[b] for j, b in zip(joints, backend_joints)}
         tree: dict = {
-            "robot": {"name": self.robot_name, "base": base,
-                      "n_joints": len(joints),
-                      "joint_groups": robot_joint_groups(joints),
-                      "joints": joint_limit_rows(joints, limits)},
+            "robot": {
+                "name": self.robot_name,
+                "base": base,
+                "n_joints": len(joints),
+                "joint_groups": robot_joint_groups(joints),
+                "joints": joint_limit_rows(joints, limits),
+            },
             "props": self._props_tree(),
             "contacts": self._contacts_tree(),
             "cameras": list(self.camera_names),
@@ -90,10 +93,8 @@ class MujocoSceneOps:
         from unigym.runtime.controllers import single_articulation_runtime
 
         art = single_articulation_runtime(self.env)
-        binding = (getattr(self.env, "_mj_articulation_bindings", {})
-                   or {}).get(art.name)
-        names = list(binding.backend_joint_names if binding is not None
-                     else art.joint_names)
+        binding = (getattr(self.env, "_mj_articulation_bindings", {}) or {}).get(art.name)
+        names = list(binding.backend_joint_names if binding is not None else art.joint_names)
         return [j for j in names if not j.startswith("Prop_")]
 
     def _props_tree(self) -> dict:
@@ -110,16 +111,21 @@ class MujocoSceneOps:
                 # object rows with the model limit per joint
                 # (the internal MJ joint id is the articulation's own
                 # resolution -- the serializer adds no new queries)
-                joints = [{"name": jn,
-                           "range": None if (lr := _jnt_limit(
-                               m, art.joints[jn]["jid"])) is None
-                           else [lr[0], lr[1]],
-                           "limited": lr is not None}
-                          for jn in sorted(art.joints)]
+                joints = [
+                    {
+                        "name": jn,
+                        "range": None
+                        if (lr := _jnt_limit(m, art.joints[jn]["jid"])) is None
+                        else [lr[0], lr[1]],
+                        "limited": lr is not None,
+                    }
+                    for jn in sorted(art.joints)
+                ]
             else:
                 joints = []
             out[name] = {
-                "type": spec.type if spec is not None
+                "type": spec.type
+                if spec is not None
                 else ("articulation" if art is not None else "rigid_object"),
                 "joints": joints,
                 "shape": _prop_shape(spec) if spec is not None else None,
@@ -139,17 +145,21 @@ class MujocoSceneOps:
                 import mujoco
 
                 m = self.env.mj_model
-                names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid)
-                         for bid in members.get("sensor_ids", [])]
-                names += [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid)
-                          for bid in members.get("filter_ids", [])]
+                names = [
+                    mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid)
+                    for bid in members.get("sensor_ids", [])
+                ]
+                names += [
+                    mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid)
+                    for bid in members.get("filter_ids", [])
+                ]
                 out[spec.name] = {"members": [n for n in names if n]}
             else:
                 # unbound (or non-mujoco backend object): the resolved
                 # declarations are the honest best face
                 out[spec.name] = {
-                    "members": list(spec.sensor_bodies)
-                    + list(spec.filter_bodies or [])}
+                    "members": list(spec.sensor_bodies) + list(spec.filter_bodies or [])
+                }
         return out
 
     # ------------------------------------------------------------------ #
@@ -166,21 +176,22 @@ class MujocoSceneOps:
 
         env, d = self.env, self.env.mj_data
         base_bid = int(env._base_body_id)
-        if self._jadr is None:             # tree not queried yet: state-only
+        if self._jadr is None:  # tree not queried yet: state-only
             m = env.mj_model
             self._jadr = {
-                j: (int(m.jnt_qposadr[m.joint(b).id]),
-                    int(m.jnt_dofadr[m.joint(b).id]))
-                for j, b in zip(self._robot_joints(),
-                                self._backend_joints())}
-        joints = {name: {"pos": float(d.qpos[qadr]),
-                         "vel": float(d.qvel[dadr])}
-                  for name, (qadr, dadr) in self._jadr.items()}
+                j: (int(m.jnt_qposadr[m.joint(b).id]), int(m.jnt_dofadr[m.joint(b).id]))
+                for j, b in zip(self._robot_joints(), self._backend_joints())
+            }
+        joints = {
+            name: {"pos": float(d.qpos[qadr]), "vel": float(d.qvel[dadr])}
+            for name, (qadr, dadr) in self._jadr.items()
+        }
         return {
             "robot": {
                 "base_pos_w": [float(v) for v in d.xpos[base_bid]],
                 "base_quat_w": [float(v) for v in d.xquat[base_bid]],
-                "joints": joints},
+                "joints": joints,
+            },
             "props": self._props_state(np),
             "contacts": self._contacts_state(),
         }
@@ -194,23 +205,25 @@ class MujocoSceneOps:
         arts = pb.articulations()
         for name in pb.free_prop_names():
             _, qadr, _ = pb.free_addresses(name)
-            out[name] = {"pos": [float(v) for v in d.qpos[qadr:qadr + 3]],
-                         "quat": [float(v) for v in d.qpos[qadr + 3:qadr + 7]]}
+            out[name] = {
+                "pos": [float(v) for v in d.qpos[qadr : qadr + 3]],
+                "quat": [float(v) for v in d.qpos[qadr + 3 : qadr + 7]],
+            }
         for name, art in arts.items():
             out[name] = {
                 "pos": [float(v) for v in d.xpos[art.root_bid]],
                 "quat": [float(v) for v in d.xquat[art.root_bid]],
-                "joints": {jname: {"pos": float(d.qpos[j["qadr"]]),
-                                   "vel": float(d.qvel[j["dadr"]])}
-                           for jname, j in art.joints.items()},
+                "joints": {
+                    jname: {"pos": float(d.qpos[j["qadr"]]), "vel": float(d.qvel[j["dadr"]])}
+                    for jname, j in art.joints.items()
+                },
             }
         return out
 
     def _contacts_state(self) -> dict:
         from unigym.runtime.scene import contact_groups_state
 
-        return contact_groups_state(
-            getattr(self.env, "contact_manager", None))
+        return contact_groups_state(getattr(self.env, "contact_manager", None))
 
     # ------------------------------------------------------------------ #
     # ?full=1 raw face: the MJ body recursion (UI never consumes this)
@@ -227,18 +240,24 @@ class MujocoSceneOps:
         bodies = []
         for bid in range(1, m.nbody):
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid)
-            bodies.append({
-                "name": name or f"body_{bid}",
-                "parent": mujoco.mj_id2name(
-                    m, mujoco.mjtObj.mjOBJ_BODY, int(m.body_parentid[bid]))
-                or "world",
-                "pos": [round(float(v), 6) for v in m.body_pos[bid]],
-                "is_prop": name.startswith("Prop_") if name else False})
+            bodies.append(
+                {
+                    "name": name or f"body_{bid}",
+                    "parent": mujoco.mj_id2name(
+                        m, mujoco.mjtObj.mjOBJ_BODY, int(m.body_parentid[bid])
+                    )
+                    or "world",
+                    "pos": [round(float(v), 6) for v in m.body_pos[bid]],
+                    "is_prop": name.startswith("Prop_") if name else False,
+                }
+            )
         joints = []
         for jid in range(m.njnt):
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, jid)
-            joints.append({"name": name or f"joint_{jid}",
-                           "type": int(m.jnt_type[jid])})
-        return {"bodies": bodies, "joints": joints,
-                "note": "mujoco body recursion; poses are model-level "
-                        "(qpos0), live world poses live in state"}
+            joints.append({"name": name or f"joint_{jid}", "type": int(m.jnt_type[jid])})
+        return {
+            "bodies": bodies,
+            "joints": joints,
+            "note": "mujoco body recursion; poses are model-level "
+            "(qpos0), live world poses live in state",
+        }

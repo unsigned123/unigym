@@ -11,6 +11,7 @@ Group fields: none beyond addressing.  ``kp``/``kd`` are DELIBERATELY
 rejected (fail-fast): the servo gain lives in the MJCF gainprm/biasprm --
 a software gain here would silently mean a different plant.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -22,7 +23,7 @@ from .base import ActuatorBase, register
 class NativeServoActuator(ActuatorBase):
     """``ctrl = clip(target, ctrlrange)`` -- the model closes the loop."""
 
-    config_keys = ActuatorBase.config_keys | {"kp", "kd"}   # rejected in _on_bind
+    config_keys = ActuatorBase.config_keys | {"kp", "kd"}  # rejected in _on_bind
 
     def _on_bind(self, env, joint_group: dict) -> None:
         for banned in ("kp", "kd"):
@@ -32,7 +33,8 @@ class NativeServoActuator(ActuatorBase):
                     f"gain lives in the MJCF actuator (gainprm/biasprm) -- "
                     f"a software {banned} here would silently change the "
                     f"plant | hint: switch the group to standard_pd for a "
-                    f"software PD")
+                    f"software PD"
+                )
 
     def step(self, model, data) -> None:
         """One sim substep: relay the clipped targets to the owned slots.

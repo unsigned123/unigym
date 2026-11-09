@@ -3,6 +3,7 @@ falls within a configurable range.
 
 Useful for collecting only high-speed or low-speed locomotion data.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -20,9 +21,12 @@ class VelocityRangeFilter(EpisodeFilter):
             excluding near-stationary episodes. None = no check.
     """
 
-    def __init__(self, min_vx: float | None = None,
-                 max_vx: float | None = None,
-                 min_abs_vx: float | None = None):
+    def __init__(
+        self,
+        min_vx: float | None = None,
+        max_vx: float | None = None,
+        min_abs_vx: float | None = None,
+    ):
         self.min_vx = min_vx
         self.max_vx = max_vx
         self.min_abs_vx = min_abs_vx

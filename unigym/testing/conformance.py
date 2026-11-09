@@ -21,6 +21,7 @@ A manifest is a small declaration; this module never imports a provider
 or a backend by itself.  The core tests build synthetic manifests; the
 source tests map the robocasa family tables onto the same structure.
 """
+
 from __future__ import annotations
 
 import json
@@ -104,8 +105,10 @@ def _freeze(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return (
             type(value).__name__,
-            tuple((f.name, _freeze(getattr(value, f.name)))
-                  for f in value.__dataclass_fields__.values()),
+            tuple(
+                (f.name, _freeze(getattr(value, f.name)))
+                for f in value.__dataclass_fields__.values()
+            ),
         )
     if isinstance(value, Mapping):
         return tuple(sorted((str(k), _freeze(v)) for k, v in value.items()))
@@ -123,8 +126,7 @@ def _eq(left: Any, right: Any, what: str) -> None:
         raise ConformanceError(f"{what}: determinism/parity mismatch")
 
 
-def check_dispatch_integrity(variants: Mapping[str, Any],
-                             data_variants: Iterable[str]) -> None:
+def check_dispatch_integrity(variants: Mapping[str, Any], data_variants: Iterable[str]) -> None:
     """The dispatch table and the generated data set are the same set."""
     table = set(variants)
     generated = set(data_variants)
@@ -133,18 +135,17 @@ def check_dispatch_integrity(variants: Mapping[str, Any],
     if missing or extra:
         raise ConformanceError(
             "dispatch integrity: unbacked table rows "
-            f"{extra}, data modules with no dispatch {missing}")
+            f"{extra}, data modules with no dispatch {missing}"
+        )
 
 
-def check_build_determinism(build: Callable[[str], Any],
-                            variants: Iterable[str]) -> None:
+def check_build_determinism(build: Callable[[str], Any], variants: Iterable[str]) -> None:
     """Build every variant twice; the two payloads must be identical."""
     for variant in variants:
         _eq(build(variant), build(variant), f"build {variant!r}")
 
 
-def check_compile_determinism(compile_fn: Callable[[str], Any],
-                              variants: Iterable[str]) -> None:
+def check_compile_determinism(compile_fn: Callable[[str], Any], variants: Iterable[str]) -> None:
     """Compile every variant twice; the two products must be identical."""
     for variant in variants:
         _eq(compile_fn(variant), compile_fn(variant), f"compile {variant!r}")
@@ -155,29 +156,27 @@ def check_structure(facts: StructureFacts) -> None:
     if facts.counts != facts.expected_counts:
         raise ConformanceError(
             f"structural counts: observed {dict(facts.counts)!r} != "
-            f"expected {dict(facts.expected_counts)!r}")
-    if (facts.references or facts.reference_exists) \
-            and facts.reference_exists is None:
-        raise ConformanceError(
-            "structural references declared without an existence probe")
+            f"expected {dict(facts.expected_counts)!r}"
+        )
+    if (facts.references or facts.reference_exists) and facts.reference_exists is None:
+        raise ConformanceError("structural references declared without an existence probe")
     probe = facts.reference_exists
     for reference in facts.references:
         if probe is None:
-            raise ConformanceError(
-                "structural references declared without an existence probe")
+            raise ConformanceError("structural references declared without an existence probe")
         if not probe(reference):
-            raise ConformanceError(
-                f"structural reference missing: {reference!r}")
+            raise ConformanceError(f"structural reference missing: {reference!r}")
     if (facts.attributes or facts.expected_attributes) and (
-            facts.attributes != facts.expected_attributes):
+        facts.attributes != facts.expected_attributes
+    ):
         raise ConformanceError(
             "structural attribute round-trip: "
-            f"{facts.attributes!r} != {facts.expected_attributes!r}")
-    if (facts.regions or facts.expected_regions) and (
-            facts.regions != facts.expected_regions):
+            f"{facts.attributes!r} != {facts.expected_attributes!r}"
+        )
+    if (facts.regions or facts.expected_regions) and (facts.regions != facts.expected_regions):
         raise ConformanceError(
-            f"structural region parity: {facts.regions!r} != "
-            f"{facts.expected_regions!r}")
+            f"structural region parity: {facts.regions!r} != " f"{facts.expected_regions!r}"
+        )
 
 
 def _region_key(value: Any) -> str:
@@ -194,16 +193,15 @@ def check_region_namespace(names: Iterable[Any]) -> None:
     for raw in names:
         key = _region_key(raw)
         if not _QUALIFIED_RE.fullmatch(key):
-            raise ConformanceError(
-                f"region key {key!r} is not <instance>.<region>")
+            raise ConformanceError(f"region key {key!r} is not <instance>.<region>")
         if key in seen:
             raise ConformanceError(f"duplicate region key {key!r}")
         seen.add(key)
 
 
-def check_scale_face(size: Any, native: tuple,
-                     expected: tuple | None = None,
-                     max_size: Any = None) -> None:
+def check_scale_face(
+    size: Any, native: tuple, expected: tuple | None = None, max_size: Any = None
+) -> None:
     """A registry ``size`` triple resolves through the official arithmetic."""
     got = scale_from_registry_size(size, native, max_size)
     if expected is not None:
@@ -216,19 +214,18 @@ def check_naming(names: Iterable[str]) -> None:
     """Lowercase snake_case, localized, no generic path specials."""
     for name in names:
         if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-            raise ConformanceError(
-                f"name {name!r} is not lowercase snake_case")
+            raise ConformanceError(f"name {name!r} is not lowercase snake_case")
         if any(token in name for token in _GENERIC_TOKENS):
             raise ConformanceError(
                 f"name {name!r} carries a generic token "
-                f"{[t for t in _GENERIC_TOKENS if t in name]}")
+                f"{[t for t in _GENERIC_TOKENS if t in name]}"
+            )
         if "/" in name or "\\" in name:
             raise ConformanceError(f"name {name!r} carries a path separator")
 
 
 _HEX_FLOAT_RE = re.compile(r"[-+]?0x[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?p[-+]?\d+")
-_DECIMAL_FLOAT_RE = re.compile(
-    r"[-+]?(?:(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)")
+_DECIMAL_FLOAT_RE = re.compile(r"[-+]?(?:(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)")
 
 
 def _canonical_json(value: Any) -> str:
@@ -242,13 +239,13 @@ def _check_float(value: str) -> None:
         try:
             float.fromhex(value)
         except ValueError:
-            raise ConformanceError(
-                f"scene digest: malformed hex float {value!r}") from None
+            raise ConformanceError(f"scene digest: malformed hex float {value!r}") from None
         return
     if _DECIMAL_FLOAT_RE.fullmatch(value):
         raise ConformanceError(
             f"scene digest: {value!r} is a decimal float -- describe() must "
-            "emit float.hex() strings (no repr drift)")
+            "emit float.hex() strings (no repr drift)"
+        )
 
 
 def _canonicalise(value: Any) -> Any:
@@ -263,7 +260,8 @@ def _canonicalise(value: Any) -> Any:
     if isinstance(value, float):
         raise ConformanceError(
             f"scene digest: bare float {value!r} -- describe() must emit "
-            "float.hex() strings (no repr drift)")
+            "float.hex() strings (no repr drift)"
+        )
     if isinstance(value, str):
         _check_float(value)
     return value
@@ -291,8 +289,8 @@ def canonical_digest(description: Mapping[str, object]) -> dict:
     """
     if not isinstance(description, Mapping):
         raise ConformanceError(
-            "scene digest: describe() must return a mapping, got "
-            f"{type(description).__name__}")
+            "scene digest: describe() must return a mapping, got " f"{type(description).__name__}"
+        )
     return _canonicalise(description)
 
 
@@ -320,8 +318,7 @@ def scene_digest(engine, scene) -> dict:
     return canonical_digest(engine.describe(engine.compose(scene)))
 
 
-def run_conformance(provider_name: str,
-                    manifest: ConformanceManifest) -> dict:
+def run_conformance(provider_name: str, manifest: ConformanceManifest) -> dict:
     """Run the seven faces and return a per-face report.
 
     Raises :class:`ConformanceError` on the first violation; a manifest
@@ -329,8 +326,7 @@ def run_conformance(provider_name: str,
     report never claims a check it did not run).
     """
     if not isinstance(manifest, ConformanceManifest):
-        raise ConformanceError(
-            f"{provider_name}: manifest must be a ConformanceManifest")
+        raise ConformanceError(f"{provider_name}: manifest must be a ConformanceManifest")
     variants = tuple(sorted(str(v) for v in manifest.variants))
     report = {
         "provider": provider_name,

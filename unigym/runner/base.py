@@ -8,6 +8,7 @@ new semantics, no extra RNG.
 ``Runner`` is the structural contract every driver implements:
 four methods only, no ownership of the underlying ``RunInstance``.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence

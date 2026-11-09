@@ -23,6 +23,7 @@ schema, honest differences declared.  The declared ones:
   payload is not boundable, the UI never consumes this face, and the
   escape hatch still has to stay honest (contract §1.23).
 """
+
 from __future__ import annotations
 
 from unigym.props.base import _prop_shape
@@ -32,12 +33,12 @@ from unigym.props.base import _prop_shape
 # ±1e9-class "range" is ever served as a real limit).
 _UNBOUNDED = 1e8
 
+
 def _asset_joint_names(env):
     """The policy controller's full asset joint names (no primary binding)."""
     from unigym.runtime.controllers import single_articulation_runtime
 
     return list(single_articulation_runtime(env).joint_names)
-
 
 
 def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None:
@@ -67,11 +68,10 @@ def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None
             t = torch.as_tensor(tens).detach().cpu().reshape(-1, 2)
             names = [str(n) for n in joint_names]
             if t.shape[0] != len(names):
-                return None          # face mismatch: honest null
+                return None  # face mismatch: honest null
             out: dict = {}
             for n, lo, hi in zip(names, t[:, 0].tolist(), t[:, 1].tolist()):
-                out[n] = None if (abs(lo) > _UNBOUNDED
-                                  or abs(hi) > _UNBOUNDED) else (lo, hi)
+                out[n] = None if (abs(lo) > _UNBOUNDED or abs(hi) > _UNBOUNDED) else (lo, hi)
             return out
         except (TypeError, ValueError, RuntimeError):
             return None
@@ -83,8 +83,7 @@ class IsaacLabSceneOps:
 
     backend = "isaaclab"
 
-    def __init__(self, env, robot_name: str | None = None,
-                 camera_names=None):
+    def __init__(self, env, robot_name: str | None = None, camera_names=None):
         self.env = env
         self.robot_name = robot_name or "g1"
         self.camera_names = list(camera_names or [])
@@ -102,7 +101,7 @@ class IsaacLabSceneOps:
 
         env = self.env
         robot = env.robot
-        base = str(robot.data.body_names[0])    # root link
+        base = str(robot.data.body_names[0])  # root link
         joints = list(_asset_joint_names(env))
         # limit rows over ALL actuated joints
         # (the policy controller's asset_joint_names == the articulation
@@ -110,14 +109,15 @@ class IsaacLabSceneOps:
         # -- the sim-provided limits cover the same full (N, J, 2) face;
         # a degraded/sourceless face keeps the honest nulls (contract
         # §1.23 chain).
-        limits = sim_joint_limits(
-            robot.data, [str(n) for n in robot.joint_names]) or {}
+        limits = sim_joint_limits(robot.data, [str(n) for n in robot.joint_names]) or {}
         return {
-            "robot": {"name": self.robot_name, "base": base,
-                      "n_joints": len(joints),
-                      "joint_groups": robot_joint_groups(joints),
-                      "joints": joint_limit_rows(
-                          joints, {n: limits.get(n) for n in joints})},
+            "robot": {
+                "name": self.robot_name,
+                "base": base,
+                "n_joints": len(joints),
+                "joint_groups": robot_joint_groups(joints),
+                "joints": joint_limit_rows(joints, {n: limits.get(n) for n in joints}),
+            },
             "props": self._props_tree(),
             "contacts": self._contacts_tree(),
             "cameras": list(self.camera_names),
@@ -131,11 +131,12 @@ class IsaacLabSceneOps:
         out: dict = {}
         for h in self._handlers():
             spec = h.spec
-            jnames = sorted(spec.joints) if getattr(spec, "joints", None) \
-                else []
-            out[spec.name] = {"type": spec.type,
-                              "joints": self._prop_joint_rows(h, jnames),
-                              "shape": _prop_shape(spec)}
+            jnames = sorted(spec.joints) if getattr(spec, "joints", None) else []
+            out[spec.name] = {
+                "type": spec.type,
+                "joints": self._prop_joint_rows(h, jnames),
+                "shape": _prop_shape(spec),
+            }
         return out
 
     @staticmethod
@@ -151,20 +152,26 @@ class IsaacLabSceneOps:
             return []
         spec = handler.spec
         asset = getattr(handler, "_asset", None)
-        limits = sim_joint_limits(
-            getattr(asset, "data", None),
-            [str(n) for n in getattr(asset, "joint_names", []) or []]) or {}
+        limits = (
+            sim_joint_limits(
+                getattr(asset, "data", None),
+                [str(n) for n in getattr(asset, "joint_names", []) or []],
+            )
+            or {}
+        )
         rows: list[dict] = []
         for jn in jnames:
             lo_hi = limits.get(jn)
             if lo_hi is None:
                 decl = (spec.joints.get(jn) or {}).get("range")
-                lo_hi = (float(decl[0]), float(decl[1])) \
-                    if decl and len(decl) == 2 else None
-            rows.append({"name": jn,
-                         "range": None if lo_hi is None
-                         else [lo_hi[0], lo_hi[1]],
-                         "limited": lo_hi is not None})
+                lo_hi = (float(decl[0]), float(decl[1])) if decl and len(decl) == 2 else None
+            rows.append(
+                {
+                    "name": jn,
+                    "range": None if lo_hi is None else [lo_hi[0], lo_hi[1]],
+                    "limited": lo_hi is not None,
+                }
+            )
         return rows
 
     def _contacts_tree(self) -> dict:
@@ -175,8 +182,7 @@ class IsaacLabSceneOps:
         resolved = self._resolved_sensor_names(cm)
         for spec in cm.specs:
             sensors = resolved.get(spec.name)
-            members = list(sensors) if sensors \
-                else list(spec.sensor_bodies)
+            members = list(sensors) if sensors else list(spec.sensor_bodies)
             members += list(spec.filter_bodies or [])
             out[spec.name] = {"members": members}
         return out
@@ -206,8 +212,7 @@ class IsaacLabSceneOps:
             # sensor body names are robot-qualified frames; keep the
             # robot-relative tail (the curated face names robot bodies
             # the way the declarations do)
-            out[name] = [self._robot_relative(n, body_names)
-                         for n in names]
+            out[name] = [self._robot_relative(n, body_names) for n in names]
         return out
 
     @staticmethod
@@ -233,19 +238,22 @@ class IsaacLabSceneOps:
         import torch
 
         def f(v):
-            return [float(x) for x in
-                    torch.as_tensor(v, device=device).reshape(-1).tolist()]
+            return [float(x) for x in torch.as_tensor(v, device=device).reshape(-1).tolist()]
 
-        joints = {name: {"pos": float(p), "vel": float(v)}
-                  for name, p, v in zip(
-                      _asset_joint_names(env),
-                      robot.data.joint_pos[0].detach().cpu(),
-                      robot.data.joint_vel[0].detach().cpu())}
+        joints = {
+            name: {"pos": float(p), "vel": float(v)}
+            for name, p, v in zip(
+                _asset_joint_names(env),
+                robot.data.joint_pos[0].detach().cpu(),
+                robot.data.joint_vel[0].detach().cpu(),
+            )
+        }
         return {
             "robot": {
                 "base_pos_w": f(robot.data.root_pos_w[0]),
                 "base_quat_w": f(robot.data.root_quat_w[0]),
-                "joints": joints},
+                "joints": joints,
+            },
             "props": self._props_state(torch),
             "contacts": self._contacts_state(),
         }
@@ -254,29 +262,27 @@ class IsaacLabSceneOps:
         out: dict = {}
 
         def f(v):
-            return [float(x) for x in
-                    torch.as_tensor(v).reshape(-1).detach().cpu().tolist()]
+            return [float(x) for x in torch.as_tensor(v).reshape(-1).detach().cpu().tolist()]
 
         for h in self._handlers():
             asset = getattr(h, "_asset", None)
             if asset is None or not hasattr(asset, "data"):
                 continue
-            entry: dict = {"pos": f(asset.data.root_pos_w[0]),
-                           "quat": f(asset.data.root_quat_w[0])}
+            entry: dict = {"pos": f(asset.data.root_pos_w[0]), "quat": f(asset.data.root_quat_w[0])}
             jnames = list(getattr(asset, "joint_names", []) or [])
             if jnames:
                 jp = asset.data.joint_pos[0].detach().cpu().tolist()
                 jv = asset.data.joint_vel[0].detach().cpu().tolist()
-                entry["joints"] = {n: {"pos": float(p), "vel": float(v)}
-                                   for n, p, v in zip(jnames, jp, jv)}
+                entry["joints"] = {
+                    n: {"pos": float(p), "vel": float(v)} for n, p, v in zip(jnames, jp, jv)
+                }
             out[h.spec.name] = entry
         return out
 
     def _contacts_state(self) -> dict:
         from unigym.runtime.scene import contact_groups_state
 
-        return contact_groups_state(
-            getattr(self.env, "contact_manager", None))
+        return contact_groups_state(getattr(self.env, "contact_manager", None))
 
     # ------------------------------------------------------------------ #
     # ?full=1 raw face: data-level inventory (contract §1.23 declared diff)
@@ -290,13 +296,16 @@ class IsaacLabSceneOps:
         """
         robot = self.env.robot
         doc: dict = {
-            "robot": {"base": str(robot.data.body_names[0]),
-                      "links": [str(n) for n in robot.data.body_names],
-                      "joints": [str(n) for n in _asset_joint_names(self.env)]},
+            "robot": {
+                "base": str(robot.data.body_names[0]),
+                "links": [str(n) for n in robot.data.body_names],
+                "joints": [str(n) for n in _asset_joint_names(self.env)],
+            },
             "props": {},
             "note": "isaaclab face is a data-level inventory (no USD "
-                    "stage prim walk -- payload unboundable; "
-                    "daemon_api_contract §1.23); live poses in state"}
+            "stage prim walk -- payload unboundable; "
+            "daemon_api_contract §1.23); live poses in state",
+        }
         for h in self._handlers():
             asset = getattr(h, "_asset", None)
             links: list[str] = []
@@ -308,6 +317,6 @@ class IsaacLabSceneOps:
             doc["props"][h.spec.name] = {
                 "type": h.spec.type,
                 "links": links,
-                "joints": [str(n) for n in
-                           getattr(asset, "joint_names", []) or []]}
+                "joints": [str(n) for n in getattr(asset, "joint_names", []) or []],
+            }
         return doc

@@ -15,6 +15,7 @@ This module is **stdlib-only at import time**: engine presence is probed
 lazily (importlib.metadata first — no side effects — then a guarded
 ``import``), so unit tests can import it on any host.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -57,57 +58,57 @@ class Trait(Enum):
     """
 
     # --- env core (registration prerequisite) ---
-    ENV_STEP_RESET = "ENV_STEP_RESET"          # step/reset_envs/reset_all + extra 17-key contract
+    ENV_STEP_RESET = "ENV_STEP_RESET"  # step/reset_envs/reset_all + extra 17-key contract
     ACTION_FACES_NAMED = "ACTION_FACES_NAMED"  # consumes dict[str, NamedAction]
-    JOINT_PERMUTATION = "JOINT_PERMUTATION"    # policy/il orders + inverse perm
+    JOINT_PERMUTATION = "JOINT_PERMUTATION"  # policy/il orders + inverse perm
     # --- env shape (optional: single-env backends omit it) ---
-    MULTI_ENV = "MULTI_ENV"                    # native N>1 parallel-env runs
+    MULTI_ENV = "MULTI_ENV"  # native N>1 parallel-env runs
     # --- env layout (exactly one ENV_LAYOUT_* per registered backend) ---
-    ENV_LAYOUT_TILED = "ENV_LAYOUT_TILED"          # env_spacing; one view spans envs
+    ENV_LAYOUT_TILED = "ENV_LAYOUT_TILED"  # env_spacing; one view spans envs
     ENV_LAYOUT_COINCIDENT = "ENV_LAYOUT_COINCIDENT"  # same-coordinate worlds
     # --- observation / recording ---
-    CAMERAS_RGB = "CAMERAS_RGB"                # rig-level RGB frames
-    CAMERAS_GLOBAL = "CAMERAS_GLOBAL"          # scene-wide single camera/image
-    CAMERAS_PER_ENV = "CAMERAS_PER_ENV"        # one camera instance per env (N>=1)
+    CAMERAS_RGB = "CAMERAS_RGB"  # rig-level RGB frames
+    CAMERAS_GLOBAL = "CAMERAS_GLOBAL"  # scene-wide single camera/image
+    CAMERAS_PER_ENV = "CAMERAS_PER_ENV"  # one camera instance per env (N>=1)
     CAMERAS_PER_ENV_STATE = "CAMERAS_PER_ENV_STATE"  # (camera, env) own pose state
-    CAMERAS_BATCH_RENDER = "CAMERAS_BATCH_RENDER"    # one render covers all instances
+    CAMERAS_BATCH_RENDER = "CAMERAS_BATCH_RENDER"  # one render covers all instances
     CAMERAS_PER_ENV_RESOLUTION = "CAMERAS_PER_ENV_RESOLUTION"  # reserved
     CAMERAS_PER_ENV_INTRINSICS = "CAMERAS_PER_ENV_INTRINSICS"  # reserved
-    CAMERAS_DEPTH_RIG = "CAMERAS_DEPTH_RIG"    # rig-level metric z-depth
-    DEPTH_OBS_ALIASES = "DEPTH_OBS_ALIASES"    # depth obs alias keys (isaaclab)
-    RECORDER_VIDEO = "RECORDER_VIDEO"          # recorder.enabled mp4
+    CAMERAS_DEPTH_RIG = "CAMERAS_DEPTH_RIG"  # rig-level metric z-depth
+    DEPTH_OBS_ALIASES = "DEPTH_OBS_ALIASES"  # depth obs alias keys (isaaclab)
+    RECORDER_VIDEO = "RECORDER_VIDEO"  # recorder.enabled mp4
     # --- contacts ---
-    CONTACTS_GROUPS = "CONTACTS_GROUPS"        # declarative groups + read_raw
-    CONTACTS_OVERRIDE = "CONTACTS_OVERRIDE"    # director contact op
+    CONTACTS_GROUPS = "CONTACTS_GROUPS"  # declarative groups + read_raw
+    CONTACTS_OVERRIDE = "CONTACTS_OVERRIDE"  # director contact op
     # --- props ---
-    PROPS_RIGID = "PROPS_RIGID"                # sphere/box-family/usd tiers
+    PROPS_RIGID = "PROPS_RIGID"  # sphere/box-family/usd tiers
     PROPS_ARTICULATION_URDF = "PROPS_ARTICULATION_URDF"
     PROPS_ARTICULATION_USD = "PROPS_ARTICULATION_USD"
-    PROPS_LATCH = "PROPS_LATCH"                # runtime drive swap
+    PROPS_LATCH = "PROPS_LATCH"  # runtime drive swap
     PROPS_ACTUATED_ACTIONS = "PROPS_ACTUATED_ACTIONS"  # actuated joints -> NamedAction
     # --- director ---
     DIRECTOR_TELEPORT = "DIRECTOR_TELEPORT"
     DIRECTOR_SETVEL = "DIRECTOR_SETVEL"
-    DIRECTOR_ATTACH_WELD = "DIRECTOR_ATTACH_WELD"    # frozen relative pose
+    DIRECTOR_ATTACH_WELD = "DIRECTOR_ATTACH_WELD"  # frozen relative pose
     DIRECTOR_ATTACH_SLAVE = "DIRECTOR_ATTACH_SLAVE"  # per-tick kinematic follow
     DIRECTOR_GRIPPER = "DIRECTOR_GRIPPER"
     # --- scene / randomization ---
-    SCENE_COMPOSE = "SCENE_COMPOSE"            # neutral Scene -> composed world face
+    SCENE_COMPOSE = "SCENE_COMPOSE"  # neutral Scene -> composed world face
     TERRAIN = "TERRAIN"
     EVENTS_DR = "EVENTS_DR"
     INIT_POSE = "INIT_POSE"
-    SPAWN_XY_YAW = "SPAWN_XY_YAW"              # both backends (parity)
-    MOCAP = "MOCAP"                            # mocap body carrier (mujoco)
+    SPAWN_XY_YAW = "SPAWN_XY_YAW"  # both backends (parity)
+    MOCAP = "MOCAP"  # mocap body carrier (mujoco)
     # --- rewind (Round B B1) ---
-    SNAPSHOT = "SNAPSHOT"                      # mjSTATE-exact snapshot()/restore()
+    SNAPSHOT = "SNAPSHOT"  # mjSTATE-exact snapshot()/restore()
     # --- actuator seam ---
     ACTUATORS_PLUGGABLE = "ACTUATORS_PLUGGABLE"  # env.params.actuators software ctrl laws
     # --- model introspection (no second capability enum) ---
-    MODEL_ADDRESSES = "MODEL_ADDRESSES"            # qpos/dof/geom/actuator ids
-    MODEL_MASS_INERTIA = "MODEL_MASS_INERTIA"      # compiled mass/inertia
-    MODEL_MOCAP = "MODEL_MOCAP"                    # mocap body carriers
-    MODEL_EQ_SLOTS = "MODEL_EQ_SLOTS"              # equality slots
-    MODEL_USD_PRIMS = "MODEL_USD_PRIMS"            # USD prim hierarchy
+    MODEL_ADDRESSES = "MODEL_ADDRESSES"  # qpos/dof/geom/actuator ids
+    MODEL_MASS_INERTIA = "MODEL_MASS_INERTIA"  # compiled mass/inertia
+    MODEL_MOCAP = "MODEL_MOCAP"  # mocap body carriers
+    MODEL_EQ_SLOTS = "MODEL_EQ_SLOTS"  # equality slots
+    MODEL_USD_PRIMS = "MODEL_USD_PRIMS"  # USD prim hierarchy
 
 
 # --------------------------------------------------------------------------- #
@@ -133,9 +134,9 @@ class TraitScope:
 class BackendInfo:
     """Identity + capability set of one registered backend."""
 
-    name: str                    # canonical: "mujoco" | "isaaclab2" | "isaaclab3"
-    version: tuple[int, int]   # engine version (probe; (0, 0) when absent)
-    traits: frozenset[Trait]   # capability set (registration declares it)
+    name: str  # canonical: "mujoco" | "isaaclab2" | "isaaclab3"
+    version: tuple[int, int]  # engine version (probe; (0, 0) when absent)
+    traits: frozenset[Trait]  # capability set (registration declares it)
     options_schema: Mapping[str, object] = field(default_factory=dict)
     """Backend-private ``env.backend_options.<backend>`` schema.
 
@@ -260,8 +261,7 @@ class BackendInfo:
         if num_envs is None:
             return True
         scope = self.scopes.get(trait)
-        return scope is None or scope.max_envs is None or \
-            num_envs <= scope.max_envs
+        return scope is None or scope.max_envs is None or num_envs <= scope.max_envs
 
     def blocked(self, traits, num_envs: int | None = None):
         """Present-but-scope-blocked ``(trait, scope)`` pairs (enum order).
@@ -313,16 +313,17 @@ def _dotted_options(schema: Mapping[str, object], prefix: str = "") -> list[str]
     return out
 
 
-def _validate_options_block(schema: Mapping[str, object],
-                            options: Mapping[str, object],
-                            path: str) -> dict[str, object]:
+def _validate_options_block(
+    schema: Mapping[str, object], options: Mapping[str, object], path: str
+) -> dict[str, object]:
     """Validate one nested option block against *schema* (fail-fast)."""
     unknown = sorted(set(options) - set(schema))
     if unknown:
         supported = _dotted_options(schema, path)
         raise ValueError(
             f"backend_options: unknown option keys {unknown} at "
-            f"{path.rstrip('.')!r}; supported options: {supported}")
+            f"{path.rstrip('.')!r}; supported options: {supported}"
+        )
     out = {}
     for key, spec in schema.items():
         full = f"{path}{key}"
@@ -331,12 +332,12 @@ def _validate_options_block(schema: Mapping[str, object],
             if not isinstance(value, Mapping):
                 raise ValueError(
                     f"backend_options: {full} must be a mapping; supported "
-                    f"options: {_dotted_options(schema, path)}")
+                    f"options: {_dotted_options(schema, path)}"
+                )
             out[key] = _validate_options_block(spec, value, f"{full}.")
             continue
         if isinstance(spec, bool) and not isinstance(value, bool):
-            raise ValueError(
-                f"backend_options: {full} must be a bool, got {value!r}")
+            raise ValueError(f"backend_options: {full} must be a bool, got {value!r}")
         out[key] = value
     return out
 
@@ -349,9 +350,9 @@ _OPTION_NAMESPACES = {
 }
 
 
-def validate_backend_options(backend: str,
-                             options: Mapping[str, object] | None
-                             ) -> dict[str, object]:
+def validate_backend_options(
+    backend: str, options: Mapping[str, object] | None
+) -> dict[str, object]:
     """Validate ``env.backend_options`` and return only *backend*'s options.
 
     Args:
@@ -368,9 +369,7 @@ def validate_backend_options(backend: str,
     if options is None:
         options = {}
     if not isinstance(options, Mapping):
-        raise ValueError(
-            f"env.backend_options must be a mapping, got "
-            f"{type(options).__name__}")
+        raise ValueError(f"env.backend_options must be a mapping, got " f"{type(options).__name__}")
     canonical = _resolve_name(backend)
     accepted = _OPTION_NAMESPACES.get(canonical, (canonical,))
     foreign = sorted(set(options) - set(accepted))
@@ -378,7 +377,8 @@ def validate_backend_options(backend: str,
         raise ValueError(
             f"env.backend_options declares {foreign}, but the selected "
             f"backend {canonical!r} only accepts its own namespace "
-            f"{list(accepted)}")
+            f"{list(accepted)}"
+        )
     supplied = {}
     for key in accepted:
         if key in options:
@@ -390,12 +390,13 @@ def validate_backend_options(backend: str,
             keys = sorted(supplied) if isinstance(supplied, Mapping) else []
             raise ValueError(
                 f"backend {canonical!r} declares no backend_options (unknown "
-                f"keys {keys}); supported options: []")
+                f"keys {keys}); supported options: []"
+            )
         return {}
     if not isinstance(supplied, Mapping):
         raise ValueError(
-            f"env.backend_options.{canonical} must be a mapping, got "
-            f"{type(supplied).__name__}")
+            f"env.backend_options.{canonical} must be a mapping, got " f"{type(supplied).__name__}"
+        )
     return _validate_options_block(info.options_schema, supplied, "")
 
 
@@ -411,18 +412,13 @@ class TraitRule:
 
 
 TRAIT_RULES: dict[Trait, TraitRule] = {
-    Trait.ENV_LAYOUT_TILED: TraitRule(
-        exclusive_with=(Trait.ENV_LAYOUT_COINCIDENT,)),
-    Trait.ENV_LAYOUT_COINCIDENT: TraitRule(
-        exclusive_with=(Trait.ENV_LAYOUT_TILED,)),
+    Trait.ENV_LAYOUT_TILED: TraitRule(exclusive_with=(Trait.ENV_LAYOUT_COINCIDENT,)),
+    Trait.ENV_LAYOUT_COINCIDENT: TraitRule(exclusive_with=(Trait.ENV_LAYOUT_TILED,)),
     Trait.CAMERAS_GLOBAL: TraitRule(requires=(Trait.ENV_LAYOUT_TILED,)),
     Trait.CAMERAS_PER_ENV_STATE: TraitRule(requires=(Trait.CAMERAS_PER_ENV,)),
-    Trait.CAMERAS_BATCH_RENDER: TraitRule(
-        requires=(Trait.CAMERAS_PER_ENV, Trait.MULTI_ENV)),
-    Trait.CAMERAS_PER_ENV_RESOLUTION: TraitRule(
-        requires=(Trait.CAMERAS_PER_ENV,)),
-    Trait.CAMERAS_PER_ENV_INTRINSICS: TraitRule(
-        requires=(Trait.CAMERAS_PER_ENV_STATE,)),
+    Trait.CAMERAS_BATCH_RENDER: TraitRule(requires=(Trait.CAMERAS_PER_ENV, Trait.MULTI_ENV)),
+    Trait.CAMERAS_PER_ENV_RESOLUTION: TraitRule(requires=(Trait.CAMERAS_PER_ENV,)),
+    Trait.CAMERAS_PER_ENV_INTRINSICS: TraitRule(requires=(Trait.CAMERAS_PER_ENV_STATE,)),
 }
 
 _LAYOUT_TRAITS = (Trait.ENV_LAYOUT_TILED, Trait.ENV_LAYOUT_COINCIDENT)
@@ -444,18 +440,21 @@ def validate_trait_rules(backends=None) -> None:
             if trait not in traits:
                 raise RuntimeError(
                     f"backend {name!r}: scope declared for undeclared trait "
-                    f"{trait.name} (scopes only narrow presence)")
+                    f"{trait.name} (scopes only narrow presence)"
+                )
             if scope.max_envs is not None and scope.max_envs < 1:
                 raise RuntimeError(
                     f"backend {name!r}: trait {trait.name} scope max_envs "
-                    f"must be >= 1, got {scope.max_envs}")
+                    f"must be >= 1, got {scope.max_envs}"
+                )
         if not traits:
             continue
         layouts = [t for t in _LAYOUT_TRAITS if t in traits]
         if len(layouts) != 1:
             raise RuntimeError(
                 f"backend {name!r}: exactly one ENV_LAYOUT_* trait is "
-                f"required, got {[t.name for t in layouts]}")
+                f"required, got {[t.name for t in layouts]}"
+            )
         for trait in sorted(traits, key=lambda t: t.value):
             rule = TRAIT_RULES.get(trait)
             if rule is None:
@@ -464,95 +463,130 @@ def validate_trait_rules(backends=None) -> None:
                 if other in traits:
                     raise RuntimeError(
                         f"backend {name!r}: trait {trait.name} is "
-                        f"exclusive with {other.name} but both are declared")
+                        f"exclusive with {other.name} but both are declared"
+                    )
             for required in rule.requires:
                 if required not in traits:
                     raise RuntimeError(
                         f"backend {name!r}: trait {trait.name} requires "
-                        f"{required.name}, which is not declared")
+                        f"{required.name}, which is not declared"
+                    )
 
 
 # --------------------------------------------------------------------------- #
 # per-backend trait tables (declaration = registration)
 # --------------------------------------------------------------------------- #
-_CORE = frozenset({
-    Trait.ENV_STEP_RESET, Trait.ACTION_FACES_NAMED, Trait.JOINT_PERMUTATION,
-})
+_CORE = frozenset(
+    {
+        Trait.ENV_STEP_RESET,
+        Trait.ACTION_FACES_NAMED,
+        Trait.JOINT_PERMUTATION,
+    }
+)
 
 # MuJoCo-family compose options (backend-private).
 _MJ_COMPOSE_OPTIONS = {"compose": {"auto_prefix": False}}
 
-MUJOCO_TRAITS = _CORE | frozenset({
-    Trait.MULTI_ENV,                           # native num_envs=N independent MjData
-    Trait.ENV_LAYOUT_COINCIDENT,               # one MjModel / one world per run
-    Trait.SCENE_COMPOSE,
-    Trait.CAMERAS_RGB, Trait.CAMERAS_DEPTH_RIG, Trait.RECORDER_VIDEO,
-    Trait.CAMERAS_PER_ENV,                     # N=1 degenerate instance
-    Trait.CAMERAS_PER_ENV_STATE,
-    Trait.CONTACTS_GROUPS, Trait.CONTACTS_OVERRIDE,
-    Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
-    Trait.PROPS_ACTUATED_ACTIONS,
-    Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,
-    Trait.DIRECTOR_ATTACH_WELD, Trait.DIRECTOR_GRIPPER,
-    Trait.SPAWN_XY_YAW, Trait.MOCAP, Trait.SNAPSHOT,
-    Trait.ACTUATORS_PLUGGABLE,                # unigym/actuators seam
-    # Model introspection: the compiled MjModel carries them all
-    Trait.MODEL_ADDRESSES, Trait.MODEL_MASS_INERTIA, Trait.MODEL_MOCAP,
-    Trait.MODEL_EQ_SLOTS,
-})
+MUJOCO_TRAITS = _CORE | frozenset(
+    {
+        Trait.MULTI_ENV,  # native num_envs=N independent MjData
+        Trait.ENV_LAYOUT_COINCIDENT,  # one MjModel / one world per run
+        Trait.SCENE_COMPOSE,
+        Trait.CAMERAS_RGB,
+        Trait.CAMERAS_DEPTH_RIG,
+        Trait.RECORDER_VIDEO,
+        Trait.CAMERAS_PER_ENV,  # N=1 degenerate instance
+        Trait.CAMERAS_PER_ENV_STATE,
+        Trait.CONTACTS_GROUPS,
+        Trait.CONTACTS_OVERRIDE,
+        Trait.PROPS_RIGID,
+        Trait.PROPS_ARTICULATION_URDF,
+        Trait.PROPS_ACTUATED_ACTIONS,
+        Trait.DIRECTOR_TELEPORT,
+        Trait.DIRECTOR_SETVEL,
+        Trait.DIRECTOR_ATTACH_WELD,
+        Trait.DIRECTOR_GRIPPER,
+        Trait.SPAWN_XY_YAW,
+        Trait.MOCAP,
+        Trait.SNAPSHOT,
+        Trait.ACTUATORS_PLUGGABLE,  # unigym/actuators seam
+        # Model introspection: the compiled MjModel carries them all
+        Trait.MODEL_ADDRESSES,
+        Trait.MODEL_MASS_INERTIA,
+        Trait.MODEL_MOCAP,
+        Trait.MODEL_EQ_SLOTS,
+    }
+)
 
 # The independent MuJoCo Warp backend.  N>1 is ONE batched warp
 # Data (nworld=N) with N CPU mirrors, plus scene compose through the
 # shared MujocoSceneEngine, box-family props, contact groups, RGB rigs,
 # planar spawn, and the mirror-faithful snapshot/restore face.
-MJWARP_TRAITS = _CORE | frozenset({
-    Trait.MULTI_ENV,
-    Trait.ENV_LAYOUT_COINCIDENT,               # N same-coordinate worlds
-    Trait.SCENE_COMPOSE,
-    Trait.PROPS_RIGID,
-    Trait.PROPS_ARTICULATION_URDF,             # free-joint articulation N>1
-    Trait.PROPS_ACTUATED_ACTIONS,              # prop-name NamedAction -> servo
-    Trait.CONTACTS_GROUPS,
-    Trait.CONTACTS_OVERRIDE,                   # manager-level record override
-    Trait.CAMERAS_RGB,
-    Trait.CAMERAS_DEPTH_RIG,                   # metric z from rc.depth_data
-    Trait.CAMERAS_PER_ENV,                     # CPU mirror per world
-    Trait.CAMERAS_PER_ENV_STATE,
-    Trait.CAMERAS_BATCH_RENDER,                # native warp renderer
-    Trait.RECORDER_VIDEO,                      # manager cache -> mp4
-    Trait.ACTUATORS_PLUGGABLE,                 # step1 -> law -> step2
-    Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,   # N=1 mirror + push
-    Trait.DIRECTOR_ATTACH_WELD, Trait.DIRECTOR_GRIPPER,
-    Trait.MOCAP,
-    Trait.SPAWN_XY_YAW,
-    Trait.SNAPSHOT,
-    # Same compiled MjModel as mujoco
-    Trait.MODEL_ADDRESSES, Trait.MODEL_MASS_INERTIA, Trait.MODEL_MOCAP,
-    Trait.MODEL_EQ_SLOTS,
-})
+MJWARP_TRAITS = _CORE | frozenset(
+    {
+        Trait.MULTI_ENV,
+        Trait.ENV_LAYOUT_COINCIDENT,  # N same-coordinate worlds
+        Trait.SCENE_COMPOSE,
+        Trait.PROPS_RIGID,
+        Trait.PROPS_ARTICULATION_URDF,  # free-joint articulation N>1
+        Trait.PROPS_ACTUATED_ACTIONS,  # prop-name NamedAction -> servo
+        Trait.CONTACTS_GROUPS,
+        Trait.CONTACTS_OVERRIDE,  # manager-level record override
+        Trait.CAMERAS_RGB,
+        Trait.CAMERAS_DEPTH_RIG,  # metric z from rc.depth_data
+        Trait.CAMERAS_PER_ENV,  # CPU mirror per world
+        Trait.CAMERAS_PER_ENV_STATE,
+        Trait.CAMERAS_BATCH_RENDER,  # native warp renderer
+        Trait.RECORDER_VIDEO,  # manager cache -> mp4
+        Trait.ACTUATORS_PLUGGABLE,  # step1 -> law -> step2
+        Trait.DIRECTOR_TELEPORT,
+        Trait.DIRECTOR_SETVEL,  # N=1 mirror + push
+        Trait.DIRECTOR_ATTACH_WELD,
+        Trait.DIRECTOR_GRIPPER,
+        Trait.MOCAP,
+        Trait.SPAWN_XY_YAW,
+        Trait.SNAPSHOT,
+        # Same compiled MjModel as mujoco
+        Trait.MODEL_ADDRESSES,
+        Trait.MODEL_MASS_INERTIA,
+        Trait.MODEL_MOCAP,
+        Trait.MODEL_EQ_SLOTS,
+    }
+)
 
-ISAACLAB2_TRAITS = _CORE | frozenset({
-    Trait.MULTI_ENV,                           # native num_envs=N scene cloning
-    Trait.ENV_LAYOUT_TILED,                    # env_spacing clone grid
-    Trait.CAMERAS_RGB, Trait.CAMERAS_DEPTH_RIG, Trait.DEPTH_OBS_ALIASES,
-    # CAMERAS_GLOBAL is the 1-prim mechanism (num_instances = parent prim
-    # matches = 1); upstream docs do not name it -- container-verify.
-    Trait.CAMERAS_GLOBAL,
-    Trait.CAMERAS_PER_ENV,
-    Trait.CAMERAS_PER_ENV_STATE,
-    Trait.CAMERAS_BATCH_RENDER,
-    Trait.RECORDER_VIDEO,
-    Trait.CONTACTS_GROUPS, Trait.CONTACTS_OVERRIDE,
-    Trait.PROPS_RIGID, Trait.PROPS_ARTICULATION_URDF,
-    Trait.PROPS_ARTICULATION_USD, Trait.PROPS_LATCH,
-    Trait.PROPS_ACTUATED_ACTIONS,
-    Trait.DIRECTOR_TELEPORT, Trait.DIRECTOR_SETVEL,
-    Trait.DIRECTOR_ATTACH_SLAVE, Trait.DIRECTOR_GRIPPER,
-    Trait.TERRAIN, Trait.EVENTS_DR, Trait.INIT_POSE,
-    Trait.SPAWN_XY_YAW,
-    # The USD prim hierarchy is the isaaclab model face
-    Trait.MODEL_USD_PRIMS,
-})
+ISAACLAB2_TRAITS = _CORE | frozenset(
+    {
+        Trait.MULTI_ENV,  # native num_envs=N scene cloning
+        Trait.ENV_LAYOUT_TILED,  # env_spacing clone grid
+        Trait.CAMERAS_RGB,
+        Trait.CAMERAS_DEPTH_RIG,
+        Trait.DEPTH_OBS_ALIASES,
+        # CAMERAS_GLOBAL is the 1-prim mechanism (num_instances = parent prim
+        # matches = 1); upstream docs do not name it -- container-verify.
+        Trait.CAMERAS_GLOBAL,
+        Trait.CAMERAS_PER_ENV,
+        Trait.CAMERAS_PER_ENV_STATE,
+        Trait.CAMERAS_BATCH_RENDER,
+        Trait.RECORDER_VIDEO,
+        Trait.CONTACTS_GROUPS,
+        Trait.CONTACTS_OVERRIDE,
+        Trait.PROPS_RIGID,
+        Trait.PROPS_ARTICULATION_URDF,
+        Trait.PROPS_ARTICULATION_USD,
+        Trait.PROPS_LATCH,
+        Trait.PROPS_ACTUATED_ACTIONS,
+        Trait.DIRECTOR_TELEPORT,
+        Trait.DIRECTOR_SETVEL,
+        Trait.DIRECTOR_ATTACH_SLAVE,
+        Trait.DIRECTOR_GRIPPER,
+        Trait.TERRAIN,
+        Trait.EVENTS_DR,
+        Trait.INIT_POSE,
+        Trait.SPAWN_XY_YAW,
+        # The USD prim hierarchy is the isaaclab model face
+        Trait.MODEL_USD_PRIMS,
+    }
+)
 
 # EA skeleton: registered so selection/probing can name it, implements
 # nothing yet (backends/isaaclab3/README.md declares the gap; build -> stub
@@ -565,8 +599,7 @@ ISAACLAB3_TRAITS = frozenset()
 # device; one MjModel / one mocap namespace).  isaaclab supports these at
 # N>1 (no scope).
 _MODEL_GLOBAL = "model-global writes (one MjModel): no per-env face"
-_MJWARP_MODEL_GLOBAL = ("model-global writes (one MjModel); mirror-only "
-                        "at N>1")
+_MJWARP_MODEL_GLOBAL = "model-global writes (one MjModel); mirror-only " "at N>1"
 MUJOCO_SCOPES: dict[Trait, TraitScope] = {
     Trait.DIRECTOR_TELEPORT: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
     Trait.DIRECTOR_SETVEL: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
@@ -575,14 +608,10 @@ MUJOCO_SCOPES: dict[Trait, TraitScope] = {
     Trait.MOCAP: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
 }
 MJWARP_SCOPES: dict[Trait, TraitScope] = {
-    Trait.DIRECTOR_TELEPORT: TraitScope(max_envs=1,
-                                        note=_MJWARP_MODEL_GLOBAL),
-    Trait.DIRECTOR_SETVEL: TraitScope(max_envs=1,
-                                      note=_MJWARP_MODEL_GLOBAL),
-    Trait.DIRECTOR_ATTACH_WELD: TraitScope(max_envs=1,
-                                           note=_MJWARP_MODEL_GLOBAL),
-    Trait.DIRECTOR_GRIPPER: TraitScope(max_envs=1,
-                                       note=_MJWARP_MODEL_GLOBAL),
+    Trait.DIRECTOR_TELEPORT: TraitScope(max_envs=1, note=_MJWARP_MODEL_GLOBAL),
+    Trait.DIRECTOR_SETVEL: TraitScope(max_envs=1, note=_MJWARP_MODEL_GLOBAL),
+    Trait.DIRECTOR_ATTACH_WELD: TraitScope(max_envs=1, note=_MJWARP_MODEL_GLOBAL),
+    Trait.DIRECTOR_GRIPPER: TraitScope(max_envs=1, note=_MJWARP_MODEL_GLOBAL),
     Trait.MOCAP: TraitScope(max_envs=1, note=_MJWARP_MODEL_GLOBAL),
 }
 
@@ -814,77 +843,95 @@ def _isaaclab2_kit_launcher() -> Callable[..., tuple[Any, Any]]:
 
 
 _STATIC_INFO: dict[str, BackendInfo] = {
-    "mujoco": BackendInfo("mujoco", (0, 0), MUJOCO_TRAITS,
-                          options_schema=_MJ_COMPOSE_OPTIONS,
-                          scene_engine=_mujoco_scene_engine,
-                          scopes=MUJOCO_SCOPES, env_class=_mujoco_env,
-                          live_provider=_mujoco_live,
-                          model_provider=_mujoco_model_provider,
-                          model_handle=_mujoco_model_handle,
-                          prop_backend=_mujoco_prop_backend,
-                          camera_backend=_mujoco_rig_factory,
-                          director_ops=_mujoco_director_ops,
-                          contact_backend=_mujoco_contact_backend,
-                          gripper_backend=_mujoco_gripper_backend,
-                          env_kwargs=_mujoco_env_kwargs,
-                          content_router=_mujoco_content_router,
-                          scene_ops=_mujoco_scene_ops,
-                          bind_all_declared_cameras=True,
-                          world_base_required=True,
-                          mj_scene_consumer=True,
-                          inline_static_scene=True,
-                          probe_in_host=True,
-                          probe_env=(("MUJOCO_GL", "egl"),)),
-    "mjwarp": BackendInfo("mjwarp", (0, 0), MJWARP_TRAITS,
-                          options_schema=_MJ_COMPOSE_OPTIONS,
-                          scene_engine=_mujoco_scene_engine,
-                          scopes=MJWARP_SCOPES, env_class=_mjwarp_env,
-                          live_provider=_mujoco_live,
-                          model_provider=_mjwarp_model_provider,
-                          model_handle=_mjwarp_model_handle,
-                          prop_backend=_mujoco_prop_backend,
-                          camera_backend=_mjwarp_rig_factory,
-                          director_ops=_mjwarp_director_ops,
-                          gripper_backend=_mujoco_gripper_backend,
-                          env_kwargs=_mjwarp_env_kwargs,
-                          scene_ops=_mujoco_scene_ops,
-                          bind_all_declared_cameras=True,
-                          world_base_required=True,
-                          mj_scene_consumer=True,
-                          probe_in_host=True,
-                          probe_env=(("MUJOCO_GL", "egl"),)),
-    "isaaclab2": BackendInfo("isaaclab2", (2, 3), ISAACLAB2_TRAITS,
-                             env_class=_isaaclab2_env,
-                             model_provider=_isaaclab2_model_provider,
-                             prop_backend=_isaaclab2_prop_backend,
-                             camera_backend=_isaaclab2_rig_factory,
-                             director_ops=_isaaclab2_director_ops,
-                             contact_backend=_isaaclab2_contact_backend,
-                             gripper_backend=_isaaclab2_gripper_backend,
-                             env_kwargs=_isaaclab2_env_kwargs,
-                             build_terrain=_isaaclab2_build_terrain,
-                             build_actuator_override=_isaaclab2_actuator_override,
-                             build_events=_isaaclab2_build_events,
-                             scene_ops=_isaaclab2_scene_ops,
-                             kit_launcher=_isaaclab2_kit_launcher,
-                             recipe_with_isaaclab=True,
-                             default_lighting={"dome_intensity": 600.0},
-                             camera_enable_required=True),
-    "isaaclab3": BackendInfo("isaaclab3", (3, 0), ISAACLAB3_TRAITS,
-                             env_class=_isaaclab3_env,
-                             camera_backend=_isaaclab2_rig_factory,
-                             director_ops=_isaaclab2_director_ops,
-                             contact_backend=_isaaclab2_contact_backend,
-                             gripper_backend=_isaaclab2_gripper_backend,
-                             env_kwargs=_isaaclab2_env_kwargs,
-                             build_terrain=_isaaclab2_build_terrain,
-                             build_actuator_override=_isaaclab2_actuator_override,
-                             build_events=_isaaclab2_build_events,
-                             scene_ops=_isaaclab2_scene_ops,
-                             kit_launcher=_isaaclab2_kit_launcher,
-                             recipe_with_isaaclab=True,
-                             default_lighting={"dome_intensity": 600.0},
-                             camera_enable_required=True),
+    "mujoco": BackendInfo(
+        "mujoco",
+        (0, 0),
+        MUJOCO_TRAITS,
+        options_schema=_MJ_COMPOSE_OPTIONS,
+        scene_engine=_mujoco_scene_engine,
+        scopes=MUJOCO_SCOPES,
+        env_class=_mujoco_env,
+        live_provider=_mujoco_live,
+        model_provider=_mujoco_model_provider,
+        model_handle=_mujoco_model_handle,
+        prop_backend=_mujoco_prop_backend,
+        camera_backend=_mujoco_rig_factory,
+        director_ops=_mujoco_director_ops,
+        contact_backend=_mujoco_contact_backend,
+        gripper_backend=_mujoco_gripper_backend,
+        env_kwargs=_mujoco_env_kwargs,
+        content_router=_mujoco_content_router,
+        scene_ops=_mujoco_scene_ops,
+        bind_all_declared_cameras=True,
+        world_base_required=True,
+        mj_scene_consumer=True,
+        inline_static_scene=True,
+        probe_in_host=True,
+        probe_env=(("MUJOCO_GL", "egl"),),
+    ),
+    "mjwarp": BackendInfo(
+        "mjwarp",
+        (0, 0),
+        MJWARP_TRAITS,
+        options_schema=_MJ_COMPOSE_OPTIONS,
+        scene_engine=_mujoco_scene_engine,
+        scopes=MJWARP_SCOPES,
+        env_class=_mjwarp_env,
+        live_provider=_mujoco_live,
+        model_provider=_mjwarp_model_provider,
+        model_handle=_mjwarp_model_handle,
+        prop_backend=_mujoco_prop_backend,
+        camera_backend=_mjwarp_rig_factory,
+        director_ops=_mjwarp_director_ops,
+        gripper_backend=_mujoco_gripper_backend,
+        env_kwargs=_mjwarp_env_kwargs,
+        scene_ops=_mujoco_scene_ops,
+        bind_all_declared_cameras=True,
+        world_base_required=True,
+        mj_scene_consumer=True,
+        probe_in_host=True,
+        probe_env=(("MUJOCO_GL", "egl"),),
+    ),
+    "isaaclab2": BackendInfo(
+        "isaaclab2",
+        (2, 3),
+        ISAACLAB2_TRAITS,
+        env_class=_isaaclab2_env,
+        model_provider=_isaaclab2_model_provider,
+        prop_backend=_isaaclab2_prop_backend,
+        camera_backend=_isaaclab2_rig_factory,
+        director_ops=_isaaclab2_director_ops,
+        contact_backend=_isaaclab2_contact_backend,
+        gripper_backend=_isaaclab2_gripper_backend,
+        env_kwargs=_isaaclab2_env_kwargs,
+        build_terrain=_isaaclab2_build_terrain,
+        build_actuator_override=_isaaclab2_actuator_override,
+        build_events=_isaaclab2_build_events,
+        scene_ops=_isaaclab2_scene_ops,
+        kit_launcher=_isaaclab2_kit_launcher,
+        recipe_with_isaaclab=True,
+        default_lighting={"dome_intensity": 600.0},
+        camera_enable_required=True,
+    ),
+    "isaaclab3": BackendInfo(
+        "isaaclab3",
+        (3, 0),
+        ISAACLAB3_TRAITS,
+        env_class=_isaaclab3_env,
+        camera_backend=_isaaclab2_rig_factory,
+        director_ops=_isaaclab2_director_ops,
+        contact_backend=_isaaclab2_contact_backend,
+        gripper_backend=_isaaclab2_gripper_backend,
+        env_kwargs=_isaaclab2_env_kwargs,
+        build_terrain=_isaaclab2_build_terrain,
+        build_actuator_override=_isaaclab2_actuator_override,
+        build_events=_isaaclab2_build_events,
+        scene_ops=_isaaclab2_scene_ops,
+        kit_launcher=_isaaclab2_kit_launcher,
+        recipe_with_isaaclab=True,
+        default_lighting={"dome_intensity": 600.0},
+        camera_enable_required=True,
+    ),
 }
 
 CANONICAL_BACKENDS: tuple[str, ...] = tuple(_STATIC_INFO)
@@ -975,8 +1022,7 @@ def build_name(name: str | None = None) -> str:
     raw = _BUILD_ALIASES.get(raw, raw)
     if raw in _STATIC_INFO:
         return raw
-    raise ValueError(f"unknown env backend {raw!r}; "
-                     f"available: {', '.join(CANONICAL_BACKENDS)}")
+    raise ValueError(f"unknown env backend {raw!r}; " f"available: {', '.join(CANONICAL_BACKENDS)}")
 
 
 def backend_info(name: str) -> BackendInfo:
@@ -995,9 +1041,9 @@ def backend_info(name: str) -> BackendInfo:
     else:
         ver = isaaclab_version()
         if canonical == "isaaclab3" and ver is not None and ver[0] < 3:
-            ver = None            # declared il3, stack is 2.x
+            ver = None  # declared il3, stack is 2.x
         if canonical == "isaaclab2" and ver is not None and ver[0] >= 3:
-            ver = None            # declared il2, stack is 3.x
+            ver = None  # declared il2, stack is 3.x
     if ver is not None:
         info = replace(info, version=ver)
     return info
@@ -1023,7 +1069,8 @@ def _resolve_name(name: str | None) -> str:
     raise BackendSelectionError(
         f"unknown env backend {name!r}",
         f"available backends: {', '.join(CANONICAL_BACKENDS)} "
-        f"(alias 'isaaclab' auto-selects isaaclab2/isaaclab3 by version)")
+        f"(alias 'isaaclab' auto-selects isaaclab2/isaaclab3 by version)",
+    )
 
 
 def select_backend(name: str | None = None) -> str:
@@ -1041,8 +1088,8 @@ def select_backend(name: str | None = None) -> str:
             raise BackendSelectionError(
                 "backend 'mujoco' requested but the mujoco stack is not "
                 "importable in this environment",
-                "run on the host .venv_sim (pip install mujoco) or pick a "
-                "different env.backend")
+                "run on the host .venv_sim (pip install mujoco) or pick a " "different env.backend",
+            )
         return canonical
     if canonical == "mjwarp":
         ver = mujoco_warp_version()
@@ -1052,7 +1099,8 @@ def select_backend(name: str | None = None) -> str:
                 "importable in this environment",
                 "install the warp extra (pip install 'unigym[warp]'; "
                 "mujoco>=3.13 + mujoco-warp + warp-lang) or pick a "
-                "different env.backend")
+                "different env.backend",
+            )
         return canonical
     ver = isaaclab_version()
     if ver is None:
@@ -1060,15 +1108,16 @@ def select_backend(name: str | None = None) -> str:
             f"backend '{canonical}' requested but the isaaclab stack is not "
             f"importable in this environment",
             "isaaclab runs need the isaac-lab container (AppLauncher must "
-            "start first); check env.backend in the config")
+            "start first); check env.backend in the config",
+        )
     if canonical == "isaaclab2" and ver[0] >= 3:
         raise BackendSelectionError(
-            f"backend 'isaaclab2' requested but installed isaaclab is "
-            f"{ver[0]}.{ver[1]}",
-            "set env.backend: isaaclab3 (or install the isaaclab 2.3 stack)")
+            f"backend 'isaaclab2' requested but installed isaaclab is " f"{ver[0]}.{ver[1]}",
+            "set env.backend: isaaclab3 (or install the isaaclab 2.3 stack)",
+        )
     if canonical == "isaaclab3" and ver[0] < 3:
         raise BackendSelectionError(
-            f"backend 'isaaclab3' requested but installed isaaclab is "
-            f"{ver[0]}.{ver[1]}",
-            "set env.backend: isaaclab2 (or install isaaclab 3.x)")
+            f"backend 'isaaclab3' requested but installed isaaclab is " f"{ver[0]}.{ver[1]}",
+            "set env.backend: isaaclab2 (or install isaaclab 3.x)",
+        )
     return canonical

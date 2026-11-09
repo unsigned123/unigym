@@ -1,4 +1,5 @@
 """Language generator registry (torch-only, unit-testable)."""
+
 from __future__ import annotations
 
 from .base import LanguageGenerator
@@ -22,8 +23,8 @@ def build_generator(section: dict | None) -> LanguageGenerator | None:
         return None
     if name not in LANGUAGE_REGISTRY:
         raise ValueError(
-            f"unknown language generator '{name}'; "
-            f"available: {sorted(LANGUAGE_REGISTRY)}")
+            f"unknown language generator '{name}'; " f"available: {sorted(LANGUAGE_REGISTRY)}"
+        )
     params = dict(section.get("params", {}))
     return LANGUAGE_REGISTRY[name](**params)
 

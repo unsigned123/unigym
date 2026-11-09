@@ -12,6 +12,7 @@ verbatim: prop -> adapter -> camera -> contact -> env ->
 writer/logger -> director/timeline -> sinks -> replay -> bridge -> rewind
 providers.
 """
+
 from __future__ import annotations
 
 import os
@@ -233,13 +234,11 @@ def _config_dict_list(value: JsonValue) -> list[dict[str, JsonValue]]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise TypeError(
-            f"expected a list of config sections, got {type(value).__name__}")
+        raise TypeError(f"expected a list of config sections, got {type(value).__name__}")
     out: list[dict[str, JsonValue]] = []
     for item in value:
         if not isinstance(item, dict):
-            raise TypeError(
-                f"expected a config section mapping, got {type(item).__name__}")
+            raise TypeError(f"expected a config section mapping, got {type(item).__name__}")
         out.append(item)
     return out
 
@@ -304,22 +303,19 @@ def _adapter_self_command_dim(adapter: Adapter) -> int:
 
 def _body_controls(env: EnvBackend) -> list[ControlRuntime]:
     """The body control faces (one per articulation, action face == name)."""
-    return [c for c in (env.controls or {}).values()
-            if c.action_face == c.articulation]
+    return [c for c in (env.controls or {}).values() if c.action_face == c.articulation]
 
 
 def _body_control_for(env: EnvBackend, articulation: str) -> ControlRuntime:
     """The body control face of one articulation (or its first control)."""
     controls = list((env.controls or {}).values())
     for control in controls:
-        if (control.articulation == articulation
-                and control.action_face == articulation):
+        if control.articulation == articulation and control.action_face == articulation:
             return control
     for control in controls:
         if control.articulation == articulation:
             return control
-    raise RuntimeError(
-        f"articulation {articulation!r} has no control face")
+    raise RuntimeError(f"articulation {articulation!r} has no control face")
 
 
 def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[str, ...]]:
@@ -339,8 +335,8 @@ def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[str, ...]]:
         prev = owners.get(name)
         if prev is not None:
             raise ValueError(
-                f"control group {name!r} is claimed by two adapters: "
-                f"{prev!r} and {owner!r}")
+                f"control group {name!r} is claimed by two adapters: " f"{prev!r} and {owner!r}"
+            )
         owners[name] = owner
         groups.setdefault(owner, []).append(name)
     return {owner: tuple(names) for owner, names in groups.items()}
@@ -359,18 +355,21 @@ def _build_replay(spec: ReplaySpec, num_envs: int) -> TraceReplay | None:
     if not spec.path:
         return None
     from unigym.trace.replay import ReplayError, TraceReplay
+
     try:
-        replay = TraceReplay(spec.path, mode=spec.mode,
-                             strict=spec.strict,
-                             key=spec.key)
+        replay = TraceReplay(spec.path, mode=spec.mode, strict=spec.strict, key=spec.key)
         info: dict[str, JsonValue] = replay.bind(num_envs)
         if spec.freeze_rng:
             frozen: dict[str, JsonValue] = replay.freeze_rng()
-            print(f"[replay] rng frozen: faces={frozen['faces']} "
-                  f"seed={frozen['seed']}", flush=True)
-        print(f"[replay] bound: mode={info['mode']} every={info['every']} "
-              f"coverage={info['coverage']} ticks raw_key={info['raw_key']}",
-              flush=True)
+            print(
+                f"[replay] rng frozen: faces={frozen['faces']} " f"seed={frozen['seed']}",
+                flush=True,
+            )
+        print(
+            f"[replay] bound: mode={info['mode']} every={info['every']} "
+            f"coverage={info['coverage']} ticks raw_key={info['raw_key']}",
+            flush=True,
+        )
         return replay
     except ReplayError as e:
         raise SystemExit(f"[replay] error: {e} | hint: {e.hint}") from e
@@ -395,14 +394,12 @@ def _profile_for(art: ArticulationSpec, with_isaaclab: bool) -> RobotRecipe:
     """
     section = _recipe_section(art)
     raw_params = section.get("params")
-    params: dict[str, JsonValue] = (
-        dict(raw_params) if isinstance(raw_params, dict) else {})
+    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     selector = params.pop("profile", None)
     if selector is not None:
         section["params"] = params
         section["name"] = str(selector)
-    return build_robot_recipe(
-        section, with_isaaclab=with_isaaclab)
+    return build_robot_recipe(section, with_isaaclab=with_isaaclab)
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
@@ -415,15 +412,13 @@ def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
     return [by_name[name] for name in names if name in by_name]
 
 
-def _control_recipes(
-        spec: RunSpec, info: BackendInfo) -> dict[str, RobotRecipe]:
+def _control_recipes(spec: RunSpec, info: BackendInfo) -> dict[str, RobotRecipe]:
     """Build the RobotRecipe of every recipe-backed control articulation."""
     recipes: dict[str, RobotRecipe] = {}
     for art in _control_articulations(spec):
         groups = [g for g in spec.controls if g.articulation == art.name]
         try:
-            recipes[art.name] = _profile_for(
-                art, info.recipe_with_isaaclab)
+            recipes[art.name] = _profile_for(art, info.recipe_with_isaaclab)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
             # recipe-less articulations are legal only when every control
             # declares its joints/q0 explicitly (e.g. a future prop face);
@@ -440,9 +435,14 @@ def _control_recipes(
 
 
 def _build_robot_and_props(
-        spec: RunSpec, cfg: dict[str, JsonValue], info: BackendInfo,
-        device: str, num_envs: int, env_spacing: float,
-        config_dir: str) -> _RobotBundle:
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    info: BackendInfo,
+    device: str,
+    num_envs: int,
+    env_spacing: float,
+    config_dir: str,
+) -> _RobotBundle:
     """Step 1: policy profile(s) + actuator/terrain/prop + adapter."""
     backend_label = info.name
     # backends that build an ArticulationCfg declare it on their
@@ -455,7 +455,8 @@ def _build_robot_and_props(
             "`controls:` group over a registered robot articulation "
             "(v104 authoring shape) | hint: e.g. controls: [{name: g1, "
             "adapter: <name>, articulation: g1, drive: position_pd, "
-            "target: position}]")
+            "target: position}]"
+        )
     first_name = next(iter(profiles))
     profile = profiles[first_name]
     # Pluggable actuators: the yaml top-level "actuator" field overrides
@@ -467,11 +468,11 @@ def _build_robot_and_props(
     # standard_pd / computed_torque_pd / native_servo) --
     # the top-level "actuator" key semantics unchanged (isaaclab-only).
     if "actuator" in cfg:
-        if info.build_actuator_override is None \
-                or profile.articulation_cfg is None:
+        if info.build_actuator_override is None or profile.articulation_cfg is None:
             raise ValueError(
                 "yaml top-level 'actuator' override is not supported by the "
-                f"'{backend_label}' backend; configure gains via env.params")
+                f"'{backend_label}' backend; configure gains via env.params"
+            )
         override = info.build_actuator_override()
         if not isinstance(override, _ActuatorOverride):
             raise TypeError("backend actuator override is not callable")
@@ -490,29 +491,44 @@ def _build_robot_and_props(
     from unigym.props import build_prop_manager
 
     prop_manager = build_prop_manager(
-        _config_dict(cfg.get("props")), num_envs=num_envs,
-        env_spacing=env_spacing, device=device, base_dir=config_dir,
-        backend=backend_label)
+        _config_dict(cfg.get("props")),
+        num_envs=num_envs,
+        env_spacing=env_spacing,
+        device=device,
+        base_dir=config_dir,
+        backend=backend_label,
+    )
     if prop_manager is not None:
-        print(f"[collect] props enabled: "
-              f"{[s.name for s in prop_manager.specs]}", flush=True)
+        print(f"[collect] props enabled: " f"{[s.name for s in prop_manager.specs]}", flush=True)
     adapter_section = _config_dict(cfg.get("adapter"))
     if adapter_section is None:
         raise TypeError("run config 'adapter' section must be a mapping")
-    adapter = build_adapter(adapter_section, num_envs=num_envs, device=device,
-                            body_parts=_profile_body_parts(profile))
+    adapter = build_adapter(
+        adapter_section, num_envs=num_envs, device=device, body_parts=_profile_body_parts(profile)
+    )
     # hierarchical adapters generate their own command each step ->
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(adapter.generates_command)
-    return {"profile": profile, "profiles": profiles, "terrain": terrain,
-            "prop_manager": prop_manager, "adapter": adapter,
-            "generates_command": generates_command}
+    return {
+        "profile": profile,
+        "profiles": profiles,
+        "terrain": terrain,
+        "prop_manager": prop_manager,
+        "adapter": adapter,
+        "generates_command": generates_command,
+    }
 
 
 def _build_sensing(
-        spec: RunSpec, cfg: dict[str, JsonValue], info: BackendInfo,
-        device: str, num_envs: int, profile: RobotRecipe, adapter: Adapter,
-        prop_manager: PropManager | None) -> _SensingBundle:
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    info: BackendInfo,
+    device: str,
+    num_envs: int,
+    profile: RobotRecipe,
+    adapter: Adapter,
+    prop_manager: PropManager | None,
+) -> _SensingBundle:
     """Step 2: camera/contact managers + lighting/director/events/recorder."""
     backend_label = info.name
     # feat/camera-obs: request-driven camera manager, built BEFORE the env
@@ -528,17 +544,21 @@ def _build_sensing(
     rec_cfg = _config_dict(cfg.get("recorder")) or {}
     rec_ref = rec_cfg.get("camera_ref") if rec_cfg.get("enabled") else None
     camera_manager = build_camera_manager(
-        cfg.get("cameras"), adapter.get_obs_requests(),
+        cfg.get("cameras"),
+        adapter.get_obs_requests(),
         enable_cameras=spec.enable_cameras,
         refs=[rec_ref] if rec_ref else None,
         depth_overrides=_config_dict(cfg.get("camera_depth")),
         backend=backend_label,
         policy_hz=_policy_hz_of(adapter),
-        num_envs=num_envs)
+        num_envs=num_envs,
+    )
     if camera_manager is not None:
-        print(f"[collect] cameras enabled: {camera_manager.names} "
-              f"(keys: {sorted(str(k) for k in camera_manager.camera_keys())})",
-              flush=True)
+        print(
+            f"[collect] cameras enabled: {camera_manager.names} "
+            f"(keys: {sorted(str(k) for k in camera_manager.camera_keys())})",
+            flush=True,
+        )
     # feat/contact-manager: request-driven contact manager, built BEFORE the
     # env (its ContactSensorCfgs must join the scene cfg prior to cloning on
     # isaaclab; docs/contracts/contacts_contract.md).  No ``contacts:`` section ->
@@ -549,14 +569,18 @@ def _build_sensing(
     # inside build_contact_manager against the profile body_parts + the
     # declared prop names (the auto held groups are retired).
     contact_manager = build_contact_manager(
-        cfg.get("contacts"), backend=backend_label, device=device,
+        cfg.get("contacts"),
+        backend=backend_label,
+        device=device,
         adapter_requests={r.key for r in adapter.get_obs_requests()},
         body_parts=_profile_body_parts(profile),
-        prop_names=([s.name for s in prop_manager.specs]
-                    if prop_manager is not None else None),
-        articulated_props=({s.name for s in prop_manager.specs
-                            if s.type == "articulation"}
-                           if prop_manager is not None else None))
+        prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
+        articulated_props=(
+            {s.name for s in prop_manager.specs if s.type == "articulation"}
+            if prop_manager is not None
+            else None
+        ),
+    )
     # default lights: a textured usd prop on isaaclab without scene
     # fill light renders as a black silhouette -- when the config declares
     # NO env.lighting and a usd prop is present, enable dome + distant by
@@ -564,15 +588,24 @@ def _build_sensing(
     # dome_intensity: 0 disables the fill light).
     env_section = _config_dict(cfg.get("env")) or {}
     effective_lighting: JsonValue = env_section.get("lighting")
-    if effective_lighting is None and info.default_lighting is not None \
-            and prop_manager is not None and prop_manager.has_usd_props:
+    if (
+        effective_lighting is None
+        and info.default_lighting is not None
+        and prop_manager is not None
+        and prop_manager.has_usd_props
+    ):
         effective_lighting = _lighting_json(info.default_lighting)
-        print("[collect] usd prop default lights: dome 600 + distant "
-              "(override via env.lighting)", flush=True)
+        print(
+            "[collect] usd prop default lights: dome 600 + distant " "(override via env.lighting)",
+            flush=True,
+        )
     if contact_manager is not None:
-        print(f"[collect] contacts enabled: "
-              f"{[s.name for s in contact_manager.specs]} "
-              f"(keys: {sorted(contact_manager.keys())})", flush=True)
+        print(
+            f"[collect] contacts enabled: "
+            f"{[s.name for s in contact_manager.specs]} "
+            f"(keys: {sorted(contact_manager.keys())})",
+            flush=True,
+        )
     # director mode : the --direct flag is the ONLY opt-in face.
     # director_cfg rides into the env builders so the mujoco spec-side
     # injection (gripper mocap body + weld slots) happens pre-compile;
@@ -583,17 +616,19 @@ def _build_sensing(
         gripper = (_config_dict(cfg.get("director")) or {}).get("gripper")
         if gripper:
             director_cfg["gripper"] = gripper
-        print("[collect] director mode ON (--direct): direct.* commands "
-              "enabled; episodes touched by commands are marked directed",
-              flush=True)
+        print(
+            "[collect] director mode ON (--direct): direct.* commands "
+            "enabled; episodes touched by commands are marked directed",
+            flush=True,
+        )
     events_cfg: object | None = None
     randomization = _config_dict(cfg.get("randomization")) or {}
     events_section = randomization.get("events")
     if events_section:
         if info.build_events is None:
             raise ValueError(
-                f"the '{backend_label}' backend does not implement "
-                "randomization.events")
+                f"the '{backend_label}' backend does not implement " "randomization.events"
+            )
         events_factory = info.build_events()
         if not isinstance(events_factory, _EventsBuilder):
             raise TypeError("backend events factory is not callable")
@@ -602,32 +637,46 @@ def _build_sensing(
     # the recorder binds an explicitly declared in-scene camera
     # only (recorder.camera_ref REQUIRED; no self-built camera path).  The
     # camera_manager MUST be built before this call (above).
-    recorder = build_recorder(rec_cfg, num_envs=num_envs,
-                              camera_manager=camera_manager)
+    recorder = build_recorder(rec_cfg, num_envs=num_envs, camera_manager=camera_manager)
     if recorder.enabled:
-        print(f"[collect] camera recording enabled "
-              f"(ref {recorder.camera_ref}, env {recorder.record_env}, "
-              f"interval {recorder.record_interval})", flush=True)
-    return {"camera_manager": camera_manager,
-            "contact_manager": contact_manager,
-            "effective_lighting": effective_lighting,
-            "director_cfg": director_cfg, "events_cfg": events_cfg,
-            "episode_length_s": episode_length_s, "recorder": recorder}
+        print(
+            f"[collect] camera recording enabled "
+            f"(ref {recorder.camera_ref}, env {recorder.record_env}, "
+            f"interval {recorder.record_interval})",
+            flush=True,
+        )
+    return {
+        "camera_manager": camera_manager,
+        "contact_manager": contact_manager,
+        "effective_lighting": effective_lighting,
+        "director_cfg": director_cfg,
+        "events_cfg": events_cfg,
+        "episode_length_s": episode_length_s,
+        "recorder": recorder,
+    }
 
 
 def _build_env_and_sampler(
-        spec: RunSpec, cfg: dict[str, JsonValue],
-        env_cfg: dict[str, JsonValue], info: BackendInfo, device: str,
-        num_envs: int, profile: RobotRecipe, adapter: Adapter,
-        prop_manager: PropManager | None, terrain: object | None,
-        camera_manager: CameraManager | None,
-        contact_manager: ContactManager | None,
-        effective_lighting: JsonValue,
-        director_cfg: dict[str, JsonValue] | None,
-        events_cfg: object | None, recorder: Recorder,
-        episode_length_s: JsonValue,
-        controls: Sequence[ControlRuntime] | None = None,
-        recipes: Mapping[str, RobotRecipe] | None = None) -> _EnvBundle:
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    env_cfg: dict[str, JsonValue],
+    info: BackendInfo,
+    device: str,
+    num_envs: int,
+    profile: RobotRecipe,
+    adapter: Adapter,
+    prop_manager: PropManager | None,
+    terrain: object | None,
+    camera_manager: CameraManager | None,
+    contact_manager: ContactManager | None,
+    effective_lighting: JsonValue,
+    director_cfg: dict[str, JsonValue] | None,
+    events_cfg: object | None,
+    recorder: Recorder,
+    episode_length_s: JsonValue,
+    controls: Sequence[ControlRuntime] | None = None,
+    recipes: Mapping[str, RobotRecipe] | None = None,
+) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
     # the run output dir resolves BEFORE the backend build: the recorded
     # scene artifacts are written during env construction
@@ -642,19 +691,24 @@ def _build_env_and_sampler(
     out_dir = spec.output.out_dir
     if out_dir is None:
         raise RuntimeError("run output directory is unresolved")
-    artifacts_dir = (Path(spec.output.artifacts_dir)
-                     if spec.output.artifacts_dir is not None else None)
+    artifacts_dir = (
+        Path(spec.output.artifacts_dir) if spec.output.artifacts_dir is not None else None
+    )
     env_kwargs_factory = info.env_kwargs
     if env_kwargs_factory is None:
-        raise TypeError(
-            f"backend {info.name!r} declares no env_kwargs factory")
+        raise TypeError(f"backend {info.name!r} declares no env_kwargs factory")
     env_kwargs_builder = env_kwargs_factory()
     if not isinstance(env_kwargs_builder, _EnvKwargsBuilder):
         raise TypeError("backend env_kwargs builder is not callable")
     extra_kwargs = env_kwargs_builder(
-        env_cfg, artifacts_dir, spec.world_base, spec,
-        controls=controls, recipes=recipes,
-        backend_options=spec.backend_options)
+        env_cfg,
+        artifacts_dir,
+        spec.world_base,
+        spec,
+        controls=controls,
+        recipes=recipes,
+        backend_options=spec.backend_options,
+    )
     env: RunEnv = build_env_backend(
         info.name,
         robot_profile=profile,
@@ -689,29 +743,45 @@ def _build_env_and_sampler(
     command_section = _config_dict(cfg.get("command"))
     if command_section is None:
         raise TypeError("run config 'command' section must be a mapping")
-    sampler = None if bool(adapter.generates_command) \
+    sampler = (
+        None
+        if bool(adapter.generates_command)
         else build_sampler(command_section, num_envs=num_envs, device=device)
-    command_dim = (sampler.dim if sampler is not None
-                   else _adapter_self_command_dim(adapter))
+    )
+    command_dim = sampler.dim if sampler is not None else _adapter_self_command_dim(adapter)
     policy_dt = adapter.control_dt
     language_section = _config_dict(cfg.get("language"))
     language_gen = build_generator(language_section)
-    lang_interval = _config_int(
-        (language_section or {}).get("interval_steps", 1))
+    lang_interval = _config_int((language_section or {}).get("interval_steps", 1))
     if language_gen is not None:
-        print(f"[collect] language generator: {type(language_gen).__name__} "
-              f"(interval={lang_interval})", flush=True)
-    return {"env": env, "artifacts_dir": artifacts_dir, "out_dir": out_dir,
-            "sampler": sampler, "command_dim": command_dim,
-            "policy_dt": policy_dt, "language_gen": language_gen,
-            "lang_interval": lang_interval}
+        print(
+            f"[collect] language generator: {type(language_gen).__name__} "
+            f"(interval={lang_interval})",
+            flush=True,
+        )
+    return {
+        "env": env,
+        "artifacts_dir": artifacts_dir,
+        "out_dir": out_dir,
+        "sampler": sampler,
+        "command_dim": command_dim,
+        "policy_dt": policy_dt,
+        "language_gen": language_gen,
+        "lang_interval": lang_interval,
+    }
 
 
 def _apply_benchmark_budget(
-        cfg: dict[str, JsonValue], mode: str, env: EnvBackend,
-        sampler: CommandSampler | None, generates_command: bool, seed: int,
-        num_envs: int, policy_dt: float, backend_label: str,
-        total_steps: int
+    cfg: dict[str, JsonValue],
+    mode: str,
+    env: EnvBackend,
+    sampler: CommandSampler | None,
+    generates_command: bool,
+    seed: int,
+    num_envs: int,
+    policy_dt: float,
+    backend_label: str,
+    total_steps: int,
 ) -> tuple[int, dict[str, JsonValue], _TaskMeta | None]:
     """Step 4: benchmark max_steps cap + task metadata."""
     # benchmark wiring (mode: benchmark | both).  Step budget: the benchmark
@@ -733,62 +803,87 @@ def _apply_benchmark_budget(
             "seed": seed,
             "num_envs": num_envs,
             "policy_dt": policy_dt,
-            "articulations": {
-                rt.articulation: list(rt.joint_names) for rt in runtimes},
+            "articulations": {rt.articulation: list(rt.joint_names) for rt in runtimes},
             "has_command": bool(sampler is not None or generates_command),
-            "backend": backend_label,     # results.v1 face
+            "backend": backend_label,  # results.v1 face
         }
         if len(runtimes) == 1:
             task_meta["joint_names"] = list(runtimes[0].joint_names)
         task_names = [
-            t if isinstance(t, str)
+            t
+            if isinstance(t, str)
             else (_config_str(t.get("name")) if isinstance(t, dict) else None)
-            for t in (_config_list(bench_cfg.get("tasks")) or [])]
-        print(f"[benchmark] mode={mode} max_steps={max_steps} "
-              f"min_episodes={_config_int(bench_cfg.get('min_episodes', 1))} "
-              f"tasks={task_names}", flush=True)
+            for t in (_config_list(bench_cfg.get("tasks")) or [])
+        ]
+        print(
+            f"[benchmark] mode={mode} max_steps={max_steps} "
+            f"min_episodes={_config_int(bench_cfg.get('min_episodes', 1))} "
+            f"tasks={task_names}",
+            flush=True,
+        )
     return total_steps, bench_cfg, task_meta
 
 
 def _build_sinks(
-        spec: RunSpec, cfg: dict[str, JsonValue], mode: str, env: RunEnv,
-        adapter: Adapter, writer: ShardWriter, logger: DataCollectLogger,
-        filter_chain: list[EpisodeFilter],
-        language_gen: LanguageGenerator | None, lang_interval: int,
-        recorder: Recorder, num_envs: int, total_steps: int, device: str,
-        policy_dt: float, out_dir: str, seed: int,
-        episode_length_s: JsonValue, dur_lo: float, dur_hi: float,
-        command_dim: int, profile: RobotRecipe,
-        bench_cfg: dict[str, JsonValue], task_meta: _TaskMeta | None,
-        contact_manager: ContactManager | None) -> _SinkBundle:
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    mode: str,
+    env: RunEnv,
+    adapter: Adapter,
+    writer: ShardWriter,
+    logger: DataCollectLogger,
+    filter_chain: list[EpisodeFilter],
+    language_gen: LanguageGenerator | None,
+    lang_interval: int,
+    recorder: Recorder,
+    num_envs: int,
+    total_steps: int,
+    device: str,
+    policy_dt: float,
+    out_dir: str,
+    seed: int,
+    episode_length_s: JsonValue,
+    dur_lo: float,
+    dur_hi: float,
+    command_dim: int,
+    profile: RobotRecipe,
+    bench_cfg: dict[str, JsonValue],
+    task_meta: _TaskMeta | None,
+    contact_manager: ContactManager | None,
+) -> _SinkBundle:
     """Step 5: director + timeline + mode sink composition."""
-    from unigym.runner.sinks import (
-        BenchmarkSink, CollectSink, FanOutSink)
+    from unigym.runner.sinks import BenchmarkSink, CollectSink, FanOutSink
+
     # director (before the sinks so BenchmarkSink can label
     # episodes directed): status_fn wires in after the bridge exists
     director: Director | None = None
     if spec.direct:
         from unigym.backends.registry import backend_info, build_name
         from unigym.director import Director
+
         info = backend_info(build_name(spec.backend))
         director = Director(
-            env=env, contact_manager=contact_manager,
-            cfg=_config_dict(cfg.get("director")) or {}, out_dir=out_dir,
-            director_ops=info.director_ops)
+            env=env,
+            contact_manager=contact_manager,
+            cfg=_config_dict(cfg.get("director")) or {},
+            out_dir=out_dir,
+            director_ops=info.director_ops,
+        )
 
     # timeline (§3): the unified events.jsonl stream + shared writer
     # (read-only observers -- zero perturbation of recording/physics)
     from unigym.watchers import EventLog, TimelineSink
+
     watch_specs: list[dict[str, JsonValue]] | None = None
     if spec.watch:
-        watch_specs = _load_watch_specs(spec.watch)   # fail-fast, pre-mount
-        print(f"[collect] watchers born-armed: {len(watch_specs)} "
-              f"from {spec.watch}", flush=True)
+        watch_specs = _load_watch_specs(spec.watch)  # fail-fast, pre-mount
+        print(
+            f"[collect] watchers born-armed: {len(watch_specs)} " f"from {spec.watch}", flush=True
+        )
     event_log = EventLog(out_dir)
     timeline = TimelineSink(
-        event_log,
-        contact_keys=(contact_manager.keys() if contact_manager is not None
-                      else []))
+        event_log, contact_keys=(contact_manager.keys() if contact_manager is not None else [])
+    )
 
     # sink selection by yaml ``mode`` (collect = unchanged default path)
     collect_sink: CollectSink | None = None
@@ -822,8 +917,10 @@ def _build_sinks(
         # benchmark.packs: extra pack dirs (docs/contracts/benchmark_contract.md §10);
         # builtin registry + <repo>/benchmark_packs are always discovered
         bench_tasks = build_tasks(
-            _config_dict_list(bench_cfg.get("tasks")), dict(task_meta),
-            packs_cfg=_config_list(bench_cfg.get("packs")))
+            _config_dict_list(bench_cfg.get("tasks")),
+            dict(task_meta),
+            packs_cfg=_config_list(bench_cfg.get("packs")),
+        )
         bench_sink = BenchmarkSink(
             tasks=bench_tasks,
             meta=dict(task_meta),
@@ -832,7 +929,8 @@ def _build_sinks(
             report_path=os.path.join(out_dir, "benchmark_report.json"),
             director=director,
             # benchmark.retain_metric_frames -> metrics.npz
-            retain_frames=bool(bench_cfg.get("retain_metric_frames", False)))
+            retain_frames=bool(bench_cfg.get("retain_metric_frames", False)),
+        )
         if bench_tasks:  # no tasks -> nothing to wait for
             stop_when = bench_sink.episodes_done
     sink: Sink | None
@@ -850,21 +948,37 @@ def _build_sinks(
         sink = extra_sink if sink is None else FanOutSink(extra_sink, sink)
     if sink is None:
         raise RuntimeError(f"no sink selected for run mode {mode!r}")
-    return {"director": director, "sink": sink, "timeline": timeline,
-            "event_log": event_log, "bench_sink": bench_sink,
-            "stop_when": stop_when, "watch_specs": watch_specs}
+    return {
+        "director": director,
+        "sink": sink,
+        "timeline": timeline,
+        "event_log": event_log,
+        "bench_sink": bench_sink,
+        "stop_when": stop_when,
+        "watch_specs": watch_specs,
+    }
 
 
 def _build_bridge_and_wiring(
-        spec: RunSpec, cfg: dict[str, JsonValue], backend_label: str,
-        env: RunEnv, adapter: Adapter,
-        camera_manager: CameraManager | None, out_dir: str,
-        bench_sink: BenchmarkSink | None, sink: Sink,
-        timeline: TimelineSink, director: Director | None,
-        event_log: EventLog, watch_specs: list[dict[str, JsonValue]] | None,
-        stop_when: Callable[[], bool] | None, num_envs: int) -> _WiringBundle:
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    backend_label: str,
+    env: RunEnv,
+    adapter: Adapter,
+    camera_manager: CameraManager | None,
+    out_dir: str,
+    bench_sink: BenchmarkSink | None,
+    sink: Sink,
+    timeline: TimelineSink,
+    director: Director | None,
+    event_log: EventLog,
+    watch_specs: list[dict[str, JsonValue]] | None,
+    stop_when: Callable[[], bool] | None,
+    num_envs: int,
+) -> _WiringBundle:
     """Step 6: replay + bridge + runtime attach + rewind providers."""
     from unigym.runner.sinks import FanOutSink
+
     # trace replay source (toolkit B): fail-fast BEFORE the bridge/worker
     # mounts so a bad trace can never leak a zombie SHM segment
     replay = _build_replay(spec.replay, num_envs)
@@ -874,12 +988,14 @@ def _build_bridge_and_wiring(
     # sink.on_step and is honoured through the engine's existing stop_when
     # seam (normal break -> on_run_end teardown, no exception plumbing).
     from unigym.runtime.bridge import Bridge, make_run_id
+
     bridge = Bridge(
-        make_run_id(spec.run_name), camera_manager,
+        make_run_id(spec.run_name),
+        camera_manager,
         camera=_config_str(spec.bridges["serve_camera"]),
-        frame_capacity=int(
-            _config_float(spec.bridges["serve_frame_mb"]) * 1024 * 1024),
-        config=os.path.abspath(spec.config_path), out_dir=out_dir,
+        frame_capacity=int(_config_float(spec.bridges["serve_frame_mb"]) * 1024 * 1024),
+        config=os.path.abspath(spec.config_path),
+        out_dir=out_dir,
         state_dir=_config_str(spec.bridges["serve_state_dir"]),
         obs_catalog=_catalog_keys(env),
         paused=_config_bool(spec.bridges["serve_pause"]),
@@ -887,14 +1003,18 @@ def _build_bridge_and_wiring(
         # typed queries: effective config snapshot (startup
         # fail-fast on oversize) + benchmark telemetry feed (report draft,
         # episode rings; None in collect-only runs)
-        config_doc=cfg, metrics_source=bench_sink)
+        config_doc=cfg,
+        metrics_source=bench_sink,
+    )
     # runtime debug console: step/inspect/save_npz handlers on
     # the bridge dispatch table (docs/contracts/console_contract.md)
     from unigym.console import attach as attach_console
+
     attach_console(bridge, env=env, adapter=adapter, out_dir=out_dir)
     # scene face: cmd-16 typed query -- curated scene tree
     # (lazy cache) + live state (per-query sampling); zero engine writes
     from unigym.runtime.scene import attach as attach_scene
+
     robot_name = next(iter(getattr(env, "articulations", {}) or {}), None)
     attach_scene(bridge, env, backend_label, robot_name=robot_name)
     # watchers: cmd-15 handler + per-tick hook (before the step gate);
@@ -904,12 +1024,19 @@ def _build_bridge_and_wiring(
     # run's output dir (the daemon tail-face reads it there).
     from unigym import runtime_dirs
     from unigym.watchers import attach as attach_watchers
-    attach_watchers(bridge, env=env, adapter=adapter,
-                    out_dir=runtime_dirs.watch_dir(bridge.run_id),
-                    event_log=event_log, specs=watch_specs)
+
+    attach_watchers(
+        bridge,
+        env=env,
+        adapter=adapter,
+        out_dir=runtime_dirs.watch_dir(bridge.run_id),
+        event_log=event_log,
+        specs=watch_specs,
+    )
     # director: command handler on cmd 14 + live status feed
     if director is not None:
         from unigym.director import attach as attach_director
+
         director.status_fn = bridge.read_status
         attach_director(bridge, director)
     else:
@@ -917,18 +1044,18 @@ def _build_bridge_and_wiring(
         # command is rejected fail-fast (the attempt still lands in the
         # shared command log)
         from unigym.director import Rejector
-        log = (Path(out_dir) / "director" / "commands.jsonl"
-               if out_dir else None)
+
+        log = Path(out_dir) / "director" / "commands.jsonl" if out_dir else None
         bridge.register_command("direct", Rejector(log).handle)
     if director is not None:
-        sink = FanOutSink(sink, director)      # sinks first, then director
-    sink = FanOutSink(sink, timeline)          # timeline, then the bridge
+        sink = FanOutSink(sink, director)  # sinks first, then director
+    sink = FanOutSink(sink, timeline)  # timeline, then the bridge
     sink = FanOutSink(sink, bridge)
     base_stop = stop_when
 
     def _stop_when() -> bool:
-        return bool(bridge.shutdown_requested) or (
-            base_stop() if base_stop is not None else False)
+        return bool(bridge.shutdown_requested) or (base_stop() if base_stop is not None else False)
+
     stop_when = _stop_when
 
     # rewind face: the providers are constructed here; the
@@ -936,13 +1063,14 @@ def _build_bridge_and_wiring(
     # providers: the sink facilities' open-episode state joins every
     # checkpoint payload and is restored fail-fast with the engine+adapter
     from unigym.runtime.rewind_providers import build_rewind_providers
+
     initializer: object | None = getattr(env, "_initializer", None)
-    rewind_providers = build_rewind_providers(
-        sink, initializer=initializer)
+    rewind_providers = build_rewind_providers(sink, initializer=initializer)
     # freeze face (freeze paradigm): skill halt -> world freeze.
     # Engine-thread park hook for adapters that declare it (agent_g1);
     # a no-op mount for every other adapter.
     from unigym.runtime.freeze import attach as attach_freeze
+
     attach_freeze(bridge, adapter)
     # born-paused truth: a --serve_pause run parks via the gate at
     # construction -- adopt that park as the time proxy's command
@@ -950,8 +1078,13 @@ def _build_bridge_and_wiring(
     set_paused: object = getattr(adapter, "set_time_truth_paused", None)
     if _config_bool(spec.bridges["serve_pause"]) and callable(set_paused):
         set_paused(True)
-    return {"bridge": bridge, "sink": sink, "replay": replay,
-            "rewind_providers": rewind_providers, "stop_when": stop_when}
+    return {
+        "bridge": bridge,
+        "sink": sink,
+        "replay": replay,
+        "rewind_providers": rewind_providers,
+        "stop_when": stop_when,
+    }
 
 
 def build_instance(spec: RunSpec) -> RunInstance:
@@ -968,11 +1101,9 @@ def build_instance(spec: RunSpec) -> RunInstance:
 
     device = spec.device
     env_value = cfg["env"]
-    env_cfg: dict[str, JsonValue] = (
-        env_value if isinstance(env_value, dict) else {})
+    env_cfg: dict[str, JsonValue] = env_value if isinstance(env_value, dict) else {}
     col_value = cfg["collect"]
-    col_cfg: dict[str, JsonValue] = (
-        col_value if isinstance(col_value, dict) else {})
+    col_cfg: dict[str, JsonValue] = col_value if isinstance(col_value, dict) else {}
     num_envs = _config_int(env_cfg["num_envs"])
     total_steps = _config_int(col_cfg["steps"])
     # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
@@ -982,8 +1113,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     env_spacing = _config_float(env_cfg.get("env_spacing", 4.0))
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
 
-    robot = _build_robot_and_props(
-        spec, cfg, info, device, num_envs, env_spacing, config_dir)
+    robot = _build_robot_and_props(spec, cfg, info, device, num_envs, env_spacing, config_dir)
     profile = robot["profile"]
     profiles = robot["profiles"]
     adapter = robot["adapter"]
@@ -993,20 +1123,30 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # ControlRuntime per declared group by expanding `joint_set` from the
     # recipe (or using explicit `joints`) -- once.  The same resolved
     # controls freeze into the read-only plan; no guessing path remains.
-    control_runtimes = build_control_runtimes(
-        spec.controls, spec.articulations, profiles)
+    control_runtimes = build_control_runtimes(spec.controls, spec.articulations, profiles)
     control_plan = build_control_plan(spec.controls, control_runtimes)
-    sensing = _build_sensing(
-        spec, cfg, info, device, num_envs, profile, adapter,
-        prop_manager)
+    sensing = _build_sensing(spec, cfg, info, device, num_envs, profile, adapter, prop_manager)
     built = _build_env_and_sampler(
-        spec, cfg, env_cfg, info, device, num_envs, profile, adapter,
-        prop_manager, robot["terrain"],
-        sensing["camera_manager"], sensing["contact_manager"],
-        sensing["effective_lighting"], sensing["director_cfg"],
-        sensing["events_cfg"], sensing["recorder"],
+        spec,
+        cfg,
+        env_cfg,
+        info,
+        device,
+        num_envs,
+        profile,
+        adapter,
+        prop_manager,
+        robot["terrain"],
+        sensing["camera_manager"],
+        sensing["contact_manager"],
+        sensing["effective_lighting"],
+        sensing["director_cfg"],
+        sensing["events_cfg"],
+        sensing["recorder"],
         sensing["episode_length_s"],
-        controls=control_runtimes, recipes=profiles)
+        controls=control_runtimes,
+        recipes=profiles,
+    )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)
     if spec.adapter_name:
@@ -1014,21 +1154,30 @@ def build_instance(spec: RunSpec) -> RunInstance:
         # articulated-prop action faces are declared by ``objects:`` sugar and
         # materialized by the backend as prop control runtimes; the emitting
         # adapter owns them (the config's controls[] cannot name them).
-        prop_faces = tuple(c.name for c in (env.controls or {}).values()
-                           if c.prop)
+        prop_faces = tuple(c.name for c in (env.controls or {}).values() if c.prop)
         if prop_faces:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))
             env.adapter_groups[spec.adapter_name] = owned + prop_faces
     sampler = built["sampler"]
     policy_dt = built["policy_dt"]
     total_steps, bench_cfg, task_meta = _apply_benchmark_budget(
-        cfg, mode, env, sampler, generates_command, seed, num_envs, policy_dt,
-        backend_label, total_steps)
+        cfg,
+        mode,
+        env,
+        sampler,
+        generates_command,
+        seed,
+        num_envs,
+        policy_dt,
+        backend_label,
+        total_steps,
+    )
 
     # pluggable filter chain (episode-level)
     articulation_names = list(env.articulations or {})
     filter_chain = build_filter_chain(
-        _config_list(cfg.get("filters")), articulations=articulation_names)
+        _config_list(cfg.get("filters")), articulations=articulation_names
+    )
     filter_active = len(filter_chain) > 0
     if filter_active:
         names = [type(f).__name__ for f in filter_chain]
@@ -1038,8 +1187,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # duration).  Terminations are explicit; no default fall group is
     # synthesised when the config omits the section.
     term_group = build_termination_group(_config_list(cfg.get("terminations")))
-    print(f"[collect] terminations: {term_group.names} "
-          f"(mode={term_group.mode})", flush=True)
+    print(f"[collect] terminations: {term_group.names} " f"(mode={term_group.mode})", flush=True)
 
     # label single-writer: the run process stamps its OWN
     # ledger with the display label (pid-aware, no-op without a ledger
@@ -1047,6 +1195,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # swallowed by the mutation face (bookkeeping never kills a run).
     if spec.label:
         from unigym.daemon import runrec as _runrec
+
         _runrec.set_label(built["out_dir"], os.getpid(), spec.label)
     episode_length_s = sensing["episode_length_s"]
     from unigym.adapters.base import Adapter
@@ -1081,11 +1230,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
         },
         "command_dim": built["command_dim"],
         "obs_collect_overridden": (
-            type(adapter).compute_obs_collect
-            is not Adapter.compute_obs_collect),
+            type(adapter).compute_obs_collect is not Adapter.compute_obs_collect
+        ),
         "body_parts": _profile_body_parts(profile),
-        "language_generator": (type(built["language_gen"]).__name__
-                               if built["language_gen"] is not None else None),
+        "language_generator": (
+            type(built["language_gen"]).__name__ if built["language_gen"] is not None else None
+        ),
         "language_interval_steps": built["lang_interval"],
         "filters": cfg.get("filters"),
         "filter_active": filter_active,
@@ -1096,8 +1246,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         # director/status.json + commands.jsonl, contract §7)
         "director_enabled": bool(spec.direct),
         # watchers: the born-armed pack (reproducibility, §8.6)
-        "watch_file": (os.path.abspath(spec.watch)
-                       if spec.watch else None),
+        "watch_file": (os.path.abspath(spec.watch) if spec.watch else None),
     }
     # effective diff (reproducibility; key ABSENT when no
     # --set so old runs' meta.json stays byte-identical)
@@ -1122,11 +1271,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     from unigym.io.writer import ShardWriter
 
     writer = ShardWriter(
-        built["out_dir"],
-        shard_steps=_config_int(col_cfg.get("shard_steps", 1000)),
-        meta=dict(meta))
+        built["out_dir"], shard_steps=_config_int(col_cfg.get("shard_steps", 1000)), meta=dict(meta)
+    )
     logger = DataCollectLogger(
-        cfg, built["out_dir"], num_envs,
+        cfg,
+        built["out_dir"],
+        num_envs,
         total_steps=total_steps,
         policy_dt=policy_dt,
         log_interval=_config_int(col_cfg.get("log_interval", 500)),
@@ -1134,16 +1284,49 @@ def build_instance(spec: RunSpec) -> RunInstance:
     print(f"[collect] output dir: {built['out_dir']}", flush=True)
 
     sinks = _build_sinks(
-        spec, cfg, mode, env, adapter, writer, logger, filter_chain,
-        built["language_gen"], built["lang_interval"], sensing["recorder"],
-        num_envs, total_steps, device, policy_dt, built["out_dir"], seed,
-        episode_length_s, dur_lo, dur_hi, built["command_dim"], profile,
-        bench_cfg, task_meta, sensing["contact_manager"])
+        spec,
+        cfg,
+        mode,
+        env,
+        adapter,
+        writer,
+        logger,
+        filter_chain,
+        built["language_gen"],
+        built["lang_interval"],
+        sensing["recorder"],
+        num_envs,
+        total_steps,
+        device,
+        policy_dt,
+        built["out_dir"],
+        seed,
+        episode_length_s,
+        dur_lo,
+        dur_hi,
+        built["command_dim"],
+        profile,
+        bench_cfg,
+        task_meta,
+        sensing["contact_manager"],
+    )
     wiring = _build_bridge_and_wiring(
-        spec, cfg, backend_label, env, adapter, sensing["camera_manager"],
-        built["out_dir"], sinks["bench_sink"], sinks["sink"],
-        sinks["timeline"], sinks["director"], sinks["event_log"],
-        sinks["watch_specs"], sinks["stop_when"], num_envs)
+        spec,
+        cfg,
+        backend_label,
+        env,
+        adapter,
+        sensing["camera_manager"],
+        built["out_dir"],
+        sinks["bench_sink"],
+        sinks["sink"],
+        sinks["timeline"],
+        sinks["director"],
+        sinks["event_log"],
+        sinks["watch_specs"],
+        sinks["stop_when"],
+        num_envs,
+    )
 
     return RunInstance(
         spec=spec,

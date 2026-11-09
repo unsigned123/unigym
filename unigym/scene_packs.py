@@ -37,6 +37,7 @@ overrides -> run overrides): a run-level value always wins; mappings
 merge key-wise (so a run can override a single initializer param, e.g.
 the per-seed stream seed, without restating the table).
 """
+
 from __future__ import annotations
 
 import copy
@@ -105,20 +106,19 @@ def discover_scene_packs(root: Optional[Path] = None) -> dict:
     for base, path in _scene_hits(root):
         rel = path.relative_to(base)
         if len(rel.parts) < 2:
-            continue               # a bare root-level scene.yaml: no family
+            continue  # a bare root-level scene.yaml: no family
         family = rel.parts[0]
         doc = yaml.safe_load(path.read_text()) or {}
         name = str(doc.get("name") or "").strip()
         if not name:
             raise ValueError(
                 f"{path}: scene bundle must declare a top-level 'name' "
-                f"(referenced as '{family}/<name>')")
+                f"(referenced as '{family}/<name>')"
+            )
         key = f"{family}/{name}"
         if key in index:
             if origin[key] == base:
-                raise ValueError(
-                    f"duplicate scene bundle {key!r}: {index[key]} and "
-                    f"{path}")
+                raise ValueError(f"duplicate scene bundle {key!r}: {index[key]} and " f"{path}")
             # cross-mount duplicate: the earlier mount (external pack)
             # wins; the repo copy is shadowed during the transition
             index.shadowed.append((key, base, index[key], path))
@@ -129,7 +129,8 @@ def discover_scene_packs(root: Optional[Path] = None) -> dict:
 
 
 def load_scene_bundle(
-    ref: str, root: Optional[Path] = None,
+    ref: str,
+    root: Optional[Path] = None,
 ) -> dict[str, JsonValue]:
     """Resolve one ``<family>/<name>`` reference to its parsed bundle."""
     index = discover_scene_packs(root)
@@ -140,7 +141,8 @@ def load_scene_bundle(
             f"unknown scene bundle {ref!r} | available: {sorted(index)} "
             f"| hint: scene refs resolve against <repo>/"
             f"{SCENES_DIR}/<family>/{SCENE_FILE} (the yaml's top-level "
-            f"'name:' key is the second reference component)")
+            f"'name:' key is the second reference component)"
+        )
     doc = yaml.safe_load(path.read_text()) or {}
     if not is_json_object(doc):
         raise ValueError(f"{path}: scene bundle must be a mapping")
@@ -164,7 +166,8 @@ def _merge(scene, run):
 
 
 def apply_scene_bundle(
-    cfg: dict[str, JsonValue], root: Optional[Path] = None,
+    cfg: dict[str, JsonValue],
+    root: Optional[Path] = None,
 ) -> dict[str, JsonValue]:
     """Resolve the run config's ``scene:`` reference (deep-copy merge).
 
@@ -180,16 +183,14 @@ def apply_scene_bundle(
     ref = cfg.get("scene")
     if ref is None:
         return cfg
-    doc = normalize_content_keys(
-        load_scene_bundle(str(ref), root), source=f"scene bundle {ref!r}")
+    doc = normalize_content_keys(load_scene_bundle(str(ref), root), source=f"scene bundle {ref!r}")
     cfg = copy.deepcopy(cfg)
     # A direct caller (tests, the API) may hand us an un-normalized run
     # config; the collector's single load point already migrated its own
     # copy, so this branch only fires on the surface spelling and can never
     # re-warn a run config that point already normalized.
     if "objects" in cfg:
-        cfg = normalize_content_keys(
-            cfg, source=f"run config for scene {ref!r}")
+        cfg = normalize_content_keys(cfg, source=f"run config for scene {ref!r}")
     env_obj = cfg.setdefault("env", {})
     if not isinstance(env_obj, dict):
         raise ValueError(f"scene bundle {ref!r}: env must be a mapping")
@@ -200,28 +201,28 @@ def apply_scene_bundle(
     backend_obj = doc.get("backend") or {}
     if not isinstance(backend_obj, dict):
         raise ValueError(
-            f"scene bundle {ref!r}: backend must be a mapping, "
-            f"got {type(backend_obj).__name__}")
+            f"scene bundle {ref!r}: backend must be a mapping, " f"got {type(backend_obj).__name__}"
+        )
     mujoco_block = backend_obj.get("mujoco") or {}
     if not isinstance(mujoco_block, dict):
         raise ValueError(
             f"scene bundle {ref!r}: backend.mujoco must be a mapping, "
-            f"got {type(mujoco_block).__name__}")
+            f"got {type(mujoco_block).__name__}"
+        )
     if "mj_model" in mujoco_block:
         raise ValueError(
             f"scene bundle {ref!r}: backend.mujoco.mj_model was removed in "
             f"v101 A1; declare `world_base: {{mjcf: <path>}}` there instead "
-            f"(it routes to the run config top level) -- no alias/fallback")
+            f"(it routes to the run config top level) -- no alias/fallback"
+        )
     # the world asset is run-level, not a backend param.
     if "world_base" in mujoco_block:
-        cfg["world_base"] = _merge(mujoco_block["world_base"],
-                                   cfg.get("world_base"))
+        cfg["world_base"] = _merge(mujoco_block["world_base"], cfg.get("world_base"))
     for key in ("mj_scene", "mj_scene_params", "base", "actuators"):
         if key in mujoco_block:
             params[key] = _merge(mujoco_block[key], params.get(key))
     if "props" in doc:
         cfg["props"] = _merge(doc["props"], cfg.get("props"))
     if "initializer" in doc:
-        params["initializer"] = _merge(doc["initializer"],
-                                       params.get("initializer"))
+        params["initializer"] = _merge(doc["initializer"], params.get("initializer"))
     return cfg

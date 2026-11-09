@@ -18,6 +18,7 @@ registry existed is therefore no longer invisible.
 Absent-data honest by construction: installs with no death files
 (scan -> empty list); unreadable/partial files are skipped, never raised.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,9 +58,14 @@ def log_tail_lines(log: str | Path, n: int = REASON_TAIL_LINES) -> str:
     return "\n".join(tail)
 
 
-def record(pid: int, exit_code: int | None, signal_num: int | None,
-           meta: dict, state_dir: str | Path | None = None,
-           tail_lines: int = REASON_TAIL_LINES) -> dict:
+def record(
+    pid: int,
+    exit_code: int | None,
+    signal_num: int | None,
+    meta: dict,
+    state_dir: str | Path | None = None,
+    tail_lines: int = REASON_TAIL_LINES,
+) -> dict:
     """Write one death record; returns the document (also logged by caller).
 
     ``meta`` carries the spawn-handle fields (log_path/config/out_dir/
@@ -67,12 +73,17 @@ def record(pid: int, exit_code: int | None, signal_num: int | None,
     is never written -- the caller only records non-zero exits.
     """
     log = meta.get("log_path") or ""
-    reason_head = (f"spawned run pid={pid} exited code={exit_code}"
-                   if signal_num is None else
-                   f"spawned run pid={pid} killed by signal {signal_num}")
+    reason_head = (
+        f"spawned run pid={pid} exited code={exit_code}"
+        if signal_num is None
+        else f"spawned run pid={pid} killed by signal {signal_num}"
+    )
     doc = {
-        "schema": SCHEMA, "kind": "death", "pid": int(pid),
-        "exit_code": exit_code, "signal": signal_num,
+        "schema": SCHEMA,
+        "kind": "death",
+        "pid": int(pid),
+        "exit_code": exit_code,
+        "signal": signal_num,
         "log_path": str(log),
         "config": meta.get("config") or "",
         "out_dir": meta.get("out_dir") or "",
@@ -82,10 +93,10 @@ def record(pid: int, exit_code: int | None, signal_num: int | None,
         "reason": reason_head + "\n" + log_tail_lines(log, tail_lines),
     }
     p = death_path(pid, state_dir)
-    p.parent.mkdir(parents=True, exist_ok=True)    # idempotent
+    p.parent.mkdir(parents=True, exist_ok=True)  # idempotent
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(doc, indent=1))
-    os.replace(tmp, p)                              # atomic publish
+    os.replace(tmp, p)  # atomic publish
     return doc
 
 
@@ -110,8 +121,7 @@ def scan(state_dir: str | Path | None = None) -> list[dict]:
     root = Path(state_dir) if state_dir else default_dir()
     paths = sorted(root.glob(GLOB))
     out = [d for p in paths if (d := _load(p)) is not None]
-    return sorted(out, key=lambda d: (float(d.get("reaped_ts") or 0.0),
-                                      int(d.get("pid") or 0)))
+    return sorted(out, key=lambda d: (float(d.get("reaped_ts") or 0.0), int(d.get("pid") or 0)))
 
 
 def for_pid(pid: int, state_dir: str | Path | None = None) -> dict | None:

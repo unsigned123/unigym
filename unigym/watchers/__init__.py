@@ -18,11 +18,23 @@ Bridge touchpoints stay minimal: one attribute (``bridge._watchers``),
 one tick hook call, one command registration (cmd 15 "watch") -- the
 attach function below does all three.
 """
+
 from __future__ import annotations
 
-__all__ = ["WatcherEngine", "WatchSpec", "WatchError", "WatchResult",
-           "WatchContext", "Level", "EventLog", "TimelineSink", "read_tail",
-           "load_watch_yaml", "attach", "TEMPLATE_REGISTRY"]
+__all__ = [
+    "WatcherEngine",
+    "WatchSpec",
+    "WatchError",
+    "WatchResult",
+    "WatchContext",
+    "Level",
+    "EventLog",
+    "TimelineSink",
+    "read_tail",
+    "load_watch_yaml",
+    "attach",
+    "TEMPLATE_REGISTRY",
+]
 
 from .base import Level, WatchContext, WatchError, WatchResult
 from .engine import WatcherEngine
@@ -38,6 +50,7 @@ def load_watch_yaml(path) -> list[dict]:
     verbatim in the run manifest for reproducibility.
     """
     import yaml
+
     p = __import__("pathlib").Path(path)
     if not p.is_file():
         raise WatchError(f"--watch file not found: {p}")
@@ -49,13 +62,12 @@ def load_watch_yaml(path) -> list[dict]:
         doc = doc.get("watchers")
     if not isinstance(doc, list) or not doc:
         raise WatchError(
-            f"--watch {p}: expected a non-empty 'watchers:' list, got "
-            f"{type(doc).__name__}")
+            f"--watch {p}: expected a non-empty 'watchers:' list, got " f"{type(doc).__name__}"
+        )
     return doc
 
 
-def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None,
-           specs=None):
+def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=None):
     """Mount the WatcherEngine on a live bridge (collect_cli wiring).
 
     * ``bridge._watchers`` -- the per-tick hook target (evaluated in
@@ -66,11 +78,19 @@ def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None,
     * ``Bridge.on_episode_end`` -> callable ``on_reset`` hooks (§8.3).
     """
     engine = WatcherEngine(
-        run_id=bridge.run_id, out_dir=out_dir, env=env, adapter=adapter,
-        event_log=event_log, bridge=bridge, specs=specs)
+        run_id=bridge.run_id,
+        out_dir=out_dir,
+        env=env,
+        adapter=adapter,
+        event_log=event_log,
+        bridge=bridge,
+        specs=specs,
+    )
     bridge._watchers = engine
     bridge.register_command("watch", engine.handle)
     n = len(engine._specs)
-    print(f"[watcher] engine mounted: {n} watcher(s) born-armed "
-          f"({sorted(engine._specs) or '-'})", flush=True)
+    print(
+        f"[watcher] engine mounted: {n} watcher(s) born-armed " f"({sorted(engine._specs) or '-'})",
+        flush=True,
+    )
     return engine

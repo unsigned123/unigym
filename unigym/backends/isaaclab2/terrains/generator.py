@@ -30,6 +30,7 @@ yaml sketch::
 The build runs on the server (isaaclab); unit tests inject fake cfg classes
 through ``classes=`` exactly like :class:`StepTerrain`.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -142,13 +143,11 @@ def _resolve_callable(dotted: str) -> Callable:
     dotted = dotted.strip()
     mod_name, _, attr = dotted.rpartition(".")
     if not mod_name or not attr:
-        raise ValueError(
-            f"custom: path must be 'module.attr', got '{dotted}'")
+        raise ValueError(f"custom: path must be 'module.attr', got '{dotted}'")
     return getattr(importlib.import_module(mod_name), attr)
 
 
-def _make_custom_cfg(func: Callable, proportion: float,
-                     params: dict, classes: dict):
+def _make_custom_cfg(func: Callable, proportion: float, params: dict, classes: dict):
     """Wrap an already-decorated height-field function in a cfg instance.
 
     Returns an ``HfTerrainBaseCfg`` subclass instance.  ``function`` and
@@ -179,6 +178,7 @@ def _make_custom_cfg(func: Callable, proportion: float,
     cls = type("CustomTerrainCfg", (hf_base,), namespace)
     try:  # server: regenerate __init__ + promote params to declared fields
         from isaaclab.utils import configclass
+
         cls = configclass(cls)
     except Exception:  # local: fake base, staticmethod attr read directly
         pass
@@ -200,8 +200,7 @@ class GeneratorTerrain(TerrainPreset):
         self.params = dict(params or {})
         self.params.update(kwargs)
 
-    def build(self, num_envs: int, env_spacing: float, *,
-              classes=None, **kwargs) -> dict:
+    def build(self, num_envs: int, env_spacing: float, *, classes=None, **kwargs) -> dict:
         """Assemble the ``TerrainImporterCfg`` (see TerrainPreset.build).
 
         Args:
@@ -230,15 +229,15 @@ class GeneratorTerrain(TerrainPreset):
             proportion = float(spec.get("proportion", 1.0))
             params = dict(spec.get("params", {}))
             if isinstance(t, str) and t.startswith("custom:"):
-                func = _resolve_callable(t[len("custom:"):])
-                sub_terrains[name] = _make_custom_cfg(
-                    func, proportion, params, c)
+                func = _resolve_callable(t[len("custom:") :])
+                sub_terrains[name] = _make_custom_cfg(func, proportion, params, c)
             else:
                 cls_name = self.SUB_TERRAIN_REGISTRY.get(t)
                 if cls_name is None:
                     raise ValueError(
                         f"unknown sub-terrain type '{t}' "
-                        f"(available: {sorted(self.SUB_TERRAIN_REGISTRY)})")
+                        f"(available: {sorted(self.SUB_TERRAIN_REGISTRY)})"
+                    )
                 sub_terrains[name] = c[cls_name](proportion=proportion, **params)
 
         gen_cfg = c["TerrainGeneratorCfg"](
@@ -259,9 +258,11 @@ class GeneratorTerrain(TerrainPreset):
             terrain_type="generator",
             terrain_generator=gen_cfg,
             use_terrain_origins=use_origins,
-            max_init_terrain_level=(int(p["max_init_terrain_level"])
-                                    if "max_init_terrain_level" in p
-                                    else (num_rows - 1 if use_origins else None)),
+            max_init_terrain_level=(
+                int(p["max_init_terrain_level"])
+                if "max_init_terrain_level" in p
+                else (num_rows - 1 if use_origins else None)
+            ),
             env_spacing=env_spacing,
             physics_material=c["RigidBodyMaterialCfg"](
                 static_friction=friction,
@@ -271,7 +272,8 @@ class GeneratorTerrain(TerrainPreset):
                 restitution_combine_mode="multiply",
             ),
             visual_material=c["PreviewSurfaceCfg"](
-                diffuse_color=tuple(p.get("color", (0.5, 0.45, 0.4)))),
+                diffuse_color=tuple(p.get("color", (0.5, 0.45, 0.4)))
+            ),
             debug_vis=False,
         )
         return {"terrain": cfg}

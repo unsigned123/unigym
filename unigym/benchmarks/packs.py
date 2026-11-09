@@ -59,6 +59,7 @@ rule in docs/contracts/benchmark_contract.md §9.5.
 numpy/yaml only at module level; plugin loading is importlib + the
 benchmarks package (no torch/isaaclab anywhere).
 """
+
 from __future__ import annotations
 
 import copy
@@ -70,8 +71,11 @@ from pathlib import Path
 
 from .base import TASK_REGISTRY, EpisodeData, Task  # noqa: F401 (EpisodeData: docs)
 from .formula import validate_formula_spec
-from .pack_meta import (load_meta_package, resolve_row,  # noqa: F401
-                        rewrite_pack_references)
+from .pack_meta import (
+    load_meta_package,
+    resolve_row,  # noqa: F401
+    rewrite_pack_references,
+)
 
 _BUILTIN_NS = "builtin"
 _MODULE_PREFIX = "unigym_pack_"
@@ -96,12 +100,12 @@ class PackTaskDef:
 
     pack: str
     task: str
-    kind: str                       # "formula" | "class"
+    kind: str  # "formula" | "class"
     spec: dict | None = None
     cls: type[Task] | None = None
     default_params: dict = field(default_factory=dict)
     source: str = ""
-    description: str = ""           # first doc line, for CLI listings
+    description: str = ""  # first doc line, for CLI listings
 
     @property
     def canonical(self) -> str:
@@ -111,15 +115,14 @@ class PackTaskDef:
         """Build the run instance; the report key is set by the caller."""
         if self.kind == "class":
             if self.cls is None:
-                raise ValueError(
-                    f"task {self.canonical!r}: class definition has no cls")
+                raise ValueError(f"task {self.canonical!r}: class definition has no cls")
             merged = {**self.default_params, **(params or {})}
             return self.cls(params=merged, meta=meta)
         if self.spec is None:
-            raise ValueError(
-                f"task {self.canonical!r}: formula definition has no spec")
+            raise ValueError(f"task {self.canonical!r}: formula definition has no spec")
         merged = {**self.spec, **(params or {})}
         from .formula import FormulaTask  # lazy: avoids the import cycle
+
         return FormulaTask(params=merged, meta=meta)
 
 
@@ -128,10 +131,10 @@ class Pack:
     """A loaded pack: identity + its task definitions."""
 
     name: str
-    root: Path | None               # None for the builtin namespace
+    root: Path | None  # None for the builtin namespace
     description: str | None
     version: str | None
-    tasks: dict[str, PackTaskDef]   # local task name -> definition
+    tasks: dict[str, PackTaskDef]  # local task name -> definition
 
     def __len__(self) -> int:
         return len(self.tasks)
@@ -141,9 +144,11 @@ class Pack:
         for every formula task of the pack -- materialized and
         template-resolved alike.  The dump is a deep copy: one-way stream
         (load-time resolve -> consumers), the runtime never writes back."""
-        return {task: copy.deepcopy(d.spec)
-                for task, d in sorted(self.tasks.items())
-                if d.kind == "formula" and d.spec is not None}
+        return {
+            task: copy.deepcopy(d.spec)
+            for task, d in sorted(self.tasks.items())
+            if d.kind == "formula" and d.spec is not None
+        }
 
 
 class PackIndex:
@@ -165,38 +170,40 @@ class PackIndex:
                     f"pack name '{pack.name}' declared twice "
                     f"({self.packs[pack.name].root} and {pack.root}); "
                     "rename one pack.yaml -- collisions are never silently "
-                    "merged")
+                    "merged"
+                )
             self.packs[pack.name] = pack
 
     # -- resolution ------------------------------------------------------- #
     def resolve_task(self, name) -> tuple[PackTaskDef, str]:
         """Canonical-or-unique-bare lookup; errors list the alternatives."""
         if not isinstance(name, str) or not name:
-            raise ValueError(
-                f"benchmark task name must be a non-empty string, got {name!r}")
+            raise ValueError(f"benchmark task name must be a non-empty string, got {name!r}")
         if "/" in name:
             pack_name, _, task = name.partition("/")
             pack = self.packs.get(pack_name)
             if pack is None:
                 raise ValueError(
                     f"unknown pack '{pack_name}' in task name {name!r} "
-                    f"(available packs: {sorted(self.packs)})")
+                    f"(available packs: {sorted(self.packs)})"
+                )
             if task not in pack.tasks:
                 raise ValueError(
-                    f"pack '{pack_name}' has no task '{task}' "
-                    f"(available: {sorted(pack.tasks)})")
+                    f"pack '{pack_name}' has no task '{task}' " f"(available: {sorted(pack.tasks)})"
+                )
             return pack.tasks[task], pack_name
-        hits = [(p.name, t) for p in self.packs.values()
-                for t in p.tasks if t == name]
+        hits = [(p.name, t) for p in self.packs.values() for t in p.tasks if t == name]
         if not hits:
             raise ValueError(
                 f"unknown benchmark task '{name}' (available: "
-                f"{self.canonical_names()}; use the '<pack>/<task>' form)")
+                f"{self.canonical_names()}; use the '<pack>/<task>' form)"
+            )
         if len(hits) > 1:
             raise ValueError(
                 f"ambiguous bare task name '{name}' matches "
                 f"{sorted(f'{p}/{t}' for p, t in hits)}; qualify it as "
-                "'<pack>/<task>'")
+                "'<pack>/<task>'"
+            )
         p, t = hits[0]
         return self.packs[p].tasks[t], p
 
@@ -216,21 +223,22 @@ class PackIndex:
                 raise ValueError(
                     f"wildcard section {name!r} must be exactly "
                     f"{{name: '<pack>/*'}} (per-task params would be "
-                    f"ambiguous); got extra keys {sorted(extra)}")
+                    f"ambiguous); got extra keys {sorted(extra)}"
+                )
             pack_name = name[:-2]
             pack = self.packs.get(pack_name)
             if pack is None:
                 raise ValueError(
                     f"unknown pack '{pack_name}' in wildcard {name!r} "
-                    f"(available packs: {sorted(self.packs)})")
+                    f"(available packs: {sorted(self.packs)})"
+                )
             for task in sorted(pack.tasks):
                 out.append({"name": f"{pack_name}/{task}"})
         return out
 
     # -- introspection ------------------------------------------------------ #
     def canonical_names(self) -> list[str]:
-        return [f"{p.name}/{t}" for p in self.packs.values()
-                for t in sorted(p.tasks)]
+        return [f"{p.name}/{t}" for p in self.packs.values() for t in sorted(p.tasks)]
 
 
 # pack loading
@@ -241,6 +249,7 @@ def _load_pack_yaml(root: Path) -> dict:
     if not path.is_file():
         raise ValueError(f"not a benchmark pack (missing {path})")
     import yaml  # lazy: keeps `import unigym.benchmarks.packs` light
+
     try:
         meta = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
@@ -248,14 +257,16 @@ def _load_pack_yaml(root: Path) -> dict:
     if not isinstance(meta, dict):
         raise ValueError(
             f"{path}: must be a dict {{name, version?, description?, "
-            f"templates?+task_rows?}}, got {type(meta).__name__}")
+            f"templates?+task_rows?}}, got {type(meta).__name__}"
+        )
     name = meta.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ValueError(f"{path}: 'name' is required (non-empty string)")
     if "/" in name or name == _BUILTIN_NS:
         raise ValueError(
             f"{path}: pack name {name!r} is invalid (no '/' and not "
-            f"'{_BUILTIN_NS}' -- that namespace is the first-party registry)")
+            f"'{_BUILTIN_NS}' -- that namespace is the first-party registry)"
+        )
     return meta
 
 
@@ -268,6 +279,7 @@ def _formula_task_from_yaml(path: Path) -> tuple[str, dict]:
     definition -- hand-written tasks use tasks/*.py plugins).
     """
     import yaml  # lazy, same reason as _load_pack_yaml
+
     try:
         spec = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
@@ -275,13 +287,15 @@ def _formula_task_from_yaml(path: Path) -> tuple[str, dict]:
     if not isinstance(spec, dict):
         raise ValueError(
             f"{path}: task file must be a dict (a formula task section), "
-            f"got {type(spec).__name__}")
+            f"got {type(spec).__name__}"
+        )
     cls_key = spec.pop("class", None)
     if cls_key is not None and cls_key != "formula":
         raise ValueError(
             f"{path}: pack yaml tasks are FormulaTask declarations; "
             f"class {cls_key!r} is invalid (omit the key or use "
-            "'formula'; Python tasks go in tasks/*.py)")
+            "'formula'; Python tasks go in tasks/*.py)"
+        )
     name = spec.pop("name", None) or path.stem
     if not isinstance(name, str) or not name:
         raise ValueError(f"{path}: 'name' must be a non-empty string")
@@ -296,8 +310,9 @@ def _plugin_defs(path: Path, pack: str) -> list[tuple[str, PackTaskDef]]:
     duplicate names inside the module).
     """
     stem = path.stem
-    modname = _MODULE_PREFIX + _MODULE_NAME_SAFE.sub("_", pack) \
-        + "_" + _MODULE_NAME_SAFE.sub("_", stem)
+    modname = (
+        _MODULE_PREFIX + _MODULE_NAME_SAFE.sub("_", pack) + "_" + _MODULE_NAME_SAFE.sub("_", stem)
+    )
     spec = importlib.util.spec_from_file_location(modname, path)
     if spec is None or spec.loader is None:
         raise ValueError(f"{path}: cannot load plugin (no module loader)")
@@ -309,12 +324,13 @@ def _plugin_defs(path: Path, pack: str) -> list[tuple[str, PackTaskDef]]:
         # re-raised with context; registry entry rolled back first
         sys.modules.pop(modname, None)
         raise ValueError(f"{path}: plugin import failed ({exc!r})") from exc
-    doc = (module.__doc__ or "")
+    doc = module.__doc__ or ""
     if _PLUGIN_DOCSTRING_MARKER not in doc.lower():
         raise ValueError(
             f"{path}: plugin module docstring must declare "
             f"'{_PLUGIN_DOCSTRING_MARKER}' -- loading a plugin EXECUTES "
-            "arbitrary Python; only point packs at sources you control")
+            "arbitrary Python; only point packs at sources you control"
+        )
     raw: list = []
     if hasattr(module, "TASK"):
         raw = [module.TASK]
@@ -322,32 +338,43 @@ def _plugin_defs(path: Path, pack: str) -> list[tuple[str, PackTaskDef]]:
         raw = module.TASKS
         if not isinstance(raw, list) or not raw:
             raise ValueError(
-                f"{path}: TASKS must be a non-empty list of Task "
-                "subclasses/instances")
+                f"{path}: TASKS must be a non-empty list of Task " "subclasses/instances"
+            )
     else:
         raise ValueError(
             f"{path}: no plugin entry point (define TASK -- a Task "
-            "subclass or instance -- or TASKS, a list of them)")
+            "subclass or instance -- or TASKS, a list of them)"
+        )
     defs: list[tuple[str, PackTaskDef]] = []
     seen: set[str] = set()
     for i, item in enumerate(raw):
         if isinstance(item, Task):
-            cls, default_params, name = type(item), dict(item.params), \
-                item.name
+            cls, default_params, name = type(item), dict(item.params), item.name
         elif isinstance(item, type) and issubclass(item, Task):
             cls, default_params, name = item, {}, item.name
         else:
             raise ValueError(
-                f"{path}: TASKS[{i}] must be a Task instance or Task "
-                f"subclass, got {item!r}")
+                f"{path}: TASKS[{i}] must be a Task instance or Task " f"subclass, got {item!r}"
+            )
         if not name or name in seen:
             raise ValueError(
                 f"{path}: plugin task name {name!r} empty or duplicated "
-                "inside the module (Task.name is the local pack task name)")
+                "inside the module (Task.name is the local pack task name)"
+            )
         seen.add(name)
-        defs.append((name, PackTaskDef(
-            pack=pack, task=name, kind="class", cls=cls,
-            default_params=default_params, source=str(path))))
+        defs.append(
+            (
+                name,
+                PackTaskDef(
+                    pack=pack,
+                    task=name,
+                    kind="class",
+                    cls=cls,
+                    default_params=default_params,
+                    source=str(path),
+                ),
+            )
+        )
     return defs
 
 
@@ -363,24 +390,23 @@ def load_pack(root: Path) -> Pack:
     name = meta["name"].strip()
     errors: list[str] = []
     tasks: dict[str, PackTaskDef] = {}
-    task_files = sorted((root / "tasks").glob("*.yaml")) \
-        if (root / "tasks").is_dir() else []
-    py_files = sorted((root / "tasks").glob("*.py")) \
-        if (root / "tasks").is_dir() else []
+    task_files = sorted((root / "tasks").glob("*.yaml")) if (root / "tasks").is_dir() else []
+    py_files = sorted((root / "tasks").glob("*.py")) if (root / "tasks").is_dir() else []
     templates: dict[str, tuple[dict, dict]] = {}
     rows: dict[str, dict] = {}
     rows_path: Path | None = None
     tables: dict = {}
     if meta.get("templates") is not None or meta.get("task_rows") is not None:
         try:
-            templates, rows, rows_path, tables = load_meta_package(
-                root, meta)
+            templates, rows, rows_path, tables = load_meta_package(root, meta)
         except ValueError as exc:
             errors.append(str(exc))
     if not task_files and not py_files and rows_path is None:
-        errors.append(f"{root / 'tasks'}: no tasks found (tasks/*.yaml, "
-                      "tasks/*.py, or templates + task_rows required -- "
-                      "an empty pack is a typo, not a pack)")
+        errors.append(
+            f"{root / 'tasks'}: no tasks found (tasks/*.yaml, "
+            "tasks/*.py, or templates + task_rows required -- "
+            "an empty pack is a typo, not a pack)"
+        )
     references_dir = root / "references"
     for path in task_files:
         try:
@@ -394,19 +420,20 @@ def load_pack(root: Path) -> Pack:
                 errors.append(
                     f"{path}: duplicate task name '{local}' in pack "
                     f"'{name}' (already defined by "
-                    f"{tasks[local].source})")
+                    f"{tasks[local].source})"
+                )
                 continue
             desc = " ".join(str(spec.get("description", "")).split())
             tasks[local] = PackTaskDef(
-                pack=name, task=local, kind="formula", spec=spec,
-                source=str(path), description=desc)
+                pack=name, task=local, kind="formula", spec=spec, source=str(path), description=desc
+            )
         except ValueError as exc:
             errors.append(str(exc))
     if rows_path is not None:
         for local in sorted(rows):
             spec, row_errors = resolve_row(
-                local, rows[local], templates, references_dir, rows_path,
-                tables)
+                local, rows[local], templates, references_dir, rows_path, tables
+            )
             errors.extend(row_errors)
             if spec is None:
                 continue
@@ -414,12 +441,18 @@ def load_pack(root: Path) -> Pack:
                 errors.append(
                     f"{rows_path}#{local}: duplicate task name '{local}' in "
                     f"pack '{name}' (already defined by "
-                    f"{tasks[local].source})")
+                    f"{tasks[local].source})"
+                )
                 continue
             desc = " ".join(str(spec.get("description", "")).split())
             tasks[local] = PackTaskDef(
-                pack=name, task=local, kind="formula", spec=spec,
-                source=f"{rows_path}#{local}", description=desc)
+                pack=name,
+                task=local,
+                kind="formula",
+                spec=spec,
+                source=f"{rows_path}#{local}",
+                description=desc,
+            )
     for path in py_files:
         try:
             for local, d in _plugin_defs(path, name):
@@ -427,7 +460,8 @@ def load_pack(root: Path) -> Pack:
                     errors.append(
                         f"{path}: duplicate task name '{local}' in pack "
                         f"'{name}' (already defined by "
-                        f"{tasks[local].source})")
+                        f"{tasks[local].source})"
+                    )
                     continue
                 tasks[local] = d
         except ValueError as exc:
@@ -435,11 +469,15 @@ def load_pack(root: Path) -> Pack:
     if errors:
         raise ValueError(
             f"pack '{name}' ({root}) has {len(errors)} error(s):\n"
-            + "\n".join(f"  - {e}" for e in errors))
+            + "\n".join(f"  - {e}" for e in errors)
+        )
     return Pack(
-        name=name, root=root,
+        name=name,
+        root=root,
         description=(meta.get("description") or None),
-        version=meta.get("version"), tasks=tasks)
+        version=meta.get("version"),
+        tasks=tasks,
+    )
 
 
 def _description_of(def_: PackTaskDef) -> str:
@@ -463,12 +501,20 @@ def builtin_pack() -> Pack:
     tasks = {}
     for name, cls in TASK_REGISTRY.items():
         tasks[name] = PackTaskDef(
-            pack=_BUILTIN_NS, task=name, kind="class", cls=cls,
+            pack=_BUILTIN_NS,
+            task=name,
+            kind="class",
+            cls=cls,
             source="unigym.benchmarks (TASK_REGISTRY)",
-            description=" ".join((cls.__doc__ or "").split()))
-    return Pack(name=_BUILTIN_NS, root=None,
-                description="first-party tasks (benchmarks/tasks.py)",
-                version=None, tasks=tasks)
+            description=" ".join((cls.__doc__ or "").split()),
+        )
+    return Pack(
+        name=_BUILTIN_NS,
+        root=None,
+        description="first-party tasks (benchmarks/tasks.py)",
+        version=None,
+        tasks=tasks,
+    )
 
 
 def default_packs_root() -> Path:
@@ -480,6 +526,7 @@ def default_packs_root() -> Path:
     dc = repo / "unigym.yaml"
     if dc.is_file():
         import yaml  # lazy
+
         try:
             cfg = yaml.safe_load(dc.read_text()) or {}
         except yaml.YAMLError:
@@ -491,8 +538,7 @@ def default_packs_root() -> Path:
     return face if face is not None else repo / "benchmark_packs"
 
 
-def discover_packs(packs_cfg: list | None = None,
-                   packs_root=None) -> PackIndex:
+def discover_packs(packs_cfg: list | None = None, packs_root=None) -> PackIndex:
     """Full discovery: builtin -> explicit benchmark.packs paths ->
     packs_root subdirs (sorted; a subdir counts when it owns pack.yaml).
 
@@ -503,7 +549,7 @@ def discover_packs(packs_cfg: list | None = None,
     (aggregated per pack), not mid-run.
     """
     packs = [builtin_pack()]
-    for raw in (packs_cfg or []):
+    for raw in packs_cfg or []:
         root = Path(raw)
         if not root.is_dir():
             raise ValueError(f"benchmark.packs entry not found: {root}")
@@ -519,6 +565,7 @@ def discover_packs(packs_cfg: list | None = None,
     # a pack name is shadowed by the earlier mount (the repo copy is the
     # last one, exactly like the runs/scenes faces).
     from unigym.packs import pack_roots
+
     seen = {pack.name for pack in packs}
     for mounted in pack_roots():
         face = mounted.faces.get("benchmarks")

@@ -22,6 +22,7 @@ batched ``naconmax``, which defaults to ``nconmax * nworld`` (and
 ``naconmax`` covers ``N`` so a batch can never silently overflow.  Memory is
 therefore N x the per-world budget, not N².
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,9 +59,9 @@ class Capacity:
 
     def doubled(self) -> Capacity:
         """The next rung of the retry ladder (``RETRY_FACTOR`` growth)."""
-        return Capacity(self.nconmax * RETRY_FACTOR,
-                        self.njmax * RETRY_FACTOR,
-                        self.probe_ncon, self.probe_nefc)
+        return Capacity(
+            self.nconmax * RETRY_FACTOR, self.njmax * RETRY_FACTOR, self.probe_ncon, self.probe_nefc
+        )
 
 
 def probe_peak(mjm, steps: int = 100) -> tuple[int, int]:
@@ -86,16 +87,19 @@ def probe_peak(mjm, steps: int = 100) -> tuple[int, int]:
 def capacity_for(mjm, steps: int = 100) -> Capacity:
     """Size one world from the CPU probe (``SAFETY_FACTOR``, floor applied)."""
     ncon, nefc = probe_peak(mjm, steps)
-    return Capacity(max(MIN_NCONMAX, ncon * SAFETY_FACTOR),
-                    max(MIN_NJMAX, nefc * SAFETY_FACTOR),
-                    probe_ncon=ncon, probe_nefc=nefc)
+    return Capacity(
+        max(MIN_NCONMAX, ncon * SAFETY_FACTOR),
+        max(MIN_NJMAX, nefc * SAFETY_FACTOR),
+        probe_ncon=ncon,
+        probe_nefc=nefc,
+    )
 
 
 def build_with_retry(
-        build: Callable[[Capacity], T],
-        capacity: Capacity,
-        saturated: Callable[[T, Capacity], bool],
-        max_attempts: int = MAX_ATTEMPTS,
+    build: Callable[[Capacity], T],
+    capacity: Capacity,
+    saturated: Callable[[T, Capacity], bool],
+    max_attempts: int = MAX_ATTEMPTS,
 ) -> tuple[T, Capacity]:
     """Build a resource, doubling the capacity until it is not saturated.
 
@@ -123,7 +127,8 @@ def build_with_retry(
         "mjwarp capacity saturation persisted after "
         f"{max_attempts} attempts (last nconmax={cap.nconmax}, "
         f"njmax={cap.njmax}); the world needs a larger per-world buffer "
-        "(increase SAFETY_FACTOR or pass an explicit Capacity)")
+        "(increase SAFETY_FACTOR or pass an explicit Capacity)"
+    )
 
 
 __all__ = [

@@ -3,6 +3,7 @@
 The compiled model is the same ``MjModel`` the CPU backend reads, so the
 shared family provider does the work; only the IR backend label differs.
 """
+
 from __future__ import annotations
 
 from unigym.backends.shared.mjfamily.model.ir_access import (

@@ -5,6 +5,7 @@ module.  It stays thin: resolution is delegated to :mod:`unigym.packs`
 and registration to the existing closed registries, which this module
 does not modify.
 """
+
 from __future__ import annotations
 
 import sys

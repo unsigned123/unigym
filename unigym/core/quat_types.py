@@ -21,6 +21,7 @@ rather than silently returning False.
 Adoption is staged (N2 + a later sweep): this module is additive and no
 call site has been migrated yet.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,11 +47,11 @@ def _mix_error(left: _QuatMixin, right: _QuatMixin, op: str) -> TypeError:
     return TypeError(
         f"cannot {op} {type(left).__name__} (order={left.order!r}) with "
         f"{type(right).__name__} (order={right.order!r}): component orders "
-        f"differ; convert explicitly with .as_wxyz() / .as_xyzw()")
+        f"differ; convert explicitly with .as_wxyz() / .as_xyzw()"
+    )
 
 
-def _require_same_order(left: _QuatMixin, right: _QuatMixin,
-                        op: str) -> None:
+def _require_same_order(left: _QuatMixin, right: _QuatMixin, op: str) -> None:
     """Raise :class:`TypeError` unless both operands share a component order."""
     if left.order != right.order:
         raise _mix_error(left, right, op)
@@ -61,8 +62,7 @@ def _compose(left: _QuatMixin, right: _QuatMixin) -> _QuatMixin:
     _require_same_order(left, right, "compose")
     if left.order == "wxyz":
         return QuatWXYZ(_quat.mul(left.data, right.data))
-    return QuatXYZW(_quat.to_xyzw(
-        _quat.mul(_quat.to_wxyz(left.data), _quat.to_wxyz(right.data))))
+    return QuatXYZW(_quat.to_xyzw(_quat.mul(_quat.to_wxyz(left.data), _quat.to_wxyz(right.data))))
 
 
 class _QuatMixin:
@@ -86,12 +86,14 @@ class _QuatMixin:
             raise TypeError(
                 f"{type(self).__name__}.data must be a numpy array or torch "
                 f"tensor, got {type(data).__name__} "
-                f"(use .from_array() for raw sequences)")
+                f"(use .from_array() for raw sequences)"
+            )
         shape = data.shape
         if len(shape) == 0 or shape[-1] != 4:
             raise ValueError(
                 f"{type(self).__name__} expects a trailing axis of 4 "
-                f"((4,) or (N, 4)), got shape {tuple(shape)}")
+                f"((4,) or (N, 4)), got shape {tuple(shape)}"
+            )
 
     @classmethod
     def from_array(cls: type[_Q], a: np.ndarray | torch.Tensor) -> _Q:
@@ -101,8 +103,7 @@ class _QuatMixin:
         return cls(a)
 
     @classmethod
-    def identity(cls: type[_Q], *, batch: int | None = None,
-                 like: object | None = None) -> _Q:
+    def identity(cls: type[_Q], *, batch: int | None = None, like: object | None = None) -> _Q:
         """Unit quaternion in this order, optionally batched / dtype-like."""
         vec = _IDENTITY[cls.order]
         payload = like.data if isinstance(like, _QuatMixin) else like
@@ -144,8 +145,7 @@ class _QuatMixin:
         data = self.data
         if isinstance(data, torch.Tensor):
             norm = torch.linalg.norm(data, dim=-1)
-            return bool(torch.allclose(norm, torch.ones_like(norm),
-                                       atol=tol, rtol=0.0))
+            return bool(torch.allclose(norm, torch.ones_like(norm), atol=tol, rtol=0.0))
         norm = np.linalg.norm(np.asarray(data), axis=-1)
         return bool(np.allclose(norm, 1.0, atol=tol, rtol=0.0))
 
@@ -167,8 +167,7 @@ class _QuatMixin:
         if isinstance(data, torch.Tensor):
             n2 = (data * data).sum(dim=-1, keepdim=True).clamp_min(1e-24)
         else:
-            n2 = np.sum(np.asarray(data) * np.asarray(data),
-                        axis=-1, keepdims=True)
+            n2 = np.sum(np.asarray(data) * np.asarray(data), axis=-1, keepdims=True)
             n2 = np.clip(n2, 1e-24, None)
         return self._wrap(conj / n2)
 
@@ -180,8 +179,11 @@ class _QuatMixin:
                 w, u = data[..., 0:1], data[..., 1:4]
             else:
                 u, w = data[..., 0:3], data[..., 3:4]
-            vec = v if isinstance(v, torch.Tensor) else torch.as_tensor(
-                v, dtype=data.dtype, device=data.device)
+            vec = (
+                v
+                if isinstance(v, torch.Tensor)
+                else torch.as_tensor(v, dtype=data.dtype, device=data.device)
+            )
             t = 2.0 * torch.cross(u, vec, dim=-1)
             return vec + w * t + torch.cross(u, t, dim=-1)
         if self.order == "wxyz":
@@ -199,20 +201,25 @@ class _QuatMixin:
             return _quat.to_rotmat(data)
         q = np.asarray(data, dtype=np.float64)
         w, x, y, z = np.moveaxis(q, -1, 0)
-        return np.stack([
-            np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z),
-                      2 * (x * z + w * y)], axis=-1),
-            np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z),
-                      2 * (y * z - w * x)], axis=-1),
-            np.stack([2 * (x * z - w * y), 2 * (y * z + w * x),
-                      1 - 2 * (x * x + y * y)], axis=-1),
-        ], axis=-2)
+        return np.stack(
+            [
+                np.stack(
+                    [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], axis=-1
+                ),
+                np.stack(
+                    [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], axis=-1
+                ),
+                np.stack(
+                    [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], axis=-1
+                ),
+            ],
+            axis=-2,
+        )
 
     def __getitem__(self, key):
         """Index the payload; a still-4-wide slice stays typed."""
         data = self.data[key]
-        if (isinstance(data, (np.ndarray, torch.Tensor))
-                and data.ndim >= 1 and data.shape[-1] == 4):
+        if isinstance(data, (np.ndarray, torch.Tensor)) and data.ndim >= 1 and data.shape[-1] == 4:
             return self._wrap(data)
         return data
 
@@ -238,8 +245,7 @@ class _QuatMixin:
             raise _mix_error(self, other, "compare")
         left, right = self.data, other.data
         if isinstance(left, torch.Tensor) or isinstance(right, torch.Tensor):
-            if not (isinstance(left, torch.Tensor)
-                    and isinstance(right, torch.Tensor)):
+            if not (isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor)):
                 return False
             return bool(torch.equal(left, right))
         return bool(np.array_equal(left, right))

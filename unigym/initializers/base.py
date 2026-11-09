@@ -38,6 +38,7 @@ callable precedent, resolved in the run process):
 called as ``factory(params, profile, primitives)`` and returns an
 :class:`InitializerBase` instance.
 """
+
 from __future__ import annotations
 
 from abc import ABC
@@ -143,7 +144,8 @@ class InitializerBase(ABC):
             if policy_cls is None:
                 raise RuntimeError(
                     f"{type(self).__name__} declares no placement policy: "
-                    "set 'policy_class' or override the three phases")
+                    "set 'policy_class' or override the three phases"
+                )
             self._policy = policy_cls()
         return self._policy
 
@@ -162,8 +164,7 @@ class InitializerBase(ABC):
 
     def validate(self) -> None:
         """Load-time schema fail-fast (the policy's ``normalize`` step)."""
-        self.normalized = self._resolve_policy().normalize(
-            self.params, self.default_params())
+        self.normalized = self._resolve_policy().normalize(self.params, self.default_params())
 
     def resolve(self) -> None:
         """Bind-time model resolution (the policy's ``bind`` step)."""
@@ -214,12 +215,14 @@ def register(cls: type) -> type:
     if not name:
         raise ValueError(
             f"{cls.__name__}: initializer classes must declare a "
-            f"'name' ClassVar (the yaml initializer.type key)")
+            f"'name' ClassVar (the yaml initializer.type key)"
+        )
     if name in INITIALIZER_REGISTRY:
         raise ValueError(
             f"initializer type {name!r} already registered "
             f"({INITIALIZER_REGISTRY[name].__module__}."
-            f"{INITIALIZER_REGISTRY[name].__name__})")
+            f"{INITIALIZER_REGISTRY[name].__name__})"
+        )
     INITIALIZER_REGISTRY[name] = cls
     return cls
 
@@ -231,8 +234,10 @@ def _resolve_factory(spec: str):
         raise ValueError(
             f"initializer module {spec!r} must spell 'pkg.mod:factory' "
             "(the watchers callable precedent; resolved in the run "
-            "process)")
+            "process)"
+        )
     import importlib
+
     mod = importlib.import_module(mod_name)
     return getattr(mod, attr)
 
@@ -246,28 +251,26 @@ def build_initializer(cfg: dict, profile, primitives) -> InitializerBase:
     on unknown types and on schema errors (the load-time validate phase).
     """
     if not isinstance(cfg, dict):
-        raise ValueError(
-            f"initializer block must be a mapping, got "
-            f"{type(cfg).__name__}")
+        raise ValueError(f"initializer block must be a mapping, got " f"{type(cfg).__name__}")
     has_type = "type" in cfg
     has_module = "module" in cfg
     if has_type == has_module:
         raise ValueError(
             "initializer block must declare exactly one of 'type' "
             f"(builtin registry) or 'module' (pkg.mod:factory mount), "
-            f"got keys {sorted(cfg)}")
+            f"got keys {sorted(cfg)}"
+        )
     params = cfg.get("params") or {}
     if not isinstance(params, dict):
-        raise ValueError(
-            f"initializer.params must be a mapping, got "
-            f"{type(params).__name__}")
+        raise ValueError(f"initializer.params must be a mapping, got " f"{type(params).__name__}")
     if has_type:
         itype = str(cfg["type"])
         cls = INITIALIZER_REGISTRY.get(itype)
         if cls is None:
             raise ValueError(
                 f"initializer.type {itype!r} unknown | registered: "
-                f"{sorted(INITIALIZER_REGISTRY)}")
+                f"{sorted(INITIALIZER_REGISTRY)}"
+            )
         inst = cls(params, profile, primitives)
     else:
         factory = _resolve_factory(cfg["module"])
@@ -275,7 +278,8 @@ def build_initializer(cfg: dict, profile, primitives) -> InitializerBase:
         if not isinstance(inst, InitializerBase):
             raise ValueError(
                 f"initializer factory {cfg['module']!r} returned "
-                f"{type(inst).__name__}, not an InitializerBase")
+                f"{type(inst).__name__}, not an InitializerBase"
+            )
     inst.validate()
     return inst
 
@@ -302,30 +306,29 @@ def normalize_initializer_spec(params: dict) -> Optional[dict]:
         raise ValueError(
             "env.params declares both 'initializer' and the legacy "
             "'reset' block -- declare one (the initializer face wins "
-            "nowhere; the ambiguity is a config error)")
+            "nowhere; the ambiguity is a config error)"
+        )
     if init is not None:
-        if not isinstance(init, dict) or not (
-                "type" in init or "module" in init):
+        if not isinstance(init, dict) or not ("type" in init or "module" in init):
             raise ValueError(
                 f"env.params.initializer must be a mapping with a "
-                f"'type' (or 'module') key, got {init!r}")
+                f"'type' (or 'module') key, got {init!r}"
+            )
         return init
     if legacy is None:
         return None
     if not isinstance(legacy, dict):
-        raise ValueError(
-            f"env.params.reset must be a mapping, got "
-            f"{type(legacy).__name__}")
+        raise ValueError(f"env.params.reset must be a mapping, got " f"{type(legacy).__name__}")
     from unigym.robots.gr1_reset import GR1_RESET_PROTOCOL
+
     protocol = legacy.get("protocol")
     if protocol != GR1_RESET_PROTOCOL:
         raise ValueError(
             f"env.params.reset.protocol {protocol!r} unknown | the "
             f"legacy block transposes to the splita_tabletop "
             f"initializer whose only protocol is "
-            f"{GR1_RESET_PROTOCOL!r}")
+            f"{GR1_RESET_PROTOCOL!r}"
+        )
     placement = legacy.get("placement") or {}
-    rest = {k: v for k, v in legacy.items()
-            if k not in ("protocol", "placement")}
-    return {"type": "splita_tabletop",
-            "params": {**placement, **rest, "protocol": protocol}}
+    rest = {k: v for k, v in legacy.items() if k not in ("protocol", "placement")}
+    return {"type": "splita_tabletop", "params": {**placement, **rest, "protocol": protocol}}

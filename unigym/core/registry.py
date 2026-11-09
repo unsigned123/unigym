@@ -23,6 +23,7 @@ function -- kill -9 of the daemon loses nothing
 rebuilds the view; manually nohup'd runs are equally visible because
 discovery is registry/SHM based, never parent-child).
 """
+
 from __future__ import annotations
 
 import json
@@ -60,13 +61,21 @@ class RunInfo:
     def to_dict(self) -> dict:
         """JSON-ready dict with a stable key order (API + CLI tables)."""
         return {
-            "run_id": self.run_id, "pid": self.pid, "shm": self.shm,
-            "output_dir": self.output_dir, "log_path": self.log_path,
-            "phase": self.phase, "cameras": self.cameras,
-            "registry_path": self.registry_path, "alive": self.alive,
-            "config": self.config, "camera": self.camera,
-            "step": self.step, "episodes": self.episodes,
-            "start_ts": self.start_ts, "gpu": self.gpu,
+            "run_id": self.run_id,
+            "pid": self.pid,
+            "shm": self.shm,
+            "output_dir": self.output_dir,
+            "log_path": self.log_path,
+            "phase": self.phase,
+            "cameras": self.cameras,
+            "registry_path": self.registry_path,
+            "alive": self.alive,
+            "config": self.config,
+            "camera": self.camera,
+            "step": self.step,
+            "episodes": self.episodes,
+            "start_ts": self.start_ts,
+            "gpu": self.gpu,
             "error": self.error,
         }
 
@@ -108,27 +117,25 @@ def _from_shm(run_id: str, entry: dict) -> RunInfo | None:
             # read_status would only re-list the same directories to
             # rediscover this very file
             s = c.read_status(
-                camera_fallback=(str(entry["camera"])
-                                 if entry.get("camera") is not None
-                                 else None))
+                camera_fallback=(str(entry["camera"]) if entry.get("camera") is not None else None)
+            )
     except FileNotFoundError:
-        return None                 # vanished mid-scan (race): true absence
-    except Exception as e:          # noqa: BLE001 -- typed into UNKNOWN below,
+        return None  # vanished mid-scan (race): true absence
+    except Exception as e:  # noqa: BLE001 -- typed into UNKNOWN below,
         # never swallowed into None; the kill target comes from the
         # serve registry entry, else straight off the (magic-valid)
         # header -- an orphan segment stays actionable with no ledger
-        pid = (int(entry.get("pid") or 0)
-               or _bridge.read_header_pid(_bridge.SHM_PREFIX + run_id))
+        pid = int(entry.get("pid") or 0) or _bridge.read_header_pid(_bridge.SHM_PREFIX + run_id)
         return RunInfo(
-            run_id=run_id, pid=pid,
+            run_id=run_id,
+            pid=pid,
             shm=_bridge.SHM_PREFIX + run_id,
             output_dir=str(entry.get("output_dir") or ""),
             log_path=str(entry.get("log_path") or ""),
             phase="UNKNOWN",
             cameras=list(entry.get("cameras") or []),
             registry_path=str(entry.get("registry_path") or ""),
-            alive=_bridge.hb_alive(_bridge.probe_heartbeat(
-                run_id=run_id, pid=pid or None)),
+            alive=_bridge.hb_alive(_bridge.probe_heartbeat(run_id=run_id, pid=pid or None)),
             config=str(entry.get("config") or ""),
             camera=str(entry.get("camera") or ""),
             start_ts=float(entry.get("start_ts") or 0.0),
@@ -137,7 +144,8 @@ def _from_shm(run_id: str, entry: dict) -> RunInfo | None:
         )
     pid = int(s.get("pid") or 0)
     return RunInfo(
-        run_id=run_id, pid=pid,
+        run_id=run_id,
+        pid=pid,
         shm=_bridge.SHM_PREFIX + run_id,
         output_dir=str(entry.get("output_dir") or ""),
         log_path=str(entry.get("log_path") or ""),
@@ -147,9 +155,9 @@ def _from_shm(run_id: str, entry: dict) -> RunInfo | None:
         alive=_bridge.hb_alive(s.get("hb_ts") or 0.0),
         config=str(entry.get("config") or ""),
         camera=str(s.get("camera") or entry.get("camera") or ""),
-        step=int(s.get("step") or 0), episodes=int(s.get("episodes") or 0),
-        start_ts=float(entry.get("start_ts")
-                       or s.get("started") or 0.0),
+        step=int(s.get("step") or 0),
+        episodes=int(s.get("episodes") or 0),
+        start_ts=float(entry.get("start_ts") or s.get("started") or 0.0),
         gpu=(str(entry["gpu"]) if entry.get("gpu") is not None else None),
     )
 
@@ -165,15 +173,15 @@ def _from_registry(run_id: str, entry: dict, path: Path) -> RunInfo:
     """
     pid = int(entry.get("pid") or 0)
     return RunInfo(
-        run_id=run_id, pid=pid,
+        run_id=run_id,
+        pid=pid,
         shm=_bridge.SHM_PREFIX + run_id,
         output_dir=str(entry.get("output_dir") or ""),
         log_path=str(entry.get("log_path") or ""),
         phase="starting",
         cameras=list(entry.get("cameras") or []),
         registry_path=str(path),
-        alive=_bridge.hb_alive(_bridge.probe_heartbeat(run_id=run_id,
-                                                       pid=pid or None)),
+        alive=_bridge.hb_alive(_bridge.probe_heartbeat(run_id=run_id, pid=pid or None)),
         config=str(entry.get("config") or ""),
         camera=str(entry.get("camera") or ""),
         start_ts=float(entry.get("start_ts") or 0.0),
@@ -181,8 +189,7 @@ def _from_registry(run_id: str, entry: dict, path: Path) -> RunInfo:
     )
 
 
-def list_runs(state_dir: str | None = None,
-              include_dead: bool = False) -> list[RunInfo]:
+def list_runs(state_dir: str | None = None, include_dead: bool = False) -> list[RunInfo]:
     """Merged live view: SHM scan x serve registries, heartbeat-verified.
 
     Sorted by run_id (=`unigym runs` historical order, so 'latest' =
@@ -220,11 +227,9 @@ def list_runs(state_dir: str | None = None,
     return sorted(out, key=lambda r: r.run_id)
 
 
-def clean(state_dir: str | None = None, dry_run: bool = False,
-          force: bool = False) -> list[str]:
+def clean(state_dir: str | None = None, dry_run: bool = False, force: bool = False) -> list[str]:
     """Zombie SHM segments + stale registries hygiene (bridge primitive).
 
     ``force`` also removes the unattachable segments reported as
     version-mismatch / corrupt."""
-    return _bridge.clean_zombies(state_dir=state_dir, dry_run=dry_run,
-                                 force=force)
+    return _bridge.clean_zombies(state_dir=state_dir, dry_run=dry_run, force=force)

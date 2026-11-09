@@ -13,6 +13,7 @@ The expansion is document-wide: a fragment that spells a token in a
 ``<mesh file=...>`` / ``<texture file=...>`` attribute compiles with the
 absolute resolved leaf.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,8 +40,7 @@ def load_spec(path):
     # tokens resolve to absolute leaves, then the asset-face texture rule
     # makes a flat leaf written by an older fragment compile against the
     # payload that now owns its own directory
-    return mujoco.MjSpec.from_string(
-        canonical_asset_text(expand_placeholders(text)))
+    return mujoco.MjSpec.from_string(canonical_asset_text(expand_placeholders(text)))
 
 
 def load_model(path):

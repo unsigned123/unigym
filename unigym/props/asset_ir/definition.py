@@ -7,6 +7,7 @@ renderer's input contract).  Construction validates the envelope
 duplicate-name walk re-runnable at every consumer boundary.  The tree
 walkers here are the shared iteration faces over the root(s).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -33,8 +34,7 @@ def _fvec3(values) -> tuple[float, float, float]:
 
 def _fvec4(values) -> tuple[float, float, float, float]:
     """A numeric sequence as a fixed 4-vector (``quat``/``rgba``)."""
-    return (float(values[0]), float(values[1]),
-            float(values[2]), float(values[3]))
+    return (float(values[0]), float(values[1]), float(values[2]), float(values[3]))
 
 
 def joint_names(asset: AssetDefinition) -> list[str]:
@@ -222,11 +222,7 @@ class AssetDefinition:
                         type=joint.type,
                         body=body.name,
                         axis=_fvec3(joint.axis),
-                        range=(
-                            _fvec2(joint.range)
-                            if joint.range is not None
-                            else None
-                        ),
+                        range=(_fvec2(joint.range) if joint.range is not None else None),
                         limited=joint.range is not None,
                         pos=_fvec3(joint.pos),
                         damping=float(joint.damping),
@@ -237,11 +233,7 @@ class AssetDefinition:
                 )
             for index, geom in enumerate(body.geoms):
                 geom_name = geom.name or f"{body.name}__geom_{index}"
-                size = (
-                    _fvec3(geom.size)
-                    if geom.size
-                    else (0.0, 0.0, 0.0)
-                )
+                size = _fvec3(geom.size) if geom.size else (0.0, 0.0, 0.0)
                 collidable = bool(geom.collidable)
                 geoms.append(
                     ModelGeom(
@@ -255,11 +247,7 @@ class AssetDefinition:
                         group=geom.group,
                         contype=1 if collidable else 0,
                         conaffinity=1 if collidable else 0,
-                        density=(
-                            float(geom.density)
-                            if geom.density is not None
-                            else None
-                        ),
+                        density=(float(geom.density) if geom.density is not None else None),
                         path=path + (geom_name,),
                         qualname=f"{body.name}/{geom_name}",
                     )
@@ -268,8 +256,7 @@ class AssetDefinition:
                 if site.size_vector is not None:
                     size = _fvec3(site.size_vector)
                 elif site.size is not None:
-                    size = (float(site.size), float(site.size),
-                            float(site.size))
+                    size = (float(site.size), float(site.size), float(site.size))
                 else:
                     size = (0.0, 0.0, 0.0)
                 sites.append(
@@ -292,25 +279,13 @@ class AssetDefinition:
         materials = [
             ModelMaterial(
                 name=mat.name,
-                rgba=(
-                    _fvec4(mat.rgba)
-                    if mat.rgba is not None
-                    else (1.0, 1.0, 1.0, 1.0)
-                ),
+                rgba=(_fvec4(mat.rgba) if mat.rgba is not None else (1.0, 1.0, 1.0, 1.0)),
                 textures=(mat.texture.name,) if mat.texture is not None else (),
                 reflectance=mat.reflectance,
                 specular=mat.specular,
                 shininess=mat.shininess,
-                texrepeat=(
-                    _fvec2(mat.texrepeat)
-                    if mat.texrepeat is not None
-                    else (1.0, 1.0)
-                ),
-                texuniform=(
-                    bool(mat.texuniform)
-                    if mat.texuniform is not None
-                    else False
-                ),
+                texrepeat=(_fvec2(mat.texrepeat) if mat.texrepeat is not None else (1.0, 1.0)),
+                texuniform=(bool(mat.texuniform) if mat.texuniform is not None else False),
             )
             for mat in self.materials
         ]

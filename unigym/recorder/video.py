@@ -3,6 +3,7 @@
 Writes a list of ``np.ndarray`` uint8 frames ``(H, W, 3)`` to an MP4 file
 using the bundled ffmpeg backend.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,9 +29,9 @@ def write_mp4(frames: list[np.ndarray], path: str, fps: int = 50) -> str:
     path = str(path)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     from unigym._optional import require
+
     iio = require("imageio.v2", "record", feature="MP4 recording")
-    writer = iio.get_writer(path, fps=fps, codec="libx264",
-                            quality=8, macro_block_size=1)
+    writer = iio.get_writer(path, fps=fps, codec="libx264", quality=8, macro_block_size=1)
     for f in frames_u8:
         writer.append_data(f)
     writer.close()

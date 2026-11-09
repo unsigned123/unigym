@@ -12,6 +12,7 @@ neutral vocabulary (:class:`PropSpec`, :class:`PropManager`, placement,
 validation, geometry and the generated-URDF cache) and lazy compatibility
 re-exports for the long-standing public class names.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -30,10 +31,17 @@ from .base import (
 from . import providers  # noqa: F401
 
 #: legacy public class name -> backend handler module basename
-_COMPAT_NAMES = frozenset({
-    "BallProp", "BoxProp", "FreeArticulationProp", "GenericProp",
-    "PrimitiveProp", "PropArticulation", "UsdArticulationProp",
-})
+_COMPAT_NAMES = frozenset(
+    {
+        "BallProp",
+        "BoxProp",
+        "FreeArticulationProp",
+        "GenericProp",
+        "PrimitiveProp",
+        "PropArticulation",
+        "UsdArticulationProp",
+    }
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -45,7 +53,6 @@ if TYPE_CHECKING:
     PrimitiveProp: Any
     PropArticulation: Any
     UsdArticulationProp: Any
-
 
 
 def __getattr__(name: str):
@@ -64,10 +71,14 @@ def _dispatch_handler(spec: PropSpec) -> type[PropHandler]:
     return _prop_backend(None).handler_for(spec)
 
 
-def build_prop_manager(config: dict | None, num_envs: int, env_spacing: float,
-                       device: str = "cpu", base_dir: str | None = None,
-                       backend: str | None = None
-                       ) -> PropManager | None:
+def build_prop_manager(
+    config: dict | None,
+    num_envs: int,
+    env_spacing: float,
+    device: str = "cpu",
+    base_dir: str | None = None,
+    backend: str | None = None,
+) -> PropManager | None:
     """Build a :class:`PropManager` from a yaml ``props:`` section.
 
     Returns ``None`` when the section is missing, ``enabled`` is false, or
@@ -82,8 +93,13 @@ def build_prop_manager(config: dict | None, num_envs: int, env_spacing: float,
     if not config.get("types"):
         return None
     return PropManager(
-        config, num_envs=num_envs, env_spacing=env_spacing,
-        device=device, base_dir=base_dir, backend=backend)
+        config,
+        num_envs=num_envs,
+        env_spacing=env_spacing,
+        device=device,
+        base_dir=base_dir,
+        backend=backend,
+    )
 
 
 __all__ = [

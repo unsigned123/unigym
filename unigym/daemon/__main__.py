@@ -8,6 +8,7 @@ control API and ``webui_port`` (8600) for the portal.  Run detached via
     python -m unigym.daemon [--api-port N] [--webui-port M]
                             [--runs-root R] [--poll S] [--rebuild S]
 """
+
 from __future__ import annotations
 
 import os
@@ -57,47 +58,75 @@ def main(argv: list[str] | None = None) -> int:
         0 on a clean stop, 1 when the daemon failed to bind its ports.
     """
     from unigym.core.spawn import load_cfg
+
     cfg = load_cfg()
     p = argparse.ArgumentParser(
         prog="unigym.daemon",
         description="unigymd -- resident daemon: webui portal + control "
-                    "API + spawn scheduling (runs outlive it by design)")
-    p.add_argument("--api-port", type=int, dest="api_port",
-                   default=int(cfg.get("daemon_api_port") or 8670),
-                   help="control API port (default: unigym.yaml "
-                        "daemon_api_port or 8670)")
-    p.add_argument("--webui-port", type=int, dest="webui_port",
-                   default=int(cfg.get("webui_port") or 8600),
-                   help="portal port (default: unigym.yaml webui_port "
-                        "or 8600; busy -> scans upward with a note)")
-    p.add_argument("--runs-root", default=None,
-                   help="job world root (default: unigym.yaml runs_root "
-                        "or <repo>/runs)")
-    p.add_argument("--output-root", dest="output_root", default=None,
-                   help="ledger scan root for the history face + record "
-                        "delete (default: unigym.yaml output_root, "
-                        "relative to the repo)")
-    p.add_argument("--poll", type=float, default=2.0,
-                   help="pending-job scan interval seconds (default 2)")
-    p.add_argument("--rebuild", type=float, dest="rebuild", default=2.0,
-                   help="instance-table rebuild interval seconds "
-                        "(default 2)")
-    p.add_argument("--no-state-file", action="store_true",
-                   dest="no_state_file",
-                   help="do not write /tmp/unigym-daemon.json (tests)")
+        "API + spawn scheduling (runs outlive it by design)",
+    )
+    p.add_argument(
+        "--api-port",
+        type=int,
+        dest="api_port",
+        default=int(cfg.get("daemon_api_port") or 8670),
+        help="control API port (default: unigym.yaml " "daemon_api_port or 8670)",
+    )
+    p.add_argument(
+        "--webui-port",
+        type=int,
+        dest="webui_port",
+        default=int(cfg.get("webui_port") or 8600),
+        help="portal port (default: unigym.yaml webui_port "
+        "or 8600; busy -> scans upward with a note)",
+    )
+    p.add_argument(
+        "--runs-root",
+        default=None,
+        help="job world root (default: unigym.yaml runs_root " "or <repo>/runs)",
+    )
+    p.add_argument(
+        "--output-root",
+        dest="output_root",
+        default=None,
+        help="ledger scan root for the history face + record "
+        "delete (default: unigym.yaml output_root, "
+        "relative to the repo)",
+    )
+    p.add_argument(
+        "--poll", type=float, default=2.0, help="pending-job scan interval seconds (default 2)"
+    )
+    p.add_argument(
+        "--rebuild",
+        type=float,
+        dest="rebuild",
+        default=2.0,
+        help="instance-table rebuild interval seconds " "(default 2)",
+    )
+    p.add_argument(
+        "--no-state-file",
+        action="store_true",
+        dest="no_state_file",
+        help="do not write /tmp/unigym-daemon.json (tests)",
+    )
     a = p.parse_args(argv)
     # the code-origin line (cwd footgun made visible): WHICH checkout
     # and version this daemon serves -- a wrong cwd silently runs
     # another worktree's stale code (an entire debugging session was
     # spent on that before it became this line)
     import unigym
-    print(f"[unigymd] code {unigym.__file__} version "
-          f"{unigym.__version__}", flush=True)
+
+    print(f"[unigymd] code {unigym.__file__} version " f"{unigym.__version__}", flush=True)
     _load_code_packs()
-    svc = DaemonService(api_port=a.api_port, webui_port=a.webui_port,
-                        runs_root=a.runs_root, poll=a.poll,
-                        rebuild_s=a.rebuild, output_root=a.output_root,
-                        write_state=not a.no_state_file)
+    svc = DaemonService(
+        api_port=a.api_port,
+        webui_port=a.webui_port,
+        runs_root=a.runs_root,
+        poll=a.poll,
+        rebuild_s=a.rebuild,
+        output_root=a.output_root,
+        write_state=not a.no_state_file,
+    )
     try:
         svc.run()
     except OSError as e:

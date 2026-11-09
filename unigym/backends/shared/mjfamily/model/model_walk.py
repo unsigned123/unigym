@@ -4,6 +4,7 @@ This is the ``describe`` half: declared geometry/pose stays as compiled,
 and the compiler-owned values (addresses, mass/inertia, element ids) are
 filled in because they now genuinely exist.
 """
+
 from __future__ import annotations
 
 from .spec_walk import (
@@ -84,8 +85,7 @@ def _body_row(model, index, paths, explicit_inertial):
     """Build one :class:`Body` row from a compiled model body."""
     name = _body_name(model, index)
     path_value = paths.get(index, ())
-    parent = None if index == 0 else _body_name(
-        model, int(model.body_parentid[index]))
+    parent = None if index == 0 else _body_name(model, int(model.body_parentid[index]))
     return Body(
         name=name,
         parent=parent,
@@ -114,8 +114,7 @@ def _target_name(model, trntype, target_id):
     """Return the native name an actuator target id points at."""
     if target_id < 0:
         return ""
-    kind = trntype if isinstance(trntype, str) else _TRN_TYPES.get(
-        trntype, "")
+    kind = trntype if isinstance(trntype, str) else _TRN_TYPES.get(trntype, "")
     if kind in ("joint", "jointinparent"):
         return _safe_name("joint", target_id, model.joint(target_id).name)
     if kind == "site":
@@ -132,8 +131,7 @@ def _actuator_joint_map(model):
         trntype = int(model.actuator_trntype[index])
         if trntype in (0, 1):
             joint_id = int(model.actuator_trnid[index][0])
-            result[joint_id] = _safe_name(
-                "actuator", index, model.actuator(index).name)
+            result[joint_id] = _safe_name("actuator", index, model.actuator(index).name)
     return result
 
 
@@ -143,13 +141,11 @@ def _actuator_row(model, index):
         int(model.actuator_trntype[index]),
         str(int(model.actuator_trntype[index])),
     )
-    target = _target_name(
-        model, trntype, int(model.actuator_trnid[index][0]))
+    target = _target_name(model, trntype, int(model.actuator_trnid[index][0]))
     name = _safe_name("actuator", index, model.actuator(index).name)
     kind, owner = _actuator_kind(name, target, trntype)
     ctrlrange = (
-        _vec2(model.actuator_ctrlrange[index])
-        if int(model.actuator_ctrllimited[index]) else None
+        _vec2(model.actuator_ctrlrange[index]) if int(model.actuator_ctrllimited[index]) else None
     )
     return Actuator(
         name=name,
@@ -175,8 +171,7 @@ def _joint_row(model, index, actuator_by_joint):
     dof = int(model.jnt_dofadr[index])
     return Joint(
         name=name,
-        type=_JOINT_TYPES.get(
-            int(model.jnt_type[index]), str(int(model.jnt_type[index]))),
+        type=_JOINT_TYPES.get(int(model.jnt_type[index]), str(int(model.jnt_type[index]))),
         body=body,
         axis=_vec3(model.jnt_axis[index]),
         range=raw_range if limited else None,
@@ -196,8 +191,7 @@ def _geom_row(model, index):
     name = _safe_name("geom", index, model.geom(index).name)
     return Geom(
         name=name,
-        type=_GEOM_TYPES.get(
-            int(model.geom_type[index]), str(int(model.geom_type[index]))),
+        type=_GEOM_TYPES.get(int(model.geom_type[index]), str(int(model.geom_type[index]))),
         body=_body_name(model, int(model.geom_bodyid[index])),
         pos=_vec3(model.geom_pos[index]),
         quat=_vec4(model.geom_quat[index]),
@@ -216,8 +210,7 @@ def _site_row(model, index):
     name = _safe_name("site", index, model.site(index).name)
     return Site(
         name=name,
-        type=_GEOM_TYPES.get(
-            int(model.site_type[index]), str(int(model.site_type[index]))),
+        type=_GEOM_TYPES.get(int(model.site_type[index]), str(int(model.site_type[index]))),
         body=_body_name(model, int(model.site_bodyid[index])),
         pos=_vec3(model.site_pos[index]),
         quat=_vec4(model.site_quat[index]),
@@ -239,8 +232,7 @@ def _camera_row(model, index):
         pos=_vec3(model.cam_pos[index]),
         quat=_vec4(model.cam_quat[index]),
         fovy=float(model.cam_fovy[index]),
-        mode=_CAM_MODES.get(
-            int(model.cam_mode[index]), str(int(model.cam_mode[index]))),
+        mode=_CAM_MODES.get(int(model.cam_mode[index]), str(int(model.cam_mode[index]))),
         targetbody=_body_name(model, target_id) if target_id >= 0 else None,
         camera_id=index,
         qualname=f"{_body_name(model, int(model.cam_bodyid[index]))}/{name}",
@@ -294,8 +286,7 @@ def _eq_row(model, index):
     objtype = int(model.eq_objtype[index])
     return EqSlot(
         name=_safe_name("eq", index, model.eq(index).name),
-        type=_EQ_TYPES.get(
-            int(model.eq_type[index]), str(int(model.eq_type[index]))),
+        type=_EQ_TYPES.get(int(model.eq_type[index]), str(int(model.eq_type[index]))),
         obj1=_eq_obj_name(model, objtype, int(model.eq_obj1id[index])),
         obj2=_eq_obj_name(model, objtype, int(model.eq_obj2id[index])),
         active=bool(model.eq_active0[index]),
@@ -322,8 +313,7 @@ def _model_texture_file(model, index):
     address = int(pathadr[index])
     if address < 0:
         return None
-    text = bytes(names)[address:].split(b"\0", 1)[0].decode(
-        "utf-8", "replace")
+    text = bytes(names)[address:].split(b"\0", 1)[0].decode("utf-8", "replace")
     return _basename(text)
 
 
@@ -332,8 +322,7 @@ def _texture_row_from_model(model, index):
     name = _safe_name("texture", index, model.texture(index).name)
     return Texture(
         name=name,
-        type=_TEXTURE_TYPES.get(
-            int(model.tex_type[index]), str(int(model.tex_type[index]))),
+        type=_TEXTURE_TYPES.get(int(model.tex_type[index]), str(int(model.tex_type[index]))),
         file=_model_texture_file(model, index),
         width=_optional_int(model.tex_width[index], minimum=1),
         height=_optional_int(model.tex_height[index], minimum=1),
@@ -359,10 +348,7 @@ def _ext(model, body_rows, geom_rows):
     """Build the ``mj`` extension from a compiled model."""
     mocap = [row for row in body_rows if row.mocap]
     eq_slots = [_eq_row(model, index) for index in range(model.neq)]
-    textures = [
-        _texture_row_from_model(model, index)
-        for index in range(model.ntex)
-    ]
+    textures = [_texture_row_from_model(model, index) for index in range(model.ntex)]
     geom_contact = [
         _geom_contact_row_from_model(model, index, geom_rows[index].name)
         for index in range(model.ngeom)
@@ -383,26 +369,14 @@ def describe_model(model, backend="mujoco"):
     if explicit is None:
         explicit = [False] * model.nbody
     paths = _body_paths(model)
-    body_rows = [
-        _body_row(model, index, paths, explicit)
-        for index in range(model.nbody)
-    ]
+    body_rows = [_body_row(model, index, paths, explicit) for index in range(model.nbody)]
     actuator_by_joint = _actuator_joint_map(model)
-    joint_rows = [
-        _joint_row(model, index, actuator_by_joint)
-        for index in range(model.njnt)
-    ]
+    joint_rows = [_joint_row(model, index, actuator_by_joint) for index in range(model.njnt)]
     geom_rows = [_geom_row(model, index) for index in range(model.ngeom)]
     site_rows = [_site_row(model, index) for index in range(model.nsite)]
-    camera_rows = [
-        _camera_row(model, index) for index in range(model.ncam)
-    ]
-    actuator_rows = [
-        _actuator_row(model, index) for index in range(model.nu)
-    ]
-    material_rows = [
-        _material_row(model, index) for index in range(model.nmat)
-    ]
+    camera_rows = [_camera_row(model, index) for index in range(model.ncam)]
+    actuator_rows = [_actuator_row(model, index) for index in range(model.nu)]
+    material_rows = [_material_row(model, index) for index in range(model.nmat)]
     ir = ModelIR(
         name=_model_name(model),
         backend=backend,

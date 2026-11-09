@@ -3,6 +3,7 @@
 Everything here reads the declared spec only: compiled addresses, mass and
 inertia stay ``None`` because the compiler owns those values.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,7 +31,10 @@ _JOINT_TYPES = {0: "free", 1: "ball", 2: "slide", 3: "hinge"}
 _TEXTURE_TYPES = {0: "2d", 1: "cube", 2: "skybox"}
 _BUILTIN_TYPES = {0: None, 1: "gradient", 2: "checker", 3: "flat"}
 _INTEGRATOR_TYPES = {
-    0: "euler", 1: "rk4", 2: "implicit", 3: "implicitfast",
+    0: "euler",
+    1: "rk4",
+    2: "implicit",
+    3: "implicitfast",
 }
 _SOLVER_TYPES = {0: "pgs", 1: "cg", 2: "newton"}
 _CONE_TYPES = {0: "pyramidal", 1: "elliptic"}
@@ -40,20 +44,42 @@ _OPTION_ENUM_TYPES = {
     "cone": _CONE_TYPES,
 }
 _GEOM_TYPES = {
-    0: "plane", 1: "hfield", 2: "sphere", 3: "capsule", 4: "ellipsoid",
-    5: "cylinder", 6: "box", 7: "mesh", 8: "sdf",
+    0: "plane",
+    1: "hfield",
+    2: "sphere",
+    3: "capsule",
+    4: "ellipsoid",
+    5: "cylinder",
+    6: "box",
+    7: "mesh",
+    8: "sdf",
 }
 _TRN_TYPES = {
-    0: "joint", 1: "jointinparent", 2: "slidercrank", 3: "tendon",
-    4: "site", 5: "body", 6: "so3", 1000: "undefined",
+    0: "joint",
+    1: "jointinparent",
+    2: "slidercrank",
+    3: "tendon",
+    4: "site",
+    5: "body",
+    6: "so3",
+    1000: "undefined",
 }
 _CAM_MODES = {
-    0: "fixed", 1: "track", 2: "trackcom", 3: "targetbody",
+    0: "fixed",
+    1: "track",
+    2: "trackcom",
+    3: "targetbody",
     4: "targetbodycom",
 }
 _EQ_TYPES = {
-    0: "connect", 1: "weld", 2: "joint", 3: "tendon", 4: "flex",
-    5: "flexvert", 6: "flexstrain", 7: "distance",
+    0: "connect",
+    1: "weld",
+    2: "joint",
+    3: "tendon",
+    4: "flex",
+    5: "flexvert",
+    6: "flexstrain",
+    7: "distance",
 }
 
 
@@ -81,8 +107,7 @@ def _vec3(values) -> tuple[float, float, float]:
 
 def _vec4(values) -> tuple[float, float, float, float]:
     """Return a numeric array as a fixed 4-vector (``quat``/``rgba``)."""
-    return (float(values[0]), float(values[1]),
-            float(values[2]), float(values[3]))
+    return (float(values[0]), float(values[1]), float(values[2]), float(values[3]))
 
 
 def _finite(value):
@@ -173,16 +198,13 @@ def _body_info(spec, bodies=None):
 
     for body in bodies:
         path(body)
-    records = [
-        (body, names[id(body)], paths[id(body)]) for body in bodies
-    ]
+    records = [(body, names[id(body)], paths[id(body)]) for body in bodies]
     by_name = {name: (name, value) for _, name, value in records}
     return {
         "records": records,
         "by_name": by_name,
         "world": world,
-        "world_name": names.get(
-            id(world), records[0][1] if records else "world"),
+        "world_name": names.get(id(world), records[0][1] if records else "world"),
     }
 
 
@@ -422,19 +444,10 @@ def _ext(spec, body_rows, geom_rows):
         GeomGroup(name=f"group{group}", group=group, geoms=tuple(names))
         for group, names in sorted(groups.items())
     ]
-    eq_slots = [
-        _eq_row(equality, index)
-        for index, equality in enumerate(spec.equalities)
-    ]
+    eq_slots = [_eq_row(equality, index) for index, equality in enumerate(spec.equalities)]
     mocap = [row for row in body_rows if row.mocap]
-    textures = [
-        _texture_row(texture, index)
-        for index, texture in enumerate(spec.textures)
-    ]
-    geom_contact = [
-        _geom_contact_row(geom, row.name)
-        for geom, row in zip(spec.geoms, geom_rows)
-    ]
+    textures = [_texture_row(texture, index) for index, texture in enumerate(spec.textures)]
+    geom_contact = [_geom_contact_row(geom, row.name) for geom, row in zip(spec.geoms, geom_rows)]
     return MjExt(
         opt=_option_dict(spec.option),
         geom_groups=Table(geom_groups),
@@ -449,30 +462,16 @@ def build_from_spec(spec, backend="mujoco"):
     """Walk an uncompiled ``MjSpec`` and return the declared model IR."""
     bodies = list(spec.bodies)
     info = _body_info(spec, bodies)
-    body_rows = [
-        _body_row(body, info, spec.worldbody) for body in bodies
-    ]
+    body_rows = [_body_row(body, info, spec.worldbody) for body in bodies]
     actuator_rows, actuator_by_target = _actuator_rows(spec)
     joint_rows = [
         _joint_row(joint, index, info, actuator_by_target)
         for index, joint in enumerate(spec.joints)
     ]
-    geom_rows = [
-        _geom_row(geom, index, info)
-        for index, geom in enumerate(spec.geoms)
-    ]
-    site_rows = [
-        _site_row(site, index, info)
-        for index, site in enumerate(spec.sites)
-    ]
-    camera_rows = [
-        _camera_row(camera, index, info)
-        for index, camera in enumerate(spec.cameras)
-    ]
-    material_rows = [
-        _material_row(item, index)
-        for index, item in enumerate(spec.materials)
-    ]
+    geom_rows = [_geom_row(geom, index, info) for index, geom in enumerate(spec.geoms)]
+    site_rows = [_site_row(site, index, info) for index, site in enumerate(spec.sites)]
+    camera_rows = [_camera_row(camera, index, info) for index, camera in enumerate(spec.cameras)]
+    material_rows = [_material_row(item, index) for index, item in enumerate(spec.materials)]
     scene = _ref_name(getattr(spec, "modelname", "")) or "model"
     ir = ModelIR(
         name=scene,

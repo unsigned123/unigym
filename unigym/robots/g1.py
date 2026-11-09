@@ -27,6 +27,7 @@ every other field is identical.
 Pure-data constants live in :mod:`unigym.robots.g1_constants`
 (isaaclab-free; the single source of truth for tests + contract doc).
 """
+
 from __future__ import annotations
 
 import math
@@ -70,8 +71,9 @@ from .g1_constants import (
 # IsaaclabEnv's name-based permutation (extra asset DOFs are allowed).
 
 
-def _override_gains(base: Dict[str, float],
-                    override: Optional[Dict[str, float]]) -> Dict[str, float]:
+def _override_gains(
+    base: Dict[str, float], override: Optional[Dict[str, float]]
+) -> Dict[str, float]:
     """Merge a yaml gain override into one actuator group's dict.
 
     Only regex keys that already exist in the group dict are applied (per
@@ -94,21 +96,23 @@ def _spawn_rot_wxyz(yaw_deg: float) -> tuple:
     return tuple(float(v) for v in quat.about_z(yaw))
 
 
-def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
-                    stiffness: Optional[Dict] = None,
-                    damping: Optional[Dict] = None,
-                    effort: Optional[Dict] = None,
-                    hands_kp: Optional[float] = None,
-                    hands_kd: Optional[float] = None,
-                    prim_path: str = "{ENV_REGEX_NS}/Robot",
-                    usd_path: Optional[str] = None,
-                    actuate_hands: bool = False,
-                    body_parts: Optional[Dict] = None,
-                    default_q: Optional[Dict] = None,
-                    spawn_x: float = 0.0,
-                    spawn_y: float = 0.0,
-                    spawn_yaw_deg: float = 0.0,
-                    with_isaaclab: bool = False) -> RobotRecipe:
+def make_g1_profile(
+    spawn_height: float = G1_SPAWN_HEIGHT,
+    stiffness: Optional[Dict] = None,
+    damping: Optional[Dict] = None,
+    effort: Optional[Dict] = None,
+    hands_kp: Optional[float] = None,
+    hands_kd: Optional[float] = None,
+    prim_path: str = "{ENV_REGEX_NS}/Robot",
+    usd_path: Optional[str] = None,
+    actuate_hands: bool = False,
+    body_parts: Optional[Dict] = None,
+    default_q: Optional[Dict] = None,
+    spawn_x: float = 0.0,
+    spawn_y: float = 0.0,
+    spawn_yaw_deg: float = 0.0,
+    with_isaaclab: bool = False,
+) -> RobotRecipe:
     """Build the G1 29-DoF RobotRecipe.
 
     Args:
@@ -168,14 +172,14 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
         # multiple-matches error
         import re
         from .g1_constants import G1_JOINT_ORDER_FULL as _ALL_JOINTS
+
         expanded: Dict[str, float] = {}
         for key, val in default_q.items():
             if re.search(r"[.*]", key):
                 pat = re.compile(key)
                 hits = [n for n in _ALL_JOINTS if pat.fullmatch(n)]
                 if not hits:
-                    raise ValueError(
-                        f"default_q pattern {key!r} matches no G1 joint")
+                    raise ValueError(f"default_q pattern {key!r} matches no G1 joint")
                 for n in hits:
                     expanded[n] = float(val)
             else:
@@ -188,8 +192,7 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
         from isaaclab.assets import ArticulationCfg
         from isaaclab_assets.robots.unitree import G1_29DOF_CFG
 
-        spawn_kwargs: dict[str, Any] = {
-            "activate_contact_sensors": True}  # asset ships OFF
+        spawn_kwargs: dict[str, Any] = {"activate_contact_sensors": True}  # asset ships OFF
         if usd_path:
             spawn_kwargs["usd_path"] = usd_path
         cfg = G1_29DOF_CFG.replace(
@@ -203,37 +206,52 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
             ),
             actuators={
                 "legs": ImplicitActuatorCfg(
-                    joint_names_expr=[".*_hip_pitch_joint", ".*_hip_roll_joint",
-                                      ".*_hip_yaw_joint", ".*_knee_joint"],
+                    joint_names_expr=[
+                        ".*_hip_pitch_joint",
+                        ".*_hip_roll_joint",
+                        ".*_hip_yaw_joint",
+                        ".*_knee_joint",
+                    ],
                     stiffness=_override_gains(G1_KP_LEGS, stiffness),
                     damping=_override_gains(G1_KD_LEGS, damping),
-                    effort_limit_sim=_override_gains(G1_EFFORT_LEGS, effort)),
+                    effort_limit_sim=_override_gains(G1_EFFORT_LEGS, effort),
+                ),
                 "feet": ImplicitActuatorCfg(
-                    joint_names_expr=[".*_ankle_pitch_joint",
-                                      ".*_ankle_roll_joint"],
+                    joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
                     stiffness=_override_gains(G1_KP_FEET, stiffness),
                     damping=_override_gains(G1_KD_FEET, damping),
-                    effort_limit_sim=_override_gains(G1_EFFORT_FEET, effort)),
+                    effort_limit_sim=_override_gains(G1_EFFORT_FEET, effort),
+                ),
                 "waist": ImplicitActuatorCfg(
-                    joint_names_expr=["waist_yaw_joint", "waist_roll_joint",
-                                      "waist_pitch_joint"],
+                    joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
                     stiffness=_override_gains(G1_KP_WAIST, stiffness),
                     damping=_override_gains(G1_KD_WAIST, damping),
-                    effort_limit_sim=_override_gains(G1_EFFORT_WAIST, effort)),
+                    effort_limit_sim=_override_gains(G1_EFFORT_WAIST, effort),
+                ),
                 "arms": ImplicitActuatorCfg(
-                    joint_names_expr=[".*_shoulder_pitch_joint",
-                                      ".*_shoulder_roll_joint",
-                                      ".*_shoulder_yaw_joint",
-                                      ".*_elbow_joint",
-                                      ".*_wrist_.*_joint"],
+                    joint_names_expr=[
+                        ".*_shoulder_pitch_joint",
+                        ".*_shoulder_roll_joint",
+                        ".*_shoulder_yaw_joint",
+                        ".*_elbow_joint",
+                        ".*_wrist_.*_joint",
+                    ],
                     stiffness=_override_gains(G1_KP_ARMS, stiffness),
                     damping=_override_gains(G1_KD_ARMS, damping),
-                    effort_limit_sim=_override_gains(G1_EFFORT_ARMS, effort)),
-                **({"hands": ImplicitActuatorCfg(  # non-policy DOFs, held at rest
-                    joint_names_expr=list(G1_HAND_EXPRS),
-                    stiffness=G1_KP_HANDS if hands_kp is None else hands_kp,
-                    damping=G1_KD_HANDS if hands_kd is None else hands_kd,
-                    effort_limit_sim=G1_EFFORT_HANDS)} if actuate_hands else {}),
+                    effort_limit_sim=_override_gains(G1_EFFORT_ARMS, effort),
+                ),
+                **(
+                    {
+                        "hands": ImplicitActuatorCfg(  # non-policy DOFs, held at rest
+                            joint_names_expr=list(G1_HAND_EXPRS),
+                            stiffness=G1_KP_HANDS if hands_kp is None else hands_kp,
+                            damping=G1_KD_HANDS if hands_kd is None else hands_kd,
+                            effort_limit_sim=G1_EFFORT_HANDS,
+                        )
+                    }
+                    if actuate_hands
+                    else {}
+                ),
             },
         )
     return RobotRecipe(
@@ -242,8 +260,7 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
         # mujoco 43-DoF asset carries the fingers even when the isaaclab
         # actuator gate is off); the isaaclab *action term* for it stays
         # gated by actuate_hands below.
-        joint_sets={"body": tuple(G1_JOINT_ORDER_IL),
-                    "hand": tuple(G1_HAND_JOINTS)},
+        joint_sets={"body": tuple(G1_JOINT_ORDER_IL), "hand": tuple(G1_HAND_JOINTS)},
         default_joint_pos=joint_pos,
         foot_bodies=list(bp["feet"]),
         body_parts=bp,
@@ -253,6 +270,5 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
         # drivers emit).  Without actuate_hands the 29-DoF single-face
         # surface is unchanged.  This is an isaaclab action-term capability
         # gate, not a joint-resolution source (v105).
-        _extra_action_terms=({"hand": list(G1_HAND_JOINTS)}
-                            if actuate_hands else None),
+        _extra_action_terms=({"hand": list(G1_HAND_JOINTS)} if actuate_hands else None),
     )

@@ -15,6 +15,7 @@ Yaml usage (indirectly, via ``collect.py``)::
     logger:
       log_interval: 500
 """
+
 from __future__ import annotations
 
 import json
@@ -35,7 +36,10 @@ def _git_hash(cwd: str | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=cwd, timeout=5,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip()[:12]
@@ -69,20 +73,30 @@ class DataCollectLogger:
         neither is present the env-mean-height fallback applies.
     """
 
-    def __init__(self, config: dict, output_dir: str, num_envs: int,
-                 total_steps: int = 0, policy_dt: float = 0.02,
-                 log_interval: int = 500,
-                 dist_keys: tuple[str, ...] = ("vx", "base_z", "alive",
-                                               "fallen", "terminated",
-                                               "in_recovery")):
+    def __init__(
+        self,
+        config: dict,
+        output_dir: str,
+        num_envs: int,
+        total_steps: int = 0,
+        policy_dt: float = 0.02,
+        log_interval: int = 500,
+        dist_keys: tuple[str, ...] = (
+            "vx",
+            "base_z",
+            "alive",
+            "fallen",
+            "terminated",
+            "in_recovery",
+        ),
+    ):
         self.config = config
         self.output_dir = output_dir
         self.num_envs = num_envs
         self._total_steps = total_steps
         self._policy_dt = policy_dt
         self._log_interval = max(1, int(log_interval))
-        self._stats = StatsCollector(window_size=log_interval,
-                                     dist_keys=dist_keys)
+        self._stats = StatsCollector(window_size=log_interval, dist_keys=dist_keys)
         self._episode_durations: list[float] = []
         self._episode_snapshots: list[dict] = []
         self._filter_stats: dict = {
@@ -143,14 +157,18 @@ class DataCollectLogger:
         ep_len = self._mean_recent_episode_steps()
         shards = self._shard_count
         elapsed = time.time() - self._t0
-        line = (f"[step {step:>6d}/{self._total_steps}] "
-                f"vx={vx:+.3f} base_z={bz:.3f} "
-                f"alive={alive * 100:.0f}% ep_len={ep_len} "
-                f"shards={shards} elapsed={elapsed:.0f}s")
+        line = (
+            f"[step {step:>6d}/{self._total_steps}] "
+            f"vx={vx:+.3f} base_z={bz:.3f} "
+            f"alive={alive * 100:.0f}% ep_len={ep_len} "
+            f"shards={shards} elapsed={elapsed:.0f}s"
+        )
         if "obs_disp_m" in w:
-            line += (f" obs_disp_m={w['obs_disp_m']:.2f} "
-                     f"obs_disp_max={w['obs_disp_max']:.2f} "
-                     f"obs_z_max={w['obs_z_max']:.2f}")
+            line += (
+                f" obs_disp_m={w['obs_disp_m']:.2f} "
+                f"obs_disp_max={w['obs_disp_max']:.2f} "
+                f"obs_z_max={w['obs_z_max']:.2f}"
+            )
         print(line, flush=True)
 
     def _mean_recent_episode_steps(self, n: int = 10) -> int:
@@ -163,8 +181,7 @@ class DataCollectLogger:
     # ------------------------------------------------------------------ #
     # per-episode logging
     # ------------------------------------------------------------------ #
-    def log_episode(self, episode_info: dict, kept: bool,
-                    filter_reason: str | None = None) -> None:
+    def log_episode(self, episode_info: dict, kept: bool, filter_reason: str | None = None) -> None:
         """Record episode-level statistics at episode end.
 
         ``episode_info`` should contain at least ``duration_s`` (float).
@@ -177,14 +194,16 @@ class DataCollectLogger:
         else:
             self._filter_stats["discarded_episodes"] += 1
             if filter_reason:
-                self._filter_stats["discards_by_filter"][filter_reason] = \
-                    self._filter_stats["discards_by_filter"].get(
-                        filter_reason, 0) + 1
-        self._episode_snapshots.append({
-            "duration_s": dur,
-            "kept": kept,
-            "filter_reason": filter_reason,
-        })
+                self._filter_stats["discards_by_filter"][filter_reason] = (
+                    self._filter_stats["discards_by_filter"].get(filter_reason, 0) + 1
+                )
+        self._episode_snapshots.append(
+            {
+                "duration_s": dur,
+                "kept": kept,
+                "filter_reason": filter_reason,
+            }
+        )
 
     # ------------------------------------------------------------------ #
     # per-shard logging
@@ -195,9 +214,9 @@ class DataCollectLogger:
     # ------------------------------------------------------------------ #
     # summary
     # ------------------------------------------------------------------ #
-    def write_summary(self, total_records: int | None = None,
-                      shards: int | None = None,
-                      extra: dict | None = None) -> dict:
+    def write_summary(
+        self, total_records: int | None = None, shards: int | None = None, extra: dict | None = None
+    ) -> dict:
         """Write ``summary.json`` and return the summary dict."""
         wall = time.time() - self._t0
         dists = self._stats.distributions
@@ -207,28 +226,31 @@ class DataCollectLogger:
         fallen_raw = self._stats.raw_values("fallen")
         # primary (P10): termination-group firing ratio; fallbacks:
         # per-step "fallen" metric, then env-mean base_z below 0.15 m
-        fallen_fraction = (float(term_raw.mean()) if term_raw.size
-                           else (float(fallen_raw.mean())
-                                 if fallen_raw.size else None))
+        fallen_fraction = (
+            float(term_raw.mean())
+            if term_raw.size
+            else (float(fallen_raw.mean()) if fallen_raw.size else None)
+        )
         # fallback / reference: env-mean base_z below 0.15 m
-        fallen_fraction_height = (float((bz_raw < 0.15).mean())
-                                  if bz_raw.size else 0.0)
+        fallen_fraction_height = float((bz_raw < 0.15).mean()) if bz_raw.size else 0.0
         if fallen_fraction is None:
             fallen_fraction = fallen_fraction_height
 
         # per-termination firing fractions (collect.py feeds "term_<name>"
         # step metrics when the group has >1 terminations)
-        term_fractions = {k[len("term_"):]: float(v)
-                          for k, v in overall.items()
-                          if k.startswith("term_")}
+        term_fractions = {
+            k[len("term_") :]: float(v) for k, v in overall.items() if k.startswith("term_")
+        }
 
         # duty metrics are generated per profile foot (collect.py); label sets
         # vary by robot — scan the overall means instead of hardcoding them.
-        duty = {k[len("duty_"):]: float(v) for k, v in overall.items()
-                if k.startswith("duty_")}
+        duty = {k[len("duty_") :]: float(v) for k, v in overall.items() if k.startswith("duty_")}
 
-        durs = np.array(self._episode_durations, dtype=np.float64) \
-            if self._episode_durations else np.array([])
+        durs = (
+            np.array(self._episode_durations, dtype=np.float64)
+            if self._episode_durations
+            else np.array([])
+        )
         summary: dict = {
             "framework": "unigym",
             "version": _get_version(),
@@ -241,10 +263,10 @@ class DataCollectLogger:
             "duration_s": self._total_steps * self._policy_dt,
             "wall_time_s": wall,
             "steps_per_sec": self._total_steps / wall if wall > 0 else 0,
-            "env_steps_per_sec": (self._total_steps * self.num_envs / wall)
-                                 if wall > 0 else 0,
-            "total_records": total_records if total_records is not None
-                             else self._total_steps * self.num_envs,
+            "env_steps_per_sec": (self._total_steps * self.num_envs / wall) if wall > 0 else 0,
+            "total_records": total_records
+            if total_records is not None
+            else self._total_steps * self.num_envs,
             "shards": shards if shards is not None else self._shard_count,
             "stats": {
                 "vx": dists.get("vx", {}),
@@ -266,8 +288,7 @@ class DataCollectLogger:
                     "min": float(durs.min()) if durs.size else None,
                     "max": float(durs.max()) if durs.size else None,
                     "mean": float(durs.mean()) if durs.size else None,
-                    "p50": (float(np.percentile(durs, 50))
-                            if durs.size else None),
+                    "p50": (float(np.percentile(durs, 50)) if durs.size else None),
                 },
             },
             "filter_stats": dict(self._filter_stats),
@@ -284,6 +305,7 @@ class DataCollectLogger:
 def _get_version() -> str:
     try:
         from unigym import __version__
+
         return __version__
     except Exception:  # best effort: __version__ absent outside an install
         return "unknown"

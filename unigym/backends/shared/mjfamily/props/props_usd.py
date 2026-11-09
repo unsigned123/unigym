@@ -12,6 +12,7 @@ file-size discipline).  Two pieces:
   the ``Prop_`` prefix), ``box_texture`` / ``box`` (declared envelope-box
   tiers).
 """
+
 from __future__ import annotations
 
 
@@ -24,15 +25,13 @@ def add_material(mjspec, spec) -> str | None:
     """
     import mujoco
 
-    tex = spec.spawn.get("texture") if spec.type != "usd" \
-        else (spec.mujoco or {}).get("texture")
+    tex = spec.spawn.get("texture") if spec.type != "usd" else (spec.mujoco or {}).get("texture")
     if not tex:
         return None
     file = tex.get("file") if isinstance(tex, dict) else str(tex)
     if not file:
         return None
-    name = (tex.get("name") if isinstance(tex, dict) else None) \
-        or f"tex_{spec.name}"
+    name = (tex.get("name") if isinstance(tex, dict) else None) or f"tex_{spec.name}"
     tex_name = f"{name}_tex"
     mjspec.add_texture(
         name=tex_name,
@@ -42,9 +41,7 @@ def add_material(mjspec, spec) -> str | None:
     mat_name = f"mat_{spec.name}"
     from ..scene.asset_render import material_textures
 
-    mjspec.add_material(name=mat_name,
-                        textures=material_textures(
-                            [tex_name] * 6))
+    mjspec.add_material(name=mat_name, textures=material_textures([tex_name] * 6))
     return mat_name
 
 
@@ -77,7 +74,8 @@ def add_usd_body(mjspec, spec, body) -> None:
             f"-- declare its representation explicitly: mujoco: "
             f"{{representation: mjcf_file | box_texture | box, ...}} "
             f"(mjcf_file = converted fragment via scripts/usd_to_mjcf.py; "
-            f"box_texture = envelope box + texture; box = plain envelope)")
+            f"box_texture = envelope box + texture; box = plain envelope)"
+        )
     if rep == "mjcf_file":
         from ..scene.mjcf_io import load_spec
 
@@ -87,31 +85,32 @@ def add_usd_body(mjspec, spec, body) -> None:
             raise ValueError(
                 f"usd prop {spec.name!r}: mjcf_file {mj['mjcf_file']!r} "
                 f"must declare exactly ONE worldbody body named "
-                f"{spec.name!r} (found: {[b.name for b in bodies]})")
+                f"{spec.name!r} (found: {[b.name for b in bodies]})"
+            )
         joints = list(bodies[0].joints)
-        if len(joints) != 1 or \
-                int(joints[0].type) != int(mujoco.mjtJoint.mjJNT_FREE):
+        if len(joints) != 1 or int(joints[0].type) != int(mujoco.mjtJoint.mjJNT_FREE):
             raise ValueError(
                 f"usd prop {spec.name!r}: mjcf_file body {spec.name!r} "
-                f"must carry exactly one freejoint")
+                f"must carry exactly one freejoint"
+            )
         if not joints[0].name:
             # attach does NOT prefix unnamed joints -- an empty joint name
             # would leak into the env's hand-DOF table; name it explicitly
             # so the Prop_ prefix lands (Prop_<name>_free)
             joints[0].name = f"{spec.name}_free"
-        frame = mjspec.worldbody.add_frame(
-            name=f"Prop_{spec.name}_attach")
+        frame = mjspec.worldbody.add_frame(name=f"Prop_{spec.name}_attach")
         mjspec.attach(child, prefix="Prop_", suffix="", frame=frame)
         return
     # box_texture / box: envelope-box tiers
     if not spec.size:
         raise ValueError(
             f"usd prop {spec.name!r}: representation {rep!r} requires the "
-            f"declared size: [sx, sy, sz] envelope")
+            f"declared size: [sx, sy, sz] envelope"
+        )
     from unigym.props.container import box_layout
+
     body = mjspec.worldbody.add_body(name=f"Prop_{spec.name}")
-    body.add_joint(name=f"Prop_{spec.name}_free",
-                   type=mujoco.mjtJoint.mjJNT_FREE)
+    body.add_joint(name=f"Prop_{spec.name}_free", type=mujoco.mjtJoint.mjJNT_FREE)
     mat_name = add_material(mjspec, spec)
     boxes = box_layout(spec)
     mass = float(mj.get("mass", spec.spawn.get("mass", 1.0)))
@@ -127,8 +126,11 @@ def add_usd_body(mjspec, spec, body) -> None:
             kwargs["rgba"] = [float(v) for v in rgba]
         if mat_name is not None:
             kwargs["material"] = mat_name
-        body.add_geom(name=f"Prop_{spec.name}_geom{i}",
-                      type=mujoco.mjtGeom.mjGEOM_BOX,
-                      pos=[float(v) for v in center],
-                      size=[float(v) for v in half],
-                      mass=per, **kwargs)
+        body.add_geom(
+            name=f"Prop_{spec.name}_geom{i}",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=[float(v) for v in center],
+            size=[float(v) for v in half],
+            mass=per,
+            **kwargs,
+        )

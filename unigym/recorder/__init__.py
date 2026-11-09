@@ -16,6 +16,7 @@ Usage in ``collect.py``::
     frame = recorder.capture_frame()          # per record_interval steps
     recorder.write_video(frames, path, fps)   # at episode end
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -40,8 +41,7 @@ class Recorder:
     mp4 encoding stay here.
     """
 
-    def __init__(self, config: dict | None, num_envs: int,
-                 camera_manager: Any = None):
+    def __init__(self, config: dict | None, num_envs: int, camera_manager: Any = None):
         cfg = dict(config or {})
         self._num_envs = int(num_envs)
         self._enabled = bool(cfg.get("enabled", False))
@@ -79,12 +79,11 @@ class Recorder:
         if n is not None and not 0 <= self._record_env < int(n):
             raise ValueError(
                 f"recorder.record_env {self._record_env} out of range for "
-                f"{int(n)} env(s) (camera '{self._camera_ref}')")
-        return self._camera_manager.video_rgb(self._camera_ref,
-                                              self._record_env)
+                f"{int(n)} env(s) (camera '{self._camera_ref}')"
+            )
+        return self._camera_manager.video_rgb(self._camera_ref, self._record_env)
 
-    def write_video(self, frames: list[np.ndarray], path: str,
-                    fps: int = 50) -> str | None:
+    def write_video(self, frames: list[np.ndarray], path: str, fps: int = 50) -> str | None:
         """Write *frames* to an MP4 file. No-op if disabled.
 
         WYSIWYG meta marker (v054): when the referenced camera carries
@@ -104,21 +103,32 @@ class Recorder:
             return
         try:
             state = getter(self._camera_ref)
-        except Exception:                      # noqa: BLE001 (meta only)
+        except Exception:  # noqa: BLE001 (meta only)
             return
         if not state:
             return
         import json
+
         side = f"{video_path}.render.json"
         with open(side, "w") as f:
-            json.dump({"schema": 1, "camera": self._camera_ref,
-                       "render_source": state["render_source"],
-                       "render": state["render"],
-                       "note": "WYSIWYG: this video was shot under the "
-                               "live render state (null = the plain "
-                               "publish path)"}, f, indent=1)
-        print(f"[recorder] live render '{state['render_source']}' active "
-              f"on '{self._camera_ref}' -> {side}", flush=True)
+            json.dump(
+                {
+                    "schema": 1,
+                    "camera": self._camera_ref,
+                    "render_source": state["render_source"],
+                    "render": state["render"],
+                    "note": "WYSIWYG: this video was shot under the "
+                    "live render state (null = the plain "
+                    "publish path)",
+                },
+                f,
+                indent=1,
+            )
+        print(
+            f"[recorder] live render '{state['render_source']}' active "
+            f"on '{self._camera_ref}' -> {side}",
+            flush=True,
+        )
 
 
 def _available_names(camera_manager) -> list[str]:
@@ -127,8 +137,7 @@ def _available_names(camera_manager) -> list[str]:
     return list(getattr(camera_manager, "names", []))
 
 
-def build_recorder(cfg: dict | None, num_envs: int,
-                   camera_manager=None) -> Recorder:
+def build_recorder(cfg: dict | None, num_envs: int, camera_manager=None) -> Recorder:
     """Factory: build a :class:`Recorder` from the yaml ``recorder:`` section.
 
     The recorder can ONLY bind a rig explicitly declared under ``cameras:``
@@ -151,15 +160,18 @@ def build_recorder(cfg: dict | None, num_envs: int,
             "recorder.camera_ref is REQUIRED: the recorder only records "
             "cameras explicitly declared under yaml 'cameras:' (no "
             "self-built camera path exists). Available cameras: "
-            f"{available or 'NONE — declare one under cameras:'}")
+            f"{available or 'NONE — declare one under cameras:'}"
+        )
     if camera_manager is None or ref not in available:
         raise ValueError(
             f"recorder.camera_ref '{ref}' does not name an instantiated "
             f"camera rig; available cameras: "
-            f"{available or 'NONE — declare it under cameras:'}")
+            f"{available or 'NONE — declare it under cameras:'}"
+        )
     if f"cam/{ref}/rgb" not in camera_manager.camera_keys():
         raise ValueError(
             f"recorder.camera_ref '{ref}': camera does not render an RGB "
             f"stream (add 'rgb' to its types: list); available cameras: "
-            f"{available}")
+            f"{available}"
+        )
     return Recorder(cfg, num_envs, camera_manager)

@@ -28,6 +28,7 @@ Design:
   index wraps onto the zeroed one-pixel ring for tiles narrower than 2 m
   (origin z becomes 0); the preset computes the centre height explicitly.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -50,6 +51,7 @@ def _resolve(classes):
     import isaaclab.sim as sim_utils
     from isaaclab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
     from isaaclab.terrains.height_field import HfTerrainBaseCfg
+
     return {
         "TerrainImporterCfg": TerrainImporterCfg,
         "TerrainGeneratorCfg": TerrainGeneratorCfg,
@@ -104,7 +106,8 @@ def _full_field(terrain, horizontal_scale, vertical_scale):
         raise ValueError(
             f"terrain {terrain.name!r}: heights exceed the int16 height-field "
             f"range at vertical_scale={vertical_scale}: "
-            f"[{units.min()}, {units.max()}]")
+            f"[{units.min()}, {units.max()}]"
+        )
     full = units.astype(np.int16)
     full[0, :] = 0
     full[-1, :] = 0
@@ -120,8 +123,7 @@ def _centre_height(full, size, horizontal_scale, vertical_scale):
     xs = np.arange(gx, dtype=np.float64) * horizontal_scale - sx * 0.5
     ys = np.arange(gy, dtype=np.float64) * horizontal_scale - sy * 0.5
     values = full.astype(np.float64)
-    along_x = np.array([np.interp(0.0, xs, values[:, col])
-                        for col in range(gy)])
+    along_x = np.array([np.interp(0.0, xs, values[:, col]) for col in range(gy)])
     return float(np.interp(0.0, ys, along_x)) * vertical_scale
 
 
@@ -134,17 +136,20 @@ def _origin(full, size, horizontal_scale, vertical_scale):
     returns the centre height explicitly instead (the env spawn point).
     """
     sx, sy = size
-    origin_z = _centre_height(
-        full, size, horizontal_scale, vertical_scale)
+    origin_z = _centre_height(full, size, horizontal_scale, vertical_scale)
     return (sx * 0.5, sy * 0.5, origin_z)
 
 
 class NativeTerrainPreset(TerrainPreset):
     """One Isaac Lab terrain tile per env, sampled from a native ``Terrain``."""
 
-    def __init__(self, terrain, friction: float = _DEFAULT_FRICTION,
-                 vertical_scale: float = _DEFAULT_VERTICAL_SCALE,
-                 color=_DEFAULT_COLOR):
+    def __init__(
+        self,
+        terrain,
+        friction: float = _DEFAULT_FRICTION,
+        vertical_scale: float = _DEFAULT_VERTICAL_SCALE,
+        color=_DEFAULT_COLOR,
+    ):
         """Store the source IR and the preset parameters.
 
         Args:
@@ -160,22 +165,18 @@ class NativeTerrainPreset(TerrainPreset):
         self.friction = float(friction)
         self.vertical_scale = float(vertical_scale)
         if self.vertical_scale <= 0:
-            raise ValueError(
-                f"vertical_scale must be > 0, got {vertical_scale!r}")
+            raise ValueError(f"vertical_scale must be > 0, got {vertical_scale!r}")
         self.color = tuple(color)
         nx, _ = terrain.resolution
         self.horizontal_scale = terrain.size[0] / (nx - 1)
 
     def height_field(self):
         """Return ``(full_int16_grid, origin_xyz)`` used by the generator."""
-        full = _full_field(self.terrain, self.horizontal_scale,
-                           self.vertical_scale)
-        origin = _origin(full, self.terrain.size, self.horizontal_scale,
-                         self.vertical_scale)
+        full = _full_field(self.terrain, self.horizontal_scale, self.vertical_scale)
+        origin = _origin(full, self.terrain.size, self.horizontal_scale, self.vertical_scale)
         return full, origin
 
-    def build(self, num_envs: int, env_spacing: float, *,
-              classes=None, **kwargs) -> dict:
+    def build(self, num_envs: int, env_spacing: float, *, classes=None, **kwargs) -> dict:
         """Build the native terrain preset (see ``TerrainPreset.build``).
 
         Returns:
@@ -190,7 +191,8 @@ class NativeTerrainPreset(TerrainPreset):
                 f"terrain {self.terrain.name!r}: resolution "
                 f"{self.terrain.resolution} is too coarse for the Isaac Lab "
                 f"height-field preset (the decorator reserves a one-pixel "
-                f"border; need at least 3 samples per axis)")
+                f"border; need at least 3 samples per axis)"
+            )
 
         def native_height_field(difficulty: float, cfg) -> np.ndarray:
             return interior
@@ -234,8 +236,7 @@ class NativeTerrainPreset(TerrainPreset):
                 friction_combine_mode="multiply",
                 restitution_combine_mode="multiply",
             ),
-            visual_material=c["PreviewSurfaceCfg"](
-                diffuse_color=self.color),
+            visual_material=c["PreviewSurfaceCfg"](diffuse_color=self.color),
             debug_vis=False,
         )
         return {"terrain": cfg}

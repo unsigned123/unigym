@@ -3,6 +3,7 @@
 Standard library only: the neutral-name guard is inlined here so this
 module never imports the props (asset-IR) layer.
 """
+
 from __future__ import annotations
 
 import math
@@ -62,15 +63,21 @@ def _name(kind: str, value: str) -> str:
     if value in _ENGINE_ELEMENT_NAMES:
         raise ValueError(
             f"{kind} name {value!r} is an engine element name -- providers "
-            f"speak the neutral IR vocabulary only")
+            f"speak the neutral IR vocabulary only"
+        )
     return value
 
 
 def _vector(name: str, value, length: int) -> tuple:
     """Validate and normalize a finite vector without backend dependencies."""
-    if (not isinstance(value, (list, tuple)) or len(value) != length
-            or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                   or not math.isfinite(v) for v in value)):
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != length
+        or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+            for v in value
+        )
+    ):
         raise ValueError(f"region: {name} must be {length} finite numbers")
     return tuple(float(v) for v in value)
 
@@ -110,14 +117,21 @@ class RegionDefinition:
         object.__setattr__(self, "quat", quat)
         for field in ("width_m", "depth_m"):
             value = getattr(self, field)
-            if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(value) or value <= 0):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
                 raise ValueError(f"region {self.name!r}: {field} must be finite and > 0")
             object.__setattr__(self, field, float(value))
         if self.kind == "interior":
-            if (isinstance(self.height_m, bool)
-                    or not isinstance(self.height_m, (int, float))
-                    or not math.isfinite(self.height_m) or self.height_m <= 0):
+            if (
+                isinstance(self.height_m, bool)
+                or not isinstance(self.height_m, (int, float))
+                or not math.isfinite(self.height_m)
+                or self.height_m <= 0
+            ):
                 raise ValueError(f"region {self.name!r}: interior height_m must be finite and > 0")
             object.__setattr__(self, "height_m", float(self.height_m))
         elif self.height_m is not None:

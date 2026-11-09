@@ -12,6 +12,7 @@ without an isaaclab environment.
   Default regex ``.*_foot``; when the profile declares
   ``body_parts["feet"]``, an explicit-set regex is used instead.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence

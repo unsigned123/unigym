@@ -4,6 +4,7 @@ An :class:`EpisodeFilter` judges a single episode and returns ``True`` to keep
 it or ``False`` to discard it.  Filters are chained in order; the first
 ``False`` discards the entire episode.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

@@ -10,6 +10,7 @@ This lets a bundle which lives in the repository point at content that
 exists only in an external pack, without an absolute path and without a
 repo-relative path that breaks once the content moves out.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -26,7 +27,8 @@ def resolve_ref(ref: str) -> str:
     except PackError as exc:
         raise PackError(
             f"{exc} | pack references in configs are resolved by "
-            f"unigym.packs.resolve at config load") from exc
+            f"unigym.packs.resolve at config load"
+        ) from exc
 
 
 def expand_pack_refs(obj: Any) -> Any:

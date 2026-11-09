@@ -14,6 +14,7 @@ Offline-testable: :func:`build_info_expr` (string), :func:`unwrap`
 (deterministic Inspector formatting envelope), :func:`quat_axes`,
 :func:`convention_line`, :func:`render` (pure doc -> text).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -23,12 +24,15 @@ import numpy as np
 CONVENTION_WRITE = "world (forward=+X, up=+Z, quat wxyz)"
 
 _MOUNT_CONV = {
-    "body": ("pose = root_pose ∘ mount offset (set_world_poses world) "
-             "each step-tail"),
-    "world": ("static world-anchored tripod; lookat composed by "
-              "yaw-about-Z then pitch-about-Y (lookat_quat)"),
-    "chase": ("yaw-rotated offset behind target_env's root, lookat=roi "
-              "(lookat_quat), re-posed each step-tail"),
+    "body": ("pose = root_pose ∘ mount offset (set_world_poses world) " "each step-tail"),
+    "world": (
+        "static world-anchored tripod; lookat composed by "
+        "yaw-about-Z then pitch-about-Y (lookat_quat)"
+    ),
+    "chase": (
+        "yaw-rotated offset behind target_env's root, lookat=roi "
+        "(lookat_quat), re-posed each step-tail"
+    ),
 }
 
 _INFO_EXPR = """\
@@ -97,12 +101,8 @@ def quat_axes(quat_wxyz) -> tuple[list, list]:
     """(fwd, up) unit vectors of a world-convention (w,x,y,z) quat
     (the same algebra as CameraManager.get_world_pose's fwd)."""
     w, x, y, z = (float(v) for v in quat_wxyz)
-    fwd = (1.0 - 2.0 * (y * y + z * z),
-           2.0 * (x * y + w * z),
-           2.0 * (x * z - w * y))
-    up = (2.0 * (x * y - w * z),
-          1.0 - 2.0 * (x * x + z * z),
-          2.0 * (y * z + w * x))
+    fwd = (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y))
+    up = (2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x))
     n = np.linalg.norm(fwd)
     fwd = [float(v) / n for v in fwd]
     n = np.linalg.norm(up)
@@ -115,9 +115,11 @@ def convention_line(cam: dict) -> str:
     rig = cam.get("rig_type", "?")
     chain = _MOUNT_CONV.get(rig, "rig-specific composition")
     if rig == "body" and cam.get("mount", {}).get("body"):
-        chain = ("kinematic-tree mount: prim parented under "
-                 f"'{cam['mount']['body']}' -- the USD/link chain owns the "
-                 f"pose (upstream-authored offsets ride along)")
+        chain = (
+            "kinematic-tree mount: prim parented under "
+            f"'{cam['mount']['body']}' -- the USD/link chain owns the "
+            f"pose (upstream-authored offsets ride along)"
+        )
     return f"write={CONVENTION_WRITE}; mount: {chain}"
 
 
@@ -132,31 +134,38 @@ def render(doc: dict, name: str | None = None) -> str:
     for cam_name, cam in cams.items():
         if name and cam_name != name:
             continue
-        lines.append(f"camera '{cam_name}'  rig={cam.get('rig_type')}  "
-                     f"(instance={cam.get('instance')}, "
-                     f"kind={cam.get('kind')}, "
-                     f"fps={cam.get('target_fps')}, "
-                     f"interval={cam.get('interval')} (deprecated), "
-                     f"types={'+'.join(cam.get('types') or [])})")
+        lines.append(
+            f"camera '{cam_name}'  rig={cam.get('rig_type')}  "
+            f"(instance={cam.get('instance')}, "
+            f"kind={cam.get('kind')}, "
+            f"fps={cam.get('target_fps')}, "
+            f"interval={cam.get('interval')} (deprecated), "
+            f"types={'+'.join(cam.get('types') or [])})"
+        )
         mount = cam.get("mount") or {}
-        mtxt = "  ".join(f"{k}={_fmt_vec(v) if isinstance(v, list) else v}"
-                         for k, v in mount.items()) or "-"
+        mtxt = (
+            "  ".join(f"{k}={_fmt_vec(v) if isinstance(v, list) else v}" for k, v in mount.items())
+            or "-"
+        )
         lines.append(f"  mount:    {mtxt}")
         world = cam.get("world")
         if world:
             fwd, up = quat_axes(world["quat_wxyz"])
-            lines.append(f"  world:    pos={_fmt_vec(world['pos'])} "
-                         f"quat_wxyz="
-                         f"{_fmt_vec(world['quat_wxyz'], 4)} "
-                         f"fwd={_fmt_vec(fwd)} up={_fmt_vec(up)}")
+            lines.append(
+                f"  world:    pos={_fmt_vec(world['pos'])} "
+                f"quat_wxyz="
+                f"{_fmt_vec(world['quat_wxyz'], 4)} "
+                f"fwd={_fmt_vec(fwd)} up={_fmt_vec(up)}"
+            )
         else:
-            lines.append(f"  world:    (no read-back: "
-                         f"{cam.get('world_error')})")
-        lines.append(f"  intrins:  {cam.get('width')}x{cam.get('height')} "
-                     f"hfov={cam.get('hfov_deg')}deg "
-                     f"(f={cam.get('focal_mm'):.2f}mm, "
-                     f"aperture={cam.get('aperture_mm'):.3f}mm) "
-                     f"near={cam.get('near_clip')} far={cam.get('far_clip')}")
+            lines.append(f"  world:    (no read-back: " f"{cam.get('world_error')})")
+        lines.append(
+            f"  intrins:  {cam.get('width')}x{cam.get('height')} "
+            f"hfov={cam.get('hfov_deg')}deg "
+            f"(f={cam.get('focal_mm'):.2f}mm, "
+            f"aperture={cam.get('aperture_mm'):.3f}mm) "
+            f"near={cam.get('near_clip')} far={cam.get('far_clip')}"
+        )
         lines.append(f"  convention: {convention_line(cam)}")
     return "\n".join(lines)
 
@@ -176,7 +185,14 @@ def doc_to_sidecar_facts(doc: dict, cam_name: str) -> dict:
         "world": world,
         "world_error": cam.get("world_error"),
         "convention": convention_line(cam) if cam else None,
-        "intrinsics": ({"w": cam.get("width"), "h": cam.get("height"),
-                        "hfov_deg": cam.get("hfov_deg"),
-                        "model": "pinhole"} if cam else None),
+        "intrinsics": (
+            {
+                "w": cam.get("width"),
+                "h": cam.get("height"),
+                "hfov_deg": cam.get("hfov_deg"),
+                "model": "pinhole",
+            }
+            if cam
+            else None
+        ),
     }

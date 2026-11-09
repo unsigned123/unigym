@@ -28,6 +28,7 @@ props).  Runtime integration is NOT part of this module: the composer
 returns the compiled-ready spec (the tabletop decomposition wires it
 into the env's model-load seam).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -128,24 +129,25 @@ def bind_regions(model, data, regions) -> Mapping[str, BoundRegion]:
 
     bound = {}
     for name, region in regions.items():
-        owner_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
-                                     region.owner_body)
+        owner_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, region.owner_body)
         if owner_id < 0:
             raise ValueError(f"region {name!r}: dangling owner {region.owner_body!r}")
-        body_id = (mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
-                                     region.body) if region.body else None)
-        site_id = (mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE,
-                                     region.site) if region.site else None)
+        body_id = (
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, region.body) if region.body else None
+        )
+        site_id = (
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, region.site) if region.site else None
+        )
         if body_id is not None and body_id < 0:
             raise ValueError(f"region {name!r}: dangling body {region.body!r}")
         if site_id is not None and site_id < 0:
             raise ValueError(f"region {name!r}: dangling site {region.site!r}")
         if body_id is not None and model.body_parentid[body_id] != owner_id:
             raise ValueError(
-                f"region {name!r}: body {region.body!r} is not an immediate child of its owner")
+                f"region {name!r}: body {region.body!r} is not an immediate child of its owner"
+            )
         if site_id is not None and model.site_bodyid[site_id] != owner_id:
-            raise ValueError(
-                f"region {name!r}: site {region.site!r} is not attached to its owner")
+            raise ValueError(f"region {name!r}: site {region.site!r} is not attached to its owner")
         bound[name] = BoundRegion(region, owner_id, body_id, site_id)
     return MappingProxyType(bound)
 
@@ -192,8 +194,7 @@ def bind_placement_regions(model, declared_regions) -> dict:
     mujoco.mj_forward(model, region_data)
     bound = bind_regions(model, region_data, declared_regions)
     return {
-        name: _bound_region_definition(region, model, region_data)
-        for name, region in bound.items()
+        name: _bound_region_definition(region, model, region_data) for name, region in bound.items()
     }
 
 
@@ -210,21 +211,19 @@ class _InstanceHandler:
 
     def __init__(self, name: str, entry: dict):
         joints = dict(entry.get("joints") or {})
-        actuated = sorted(j for j, p in joints.items()
-                          if p.get("mode") == "actuated")
+        actuated = sorted(j for j, p in joints.items() if p.get("mode") == "actuated")
         if actuated:
             raise ValueError(
                 f"scene instance {name!r}: actuated joints {actuated} are "
                 f"prop-runtime vocabulary -- scene instances are passive "
-                f"assemblies")
+                f"assemblies"
+            )
         self.spec = SimpleNamespace(name=name, joints={})
         self.joints = joints
         self._asset_ranges: dict = {}
 
 
-_FLOOR_GEOM_NAMES = frozenset(
-    {"floor", "ground", "ground_plane", "groundplane"}
-)
+_FLOOR_GEOM_NAMES = frozenset({"floor", "ground", "ground_plane", "groundplane"})
 """Base-model ground plane names the terrain replaces (by geom name)."""
 
 _HFIELD_BASE_EPS = 1e-3
@@ -238,8 +237,7 @@ def _terrain_shape(terrain):
     heights = np.asarray(terrain.heights, dtype=np.float64)
     zmin = float(heights.min())
     elevation = float(heights.max() - heights.min())
-    normalized = ((heights - zmin) / elevation if elevation > 0.0
-                  else np.zeros_like(heights))
+    normalized = (heights - zmin) / elevation if elevation > 0.0 else np.zeros_like(heights)
     return np, heights, zmin, elevation, normalized
 
 
@@ -282,8 +280,7 @@ def _add_terrain_mesh(spec, terrain) -> dict:
     verts = []
     for iy in range(ny):
         for ix in range(nx):
-            verts.extend([float(xs[ix]), float(ys[iy]),
-                          float(heights[iy, ix])])
+            verts.extend([float(xs[ix]), float(ys[iy]), float(heights[iy, ix])])
     faces = []
     for iy in range(ny - 1):
         for ix in range(nx - 1):
@@ -323,8 +320,7 @@ def _remove_base_floor(spec) -> None:
     import mujoco
 
     for geom in list(getattr(spec.worldbody, "geoms", ()) or ()):
-        if (geom.name in _FLOOR_GEOM_NAMES
-                and geom.type == mujoco.mjtGeom.mjGEOM_PLANE):
+        if geom.name in _FLOOR_GEOM_NAMES and geom.type == mujoco.mjtGeom.mjGEOM_PLANE:
             spec.delete(geom)
 
 
@@ -355,8 +351,7 @@ def compose_scene(scene):
     _apply_options(mujoco, spec, scene.engine_hints)
     _add_scene_materials(mujoco, spec, scene.materials)
     shape_generators = set(registered_generators())
-    terrain = (_add_terrain(spec, scene.terrain)
-               if scene.terrain is not None else None)
+    terrain = _add_terrain(spec, scene.terrain) if scene.terrain is not None else None
     asset_regions = {}
     for instance in scene.instances:
         if instance.generator in shape_generators:
@@ -373,9 +368,7 @@ def compose_scene(scene):
                 params.setdefault("pos", tuple(instance.pose.xyz))
             if "quat" in schema:
                 params.setdefault("quat", tuple(instance.pose.quat_wxyz))
-            _add_shape_payload(
-                spec, instance, build_payload(instance.generator, params)
-            )
+            _add_shape_payload(spec, instance, build_payload(instance.generator, params))
         else:
             asset_regions.update(_add_prop_instance(spec, scene.name, instance))
     regions = _scene_regions(scene)
@@ -401,18 +394,28 @@ def _scene_regions(scene: Scene) -> dict:
         instance = instances[region["owner"]]
         verbatim = bool(instance.params.get("verbatim", False))
         prefix = "" if verbatim else f"Prop_{instance.id}_"
-        owner = (f"{prefix}{region['body']}" if region["body"] else
-                 region["owner"] if verbatim else
-                 f"Prop_{instance.id}_{instance.id}")
+        owner = (
+            f"{prefix}{region['body']}"
+            if region["body"]
+            else region["owner"]
+            if verbatim
+            else f"Prop_{instance.id}_{instance.id}"
+        )
         name = f"{region['owner']}.{region['name']}"
         if name in regions:
             raise ValueError(f"duplicate composed region name {name!r}")
         regions[name] = RegionAttachment(
-            name, region["kind"], owner,
+            name,
+            region["kind"],
+            owner,
             f"{prefix}{region['body']}" if region["body"] else None,
             f"{prefix}{region['site']}" if region["site"] else None,
-            region["pos"], region["quat"], region["width_m"],
-            region["depth_m"], region["height_m"])
+            region["pos"],
+            region["quat"],
+            region["width_m"],
+            region["depth_m"],
+            region["height_m"],
+        )
     return regions
 
 
@@ -463,8 +466,11 @@ def _add_scene_materials(mujoco, spec, materials) -> None:
     }
     for material in materials:
         slots = material.slots
-        spec.add_texture(name=material.name, type=kind_enum[slots["kind"]],
-                         file=resolve_asset_path(slots["texture_file"]))
+        spec.add_texture(
+            name=material.name,
+            type=kind_enum[slots["kind"]],
+            file=resolve_asset_path(slots["texture_file"]),
+        )
     for material in materials:
         slots = material.slots
         kwargs = {}
@@ -503,13 +509,15 @@ def _plane_size(shape) -> list:
 
 
 #: closed neutral shape class -> (mujoco geom enum member, size mapping).
-_SHAPE_GEOM = MappingProxyType({
-    BoxShape: ("mjGEOM_BOX", _box_size),
-    SphereShape: ("mjGEOM_SPHERE", _sphere_size),
-    CylinderShape: ("mjGEOM_CYLINDER", _axial_size),
-    CapsuleShape: ("mjGEOM_CAPSULE", _axial_size),
-    PlaneShape: ("mjGEOM_PLANE", _plane_size),
-})
+_SHAPE_GEOM = MappingProxyType(
+    {
+        BoxShape: ("mjGEOM_BOX", _box_size),
+        SphereShape: ("mjGEOM_SPHERE", _sphere_size),
+        CylinderShape: ("mjGEOM_CYLINDER", _axial_size),
+        CapsuleShape: ("mjGEOM_CAPSULE", _axial_size),
+        PlaneShape: ("mjGEOM_PLANE", _plane_size),
+    }
+)
 
 
 def _add_shape_payload(spec, instance, payload) -> None:
@@ -545,7 +553,8 @@ def _add_shape_payload(spec, instance, payload) -> None:
             raise TypeError(
                 f"scene instance {instance.id!r}: unknown shape class "
                 f"{type(shape).__name__}; the closed payload vocabulary is "
-                f"{sorted(cls.__name__ for cls in _SHAPE_GEOM)}")
+                f"{sorted(cls.__name__ for cls in _SHAPE_GEOM)}"
+            )
         geom_name, size_of = entry
         kwargs = {
             "name": shape.name,
@@ -586,29 +595,27 @@ def _add_prop_instance(spec, scene_name, instance) -> dict:
     params = dict(instance.params)
     verbatim = bool(params.pop("verbatim", False))
     where = f"scene:{scene_name}/instances/{instance.id}"
-    entry, asset = resolve_prop_template(
-        instance.generator, instance.id, params, where=where)
+    entry, asset = resolve_prop_template(instance.generator, instance.id, params, where=where)
     if verbatim:
         _add_verbatim_instance(spec, where, instance, entry, asset)
         return _asset_regions(instance, asset, "")
     if entry.get("type") == "free_articulation":
-        add_ir_free_body(spec, _InstanceHandler(instance.id, entry),
-                         cast("AssetDefinition", asset))
+        add_ir_free_body(spec, _InstanceHandler(instance.id, entry), cast("AssetDefinition", asset))
     elif entry.get("type") == "articulation":
-        add_ir_body(spec, _InstanceHandler(instance.id, entry),
-                    cast("AssetDefinition", asset))
+        add_ir_body(spec, _InstanceHandler(instance.id, entry), cast("AssetDefinition", asset))
     else:
         raise ValueError(
             f"{where}: generator {instance.generator!r} produced prop type "
             f"{entry.get('type')!r} -- scene instances assemble generated "
             f"articulation payloads (rigid dressing is the primitive "
-            f"payload vocabulary)")
+            f"payload vocabulary)"
+        )
     frame_name = f"Prop_{instance.id}_attach"
     frames = [f for f in _all_frames(spec) if f.name == frame_name]
     if len(frames) != 1:
         raise ValueError(
-            f"{where}: expected exactly one attach frame {frame_name!r}, "
-            f"found {len(frames)}")
+            f"{where}: expected exactly one attach frame {frame_name!r}, " f"found {len(frames)}"
+        )
     frames[0].pos = [float(v) for v in instance.pose.xyz]
     frames[0].quat = [float(v) for v in instance.pose.quat_wxyz]
     return _asset_regions(instance, asset, f"Prop_{instance.id}_")
@@ -629,11 +636,17 @@ def _asset_regions(instance, asset, prefix: str) -> dict:
         # against itself
         owner = region.body or region.owner
         rows[name] = RegionAttachment(
-            name, region.kind, f"{prefix}{owner}",
+            name,
+            region.kind,
+            f"{prefix}{owner}",
             None,
             f"{prefix}{region.site}" if region.site else None,
-            region.pos, region.quat, region.width_m, region.depth_m,
-            region.height_m)
+            region.pos,
+            region.quat,
+            region.width_m,
+            region.depth_m,
+            region.height_m,
+        )
     return rows
 
 
@@ -654,7 +667,8 @@ def _add_verbatim_instance(spec, where, instance, entry, asset) -> None:
     if entry.get("type") != "articulation":
         raise ValueError(
             f"{where}: verbatim instances assemble anchored articulation "
-            f"payloads, got {entry.get('type')!r}")
+            f"payloads, got {entry.get('type')!r}"
+        )
     handler = _InstanceHandler(instance.id, entry)
     child, _joints = _build_child(handler, asset)
     frame = spec.worldbody.add_frame(name=f"Scene_{instance.id}_attach")
@@ -697,8 +711,7 @@ def attach_scene_definition(spec, scene: Scene) -> object:
     scene-engine seam (:func:`attach_composed`); this wrapper stays for
     callers that only have the neutral scene.
     """
-    return attach_composed(spec, compose_scene(scene),
-                           f"Scene_{scene.name}_attach")
+    return attach_composed(spec, compose_scene(scene), f"Scene_{scene.name}_attach")
 
 
 def _all_frames(spec) -> list:

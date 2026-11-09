@@ -6,6 +6,7 @@ until a backend's ``describe`` fills them.  A ``ModelIR`` never invents a
 value -- a ``None`` means "this backend has no such concept" or "not
 compiled yet".
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
@@ -343,13 +344,11 @@ class MjExt(ModelExt):
 
     namespace: ClassVar[str] = "mj"
     opt: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
-    geom_groups: Table[GeomGroup] = field(
-        default_factory=lambda: Table[GeomGroup]())
+    geom_groups: Table[GeomGroup] = field(default_factory=lambda: Table[GeomGroup]())
     eq_slots: Table[EqSlot] = field(default_factory=lambda: Table[EqSlot]())
     mocap_bodies: Table[Body] = field(default_factory=lambda: Table[Body]())
     textures: Table[Texture] = field(default_factory=lambda: Table[Texture]())
-    geom_contact: Table[GeomContact] = field(
-        default_factory=lambda: Table[GeomContact]())
+    geom_contact: Table[GeomContact] = field(default_factory=lambda: Table[GeomContact]())
 
     @classmethod
     def from_dict(cls, data: Mapping[str, JsonValue]) -> Self:
@@ -360,20 +359,20 @@ class MjExt(ModelExt):
         return cls(
             opt=dict(_mapping_value(decoded.get("opt"))),
             geom_groups=_table_from_dict(
-                GeomGroup, _mapping_value(decoded.get("geom_groups")),
-                _TUPLE_FIELDS),
+                GeomGroup, _mapping_value(decoded.get("geom_groups")), _TUPLE_FIELDS
+            ),
             eq_slots=_table_from_dict(
-                EqSlot, _mapping_value(decoded.get("eq_slots")),
-                _TUPLE_FIELDS),
+                EqSlot, _mapping_value(decoded.get("eq_slots")), _TUPLE_FIELDS
+            ),
             mocap_bodies=_table_from_dict(
-                Body, _mapping_value(decoded.get("mocap_bodies")),
-                _TUPLE_FIELDS),
+                Body, _mapping_value(decoded.get("mocap_bodies")), _TUPLE_FIELDS
+            ),
             textures=_table_from_dict(
-                Texture, _mapping_value(decoded.get("textures")),
-                _TUPLE_FIELDS),
+                Texture, _mapping_value(decoded.get("textures")), _TUPLE_FIELDS
+            ),
             geom_contact=_table_from_dict(
-                GeomContact, _mapping_value(decoded.get("geom_contact")),
-                _TUPLE_FIELDS),
+                GeomContact, _mapping_value(decoded.get("geom_contact")), _TUPLE_FIELDS
+            ),
         )
 
     def to_dict(self) -> Mapping[str, JsonValue]:
@@ -413,15 +412,13 @@ class UsdExt(ModelExt):
             raise ModelIRError("usd extension: descriptor must be a mapping")
         prim_paths = {
             name: value
-            for name, value in _mapping_value(
-                decoded.get("prim_paths")).items()
+            for name, value in _mapping_value(decoded.get("prim_paths")).items()
             if isinstance(value, str)
         }
         articulation = decoded.get("articulation")
         return cls(
             prim_paths=prim_paths,
-            articulation=(
-                articulation if isinstance(articulation, str) else None),
+            articulation=(articulation if isinstance(articulation, str) else None),
             attrs=dict(_mapping_value(decoded.get("attrs"))),
         )
 
@@ -456,8 +453,7 @@ _TUPLE_FIELDS: Mapping[object, frozenset[str]] = {
     Geom: frozenset({"pos", "quat", "size", "path"}),
     Site: frozenset({"pos", "quat", "size", "path"}),
     Camera: frozenset({"pos", "quat", "path"}),
-    Actuator: frozenset(
-        {"ctrlrange", "gear", "gainprm", "biasprm", "path"}),
+    Actuator: frozenset({"ctrlrange", "gear", "gainprm", "biasprm", "path"}),
     Material: frozenset({"rgba", "textures", "texrepeat"}),
     GeomGroup: frozenset({"geoms"}),
     EqSlot: frozenset(),
@@ -495,23 +491,21 @@ def _table_from_dict(
 ) -> Table[_RowT]:
     """Build a table from a name-keyed mapping, sorted by name."""
     rows = [
-        from_row(
-            cls, _mapping_value(mapping[name]),
-            tuple_fields.get(cls, frozenset()))
+        from_row(cls, _mapping_value(mapping[name]), tuple_fields.get(cls, frozenset()))
         for name in sorted(mapping)
     ]
     return Table(rows)
 
 
 def _keep_rows(
-    table: Table[_RowT], selected: Iterable[str] | None,
+    table: Table[_RowT],
+    selected: Iterable[str] | None,
 ) -> Table[_RowT]:
     """Return *table* unchanged for ``None``, else the named rows."""
     if selected is None:
         return table
     keep = set(selected)
-    return Table(
-        row for row in table if getattr(row, "name", None) in keep)
+    return Table(row for row in table if getattr(row, "name", None) in keep)
 
 
 def _check_unique(kind: str, table: Iterable[_NamedRow]) -> None:
@@ -519,8 +513,7 @@ def _check_unique(kind: str, table: Iterable[_NamedRow]) -> None:
     seen: set[str] = set()
     for row in table:
         if row.name in seen:
-            raise ModelIRError(
-                f"model IR: duplicate {kind} name {row.name!r}")
+            raise ModelIRError(f"model IR: duplicate {kind} name {row.name!r}")
         seen.add(row.name)
 
 
@@ -546,10 +539,8 @@ class ModelIR:
     geoms: Table[Geom] = field(default_factory=lambda: Table[Geom]())
     sites: Table[Site] = field(default_factory=lambda: Table[Site]())
     cameras: Table[Camera] = field(default_factory=lambda: Table[Camera]())
-    actuators: Table[Actuator] = field(
-        default_factory=lambda: Table[Actuator]())
-    materials: Table[Material] = field(
-        default_factory=lambda: Table[Material]())
+    actuators: Table[Actuator] = field(default_factory=lambda: Table[Actuator]())
+    materials: Table[Material] = field(default_factory=lambda: Table[Material]())
     # ``meta`` values are opaque: ``builder`` is the backend's native MjSpec
     # (never serialized), the rest are plain scalar descriptors.
     meta: Mapping[str, object] = field(default_factory=_empty_object_map)
@@ -573,7 +564,10 @@ class ModelIR:
         return ext if isinstance(ext, UsdExt) else None
 
     def pose(
-        self, name: str, *, camera: bool = False,
+        self,
+        name: str,
+        *,
+        camera: bool = False,
     ) -> tuple[tuple[float, ...], QuatWXYZ]:
         """Return ``(pos, quat_wxyz)`` for one body or camera.
 
@@ -593,12 +587,13 @@ class ModelIR:
         try:
             row = table[name]
         except KeyError:
-            raise KeyError(
-                f"model IR: {face} {name!r} is not in this model") from None
+            raise KeyError(f"model IR: {face} {name!r} is not in this model") from None
         return row.pos, row.quat_wxyz
 
     def to_dict(
-        self, include_ext: bool = False, include_meta: bool = False,
+        self,
+        include_ext: bool = False,
+        include_meta: bool = False,
     ) -> dict[str, Any]:
         """Return the canonical dictionary (stable keys, hex floats).
 
@@ -625,24 +620,21 @@ class ModelIR:
         data["actuators"] = _table_payload(self.actuators)
         data["materials"] = _table_payload(self.materials)
         if include_meta:
-            data["meta"] = {
-                key: value for key, value in self.meta.items()
-                if key != "builder"
-            }
+            data["meta"] = {key: value for key, value in self.meta.items() if key != "builder"}
         if include_ext:
             data["ext"] = {
-                namespace: extension.to_dict()
-                for namespace, extension in self.ext.items()
+                namespace: extension.to_dict() for namespace, extension in self.ext.items()
             }
         encoded = encode(data)
         if not isinstance(encoded, dict):
-            raise ModelIRError(
-                "model IR: canonical document is not a mapping")
+            raise ModelIRError("model IR: canonical document is not a mapping")
         return encoded
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, JsonValue], strict: bool = True,
+        cls,
+        data: Mapping[str, JsonValue],
+        strict: bool = True,
     ) -> Self:
         """Rebuild a model IR from :meth:`to_dict` output.
 
@@ -666,31 +658,25 @@ class ModelIR:
                 elif strict:
                     raise UnknownExtensionError(
                         f"model IR: unknown extension namespace {namespace!r} "
-                        f"(pass strict=False to preserve it as UnparsedExt)")
+                        f"(pass strict=False to preserve it as UnparsedExt)"
+                    )
                 else:
-                    ext[namespace] = UnparsedExt(
-                        namespace, dict(decoded_payload))
+                    ext[namespace] = UnparsedExt(namespace, dict(decoded_payload))
         return cls(
             name=_string_value(decoded.get("name", "")),
             backend=_optional_string(decoded.get("backend")),
             compiled=bool(decoded.get("compiled", False)),
-            bodies=_table_from_dict(
-                Body, _mapping_value(decoded.get("bodies")), _TUPLE_FIELDS),
-            joints=_table_from_dict(
-                Joint, _mapping_value(decoded.get("joints")), _TUPLE_FIELDS),
-            geoms=_table_from_dict(
-                Geom, _mapping_value(decoded.get("geoms")), _TUPLE_FIELDS),
-            sites=_table_from_dict(
-                Site, _mapping_value(decoded.get("sites")), _TUPLE_FIELDS),
-            cameras=_table_from_dict(
-                Camera, _mapping_value(decoded.get("cameras")),
-                _TUPLE_FIELDS),
+            bodies=_table_from_dict(Body, _mapping_value(decoded.get("bodies")), _TUPLE_FIELDS),
+            joints=_table_from_dict(Joint, _mapping_value(decoded.get("joints")), _TUPLE_FIELDS),
+            geoms=_table_from_dict(Geom, _mapping_value(decoded.get("geoms")), _TUPLE_FIELDS),
+            sites=_table_from_dict(Site, _mapping_value(decoded.get("sites")), _TUPLE_FIELDS),
+            cameras=_table_from_dict(Camera, _mapping_value(decoded.get("cameras")), _TUPLE_FIELDS),
             actuators=_table_from_dict(
-                Actuator, _mapping_value(decoded.get("actuators")),
-                _TUPLE_FIELDS),
+                Actuator, _mapping_value(decoded.get("actuators")), _TUPLE_FIELDS
+            ),
             materials=_table_from_dict(
-                Material, _mapping_value(decoded.get("materials")),
-                _TUPLE_FIELDS),
+                Material, _mapping_value(decoded.get("materials")), _TUPLE_FIELDS
+            ),
             meta=dict(_mapping_value(decoded.get("meta"))),
             ext=ext,
         )
@@ -713,22 +699,23 @@ class ModelIR:
         for body in self.bodies:
             if body.parent is not None and body.parent not in bodies:
                 raise ModelIRError(
-                    f"model IR: body {body.name!r} names missing parent "
-                    f"{body.parent!r}")
+                    f"model IR: body {body.name!r} names missing parent " f"{body.parent!r}"
+                )
         for joint in self.joints:
             if joint.body not in bodies:
                 raise ModelIRError(
-                    f"model IR: joint {joint.name!r} references missing "
-                    f"body {joint.body!r}")
+                    f"model IR: joint {joint.name!r} references missing " f"body {joint.body!r}"
+                )
             if joint.range is not None and joint.range[0] > joint.range[1]:
                 raise ModelIRError(
                     f"model IR: joint {joint.name!r} has reversed range "
-                    f"{joint.range!r} (lo must be <= hi)")
+                    f"{joint.range!r} (lo must be <= hi)"
+                )
         for camera in self.cameras:
             if camera.body not in bodies:
                 raise ModelIRError(
-                    f"model IR: camera {camera.name!r} references missing "
-                    f"body {camera.body!r}")
+                    f"model IR: camera {camera.name!r} references missing " f"body {camera.body!r}"
+                )
         self._validate_actuators(bodies)
         for extension in self.ext.values():
             extension.validate()
@@ -738,17 +725,19 @@ class ModelIR:
         """Check that every actuator target names a declared entity."""
         joints = set(self.joints.names())
         sites = set(self.sites.names())
-        known = {"joint": joints, "jointinparent": joints,
-                 "site": sites, "body": bodies}
+        known = {"joint": joints, "jointinparent": joints, "site": sites, "body": bodies}
         for actuator in self.actuators:
             targets = known.get(actuator.trntype)
             if targets is not None and actuator.target not in targets:
                 raise ModelIRError(
                     f"model IR: actuator {actuator.name!r} targets missing "
-                    f"{actuator.trntype} {actuator.target!r}")
+                    f"{actuator.trntype} {actuator.target!r}"
+                )
 
     def subset(
-        self, *, bodies: Iterable[str] | None = None,
+        self,
+        *,
+        bodies: Iterable[str] | None = None,
         joints: Iterable[str] | None = None,
         geoms: Iterable[str] | None = None,
         sites: Iterable[str] | None = None,
@@ -809,15 +798,14 @@ class ModelIR:
             ModelIRError: *root* names no body in this model.
         """
         if root not in self.bodies:
-            raise ModelIRError(
-                f"model IR: subtree root {root!r} is not a body")
+            raise ModelIRError(f"model IR: subtree root {root!r} is not a body")
         root_path = tuple(self.bodies[root].path)
         rows: list[Body] = []
         for body in self.bodies:
             path = tuple(body.path)
             if body.name == root:
                 rows.append(body)
-            elif root_path and path[:len(root_path)] == root_path:
+            elif root_path and path[: len(root_path)] == root_path:
                 rows.append(body)
         return Table(rows)
 
@@ -842,7 +830,10 @@ class ModelIR:
         return f"backend {self.backend!r} lacks {names}"
 
     def diff(
-        self, other: ModelIR, *, include_ext: bool = False,
+        self,
+        other: ModelIR,
+        *,
+        include_ext: bool = False,
         ignore_compiled: bool = False,
     ) -> ModelDiff:
         """Return the face-by-face difference to *other*.
@@ -862,24 +853,22 @@ class ModelIR:
         """
         from .diff import diff_models
 
-        return diff_models(
-            self, other, include_ext=include_ext,
-            ignore_compiled=ignore_compiled)
+        return diff_models(self, other, include_ext=include_ext, ignore_compiled=ignore_compiled)
 
     def _repr_html_(self) -> str:
         """Return an HTML summary with one small table per non-empty face."""
         from html import escape
 
-        counts = ", ".join(
-            f"{name}={len(getattr(self, name))}" for name in _TABLES)
+        counts = ", ".join(f"{name}={len(getattr(self, name))}" for name in _TABLES)
         links = " | ".join(
             f"<a href='#{name}'>{name}</a> ({len(getattr(self, name))})"
-            for name in _TABLES if len(getattr(self, name)))
+            for name in _TABLES
+            if len(getattr(self, name))
+        )
         parts = [
             "<div class='unigym-model-ir'>",
             f"<h3>ModelIR <code>{escape(self.name)}</code></h3>",
-            f"<p>backend={escape(str(self.backend))}, "
-            f"compiled={self.compiled}</p>",
+            f"<p>backend={escape(str(self.backend))}, " f"compiled={self.compiled}</p>",
             f"<p>{escape(counts)}</p>",
             f"<p>{links}</p>",
         ]

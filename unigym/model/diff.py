@@ -7,6 +7,7 @@ included as ``ext.<namespace>`` faces.  Comparing a declared IR with a
 compiled one is allowed but noisy (compiled-only fields move ``None`` ->
 value); ``ignore_compiled=True`` silences exactly those fields.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -20,8 +21,7 @@ if TYPE_CHECKING:
 
 __all__ = ["ModelDiff"]
 
-_COMPILED_FIELDS: frozenset[str] = frozenset(
-    {"mass", "inertia", "ipos", "iquat"})
+_COMPILED_FIELDS: frozenset[str] = frozenset({"mass", "inertia", "ipos", "iquat"})
 
 _PREVIEW = 5
 
@@ -53,8 +53,7 @@ class _NamedRow(Protocol):
 
 def _is_compiled_field(name: str) -> bool:
     """Return True for fields a compiled backend fills (ids/addresses)."""
-    return (name.endswith("_id") or name.endswith("_adr")
-            or name in _COMPILED_FIELDS)
+    return name.endswith("_id") or name.endswith("_adr") or name in _COMPILED_FIELDS
 
 
 def _table_map(table: Iterable[_NamedRow]) -> _FaceMap:
@@ -75,8 +74,7 @@ def _ext_value(value: JsonValue) -> _FaceMap:
         return {}
     if all(isinstance(item, Mapping) for item in value.values()):
         return {
-            str(name): dict(item) if isinstance(item, Mapping)
-            else {"value": item}
+            str(name): dict(item) if isinstance(item, Mapping) else {"value": item}
             for name, item in value.items()
         }
     return {str(name): {"value": item} for name, item in value.items()}
@@ -101,7 +99,9 @@ def _faces(ir: ModelIR, include_ext: bool) -> dict[str, _FaceMap]:
 
 
 def _changed_fields(
-    left: _RowMap, right: _RowMap, ignore_compiled: bool,
+    left: _RowMap,
+    right: _RowMap,
+    ignore_compiled: bool,
 ) -> _FieldChanges:
     """Return the differing fields between two row maps."""
     changes: _FieldChanges = {}
@@ -118,7 +118,9 @@ def _changed_fields(
 
 
 def _diff_maps(
-    left: _FaceMap, right: _FaceMap, ignore_compiled: bool,
+    left: _FaceMap,
+    right: _FaceMap,
+    ignore_compiled: bool,
 ) -> tuple[tuple[str, ...], tuple[str, ...], _RowChanges]:
     """Diff two face maps into added/removed/changed pieces."""
     added = tuple(name for name in right if name not in left)
@@ -163,9 +165,7 @@ def _preview_entries(diff: ModelDiff) -> Iterator[str]:
     for face, entities in diff.changed.items():
         for name, fields in entities.items():
             for field_name, (before, after) in fields.items():
-                yield (
-                    f"  ~ {face}[{name!r}].{field_name}: "
-                    f"{before!r} -> {after!r}")
+                yield (f"  ~ {face}[{name!r}].{field_name}: " f"{before!r} -> {after!r}")
                 count += 1
                 if count >= _PREVIEW:
                     return
@@ -182,12 +182,9 @@ class ModelDiff:
             compared fields differ.
     """
 
-    added: dict[str, tuple[str, ...]] = field(
-        default_factory=_empty_name_tuple_map)
-    removed: dict[str, tuple[str, ...]] = field(
-        default_factory=_empty_name_tuple_map)
-    changed: _DiffChanges = field(
-        default_factory=_empty_diff_changes)
+    added: dict[str, tuple[str, ...]] = field(default_factory=_empty_name_tuple_map)
+    removed: dict[str, tuple[str, ...]] = field(default_factory=_empty_name_tuple_map)
+    changed: _DiffChanges = field(default_factory=_empty_diff_changes)
 
     def __bool__(self) -> bool:
         """Return True when any face has an added, removed or changed row."""
@@ -195,13 +192,14 @@ class ModelDiff:
 
     def to_dict(self) -> JsonValue:
         """Return a JSON-safe canonical document (floats use ``float.hex``)."""
-        return encode({
-            "equal": not bool(self),
-            "added": {face: list(names) for face, names in self.added.items()},
-            "removed": {
-                face: list(names) for face, names in self.removed.items()},
-            "changed": self.changed,
-        })
+        return encode(
+            {
+                "equal": not bool(self),
+                "added": {face: list(names) for face, names in self.added.items()},
+                "removed": {face: list(names) for face, names in self.removed.items()},
+                "changed": self.changed,
+            }
+        )
 
     def __repr__(self) -> str:
         """Return counts per face plus the first few concrete changes."""
@@ -213,7 +211,10 @@ class ModelDiff:
 
 
 def diff_models(
-    left: ModelIR, right: ModelIR, *, include_ext: bool = False,
+    left: ModelIR,
+    right: ModelIR,
+    *,
+    include_ext: bool = False,
     ignore_compiled: bool = False,
 ) -> ModelDiff:
     """Compare two model IRs face by face.
@@ -230,16 +231,14 @@ def diff_models(
     """
     left_faces = _faces(left, include_ext)
     right_faces = _faces(right, include_ext)
-    order = list(left_faces) + [
-        face for face in right_faces if face not in left_faces
-    ]
+    order = list(left_faces) + [face for face in right_faces if face not in left_faces]
     added: dict[str, tuple[str, ...]] = {}
     removed: dict[str, tuple[str, ...]] = {}
     changed: _DiffChanges = {}
     for face in order:
         more, gone, moved = _diff_maps(
-            left_faces.get(face, {}), right_faces.get(face, {}),
-            ignore_compiled)
+            left_faces.get(face, {}), right_faces.get(face, {}), ignore_compiled
+        )
         if more:
             added[face] = more
         if gone:

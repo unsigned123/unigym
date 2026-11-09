@@ -66,8 +66,7 @@ _LAZY = {
     "CapabilityError": ("unigym.errors", "CapabilityError"),
     "ModelIRError": ("unigym.model.errors", "ModelIRError"),
     "StaleModelError": ("unigym.model.errors", "StaleModelError"),
-    "UnknownExtensionError": ("unigym.model.errors",
-                             "UnknownExtensionError"),
+    "UnknownExtensionError": ("unigym.model.errors", "UnknownExtensionError"),
 }
 
 
@@ -105,8 +104,7 @@ def __getattr__(name):
     """
     entry = _LAZY.get(name)
     if entry is None:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}")
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module_name, attr = entry
     from importlib import import_module
 

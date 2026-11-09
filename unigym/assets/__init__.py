@@ -10,6 +10,7 @@ The package is intentionally thin and dependency-light (stdlib + yaml):
 it is the foundation every later asset card imports, so it never reaches
 into backends, scenes or the pack loader.
 """
+
 from .manifest import (
     FORBIDDEN_KEYS,
     KINDS,

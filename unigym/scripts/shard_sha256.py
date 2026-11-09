@@ -36,8 +36,7 @@ def run_hashes(run_dir: Path) -> list[str]:
             if arr.dtype.kind == _SKIP_DTYPE:
                 continue
             arr = np.ascontiguousarray(arr)
-            lines.append(
-                f"{sh.name} {key} {hashlib.sha256(arr.tobytes()).hexdigest()}")
+            lines.append(f"{sh.name} {key} {hashlib.sha256(arr.tobytes()).hexdigest()}")
     return lines
 
 
@@ -49,8 +48,10 @@ def main() -> None:
     if len(sys.argv) == 3:
         other = run_hashes(Path(sys.argv[2]))
         if lines == other:
-            print(f"=== BIT-EXACT MATCH: {len(lines)}/{len(lines)} "
-                  f"({Path(sys.argv[1]).name} vs {Path(sys.argv[2]).name}) ===")
+            print(
+                f"=== BIT-EXACT MATCH: {len(lines)}/{len(lines)} "
+                f"({Path(sys.argv[1]).name} vs {Path(sys.argv[2]).name}) ==="
+            )
         else:
             diff = [f"  A: {a}\n  B: {b}" for a, b in zip(lines, other) if a != b]
             raise SystemExit("=== MISMATCH ===\n" + "\n".join(diff))

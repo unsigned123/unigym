@@ -4,17 +4,20 @@ Three arrows along the body frame's X/Y/Z at the body origin -- the
 classic EE-frame visualization.  All decor is injected (L1.5 scene
 buffer); nothing here touches the model.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from . import (_check_keys, _pos_float, DecorContext, register_gen)
+from . import _check_keys, _pos_float, DecorContext, register_gen
 
 __all__ = ["Axes"]
 
-AXIS_COLORS = ((1.00, 0.20, 0.20),   # X red
-               (0.20, 1.00, 0.35),   # Y green
-               (0.30, 0.50, 1.00))   # Z blue
+AXIS_COLORS = (
+    (1.00, 0.20, 0.20),  # X red
+    (0.20, 1.00, 0.35),  # Y green
+    (0.30, 0.50, 1.00),
+)  # Z blue
 
 
 @register_gen("axes")
@@ -29,8 +32,7 @@ class Axes:
     @staticmethod
     def generate(params, target, ctx: DecorContext):
         if target == "*":
-            raise ValueError("axes: target must name a body "
-                             "(no body prefix '*')")
+            raise ValueError("axes: target must name a body " "(no body prefix '*')")
         body, _ = ctx.target_geoms(target, collision_only=False)
         bid = ctx._body_lower.index(body.lower())
         data = ctx.require_data()
@@ -39,8 +41,13 @@ class Axes:
         size = params["size"]
         out = []
         for i, col in enumerate(AXIS_COLORS):
-            out.append({"type": "arrow", "from": pos,
-                        "to": pos + rot[:, i] * size,
-                        "radius": size * 0.06,
-                        "rgba": np.array([col[0], col[1], col[2], 1.0])})
+            out.append(
+                {
+                    "type": "arrow",
+                    "from": pos,
+                    "to": pos + rot[:, i] * size,
+                    "radius": size * 0.06,
+                    "rgba": np.array([col[0], col[1], col[2], 1.0]),
+                }
+            )
         return out

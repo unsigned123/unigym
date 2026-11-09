@@ -25,6 +25,7 @@ laws subclass + ``@register``):
 Import face stays numpy-only (mujoco imports lazily inside ``bind``), so
 the registry and config validation unit-test on hosts without mujoco.
 """
+
 from __future__ import annotations
 
 import re
@@ -53,7 +54,8 @@ def register(name: str):
         if name in ACTUATOR_REGISTRY:
             raise ValueError(
                 f"actuator type {name!r} already registered "
-                f"({ACTUATOR_REGISTRY[name].__name__})")
+                f"({ACTUATOR_REGISTRY[name].__name__})"
+            )
         cls.type_name = name
         ACTUATOR_REGISTRY[name] = cls
         return cls
@@ -72,7 +74,8 @@ def build_actuator(cfg: dict) -> ActuatorBase:
             f"actuator group must be a mapping {{type, regex, ...}}, got "
             f"{type(cfg).__name__} | hint: env.params.actuators entries "
             f"look like {{body: {{type: computed_torque_pd, regex: "
-            f"robot0_.*, kp: 1000, kd: 200}}}}")
+            f"robot0_.*, kp: 1000, kd: 200}}}}"
+        )
     atype = cfg.get("type")
     if atype not in ACTUATOR_REGISTRY:
         raise ValueError(
@@ -80,7 +83,8 @@ def build_actuator(cfg: dict) -> ActuatorBase:
             f"{sorted(ACTUATOR_REGISTRY)} | hint: set "
             f"env.params.actuators.<group>.type to one of the registered "
             f"names (standard_pd is the default law; omitting the whole "
-            f"'actuators' key keeps the legacy backend path)")
+            f"'actuators' key keeps the legacy backend path)"
+        )
     return ACTUATOR_REGISTRY[atype]()
 
 
@@ -105,8 +109,7 @@ def resolve_gain_vector(spec, which: str, joint_names: list) -> np.ndarray:
     """
     n = len(joint_names)
     if isinstance(spec, bool):
-        raise ValueError(
-            f"actuator gain {which!r} must be numeric, got a bool")
+        raise ValueError(f"actuator gain {which!r} must be numeric, got a bool")
     if isinstance(spec, (int, float)):
         return np.full(n, float(spec), dtype=np.float64)
     if isinstance(spec, dict):
@@ -117,7 +120,8 @@ def resolve_gain_vector(spec, which: str, joint_names: list) -> np.ndarray:
                 raise ValueError(
                     f"actuator gain {which!r} dict has no entry for joint "
                     f"{name!r} | hint: dict keys are joint names or "
-                    f"regexes fullmatching them")
+                    f"regexes fullmatching them"
+                )
             out[i] = val
         return out
     arr = np.asarray(spec, dtype=np.float64)
@@ -125,7 +129,8 @@ def resolve_gain_vector(spec, which: str, joint_names: list) -> np.ndarray:
         return arr.copy()
     raise ValueError(
         f"actuator gain {which!r} must be a scalar, a joint-name/regex "
-        f"dict, or a length-{n} vector, got {type(spec).__name__}")
+        f"dict, or a length-{n} vector, got {type(spec).__name__}"
+    )
 
 
 class ActuatorBase:
@@ -141,8 +146,7 @@ class ActuatorBase:
     type_name: ClassVar[str] = ""
     #: group-spec keys this law accepts ("type" + the addressing keys are
     #: always legal; subclasses extend)
-    config_keys: ClassVar[frozenset] = frozenset(
-        {"type", "regex", "joint_names"})
+    config_keys: ClassVar[frozenset] = frozenset({"type", "regex", "joint_names"})
 
     def __init__(self) -> None:
         self._joint_names: list = []
@@ -169,11 +173,13 @@ class ActuatorBase:
         if unknown:
             raise ValueError(
                 f"{self.type_name} actuator group got unsupported keys "
-                f"{sorted(unknown)}; legal keys: {sorted(self.config_keys)}")
+                f"{sorted(unknown)}; legal keys: {sorted(self.config_keys)}"
+            )
         if "regex" not in joint_group and "joint_names" not in joint_group:
             raise ValueError(
                 f"{self.type_name} actuator group needs 'regex' (or an "
-                f"explicit 'joint_names' list), got {sorted(joint_group)}")
+                f"explicit 'joint_names' list), got {sorted(joint_group)}"
+            )
         names = self._resolve_joint_names(env, joint_group)
         import mujoco
 
@@ -186,24 +192,29 @@ class ActuatorBase:
                 raise ValueError(
                     f"{self.type_name} actuator: joint {name!r} not in the "
                     f"MJ model | hint: group regexes fullmatch against the "
-                    f"robot hinge names {self._universe(env)[:4]} ...")
+                    f"robot hinge names {self._universe(env)[:4]} ..."
+                )
             if int(m.jnt_type[jid]) not in (
-                    int(mujoco.mjtJoint.mjJNT_HINGE),
-                    int(mujoco.mjtJoint.mjJNT_SLIDE)):
+                int(mujoco.mjtJoint.mjJNT_HINGE),
+                int(mujoco.mjtJoint.mjJNT_SLIDE),
+            ):
                 raise ValueError(
                     f"{self.type_name} actuator: joint {name!r} is not a "
                     f"1-dof hinge/slide (type {int(m.jnt_type[jid])}); the "
-                    f"ctrl laws address per-joint torque/position targets")
+                    f"ctrl laws address per-joint torque/position targets"
+                )
             slot = None if act_of_joint is None else act_of_joint.get(name)
             if slot is None:
                 raise ValueError(
                     f"{self.type_name} actuator: no actuator drives joint "
-                    f"{name!r} (the law would have nothing to write)")
+                    f"{name!r} (the law would have nothing to write)"
+                )
             if not 0 <= int(slot) < int(m.nu):
                 raise ValueError(
                     f"{self.type_name} actuator: joint {name!r} maps to "
                     f"actuator slot {slot} outside the model's ctrl vector "
-                    f"(nu={m.nu})")
+                    f"(nu={m.nu})"
+                )
             qadr.append(int(m.jnt_qposadr[jid]))
             dadr.append(int(m.jnt_dofadr[jid]))
             slots.append(int(slot))
@@ -233,13 +244,13 @@ class ActuatorBase:
             raise ValueError(
                 "actuator bind needs the env's robot joint universe "
                 "(controller.asset_joint_names); the object passed to bind "
-                "is not a bound mujoco backend env")
+                "is not a bound mujoco backend env"
+            )
         names = list(names)
         # A backend binding may hand the law compiled joint names (the
         # controller's neutral names stay authoritative on the public face).
         names.extend(getattr(env, "_compiled_joint_names", ()) or ())
-        return [n for n in dict.fromkeys(names)
-                if not str(n).startswith("Prop_")]
+        return [n for n in dict.fromkeys(names) if not str(n).startswith("Prop_")]
 
     def _resolve_joint_names(self, env, joint_group: dict) -> list:
         universe = self._universe(env)
@@ -249,7 +260,8 @@ class ActuatorBase:
             if missing:
                 raise ValueError(
                     f"{self.type_name} actuator: joint_names {missing} not "
-                    f"in the robot joint universe")
+                    f"in the robot joint universe"
+                )
             return names
         expr = str(joint_group["regex"])
         names = [n for n in universe if re.fullmatch(expr, n)]
@@ -257,7 +269,8 @@ class ActuatorBase:
             raise ValueError(
                 f"{self.type_name} actuator: regex {expr!r} matches none "
                 f"of the robot joints | hint: regexes fullmatch against "
-                f"the model hinge names, e.g. {universe[:4]} ...")
+                f"the model hinge names, e.g. {universe[:4]} ..."
+            )
         return names
 
     # ---------------------------------------------------------------- #
@@ -274,7 +287,8 @@ class ActuatorBase:
         if self._slots is None:
             raise RuntimeError(
                 f"{self.type_name} actuator queried for slots before "
-                f"bind(); call bind(env, joint_group) first")
+                f"bind(); call bind(env, joint_group) first"
+            )
         return self._slots
 
     def set_targets(self, qpos_targets) -> None:
@@ -290,13 +304,13 @@ class ActuatorBase:
                 f"{self.type_name} actuator: target vector shape {t.shape} "
                 f"does not match the {len(self._joint_names)} bound joints "
                 f"| hint: bind(env, joint_group) first, then feed one "
-                f"target per bound joint in joint_names order")
+                f"target per bound joint in joint_names order"
+            )
         self._targets = t
 
     def step(self, model, data) -> None:
         """One sim substep: compute + write this law's ctrl slots."""
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement step(model, data)")
+        raise NotImplementedError(f"{type(self).__name__} must implement step(model, data)")
 
     def snapshot_internal(self):
         """Stateful-law rewind payload.
@@ -311,10 +325,12 @@ class ActuatorBase:
         if state is not None:
             raise ValueError(
                 f"{self.type_name} actuator returned no internal state at "
-                f"snapshot time but restore got {type(state).__name__}")
+                f"snapshot time but restore got {type(state).__name__}"
+            )
 
     def _require_bound(self) -> None:
         if not self._bound:
             raise RuntimeError(
                 f"{self.type_name} actuator stepped before bind(); call "
-                f"bind(env, joint_group) first")
+                f"bind(env, joint_group) first"
+            )

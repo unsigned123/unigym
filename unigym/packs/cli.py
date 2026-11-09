@@ -9,6 +9,7 @@ code-face import), and ``path`` prints the resolved face path(s).
 Every failure names the legal options (known packs / known faces) so the
 CLI stays fail-closed and teachable, matching the resolver's style.
 """
+
 from __future__ import annotations
 
 import json
@@ -76,23 +77,26 @@ def cmd_list(a, extra: list[str] | None = None) -> int:
     rows = []
     for pack in packs:
         version, api = _manifest_row(pack)
-        rows.append({
-            "name": pack.name,
-            "version": version,
-            "api": api,
-            "trust": pack.trust,
-            "origin": pack.origin,
-            "faces": _face_counts(pack),
-            "root": None if pack.root is None else str(pack.root),
-        })
+        rows.append(
+            {
+                "name": pack.name,
+                "version": version,
+                "api": api,
+                "trust": pack.trust,
+                "origin": pack.origin,
+                "faces": _face_counts(pack),
+                "root": None if pack.root is None else str(pack.root),
+            }
+        )
     if getattr(a, "json", False):
         print(json.dumps({"ok": True, "packs": rows}))
         return 0
-    print(f"{'name':<16} {'version':<9} {'api':<4} {'trust':<11} "
-          f"{'origin':<5} faces")
+    print(f"{'name':<16} {'version':<9} {'api':<4} {'trust':<11} " f"{'origin':<5} faces")
     for row in rows:
-        print(f"{row['name']:<16} {row['version']:<9} {row['api']:<4} "
-              f"{row['trust']:<11} {row['origin']:<5} {row['faces']}")
+        print(
+            f"{row['name']:<16} {row['version']:<9} {row['api']:<4} "
+            f"{row['trust']:<11} {row['origin']:<5} {row['faces']}"
+        )
     return 0
 
 
@@ -118,8 +122,7 @@ def _actual_inventory(root: Path) -> dict[str, tuple[str, int]]:
     """Live tree inventory: pack-relative path -> ``(kind, size)``."""
     actual: dict[str, tuple[str, int]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(name for name in dirnames
-                             if name not in SKIP_DIRS)
+        dirnames[:] = sorted(name for name in dirnames if name not in SKIP_DIRS)
         for name in sorted(filenames):
             if name.endswith(".pyc"):
                 continue
@@ -131,13 +134,11 @@ def _actual_inventory(root: Path) -> dict[str, tuple[str, int]]:
     return actual
 
 
-def _declared_inventory(path: Path) -> tuple[dict[str, tuple[str, int]],
-                                             list[str]]:
+def _declared_inventory(path: Path) -> tuple[dict[str, tuple[str, int]], list[str]]:
     """Parse ``BUILD_MANIFEST.txt``; return entries plus malformed lines."""
     declared: dict[str, tuple[str, int]] = {}
     bad: list[str] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(),
-                                   1):
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
         parts = line.split(" ", 2)
@@ -193,22 +194,19 @@ def _doctor_one(root: Path) -> tuple[str, list[str], int]:
     manifest = None
     try:
         manifest = load_manifest(root)
-        check("manifest", True,
-              f"valid ({manifest.name} {manifest.version})")
+        check("manifest", True, f"valid ({manifest.name} {manifest.version})")
     except PackError as err:
         check("manifest", False, str(err))
 
     raw, raw_error = _raw_document(root)
-    name = (manifest.name if manifest is not None
-            else str((raw or {}).get("name") or root.name))
+    name = manifest.name if manifest is not None else str((raw or {}).get("name") or root.name)
     if raw is None:
         check("api", False, f"unreadable manifest: {raw_error}")
         check("requires", False, f"unreadable manifest: {raw_error}")
         check("faces", False, f"unreadable manifest: {raw_error}")
     else:
         api = raw.get("api")
-        api_ok = isinstance(api, int) and not isinstance(api, bool) \
-            and api == PACK_API
+        api_ok = isinstance(api, int) and not isinstance(api, bool) and api == PACK_API
         check("api", api_ok, f"{api!r} (kernel {PACK_API})")
 
         requires = raw.get("requires") or {}
@@ -256,11 +254,13 @@ def _doctor_one(root: Path) -> tuple[str, list[str], int]:
         else:
             modules = loaded.get(name, ())
             report = registration_report()
-            count = (int(report["scenes"]) + int(report["props"])
-                     + int(report["terminations"]))
-            check("code", True,
-                  f"imported unigym_packs_{name} ({len(modules)} modules, "
-                  f"{count} registrations, no hash, internal trust)")
+            count = int(report["scenes"]) + int(report["props"]) + int(report["terminations"])
+            check(
+                "code",
+                True,
+                f"imported unigym_packs_{name} ({len(modules)} modules, "
+                f"{count} registrations, no hash, internal trust)",
+            )
     else:
         check("code", True, f"trust={trust!r} (no import)")
     return name, lines, fails
@@ -305,8 +305,7 @@ def cmd_doctor(a, extra: list[str] | None = None) -> int:
             continue
         pack_name, lines, fails = _doctor_one(root)
         total += fails
-        report.append({"name": pack_name, "root": str(root),
-                       "ok": fails == 0, "checks": lines})
+        report.append({"name": pack_name, "root": str(root), "ok": fails == 0, "checks": lines})
         if not getattr(a, "json", False):
             print(f"[{pack_name}] {root}")
             print("\n".join(lines))
@@ -324,8 +323,7 @@ def cmd_path(a, extra: list[str] | None = None) -> int:
     by_name = {pack.name: pack for pack in packs}
     pack = by_name.get(a.name)
     if pack is None:
-        print(f"[unigym pack] unknown pack {a.name!r}; "
-              f"known packs: {sorted(by_name)}")
+        print(f"[unigym pack] unknown pack {a.name!r}; " f"known packs: {sorted(by_name)}")
         return 1
     face = getattr(a, "face", None)
     if face is None:
@@ -334,15 +332,12 @@ def cmd_path(a, extra: list[str] | None = None) -> int:
             print(f"{candidate}: {path if path is not None else '(absent)'}")
         return 0
     if face not in FACE_NAMES:
-        print(f"[unigym pack] unknown face {face!r}; "
-              f"known faces: {list(FACE_NAMES)}")
+        print(f"[unigym pack] unknown face {face!r}; " f"known faces: {list(FACE_NAMES)}")
         return 1
     path = pack.faces.get(face)
     if path is None:
-        available = [name for name in FACE_NAMES
-                     if pack.faces.get(name) is not None]
-        print(f"[unigym pack] pack {a.name!r} has no {face!r} face; "
-              f"faces: {available}")
+        available = [name for name in FACE_NAMES if pack.faces.get(name) is not None]
+        print(f"[unigym pack] pack {a.name!r} has no {face!r} face; " f"faces: {available}")
         return 1
     print(path)
     return 0
@@ -354,25 +349,25 @@ def add_pack_subparser(sub) -> None:
     pack_sub = pack.add_subparsers(dest="pack_cmd", required=True)
 
     listing = pack_sub.add_parser(
-        "list", help="mounted packs: name, version, api, trust, origin, "
-                     "faces with file counts")
-    listing.add_argument("--json", action="store_true",
-                         help="single JSON document on stdout")
+        "list", help="mounted packs: name, version, api, trust, origin, " "faces with file counts"
+    )
+    listing.add_argument("--json", action="store_true", help="single JSON document on stdout")
     listing.set_defaults(fn=cmd_list)
 
     doctor = pack_sub.add_parser(
-        "doctor", help="validate packs: manifest, api, requires, faces, "
-                       "BUILD_MANIFEST.txt, code import (exit 1 on failure)")
-    doctor.add_argument("--name", default=None,
-                        help="only this pack (default: every external pack)")
-    doctor.add_argument("--json", action="store_true",
-                        help="single JSON document on stdout")
+        "doctor",
+        help="validate packs: manifest, api, requires, faces, "
+        "BUILD_MANIFEST.txt, code import (exit 1 on failure)",
+    )
+    doctor.add_argument(
+        "--name", default=None, help="only this pack (default: every external pack)"
+    )
+    doctor.add_argument("--json", action="store_true", help="single JSON document on stdout")
     doctor.set_defaults(fn=cmd_doctor)
 
     path = pack_sub.add_parser("path", help="print resolved pack face path(s)")
     path.add_argument("name", help="pack name (or 'repo')")
-    path.add_argument("face", nargs="?", default=None,
-                      help=f"one face: {', '.join(FACE_NAMES)}")
+    path.add_argument("face", nargs="?", default=None, help=f"one face: {', '.join(FACE_NAMES)}")
     path.set_defaults(fn=cmd_path)
 
 

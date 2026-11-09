@@ -30,6 +30,7 @@ dynamic rigid body) and adds: aabb validation, aabb metadata exposure
 (``aabb_center``/``aabb_half``), and world-frame ``get_world_pose`` for the
 ``object/*`` record-key layer (props/object_state).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -46,8 +47,11 @@ from .base import (
 
 # kind -> default total mass (kg); overridable via spawn: {mass: ...}
 _DEFAULT_MASS = {"container": 1.0, "table": 15.0, "box": 0.1}
-_DEFAULT_COLOR = {"container": (0.45, 0.30, 0.15), "table": (0.55, 0.55, 0.58),
-                  "box": (0.90, 0.75, 0.10)}
+_DEFAULT_COLOR = {
+    "container": (0.45, 0.30, 0.15),
+    "table": (0.55, 0.55, 0.58),
+    "box": (0.90, 0.75, 0.10),
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -55,12 +59,12 @@ _DEFAULT_COLOR = {"container": (0.45, 0.30, 0.15), "table": (0.55, 0.55, 0.58),
 # --------------------------------------------------------------------------- #
 def _positive_size(spec: PropSpec) -> np.ndarray:
     size = np.asarray(spec.size, dtype=float) if spec.size is not None else None
-    if (size is None or size.shape != (3,)
-            or not np.isfinite(size).all() or (size <= 0).any()):
+    if size is None or size.shape != (3,) or not np.isfinite(size).all() or (size <= 0).any():
         raise ValueError(
             f"prop {spec.name!r} (type {spec.type!r}): size must be a "
             f"[sx, sy, sz] list of positive numbers (outer envelope, m), "
-            f"got {spec.size!r}")
+            f"got {spec.size!r}"
+        )
     return size
 
 
@@ -73,17 +77,19 @@ def _declared_aabb(spec: PropSpec) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(
             f"prop {spec.name!r} (type {spec.type!r}): aabb must be a "
             f"{{center: [x,y,z], half_extents: [hx,hy,hz]}} mapping relative "
-            f"to the prop origin, got {spec.aabb!r}") from exc
+            f"to the prop origin, got {spec.aabb!r}"
+        ) from exc
     if center.shape != (3,) or half.shape != (3,):
         raise ValueError(
             f"prop {spec.name!r}: aabb center/half_extents must have exactly "
-            f"3 numbers each, got {center.shape} / {half.shape}")
+            f"3 numbers each, got {center.shape} / {half.shape}"
+        )
     if not np.isfinite(center).all() or not np.isfinite(half).all():
         raise ValueError(f"prop {spec.name!r}: aabb values must be finite")
     if (half < 0).any():
         raise ValueError(
-            f"prop {spec.name!r}: aabb half_extents must be non-negative, "
-            f"got {half!r}")
+            f"prop {spec.name!r}: aabb half_extents must be non-negative, " f"got {half!r}"
+        )
     return center, half
 
 
@@ -99,18 +105,21 @@ def validate_box_spec(spec: PropSpec) -> None:
         raise ValueError(
             f"prop {spec.name!r}: aabb z-range [{lo[2]}, {hi[2]}] escapes "
             f"the outer envelope z [0, {size[2]}] (origin is the bottom "
-            f"face center)")
+            f"face center)"
+        )
     if spec.type == "container" and lo[2] <= 1e-9:
         raise ValueError(
             f"prop {spec.name!r}: container cavity floor must sit ABOVE the "
             f"origin (a bottom-less container cannot hold objects); declare "
             f"aabb center z > half z (bottom slab thickness = "
-            f"{center[2] - half[2]:.4f} m)")
+            f"{center[2] - half[2]:.4f} m)"
+        )
     for ax, s in ((0, size[0]), (1, size[1])):
         if abs(center[ax]) > s / 2 + 1e-9 or half[ax] > s / 2 + 1e-9:
             raise ValueError(
                 f"prop {spec.name!r}: aabb escapes the outer envelope on "
-                f"axis {ax} (half {half[ax]} > envelope half {s / 2})")
+                f"axis {ax} (half {half[ax]} > envelope half {s / 2})"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -136,11 +145,10 @@ def box_layout(spec: PropSpec) -> list[tuple[np.ndarray, np.ndarray]]:
 
     center, half = _declared_aabb(spec)
     sx, sy, sz = size
-    z_floor = max(center[2] - half[2], 0.0)      # cavity floor height
-    if z_floor > 1e-9:                            # bottom slab
-        boxes.append((np.array([0.0, 0.0, z_floor / 2]),
-                      np.array([sx / 2, sy / 2, z_floor / 2])))
-    z_top = min(center[2] + half[2] + 0.0, sz)   # walls span to the top rim
+    z_floor = max(center[2] - half[2], 0.0)  # cavity floor height
+    if z_floor > 1e-9:  # bottom slab
+        boxes.append((np.array([0.0, 0.0, z_floor / 2]), np.array([sx / 2, sy / 2, z_floor / 2])))
+    z_top = min(center[2] + half[2] + 0.0, sz)  # walls span to the top rim
     wall_h = (z_top - z_floor) / 2
     z_c = (z_top + z_floor) / 2
     if wall_h <= 1e-9:
@@ -151,14 +159,12 @@ def box_layout(spec: PropSpec) -> list[tuple[np.ndarray, np.ndarray]]:
         t = abs(size[0] / 2 - sign * center[0] - half[0])
         if t > 1e-9:
             cx = (center[0] + sign * half[0] + sign * size[0] / 2) / 2
-            boxes.append((np.array([cx, 0.0, z_c]),
-                          np.array([t / 2, sy / 2, wall_h])))
+            boxes.append((np.array([cx, 0.0, z_c]), np.array([t / 2, sy / 2, wall_h])))
     for sign in (+1.0, -1.0):
         t = abs(size[1] / 2 - sign * center[1] - half[1])
         if t > 1e-9:
             cy = (center[1] + sign * half[1] + sign * size[1] / 2) / 2
-            boxes.append((np.array([0.0, cy, z_c]),
-                          np.array([sx / 2, t / 2, wall_h])))
+            boxes.append((np.array([0.0, cy, z_c]), np.array([sx / 2, t / 2, wall_h])))
     return boxes
 
 
@@ -171,25 +177,25 @@ def _box_urdf_xml(spec: PropSpec, boxes, mass: float, color) -> str:
     izz = mass / 12.0 * (size[0] ** 2 + size[1] ** 2)
     rgba = " ".join(f"{c:.4f}" for c in color) + " 1.0"
     parts = [
-        "<?xml version=\"1.0\"?>",
+        '<?xml version="1.0"?>',
         f"<!-- generated box-family prop ({spec.type}, name={spec.name}); "
         "origin at the outer bottom-face center -->",
-        "<robot name=\"box_prop\">",
-        "  <link name=\"base_link\">",
-        f"    <inertial><origin xyz=\"0 0 {size[2] / 2:.6f}\" rpy=\"0 0 0\"/>"
-        f"<mass value=\"{mass:.6f}\"/><inertia "
-        f"ixx=\"{ixx:.8f}\" iyy=\"{iyy:.8f}\" izz=\"{izz:.8f}\" "
-        "ixy=\"0\" ixz=\"0\" iyz=\"0\"/></inertial>",
+        '<robot name="box_prop">',
+        '  <link name="base_link">',
+        f'    <inertial><origin xyz="0 0 {size[2] / 2:.6f}" rpy="0 0 0"/>'
+        f'<mass value="{mass:.6f}"/><inertia '
+        f'ixx="{ixx:.8f}" iyy="{iyy:.8f}" izz="{izz:.8f}" '
+        'ixy="0" ixz="0" iyz="0"/></inertial>',
     ]
     for i, (c, h) in enumerate(boxes):
         cxml = " ".join(f"{v:.6f}" for v in c)
         sxml = " ".join(f"{2 * v:.6f}" for v in h)
         parts += [
-            f"    <visual><origin xyz=\"{cxml}\" rpy=\"0 0 0\"/><geometry>"
-            f"<box size=\"{sxml}\"/></geometry>"
-            f"<material name=\"mat\"><color rgba=\"{rgba}\"/></material></visual>",
-            f"    <collision><origin xyz=\"{cxml}\" rpy=\"0 0 0\"/><geometry>"
-            f"<box size=\"{sxml}\"/></geometry></collision>",
+            f'    <visual><origin xyz="{cxml}" rpy="0 0 0"/><geometry>'
+            f'<box size="{sxml}"/></geometry>'
+            f'<material name="mat"><color rgba="{rgba}"/></material></visual>',
+            f'    <collision><origin xyz="{cxml}" rpy="0 0 0"/><geometry>'
+            f'<box size="{sxml}"/></geometry></collision>',
         ]
     parts += ["  </link>", "</robot>", ""]
     return "\n".join(parts)
@@ -240,8 +246,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
         raise
 
 
-def purge_urdf_cache(max_bytes: int | None = None,
-                     include_legacy: bool = False) -> dict:
+def purge_urdf_cache(max_bytes: int | None = None, include_legacy: bool = False) -> dict:
     """Delete cached URDFs (all, or oldest-first until ``max_bytes``).
 
     Args:
@@ -277,8 +282,7 @@ def purge_urdf_cache(max_bytes: int | None = None,
         removed += 1
         freed += size
     legacy = _purge_legacy_urdfs() if include_legacy else 0
-    return {"dir": str(root), "removed": removed, "freed_bytes": freed,
-            "legacy_removed": legacy}
+    return {"dir": str(root), "removed": removed, "freed_bytes": freed, "legacy_removed": legacy}
 
 
 def _legacy_urdf_paths() -> list[Path]:
@@ -309,9 +313,9 @@ def generate_box_urdf(spec: PropSpec) -> str:
     ``/workspace/unigym``.  ``UNIGYM_URDF_CACHE`` overrides the root.
     """
     from .primitive import resolve_mass
+
     mass = resolve_mass(spec, default=_DEFAULT_MASS[spec.type])
-    color = tuple(float(v) for v in dict(spec.spawn).get(
-        "color", _DEFAULT_COLOR[spec.type]))
+    color = tuple(float(v) for v in dict(spec.spawn).get("color", _DEFAULT_COLOR[spec.type]))
     xml = _box_urdf_xml(spec, box_layout(spec), mass, color).encode("utf-8")
     path = _urdf_cache_path(xml)
     if not path.exists():

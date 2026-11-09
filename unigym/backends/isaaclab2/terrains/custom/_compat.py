@@ -7,6 +7,7 @@ custom terrain functions remain *plain height-field producers* returning a
 wraps them into mesh-returning functions exactly as Isaac Lab's
 ``TerrainGenerator`` expects.
 """
+
 from __future__ import annotations
 
 try:  # pragma: no cover - exercised only on the server (isaaclab present)

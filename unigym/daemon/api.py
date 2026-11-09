@@ -12,6 +12,7 @@ docs/contracts/daemon_api_contract.md is the endpoint contract twin --
 API changes go through it first.  Business logic lives in unigym.core /
 daemon.queries, never here.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -48,8 +49,11 @@ def thread_census() -> dict:
     buckets: dict[str, int] = {}
     for t in threading.enumerate():
         name = t.name
-        key = name if name.startswith("unigymd-") else (
-            "request-workers" if name.startswith("Thread-") else name)
+        key = (
+            name
+            if name.startswith("unigymd-")
+            else ("request-workers" if name.startswith("Thread-") else name)
+        )
         buckets[key] = buckets.get(key, 0) + 1
     return {"total": threading.active_count(), "by_name": buckets}
 
@@ -74,10 +78,9 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
             except ValueError:
                 limit = queries.DEFAULT_HISTORY_LIMIT
             return queries.history_rows(svc, limit=limit)
-        return 200, {"ok": True, "runs": svc.view(),
-                     "deaths": svc.deaths()}
+        return 200, {"ok": True, "runs": svc.view(), "deaths": svc.deaths()}
     if route.startswith("/api/runs/"):
-        rest = urllib.parse.unquote(route[len("/api/runs/"):])
+        rest = urllib.parse.unquote(route[len("/api/runs/") :])
         rid, _, sub = rest.partition("/")
         if not sub:
             for r in svc.view():
@@ -90,37 +93,38 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
             except ValueError:
                 tail = queries.DEFAULT_LOG_TAIL
             return queries.query_log(svc, rid, tail=tail)
-        if sub == "status":                # status + media section
+        if sub == "status":  # status + media section
             return queries.query_status(svc, rid)
-        if sub == "events":                # timeline tail (events.jsonl, §3)
+        if sub == "events":  # timeline tail (events.jsonl, §3)
             try:
                 tail = int((qs.get("tail") or ["50"])[0])
             except ValueError:
                 tail = 50
-            return queries.query_events(svc, rid, tail=tail,
-                                        kind=(qs.get("kind") or [None])[0])
-        if sub == "scene":                 # curated scene face (?full=1 raw)
+            return queries.query_events(svc, rid, tail=tail, kind=(qs.get("kind") or [None])[0])
+        if sub == "scene":  # curated scene face (?full=1 raw)
             full = (qs.get("full") or [""])[0].lower() in ("1", "true")
-            return queries.query_run(svc, rid, "scene",
-                                     params={"full": full} if full else None)
+            return queries.query_run(svc, rid, "scene", params={"full": full} if full else None)
         if sub in queries.KINDS:
             return queries.query_run(svc, rid, sub)
-        return _err(f"no such endpoint: /api/runs/{rid}/{sub}", 404,
-                    hint="typed queries: "
-                         "/api/runs/<id>/{status,events,metrics,config,"
-                         "report,scene,log}")
+        return _err(
+            f"no such endpoint: /api/runs/{rid}/{sub}",
+            404,
+            hint="typed queries: "
+            "/api/runs/<id>/{status,events,metrics,config,"
+            "report,scene,log}",
+        )
     if route.startswith("/api/op/"):
         # rewind face read side (Round B B1): GET /api/op/<run>/snapshots
         # and GET /api/op/<run>/rewind/snapshots -- the same snapshots
         # document; the run id sits left of the trailing segment(s)
-        rest = route[len("/api/op/"):]
+        rest = route[len("/api/op/") :]
         for tail in ("/rewind/snapshots", "/snapshots"):
             if rest.endswith(tail):
-                run = rest[:len(rest) - len(tail)]
-                return queries.query_run(svc, urllib.parse.unquote(run),
-                                         "snapshots")
-        return _err(f"no such endpoint: {route}", 404,
-                    hint="GET /api/op/<run>/snapshots (rewind face list)")
+                run = rest[: len(rest) - len(tail)]
+                return queries.query_run(svc, urllib.parse.unquote(run), "snapshots")
+        return _err(
+            f"no such endpoint: {route}", 404, hint="GET /api/op/<run>/snapshots (rewind face list)"
+        )
     if route == "/api/configs":
         return queries.list_configs(svc)
     if route == "/api/adapters/params":
@@ -135,11 +139,14 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
         # the pending/running/done buckets are GONE with the
         # submit queue (design §2) -- live view + deaths only;
         # thread census + live SSE subscription count
-        return 200, {"ok": True, "runs_root": str(svc.runs_root),
-                     "shm_runs": svc.view(),
-                     "deaths": svc.deaths(),
-                     "threads": thread_census(),
-                     "sse_subscriptions": svc.events.subscriber_count}
+        return 200, {
+            "ok": True,
+            "runs_root": str(svc.runs_root),
+            "shm_runs": svc.view(),
+            "deaths": svc.deaths(),
+            "threads": thread_census(),
+            "sse_subscriptions": svc.events.subscriber_count,
+        }
     return _err(f"no such endpoint: {route}", 404, hint="GET /api/health")
 
 
@@ -151,12 +158,13 @@ def api_post(svc, path: str, body: dict) -> tuple[int, dict]:
     if route == "/api/submit":
         # REMOVED (contract §1.11): the queue had zero users and
         # batch semantics live on as `unigym run a.yaml b.yaml ...`
-        return 410, {"ok": False,
-                     "error": "api removed: the submit job queue is "
-                              "gone",
-                     "hint": "use `unigym run CONFIG... --bg` for "
-                             "detached runs (multiple configs run in "
-                             "order)"}
+        return 410, {
+            "ok": False,
+            "error": "api removed: the submit job queue is " "gone",
+            "hint": "use `unigym run CONFIG... --bg` for "
+            "detached runs (multiple configs run in "
+            "order)",
+        }
     if route == "/api/runs/delete":
         return queries.delete_run(svc, body)
     if route == "/api/wait":
@@ -164,15 +172,14 @@ def api_post(svc, path: str, body: dict) -> tuple[int, dict]:
     if route == "/api/clean":
         return _clean(svc, body)
     if route.startswith("/api/op/"):
-        rest = route[len("/api/op/"):]
+        rest = route[len("/api/op/") :]
         for family in ("/direct/", "/watch/", "/rewind/"):
             # two-segment families: /api/op/<run>/<family><sub> -- the
             # run id sits LEFT of the family separator (rpartition below
             # would mis-split them)
             if family in rest:
                 run, _, sub = rest.partition(family)
-                return _op(svc, urllib.parse.unquote(run),
-                           family.strip("/") + "/" + sub, body)
+                return _op(svc, urllib.parse.unquote(run), family.strip("/") + "/" + sub, body)
         run, _, op = rest.rpartition("/")
         if not run:
             return _err("expected /api/op/<run>/<op>", 404)
@@ -186,6 +193,7 @@ def api_post(svc, path: str, body: dict) -> tuple[int, dict]:
 def _wait(svc, body: dict) -> tuple[int, dict]:
     """Single-shot completion facts (the CLI keeps the loop/format)."""
     from unigym.scripts import spawn_spec as ss
+
     state = body.get("state")
     state_path = Path(state) if state else ss.newest_state(svc.cfg)
     try:
@@ -195,20 +203,19 @@ def _wait(svc, body: dict) -> tuple[int, dict]:
     name = body.get("container") or st.get("container")
     log = Path(body.get("log") or st.get("log"))
     out_dir = Path(body.get("output_dir") or st.get("output_dir"))
-    facts = run_ops.wait_once(log, out_dir, container=name,
-                              teardown=bool(body.get("teardown", True)))
-    return 200, {"ok": True, "log": str(log), "out_dir": str(out_dir),
-                 "container": name, **facts}
+    facts = run_ops.wait_once(
+        log, out_dir, container=name, teardown=bool(body.get("teardown", True))
+    )
+    return 200, {"ok": True, "log": str(log), "out_dir": str(out_dir), "container": name, **facts}
 
 
 def _clean(svc, body: dict) -> tuple[int, dict]:
     dry = bool(body.get("dry_run"))
-    force = bool(body.get("force"))        # also version-mismatch/corrupt
+    force = bool(body.get("force"))  # also version-mismatch/corrupt
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         removed = core_registry.clean(dry_run=dry, force=force)
-    return 200, {"ok": True, "removed": removed,
-                 "lines": buf.getvalue().splitlines()}
+    return 200, {"ok": True, "removed": removed, "lines": buf.getvalue().splitlines()}
 
 
 def _unknown_view_row(svc, run: str) -> dict | None:
@@ -217,6 +224,7 @@ def _unknown_view_row(svc, run: str) -> dict | None:
     Shared by the op pre-check (§1.14 honest 409).
     """
     from unigym.core.session import resolve_run_id
+
     try:
         rid = resolve_run_id(run)
     except SessionError:
@@ -228,8 +236,7 @@ def _unknown_view_row(svc, run: str) -> dict | None:
     # attach-time error it replaced -- the op still fails honestly,
     # just one layer deeper (rationale for not going fresh: the
     # command path must stay off the per-request rebuild)
-    row = next((r for r in svc.view()
-                if r.get("run_id") == rid), None)
+    row = next((r for r in svc.view() if r.get("run_id") == rid), None)
     if row is None:
         # cache miss is INCONCLUSIVE: the rebuild loop may lag the serve
         # registry (a just-spawned run writes its serve json before the
@@ -237,32 +244,31 @@ def _unknown_view_row(svc, run: str) -> dict | None:
         # -> one fresh rebuild for the honest classification;
         # no trace anywhere -> the attach-time 404 stands.
         from unigym.runtime_dirs import serve_registry_trace
+
         if serve_registry_trace(rid):
-            row = next((r for r in svc.view(fresh=True)
-                        if r.get("run_id") == rid), None)
+            row = next((r for r in svc.view(fresh=True) if r.get("run_id") == rid), None)
     return row
 
 
 def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
     timeout = float(body.get("timeout") or 10.0)
-    if op in queries.KINDS:                # typed-query synonyms
+    if op in queries.KINDS:  # typed-query synonyms
         # scene accepts the {full: true} escape hatch in the op body
         # (§1.14 mirror of the GET ?full=1 face)
-        params = ({"full": bool(body.get("full"))}
-                  if op == "scene" and body.get("full") else None)
-        return queries.query_run(svc, run, op, timeout=timeout,
-                                 params=params)
+        params = {"full": bool(body.get("full"))} if op == "scene" and body.get("full") else None
+        return queries.query_run(svc, run, op, timeout=timeout, params=params)
     if op != "shutdown":
         # an UNKNOWN run has no readable command slot -- pause/
         # step/... would fail inside attach anyway; refuse with the
         # honest 409 instead of a generic attach error
         row = _unknown_view_row(svc, run)
         if row is not None and row.get("phase") == "UNKNOWN":
-            return _err(f"run {run} is UNKNOWN: {row.get('error')}", 409,
-                        hint="only shutdown and record delete are "
-                             "available for UNKNOWN runs")
-    if (op == "camera" and body.get("camera_op") == "get"
-            and "flags" in body):
+            return _err(
+                f"run {run} is UNKNOWN: {row.get('error')}",
+                409,
+                hint="only shutdown and record delete are " "available for UNKNOWN runs",
+            )
+    if op == "camera" and body.get("camera_op") == "get" and "flags" in body:
         # v054: the flags form is gone at every layer (checked BEFORE
         # the attach -- the removal is structural, not run-dependent;
         # the CLI's --flags is the only surviving alias and it expands
@@ -271,8 +277,8 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
             f"'flags' was removed in v054 (RenderSpec face): send "
             f"render={{'view': name}} or a RenderSpec dict -- got "
             f"flags={body.get('flags')!r}",
-            hint="POST /api/op/<run>/camera {camera_op:'get', "
-                 "render:{...}}")
+            hint="POST /api/op/<run>/camera {camera_op:'get', " "render:{...}}",
+        )
     try:
         with attach(run, timeout_s=timeout) as s:
             if op == "status":
@@ -284,28 +290,33 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
             if op == "shutdown":
                 return 200, {"ok": True, **s.shutdown(timeout)}
             if op == "step":
-                return 200, {"ok": True,
-                             **s.step(int(body.get("n") or 1), timeout)}
+                return 200, {"ok": True, **s.step(int(body.get("n") or 1), timeout)}
             if op == "inspect":
-                return 200, {"ok": True,
-                             **s.inspect(expr=body.get("expr"),
-                                         target=body.get("target"),
-                                         key=body.get("key"),
-                                         timeout_s=timeout)}
+                return 200, {
+                    "ok": True,
+                    **s.inspect(
+                        expr=body.get("expr"),
+                        target=body.get("target"),
+                        key=body.get("key"),
+                        timeout_s=timeout,
+                    ),
+                }
             if op == "snapshot":
-                return 200, {"ok": True,
-                             **s.snapshot(out=body.get("out"),
-                                          camera=body.get("camera"),
-                                          env=body.get("env"),
-                                          pos=body.get("pos"),
-                                          lookat=body.get("lookat"),
-                                          timeout_s=timeout)}
+                return 200, {
+                    "ok": True,
+                    **s.snapshot(
+                        out=body.get("out"),
+                        camera=body.get("camera"),
+                        env=body.get("env"),
+                        pos=body.get("pos"),
+                        lookat=body.get("lookat"),
+                        timeout_s=timeout,
+                    ),
+                }
             if op == "rewind/snapshot":
                 # rewind face (Round B B1): capture an engine snapshot
                 # (camera-frame `snapshot` keeps its original meaning above)
-                return 200, {"ok": True,
-                             **s.rewind_snapshot(body.get("label"),
-                                                 timeout_s=timeout)}
+                return 200, {"ok": True, **s.rewind_snapshot(body.get("label"), timeout_s=timeout)}
             if op == "rewind":
                 # restore a snapshot; the world auto-pauses on the ack
                 sid = body.get("snap_id")
@@ -313,16 +324,20 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
                     return _err(
                         f"rewind: 'snap_id' must be an integer, got {sid!r}",
                         hint="POST /api/op/<run>/rewind/snapshot captures "
-                             "one; GET .../snapshots lists the slots")
-                return 200, {"ok": True,
-                             **s.rewind(sid, timeout_s=timeout)}
+                        "one; GET .../snapshots lists the slots",
+                    )
+                return 200, {"ok": True, **s.rewind(sid, timeout_s=timeout)}
             if op == "capture":
-                return 200, {"ok": True,
-                             **s.capture(out=body.get("out"),
-                                         npz=body.get("npz"),
-                                         camera=body.get("camera"),
-                                         env=body.get("env"),
-                                         timeout_s=timeout)}
+                return 200, {
+                    "ok": True,
+                    **s.capture(
+                        out=body.get("out"),
+                        npz=body.get("npz"),
+                        camera=body.get("camera"),
+                        env=body.get("env"),
+                        timeout_s=timeout,
+                    ),
+                }
             if op == "camera":
                 if body.get("camera_op") == "set":
                     params = dict(body.get("params") or {})
@@ -333,14 +348,13 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
                         params["pos"] = body.get("pos")
                     if body.get("lookat") is not None:
                         params["lookat"] = body.get("lookat")
-                    res = s.camera_set(cast(str, body.get("name")),
-                                       params,
-                                       env=body.get("env"),
-                                       timeout_s=timeout)
+                    res = s.camera_set(
+                        cast(str, body.get("name")), params, env=body.get("env"), timeout_s=timeout
+                    )
                 elif body.get("camera_op") == "get_pose":
-                    res = s.camera_get_pose(name=body.get("name"),
-                                            env=body.get("env"),
-                                            timeout_s=timeout)
+                    res = s.camera_get_pose(
+                        name=body.get("name"), env=body.get("env"), timeout_s=timeout
+                    )
                 else:
                     # RenderSpec capture face (camera_contract §14):
                     # render = {"view": name} | spec fragment | full
@@ -348,19 +362,21 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
                     # pos/lookat (together, world frame) render the one
                     # frame from a transient world pose (camera aim;
                     # world rigs only)
-                    res = s.camera_get(out=body.get("out"),
-                                       name=body.get("name"),
-                                       env=body.get("env"),
-                                       render=body.get("render"),
-                                       pos=body.get("pos"),
-                                       lookat=body.get("lookat"),
-                                       timeout_s=timeout)
+                    res = s.camera_get(
+                        out=body.get("out"),
+                        name=body.get("name"),
+                        env=body.get("env"),
+                        render=body.get("render"),
+                        pos=body.get("pos"),
+                        lookat=body.get("lookat"),
+                        timeout_s=timeout,
+                    )
                 return 200, {"ok": True, **res}
             if op.startswith("direct/"):
                 # director op family (/api/op/<run>/direct/<op>;
                 # director_contract.md §5).  `timeout` is daemon-side and
                 # must not leak into the command payload.
-                sub = op[len("direct/"):]
+                sub = op[len("direct/") :]
                 body = {k: v for k, v in body.items() if k != "timeout"}
                 res = s.direct(sub, body, timeout)
                 if sub == "status":
@@ -369,16 +385,19 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
             if op.startswith("watch/"):
                 # watcher op family (/api/op/<run>/watch/<sub>;
                 # watchers_contract.md §7)
-                sub = op[len("watch/"):]
+                sub = op[len("watch/") :]
                 body = {k: v for k, v in body.items() if k != "timeout"}
                 res = s.watch(sub, body, timeout)
                 if sub in ("add", "update", "clear", "test"):
                     return 200, {"ok": True, "watch_op": sub, **res}
                 return 200, {"ok": True, **res}
-            return _err(f"unknown op: {op}", 404,
-                        hint="pause resume shutdown step inspect "
-                             "snapshot capture camera status direct/<op> "
-                             "watch/<op> rewind/snapshot rewind snapshots")
+            return _err(
+                f"unknown op: {op}",
+                404,
+                hint="pause resume shutdown step inspect "
+                "snapshot capture camera status direct/<op> "
+                "watch/<op> rewind/snapshot rewind snapshots",
+            )
     except SessionOpError as e:
         hint = getattr(e, "hint", None)
         return _err(str(e), hint=hint)
@@ -392,8 +411,7 @@ def _op(svc, run: str, op: str, body: dict) -> tuple[int, dict]:
                 return killed
         # resolve/attach failures: 'latest' with nothing alive -> 404
         msg = str(e)
-        code = 404 if ("no live bridge run" in msg
-                       or "cannot attach" in msg) else 400
+        code = 404 if ("no live bridge run" in msg or "cannot attach" in msg) else 400
         return _err(msg, code)
 
 
@@ -425,7 +443,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
-        if n > 65536:                      # same cap as the 8600 mirror:
+        if n > 65536:  # same cap as the 8600 mirror:
             raise ValueError("request body too large (65536 bytes max)")
         if n <= 0:
             return {}
@@ -435,7 +453,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
-    def do_GET(self):                          # noqa: N802 (stdlib name)
+    def do_GET(self):  # noqa: N802 (stdlib name)
         """GET face: /api/events SSE stream, else the api_get JSON shield.
 
         See docs/contracts/daemon_api_contract.md §1 (endpoints §1.1-§1.25).
@@ -448,19 +466,18 @@ class ApiHandler(BaseHTTPRequestHandler):
             return events.serve_sse(self, self._service(), qs)
         try:
             return self._json(*api_get(self._service(), parts.path, qs))
-        except Exception as e:                 # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             return self._json(*_err(f"{type(e).__name__}: {e}", 500))
 
-    def do_POST(self):                         # noqa: N802 (stdlib name)
+    def do_POST(self):  # noqa: N802 (stdlib name)
         """POST face: the api_post JSON shield (start/wait/clean/op routes).
 
         See docs/contracts/daemon_api_contract.md §1.
         """
         parts = urllib.parse.urlparse(self.path)
         try:
-            return self._json(*api_post(self._service(), parts.path,
-                                        self._body()))
-        except ValueError as e:                # oversized/malformed body
+            return self._json(*api_post(self._service(), parts.path, self._body()))
+        except ValueError as e:  # oversized/malformed body
             return self._json(*_err(str(e)))
-        except Exception as e:                 # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             return self._json(*_err(f"{type(e).__name__}: {e}", 500))

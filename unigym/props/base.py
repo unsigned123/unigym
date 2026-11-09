@@ -42,6 +42,7 @@ only object-key family the manager emits.
 The manager is isaaclab-free at import time (cfg classes resolved lazily via
 ``_resolve``); unit tests inject fake classes through ``classes=``.
 """
+
 from __future__ import annotations
 
 import math
@@ -54,8 +55,7 @@ if TYPE_CHECKING:
 
     from ..adapters.base import RawObsRequest
 
-from .asset_ir import (AssetDefinition, iter_asset_bodies,
-                       joint_names)
+from .asset_ir import AssetDefinition, iter_asset_bodies, joint_names
 
 
 # --------------------------------------------------------------------------- #
@@ -250,7 +250,8 @@ def _prop_backend(backend: str | None = None) -> PropBackendCap:
     if factory is None:
         raise ValueError(
             f"backend {build_name(backend)!r} has no prop backend face "
-            f"(hint: use mujoco/mjwarp/isaaclab)")
+            f"(hint: use mujoco/mjwarp/isaaclab)"
+        )
     return cast("PropBackendCap", factory())
 
 
@@ -340,8 +341,7 @@ class PropPlacement:
         config = dict(config or {})
         self.mode = str(config.get("mode", "random"))
         if self.mode not in ("random", "fixed"):
-            raise ValueError(
-                f"placement mode must be 'random' or 'fixed', got '{self.mode}'")
+            raise ValueError(f"placement mode must be 'random' or 'fixed', got '{self.mode}'")
         self.x_range = tuple(config.get("x_range", [0.0, 0.0]))
         self.y_range = tuple(config.get("y_range", [0.0, 0.0]))
         self.z_range = tuple(config.get("z_range", [0.0, 0.0]))
@@ -378,15 +378,18 @@ class PropPlacement:
             z = _draw(self.z_range)
             yaw = _draw(self.yaw_range)
         else:  # fixed: midpoints
-            x = torch.full((num_positions,),
-                           0.5 * (self.x_range[0] + self.x_range[1]), device=device)
-            y = torch.full((num_positions,),
-                           0.5 * (self.y_range[0] + self.y_range[1]), device=device)
-            z = torch.full((num_positions,),
-                           0.5 * (self.z_range[0] + self.z_range[1]), device=device)
-            yaw = torch.full((num_positions,),
-                             0.5 * (self.yaw_range[0] + self.yaw_range[1]),
-                             device=device)
+            x = torch.full(
+                (num_positions,), 0.5 * (self.x_range[0] + self.x_range[1]), device=device
+            )
+            y = torch.full(
+                (num_positions,), 0.5 * (self.y_range[0] + self.y_range[1]), device=device
+            )
+            z = torch.full(
+                (num_positions,), 0.5 * (self.z_range[0] + self.z_range[1]), device=device
+            )
+            yaw = torch.full(
+                (num_positions,), 0.5 * (self.yaw_range[0] + self.yaw_range[1]), device=device
+            )
         z = z + self.height_offset
         return torch.stack([x, y, z, yaw], dim=-1)
 
@@ -407,8 +410,9 @@ class PropHandler:
     num_envs: int
     device: str
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None) -> None:
+    def __init__(
+        self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None
+    ) -> None:
         """Store the handler's declaration context (subclass hooks extend)."""
         self.spec = spec
         self.num_envs = int(num_envs)
@@ -493,8 +497,9 @@ class PropBackendCap(Protocol):
         """Resolve a legacy public handler class name (isaaclab compat)."""
         ...
 
-    def build_handler(self, spec: PropSpec, *, num_envs: int, device: str,
-                      base_dir: str | None = None) -> PropHandler:
+    def build_handler(
+        self, spec: PropSpec, *, num_envs: int, device: str, base_dir: str | None = None
+    ) -> PropHandler:
         """Instantiate the declared handler for one spec."""
         ...
 
@@ -518,20 +523,21 @@ class PropBackendCap(Protocol):
 # --------------------------------------------------------------------------- #
 # PropManager: orchestrates a list of PropHandlers
 # --------------------------------------------------------------------------- #
-def _require_path(path: str | None, kind: str, spec: PropSpec,
-                  base_dir: str | None, noun: str = "asset") -> str:
+def _require_path(
+    path: str | None, kind: str, spec: PropSpec, base_dir: str | None, noun: str = "asset"
+) -> str:
     """Resolve + existence-check one declared asset path (fail-fast)."""
     if not path:
         raise ValueError(f"{kind} prop {spec.name!r}: {noun} is required")
     resolved = _resolve_urdf_path(path, base_dir)
     if not os.path.exists(resolved):
-        raise FileNotFoundError(
-            f"{kind} prop {spec.name!r}: asset not found: {resolved}")
+        raise FileNotFoundError(f"{kind} prop {spec.name!r}: asset not found: {resolved}")
     return resolved
 
 
-def _resolve_spec_paths(spec: PropSpec, base_dir: str | None,
-                        asset: AssetDefinition | None = None) -> None:
+def _resolve_spec_paths(
+    spec: PropSpec, base_dir: str | None, asset: AssetDefinition | None = None
+) -> None:
     """Per-kind declaration validation + path resolution (fail-fast).
 
     Extracted from ``PropManager.__init__`` (the CC-cap split; same
@@ -552,20 +558,18 @@ def _resolve_spec_paths(spec: PropSpec, base_dir: str | None,
         _resolve_generated_spec(spec, asset)
         return
     if spec.type == "articulation":
-        spec.asset = _require_path(spec.asset, "articulation", spec,
-                                   base_dir)
+        spec.asset = _require_path(spec.asset, "articulation", spec, base_dir)
     elif spec.type == "free_articulation":
         if not spec.joints:
             raise ValueError(
                 f"free_articulation prop {spec.name!r}: joints must "
-                f"declare at least one (internal) joint")
-        spec.asset = _require_path(spec.asset, "free_articulation", spec,
-                                   base_dir)
+                f"declare at least one (internal) joint"
+            )
+        spec.asset = _require_path(spec.asset, "free_articulation", spec, base_dir)
     else:
         if spec.type == "rigid_object" and spec.urdf_path:
             spec.urdf_path = _resolve_urdf_path(spec.urdf_path, base_dir)
-        if spec.type == "rigid_object" \
-                and (spec.mujoco or {}).get("representation"):
+        if spec.type == "rigid_object" and (spec.mujoco or {}).get("representation"):
             # URDF-less mesh declaration (T2.4): the mujoco backend
             # honors the same three representation tiers as the usd
             # kind ( mjcf_file = attachable fragment ); isaaclab keeps
@@ -576,50 +580,53 @@ def _resolve_spec_paths(spec: PropSpec, base_dir: str | None,
                 raise ValueError(
                     f"rigid_object prop {spec.name!r}: unknown mujoco "
                     f"representation {rep!r} (allowed: mjcf_file | "
-                    f"box_texture | box)")
+                    f"box_texture | box)"
+                )
             if rep == "mjcf_file":
                 if not mj.get("mjcf_file"):
                     raise ValueError(
                         f"rigid_object prop {spec.name!r}: "
                         f"representation mjcf_file requires "
-                        f"mujoco.mjcf_file")
+                        f"mujoco.mjcf_file"
+                    )
                 p = _resolve_urdf_path(mj["mjcf_file"], base_dir)
                 if not os.path.exists(p):
                     raise FileNotFoundError(
-                        f"rigid_object prop {spec.name!r}: mjcf_file "
-                        f"not found: {p}")
+                        f"rigid_object prop {spec.name!r}: mjcf_file " f"not found: {p}"
+                    )
                 spec.mujoco = dict(mj, mjcf_file=p)
         if spec.type == "usd_articulation":
             # native USD articulation (isaaclab-only kind --
             # the mujoco backend has no USD articulation loader; the
             # backend itself also fails fast at build time)
-            spec.usd_path = _require_path(spec.usd_path, "usd_articulation",
-                                          spec, base_dir, noun="usd_path")
+            spec.usd_path = _require_path(
+                spec.usd_path, "usd_articulation", spec, base_dir, noun="usd_path"
+            )
             if not spec.joints:
                 raise ValueError(
                     f"usd_articulation prop {spec.name!r}: joints must "
-                    f"declare at least one joint")
+                    f"declare at least one joint"
+                )
         if spec.type == "usd":
-            spec.usd_path = _require_path(spec.usd_path, "usd", spec,
-                                          base_dir, noun="usd_path")
+            spec.usd_path = _require_path(spec.usd_path, "usd", spec, base_dir, noun="usd_path")
             mj = spec.mujoco or {}
             rep = mj.get("representation")
             if rep not in (None, "mjcf_file", "box_texture", "box"):
                 raise ValueError(
                     f"usd prop {spec.name!r}: unknown mujoco "
                     f"representation {rep!r} (allowed: mjcf_file | "
-                    f"box_texture | box)")
+                    f"box_texture | box)"
+                )
             if rep == "mjcf_file":
                 if not mj.get("mjcf_file"):
                     raise ValueError(
                         f"usd prop {spec.name!r}: representation "
                         f"mjcf_file requires mujoco.mjcf_file "
-                        f"(scripts/usd_to_mjcf.py)")
+                        f"(scripts/usd_to_mjcf.py)"
+                    )
                 p = _resolve_urdf_path(mj["mjcf_file"], base_dir)
                 if not os.path.exists(p):
-                    raise FileNotFoundError(
-                        f"usd prop {spec.name!r}: mjcf_file not found: "
-                        f"{p}")
+                    raise FileNotFoundError(f"usd prop {spec.name!r}: mjcf_file not found: " f"{p}")
                 spec.mujoco = dict(mj, mjcf_file=p)
 
 
@@ -646,11 +653,13 @@ def _resolve_generated_spec(spec: PropSpec, asset: AssetDefinition) -> None:
         raise ValueError(
             f"prop {spec.name!r}: generated asset payloads support the "
             f"anchored 'articulation' kind or the jointless "
-            f"'free_articulation' data-object form only, got {spec.type!r}")
+            f"'free_articulation' data-object form only, got {spec.type!r}"
+        )
     if spec.asset is not None:
         raise ValueError(
             f"prop {spec.name!r}: a generated payload and an asset path "
-            f"are mutually exclusive (got asset {spec.asset!r})")
+            f"are mutually exclusive (got asset {spec.asset!r})"
+        )
     declared = set(spec.joints or {})
     ir_joints = set(joint_names(asset))
     if spec.type == "free_articulation":
@@ -659,41 +668,53 @@ def _resolve_generated_spec(spec: PropSpec, asset: AssetDefinition) -> None:
         # with exact coverage like the anchored kind; the injected
         # freejoint stays the prop's live root dof and is never
         # declarable.  Anything beyond hinge/slide is still refused.
-        bad_types = sorted(j.name
-                           for b in iter_asset_bodies(asset)
-                           for j in b.joints
-                           if j.type not in _PASSIVE_IR_JOINTS)
+        bad_types = sorted(
+            j.name
+            for b in iter_asset_bodies(asset)
+            for j in b.joints
+            if j.type not in _PASSIVE_IR_JOINTS
+        )
         if bad_types:
             raise ValueError(
                 f"free_articulation prop {spec.name!r}: a generated "
                 f"payload carries passive hinge/slide internal joints "
                 f"only (the injected freejoint is the prop's live dof); "
-                f"got {bad_types}")
+                f"got {bad_types}"
+            )
         if declared != ir_joints:
             raise ValueError(
                 f"free_articulation prop {spec.name!r}: the declared "
                 f"joints must cover the payload's internal joints exactly "
-                f"(declared {sorted(declared)} vs IR {sorted(ir_joints)})")
+                f"(declared {sorted(declared)} vs IR {sorted(ir_joints)})"
+            )
         return
     missing = sorted(declared - ir_joints)
     undeclared = sorted(ir_joints - declared)
     if missing:
         raise ValueError(
             f"articulation prop {spec.name!r}: declared joints {missing} "
-            f"not in the generated asset joints {sorted(ir_joints)}")
+            f"not in the generated asset joints {sorted(ir_joints)}"
+        )
     if undeclared:
         raise ValueError(
             f"articulation prop {spec.name!r}: generated asset joints "
             f"{undeclared} are not declared in spec.joints (every asset "
-            f"joint must be declared)")
+            f"joint must be declared)"
+        )
 
 
 class PropManager:
     """Interactive-prop scene + state manager."""
 
-    def __init__(self, config: dict, num_envs: int, env_spacing: float,
-                 device: str = "cpu", base_dir: str | None = None,
-                 backend: str | None = None):
+    def __init__(
+        self,
+        config: dict,
+        num_envs: int,
+        env_spacing: float,
+        device: str = "cpu",
+        base_dir: str | None = None,
+        backend: str | None = None,
+    ):
         self.backend = backend
         self._prop_backend: PropBackendCap = _prop_backend(backend)
         self.num_envs = int(num_envs)
@@ -704,6 +725,7 @@ class PropManager:
         self.asset_definitions: dict[str, AssetDefinition] = {}
         """Generated payloads by prop name (empty = all-static)."""
         from .templates import resolve_prop_entries
+
         for entry, asset in resolve_prop_entries(config):
             spec = PropSpec(**entry)
             _resolve_spec_paths(spec, base_dir, asset=asset)
@@ -713,8 +735,10 @@ class PropManager:
         # build handlers through the backend face (no neutral type branching)
         self._handlers: list[PropHandler] = [
             self._prop_backend.build_handler(
-                spec, num_envs=self.num_envs, device=device, base_dir=base_dir)
-            for spec in self.specs]
+                spec, num_envs=self.num_envs, device=device, base_dir=base_dir
+            )
+            for spec in self.specs
+        ]
         self._bound = False
 
     # ------------------------------------------------------------------ #
@@ -733,7 +757,8 @@ class PropManager:
                 f"props {sorted(self.asset_definitions)}: generated asset "
                 f"payloads are mujoco-only (the isaaclab scene spawner has "
                 f"no generated-asset face) -- run this pack on backend: "
-                f"mujoco")
+                f"mujoco"
+            )
         return self._prop_backend.scene_fields(self, classes=classes)
 
     def scene_fields(self, *, classes=None) -> dict:

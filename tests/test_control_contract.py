@@ -1,4 +1,5 @@
 """Pure-data control declaration contract (no engine involved)."""
+
 from __future__ import annotations
 
 import pytest
@@ -37,9 +38,14 @@ def test_group_accepts_explicit_joints_and_joint_set():
 
 @pytest.mark.parametrize(
     "drive,target",
-    [("position_pd", "position"), ("position_servo", "position"),
-     ("torque", "torque"), ("velocity", "velocity"),
-     ("effort", "effort"), ("current", "current")],
+    [
+        ("position_pd", "position"),
+        ("position_servo", "position"),
+        ("torque", "torque"),
+        ("velocity", "velocity"),
+        ("effort", "effort"),
+        ("current", "current"),
+    ],
 )
 def test_drive_target_pairs_map_explicitly(drive, target):
     """Every legal drive maps to exactly one target kind."""
@@ -67,8 +73,7 @@ def test_exactly_one_joint_selector_required():
 def test_duplicate_joints_and_unknown_keys_rejected():
     """Joint lists are duplicate-free and the entry key set is closed."""
     with pytest.raises(ControlError, match="duplicate"):
-        ControlGroup.from_mapping(
-            _group(joints=["shoulder", "shoulder"]))
+        ControlGroup.from_mapping(_group(joints=["shoulder", "shoulder"]))
     with pytest.raises(ControlError, match="unknown keys"):
         ControlGroup.from_mapping(_group(mode="policy"))
 

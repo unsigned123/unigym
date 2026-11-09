@@ -6,6 +6,7 @@ external packs in mount order and falls back to the repository.  Two
 external hits are an error (no silent first-match), and every resolved
 path must stay inside its pack root, symlinks included.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -28,13 +29,10 @@ def _validate_rel(rel: str, ref: str) -> None:
         )
     path = Path(rel)
     if path.is_absolute():
-        raise PackError(
-            f"absolute path in reference {ref!r}; pack references are relative"
-        )
+        raise PackError(f"absolute path in reference {ref!r}; pack references are relative")
     if any(part == ".." for part in path.parts):
         raise PackError(
-            f"'..' component in reference {ref!r}; references stay inside "
-            f"the pack root"
+            f"'..' component in reference {ref!r}; references stay inside " f"the pack root"
         )
 
 
@@ -47,9 +45,7 @@ def _safe_join(root: Path, rel: str, ref: str) -> Path:
     try:
         real.relative_to(base)
     except ValueError:
-        raise PackError(
-            f"reference {ref!r} escapes its pack root {base} (symlink?)"
-        ) from None
+        raise PackError(f"reference {ref!r} escapes its pack root {base} (symlink?)") from None
     return candidate
 
 
@@ -102,8 +98,7 @@ def _miss(ref: str, packs: list[MountedPack]) -> PackError:
     names = [pack.name for pack in packs]
     faces = sorted({face for pack in packs for face in pack.faces})
     message = (
-        f"pack reference {ref!r} not found; mounted packs: {names}; "
-        f"faces searched: {faces}"
+        f"pack reference {ref!r} not found; mounted packs: {names}; " f"faces searched: {faces}"
     )
     hints = _nearest(ref, packs)
     if hints:
@@ -143,24 +138,19 @@ def resolve(ref: str) -> Path:
     packs = _mount.pack_roots()
 
     if ref.startswith(PACK_PREFIX):
-        name, _, rel = ref[len(PACK_PREFIX):].partition("/")
+        name, _, rel = ref[len(PACK_PREFIX) :].partition("/")
         if not name or not rel:
-            raise PackError(
-                f"invalid pack reference {ref!r}; expected 'pack:<name>/<rel>'"
-            )
+            raise PackError(f"invalid pack reference {ref!r}; expected 'pack:<name>/<rel>'")
         pack = _by_name(packs, name)
         if pack.root is None:
-            raise PackError(
-                f"reference {ref!r} names the implicit repo pack; "
-                f"use 'repo:<rel>'"
-            )
+            raise PackError(f"reference {ref!r} names the implicit repo pack; " f"use 'repo:<rel>'")
         candidate = _safe_join(pack.root, rel, ref)
         if candidate.exists():
             return candidate
         raise _miss(ref, packs)
 
     if ref.startswith(REPO_PREFIX):
-        rel = ref[len(REPO_PREFIX):]
+        rel = ref[len(REPO_PREFIX) :]
         _validate_rel(rel, ref)
         candidate = _safe_join(Path(_mount.repo_root()), rel, ref)
         if candidate.exists():

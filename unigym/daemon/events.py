@@ -22,6 +22,7 @@ handlers delegate here, keeping routing module-level per api.py's
 single-sourcing discipline.  docs/contracts/daemon_api_contract.md
 §1.22 is the wire contract twin.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -32,9 +33,9 @@ import threading
 import time
 from collections import deque
 
-RING_SIZE = 256                    # replayed history (design §2 self-healing)
-QUEUE_SIZE = 256                   # per-subscriber buffer (drop-oldest)
-PING_S = 15.0                      # ": ping" keepalive cadence
+RING_SIZE = 256  # replayed history (design §2 self-healing)
+QUEUE_SIZE = 256  # per-subscriber buffer (drop-oldest)
+PING_S = 15.0  # ": ping" keepalive cadence
 # thread convergence: a client that vanished without a TCP reset
 # (half-open) never triggers a write error -- the heartbeat gains the
 # same disconnect detection the MJPEG stream has (media._backlog_ok
@@ -43,11 +44,11 @@ PING_S = 15.0                      # ": ping" keepalive cadence
 # that stays non-draining for SSE_STALL_CHECKS consecutive probes is a
 # dead peer and the handler thread exits.
 SSE_WRITE_TIMEOUT_S = 30.0
-SSE_BACKLOG_BYTES = 262_144        # hard cap on unacked send bytes
-SSE_STALL_CHECKS = 20              # non-draining heartbeats before exit
-                                   # (20 x PING_S = 5 min to declare dead)
+SSE_BACKLOG_BYTES = 262_144  # hard cap on unacked send bytes
+SSE_STALL_CHECKS = 20  # non-draining heartbeats before exit
+# (20 x PING_S = 5 min to declare dead)
 
-DROPPED = "dropped"                # control events (contract §1.22)
+DROPPED = "dropped"  # control events (contract §1.22)
 RESET = "reset"
 
 
@@ -57,8 +58,7 @@ def _matches(types, etype: str) -> bool:
     A family ("run") matches its children ("run.phase"); an exact
     type matches itself.
     """
-    return not types or any(etype == t or etype.startswith(t + ".")
-                            for t in types)
+    return not types or any(etype == t or etype.startswith(t + ".") for t in types)
 
 
 class Subscription:
@@ -88,8 +88,7 @@ class EventBus:
         self._subs: list[Subscription] = []
 
     # -- publishing ---------------------------------------------------------- #
-    def publish(self, etype: str, run_id: str | None = None,
-                data: dict | None = None) -> dict:
+    def publish(self, etype: str, run_id: str | None = None, data: dict | None = None) -> dict:
         """Append to the ring + fan out.
 
         NEVER blocks the publisher and never raises on subscriber
@@ -102,9 +101,13 @@ class EventBus:
         """
         with self._lock:
             self._seq += 1
-            ev = {"seq": self._seq, "ts": round(time.time(), 3),
-                  "type": etype, "run_id": run_id,
-                  "data": dict(data or {})}
+            ev = {
+                "seq": self._seq,
+                "ts": round(time.time(), 3),
+                "type": etype,
+                "run_id": run_id,
+                "data": dict(data or {}),
+            }
             self._ring.append(ev)
             for sub in self._subs:
                 if not sub.wants(ev):
@@ -116,15 +119,20 @@ class EventBus:
                         with contextlib.suppress(queue.Empty):
                             sub.q.get_nowait()
                     with contextlib.suppress(queue.Full):
-                        sub.q.put_nowait({"seq": ev["seq"], "ts": ev["ts"],
-                                          "type": DROPPED, "run_id": None,
-                                          "data": {"lost": 2}})
+                        sub.q.put_nowait(
+                            {
+                                "seq": ev["seq"],
+                                "ts": ev["ts"],
+                                "type": DROPPED,
+                                "run_id": None,
+                                "data": {"lost": 2},
+                            }
+                        )
                         sub.q.put_nowait(ev)
             return ev
 
     # -- subscribing --------------------------------------------------------- #
-    def subscribe(self, types=None, run_id: str | None = None) \
-            -> tuple[Subscription, list[dict]]:
+    def subscribe(self, types=None, run_id: str | None = None) -> tuple[Subscription, list[dict]]:
         """Register a subscriber.
 
         Returns:
@@ -173,8 +181,9 @@ class EventBus:
 def sse_frame(ev: dict) -> bytes:
     """One text/event-stream frame: id/event/data + blank line."""
     data = {"ts": ev["ts"], "run_id": ev["run_id"], **ev["data"]}
-    return (f"id: {ev['seq']}\nevent: {ev['type']}\n"
-            f"data: {json.dumps(data, default=str)}\n\n").encode()
+    return (
+        f"id: {ev['seq']}\nevent: {ev['type']}\n" f"data: {json.dumps(data, default=str)}\n\n"
+    ).encode()
 
 
 def _last_event_id(handler, qs: dict) -> int | None:
@@ -184,8 +193,10 @@ def _last_event_id(handler, qs: dict) -> int | None:
     then the query aliases (curl/agent convenience).  Garbage -> None
     (a fresh live-only subscription, never a 400).
     """
-    raw = handler.headers.get("Last-Event-ID") \
+    raw = (
+        handler.headers.get("Last-Event-ID")
         or (qs.get("lastEventId") or qs.get("last_event_id") or [None])[0]
+    )
     try:
         return int(raw) if raw not in (None, "") else None
     except (TypeError, ValueError):
@@ -206,9 +217,9 @@ def _send_backlog(sock) -> int | None:
         import fcntl
         import struct
         import termios
-        return struct.unpack("i", fcntl.ioctl(
-            sock, termios.TIOCOUTQ, b"\x00" * 4))[0]
-    except (ImportError, OSError, ValueError):   # probe optional (v068)
+
+        return struct.unpack("i", fcntl.ioctl(sock, termios.TIOCOUTQ, b"\x00" * 4))[0]
+    except (ImportError, OSError, ValueError):  # probe optional (v068)
         return None
 
 
@@ -228,8 +239,7 @@ def serve_sse(handler, svc, qs: dict) -> None:
     Any of the three exits the handler thread; ``finally`` unsubscribes.
     """
     bus = svc.events
-    types = [t.strip() for t in (qs.get("types") or [""])[0].split(",")
-             if t.strip()] or None
+    types = [t.strip() for t in (qs.get("types") or [""])[0].split(",") if t.strip()] or None
     run_id = (qs.get("run_id") or [""])[0].strip() or None
     last = _last_event_id(handler, qs)
     sub, replay = bus.subscribe(types=types, run_id=run_id)
@@ -242,16 +252,13 @@ def serve_sse(handler, svc, qs: dict) -> None:
         # so the next heartbeat write fails and the thread exits.
         with contextlib.suppress(OSError, AttributeError):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        for opt, val in (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 10),
-                         ("TCP_KEEPCNT", 6)):
+        for opt, val in (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 6)):
             if hasattr(socket, opt):
                 with contextlib.suppress(OSError):
-                    sock.setsockopt(socket.IPPROTO_TCP,
-                                    getattr(socket, opt), val)
+                    sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), val)
     try:
         handler.send_response(200)
-        handler.send_header("Content-Type",
-                            "text/event-stream; charset=utf-8")
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
         handler.send_header("Cache-Control", "no-cache")
         handler.end_headers()
         w = handler.wfile
@@ -259,11 +266,19 @@ def serve_sse(handler, svc, qs: dict) -> None:
         if last is not None and oldest is not None and last < oldest - 1:
             # ring overflow: the client is past the replay window --
             # tell it to re-pull everything, then keep streaming live
-            w.write(sse_frame({"seq": bus.seq, "ts": time.time(),
-                               "type": RESET, "run_id": None,
-                               "data": {"last": last, "oldest": oldest}}))
+            w.write(
+                sse_frame(
+                    {
+                        "seq": bus.seq,
+                        "ts": time.time(),
+                        "type": RESET,
+                        "run_id": None,
+                        "data": {"last": last, "oldest": oldest},
+                    }
+                )
+            )
         elif last is not None:
-            for ev in replay:              # incremental replay (design §2)
+            for ev in replay:  # incremental replay (design §2)
                 if ev["seq"] > last:
                     w.write(sse_frame(ev))
         w.flush()
@@ -274,27 +289,26 @@ def serve_sse(handler, svc, qs: dict) -> None:
                 ev = sub.q.get(timeout=PING_S)
                 payload = sse_frame(ev)
             except queue.Empty:
-                payload = b": ping\n\n"    # proxy keepalive + liveness probe
+                payload = b": ping\n\n"  # proxy keepalive + liveness probe
             w.write(payload)
             w.flush()
             outq = _send_backlog(sock)
-            if outq is None:               # probe unavailable: error path only
+            if outq is None:  # probe unavailable: error path only
                 stall = 0
                 prev_outq = None
             else:
-                if outq == 0 or (prev_outq is not None
-                                 and outq < prev_outq):
-                    stall = 0              # drained (or draining): alive
+                if outq == 0 or (prev_outq is not None and outq < prev_outq):
+                    stall = 0  # drained (or draining): alive
                 else:
-                    stall += 1             # unacked bytes never leave
+                    stall += 1  # unacked bytes never leave
                 prev_outq = outq
                 if outq > SSE_BACKLOG_BYTES:
                     raise OSError("sse send backlog over cap (dead peer)")
             if stall >= SSE_STALL_CHECKS:
-                raise OSError("sse send queue stalled across "
-                              f"{SSE_STALL_CHECKS} heartbeats (dead peer)")
-    except (BrokenPipeError, ConnectionResetError,
-            ConnectionAbortedError, OSError):
-        pass                               # client hung up
+                raise OSError(
+                    "sse send queue stalled across " f"{SSE_STALL_CHECKS} heartbeats (dead peer)"
+                )
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+        pass  # client hung up
     finally:
         bus.unsubscribe(sub)

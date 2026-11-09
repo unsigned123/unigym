@@ -26,6 +26,7 @@ Callback contract (docs/contracts/runner_contract.md):
 * ``on_run_end()`` — remaining flushes, ``writer.finalize``, summary.json;
   returns the summary dict.
 """
+
 from __future__ import annotations
 
 import json
@@ -76,16 +77,23 @@ def action_face_contract(targets: dict[str, NamedAction]) -> list:
     key are rejected explicitly (pre-playback re-record).
     """
     return [
-        {"key": key, "column": f"action_target/{key}",
-         "joint_names": list(na.joint_names), "kind": na.kind}
+        {
+            "key": key,
+            "column": f"action_target/{key}",
+            "joint_names": list(na.joint_names),
+            "kind": na.kind,
+        }
         for key, na in targets.items()
     ]
 
 
 def _policy_runtimes(env) -> list:
     """Every body control runtime (declaration order, no primary)."""
-    return [c for c in (getattr(env, "controls", {}) or {}).values()
-            if getattr(c, "action_face", None) == getattr(c, "articulation", None)]
+    return [
+        c
+        for c in (getattr(env, "controls", {}) or {}).values()
+        if getattr(c, "action_face", None) == getattr(c, "articulation", None)
+    ]
 
 
 def _policy_runtime(env):
@@ -94,7 +102,8 @@ def _policy_runtime(env):
     if len(runtimes) != 1:
         raise NotImplementedError(
             f"this consumer needs exactly one policy articulation, found "
-            f"{len(runtimes)} (per-articulation metrics are V103.6)")
+            f"{len(runtimes)} (per-articulation metrics are V103.6)"
+        )
     return runtimes[0]
 
 
@@ -106,10 +115,29 @@ def _state_key(rt, leaf: str) -> str:
 class CollectSink:
     """Shard-writing collection sink (the pre-split collect.py behavior)."""
 
-    def __init__(self, *, writer, logger, filter_chain, language_gen,
-                 lang_interval, recorder, adapter, env, num_envs, total_steps,
-                 device, policy_dt, out_dir, seed, episode_length_s,
-                 dur_lo, dur_hi, command_dim, body_parts):
+    def __init__(
+        self,
+        *,
+        writer,
+        logger,
+        filter_chain,
+        language_gen,
+        lang_interval,
+        recorder,
+        adapter,
+        env,
+        num_envs,
+        total_steps,
+        device,
+        policy_dt,
+        out_dir,
+        seed,
+        episode_length_s,
+        dur_lo,
+        dur_hi,
+        command_dim,
+        body_parts,
+    ):
         self.writer = writer
         self.logger = logger
         self.filter_chain = filter_chain
@@ -135,7 +163,8 @@ class CollectSink:
         self._action_faces: list | None = None
         # per-env episode buffer (only when filters active)
         self.ep_bufs: list[list[dict]] = (
-            [[] for _ in range(self.num_envs)] if self.filter_active else [])
+            [[] for _ in range(self.num_envs)] if self.filter_active else []
+        )
         # recorder frame buffer (per-episode, for env record_env only)
         self.rec_frames: list[np.ndarray] = []
         self.rec_ep_id = 0
@@ -176,7 +205,8 @@ class CollectSink:
             raise ValueError(
                 f"action faces changed mid-run: {faces} != "
                 f"{self._action_faces} -- the recorded meta contract "
-                f"(action_faces) would not describe the shard stream")
+                f"(action_faces) would not describe the shard stream"
+            )
         # P11: recovery-switching adapters expose their per-env switch state
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:
@@ -196,9 +226,15 @@ class CollectSink:
                     "wz": ang[:, 2],
                     "base_z": pos[:, 2],
                 }
-                lang_cmd = eff_cmd if eff_cmd is not None else torch.zeros(
-                    self.num_envs, getattr(self.adapter, "self_command_dim", 1),
-                    device=self.device)
+                lang_cmd = (
+                    eff_cmd
+                    if eff_cmd is not None
+                    else torch.zeros(
+                        self.num_envs,
+                        getattr(self.adapter, "self_command_dim", 1),
+                        device=self.device,
+                    )
+                )
                 states = self.adapter.build_language_states(lang_extra, lang_cmd)
                 self.last_language = self.language_gen.describe(states, lang_cmd)
             rec["language"] = self.last_language
@@ -228,8 +264,7 @@ class CollectSink:
         due_list = env_ids.tolist()
         if self.filter_active:
             for ei in due_list:
-                _flush_episode(self.ep_bufs[ei], self.filter_chain,
-                               self.writer, self.logger)
+                _flush_episode(self.ep_bufs[ei], self.filter_chain, self.writer, self.logger)
                 self.ep_bufs[ei] = []
         else:
             for ei in due_list:
@@ -239,12 +274,12 @@ class CollectSink:
         if self.recorder.enabled and self.recorder.record_env in due_list:
             if self.rec_frames:
                 path = os.path.join(
-                    self.out_dir,
-                    f"video_env{self.recorder.record_env}_ep{self.rec_ep_id}.mp4")
+                    self.out_dir, f"video_env{self.recorder.record_env}_ep{self.rec_ep_id}.mp4"
+                )
                 self.recorder.write_video(
-                    self.rec_frames, path, fps=int(round(1.0 / self.policy_dt)))
-                print(f"[collect] wrote {path} "
-                      f"({len(self.rec_frames)} frames)", flush=True)
+                    self.rec_frames, path, fps=int(round(1.0 / self.policy_dt))
+                )
+                print(f"[collect] wrote {path} " f"({len(self.rec_frames)} frames)", flush=True)
                 self.rec_frames = []
             self.rec_ep_id += 1
         self.n_episodes += env_ids.numel()
@@ -264,14 +299,15 @@ class CollectSink:
         for rt in runtimes:
             suffix = "" if len(runtimes) == 1 else f"/{rt.name}"
             step_metrics[f"vx{suffix}"] = float(
-                extra[_state_key(rt, "base_lin_vel_b")][:, 0].mean())
+                extra[_state_key(rt, "base_lin_vel_b")][:, 0].mean()
+            )
             step_metrics[f"base_z{suffix}"] = float(
-                extra[_state_key(rt, "base_pos_w")][:, 2].mean())
+                extra[_state_key(rt, "base_pos_w")][:, 2].mean()
+            )
             contact = extra[_state_key(rt, "foot_contact")]
             for i, name in enumerate(rt.feet):
                 label = foot_metric_label(name)
-                key = (f"duty_{label}" if len(runtimes) == 1
-                       else f"duty_{label}/{rt.name}")
+                key = f"duty_{label}" if len(runtimes) == 1 else f"duty_{label}/{rt.name}"
                 step_metrics[key] = float(contact[:, i].float().mean())
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:  # P11: switch-state distribution
@@ -286,22 +322,24 @@ class CollectSink:
         if self.filter_active:
             for ei in range(self.num_envs):
                 if self.ep_bufs[ei]:
-                    _flush_episode(self.ep_bufs[ei], self.filter_chain,
-                                   self.writer, self.logger)
+                    _flush_episode(self.ep_bufs[ei], self.filter_chain, self.writer, self.logger)
                     self.ep_bufs[ei] = []
 
         # flush remaining recorder frames (incomplete last episode)
         if self.recorder.enabled and self.rec_frames:
             path = os.path.join(
-                self.out_dir, f"video_env{self.recorder.record_env}_ep{self.rec_ep_id}.mp4")
-            self.recorder.write_video(self.rec_frames, path,
-                                      fps=int(round(1.0 / self.policy_dt)))
+                self.out_dir, f"video_env{self.recorder.record_env}_ep{self.rec_ep_id}.mp4"
+            )
+            self.recorder.write_video(self.rec_frames, path, fps=int(round(1.0 / self.policy_dt)))
             print(f"[collect] wrote {path} ({len(self.rec_frames)} frames)", flush=True)
 
         self.writer.finalize()
         wall = time.time() - self._t0
-        total_records = (self.writer.total_steps if self.filter_active
-                         else self.writer.total_steps * self.num_envs)
+        total_records = (
+            self.writer.total_steps
+            if self.filter_active
+            else self.writer.total_steps * self.num_envs
+        )
         summary_extra = {
             "wall_time_s": wall,
             "num_episodes": self.n_episodes,
@@ -321,8 +359,9 @@ class CollectSink:
             },
             "command_dim": self.command_dim,
             "body_parts": self.body_parts,
-            "language_generator": (type(self.language_gen).__name__
-                                   if self.language_gen is not None else None),
+            "language_generator": (
+                type(self.language_gen).__name__ if self.language_gen is not None else None
+            ),
             "language_interval_steps": self.lang_interval,
             # NOTE: terminations config lives in summary["config"] snapshot;
             # summary["terminations"] is reserved for per-term firing fractions
@@ -342,6 +381,7 @@ class CollectSink:
             shards=self.writer.shard_count,
             extra=summary_extra,
         )
-        print("[collect] summary:\n"
-              + json.dumps(summary, indent=2, ensure_ascii=False), flush=True)
+        print(
+            "[collect] summary:\n" + json.dumps(summary, indent=2, ensure_ascii=False), flush=True
+        )
         return summary

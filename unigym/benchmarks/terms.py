@@ -33,6 +33,7 @@ docstring (parameter table + units + return semantics), register it in
 enum/param checks to ``validate_term_spec``, then unit-test against
 hand-computed synthetic episodes.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -82,8 +83,7 @@ def _frames(ep: EpisodeData, key, articulation: str | None = None) -> np.ndarray
         raise ValueError(f"key must be a recorded-key string, got {key!r}")
     key = resolve_episode_key(ep.data, key, articulation)
     if key not in ep.data:
-        raise ValueError(
-            f"episode data has no key '{key}' (available: {sorted(ep.data)})")
+        raise ValueError(f"episode data has no key '{key}' (available: {sorted(ep.data)})")
     return np.asarray(ep.data[key], dtype=float)
 
 
@@ -112,8 +112,9 @@ def _select(x: np.ndarray, spec: dict, what: str) -> np.ndarray:
     return x
 
 
-def _frame_scalars(ep: EpisodeData, spec: dict, what: str,
-                   articulation: str | None = None) -> np.ndarray:
+def _frame_scalars(
+    ep: EpisodeData, spec: dict, what: str, articulation: str | None = None
+) -> np.ndarray:
     """Per-frame scalar series from spec: key (+key2 residual) -> cols ->
     post.  Used by frame_fraction; see module docstring for semantics."""
     x = _check_frames(_frames(ep, spec["key"], articulation), what)
@@ -124,7 +125,8 @@ def _frame_scalars(ep: EpisodeData, spec: dict, what: str,
         if y.shape[0] != x.shape[0]:
             raise ValueError(
                 f"{what}: key2 '{key2}' has T={y.shape[0]} frames, "
-                f"key '{spec['key']}' has T={x.shape[0]} (must align)")
+                f"key '{spec['key']}' has T={x.shape[0]} (must align)"
+            )
         r = r - _select(y, spec, what)
     post = spec.get("post")
     if post == "norm2":
@@ -134,15 +136,15 @@ def _frame_scalars(ep: EpisodeData, spec: dict, what: str,
             raise ValueError(
                 f"{what}: post={post!r} needs exactly one selected column "
                 f"(dims/axis of length 1); got {r.shape[1]} columns "
-                f"(multi-column only supports post: norm2)")
+                f"(multi-column only supports post: norm2)"
+            )
         v = r[:, 0]
         if post == "abs":
             return np.abs(v)
         if post == "x2":
             return np.square(v)
         return v
-    raise ValueError(
-        f"{what}: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
+    raise ValueError(f"{what}: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
 
 
 def _scalar_reduction(v: np.ndarray, spec: dict, what: str) -> float:
@@ -154,15 +156,13 @@ def _scalar_reduction(v: np.ndarray, spec: dict, what: str) -> float:
         return float(v.max())
     if red == "p90":
         return float(np.percentile(v, 90))
-    raise ValueError(
-        f"{what}: unknown reduction {red!r} (whitelist: {', '.join(REDUCTIONS)})")
+    raise ValueError(f"{what}: unknown reduction {red!r} (whitelist: {', '.join(REDUCTIONS)})")
 
 
 # --------------------------------------------------------------------------- #
 # templates
 # --------------------------------------------------------------------------- #
-def term_frame_fraction(ep: EpisodeData, spec: dict,
-                        *, articulation: str | None = None) -> float:
+def term_frame_fraction(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Fraction of frames satisfying a structured predicate.
 
     spec:
@@ -188,31 +188,30 @@ def term_frame_fraction(ep: EpisodeData, spec: dict,
     if "pred_spec" in spec:
         raise NotImplementedError(
             "frame_fraction: pred_spec free-form expressions are rejected "
-            "in v1 (whitelist-only DSL); use {target, tol} or {op, value}")
+            "in v1 (whitelist-only DSL); use {target, tol} or {op, value}"
+        )
     target = spec.get("target")
     if target is not None:
         if "op" in spec:
             raise ValueError(
                 "frame_fraction: predicate forms are mutually exclusive "
-                "({target, tol} vs {op, value})")
+                "({target, tol} vs {op, value})"
+            )
         tol = float(spec.get("tol", 0.0))
         return float((np.abs(v - float(target)) <= tol).mean())
     if "op" in spec:
         op = spec["op"]
         if op not in _OP_FNS:
-            raise ValueError(
-                f"frame_fraction: unknown op {op!r} (whitelist: {', '.join(OPS)})")
+            raise ValueError(f"frame_fraction: unknown op {op!r} (whitelist: {', '.join(OPS)})")
         if "value" not in spec:
-            raise ValueError(
-                "frame_fraction: op form requires a constant 'value'")
+            raise ValueError("frame_fraction: op form requires a constant 'value'")
         return float(_OP_FNS[op](v, float(spec["value"])).mean())
     raise ValueError(
-        "frame_fraction: missing predicate -- provide {target(, tol)} "
-        "or {op, value}")
+        "frame_fraction: missing predicate -- provide {target(, tol)} " "or {op, value}"
+    )
 
 
-def term_frame_mean(ep: EpisodeData, spec: dict,
-                    *, articulation: str | None = None) -> float:
+def term_frame_mean(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Mean over frames of the (transformed) selected values.
 
     spec:
@@ -235,12 +234,10 @@ def term_frame_mean(ep: EpisodeData, spec: dict,
         return float(np.abs(r).mean())
     if post == "x2":
         return float(np.square(r).mean())
-    raise ValueError(
-        f"frame_mean: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
+    raise ValueError(f"frame_mean: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
 
 
-def term_frame_var(ep: EpisodeData, spec: dict,
-                   *, articulation: str | None = None) -> float:
+def term_frame_var(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Population variance (ddof=0) over frames of the transformed values.
 
     spec: identical to ``frame_mean`` (key, dims?, post?).
@@ -260,12 +257,12 @@ def term_frame_var(ep: EpisodeData, spec: dict,
         return float(np.abs(r).var())
     if post == "x2":
         return float(np.square(r).var())
-    raise ValueError(
-        f"frame_var: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
+    raise ValueError(f"frame_var: unknown post {post!r} (whitelist: {', '.join(POSTS)})")
 
 
-def _frame_series(ep: EpisodeData, spec: dict, what: str,
-                  articulation: str | None = None) -> np.ndarray:
+def _frame_series(
+    ep: EpisodeData, spec: dict, what: str, articulation: str | None = None
+) -> np.ndarray:
     """Per-frame series for final/min/max: selected columns, L2-reduced
     when more than one column is selected (raw scalar for one column)."""
     x = _check_frames(_frames(ep, spec["key"], articulation), what)
@@ -275,8 +272,7 @@ def _frame_series(ep: EpisodeData, spec: dict, what: str,
     return np.linalg.norm(r, axis=1)
 
 
-def term_final(ep: EpisodeData, spec: dict,
-               *, articulation: str | None = None) -> float:
+def term_final(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Value of the last frame.
 
     spec:
@@ -290,8 +286,7 @@ def term_final(ep: EpisodeData, spec: dict,
     return float(_frame_series(ep, spec, "final", articulation)[-1])
 
 
-def term_min(ep: EpisodeData, spec: dict,
-             *, articulation: str | None = None) -> float:
+def term_min(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Minimum over frames (same spec/derivation as ``final``).
 
     Returns: float -- min over frames of the per-frame scalar series.
@@ -299,8 +294,7 @@ def term_min(ep: EpisodeData, spec: dict,
     return float(_frame_series(ep, spec, "min", articulation).min())
 
 
-def term_max(ep: EpisodeData, spec: dict,
-             *, articulation: str | None = None) -> float:
+def term_max(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Maximum over frames (same spec/derivation as ``final``).
 
     Returns: float -- max over frames of the per-frame scalar series.
@@ -308,8 +302,7 @@ def term_max(ep: EpisodeData, spec: dict,
     return float(_frame_series(ep, spec, "max", articulation).max())
 
 
-def term_tracking_error(ep: EpisodeData, spec: dict,
-                        *, articulation: str | None = None) -> float:
+def term_tracking_error(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Per-frame ||state[cols] - cmd[cols]||_2 reduced over frames.
 
     spec:
@@ -326,14 +319,13 @@ def term_tracking_error(ep: EpisodeData, spec: dict,
     Returns: float -- the reduced per-frame tracking error (units of the
     signal, m/s for velocities).  p90 = np.percentile(err, 90).
     """
-    s = _check_frames(_frames(ep, spec["state"], articulation),
-                      "tracking_error")
-    c = _check_frames(_frames(ep, spec["cmd"], articulation),
-                      "tracking_error")
+    s = _check_frames(_frames(ep, spec["state"], articulation), "tracking_error")
+    c = _check_frames(_frames(ep, spec["cmd"], articulation), "tracking_error")
     if s.shape[0] != c.shape[0]:
         raise ValueError(
             f"tracking_error: state T={s.shape[0]} != cmd T={c.shape[0]} "
-            "(frame-aligned keys required)")
+            "(frame-aligned keys required)"
+        )
     dims = spec.get("dims", (0, 1))
     cols_s = [int(d) for d in spec.get("state_dims", dims)]
     cols_c = [int(d) for d in spec.get("cmd_dims", dims)]
@@ -341,8 +333,9 @@ def term_tracking_error(ep: EpisodeData, spec: dict,
     return _scalar_reduction(err, spec, "tracking_error")
 
 
-def term_range_check_fraction(ep: EpisodeData, spec: dict,
-                              *, articulation: str | None = None) -> float:
+def term_range_check_fraction(
+    ep: EpisodeData, spec: dict, *, articulation: str | None = None
+) -> float:
     """Fraction of frames whose selected values all lie in [lo, hi].
 
     spec:
@@ -354,20 +347,17 @@ def term_range_check_fraction(ep: EpisodeData, spec: dict,
     Returns: float in [0, 1] -- a frame counts when EVERY selected value
     satisfies lo <= x <= hi.  Units: those of ``key`` for lo/hi.
     """
-    x = _check_frames(_frames(ep, spec["key"], articulation),
-                      "range_check_fraction")
+    x = _check_frames(_frames(ep, spec["key"], articulation), "range_check_fraction")
     r = _select(x, spec, "range_check_fraction")
     lo = float(spec.get("lo", -np.inf))
     hi = float(spec.get("hi", np.inf))
     if lo > hi:
-        raise ValueError(
-            f"range_check_fraction: lo ({lo}) > hi ({hi})")
+        raise ValueError(f"range_check_fraction: lo ({lo}) > hi ({hi})")
     mask = np.all((r >= lo) & (r <= hi), axis=1)
     return float(mask.mean())
 
 
-def term_delta(ep: EpisodeData, spec: dict,
-               *, articulation: str | None = None) -> float:
+def term_delta(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Last-frame value minus first-frame value of the selected columns.
 
     spec:
@@ -396,7 +386,8 @@ def term_delta(ep: EpisodeData, spec: dict,
             raise ValueError(
                 f"delta: multi-column selection ({d.shape[0]} columns) "
                 f"requires a 'reduction' (whitelist: "
-                f"{', '.join(DELTA_REDUCTIONS)})")
+                f"{', '.join(DELTA_REDUCTIONS)})"
+            )
         return float(d[0])
     if red == "mean":
         return float(d.mean())
@@ -405,12 +396,13 @@ def term_delta(ep: EpisodeData, spec: dict,
     if red == "norm2":
         return float(np.linalg.norm(d))
     raise ValueError(
-        f"delta: unknown reduction {red!r} (whitelist: "
-        f"{', '.join(DELTA_REDUCTIONS)})")
+        f"delta: unknown reduction {red!r} (whitelist: " f"{', '.join(DELTA_REDUCTIONS)})"
+    )
 
 
-def term_point_in_box_fraction(ep: EpisodeData, spec: dict,
-                               *, articulation: str | None = None) -> float:
+def term_point_in_box_fraction(
+    ep: EpisodeData, spec: dict, *, articulation: str | None = None
+) -> float:
     """Fraction of frames whose 3D point lies inside an axis-aligned box.
 
     spec:
@@ -425,12 +417,11 @@ def term_point_in_box_fraction(ep: EpisodeData, spec: dict,
     bounds, frame-wise over each axis).  Units: those of ``key`` for
     center/half_extents (m for positions).
     """
-    x = _check_frames(_frames(ep, spec["key"], articulation),
-                      "point_in_box_fraction")
+    x = _check_frames(_frames(ep, spec["key"], articulation), "point_in_box_fraction")
     if x.ndim != 2 or x.shape[1] != 3:
         raise ValueError(
-            f"point_in_box_fraction: key must be a (T, 3) xyz point "
-            f"series, got shape {x.shape}")
+            f"point_in_box_fraction: key must be a (T, 3) xyz point " f"series, got shape {x.shape}"
+        )
     center, half = spec.get("center"), spec.get("half_extents")
     try:
         c = np.asarray(center, dtype=float)
@@ -438,21 +429,22 @@ def term_point_in_box_fraction(ep: EpisodeData, spec: dict,
     except (TypeError, ValueError) as exc:
         raise ValueError(
             f"point_in_box_fraction: center/half_extents must be [x, y, z] "
-            f"number lists, got {center!r} / {half!r}") from exc
+            f"number lists, got {center!r} / {half!r}"
+        ) from exc
     if c.shape != (3,) or h.shape != (3,):
         raise ValueError(
             f"point_in_box_fraction: center/half_extents must have exactly "
-            f"3 numbers each, got shapes {c.shape} / {h.shape}")
+            f"3 numbers each, got shapes {c.shape} / {h.shape}"
+        )
     if (h < 0).any():
         raise ValueError(
-            f"point_in_box_fraction: half_extents must be non-negative, "
-            f"got {half!r}")
+            f"point_in_box_fraction: half_extents must be non-negative, " f"got {half!r}"
+        )
     inside = np.all((x >= c - h) & (x <= c + h), axis=1)
     return float(inside.mean())
 
 
-def term_reference_mpjpe(ep: EpisodeData, spec: dict,
-                         *, articulation: str | None = None) -> float:
+def term_reference_mpjpe(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Mean per-joint error of ``key`` against a reference motion npz.
 
     spec:
@@ -475,28 +467,27 @@ def term_reference_mpjpe(ep: EpisodeData, spec: dict,
     if not ref_path.is_absolute():
         ref_path = REFERENCES_DIR / ref_path
     if not ref_path.is_file():
-        raise ValueError(
-            f"reference_mpjpe: reference file not found: {ref_path}")
+        raise ValueError(f"reference_mpjpe: reference file not found: {ref_path}")
     with np.load(ref_path) as npz:
         if key not in npz.files:
             raise ValueError(
                 f"reference_mpjpe: reference npz {ref_path.name} has no "
-                f"key '{key}' (available: {sorted(npz.files)})")
+                f"key '{key}' (available: {sorted(npz.files)})"
+            )
         ref = np.asarray(npz[key], dtype=float)  # (R, J[, D])
     n_ref = ref.shape[0]
     if x.shape[0] < n_ref:
         raise ValueError(
             f"reference_mpjpe: episode shorter than reference "
             f"(T={x.shape[0]} < R={n_ref}); only over-long episodes are "
-            "clamped, shorter ones are a definition error")
+            "clamped, shorter ones are a definition error"
+        )
     diff = x[:n_ref] - ref  # clamp over-long episodes to R frames
-    per_joint = (np.linalg.norm(diff, axis=-1) if diff.ndim == 3
-                 else np.abs(diff))
+    per_joint = np.linalg.norm(diff, axis=-1) if diff.ndim == 3 else np.abs(diff)
     return float(per_joint.mean())
 
 
-def term_contact_any(ep: EpisodeData, spec: dict,
-                     *, articulation: str | None = None) -> float:
+def term_contact_any(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Fraction of frames where a DECLARED contact group holds.
 
     The generic hand/contact criterion primitive : consumes a
@@ -520,8 +511,7 @@ def term_contact_any(ep: EpisodeData, spec: dict,
     pairwise groups (e.g. hand_crate_left); the per-B any/all replaces
     the retired auto held-key family.
     """
-    return float(_contact_series(ep, spec, "contact_any",
-                                 articulation).mean())
+    return float(_contact_series(ep, spec, "contact_any", articulation).mean())
 
 
 # --------------------------------------------------------------------------- #
@@ -536,9 +526,9 @@ from .holding import hold_predicate_series as _hold_predicate_series
 from .holding import validate_hold_specs as _validate_hold_specs
 
 
-def term_keypoint_in_region_fraction(ep: EpisodeData, spec: dict,
-                                     *,
-                                     articulation: str | None = None) -> float:
+def term_keypoint_in_region_fraction(
+    ep: EpisodeData, spec: dict, *, articulation: str | None = None
+) -> float:
     """Fraction of frames where enough eroded bbox keypoints of a moving
     body lie inside a spawn region attached to another body.
 
@@ -570,12 +560,12 @@ def term_keypoint_in_region_fraction(ep: EpisodeData, spec: dict,
     Returns: float in [0, 1] -- fraction of frames where the predicate
     holds.  Dimensionless.
     """
-    return float(_keypoint_region_series(
-        ep, spec, "keypoint_in_region_fraction", articulation).mean())
+    return float(
+        _keypoint_region_series(ep, spec, "keypoint_in_region_fraction", articulation).mean()
+    )
 
 
-def term_hold_streak(ep: EpisodeData, spec: dict,
-                     *, articulation: str | None = None) -> float:
+def term_hold_streak(ep: EpisodeData, spec: dict, *, articulation: str | None = None) -> float:
     """Longest run of CONSECUTIVE frames where every declared per-frame
     predicate holds simultaneously (frame-level AND, then max run length).
 
@@ -605,11 +595,11 @@ def term_hold_streak(ep: EpisodeData, spec: dict,
     if not isinstance(specs, (list, tuple)) or not specs:
         raise ValueError(
             "hold_streak: 'specs' must be a non-empty list of per-frame "
-            f"predicate declarations, got {specs!r}")
+            f"predicate declarations, got {specs!r}"
+        )
     series: np.ndarray | None = None
     for i, sub in enumerate(specs):
-        s = _hold_predicate_series(ep, sub, f"hold_streak.specs[{i}]",
-                                   articulation)
+        s = _hold_predicate_series(ep, sub, f"hold_streak.specs[{i}]", articulation)
         series = s if series is None else (series & s)
     x = np.asarray(series, dtype=np.int8)
     edges = np.diff(np.concatenate(([0], x, [0])))
@@ -663,35 +653,30 @@ def _post_series(ep, spec, what, articulation=None):
 
 
 def _frames_tracking_error(ep, spec, articulation=None):
-    s = _check_frames(_frames(ep, spec["state"], articulation),
-                      "tracking_error")
-    c = _check_frames(_frames(ep, spec["cmd"], articulation),
-                      "tracking_error")
+    s = _check_frames(_frames(ep, spec["state"], articulation), "tracking_error")
+    c = _check_frames(_frames(ep, spec["cmd"], articulation), "tracking_error")
     dims = spec.get("dims", (0, 1))
-    return np.linalg.norm(s[:, [int(d) for d in
-                                spec.get("state_dims", dims)]] -
-                          c[:, [int(d) for d in
-                                spec.get("cmd_dims", dims)]], axis=1)
+    return np.linalg.norm(
+        s[:, [int(d) for d in spec.get("state_dims", dims)]]
+        - c[:, [int(d) for d in spec.get("cmd_dims", dims)]],
+        axis=1,
+    )
 
 
 def _frames_reference_mpjpe(ep, spec, articulation=None):
-    x = _check_frames(_frames(ep, spec["key"], articulation),
-                      "reference_mpjpe")
+    x = _check_frames(_frames(ep, spec["key"], articulation), "reference_mpjpe")
     ref_path = Path(spec["reference"])
     if not ref_path.is_absolute():
         ref_path = REFERENCES_DIR / ref_path
     with np.load(ref_path) as npz:
         ref = np.asarray(npz[spec["key"]], dtype=float)
-    diff = x[:ref.shape[0]] - ref
-    per_joint = (np.linalg.norm(diff, axis=-1) if diff.ndim == 3
-                 else np.abs(diff))
-    return per_joint.mean(axis=tuple(range(1, per_joint.ndim))) \
-        if per_joint.ndim > 1 else per_joint
+    diff = x[: ref.shape[0]] - ref
+    per_joint = np.linalg.norm(diff, axis=-1) if diff.ndim == 3 else np.abs(diff)
+    return per_joint.mean(axis=tuple(range(1, per_joint.ndim))) if per_joint.ndim > 1 else per_joint
 
 
 def _frames_contact_any(ep, spec, articulation=None):
-    return _contact_series(ep, spec, "contact_any",
-                           articulation).astype(np.float64)
+    return _contact_series(ep, spec, "contact_any", articulation).astype(np.float64)
 
 
 def _frames_hold_streak(ep, spec, articulation=None):
@@ -700,45 +685,40 @@ def _frames_hold_streak(ep, spec, articulation=None):
     (the sequence its streak counter consumed)."""
     series = None
     for i, sub in enumerate(spec.get("specs") or []):
-        s = _hold_predicate_series(ep, sub, f"hold_streak.specs[{i}]",
-                                   articulation)
+        s = _hold_predicate_series(ep, sub, f"hold_streak.specs[{i}]", articulation)
         series = s if series is None else (series & s)
-    if series is None:                      # pragma: no cover -- schema
+    if series is None:  # pragma: no cover -- schema
         raise ValueError("hold_streak: empty 'specs'")  # guards this
     return series.astype(np.float64)
 
 
 def _frames_point_in_box(ep, spec, articulation=None):
-    x = _check_frames(_frames(ep, spec["key"], articulation),
-                      "point_in_box_fraction")
+    x = _check_frames(_frames(ep, spec["key"], articulation), "point_in_box_fraction")
     c = np.asarray(spec["center"], dtype=float)
     h = np.asarray(spec["half_extents"], dtype=float)
     return np.all((x >= c - h) & (x <= c + h), axis=1).astype(np.float64)
 
 
 def _frames_keypoint_region(ep, spec, articulation=None):
-    return _keypoint_region_series(
-        ep, spec, "keypoint_in_region_fraction",
-        articulation).astype(np.float64)
+    return _keypoint_region_series(ep, spec, "keypoint_in_region_fraction", articulation).astype(
+        np.float64
+    )
 
 
 def _frames_range_check(ep, spec, articulation=None):
-    x = _check_frames(_frames(ep, spec["key"], articulation),
-                      "range_check_fraction")
+    x = _check_frames(_frames(ep, spec["key"], articulation), "range_check_fraction")
     sel = _select(x, spec, "r")
-    return np.all((sel >= float(spec.get("lo", -np.inf))) &
-                  (sel <= float(spec.get("hi", np.inf))),
-                  axis=1).astype(np.float64)
+    return np.all(
+        (sel >= float(spec.get("lo", -np.inf))) & (sel <= float(spec.get("hi", np.inf))), axis=1
+    ).astype(np.float64)
 
 
 # term -> per-frame series (the sequence its reduction consumed); None
 # entries = no natural per-frame face (delta is an endpoint pair)
 TERM_FRAMES: dict[str, Callable[..., object]] = {
     "frame_fraction": _frames_fraction,
-    "frame_mean": lambda ep, spec, a=None: _post_series(
-        ep, spec, "frame_mean", a),
-    "frame_var": lambda ep, spec, a=None: _post_series(
-        ep, spec, "frame_var", a),
+    "frame_mean": lambda ep, spec, a=None: _post_series(ep, spec, "frame_mean", a),
+    "frame_var": lambda ep, spec, a=None: _post_series(ep, spec, "frame_var", a),
     "final": lambda ep, spec, a=None: _frame_series(ep, spec, "final", a),
     "min": lambda ep, spec, a=None: _frame_series(ep, spec, "min", a),
     "max": lambda ep, spec, a=None: _frame_series(ep, spec, "max", a),
@@ -753,8 +733,7 @@ TERM_FRAMES: dict[str, Callable[..., object]] = {
 }
 
 
-def metric_frames(term: str, ep: EpisodeData, spec: dict,
-                  articulation: str | None = None):
+def metric_frames(term: str, ep: EpisodeData, spec: dict, articulation: str | None = None):
     """The per-frame series behind a term's scalar (float64 (T,)), or None
     when the template has no natural per-frame face (``delta``).  Purely
     the pre-reduction sequence -- metric_frames(...) reduced with the
@@ -777,30 +756,27 @@ TERM_REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "reference_mpjpe": ("key", "reference"),
     "contact_any": ("contact", "reduce_bodies"),
     "hold_streak": ("specs",),
-    "keypoint_in_region_fraction": ("points", "bbox", "region",
-                                    "min_points", "erode"),
+    "keypoint_in_region_fraction": ("points", "bbox", "region", "min_points", "erode"),
 }
 
 
 def get_term(name) -> object:
     """Whitelist lookup; unknown names raise ValueError listing options."""
     if name not in TERM_REGISTRY:
-        raise ValueError(
-            f"unknown term '{name}' (whitelist: {sorted(TERM_REGISTRY)})")
+        raise ValueError(f"unknown term '{name}' (whitelist: {sorted(TERM_REGISTRY)})")
     return TERM_REGISTRY[name]
 
 
-def _check_dims(spec: dict, errors: list[str], where: str,
-                key: str = "dims") -> None:
+def _check_dims(spec: dict, errors: list[str], where: str, key: str = "dims") -> None:
     dims = spec.get(key)
     if dims is None:
         return
-    if (not isinstance(dims, (list, tuple)) or not dims
-            or not all(isinstance(d, int) and not isinstance(d, bool)
-                       for d in dims)):
-        errors.append(
-            f"{where}.{key}: must be a non-empty list of int columns, "
-            f"got {dims!r}")
+    if (
+        not isinstance(dims, (list, tuple))
+        or not dims
+        or not all(isinstance(d, int) and not isinstance(d, bool) for d in dims)
+    ):
+        errors.append(f"{where}.{key}: must be a non-empty list of int columns, " f"got {dims!r}")
 
 
 def validate_term_spec(term, spec: dict) -> list[str]:
@@ -820,53 +796,47 @@ def validate_term_spec(term, spec: dict) -> list[str]:
             errors.append(
                 f"{where}.pred_spec: free-form expressions are not "
                 "supported in v1 (whitelist-only DSL); use target/tol or "
-                "op/value")
-        target, op, value = spec.get("target"), spec.get("op"), \
-            spec.get("value")
+                "op/value"
+            )
+        target, op, value = spec.get("target"), spec.get("op"), spec.get("value")
         if target is not None and op is not None:
             errors.append(
-                f"{where}: predicate forms are mutually exclusive "
-                "({target, tol} vs {op, value})")
+                f"{where}: predicate forms are mutually exclusive " "({target, tol} vs {op, value})"
+            )
         if op is not None:
             if op not in OPS:
-                errors.append(
-                    f"{where}.op: unknown op {op!r} (whitelist: "
-                    f"{', '.join(OPS)})")
+                errors.append(f"{where}.op: unknown op {op!r} (whitelist: " f"{', '.join(OPS)})")
             if value is None:
-                errors.append(
-                    f"{where}: op form requires a constant 'value'")
+                errors.append(f"{where}: op form requires a constant 'value'")
         if target is None and op is None and "pred_spec" not in spec:
             errors.append(
-                f"{where}: missing predicate -- provide "
-                "{target(, tol)} or {op, value}")
+                f"{where}: missing predicate -- provide " "{target(, tol)} or {op, value}"
+            )
         if "tol" in spec and target is None:
-            errors.append(
-                f"{where}.tol: only valid together with 'target'")
+            errors.append(f"{where}.tol: only valid together with 'target'")
         post = spec.get("post")
         if post is not None and post not in POSTS:
             errors.append(
-                f"{where}.post: unknown post {post!r} (whitelist: "
-                f"{', '.join(POSTS)})")
-        if post in ("abs", "x2") and spec.get("dims") is None \
-                and spec.get("axis") is None:
+                f"{where}.post: unknown post {post!r} (whitelist: " f"{', '.join(POSTS)})"
+            )
+        if post in ("abs", "x2") and spec.get("dims") is None and spec.get("axis") is None:
             errors.append(
                 f"{where}.post: {post!r} needs pinned single column "
-                "(dims/axis); multi-column only supports norm2")
+                "(dims/axis); multi-column only supports norm2"
+            )
         if spec.get("dims") is not None and spec.get("axis") is not None:
-            errors.append(
-                f"{where}: 'dims' and 'axis' are mutually exclusive")
+            errors.append(f"{where}: 'dims' and 'axis' are mutually exclusive")
         _check_dims(spec, errors, where)
         if spec.get("axis") is not None and (
-                not isinstance(spec["axis"], int)
-                or isinstance(spec["axis"], bool)):
-            errors.append(f"{where}.axis: must be an int column, got "
-                          f"{spec['axis']!r}")
+            not isinstance(spec["axis"], int) or isinstance(spec["axis"], bool)
+        ):
+            errors.append(f"{where}.axis: must be an int column, got " f"{spec['axis']!r}")
     elif term in ("frame_mean", "frame_var"):
         post = spec.get("post")
         if post is not None and post not in POSTS:
             errors.append(
-                f"{where}.post: unknown post {post!r} (whitelist: "
-                f"{', '.join(POSTS)})")
+                f"{where}.post: unknown post {post!r} (whitelist: " f"{', '.join(POSTS)})"
+            )
         _check_dims(spec, errors, where)
     elif term in ("final", "min", "max"):
         _check_dims(spec, errors, where)
@@ -880,18 +850,22 @@ def validate_term_spec(term, spec: dict) -> list[str]:
         if red not in REDUCTIONS:
             errors.append(
                 f"{where}.reduction: unknown reduction {red!r} (whitelist: "
-                f"{', '.join(REDUCTIONS)})")
+                f"{', '.join(REDUCTIONS)})"
+            )
         _check_dims(spec, errors, where)
     elif term == "range_check_fraction":
         _check_dims(spec, errors, where)
         lo, hi = spec.get("lo"), spec.get("hi")
         for name_, v in (("lo", lo), ("hi", hi)):
-            if v is not None and (isinstance(v, bool)
-                                  or not isinstance(v, (int, float))):
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
                 errors.append(f"{where}.{name_}: must be a number, got {v!r}")
-        if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) \
-                and not isinstance(lo, bool) and not isinstance(hi, bool) \
-                and lo > hi:
+        if (
+            isinstance(lo, (int, float))
+            and isinstance(hi, (int, float))
+            and not isinstance(lo, bool)
+            and not isinstance(hi, bool)
+            and lo > hi
+        ):
             errors.append(f"{where}: lo ({lo}) > hi ({hi})")
     elif term == "delta":
         _check_dims(spec, errors, where)
@@ -899,20 +873,24 @@ def validate_term_spec(term, spec: dict) -> list[str]:
         if red is not None and red not in DELTA_REDUCTIONS:
             errors.append(
                 f"{where}.reduction: unknown reduction {red!r} (whitelist: "
-                f"{', '.join(DELTA_REDUCTIONS)})")
+                f"{', '.join(DELTA_REDUCTIONS)})"
+            )
     elif term == "point_in_box_fraction":
         for p in ("center", "half_extents"):
             v = spec.get(p)
-            ok = (isinstance(v, (list, tuple)) and len(v) == 3
-                  and all(isinstance(x, (int, float))
-                          and not isinstance(x, bool) for x in v))
+            ok = (
+                isinstance(v, (list, tuple))
+                and len(v) == 3
+                and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
+            )
             if not ok:
-                errors.append(
-                    f"{where}.{p}: must be [x, y, z] numbers, got {v!r}")
-            elif (p == "half_extents" and isinstance(v, (list, tuple))
-                  and any(isinstance(x, (int, float)) and x < 0 for x in v)):
-                errors.append(
-                    f"{where}.{p}: all half lengths must be >= 0, got {v!r}")
+                errors.append(f"{where}.{p}: must be [x, y, z] numbers, got {v!r}")
+            elif (
+                p == "half_extents"
+                and isinstance(v, (list, tuple))
+                and any(isinstance(x, (int, float)) and x < 0 for x in v)
+            ):
+                errors.append(f"{where}.{p}: all half lengths must be >= 0, got {v!r}")
     elif term == "reference_mpjpe":
         ref = spec.get("reference")
         if isinstance(ref, str):
@@ -922,20 +900,20 @@ def validate_term_spec(term, spec: dict) -> list[str]:
             if not p.is_file():
                 errors.append(
                     f"{where}.reference: file not found: {p} (absolute "
-                    f"path or relative to {REFERENCES_DIR})")
+                    f"path or relative to {REFERENCES_DIR})"
+                )
         elif "reference" in spec:
-            errors.append(
-                f"{where}.reference: must be an npz path string, got {ref!r}")
+            errors.append(f"{where}.reference: must be an npz path string, got {ref!r}")
     elif term == "contact_any":
         c = spec.get("contact")
         if "contact" in spec and (not isinstance(c, str) or not c):
             errors.append(
                 f"{where}.contact: must be a recorded-key string "
-                f"(contact/<name> or a bare group name), got {c!r}")
+                f"(contact/<name> or a bare group name), got {c!r}"
+            )
         red = spec.get("reduce_bodies")
         if "reduce_bodies" in spec and red not in ("any", "all"):
-            errors.append(
-                f"{where}.reduce_bodies: must be 'any' or 'all', got {red!r}")
+            errors.append(f"{where}.reduce_bodies: must be 'any' or 'all', got {red!r}")
     elif term == "keypoint_in_region_fraction":
         errors.extend(_validate_keypoint_region_spec(spec, where))
     elif term == "hold_streak":

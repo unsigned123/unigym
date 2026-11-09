@@ -24,6 +24,7 @@ at the sampled placement (post-compile ``body_pos``/``body_quat`` mutation
 the ``object/<name>/{pos,quat}`` record layer and per-joint ``qpos`` for
 the ``object/<name>/joints/<jname>`` keys.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -64,13 +65,15 @@ def add_articulation_body(mjspec, handler) -> None:
         raise ValueError(
             f"articulation prop {spec.name!r}: latch declaration is "
             f"isaaclab-only ; remove spec.latch on the mujoco "
-            f"backend")
+            f"backend"
+        )
     child = load_spec(spec.asset)
     tops = list(child.worldbody.bodies)
     if len(tops) != 1:
         raise ValueError(
             f"articulation prop {spec.name!r}: asset must declare exactly "
-            f"one top-level body (found: {[b.name for b in tops]})")
+            f"one top-level body (found: {[b.name for b in tops]})"
+        )
     subtree = list(_iter_bodies(tops[0]))
     for b in subtree:
         for j in b.joints:
@@ -78,27 +81,28 @@ def add_articulation_body(mjspec, handler) -> None:
                 raise ValueError(
                     f"articulation prop {spec.name!r}: asset joint "
                     f"{j.name!r} is a freejoint -- anchored semantics "
-                    f"forbid free joints in the fragment")
-    asset_joints: dict[str, mujoco.MjsJoint] = {
-        j.name: j for b in subtree for j in b.joints}
+                    f"forbid free joints in the fragment"
+                )
+    asset_joints: dict[str, mujoco.MjsJoint] = {j.name: j for b in subtree for j in b.joints}
     missing = [n for n in declared if n not in asset_joints]
     if missing:
         raise ValueError(
             f"articulation prop {spec.name!r}: declared joints {missing} "
-            f"not in the asset joints {sorted(asset_joints)}")
+            f"not in the asset joints {sorted(asset_joints)}"
+        )
     undeclared = [n for n in asset_joints if n not in declared]
     if undeclared:
         raise ValueError(
             f"articulation prop {spec.name!r}: asset joints {undeclared} "
             f"are not declared in spec.joints (every asset joint must be "
-            f"declared)")
+            f"declared)"
+        )
     # pre-attach: config damping / optional declared range onto the joints
     # (a declared range implies limited under the default autolimits rule;
     # asset-declared limits pass through untouched)
     ranges: dict[str, list] = {}
     for jname, jobj in asset_joints.items():
-        jobj.damping = np.asarray(
-            [declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
+        jobj.damping = np.asarray([declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
         if declared[jname]["range"] is not None:
             lo, hi = declared[jname]["range"]
             jobj.range = np.asarray([lo, hi], dtype=np.float64)
@@ -125,7 +129,9 @@ def add_articulation_body(mjspec, handler) -> None:
             # position servo: force = kp*ctrl - kp*q - kd*dq  (biasprm[1]
             # carries the NEGATED stiffness -- the mjcf <position> form)
             biasprm=np.array([0.0, -kp, -kd] + [0.0] * 7),
-            ctrllimited=limited, ctrlrange=[lo, hi])
+            ctrllimited=limited,
+            ctrlrange=[lo, hi],
+        )
 
 
 def add_free_articulation_body(mjspec, handler) -> None:
@@ -148,56 +154,63 @@ def add_free_articulation_body(mjspec, handler) -> None:
     if getattr(handler, "latch_enabled", False):
         raise ValueError(
             f"free_articulation prop {spec.name!r}: latch declaration is "
-            f"isaaclab-only ; remove spec.latch on the mujoco backend")
+            f"isaaclab-only ; remove spec.latch on the mujoco backend"
+        )
     child = load_spec(spec.asset)
     tops = list(child.worldbody.bodies)
     if len(tops) != 1:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: asset must declare "
-            f"exactly one top-level body (found: {[b.name for b in tops]})")
+            f"exactly one top-level body (found: {[b.name for b in tops]})"
+        )
     root = tops[0]
     root_joints = list(root.joints)
-    free = [j for j in root_joints
-            if int(j.type) == int(mujoco.mjtJoint.mjJNT_FREE)]
+    free = [j for j in root_joints if int(j.type) == int(mujoco.mjtJoint.mjJNT_FREE)]
     if len(free) != 1 or len(root_joints) != 1:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: the asset root body "
             f"{root.name!r} must carry exactly one freejoint and no other "
-            f"joint (found: {[(j.name, int(j.type)) for j in root_joints]})")
+            f"joint (found: {[(j.name, int(j.type)) for j in root_joints]})"
+        )
     if free[0].name in declared:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: the freejoint "
             f"{free[0].name!r} is the prop's live dof -- it is not a "
-            f"declarable joint (declare the INTERNAL joints only)")
+            f"declarable joint (declare the INTERNAL joints only)"
+        )
     subtree = list(_iter_bodies(root))
     asset_joints: dict[str, mujoco.MjsJoint] = {
-        j.name: j for b in subtree
+        j.name: j
+        for b in subtree
         for j in b.joints
-        if int(j.type) != int(mujoco.mjtJoint.mjJNT_FREE)}
+        if int(j.type) != int(mujoco.mjtJoint.mjJNT_FREE)
+    }
     missing = [n for n in declared if n not in asset_joints]
     if missing:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: declared joints "
-            f"{missing} not in the asset joints {sorted(asset_joints)}")
+            f"{missing} not in the asset joints {sorted(asset_joints)}"
+        )
     undeclared = [n for n in asset_joints if n not in declared]
     if undeclared:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: asset joints "
             f"{undeclared} are not declared in spec.joints (every internal "
-            f"asset joint must be declared)")
+            f"asset joint must be declared)"
+        )
     actuated = [n for n, p in declared.items() if p["mode"] != "passive"]
     if actuated:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: passive-only in v1 "
             f"(got actuated {actuated} -- the free-root servo/action face "
-            f"is unexercised scope)")
+            f"is unexercised scope)"
+        )
     # pre-attach: config damping / optional declared range onto the
     # internal joints (the freejoint passes through untouched -- the
     # asset's free damping is part of the dump-verbatim contract)
     ranges: dict[str, list] = {}
     for jname, jobj in asset_joints.items():
-        jobj.damping = np.asarray(
-            [declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
+        jobj.damping = np.asarray([declared[jname]["damping"], 0.0, 0.0], dtype=np.float64)
         if declared[jname]["range"] is not None:
             lo, hi = declared[jname]["range"]
             jobj.range = np.asarray([lo, hi], dtype=np.float64)
@@ -223,8 +236,7 @@ class MujocoPropArticulation:
         self._root_name = ""
         self.joints: dict[str, dict] = {}
         self._inits: dict[str, float] = {}
-        self._asset_ranges: dict[str, list] = getattr(
-            handler, "_asset_ranges", {})
+        self._asset_ranges: dict[str, list] = getattr(handler, "_asset_ranges", {})
         self._env = None
 
     # ------------------------------------------------------------------ #
@@ -238,33 +250,32 @@ class MujocoPropArticulation:
         cands = [b for b in ir.bodies if b.name.startswith(prefix)]
         # the subtree root is the candidate whose parent lies OUTSIDE the
         # prefixed set (world or an unrelated body)
-        roots = [b for b in cands
-                 if not (b.parent and b.parent.startswith(prefix))]
+        roots = [b for b in cands if not (b.parent and b.parent.startswith(prefix))]
         if len(roots) != 1:
             raise ValueError(
                 f"articulation prop {self.name!r}: expected exactly one "
                 f"root body under prefix {prefix!r}, found "
-                f"{[b.body_id for b in roots]}")
+                f"{[b.body_id for b in roots]}"
+            )
         self.root_bid = int(roots[0].body_id)
         self._root_name = roots[0].name
         # compiled IR rows are emitted in native model order, so the row
         # index IS the native joint id (Joint carries addresses, not an id)
         joint_ids = {j.name: i for i, j in enumerate(ir.joints)}
         self._inits: dict[str, float] = {}
-        for jname in (self.spec.joints or {}):
+        for jname in self.spec.joints or {}:
             internal = f"{prefix}{jname}"
             if internal not in ir.joints:
                 raise ValueError(
                     f"articulation prop {self.name!r}: joint {jname!r} "
-                    f"({internal!r}) not in the MJ model")
+                    f"({internal!r}) not in the MJ model"
+                )
             jid = joint_ids[internal]
             # the VALIDATED table when the handler carries one; the raw
             # spec declaration otherwise (test stubs bind pre-validation)
-            decl = (self._joints_decl.get(jname)
-                    or (self.spec.joints or {}).get(jname) or {})
+            decl = self._joints_decl.get(jname) or (self.spec.joints or {}).get(jname) or {}
             init = float(decl.get("init", 0.0))
-            if decl.get("range") is None \
-                    and jname in self._asset_ranges:
+            if decl.get("range") is None and jname in self._asset_ranges:
                 # no declared range: re-check the init against the ASSET
                 # range the build recorded (the declaration-level check
                 # only covers an explicitly declared range)
@@ -273,31 +284,30 @@ class MujocoPropArticulation:
                     raise ValueError(
                         f"articulation prop {self.name!r}: joint {jname!r} "
                         f"init {init!r} outside the asset range "
-                        f"[{lo!r}, {hi!r}]")
+                        f"[{lo!r}, {hi!r}]"
+                    )
             self._inits[jname] = init
             act_name = f"{internal}_act"
-            act_row = ir.actuators[act_name] \
-                if act_name in ir.actuators else None
-            adr = -1 if act_row is None or act_row.actuator_id is None \
-                else int(act_row.actuator_id)
+            act_row = ir.actuators[act_name] if act_name in ir.actuators else None
+            adr = -1 if act_row is None or act_row.actuator_id is None else int(act_row.actuator_id)
             joint = ir.joints[internal]
             qpos_adr = joint.qpos_adr
             dof_adr = joint.dof_adr
             if qpos_adr is None or dof_adr is None:
                 raise ValueError(
                     f"articulation prop {self.name!r}: joint {internal!r} "
-                    f"is not compiled (missing qpos/dof address)")
+                    f"is not compiled (missing qpos/dof address)"
+                )
             self.joints[jname] = {
                 "jid": jid,
                 "qadr": int(qpos_adr),
                 "dadr": int(dof_adr),
-                "act_adr": adr,   # -1 for passive joints
+                "act_adr": adr,  # -1 for passive joints
             }
 
     def actuated_addresses(self) -> dict[str, int]:
         """``{jname: ctrl address}`` for the actuated joints (resolver)."""
-        return {n: j["act_adr"] for n, j in self.joints.items()
-                if j["act_adr"] >= 0}
+        return {n: j["act_adr"] for n, j in self.joints.items() if j["act_adr"] >= 0}
 
     # ------------------------------------------------------------------ #
     def on_reset(self, m, d, env_ids=None) -> None:
@@ -314,8 +324,7 @@ class MujocoPropArticulation:
 
         x, y, z, yaw = self._placement.sample(1, "cpu")[0].tolist()
         m.body_pos[self.root_bid] = [x, y, z]
-        m.body_quat[self.root_bid] = [np.cos(yaw / 2), 0.0, 0.0,
-                                      np.sin(yaw / 2)]
+        m.body_quat[self.root_bid] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
         for jname, j in self.joints.items():
             d.qpos[j["qadr"]] = self._inits[jname]
             d.qvel[j["dadr"]] = 0.0
@@ -325,8 +334,7 @@ class MujocoPropArticulation:
     def _require_env(self):
         """The bound env (fail-fast when the runtime is unbound/closed)."""
         if self._env is None:
-            raise RuntimeError(
-                f"articulation prop {self.name!r} is not bound to an env")
+            raise RuntimeError(f"articulation prop {self.name!r} is not bound to an env")
         return self._env
 
     def get_world_pose(self, e: int = 0):
@@ -335,16 +343,16 @@ class MujocoPropArticulation:
         d = env.mj_datas[e]
         pos = np.asarray(d.xpos[self.root_bid], dtype=np.float32)
         quat = np.asarray(d.xquat[self.root_bid], dtype=np.float32)
-        return (torch.from_numpy(pos).unsqueeze(0),
-                torch.from_numpy(quat).unsqueeze(0))
+        return (torch.from_numpy(pos).unsqueeze(0), torch.from_numpy(quat).unsqueeze(0))
 
     def get_joint_states(self, e: int = 0) -> dict[str, torch.Tensor]:
         """``{jname: (1,1) f32}`` joint positions (record/state face)."""
         env = self._require_env()
         d = env.mj_datas[e]
-        return {n: torch.tensor([[float(d.qpos[j["qadr"]])]],
-                                dtype=torch.float32)
-                for n, j in self.joints.items()}
+        return {
+            n: torch.tensor([[float(d.qpos[j["qadr"]])]], dtype=torch.float32)
+            for n, j in self.joints.items()
+        }
 
     def close(self) -> None:
         """Release the joint table (PropArticulation lifecycle)."""
@@ -382,14 +390,16 @@ class MujocoPropFreeArticulation(MujocoPropArticulation):
         if len(joints) != 1 or joints[0].type != "free":
             raise ValueError(
                 f"free_articulation prop {self.name!r}: the attached root "
-                f"body lost its freejoint (compiled model drift)")
+                f"body lost its freejoint (compiled model drift)"
+            )
         joint = joints[0]
         qpos_adr = joint.qpos_adr
         dof_adr = joint.dof_adr
         if qpos_adr is None or dof_adr is None:
             raise ValueError(
                 f"free_articulation prop {self.name!r}: the attached root "
-                f"body lost its freejoint (compiled model drift)")
+                f"body lost its freejoint (compiled model drift)"
+            )
         self.free_qadr = int(qpos_adr)
         self.free_vadr = int(dof_adr)
 
@@ -402,10 +412,14 @@ class MujocoPropFreeArticulation(MujocoPropArticulation):
         import mujoco
 
         x, y, z, yaw = self._placement.sample(1, "cpu")[0].tolist()
-        d.qpos[self.free_qadr:self.free_qadr + 3] = [x, y, z]
-        d.qpos[self.free_qadr + 3:self.free_qadr + 7] = [
-            np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
-        d.qvel[self.free_vadr:self.free_vadr + 6] = 0.0
+        d.qpos[self.free_qadr : self.free_qadr + 3] = [x, y, z]
+        d.qpos[self.free_qadr + 3 : self.free_qadr + 7] = [
+            np.cos(yaw / 2),
+            0.0,
+            0.0,
+            np.sin(yaw / 2),
+        ]
+        d.qvel[self.free_vadr : self.free_vadr + 6] = 0.0
         for jname, j in self.joints.items():
             d.qpos[j["qadr"]] = self._inits[jname]
             d.qvel[j["dadr"]] = 0.0

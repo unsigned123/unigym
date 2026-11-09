@@ -63,24 +63,34 @@ from unigym._typing import JsonValue
 from unigym.errors import ConfigError
 
 ENV_VAR = "UNIGYM_ASSET_ROOT"
-PLACEHOLDER = "${" + ENV_VAR + "}"          # the original token spelling
+PLACEHOLDER = "${" + ENV_VAR + "}"  # the original token spelling
 
 DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
 DEPS_YAML_KEY = "unigym_deps_root"
 ASSET_YAML_KEY = "unigym_asset_root"
 # local overlay wins over the committed yaml (load_cfg layering)
 _YAML_FILES = ("unigym.local.yaml", "unigym.yaml")
-_DEPS_YAML_FILES = _YAML_FILES          # deps-root parity (legacy name)
+_DEPS_YAML_FILES = _YAML_FILES  # deps-root parity (legacy name)
 
 PACK_ENV_VAR = "UNIGYM_ASSET_PACK"
 PACK_YAML_KEY = "unigym_asset_pack_root"
 
-_MAX_PASSES = 8                             # deep-expansion cycle guard
+_MAX_PASSES = 8  # deep-expansion cycle guard
 _PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-_IMAGE_SUFFIXES = frozenset({
-    ".bmp", ".gif", ".hdr", ".exr", ".jpeg", ".jpg", ".png", ".tga", ".webp",
-})
+_IMAGE_SUFFIXES = frozenset(
+    {
+        ".bmp",
+        ".gif",
+        ".hdr",
+        ".exr",
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".tga",
+        ".webp",
+    }
+)
 """Suffixes that make a ``tex/`` leaf a texture image (the stem-dir rule)."""
 
 
@@ -119,12 +129,14 @@ def asset_root(repo: str | None = None) -> str:
     raise ConfigError(
         f"no asset-root anchor: set {ENV_VAR}, or declare "
         f"`{ASSET_YAML_KEY}` in unigym.local.yaml / unigym.yaml -- "
-        "v101 A1 removed the implicit machine default")
+        "v101 A1 removed the implicit machine default"
+    )
 
 
 def repo_root() -> str:
     """The checkout's repo root (computed -- follows the worktree)."""
     import unigym
+
     return str(Path(unigym.__file__).resolve().parents[1])
 
 
@@ -155,7 +167,8 @@ def deps_root(repo: str | None = None) -> str:
     raise ConfigError(
         f"no dependency-root anchor: set {DEPS_ENV_VAR}, or declare "
         f"`{DEPS_YAML_KEY}` in unigym.local.yaml / unigym.yaml -- "
-        "v101 A1 removed the implicit machine default")
+        "v101 A1 removed the implicit machine default"
+    )
 
 
 def _yaml_key(base: Path, file_name: str, key: str):
@@ -192,7 +205,8 @@ def asset_pack_root(repo: str | None = None) -> str:
     raise AssetPathError(
         "no asset-face anchor: set UNIGYM_ASSET_PACK, or declare "
         f"`{PACK_YAML_KEY}` (the content pack's assets directory, e.g. "
-        "${UNIGYM_DEPS_ROOT}/unigym_packs/robocasa/assets) in unigym.yaml")
+        "${UNIGYM_DEPS_ROOT}/unigym_packs/robocasa/assets) in unigym.yaml"
+    )
 
 
 def texture_payload_rel(rel: Path) -> Path:
@@ -282,8 +296,8 @@ def canonical_asset_text(text: str) -> str:
     those attributes and nothing else (comments, names, values untouched).
     """
     return _FILE_ATTR_RE.sub(
-        lambda match: match.group(1) + canonical_asset_path(match.group(2))
-        + match.group(3), text)
+        lambda match: match.group(1) + canonical_asset_path(match.group(2)) + match.group(3), text
+    )
 
 
 def resolve_asset_path(value: str, repo: str | None = None) -> str:
@@ -311,8 +325,7 @@ def resolve_asset_path(value: str, repo: str | None = None) -> str:
     base = Path(repo) if repo else Path(repo_root())
     face = Path(asset_pack_root(repo))
     rel = None
-    for root in (face / "generators",
-                 base / "assets" / "robocasa" / "generators"):
+    for root in (face / "generators", base / "assets" / "robocasa" / "generators"):
         try:
             rel = Path(expanded).relative_to(root)
             break
@@ -328,16 +341,19 @@ def resolve_asset_path(value: str, repo: str | None = None) -> str:
             f"generator asset absent from the unified pack asset face: "
             f"{candidate} -- run `python tools/pack_asset_closure.py` to "
             f"measure the gap and fold it (v091 B-0), or fix the reference "
-            f"{value!r}")
+            f"{value!r}"
+        )
     return str(candidate)
 
 
 def known_tokens() -> dict:
     """Token name -> resolver (also the known-token list for errors)."""
-    return {"UNIGYM_ASSET_ROOT": asset_root,
-            "UNIGYM_ASSET_PACK": asset_pack_root,
-            "UNIGYM_REPO": repo_root,
-            "UNIGYM_DEPS_ROOT": deps_root}
+    return {
+        "UNIGYM_ASSET_ROOT": asset_root,
+        "UNIGYM_ASSET_PACK": asset_pack_root,
+        "UNIGYM_REPO": repo_root,
+        "UNIGYM_DEPS_ROOT": deps_root,
+    }
 
 
 def _expand_str(s: str, tokens: dict) -> str:
@@ -349,11 +365,13 @@ def _expand_str(s: str, tokens: dict) -> str:
         if name not in tokens:
             raise PlaceholderError(
                 f"unknown path placeholder ${{{name}}} in run config "
-                f"(known tokens: {', '.join(sorted(tokens))})")
+                f"(known tokens: {', '.join(sorted(tokens))})"
+            )
         s = s.replace("${" + name + "}", tokens[name]())
     raise PlaceholderError(
         f"path placeholder expansion did not settle within "
-        f"{_MAX_PASSES} passes (cycle in placeholder values?)")
+        f"{_MAX_PASSES} passes (cycle in placeholder values?)"
+    )
 
 
 @overload
@@ -389,6 +407,7 @@ def expand_placeholders(obj: JsonValue) -> JsonValue:
             # the deps/repo anchors from here), so a module-level import
             # would close the cycle.
             from unigym.packs.refs import resolve_ref
+
             return resolve_ref(expanded)
         return expanded
     if isinstance(obj, dict):

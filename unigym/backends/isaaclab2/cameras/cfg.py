@@ -20,14 +20,14 @@ Frame reading normalizes annotator layouts to the manager contract:
   ``N*H*W`` first; anything else returns ``None`` = "not rendered yet",
   which the manager replaces with its placeholder frame).
 """
+
 from __future__ import annotations
 
 import math
 
 import torch
 
-from unigym.cameras.base import (CameraSpec, depth_key, rgb_key, rig_type,
-                                 rig_hide_geom_groups)
+from unigym.cameras.base import CameraSpec, depth_key, rgb_key, rig_type, rig_hide_geom_groups
 
 
 def build_sensor_cfg(spec: CameraSpec):
@@ -68,25 +68,23 @@ def build_sensor_cfg(spec: CameraSpec):
         raise ValueError(
             f"camera {spec.name!r}: rig.hide_geom_groups is mujoco-only "
             f"(MJ geom-group visibility); the isaaclab backend has no "
-            f"kit-side equivalent -- remove the key (got {list(_hide)})")
+            f"kit-side equivalent -- remove the key (got {list(_hide)})"
+        )
     mount_body = str(rig.get("attach", "") or "").strip().strip("/")
     if rtype == "body":
         if mount_body:
-            prim_path = (f"{{ENV_REGEX_NS}}/Robot/{mount_body}/"
-                         f"{spec.sensor_key()}")
+            prim_path = f"{{ENV_REGEX_NS}}/Robot/{mount_body}/" f"{spec.sensor_key()}"
         else:
-            prim_path = str(rig.get("prim_path")
-                            or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
+            prim_path = str(rig.get("prim_path") or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
     elif rtype in ("world", "chase"):
-        prim_path = str(rig.get("prim_path")
-                        or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
+        prim_path = str(rig.get("prim_path") or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
     elif rtype == "fixed":
         raise ValueError(
             f"camera {spec.name!r}: rig type 'fixed' was renamed 'world' "
-            f"(camera unification) -- update the config; there is no alias")
+            f"(camera unification) -- update the config; there is no alias"
+        )
     else:
-        raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} "
-                         "(body|world|chase)")
+        raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} " "(body|world|chase)")
 
     pos = tuple(float(x) for x in rig.get("pos", (0.0, 0.0, 0.0)))
     convention = "world"
@@ -103,8 +101,9 @@ def build_sensor_cfg(spec: CameraSpec):
         quat = tuple(float(x) for x in lookat_quat(pos, lookat))
 
     focal_override = rig.get("focal_length")
-    focal_length = (float(focal_override) if focal_override is not None
-                    else float(spec.focal_length()))
+    focal_length = (
+        float(focal_override) if focal_override is not None else float(spec.focal_length())
+    )
 
     data_types = []
     if "rgb" in spec.types:
@@ -130,9 +129,9 @@ def build_sensor_cfg(spec: CameraSpec):
     )
 
 
-def push_state_table_poses(sensor, table, camera: str, env_ids, *,
-                           num_envs: int | None = None,
-                           force_env_ids: bool = False) -> list[int]:
+def push_state_table_poses(
+    sensor, table, camera: str, env_ids, *, num_envs: int | None = None, force_env_ids: bool = False
+) -> list[int]:
     """Drive ``sensor.set_world_poses`` from the ``(camera, env)`` state table.
 
     The rig computes/writes resolved world poses into
@@ -156,12 +155,10 @@ def push_state_table_poses(sensor, table, camera: str, env_ids, *,
         row = table.get(camera, i)
         if row is None:
             raise KeyError(
-                f"camera {camera!r}: no state row for env {i} "
-                f"(mode={table.mode(camera)!r})")
-        positions.append(torch.as_tensor(row.pos, dtype=torch.float32)
-                         .reshape(3))
-        orientations.append(torch.as_tensor(row.quat, dtype=torch.float32)
-                            .reshape(4))
+                f"camera {camera!r}: no state row for env {i} " f"(mode={table.mode(camera)!r})"
+            )
+        positions.append(torch.as_tensor(row.pos, dtype=torch.float32).reshape(3))
+        orientations.append(torch.as_tensor(row.quat, dtype=torch.float32).reshape(4))
     pos = torch.stack(positions)
     quat = torch.stack(orientations)
     # The live sensor's pose buffers live on its own device; stacking builds
@@ -171,15 +168,16 @@ def push_state_table_poses(sensor, table, camera: str, env_ids, *,
     if dev is not None:
         pos = pos.to(dev)
         quat = quat.to(dev)
-    full = (num_envs is not None and ids == list(range(int(num_envs))))
+    full = num_envs is not None and ids == list(range(int(num_envs)))
     if full and not force_env_ids:
-        sensor.set_world_poses(positions=pos, orientations=quat,
-                               convention="world")
+        sensor.set_world_poses(positions=pos, orientations=quat, convention="world")
     else:
         sensor.set_world_poses(
-            positions=pos, orientations=quat,
+            positions=pos,
+            orientations=quat,
             env_ids=torch.tensor(ids, dtype=torch.long, device=pos.device),
-            convention="world")
+            convention="world",
+        )
     return ids
 
 

@@ -9,6 +9,7 @@ The adapter-driven path is untouched (``tick()`` with no override).
 Use :class:`~unigym.adapters.manual.ManualAdapter` (or any adapter whose
 ``act`` is never needed) as the instance adapter.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -27,8 +28,7 @@ class ExternalRunner(SyncRunner):
     """
 
     @classmethod
-    def from_instance(cls, instance, action_fn: Callable | None = None
-                      ) -> ExternalRunner:
+    def from_instance(cls, instance, action_fn: Callable | None = None) -> ExternalRunner:
         """Build from a live RunInstance (mirrors SyncRunner.from_instance)."""
         spec = instance.spec
         runner_cfg = spec.runner or {}
@@ -66,7 +66,8 @@ class ExternalRunner(SyncRunner):
             raise RuntimeError(
                 "ExternalRunner.run() needs an action_fn (t -> "
                 "dict[str, NamedAction]); drive ExternalRunner.step(actions) "
-                "yourself for a manual loop")
+                "yourself for a manual loop"
+            )
         self._start()
         while int(self._tick) < self.total_steps:
             if stop_when is not None and stop_when():

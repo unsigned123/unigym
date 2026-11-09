@@ -24,6 +24,7 @@ Every template:
 Templates only answer "is it true right now"; edge/level/once/cooldown
 live in the trigger layer (design §8.5 -- semantics decoupled).
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -33,8 +34,7 @@ from .base import Level, WatchContext, WatchError, WatchResult, finite
 
 __all__ = ["TEMPLATE_REGISTRY", "get_template", "validate_template_params"]
 
-_OPS = ("gt", "lt", "gte", "lte", "eq", "abs_gt", "abs_lt", "abs_gte",
-        "abs_lte")
+_OPS = ("gt", "lt", "gte", "lte", "eq", "abs_gt", "abs_lt", "abs_gte", "abs_lte")
 
 # shared no-fire result (fast path: templates only pay for formatting
 # when they actually fire; the engine never mutates a result)
@@ -43,11 +43,10 @@ _REDUCES = ("index", "abs", "last", "min", "max", "abs_max", "norm", "mean")
 
 
 def _err(params: dict, key: str, expected: str) -> str:
-    return (f"{key}: expected {expected}, got {params.get(key)!r}")
+    return f"{key}: expected {expected}, got {params.get(key)!r}"
 
 
-def _req_num(params: dict, key: str, errors: list, *, positive=False,
-             nonneg=False) -> None:
+def _req_num(params: dict, key: str, errors: list, *, positive=False, nonneg=False) -> None:
     v = params.get(key)
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         errors.append(_err(params, key, "a number"))
@@ -57,8 +56,7 @@ def _req_num(params: dict, key: str, errors: list, *, positive=False,
         errors.append(f"{key}: must be >= 0, got {v}")
 
 
-def _req_int(params: dict, key: str, errors: list, *, minimum: int = 1) \
-        -> None:
+def _req_int(params: dict, key: str, errors: list, *, minimum: int = 1) -> None:
     v = params.get(key)
     if isinstance(v, bool) or not isinstance(v, int):
         errors.append(_err(params, key, "an integer"))
@@ -66,37 +64,32 @@ def _req_int(params: dict, key: str, errors: list, *, minimum: int = 1) \
         errors.append(f"{key}: must be >= {minimum}, got {v}")
 
 
-def _req_key(params: dict, key: str, errors: list, keys: list[str],
-             prefixes=("obs/", "extra/", "action/")) -> None:
+def _req_key(
+    params: dict, key: str, errors: list, keys: list[str], prefixes=("obs/", "extra/", "action/")
+) -> None:
     k = params.get(key)
     if not isinstance(k, str) or not k:
-        errors.append(_err(params, key, "a trace-face key string "
-                                           f"({' | '.join(prefixes)}...)"))
+        errors.append(_err(params, key, "a trace-face key string " f"({' | '.join(prefixes)}...)"))
         return
     if not any(k.startswith(p) for p in prefixes):
-        errors.append(
-            f"{key}: {k!r} must use the trace face ({' | '.join(prefixes)})")
+        errors.append(f"{key}: {k!r} must use the trace face ({' | '.join(prefixes)})")
         return
     if keys and k not in keys:
-        errors.append(
-            f"{key}: unknown key {k!r} (available: {keys})")
+        errors.append(f"{key}: unknown key {k!r} (available: {keys})")
 
 
-def _req_entity(params: dict, key: str, errors: list, keys: list[str]) \
-        -> None:
+def _req_entity(params: dict, key: str, errors: list, keys: list[str]) -> None:
     e = params.get(key)
     if not isinstance(e, str) or not e:
-        errors.append(_err(params, key, "an entity name ('base'|'pelvis'|"
-                                        "'robot'|<prop name>)"))
+        errors.append(_err(params, key, "an entity name ('base'|'pelvis'|" "'robot'|<prop name>)"))
         return
     if e in ("base", "pelvis", "robot"):
         return
     if keys and f"extra/object/{e}/pos" not in keys:
-        obj_keys = [k for k in keys if k.startswith("extra/object/")] \
-            or keys
+        obj_keys = [k for k in keys if k.startswith("extra/object/")] or keys
         errors.append(
-            f"{key}: unknown prop {e!r} (no extra/object/{e}/pos key; "
-            f"available: {obj_keys})")
+            f"{key}: unknown prop {e!r} (no extra/object/{e}/pos key; " f"available: {obj_keys})"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -107,36 +100,48 @@ def _proximity_check(ctx: WatchContext, p: dict) -> WatchResult:
     if d >= float(p["max_dist"]):
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
-        message=f"dist({p['a']}, {p['b']}) = {finite(d)} < "
-                f"{p['max_dist']}",
-        data={"dist": finite(d), "max_dist": p["max_dist"],
-              "env": p.get("env") or 0})
+        fired=True,
+        level=Level.WARN,
+        message=f"dist({p['a']}, {p['b']}) = {finite(d)} < " f"{p['max_dist']}",
+        data={"dist": finite(d), "max_dist": p["max_dist"], "env": p.get("env") or 0},
+    )
 
 
 # --------------------------------------------------------------------------- #
 # key_compare -- trace-key vs threshold (the workhorse)
 # --------------------------------------------------------------------------- #
 def _key_compare_check(ctx: WatchContext, p: dict) -> WatchResult:
-    fired, v, env = ctx.compare(p["key"], p["op"], float(p["value"]),
-                                env=p.get("env"), dim=p.get("dim"),
-                                reduce=p.get("reduce", "index"))
+    fired, v, env = ctx.compare(
+        p["key"],
+        p["op"],
+        float(p["value"]),
+        env=p.get("env"),
+        dim=p.get("dim"),
+        reduce=p.get("reduce", "index"),
+    )
     if not fired:
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
-        message=(f"{p['key']} = {finite(v)} {p['op']} {p['value']} "
-                 f"(env {env})"),
-        data={"key": p["key"], "value": finite(v), "op": p["op"],
-              "threshold": p["value"], "env": env})
+        fired=True,
+        level=Level.WARN,
+        message=(f"{p['key']} = {finite(v)} {p['op']} {p['value']} " f"(env {env})"),
+        data={
+            "key": p["key"],
+            "value": finite(v),
+            "op": p["op"],
+            "threshold": p["value"],
+            "env": env,
+        },
+    )
 
 
 # --------------------------------------------------------------------------- #
 # key_window -- framework-managed sliding window over a scalar statistic
 # --------------------------------------------------------------------------- #
 def _key_window_check(ctx: WatchContext, p: dict) -> WatchResult:
-    v, env = ctx.scalar(p["key"], env=p.get("env"), dim=p.get("dim"),
-                        reduce=p.get("reduce", "mean"))
+    v, env = ctx.scalar(
+        p["key"], env=p.get("env"), dim=p.get("dim"), reduce=p.get("reduce", "mean")
+    )
     win = int(p["window"])
     store: dict = _window_store(ctx, p["key"], win)
     store["buf"].append(v)
@@ -146,26 +151,42 @@ def _key_window_check(ctx: WatchContext, p: dict) -> WatchResult:
     if len(vals) >= win:
         if p.get("window_op") == "all":
             fired = all(_cmp(x, p["op"], float(p["value"])) for x in vals)
-        else:                       # mean over the window
+        else:  # mean over the window
             stat = sum(vals) / len(vals)
             fired = _cmp(stat, p["op"], float(p["value"]))
     if not fired:
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
-        message=(f"{p['key']} window({len(vals)}/{win}) "
-                 f"{'mean' if stat is not None else 'all'} "
-                 f"{p['op']} {p['value']}") if fired else "",
-        data={"key": p["key"], "window_stat": finite(stat)
-              if stat is not None else None,
-              "samples": len(vals), "window": win})
+        fired=True,
+        level=Level.WARN,
+        message=(
+            f"{p['key']} window({len(vals)}/{win}) "
+            f"{'mean' if stat is not None else 'all'} "
+            f"{p['op']} {p['value']}"
+        )
+        if fired
+        else "",
+        data={
+            "key": p["key"],
+            "window_stat": finite(stat) if stat is not None else None,
+            "samples": len(vals),
+            "window": win,
+        },
+    )
 
 
 def _cmp(x: float, op: str, value: float) -> bool:
-    return {"gt": x > value, "lt": x < value, "gte": x >= value,
-            "lte": x <= value, "eq": x == value,
-            "abs_gt": abs(x) > value, "abs_lt": abs(x) < value,
-            "abs_gte": abs(x) >= value, "abs_lte": abs(x) <= value}[op]
+    return {
+        "gt": x > value,
+        "lt": x < value,
+        "gte": x >= value,
+        "lte": x <= value,
+        "eq": x == value,
+        "abs_gt": abs(x) > value,
+        "abs_lt": abs(x) < value,
+        "abs_gte": abs(x) >= value,
+        "abs_lte": abs(x) <= value,
+    }[op]
 
 
 def _window_store(ctx: WatchContext, key: str, win: int) -> dict:
@@ -188,10 +209,11 @@ def _contact_check(ctx: WatchContext, p: dict) -> WatchResult:
     if on != (p.get("state", "on") == "on"):
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.INFO,
-        message=f"contact({p['group']}) "
-                f"{'ON' if on else 'OFF'} (env {p.get('env')})",
-        data={"group": p["group"], "on": on, "env": p.get("env")})
+        fired=True,
+        level=Level.INFO,
+        message=f"contact({p['group']}) " f"{'ON' if on else 'OFF'} (env {p.get('env')})",
+        data={"group": p["group"], "on": on, "env": p.get("env")},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -201,9 +223,11 @@ def _timeout_check(ctx: WatchContext, p: dict) -> WatchResult:
     if ctx.t < int(p["ticks"]):
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
+        fired=True,
+        level=Level.WARN,
         message=f"t={ctx.t} >= timeout ticks={p['ticks']}",
-        data={"t": ctx.t, "ticks": p["ticks"]})
+        data={"t": ctx.t, "ticks": p["ticks"]},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -214,46 +238,58 @@ def _log_check(ctx: WatchContext, p: dict) -> WatchResult:
     data: dict = {"t": ctx.t, "env": env}
     for k in p["keys"]:
         try:
-            v, _ = ctx.scalar(k, env=env, dim=p.get("dim"),
-                              reduce=p.get("reduce", "index"))
+            v, _ = ctx.scalar(k, env=env, dim=p.get("dim"), reduce=p.get("reduce", "index"))
         except WatchError:
             v = None
         data[k] = finite(v) if v is not None else None
-    return WatchResult(fired=True, level=Level.INFO,
-                       message="log " + ", ".join(
-                           f"{k}={data[k]}" for k in p["keys"]),
-                       data=data)
+    return WatchResult(
+        fired=True,
+        level=Level.INFO,
+        message="log " + ", ".join(f"{k}={data[k]}" for k in p["keys"]),
+        data=data,
+    )
 
 
 # --------------------------------------------------------------------------- #
 # tilt / height -- entity posture (settle/fall family)
 # --------------------------------------------------------------------------- #
 def _entity_quat(ctx: WatchContext, entity: str, env: int):
-    name = {"base": "extra/base_quat_w", "pelvis": "extra/base_quat_w",
-            "robot": "extra/base_quat_w"}.get(
-                entity, f"extra/object/{entity}/quat")
+    name = {
+        "base": "extra/base_quat_w",
+        "pelvis": "extra/base_quat_w",
+        "robot": "extra/base_quat_w",
+    }.get(entity, f"extra/object/{entity}/quat")
     return ctx.key(name), name
 
 
 def _tilt_check(ctx: WatchContext, p: dict) -> WatchResult:
     import numpy as np
+
     env = int(p.get("env") or 0)
     q, name = _entity_quat(ctx, p["entity"], env)
-    q = np.asarray(_to_np(q)[env], dtype=float)      # wxyz (contract)
+    q = np.asarray(_to_np(q)[env], dtype=float)  # wxyz (contract)
     w, x, y, z = q / max(np.linalg.norm(q), 1e-9)
-    up_z = 1.0 - 2.0 * (y * y + z * z)               # rotated world-up z
+    up_z = 1.0 - 2.0 * (y * y + z * z)  # rotated world-up z
     deg = float(np.degrees(np.arccos(np.clip(up_z, -1.0, 1.0))))
     if deg <= float(p["max_deg"]):
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
+        fired=True,
+        level=Level.WARN,
         message=f"{p['entity']} tilt {deg:.1f} deg > {p['max_deg']}",
-        data={"entity": p["entity"], "tilt_deg": round(deg, 2),
-              "max_deg": p["max_deg"], "key": name, "env": env})
+        data={
+            "entity": p["entity"],
+            "tilt_deg": round(deg, 2),
+            "max_deg": p["max_deg"],
+            "key": name,
+            "env": env,
+        },
+    )
 
 
 def _to_np(v):
     from .base import _to_numpy
+
     return _to_numpy(v)
 
 
@@ -266,17 +302,23 @@ def _height_check(ctx: WatchContext, p: dict) -> WatchResult:
         desc = f"outside band {band}"
     else:
         fired, _, _ = ctx.compare(
-            "extra/base_pos_w" if p["entity"] in ("base", "pelvis", "robot")
+            "extra/base_pos_w"
+            if p["entity"] in ("base", "pelvis", "robot")
             else f"extra/object/{p['entity']}/pos",
-            p.get("op", "lt"), float(p["z"]), dim=2,
-            env=p.get("env") or 0)
+            p.get("op", "lt"),
+            float(p["z"]),
+            dim=2,
+            env=p.get("env") or 0,
+        )
         desc = f"{p.get('op', 'lt')} {p['z']}"
     if not fired:
         return NOT_FIRED
     return WatchResult(
-        fired=True, level=Level.WARN,
+        fired=True,
+        level=Level.WARN,
         message=f"{p['entity']} z={z:.3f} {desc}",
-        data={"entity": p["entity"], "z": round(z, 4), "rule": desc})
+        data={"entity": p["entity"], "z": round(z, 4), "rule": desc},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -291,26 +333,29 @@ def _limit_magnitude(limits):
     domain; never a silent zero-margin pass).
     """
     import numpy as np
+
     if isinstance(limits, (tuple, list)) and len(limits) == 2:
         lo = np.abs(_to_np(limits[0])).astype(float)
         hi = np.abs(_to_np(limits[1])).astype(float)
-        return np.maximum(lo, hi)                  # (N, J)
+        return np.maximum(lo, hi)  # (N, J)
     a = np.abs(_to_np(limits)).astype(float)
     if a.ndim == 2 and a.shape[-1] == 2:
-        return a.max(axis=-1)                      # (J,)
+        return a.max(axis=-1)  # (J,)
     raise WatchError(
         f"joint_limit: unsupported policy_joint_pos_limits layout "
-        f"({type(limits).__name__}, shape {getattr(a, 'shape', None)})")
+        f"({type(limits).__name__}, shape {getattr(a, 'shape', None)})"
+    )
 
 
 def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     import numpy as np
+
     limits = getattr(ctx.env, "policy_joint_pos_limits", None)
     if limits is None:
         raise WatchError(
-            "joint_limit: env has no policy_joint_pos_limits (backend "
-            "without declared limits)")
-    lim = _limit_magnitude(limits)                 # (N, J) or (J,)
+            "joint_limit: env has no policy_joint_pos_limits (backend " "without declared limits)"
+        )
+    lim = _limit_magnitude(limits)  # (N, J) or (J,)
     q = _to_np(ctx.key(p.get("key", "extra/joint_pos"))).astype(float)
     margin = float(p.get("margin", 0.1))
     band = lim - margin
@@ -318,23 +363,27 @@ def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     envs = [int(i) for i in np.nonzero(viol.any(axis=-1))[0]]
     if not envs:
         return NOT_FIRED
-    worst = float((np.abs(q) - band).max()) \
-        if q.size else 0.0
+    worst = float((np.abs(q) - band).max()) if q.size else 0.0
     return WatchResult(
-        fired=True, level=Level.WARN,
-        message=f"joint limit margin {margin}: envs {envs[:8]}"
-        f"{'...' if len(envs) > 8 else ''}",
-        data={"envs": envs, "worst_over": round(worst, 4),
-              "margin": margin})
+        fired=True,
+        level=Level.WARN,
+        message=f"joint limit margin {margin}: envs {envs[:8]}" f"{'...' if len(envs) > 8 else ''}",
+        data={"envs": envs, "worst_over": round(worst, 4), "margin": margin},
+    )
 
 
 # --------------------------------------------------------------------------- #
 # registry (contract §5 mirrors this table -- change both)
 # --------------------------------------------------------------------------- #
 def _t(name, tier, validate, check, params_doc, suggest=None):
-    return {"name": name, "tier": tier, "validate": validate,
-            "check": check, "params": params_doc,
-            "suggest": suggest or {}}
+    return {
+        "name": name,
+        "tier": tier,
+        "validate": validate,
+        "check": check,
+        "params": params_doc,
+        "suggest": suggest or {},
+    }
 
 
 def _v_proximity(p, keys):
@@ -343,11 +392,12 @@ def _v_proximity(p, keys):
     b = p.get("b")
     if isinstance(b, str):
         _req_entity(p, "b", e, keys)
-    elif not (isinstance(b, (list, tuple)) and len(b) == 3
-              and all(isinstance(x, (int, float)) and
-                      not isinstance(x, bool) for x in b)):
-        e.append("b: expected an entity name or [x,y,z] point, got "
-                 f"{b!r}")
+    elif not (
+        isinstance(b, (list, tuple))
+        and len(b) == 3
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in b)
+    ):
+        e.append("b: expected an entity name or [x,y,z] point, got " f"{b!r}")
     _req_num(p, "max_dist", e, positive=True)
     return e
 
@@ -380,10 +430,11 @@ def _v_contact(p, keys):
     if not isinstance(g, str) or not g:
         e.append(_err(p, "group", "a contact group name string"))
     elif keys and f"extra/contact/{g}" not in keys:
-        groups = [k[len("extra/contact/"):] for k in keys
-                  if k.startswith("extra/contact/")]
-        e.append(f"group: unknown contact group {g!r} (available: "
-                 f"{groups or 'none declared in this config'})")
+        groups = [k[len("extra/contact/") :] for k in keys if k.startswith("extra/contact/")]
+        e.append(
+            f"group: unknown contact group {g!r} (available: "
+            f"{groups or 'none declared in this config'})"
+        )
     if p.get("state", "on") not in ("on", "off"):
         e.append(f"state: must be on|off, got {p.get('state')!r}")
     return e
@@ -398,8 +449,7 @@ def _v_timeout(p, keys):
 def _v_log(p, keys):
     e: list[str] = []
     ks = p.get("keys")
-    if not isinstance(ks, list) or not ks or \
-            not all(isinstance(k, str) for k in ks):
+    if not isinstance(ks, list) or not ks or not all(isinstance(k, str) for k in ks):
         e.append("keys: required non-empty list of trace-face keys")
         return e
     for k in ks:
@@ -423,10 +473,12 @@ def _v_height(p, keys):
     _req_entity(p, "entity", e, keys)
     if p.get("band") is not None:
         band = p["band"]
-        if not (isinstance(band, (list, tuple)) and len(band) == 2
-                and all(isinstance(x, (int, float))
-                        and not isinstance(x, bool) for x in band)
-                and band[0] <= band[1]):
+        if not (
+            isinstance(band, (list, tuple))
+            and len(band) == 2
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in band)
+            and band[0] <= band[1]
+        ):
             e.append(f"band: must be [lo, hi] with lo <= hi, got {band!r}")
     else:
         if p.get("op") not in _OPS:
@@ -446,40 +498,74 @@ def _v_joint_limit(p, keys):
 
 TEMPLATE_REGISTRY: dict[str, dict] = {
     "proximity": _t(
-        "proximity", 2, _v_proximity, _proximity_check,
+        "proximity",
+        2,
+        _v_proximity,
+        _proximity_check,
         "a=<entity>, b=<entity|[x,y,z]>, max_dist=<num>, env?<int>",
-        {}),
+        {},
+    ),
     "key_compare": _t(
-        "key_compare", 1, _v_key_compare, _key_compare_check,
+        "key_compare",
+        1,
+        _v_key_compare,
+        _key_compare_check,
         "key=<trace key>, op=<gt|lt|gte|lte|eq|abs_*>, value=<num>, "
         "dim?<int>, reduce?<index|abs|last|min|max|abs_max|norm|mean>, "
-        "env?<int>", {}),
+        "env?<int>",
+        {},
+    ),
     "key_window": _t(
-        "key_window", 1, _v_key_window, _key_window_check,
+        "key_window",
+        1,
+        _v_key_window,
+        _key_window_check,
         "key=<trace key>, op=<...>, value=<num>, window=<int>=2, "
         "reduce?<stat for the scalar read>, window_op?<mean|all>, "
-        "dim?<int>, env?<int>", {}),
+        "dim?<int>, env?<int>",
+        {},
+    ),
     "contact_state": _t(
-        "contact_state", 2, _v_contact, _contact_check,
-        "group=<name>, state?<on|off>=on, env?<int>", {}),
-    "timeout": _t(
-        "timeout", 1, _v_timeout, _timeout_check,
-        "ticks=<int>>=1", {"once": True}),
+        "contact_state",
+        2,
+        _v_contact,
+        _contact_check,
+        "group=<name>, state?<on|off>=on, env?<int>",
+        {},
+    ),
+    "timeout": _t("timeout", 1, _v_timeout, _timeout_check, "ticks=<int>>=1", {"once": True}),
     "log": _t(
-        "log", 1, _v_log, _log_check,
+        "log",
+        1,
+        _v_log,
+        _log_check,
         "keys=[<trace key>, ...], env?<int>, dim?<int>, reduce?<...>",
-        {"mode": "level", "hold": 1, "cooldown": 0}),
+        {"mode": "level", "hold": 1, "cooldown": 0},
+    ),
     "tilt": _t(
-        "tilt", 1, lambda p, k: _v_entity_num(p, k, "max_deg"),
+        "tilt",
+        1,
+        lambda p, k: _v_entity_num(p, k, "max_deg"),
         _tilt_check,
-        "entity=<base|<prop>>, max_deg=<num>, env?<int>", {}),
+        "entity=<base|<prop>>, max_deg=<num>, env?<int>",
+        {},
+    ),
     "height": _t(
-        "height", 1, _v_height, _height_check,
-        "entity=<base|<prop>>, band=[lo,hi] | (op=<...>, z=<num>), "
-        "env?<int>", {}),
+        "height",
+        1,
+        _v_height,
+        _height_check,
+        "entity=<base|<prop>>, band=[lo,hi] | (op=<...>, z=<num>), " "env?<int>",
+        {},
+    ),
     "joint_limit": _t(
-        "joint_limit", 2, _v_joint_limit, _joint_limit_check,
-        "margin?<num>=0.1, key?<trace key>=extra/joint_pos", {}),
+        "joint_limit",
+        2,
+        _v_joint_limit,
+        _joint_limit_check,
+        "margin?<num>=0.1, key?<trace key>=extra/joint_pos",
+        {},
+    ),
 }
 
 # engine hook: the active WatcherEngine instance (window deques live on
@@ -489,14 +575,11 @@ _CURRENT_ENGINE: Any = None
 
 def get_template(name: str) -> dict:
     if name not in TEMPLATE_REGISTRY:
-        raise WatchError(
-            f"unknown template {name!r} (available: "
-            f"{sorted(TEMPLATE_REGISTRY)})")
+        raise WatchError(f"unknown template {name!r} (available: " f"{sorted(TEMPLATE_REGISTRY)})")
     return TEMPLATE_REGISTRY[name]
 
 
-def validate_template_params(name: str, params: dict, keys: list[str]) \
-        -> list[str]:
+def validate_template_params(name: str, params: dict, keys: list[str]) -> list[str]:
     t = get_template(name)
     if not isinstance(params, dict):
         return [f"params: expected a mapping, got {type(params).__name__}"]

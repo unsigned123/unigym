@@ -10,6 +10,7 @@ There is deliberately **no default model and no alias**: an absent or
 malformed declaration fails fast with a teaching error, and the legacy
 ``env.params.mj_model`` key is rejected at every door.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -36,13 +37,15 @@ def resolve_world_base_mjcf(world_base) -> str:
             "world_base is required: declare `world_base: {mjcf: <path>}` "
             "at the run config top level (or "
             "`backend.mujoco.world_base` in a scene bundle). "
-            "env.params.mj_model was removed and has no fallback")
+            "env.params.mj_model was removed and has no fallback"
+        )
     if isinstance(world_base, Mapping):
         mjcf = world_base.get("mjcf")
         if mjcf is None or str(mjcf) == "":
             raise ConfigError(
                 "world_base must declare `mjcf: <path>`; got keys "
-                f"{sorted(map(str, world_base))}")
+                f"{sorted(map(str, world_base))}"
+            )
         return str(mjcf)
     if isinstance(world_base, str):
         if not world_base:
@@ -50,7 +53,8 @@ def resolve_world_base_mjcf(world_base) -> str:
         return world_base
     raise ConfigError(
         "world_base must be a path string or a mapping {mjcf: <path>}, "
-        f"got {type(world_base).__name__}")
+        f"got {type(world_base).__name__}"
+    )
 
 
 def reject_legacy_mj_model(params, *, source: str = "env.params") -> None:
@@ -69,4 +73,5 @@ def reject_legacy_mj_model(params, *, source: str = "env.params") -> None:
             f"{source}.mj_model was removed in v101 A1; declare the "
             "run-level `world_base: {mjcf: <path>}` instead "
             "(scene bundles: `backend.mujoco.world_base`) -- there is no "
-            "alias and no fallback")
+            "alias and no fallback"
+        )

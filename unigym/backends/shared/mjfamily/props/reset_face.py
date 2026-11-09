@@ -19,6 +19,7 @@ consumption order stay bitwise (determinism red line).
 (the backend's collision-query seam the placement sampler reaches
 through ``ResetPrimitives.probe_candidate``).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, Tuple
@@ -39,19 +40,19 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
 
     _bid, _qadr, _vadr = env.prop_backend.free_addresses(rule.object_name)
     region = env._placement_regions[rule.region_key]
-    support_body = mujoco.mj_name2id(
-        env._model, mujoco.mjtObj.mjOBJ_BODY, region.owner)
+    support_body = mujoco.mj_name2id(env._model, mujoco.mjtObj.mjOBJ_BODY, region.owner)
     joint_name = mujoco.mj_id2name(
-        env._model, mujoco.mjtObj.mjOBJ_JOINT,
-        int(env._model.body_jntadr[_bid]))
+        env._model, mujoco.mjtObj.mjOBJ_JOINT, int(env._model.body_jntadr[_bid])
+    )
     candidate = [
         mujoco.mj_id2name(env._model, mujoco.mjtObj.mjOBJ_GEOM, geom)
-        for geom in range(env._model.body_geomadr[_bid],
-                          env._model.body_geomadr[_bid] + env._model.body_geomnum[_bid])
+        for geom in range(
+            env._model.body_geomadr[_bid],
+            env._model.body_geomadr[_bid] + env._model.body_geomnum[_bid],
+        )
     ]
     if not candidate:
-        raise PlacementCapabilityError(
-            f"prop {rule.object_name!r} has no collision geoms")
+        raise PlacementCapabilityError(f"prop {rule.object_name!r} has no collision geoms")
     # the narrow-phase collision set is the model's COLLISION truth
     # (contype/conaffinity nonzero): region markers and visual twins
     # are compiled contype=0/conaffinity=0 and are never collision
@@ -61,19 +62,26 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
             geom,
             mujoco.mj_id2name(env._model, mujoco.mjtObj.mjOBJ_GEOM, other),
             allow_support_contact=(
-                rule.relation == "on"
-                and int(env._model.geom_bodyid[other]) == support_body))
+                rule.relation == "on" and int(env._model.geom_bodyid[other]) == support_body
+            ),
+        )
         for geom in candidate
         for other in range(env._model.ngeom)
-        if (int(env._model.geom_bodyid[other]) != _bid
-            and (int(env._model.geom_contype[other])
-                 or int(env._model.geom_conaffinity[other])))
+        if (
+            int(env._model.geom_bodyid[other]) != _bid
+            and (int(env._model.geom_contype[other]) or int(env._model.geom_conaffinity[other]))
+        )
     ]
     try:
         return probe_freejoint_candidate(
-            env._model, env._active_data, joint_name, position,
+            env._model,
+            env._active_data,
+            joint_name,
+            position,
             (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)),
-            blocking_geoms, min_clearance_m=clearance)
+            blocking_geoms,
+            min_clearance_m=clearance,
+        )
     except (AttributeError, ValueError) as exc:
         raise PlacementCapabilityError(str(exc)) from exc
 
@@ -91,17 +99,20 @@ def resolve_base_height(params: dict) -> float:
     base_decl = params.get("base")
     if base_decl is None:
         from unigym.robots.g1_constants import G1_SPAWN_HEIGHT
+
         return float(params.get("spawn_height", G1_SPAWN_HEIGHT))
     if not isinstance(base_decl, dict):
         raise ValueError(
             f"mujoco backend: env.params.base must be a mapping "
-            f"({{joint: fixed}}), got {type(base_decl).__name__}")
+            f"({{joint: fixed}}), got {type(base_decl).__name__}"
+        )
     base_joint = str(base_decl.get("joint", "fixed"))
     if base_joint != "fixed":
         raise NotImplementedError(
             f"mujoco backend: env.params.base.joint {base_joint!r} is "
             f"not implemented yet (free-base spawning arrives with the "
-            f"scene-bundle base migration) | hint: declare joint: fixed")
+            f"scene-bundle base migration) | hint: declare joint: fixed"
+        )
     return 0.0
 
 
@@ -112,23 +123,25 @@ def build_reset_primitives(env) -> ResetPrimitives:
     def write_freejoint(name: str, pos, yaw: float) -> None:
         _bid, qadr, vadr = env.prop_backend.free_addresses(name)
         d = env._active_data
-        d.qpos[qadr:qadr + 3] = pos
-        d.qpos[qadr + 3:qadr + 7] = [np.cos(yaw / 2), 0.0, 0.0,
-                                     np.sin(yaw / 2)]
-        d.qvel[vadr:vadr + 6] = 0.0
+        d.qpos[qadr : qadr + 3] = pos
+        d.qpos[qadr + 3 : qadr + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
+        d.qvel[vadr : vadr + 6] = 0.0
 
     def joint_group(name: str):
         raise NotImplementedError(
             "ResetPrimitives.joint_group: the robot-side joint seam "
-            "arrives with the robot-body reset migration")
+            "arrives with the robot-body reset migration"
+        )
 
     def set_targets(idx, vals) -> None:
         raise NotImplementedError(
             "ResetPrimitives.set_targets: the robot-side joint seam "
-            "arrives with the robot-body reset migration")
+            "arrives with the robot-body reset migration"
+        )
 
     def forward() -> None:
         import mujoco
+
         mujoco.mj_forward(m, env._active_data)
 
     def resolve_region(name: str):
@@ -156,8 +169,7 @@ def build_reset_primitives(env) -> ResetPrimitives:
 
         bid, _, _ = env.prop_backend.free_addresses(name)
         half_x, half_y, height = 0.0, 0.0, 0.0
-        for g in range(m.body_geomadr[bid],
-                       m.body_geomadr[bid] + m.body_geomnum[bid]):
+        for g in range(m.body_geomadr[bid], m.body_geomadr[bid] + m.body_geomnum[bid]):
             if int(m.geom_type[g]) != int(mujoco.mjtGeom.mjGEOM_BOX):
                 continue
             size = m.geom_size[g]
@@ -179,20 +191,25 @@ def build_reset_primitives(env) -> ResetPrimitives:
         return _probe_region_placement(env, rule, position, yaw, clearance)
 
     return ResetPrimitives(
-        model=m, settle_fn=env._settle_substeps,
-        write_freejoint=write_freejoint, joint_group=joint_group,
-        set_targets=set_targets, forward=forward,
+        model=m,
+        settle_fn=env._settle_substeps,
+        write_freejoint=write_freejoint,
+        joint_group=joint_group,
+        set_targets=set_targets,
+        forward=forward,
         prop_extents=env._prop_extents,
         prop_names=frozenset(s.name for s in env.prop_manager.specs)
-        if env.prop_manager is not None else frozenset(),
+        if env.prop_manager is not None
+        else frozenset(),
         resolve_region=resolve_region,
         object_collision_bounds=object_collision_bounds,
-        probe_candidate=probe_candidate)
+        probe_candidate=probe_candidate,
+    )
 
 
-def wire_reset_face(env, params: dict, profile
-                    ) -> Tuple[Optional[InitializerBase],
-                               Optional[Gr1ResetSpec]]:
+def wire_reset_face(
+    env, params: dict, profile
+) -> Tuple[Optional[InitializerBase], Optional[Gr1ResetSpec]]:
     """Dispatch the declared reset face (the six-step contract).
 
     read the segment (``initializer`` or the legacy ``reset`` sugar in
@@ -205,21 +222,22 @@ def wire_reset_face(env, params: dict, profile
     own ``stage_spec`` face and validates through the legacy
     ``Gr1ResetSpec`` stage face.
     """
-    from unigym.initializers import build_initializer, \
-        normalize_initializer_spec
+    from unigym.initializers import build_initializer, normalize_initializer_spec
+
     init_cfg = normalize_initializer_spec(params)
     if init_cfg is None:
         return None, None
-    initializer = build_initializer(
-        init_cfg, profile, build_reset_primitives(env))
+    initializer = build_initializer(init_cfg, profile, build_reset_primitives(env))
     if initializer.places_props and env.prop_backend is None:
         raise ValueError(
             "env.params.initializer declares object placement but no "
             "props are wired (yaml `props:`) -- the placement writes "
-            "need the injected prop bodies")
+            "need the injected prop bodies"
+        )
     initializer.resolve()
     stage = initializer.stage_spec()
     if stage is None:
         return initializer, None
     from unigym.robots.gr1_reset import Gr1ResetSpec
+
     return initializer, Gr1ResetSpec(stage)

@@ -8,6 +8,7 @@ limits the termination never fires.
 Limits are keyed by articulation (no first binding); the run layer
 supplies a ``{name: (lower, upper)}`` mapping.
 """
+
 from __future__ import annotations
 
 from .articulation import ArticulationTermination
@@ -35,8 +36,8 @@ class JointLimitTermination(ArticulationTermination):
         joint_pos = source.get("joint_pos")
         if joint_pos is None:
             raise ValueError(
-                f"JointLimitTermination requires {self.articulation!r} "
-                f"joint_pos in state")
+                f"JointLimitTermination requires {self.articulation!r} " f"joint_pos in state"
+            )
         limits = (state.joint_pos_limits or {}).get(self.articulation)
         if limits is None:
             return all_false(joint_pos)

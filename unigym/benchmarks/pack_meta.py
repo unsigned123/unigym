@@ -27,6 +27,7 @@ error named ``<table>/<row>/<field>`` (load_task_rows).  This module is
 the engine; the pack integration (load_pack) and the materialized
 tasks/*.yaml path live in packs.py.
 """
+
 from __future__ import annotations
 
 import os
@@ -56,6 +57,7 @@ def _parse_yaml_file(path: Path):
     ValueError carrying the path on any parse problem.
     """
     import yaml  # lazy: keeps `import unigym.benchmarks.packs` light
+
     try:
         return yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
@@ -72,8 +74,7 @@ def _slot_decl(name: str, raw, where: str) -> dict:
     values, so a ref slot can only name rows that exist).
     """
     if not _SLOT_NAME_RE.fullmatch(name):
-        raise ValueError(
-            f"{where}: slot name {name!r} invalid (lowercase snake_case)")
+        raise ValueError(f"{where}: slot name {name!r} invalid (lowercase snake_case)")
     if isinstance(raw, str):
         kind, payload = raw, {}
     elif isinstance(raw, dict) and raw:
@@ -82,7 +83,8 @@ def _slot_decl(name: str, raw, where: str) -> dict:
             raise ValueError(
                 f"{where}: slot '{name}' declaration must be a kind string "
                 "or a dict with exactly one of {enum: [...]}, {ref: ...}, "
-                f"got keys {sorted(raw)}")
+                f"got keys {sorted(raw)}"
+            )
         if "enum" in raw:
             kind, payload = "enum", {"values": raw["enum"]}
         else:
@@ -90,23 +92,29 @@ def _slot_decl(name: str, raw, where: str) -> dict:
     else:
         raise ValueError(
             f"{where}: slot '{name}' declaration must be a string or a "
-            f"non-empty dict, got {type(raw).__name__}")
+            f"non-empty dict, got {type(raw).__name__}"
+        )
     if kind not in _SLOT_KINDS:
         raise ValueError(
-            f"{where}: slot '{name}' kind {kind!r} unknown (kinds: "
-            f"{', '.join(_SLOT_KINDS)})")
+            f"{where}: slot '{name}' kind {kind!r} unknown (kinds: " f"{', '.join(_SLOT_KINDS)})"
+        )
     if kind == "enum":
         values = payload.get("values")
-        if (not isinstance(values, list) or not values
-                or not all(isinstance(v, _SCALARS) for v in values)):
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(v, _SCALARS) for v in values)
+        ):
             raise ValueError(
-                f"{where}: slot '{name}' enum candidates must be a "
-                "non-empty list of scalars")
-    if kind == "ref" and (not isinstance(payload.get("ref"), str)
-                          or payload["ref"].count(":") != 1):
+                f"{where}: slot '{name}' enum candidates must be a " "non-empty list of scalars"
+            )
+    if kind == "ref" and (
+        not isinstance(payload.get("ref"), str) or payload["ref"].count(":") != 1
+    ):
         raise ValueError(
             f"{where}: slot '{name}' ref must be '<file>:<dotted.keys>' "
-            f"(pack-root relative), got {payload.get('ref')!r}")
+            f"(pack-root relative), got {payload.get('ref')!r}"
+        )
     return {"kind": kind, **payload}
 
 
@@ -125,13 +133,14 @@ def _resolve_ref_pointer(ref: str, root: Path, where: str) -> dict:
     for key in keys_part.split("."):
         if not isinstance(node, dict) or key not in node:
             raise ValueError(
-                f"{where}: ref pointer {ref!r} does not resolve "
-                f"(stuck at key {key!r})")
+                f"{where}: ref pointer {ref!r} does not resolve " f"(stuck at key {key!r})"
+            )
         node = node[key]
     if not isinstance(node, dict):
         raise ValueError(
             f"{where}: ref pointer {ref!r} must land on a mapping "
-            f"(the legal values are its keys), got {type(node).__name__}")
+            f"(the legal values are its keys), got {type(node).__name__}"
+        )
     return node
 
 
@@ -149,19 +158,18 @@ def _string_slot_names(s: str, where: str) -> list[str]:
         if s[i] == "{":
             j = s.find("}", i + 1)
             if j < 0:
-                raise ValueError(
-                    f"{where}: unclosed '{{' in template string {s!r}")
-            name = s[i + 1:j]
+                raise ValueError(f"{where}: unclosed '{{' in template string {s!r}")
+            name = s[i + 1 : j]
             if not _SLOT_NAME_RE.fullmatch(name):
                 raise ValueError(
                     f"{where}: brace span {{{name}}} in {s!r} is not a "
                     "slot reference (templates carry {slot} references "
-                    "only -- no logic, no literal braces)")
+                    "only -- no logic, no literal braces)"
+                )
             out.append(name)
             i = j + 1
         elif s[i] == "}":
-            raise ValueError(
-                f"{where}: unmatched '}}' in template string {s!r}")
+            raise ValueError(f"{where}: unmatched '}}' in template string {s!r}")
         else:
             i += 1
     return out
@@ -182,13 +190,15 @@ def _load_template(path: Path) -> tuple[str, dict, dict]:
     if not isinstance(doc, dict):
         raise ValueError(
             f"{path}: template must be a dict (slots head + task "
-            f"skeleton), got {type(doc).__name__}")
+            f"skeleton), got {type(doc).__name__}"
+        )
     raw_slots = doc.pop("slots", None)
     if not isinstance(raw_slots, dict) or not raw_slots:
         raise ValueError(
             f"{path}: template must declare a non-empty 'slots:' mapping "
             "(a template without slots is a materialized task -- write "
-            "it as tasks/*.yaml)")
+            "it as tasks/*.yaml)"
+        )
     decls: dict[str, dict] = {}
     for sname, raw in raw_slots.items():
         decls[sname] = _slot_decl(sname, raw, str(path))
@@ -196,12 +206,12 @@ def _load_template(path: Path) -> tuple[str, dict, dict]:
         if reserved in doc:
             raise ValueError(
                 f"{path}: template must not carry '{reserved}' (the row "
-                "key names the task; templates are pure skeletons)")
+                "key names the task; templates are pure skeletons)"
+            )
     decls.setdefault("task", {"kind": "scalar"})
     for sname, decl in decls.items():
         if decl["kind"] == "ref":
-            decl["table"] = _resolve_ref_pointer(
-                decl["ref"], path.parents[1], str(path))
+            decl["table"] = _resolve_ref_pointer(decl["ref"], path.parents[1], str(path))
     return name, doc, decls
 
 
@@ -217,27 +227,31 @@ def load_meta_package(root: Path, meta: dict) -> tuple[dict, dict, Path, dict]:
     t_decl = meta.get("templates")
     r_decl = meta.get("task_rows")
     if t_decl is not None:
-        if (not isinstance(t_decl, list) or not t_decl
-                or not all(isinstance(t, str) and t and "/" not in t
-                           for t in t_decl)):
+        if (
+            not isinstance(t_decl, list)
+            or not t_decl
+            or not all(isinstance(t, str) and t and "/" not in t for t in t_decl)
+        ):
             errors.append(
                 f"{root / 'pack.yaml'}: 'templates' must be a non-empty "
-                "list of template names (templates/<name>.yaml stems)")
+                "list of template names (templates/<name>.yaml stems)"
+            )
             t_decl = []
         dupes = sorted({t for t in t_decl if t_decl.count(t) > 1})
         if dupes:
-            errors.append(
-                f"{root / 'pack.yaml'}: 'templates' lists {dupes} twice")
+            errors.append(f"{root / 'pack.yaml'}: 'templates' lists {dupes} twice")
         if not isinstance(r_decl, str) or not r_decl:
             errors.append(
                 f"{root / 'pack.yaml'}: 'task_rows' must be a non-empty "
                 "path when 'templates' is declared (the parameter-row "
-                "table, pack-root relative)")
+                "table, pack-root relative)"
+            )
             r_decl = ""
     if not isinstance(r_decl, str) or not r_decl:
         errors.append(
             f"{root / 'pack.yaml'}: 'task_rows' must be a non-empty path "
-            "(the parameter-row table, pack-root relative)")
+            "(the parameter-row table, pack-root relative)"
+        )
         r_decl = ""
     if errors:
         raise ValueError("\n".join(errors))
@@ -245,9 +259,7 @@ def load_meta_package(root: Path, meta: dict) -> tuple[dict, dict, Path, dict]:
     tdir = root / "templates"
     if t_decl:
         if not tdir.is_dir():
-            raise ValueError(
-                f"{tdir}: templates declared but the directory is "
-                "missing")
+            raise ValueError(f"{tdir}: templates declared but the directory is " "missing")
         for tname in t_decl:
             tpath = tdir / f"{tname}.yaml"
             if not tpath.is_file():
@@ -258,7 +270,8 @@ def load_meta_package(root: Path, meta: dict) -> tuple[dict, dict, Path, dict]:
                 if loaded[0] != tname:
                     errors.append(
                         f"{tpath}: file stem {loaded[0]!r} != the "
-                        f"declared template name {tname!r}")
+                        f"declared template name {tname!r}"
+                    )
                     continue
                 templates[tname] = (loaded[1], loaded[2])
             except ValueError as exc:
@@ -290,38 +303,29 @@ def load_task_rows(path: Path) -> dict[str, dict]:
     rows: dict[str, dict] = {}
     if not isinstance(doc, dict):
         raise ValueError(
-            f"{path}: table must be a dict (schema + rows), "
-            f"got {type(doc).__name__}")
+            f"{path}: table must be a dict (schema + rows), " f"got {type(doc).__name__}"
+        )
     schema = doc.get("schema")
     if schema != TASK_ROWS_SCHEMA:
-        errors.append(
-            f"{path}: schema must be {TASK_ROWS_SCHEMA!r}, got {schema!r}")
+        errors.append(f"{path}: schema must be {TASK_ROWS_SCHEMA!r}, got {schema!r}")
     extra = sorted(set(doc) - {"schema", "rows"})
     if extra:
         errors.append(f"{path}: unknown table keys {extra}")
     raw_rows = doc.get("rows")
     if not isinstance(raw_rows, dict) or not raw_rows:
-        errors.append(
-            f"{path}: rows: required non-empty mapping "
-            "{task name: row}")
+        errors.append(f"{path}: rows: required non-empty mapping " "{task name: row}")
         raw_rows = {}
     for name, row in raw_rows.items():
         if not isinstance(name, str) or not name or "/" in name:
-            errors.append(
-                f"{path}: rows: task name {name!r} invalid (non-empty "
-                "string, no '/')")
+            errors.append(f"{path}: rows: task name {name!r} invalid (non-empty " "string, no '/')")
             continue
         where = f"{path.name}/{name}"
         if not isinstance(row, dict):
-            errors.append(
-                f"{where}: row must be a mapping, got "
-                f"{type(row).__name__}")
+            errors.append(f"{where}: row must be a mapping, got " f"{type(row).__name__}")
             continue
         unknown = sorted(set(row) - set(_ROW_KEYS))
         if unknown:
-            errors.append(
-                f"{where}: unknown row keys {unknown} (allowed: "
-                f"{sorted(_ROW_KEYS)})")
+            errors.append(f"{where}: unknown row keys {unknown} (allowed: " f"{sorted(_ROW_KEYS)})")
         template = row.get("template")
         provider = row.get("provider")
         # exactly one instantiation source; providers are
@@ -332,45 +336,51 @@ def load_task_rows(path: Path) -> dict[str, dict]:
                 f"{where}/template: exactly one of 'template' or "
                 "'provider' required (a row instantiates one template "
                 f"OR calls one provider), got template={template!r} "
-                f"provider={provider!r}")
+                f"provider={provider!r}"
+            )
         if template and (not isinstance(template, str) or not template):
             errors.append(
                 f"{where}/template: must be a non-empty string (the "
-                "template this row instantiates)")
+                "template this row instantiates)"
+            )
         if provider and (not isinstance(provider, str) or not provider):
             errors.append(
-                f"{where}/provider: must be a non-empty string (the "
-                "registered provider name)")
+                f"{where}/provider: must be a non-empty string (the " "registered provider name)"
+            )
         elif provider and not _PROVIDER_NAME_RE.fullmatch(provider):
             errors.append(
                 f"{where}/provider: {provider!r} is not a provider NAME "
                 "(lowercase snake_case -- data cites names, never "
                 "paths; a path-shaped provider reference is rejected "
-                "at load)")
+                "at load)"
+            )
         signoff = row.get("signoff")
         if not isinstance(signoff, str) or not signoff.strip():
             errors.append(
                 f"{where}/signoff: required non-empty string (who "
                 "verified the row and against what -- the sign-off "
-                "travels with the row)")
+                "travels with the row)"
+            )
         slots = row.get("slots")
         if slots is None:
             slots = {}
-        if not isinstance(slots, dict) or not all(
-                isinstance(k, str) for k in slots):
-            errors.append(
-                f"{where}/slots: must be a mapping of slot name -> value")
+        if not isinstance(slots, dict) or not all(isinstance(k, str) for k in slots):
+            errors.append(f"{where}/slots: must be a mapping of slot name -> value")
             slots = {}
-        rows[name] = {"template": template, "provider": provider,
-                      "signoff": signoff, "slots": slots}
+        rows[name] = {
+            "template": template,
+            "provider": provider,
+            "signoff": signoff,
+            "slots": slots,
+        }
     if errors:
         raise ValueError("\n".join(errors))
     return rows
 
 
-def resolve_row(name: str, row: dict, templates: dict,
-                 references_dir: Path, rows_path: Path, tables: dict
-                 ) -> tuple[dict | None, list[str]]:
+def resolve_row(
+    name: str, row: dict, templates: dict, references_dir: Path, rows_path: Path, tables: dict
+) -> tuple[dict | None, list[str]]:
     """One row -> (resolved spec, errors).
 
     Slot presence + value types check first (naming
@@ -385,76 +395,72 @@ def resolve_row(name: str, row: dict, templates: dict,
     where = f"{rows_path.name}/{name}"
     if row.get("provider"):
         try:
-            spec = build_provider_spec(row["provider"], row["slots"],
-                                       tables)
+            spec = build_provider_spec(row["provider"], row["slots"], tables)
         except ValueError as exc:
             return None, [f"{where}/provider: {exc}"]
         rewrite_pack_references(spec, references_dir, str(rows_path))
-        errors.extend(f"{rows_path}#{name}: {e}"
-                      for e in validate_formula_spec(spec))
+        errors.extend(f"{rows_path}#{name}: {e}" for e in validate_formula_spec(spec))
         return (spec if not errors else None), errors
     tname = row["template"]
     if tname not in templates:
         return None, [
-            f"{where}/template: unknown template {tname!r} "
-            f"(declared: {sorted(templates)})"]
+            f"{where}/template: unknown template {tname!r} " f"(declared: {sorted(templates)})"
+        ]
     skeleton, decls = templates[tname]
     values = dict(row["slots"])
     if "task" in values and values["task"] != name:
         errors.append(
-            f"{where}/slots.task: {values['task']!r} != the row key "
-            f"{name!r} (copy-paste drift)")
+            f"{where}/slots.task: {values['task']!r} != the row key " f"{name!r} (copy-paste drift)"
+        )
     values["task"] = name
     missing = sorted(set(decls) - set(values))
     if missing:
         errors.append(
-            f"{where}/slots: missing slot(s) {missing} required by "
-            f"template '{tname}'")
+            f"{where}/slots: missing slot(s) {missing} required by " f"template '{tname}'"
+        )
     extra = sorted(set(values) - set(decls))
     if extra:
         errors.append(
             f"{where}/slots: unknown slot(s) {extra} (template "
-            f"'{tname}' declares {sorted(decls)})")
+            f"'{tname}' declares {sorted(decls)})"
+        )
     if missing or extra:
         return None, errors
     for sname, decl in decls.items():
         value = values[sname]
         kind = decl["kind"]
         if kind == "scalar" and not isinstance(value, _SCALARS):
-            errors.append(
-                f"{where}/slots.{sname}: scalar slot got "
-                f"{type(value).__name__}")
+            errors.append(f"{where}/slots.{sname}: scalar slot got " f"{type(value).__name__}")
         elif kind == "enum" and value not in decl["values"]:
             errors.append(
-                f"{where}/slots.{sname}: {value!r} not in enum "
-                f"candidates {decl['values']}")
+                f"{where}/slots.{sname}: {value!r} not in enum " f"candidates {decl['values']}"
+            )
         elif kind == "ref":
             if not isinstance(value, str):
                 errors.append(
                     f"{where}/slots.{sname}: ref slot must name a row "
-                    f"key (string), got {type(value).__name__}")
+                    f"key (string), got {type(value).__name__}"
+                )
             elif value not in decl["table"]:
                 errors.append(
-                    f"{where}/slots.{sname}: {value!r} is not a row key "
-                    f"of {decl['ref']}")
-        elif kind == "node" and not isinstance(
-                value, (dict, list, *_SCALARS)):
+                    f"{where}/slots.{sname}: {value!r} is not a row key " f"of {decl['ref']}"
+                )
+        elif kind == "node" and not isinstance(value, (dict, list, *_SCALARS)):
             errors.append(
                 f"{where}/slots.{sname}: node slot must be a mapping, "
-                f"list or scalar, got {value!r}")
+                f"list or scalar, got {value!r}"
+            )
     if errors:
         return None, errors
     spec = cast(dict, _substitute(skeleton, values, where, errors))
     if errors or spec is None:
         return None, errors
     rewrite_pack_references(spec, references_dir, str(rows_path))
-    errors.extend(f"{rows_path}#{name}: {e}"
-                  for e in validate_formula_spec(spec))
+    errors.extend(f"{rows_path}#{name}: {e}" for e in validate_formula_spec(spec))
     return spec, errors
 
 
-def _substitute(skeleton, values: dict, where: str,
-                errors: list[str]):
+def _substitute(skeleton, values: dict, where: str, errors: list[str]):
     """Walk the skeleton, substituting ``{slot}`` references.
 
     A string that IS exactly one reference takes the value whole (any
@@ -468,14 +474,13 @@ def _substitute(skeleton, values: dict, where: str,
         for key, val in skeleton.items():
             if isinstance(key, str) and _string_slot_names(key, where):
                 errors.append(
-                    f"{where}: mapping keys must be literal -- slot "
-                    f"reference in key {key!r}")
+                    f"{where}: mapping keys must be literal -- slot " f"reference in key {key!r}"
+                )
                 continue
             out[key] = _substitute(val, values, where, errors)
         return out
     if isinstance(skeleton, list):
-        return [_substitute(item, values, where, errors)
-                for item in skeleton]
+        return [_substitute(item, values, where, errors) for item in skeleton]
     if not isinstance(skeleton, str):
         return skeleton
     try:
@@ -489,7 +494,8 @@ def _substitute(skeleton, values: dict, where: str,
     if unknown:
         errors.append(
             f"{where}: unknown slot reference(s) {unknown} in "
-            f"{skeleton!r} (declared: {sorted(values)})")
+            f"{skeleton!r} (declared: {sorted(values)})"
+        )
         return skeleton
     if len(names) == 1 and skeleton == f"{{{names[0]}}}":
         return values[names[0]]
@@ -498,7 +504,8 @@ def _substitute(skeleton, values: dict, where: str,
         errors.append(
             f"{where}: slot(s) {bad} referenced inside the string "
             f"{skeleton!r} must be string-valued (use a whole-node "
-            "reference for structured values)")
+            "reference for structured values)"
+        )
         return skeleton
     for n in names:
         skeleton = skeleton.replace(f"{{{n}}}", values[n])
@@ -508,8 +515,7 @@ def _substitute(skeleton, values: dict, where: str,
 # --------------------------------------------------------------------------- #
 
 
-def rewrite_pack_references(spec: dict, references_dir: Path,
-                             where: str) -> None:
+def rewrite_pack_references(spec: dict, references_dir: Path, where: str) -> None:
     """Anchor relative ``reference:`` paths of reference_mpjpe metrics.
 
     Anchored at the pack's references/ (rewritten in place, BEFORE schema

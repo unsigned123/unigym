@@ -15,6 +15,7 @@ absorbed by IMPLEMENTING the capability protocols here, with repo-internal
 wxyz preserved through ``unigym.core.quat.from_isaaclab_data`` at the data
 boundary.
 """
+
 from __future__ import annotations
 
 from unigym.backends.registry import ISAACLAB3_TRAITS, BackendInfo
@@ -31,4 +32,5 @@ class Isaaclab3Env:
         raise NotImplementedError(
             "backend 'isaaclab3' is an EA skeleton — no capability is "
             "implemented yet (see unigym/backends/isaaclab3/README.md); "
-            "hint: set env.backend: isaaclab2 (the production default)")
+            "hint: set env.backend: isaaclab2 (the production default)"
+        )

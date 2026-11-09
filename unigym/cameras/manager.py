@@ -34,6 +34,7 @@ Responsibilities (design doc §1.1):
   ``env_id``.  The obs path stays batched (N, ·) — these APIs never touch
   the obs cache.
 """
+
 from __future__ import annotations
 
 import math
@@ -46,12 +47,19 @@ import torch
 
 from unigym.adapters.base import ImageObsRequest
 from unigym.backends.registry import BackendSelectionError, backend_info
-from unigym.env.depth import (DEPTH_CROP_COLS, DEPTH_CROP_ROWS,
-                                    preprocess_depth)
+from unigym.env.depth import DEPTH_CROP_COLS, DEPTH_CROP_ROWS, preprocess_depth
 
-from .base import (DEPTH_ALIAS_KEYS, apply_rate_keys, CameraRig,
-                   CameraSpec, depth_key, effective_target_fps,
-                   fold_declared_intervals, render_due, rgb_key)
+from .base import (
+    DEPTH_ALIAS_KEYS,
+    apply_rate_keys,
+    CameraRig,
+    CameraSpec,
+    depth_key,
+    effective_target_fps,
+    fold_declared_intervals,
+    render_due,
+    rgb_key,
+)
 from .capabilities import check_backend as check_camera_capabilities
 from .rigs import build_rig, lookat_quat
 from .state import apply_declared_state, read_env_ids, state_is_shared
@@ -74,8 +82,16 @@ snapshot.  ``world`` only -- body/chase rigs are re-posed from the robot
 at every step, so a world-pose override there would be misleading (the
 free debug fly camera is a world rig by the console convention)."""
 
-LIVE_PROPERTY_KEYS = ("fps", "interval", "pitch_deg", "pose_offset",
-                      "render", "roll_deg", "target_env", "yaw_deg")
+LIVE_PROPERTY_KEYS = (
+    "fps",
+    "interval",
+    "pitch_deg",
+    "pose_offset",
+    "render",
+    "roll_deg",
+    "target_env",
+    "yaw_deg",
+)
 """camera_set_properties live whitelist: pose offset,
 yaw-pitch, target_env, interval -- plus the ``render`` live key
 (the publish loop's ONLY render state: ``{"view": name}`` or a RenderSpec
@@ -86,8 +102,7 @@ EVERY other property (resolution, kind, types, hfov, depth_type, clips,
 ...) is construction-frozen and must go through a restart."""
 
 
-def validate_image_frame(req: ImageObsRequest, val: torch.Tensor,
-                         num_envs: int) -> None:
+def validate_image_frame(req: ImageObsRequest, val: torch.Tensor, num_envs: int) -> None:
     """Shape/dtype validation for one camera frame (offline-testable).
 
     Raises ``ValueError`` unless ``val`` is ``(num_envs, *req.shape)`` with
@@ -97,12 +112,10 @@ def validate_image_frame(req: ImageObsRequest, val: torch.Tensor,
     expected = (num_envs, *req.shape)
     if tuple(val.shape) != expected:
         raise ValueError(
-            f"camera obs '{req.key}' shape {tuple(val.shape)} != expected "
-            f"{expected}")
+            f"camera obs '{req.key}' shape {tuple(val.shape)} != expected " f"{expected}"
+        )
     if val.dtype != req.dtype:
-        raise ValueError(
-            f"camera obs '{req.key}' dtype {val.dtype} != expected "
-            f"{req.dtype}")
+        raise ValueError(f"camera obs '{req.key}' dtype {val.dtype} != expected " f"{req.dtype}")
 
 
 class CameraManager:
@@ -114,10 +127,14 @@ class CameraManager:
     ``on_reset`` after each reset chain.
     """
 
-    def __init__(self, specs: list[CameraSpec], rigs: list[CameraRig],
-                 aliases: dict[str, tuple[str, bool]] | None = None,
-                 obs_served: set[str] | None = None,
-                 policy_hz: float | None = None):
+    def __init__(
+        self,
+        specs: list[CameraSpec],
+        rigs: list[CameraRig],
+        aliases: dict[str, tuple[str, bool]] | None = None,
+        obs_served: set[str] | None = None,
+        policy_hz: float | None = None,
+    ):
         self.specs = list(specs)
         self.rigs = list(rigs)
         # the policy control rate (1 / adapter.control_dt) -- the
@@ -125,7 +142,7 @@ class CameraManager:
         # intervals fold to target_fps = policy_hz / N and tier defaults
         # need it.  None (probe/test managers) keeps the legacy per-tick
         # counter semantics (camera_contract §16.1).
-        self.policy_hz = (float(policy_hz) if policy_hz else None)
+        self.policy_hz = float(policy_hz) if policy_hz else None
         # alias key -> (manager key, preprocess?)
         self.aliases: dict[str, tuple[str, bool]] = dict(aliases or {})
         # obs-served rig split (declared-camera availability vs the obs
@@ -137,9 +154,9 @@ class CameraManager:
         served = None if obs_served is None else set(obs_served)
         if served is not None:
             served |= {mkey for mkey, _ in self.aliases.values()}
-        self._obs_rigs = [r for r in self.rigs
-                          if served is None
-                          or bool(set(r.spec.keys()) & served)]
+        self._obs_rigs = [
+            r for r in self.rigs if served is None or bool(set(r.spec.keys()) & served)
+        ]
         self._counter = 0
         self._last: dict[str, torch.Tensor] = {}
         self._warned: set[str] = set()
@@ -152,18 +169,21 @@ class CameraManager:
         for spec in self.specs:
             for key in spec.keys():
                 self._requests[key] = ImageObsRequest(
-                    key, spec.frame_shape(key), spec.frame_dtype(key),
-                    "camera", spec.name)
+                    key, spec.frame_shape(key), spec.frame_dtype(key), "camera", spec.name
+                )
         for alias, (mkey, pre) in self.aliases.items():
             spec = self._spec_serving(mkey)
             shape = spec.frame_shape(mkey)
             if pre:
                 # preprocess_depth crops rows/cols -> shrink the locked shape
-                shape = (1,
-                         shape[1] + DEPTH_CROP_ROWS[1] - DEPTH_CROP_ROWS[0],
-                         shape[2] + DEPTH_CROP_COLS[1] - DEPTH_CROP_COLS[0])
+                shape = (
+                    1,
+                    shape[1] + DEPTH_CROP_ROWS[1] - DEPTH_CROP_ROWS[0],
+                    shape[2] + DEPTH_CROP_COLS[1] - DEPTH_CROP_COLS[0],
+                )
             self._requests[alias] = ImageObsRequest(
-                alias, shape, torch.float32, "camera", spec.name)
+                alias, shape, torch.float32, "camera", spec.name
+            )
 
     # ------------------------------------------------------------------ #
     # key space
@@ -189,8 +209,7 @@ class CameraManager:
         for spec in self.specs:
             if key in spec.keys():
                 return spec
-        raise KeyError(f"no instantiated camera serves {key!r} "
-                       f"(cameras: {self.names})")
+        raise KeyError(f"no instantiated camera serves {key!r} " f"(cameras: {self.names})")
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -254,8 +273,7 @@ class CameraManager:
         now = time.monotonic()
         for rig in self._obs_rigs:
             keys = rig.spec.keys()
-            if not self._read_due(rig, now) \
-                    and all(k in self._last for k in keys):
+            if not self._read_due(rig, now) and all(k in self._last for k in keys):
                 continue
             frames = rig.read(env_ids=read_env_ids(rig.spec, rig))
             self._last_read[rig.spec.name] = now
@@ -265,23 +283,25 @@ class CameraManager:
                     val = self._placeholder(key)
                     if key not in self._warned:
                         self._warned.add(key)
-                        print(f"[cameras] placeholder frame for '{key}': "
-                              f"annotator output not ready -> "
-                              f"{'all-inf' if val.dtype == torch.float32 else 'all-zero'} "
-                              f"fallback", flush=True)
+                        print(
+                            f"[cameras] placeholder frame for '{key}': "
+                            f"annotator output not ready -> "
+                            f"{'all-inf' if val.dtype == torch.float32 else 'all-zero'} "
+                            f"fallback",
+                            flush=True,
+                        )
                 validate_image_frame(self._requests[key], val, self.num_envs)
                 self._last[key] = val
         out = dict(self._last)
         for alias, (mkey, pre) in self.aliases.items():
-            out[alias] = preprocess_depth(self._last[mkey]) if pre \
-                else self._last[mkey]
+            out[alias] = preprocess_depth(self._last[mkey]) if pre else self._last[mkey]
         return out
 
     def _read_due(self, rig: CameraRig, now: float) -> bool:
         """Wall-clock due for one rig (§16.1; pure logic in base)."""
-        return render_due(rig.spec, self.policy_hz, self._counter,
-                          self._last_read.get(rig.spec.name), now)
-
+        return render_due(
+            rig.spec, self.policy_hz, self._counter, self._last_read.get(rig.spec.name), now
+        )
 
     def effective_fps(self, name: str) -> float | None:
         """One camera's effective wall render fps (§16.1); None = the
@@ -309,8 +329,7 @@ class CameraManager:
             if spec.name == name:
                 rspec = getattr(rig, "render_spec", None)
                 break
-        if (rspec is not None and rig is not None
-                and callable(getattr(rig, "capture_render", None))):
+        if rspec is not None and rig is not None and callable(getattr(rig, "capture_render", None)):
             return rig.capture_render(rspec)["rgb"]
         val = self._last.get(rgb_key(name))
         if val is None:
@@ -328,11 +347,8 @@ class CameraManager:
                 rspec = getattr(rig, "render_spec", None)
                 if rspec is None:
                     return None
-                return {"render": rspec,
-                        "render_source": getattr(rig, "render_source",
-                                                 "spec")}
-        raise ValueError(f"unknown camera {name!r}; instantiated cameras: "
-                         f"{self.names}")
+                return {"render": rspec, "render_source": getattr(rig, "render_source", "spec")}
+        raise ValueError(f"unknown camera {name!r}; instantiated cameras: " f"{self.names}")
 
     @property
     def capture_backend(self) -> str | None:
@@ -351,8 +367,7 @@ class CameraManager:
         for spec, rig in zip(self.specs, self.rigs):
             if spec.name == name:
                 return spec, rig
-        raise ValueError(f"unknown camera {name!r}; instantiated cameras: "
-                         f"{self.names}")
+        raise ValueError(f"unknown camera {name!r}; instantiated cameras: " f"{self.names}")
 
     @staticmethod
     def _target_env(rig: CameraRig) -> int:
@@ -360,8 +375,7 @@ class CameraManager:
         unless ``rig.target_env`` says otherwise)."""
         return int(getattr(rig, "target_env", 0))
 
-    def _view_env(self, spec: CameraSpec, rig: CameraRig,
-                  env_id: int | None) -> int:
+    def _view_env(self, spec: CameraSpec, rig: CameraRig, env_id: int | None) -> int:
         """Resolve the get_view instance: shared -> target_env (env_id must
         agree or be omitted); per_instance -> env_id (default 0)."""
         te = self._target_env(rig)
@@ -372,16 +386,17 @@ class CameraManager:
                 raise ValueError(
                     f"camera '{spec.name}' is instance=shared: it has a "
                     f"single meaningful view (env {te} = target_env); "
-                    f"address it without env_id or with env_id={te}")
+                    f"address it without env_id or with env_id={te}"
+                )
             return te
         idx = 0 if env_id is None else int(env_id)
         if not 0 <= idx < int(self.num_envs):
-            raise ValueError(f"camera '{spec.name}': env_id {idx} out of "
-                             f"range for {self.num_envs} env(s)")
+            raise ValueError(
+                f"camera '{spec.name}': env_id {idx} out of " f"range for {self.num_envs} env(s)"
+            )
         return idx
 
-    def get_view(self, name: str, env_id: int | None = None,
-                 pos=None, lookat=None) -> np.ndarray:
+    def get_view(self, name: str, env_id: int | None = None, pos=None, lookat=None) -> np.ndarray:
         """Single-frame primitive (SHM/stream/grab all sit on this).
 
         isaaclab: the most recent sensor output for that env slice (no
@@ -401,7 +416,8 @@ class CameraManager:
             raise ValueError(
                 f"camera {name!r}: pose-inline view needs BOTH 'pos' and "
                 f"'lookat' (world frame), got pos={pos!r} "
-                f"lookat={lookat!r}")
+                f"lookat={lookat!r}"
+            )
         with self.transient_world_pose(name, pos, lookat):
             return self._get_view(name, env_id)
 
@@ -420,8 +436,9 @@ class CameraManager:
     # ------------------------------------------------------------------ #
     # RenderSpec capture (camera_contract §14)
     # ------------------------------------------------------------------ #
-    def capture(self, name: str, env_id: int | None = None,
-                pos=None, lookat=None, *, render) -> dict:
+    def capture(
+        self, name: str, env_id: int | None = None, pos=None, lookat=None, *, render
+    ) -> dict:
         """Per-request RenderSpec capture (the ONLY capture face).
 
         ``render``: ``{"view": name}`` (optionally + complementary
@@ -439,23 +456,25 @@ class CameraManager:
             raise ValueError(
                 f"camera {name!r}: capture requires render= "
                 f"({{'view': name}} or a RenderSpec dict; camera_contract "
-                f"§14) -- a plain frame is get_view's job")
+                f"§14) -- a plain frame is get_view's job"
+            )
         spec, rig = self._spec_and_rig(name)
-        self._view_env(spec, rig, env_id)     # env_id discipline (§12.2)
+        self._view_env(spec, rig, env_id)  # env_id discipline (§12.2)
         rspec, label = resolve_render(render)
-        cap_r: Callable[[dict], dict] | None = getattr(
-            rig, "capture_render", None)
+        cap_r: Callable[[dict], dict] | None = getattr(rig, "capture_render", None)
         if not callable(cap_r):
             raise ValueError(
                 f"camera {name!r}: the render= face is mujoco-only "
                 f"(this rig: {type(rig).__name__}); the isaaclab "
-                f"face gains it with the kit pipeline, not before")
+                f"face gains it with the kit pipeline, not before"
+            )
         if pos is None and lookat is None:
             doc = cap_r(rspec)
         elif pos is None or lookat is None:
             raise ValueError(
                 f"camera {name!r}: pose-inline capture needs BOTH "
-                f"'pos' and 'lookat' (world frame)")
+                f"'pos' and 'lookat' (world frame)"
+            )
         else:
             with self.transient_world_pose(name, pos, lookat):
                 doc = cap_r(rspec)
@@ -485,7 +504,8 @@ class CameraManager:
                 f"camera {name!r}: pose-inline snapshot supports world "
                 f"rigs only (this rig: {rtype!r}); follow cams move every "
                 f"step -- use camera_set_properties, or declare a world "
-                f"rig (the debug fly camera 'free' is one by convention)")
+                f"rig (the debug fly camera 'free' is one by convention)"
+            )
         p = self._check_pose_vec(name, pos)
         look = self._check_pose_vec(name, lookat)
         quat = lookat_quat(p, look)
@@ -502,12 +522,17 @@ class CameraManager:
 
     @staticmethod
     def _check_pose_vec(name: str, v) -> list[float]:
-        if not isinstance(v, (list, tuple)) or len(v) != 3 or not all(
-                isinstance(x, (int, float)) and not isinstance(x, bool)
-                and math.isfinite(float(x)) for x in v):
+        if (
+            not isinstance(v, (list, tuple))
+            or len(v) != 3
+            or not all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(float(x))
+                for x in v
+            )
+        ):
             raise ValueError(
-                f"camera {name!r}: pose must be [x, y, z] finite numbers, "
-                f"got {v!r}")
+                f"camera {name!r}: pose must be [x, y, z] finite numbers, " f"got {v!r}"
+            )
         return [float(x) for x in v]
 
     @staticmethod
@@ -534,22 +559,21 @@ class CameraManager:
         spec, rig = self._spec_and_rig(name)
         pos, quat = rig.get_world_pose()
         w, x, y, z = (float(v) for v in quat)
-        fwd = (1.0 - 2.0 * (y * y + z * z),
-               2.0 * (x * y + w * z),
-               2.0 * (x * z - w * y))
+        fwd = (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y))
         state = self.render_state(name)
         fps = self.effective_fps(name)
-        return {"camera": name, "rig": str(
-                    (spec.rig or {}).get("type", "")).strip().lower(),
-                "pos": [float(v) for v in pos],
-                "quat_wxyz": [float(v) for v in quat],
-                "lookat": [float(pos[i] + fwd[i]) for i in range(3)],
-                "interval": int(spec.interval),
-                "target_fps": fps,
-                "render_state": state}
+        return {
+            "camera": name,
+            "rig": str((spec.rig or {}).get("type", "")).strip().lower(),
+            "pos": [float(v) for v in pos],
+            "quat_wxyz": [float(v) for v in quat],
+            "lookat": [float(pos[i] + fwd[i]) for i in range(3)],
+            "interval": int(spec.interval),
+            "target_fps": fps,
+            "render_state": state,
+        }
 
-    def apply_properties(self, name: str, params: dict,
-                         env_id: int | None = None) -> None:
+    def apply_properties(self, name: str, params: dict, env_id: int | None = None) -> None:
         """Live-update one camera's whitelisted properties.
 
         Whitelist : ``pose_offset`` (mount-frame ``[dx, dy, dz]``),
@@ -567,8 +591,7 @@ class CameraManager:
         mujoco cam_pos/cam_quat).
         """
         if self.num_envs is None:
-            raise RuntimeError("CameraManager.apply_properties before "
-                               "bind_env")
+            raise RuntimeError("CameraManager.apply_properties before " "bind_env")
         spec, rig = self._spec_and_rig(name)
         params = dict(params or {})
         if "pos" in params or "lookat" in params:
@@ -580,26 +603,30 @@ class CameraManager:
                 f"camera '{name}': property key(s) {frozen} are not "
                 f"live-adjustable and requires restart; live keys: "
                 f"{sorted(LIVE_PROPERTY_KEYS)} "
-                f"(docs/contracts/camera_contract.md §instance 与寻址)")
+                f"(docs/contracts/camera_contract.md §instance 与寻址)"
+            )
         te = self._target_env(rig)
         if state_is_shared(spec):
             if env_id is not None and int(env_id) != te:
                 raise ValueError(
                     f"camera '{name}' is state=shared: it has a single "
                     f"meaningful instance (env {te} = target_env); apply "
-                    f"without env_id or with env_id={te}")
-            apply_env_ids = None          # the rig routes to target_env
+                    f"without env_id or with env_id={te}"
+                )
+            apply_env_ids = None  # the rig routes to target_env
         else:
             if "target_env" in params:
                 raise ValueError(
                     f"camera '{name}': 'target_env' applies to shared "
-                    f"cameras only (this camera is per-instance)")
+                    f"cameras only (this camera is per-instance)"
+                )
             apply_env_ids = None
             if env_id is not None:
                 idx = int(env_id)
                 if not 0 <= idx < int(self.num_envs):
-                    raise ValueError(f"camera '{name}': env_id {idx} out of "
-                                     f"range for {self.num_envs} env(s)")
+                    raise ValueError(
+                        f"camera '{name}': env_id {idx} out of " f"range for {self.num_envs} env(s)"
+                    )
                 apply_env_ids = [idx]
         if "interval" in params or "fps" in params:
             self._apply_rate_keys(name, spec, params)
@@ -615,7 +642,8 @@ class CameraManager:
                 raise ValueError(
                     f"camera '{name}': render is mujoco-only "
                     f"(this rig: {type(rig).__name__}); the isaaclab "
-                    f"face gains the render face with the kit pipeline")
+                    f"face gains the render face with the kit pipeline"
+                )
             rspec, label = resolve_render(params["render"])
             default = rspec == _DEFAULT_RENDER
             rig.render_spec = None if default else rspec
@@ -624,33 +652,35 @@ class CameraManager:
         if "pose_offset" in params:
             off = [float(x) for x in params["pose_offset"]]
             if len(off) != 3:
-                raise ValueError(f"camera '{name}': pose_offset must be "
-                                 f"[dx, dy, dz], got {off}")
+                raise ValueError(
+                    f"camera '{name}': pose_offset must be " f"[dx, dy, dz], got {off}"
+                )
             pose_kwargs["pose_offset"] = off
         for k in ("yaw_deg", "pitch_deg", "roll_deg"):
             if k in params:
                 try:
                     pose_kwargs[k] = float(params[k])
                 except (TypeError, ValueError):
-                    raise ValueError(f"camera '{name}': {k} must be a "
-                                     f"number, got {params[k]!r}") from None
+                    raise ValueError(
+                        f"camera '{name}': {k} must be a " f"number, got {params[k]!r}"
+                    ) from None
         if "target_env" in params:
             t = int(params["target_env"])
             if not 0 <= t < int(self.num_envs):
-                raise ValueError(f"camera '{name}': target_env {t} out of "
-                                 f"range for {self.num_envs} env(s)")
+                raise ValueError(
+                    f"camera '{name}': target_env {t} out of " f"range for {self.num_envs} env(s)"
+                )
             pose_kwargs["target_env"] = t
         if pose_kwargs:
             rig.apply_properties(env_ids=apply_env_ids, **pose_kwargs)
 
-    def _apply_rate_keys(self, name: str, spec: CameraSpec,
-                         params: dict) -> None:
+    def _apply_rate_keys(self, name: str, spec: CameraSpec, params: dict) -> None:
         """The rate keys of one live write (§16; pure in base)."""
         apply_rate_keys(spec, name, params, self.policy_hz)
 
-    def _apply_absolute_pose(self, name: str, spec: CameraSpec,
-                             rig: CameraRig, params: dict,
-                             env_id: int | None) -> None:
+    def _apply_absolute_pose(
+        self, name: str, spec: CameraSpec, rig: CameraRig, params: dict, env_id: int | None
+    ) -> None:
         """Freecam face: persistent absolute world-frame pose.
 
         ``pos`` + ``lookat`` (world frame, BOTH required, alone in the
@@ -667,14 +697,16 @@ class CameraManager:
             raise ValueError(
                 f"camera '{name}': 'pos'/'lookat' is an absolute-pose set "
                 f"(freecam face): send BOTH together and alone "
-                f"in the call, got keys {sorted(params)}")
+                f"in the call, got keys {sorted(params)}"
+            )
         rtype = str((spec.rig or {}).get("type", "")).strip().lower()
         if rtype not in POSE_INLINE_RIG_TYPES:
             raise ValueError(
                 f"camera {name!r}: absolute world-pose set supports world "
                 f"rigs only (this rig: {rtype!r}); follow cams move every "
                 f"step (the debug fly camera 'free' is a world rig by "
-                f"convention)")
+                f"convention)"
+            )
         p = self._check_pose_vec(name, params["pos"])
         look = self._check_pose_vec(name, params["lookat"])
         idx = self._view_env(spec, rig, env_id)
@@ -697,22 +729,23 @@ class CameraManager:
         shape = (self.num_envs, *req.shape)
         if req.dtype == torch.uint8:
             return torch.zeros(shape, dtype=torch.uint8, device=self.device)
-        return torch.full(shape, float("inf"), dtype=torch.float32,
-                          device=self.device)
+        return torch.full(shape, float("inf"), dtype=torch.float32, device=self.device)
 
 
 # --------------------------------------------------------------------------- #
 # factory (collect.py entry point)
 # --------------------------------------------------------------------------- #
-def build_camera_manager(cameras_cfg, obs_requests,
-                         enable_cameras: bool = False,
-                         refs=None,
-                         depth_overrides: dict | None = None,
-                         backend: str = "isaaclab",
-                         render_groups=None,
-                         policy_hz: float | None = None,
-                         num_envs: int | None = None) \
-        -> CameraManager | None:
+def build_camera_manager(
+    cameras_cfg,
+    obs_requests,
+    enable_cameras: bool = False,
+    refs=None,
+    depth_overrides: dict | None = None,
+    backend: str = "isaaclab",
+    render_groups=None,
+    policy_hz: float | None = None,
+    num_envs: int | None = None,
+) -> CameraManager | None:
     """Build a :class:`CameraManager` from yaml + adapter requests.
 
     Args:
@@ -749,13 +782,11 @@ def build_camera_manager(cameras_cfg, obs_requests,
     try:
         info = backend_info(backend)
     except BackendSelectionError as e:
-        raise ValueError(f"unknown camera backend {backend!r} "
-                         "(isaaclab|mujoco|mjwarp)") from e
+        raise ValueError(f"unknown camera backend {backend!r} " "(isaaclab|mujoco|mjwarp)") from e
     reqs = list(obs_requests or [])
     req_keys = {r.key for r in reqs}
     declared = fold_declared_intervals(cameras_cfg, policy_hz)
-    dup = sorted({n for n in (s.name for s in declared)
-                  if [x.name for x in declared].count(n) > 1})
+    dup = sorted({n for n in (s.name for s in declared) if [x.name for x in declared].count(n) > 1})
     if dup:
         raise ValueError(f"duplicate camera names in yaml cameras: {dup}")
 
@@ -766,7 +797,8 @@ def build_camera_manager(cameras_cfg, obs_requests,
     if unknown:
         raise ValueError(
             f"adapter requests unknown camera obs keys {sorted(unknown)}; "
-            f"declared cameras serve: {sorted(available)}")
+            f"declared cameras serve: {sorted(available)}"
+        )
 
     alias_keys = [k for k in DEPTH_ALIAS_KEYS if k in req_keys]
     shim = False
@@ -805,43 +837,52 @@ def build_camera_manager(cameras_cfg, obs_requests,
         # request-driven instantiation (every sensor prim is a
         # real render product -- unrequested cameras stay unconstructed)
         for spec in declared:
-            wanted = (bool(set(spec.keys()) & cam_req)
-                      or spec.name in refs
-                      or spec.name == "free"     # debug-console fly
-                      or (shim and spec.name == "depth")  # camera (contract:
-                      or (alias_keys and spec.name == "depth"))  # console §free)
+            wanted = (
+                bool(set(spec.keys()) & cam_req)
+                or spec.name in refs
+                or spec.name == "free"  # debug-console fly
+                or (shim and spec.name == "depth")  # camera (contract:
+                or (alias_keys and spec.name == "depth")
+            )  # console §free)
             if wanted:
                 included.append(spec)
             else:
-                print(f"[cameras] camera '{spec.name}' declared but not "
-                      f"requested by adapter/recorder -> not instantiated",
-                      flush=True)
+                print(
+                    f"[cameras] camera '{spec.name}' declared but not "
+                    f"requested by adapter/recorder -> not instantiated",
+                    flush=True,
+                )
     if alias_keys and not shim and depth_overrides:
-        print("[cameras] note: yaml 'camera_depth' overrides ignored — a "
-              "user-declared 'depth' camera wins over the implicit shim",
-              flush=True)
+        print(
+            "[cameras] note: yaml 'camera_depth' overrides ignored — a "
+            "user-declared 'depth' camera wins over the implicit shim",
+            flush=True,
+        )
 
     aliases: dict[str, tuple[str, bool]] = {}
     if alias_keys:
         depth_spec = next((s for s in included if s.name == "depth"), None)
         if depth_spec is None:
             raise ValueError(
-                "adapter requests depth alias obs but no 'depth' camera is "
-                "instantiated")
+                "adapter requests depth alias obs but no 'depth' camera is " "instantiated"
+            )
         if depth_key("depth") not in depth_spec.keys():
             raise ValueError(
                 f"camera 'depth' must render the depth stream to serve the "
-                f"alias keys (types={list(depth_spec.types)})")
-        if "depth_image" in alias_keys and \
-                (int(depth_spec.height), int(depth_spec.width)) != \
-                _PREPROCESS_SIZE:
+                f"alias keys (types={list(depth_spec.types)})"
+            )
+        if (
+            "depth_image" in alias_keys
+            and (int(depth_spec.height), int(depth_spec.width)) != _PREPROCESS_SIZE
+        ):
             raise ValueError(
                 "the 'depth_image' alias applies preprocess_depth "
                 f"(crop {_PREPROCESS_SIZE[0]}x{_PREPROCESS_SIZE[1]} -> "
                 f"58x87); camera 'depth' renders "
                 f"{depth_spec.width}x{depth_spec.height}. Use "
                 f"'depth_image_raw' + adapter-side preprocessing, or render "
-                f"the 106x60 geometry")
+                f"the 106x60 geometry"
+            )
         if "depth_image_raw" in alias_keys:
             aliases["depth_image_raw"] = (depth_key("depth"), False)
         if "depth_image" in alias_keys:
@@ -853,14 +894,14 @@ def build_camera_manager(cameras_cfg, obs_requests,
         raise ValueError(
             "cameras requested (yaml cameras/adapter image obs) but "
             "--enable_cameras was not passed: the backend camera sensors "
-            "require the kit camera pipeline (AppLauncher --enable_cameras)")
+            "require the kit camera pipeline (AppLauncher --enable_cameras)"
+        )
     if render_groups is not None:
         from .geomflags import validate_render_groups
+
         validate_render_groups(render_groups)
 
     check_camera_capabilities(backend, included, num_envs=num_envs)
 
-    rigs = [build_rig(s, backend=backend, render_groups=render_groups)
-            for s in included]
-    return CameraManager(included, rigs, aliases, obs_served=obs_served,
-                         policy_hz=policy_hz)
+    rigs = [build_rig(s, backend=backend, render_groups=render_groups) for s in included]
+    return CameraManager(included, rigs, aliases, obs_served=obs_served, policy_hz=policy_hz)

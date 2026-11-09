@@ -35,6 +35,7 @@ policy transports used by daemon-supervised runs.  The boundary asserts
 the declared extra here so a base install gets the teaching error instead
 of a traceback from a spawned worker.
 """
+
 from unigym._optional import require
 
 require("zmq", "daemon", feature="the unigymd daemon")

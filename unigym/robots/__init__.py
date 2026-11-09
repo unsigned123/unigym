@@ -6,6 +6,7 @@ scripts/collect.py.  Pure-constant modules such as
 ``unigym.robots.g1_constants`` stay importable WITHOUT isaaclab
 (local unit tests; importing this package no longer pulls isaaclab).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,6 +22,7 @@ _FACTORIES = {
 
 def _load(mod_name: str, fn_name: str):
     import importlib
+
     mod = importlib.import_module(f".{mod_name}", __name__)
     return getattr(mod, fn_name)
 
@@ -39,8 +41,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def build_robot_recipe(section: dict[str, JsonValue],
-                       with_isaaclab: bool = False) -> RobotRecipe:
+def build_robot_recipe(section: dict[str, JsonValue], with_isaaclab: bool = False) -> RobotRecipe:
     """Build a :class:`RobotRecipe` from one articulation declaration.
 
     ``section`` is the projection ``{name, params, body_parts}`` of an
@@ -48,15 +49,12 @@ def build_robot_recipe(section: dict[str, JsonValue],
     data (joint order / q0 / feet / body parts / asset), never a policy.
     """
     raw_params = section.get("params")
-    params: dict[str, JsonValue] = (
-        dict(raw_params) if isinstance(raw_params, dict) else {})
+    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     if "body_parts" in section:
         params["body_parts"] = section["body_parts"]
     name_value = section["name"]
     if not isinstance(name_value, str):
-        raise TypeError(
-            f"robot recipe name must be a string, got "
-            f"{type(name_value).__name__}")
+        raise TypeError(f"robot recipe name must be a string, got " f"{type(name_value).__name__}")
     factory = __getattr__(name_value)
     # with_isaaclab: isaaclab backends need the ArticulationCfg (built after
     # AppLauncher); the mujoco backend passes False -> articulation_cfg=None.

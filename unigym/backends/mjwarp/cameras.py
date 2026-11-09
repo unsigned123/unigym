@@ -29,6 +29,7 @@ Depth is METRIC planar z from ``rc.depth_data`` (never ``get_depth``); see
 ``render.py``.  Obs/record key space is untouched: ``read()`` always returns
 ``(N, ·)`` blocks.
 """
+
 from __future__ import annotations
 
 import math
@@ -39,14 +40,15 @@ import torch
 
 from unigym.cameras.base import CameraSpec, depth_key, rgb_key, rig_type
 from unigym.cameras.state import make_state_table
-from unigym.cameras.rigs import DEFAULT_CHASE_OFFSET, lookat_quat, \
-    yaw_pitch_roll_quat
+from unigym.cameras.rigs import DEFAULT_CHASE_OFFSET, lookat_quat, yaw_pitch_roll_quat
 
-from ..shared.mjfamily.cameras.helpers import (MJ_CAMERA_PREFIX,
-                                              _quat_mul_np,
-                                              _rig_offset_quat,
-                                              inject_spec_camera,
-                                              mj_camera_quat)
+from ..shared.mjfamily.cameras.helpers import (
+    MJ_CAMERA_PREFIX,
+    _quat_mul_np,
+    _rig_offset_quat,
+    inject_spec_camera,
+    mj_camera_quat,
+)
 
 
 def _cpu_rig_factory() -> Any:
@@ -61,9 +63,9 @@ def _cpu_rig_factory() -> Any:
 
     factory = backend_info("mujoco").camera_backend
     if factory is None:
-        raise RuntimeError(
-            "mjwarp cameras: the mujoco backend declares no camera backend")
+        raise RuntimeError("mjwarp cameras: the mujoco backend declares no camera backend")
     return factory()
+
 
 __all__ = ["MjwarpRig", "build_mjwarp_rig"]
 
@@ -103,16 +105,14 @@ class _WarpRigBase:
         self.target_env = int(rig.get("target_env", 0))
         self.render_spec = None
         self.render_source = None
-        self.state_table = make_state_table(self.name,
-                                            spec.state or "shared")
+        self.state_table = make_state_table(self.name, spec.state or "shared")
         self._mount_pos = np.asarray(
-            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))],
-            dtype=np.float64)
-        self._mount_quat = np.asarray(_rig_offset_quat(spec),
-                                      dtype=np.float64)
+            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))], dtype=np.float64
+        )
+        self._mount_quat = np.asarray(_rig_offset_quat(spec), dtype=np.float64)
         # live per-instance properties (mount-frame offsets)
-        self._pose_off = None   # (N, 3)
-        self._yaw = None        # (N,)
+        self._pose_off = None  # (N, 3)
+        self._yaw = None  # (N,)
         self._pitch = None
         self._roll = None
 
@@ -126,18 +126,24 @@ class _WarpRigBase:
         from .render import WarpRenderer
 
         self._env = env
-        cid = mujoco.mj_name2id(env.mj_model, mujoco.mjtObj.mjOBJ_CAMERA,
-                                self._mj_name)
+        cid = mujoco.mj_name2id(env.mj_model, mujoco.mjtObj.mjOBJ_CAMERA, self._mj_name)
         if cid < 0:
             raise RuntimeError(
                 f"mjwarp camera '{self._mj_name}' missing from the compiled "
-                f"model (injection lost?)")
+                f"model (injection lost?)"
+            )
         self._cam_id = int(cid)
         self._wm, self._wd = env._wm, env._wdata
         self._renderer = WarpRenderer(
-            env.mj_model, self._wm, self._wd, int(env.num_envs),
-            [self._mj_name], int(self.spec.width), int(self.spec.height),
-            with_depth="depth" in self.spec.types)
+            env.mj_model,
+            self._wm,
+            self._wd,
+            int(env.num_envs),
+            [self._mj_name],
+            int(self.spec.width),
+            int(self.spec.height),
+            with_depth="depth" in self.spec.types,
+        )
         self._init_state_rows()
 
     def close(self) -> None:
@@ -156,13 +162,14 @@ class _WarpRigBase:
         for i in ids:
             if not 0 <= i < n:
                 raise ValueError(
-                    f"camera '{self.name}': env_id {i} out of range for "
-                    f"{n} env(s)")
+                    f"camera '{self.name}': env_id {i} out of range for " f"{n} env(s)"
+                )
         if self._shared() and ids != [self.target_env]:
             raise ValueError(
                 f"camera '{self.name}' is state=shared: it has a single "
                 f"meaningful instance (env {self.target_env} = target_env); "
-                f"env_ids must be omitted or [{self.target_env}]")
+                f"env_ids must be omitted or [{self.target_env}]"
+            )
 
     # -- live properties -------------------------------------------------- #
     def _ensure_live(self) -> None:
@@ -173,22 +180,31 @@ class _WarpRigBase:
             self._pitch = np.zeros(n, dtype=np.float64)
             self._roll = np.zeros(n, dtype=np.float64)
 
-    def apply_properties(self, pose_offset=None, yaw_deg=None,
-                         pitch_deg=None, roll_deg=None, target_env=None,
-                         env_ids: list[int] | None = None) -> None:
+    def apply_properties(
+        self,
+        pose_offset=None,
+        yaw_deg=None,
+        pitch_deg=None,
+        roll_deg=None,
+        target_env=None,
+        env_ids: list[int] | None = None,
+    ) -> None:
         """Fold the live whitelist into the per-instance pose rows."""
         self._validate_ids(env_ids)
         self._ensure_live()
-        if (self._pose_off is None or self._yaw is None
-                or self._pitch is None or self._roll is None):
+        if self._pose_off is None or self._yaw is None or self._pitch is None or self._roll is None:
             raise RuntimeError(f"camera {self.name!r}: live state unbound")
-        sel = np.arange(int(self._env.num_envs)) if env_ids is None \
+        sel = (
+            np.arange(int(self._env.num_envs))
+            if env_ids is None
             else np.asarray([int(i) for i in env_ids], dtype=np.int64)
+        )
         if pose_offset is not None:
             off = np.asarray([float(x) for x in pose_offset], dtype=np.float64)
             if off.shape != (3,):
-                raise ValueError(f"camera '{self.name}': pose_offset must be "
-                                 f"[dx, dy, dz], got {list(off)}")
+                raise ValueError(
+                    f"camera '{self.name}': pose_offset must be " f"[dx, dy, dz], got {list(off)}"
+                )
             self._pose_off[sel] = off
         if yaw_deg is not None:
             self._yaw[sel] = math.radians(float(yaw_deg))
@@ -204,11 +220,14 @@ class _WarpRigBase:
         """Base mount pose ∘ this instance's live offset (isaac quat)."""
         p = np.asarray(base_pos, dtype=np.float64)
         q = np.asarray(base_quat, dtype=np.float64)
-        if (self._pose_off is not None and self._yaw is not None
-                and self._pitch is not None and self._roll is not None):
+        if (
+            self._pose_off is not None
+            and self._yaw is not None
+            and self._pitch is not None
+            and self._roll is not None
+        ):
             p = p + self._pose_off[env_idx]
-            y, pt, r = (self._yaw[env_idx], self._pitch[env_idx],
-                        self._roll[env_idx])
+            y, pt, r = (self._yaw[env_idx], self._pitch[env_idx], self._roll[env_idx])
             if y or pt or r:
                 q = _quat_mul_np(_ypr_quat(y, pt, r), q)
         return p, q
@@ -243,13 +262,10 @@ class _WarpRigBase:
         import warp as wp
 
         pos = np.ascontiguousarray(pos, dtype=np.float32)
-        quat = np.asarray([mj_camera_quat(q) for q in quat_isaac],
-                          dtype=np.float32)
+        quat = np.asarray([mj_camera_quat(q) for q in quat_isaac], dtype=np.float32)
         dev = self._wm.cam_pos.device
-        wp.copy(self._wm.cam_pos[:, self._cam_id],
-                wp.array(pos, dtype=wp.vec3, device=dev))
-        wp.copy(self._wm.cam_quat[:, self._cam_id],
-                wp.array(quat, dtype=wp.quat, device=dev))
+        wp.copy(self._wm.cam_pos[:, self._cam_id], wp.array(pos, dtype=wp.vec3, device=dev))
+        wp.copy(self._wm.cam_quat[:, self._cam_id], wp.array(quat, dtype=wp.quat, device=dev))
         # kinematics() does not refresh camera frames in mujoco-warp 3.17.
         mjw.camlight(self._wm, self._wd)
 
@@ -263,8 +279,7 @@ class _WarpRigBase:
             if key == rgb_key(self.name):
                 out[key] = torch.from_numpy(self._renderer.rgb(0))
             elif key == depth_key(self.name):
-                out[key] = torch.from_numpy(
-                    self._renderer.depth(0, float(self.spec.far_clip)))
+                out[key] = torch.from_numpy(self._renderer.depth(0, float(self.spec.far_clip)))
             else:  # pragma: no cover - CameraSpec.keys() is closed
                 raise KeyError(key)
         return out
@@ -272,8 +287,8 @@ class _WarpRigBase:
     # -- world pose faces ------------------------------------------------- #
     def get_world_pose(self):
         raise NotImplementedError(
-            f"camera '{self.name}': world-pose read-back is supported on "
-            f"world rigs only")
+            f"camera '{self.name}': world-pose read-back is supported on " f"world rigs only"
+        )
 
 
 class WarpBodyRig(_WarpRigBase):
@@ -297,32 +312,32 @@ class WarpWorldRig(_WarpRigBase):
         rig = spec.rig or {}
         pos = [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))]
         if rig.get("rot") is not None:
-            rot = np.asarray([float(x) for x in rig["rot"]],
-                             dtype=np.float64)
+            rot = np.asarray([float(x) for x in rig["rot"]], dtype=np.float64)
         else:
-            rot = np.asarray(lookat_quat(pos, rig.get("lookat",
-                                                      (1.0, 0.0, 0.25))),
-                            dtype=np.float64)
+            rot = np.asarray(
+                lookat_quat(pos, rig.get("lookat", (1.0, 0.0, 0.25))), dtype=np.float64
+            )
         self._base_pos = np.asarray(pos, dtype=np.float64)
         self._base_rot = rot
         self._declared: dict[int, tuple] | None = None
 
     def _init_state_rows(self) -> None:
         for i in range(int(self._env.num_envs)):
-            self.state_table.set(self.name, i, self._base_pos.copy(),
-                                 self._base_rot.copy())
+            self.state_table.set(self.name, i, self._base_pos.copy(), self._base_rot.copy())
 
     def apply_declared_poses(self, env_poses) -> None:
         n = int(self._env.num_envs)
         if not env_poses:
             self._declared = None
         else:
-            rows = [env_poses[0]] * n if len(env_poses) == 1 \
-                else list(env_poses)
+            rows = [env_poses[0]] * n if len(env_poses) == 1 else list(env_poses)
             self._declared = {
-                i: (np.asarray(rows[i]["pos"], dtype=np.float64),
-                    np.asarray(rows[i]["quat"], dtype=np.float64))
-                for i in range(n)}
+                i: (
+                    np.asarray(rows[i]["pos"], dtype=np.float64),
+                    np.asarray(rows[i]["quat"], dtype=np.float64),
+                )
+                for i in range(n)
+            }
         self.sync_pose(None if self._shared() else list(range(n)))
 
     def _base_for(self, env_idx: int) -> tuple:
@@ -352,23 +367,25 @@ class WarpWorldRig(_WarpRigBase):
             self.sync_pose()
             row = self.state_table.get(self.name, self.target_env)
         if row is None:
-            raise RuntimeError(
-                f"camera {self.name!r}: world-pose row missing after sync")
+            raise RuntimeError(f"camera {self.name!r}: world-pose row missing after sync")
         return row.pos, row.quat
 
     def set_world_pose(self, pos, quat_wxyz, env_idx: int | None = None):
         idx = self.target_env if env_idx is None else int(env_idx)
         if not 0 <= idx < int(self._env.num_envs):
-            raise ValueError(f"camera '{self.name}': env_idx {idx} out of "
-                             f"range")
-        self.state_table.set(self.name, None if self._shared() else idx,
-                             np.asarray(pos, dtype=np.float64),
-                             np.asarray(quat_wxyz, dtype=np.float64))
+            raise ValueError(f"camera '{self.name}': env_idx {idx} out of " f"range")
+        self.state_table.set(
+            self.name,
+            None if self._shared() else idx,
+            np.asarray(pos, dtype=np.float64),
+            np.asarray(quat_wxyz, dtype=np.float64),
+        )
         self.sync_pose()
 
     def begin_world_pose(self, pos, quat_wxyz):
-        saved = {k: (v.pos.copy(), v.quat.copy())
-                 for k, v in self.state_table.rows(self.name).items()}
+        saved = {
+            k: (v.pos.copy(), v.quat.copy()) for k, v in self.state_table.rows(self.name).items()
+        }
         self.set_world_pose(pos, quat_wxyz)
         return saved
 
@@ -385,32 +402,31 @@ class WarpChaseRig(_WarpRigBase):
         super().__init__(spec)
         rig = spec.rig or {}
         self._pos_off = np.asarray(
-            [float(x) for x in rig.get("pos", DEFAULT_CHASE_OFFSET["pos"])],
-            dtype=np.float64)
+            [float(x) for x in rig.get("pos", DEFAULT_CHASE_OFFSET["pos"])], dtype=np.float64
+        )
         self._look_off = np.asarray(
-            [float(x) for x in rig.get("lookat",
-                                       DEFAULT_CHASE_OFFSET["lookat"])],
-            dtype=np.float64)
+            [float(x) for x in rig.get("lookat", DEFAULT_CHASE_OFFSET["lookat"])], dtype=np.float64
+        )
 
     def _root(self, env_idx: int) -> tuple:
         env = self._env
         if not getattr(env, "_has_freejoint", True):
-            return (np.asarray(env._fixed_base_pos_w, dtype=np.float64),
-                    np.asarray(env._fixed_base_quat_w, dtype=np.float64))
+            return (
+                np.asarray(env._fixed_base_pos_w, dtype=np.float64),
+                np.asarray(env._fixed_base_quat_w, dtype=np.float64),
+            )
         d = env.mj_datas[env_idx]
         return d.qpos[0:3].copy(), d.qpos[3:7].copy()
 
     def _chase_pose(self, env_idx: int) -> tuple:
         root, root_q = self._root(env_idx)
         w, x, y, z = root_q
-        yaw = math.atan2(2.0 * (w * z + x * y),
-                         1.0 - 2.0 * (y * y + z * z))
+        yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
         c, s = math.cos(yaw), math.sin(yaw)
 
         def rot_xy(off):
             off3 = np.asarray(off, dtype=np.float64)
-            return np.array([off3[0] * c - off3[1] * s,
-                             off3[0] * s + off3[1] * c, off3[2]])
+            return np.array([off3[0] * c - off3[1] * s, off3[0] * s + off3[1] * c, off3[2]])
 
         live = np.zeros(3) if self._pose_off is None else self._pose_off[env_idx]
         pos = root + rot_xy(self._pos_off + live)
@@ -434,8 +450,7 @@ class WarpChaseRig(_WarpRigBase):
         return p, q
 
 
-_WARP_RIGS = {"body": WarpBodyRig, "world": WarpWorldRig,
-              "chase": WarpChaseRig}
+_WARP_RIGS = {"body": WarpBodyRig, "world": WarpWorldRig, "chase": WarpChaseRig}
 
 
 class MjwarpRig:
@@ -460,8 +475,8 @@ class MjwarpRig:
             cls = _WARP_RIGS.get(rtype)
             if cls is None:
                 raise ValueError(
-                    f"camera {self.name!r}: unknown rig type {rtype!r} "
-                    f"(body|world|chase)")
+                    f"camera {self.name!r}: unknown rig type {rtype!r} " f"(body|world|chase)"
+                )
             self._impl = cls(self.spec)
         self._impl.bind_env(env)
 

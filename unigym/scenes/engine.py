@@ -19,6 +19,7 @@ no per-generator dispatch.  A backend self-registers through
 :func:`register_scene_engine`; the registry is closed (duplicate or
 illegal names are teaching errors) and the core never names a backend.
 """
+
 from __future__ import annotations
 
 import re
@@ -50,8 +51,7 @@ class SceneEngine(Protocol):
         """Return the backend's composed product for *scene*."""
         ...
 
-    def attach(self, base: object, composed: object, *,
-               frame: str) -> Mapping[str, object]:
+    def attach(self, base: object, composed: object, *, frame: str) -> Mapping[str, object]:
         """Join *composed* into *base* at *frame*; return the region table."""
         ...
 
@@ -77,7 +77,8 @@ _ENGINES: dict[str, Callable[[], object]] = {}
 
 
 def register_scene_engine(
-    name: str, factory: Callable[[], object],
+    name: str,
+    factory: Callable[[], object],
 ) -> Callable[[], object]:
     """Register one scene-engine factory under a lowercase name.
 
@@ -104,13 +105,11 @@ def register_scene_engine(
         )
     if not callable(factory):
         raise SceneEngineError(
-            f"scene engine {name!r} factory must be callable, got "
-            f"{type(factory).__name__}"
+            f"scene engine {name!r} factory must be callable, got " f"{type(factory).__name__}"
         )
     if name in _ENGINES:
         raise SceneEngineError(
-            f"scene engine {name!r} is registered twice -- give each engine "
-            f"a unique name"
+            f"scene engine {name!r} is registered twice -- give each engine " f"a unique name"
         )
     _ENGINES[name] = factory
     return factory
@@ -130,9 +129,7 @@ def scene_engine(name: str) -> SceneEngine:
             factory product does not satisfy :class:`SceneEngine`.
     """
     if not isinstance(name, str) or not name:
-        raise SceneEngineError(
-            f"scene engine name must be a non-empty string, got {name!r}"
-        )
+        raise SceneEngineError(f"scene engine name must be a non-empty string, got {name!r}")
     try:
         factory = _ENGINES[name]
     except KeyError:

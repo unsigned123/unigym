@@ -5,6 +5,7 @@ profiles import ``isaaclab_assets``).  ``unigym.scripts.collect_cli`` asks
 the registry for this face instead of comparing the backend name, so the
 ``isaaclab.app`` import stays inside this package.
 """
+
 from __future__ import annotations
 
 

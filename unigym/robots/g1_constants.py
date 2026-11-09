@@ -23,6 +23,7 @@ Provenance of every number:
     deployment gains (policy_parameters.hpp:141-210) remain the documented
     A/B alternative via the yaml ``actuator`` override.
 """
+
 from __future__ import annotations
 
 from typing import Dict, List
@@ -32,25 +33,58 @@ from typing import Dict, List
 # IL/policy index.  NOT necessarily the USD spawn order (probed separately).
 # ---------------------------------------------------------------------------
 G1_JOINT_ORDER_IL: List[str] = [
-    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
-    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
-    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
-    "left_knee_joint", "right_knee_joint",
-    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
-    "left_ankle_pitch_joint", "right_ankle_pitch_joint",
-    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
-    "left_ankle_roll_joint", "right_ankle_roll_joint",
-    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
-    "left_elbow_joint", "right_elbow_joint",
-    "left_wrist_roll_joint", "right_wrist_roll_joint",
-    "left_wrist_pitch_joint", "right_wrist_pitch_joint",
-    "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "waist_roll_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "waist_pitch_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
 ]
 
 # upper/lower-body partition in IL indices (policy_parameters.hpp:151-157
 # upper_body_joint_isaaclab_order_in_isaaclab_index / lower_body_...).
-G1_UPPER_BODY_IDX = (2, 5, 8, 11, 12, 15, 16, 19, 20, 21, 22, 23, 24, 25, 26,
-                     27, 28)  # 17 joints (waist + arms)
+G1_UPPER_BODY_IDX = (
+    2,
+    5,
+    8,
+    11,
+    12,
+    15,
+    16,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+)  # 17 joints (waist + arms)
 G1_LOWER_BODY_IDX = (0, 1, 3, 4, 6, 7, 9, 10, 13, 14, 17, 18)  # 12 joints (legs)
 
 # foot bodies == contact-sensor bodies (MJ XML + IL asset: the ankle-roll
@@ -63,20 +97,35 @@ G1_BASE_BODY = "pelvis"
 # Drives both the spawn pose and the controller q0, so obs
 # ``joint_pos_rel = q - q0`` matches the deployment ``body_q`` bit-for-bit.
 G1_DEFAULT_Q: Dict[str, float] = {
-    "left_hip_pitch_joint": -0.312, "right_hip_pitch_joint": -0.312,
-    "left_hip_roll_joint": 0.0, "right_hip_roll_joint": 0.0,
-    "left_hip_yaw_joint": 0.0, "right_hip_yaw_joint": 0.0,
-    "left_knee_joint": 0.669, "right_knee_joint": 0.669,
-    "left_ankle_pitch_joint": -0.363, "right_ankle_pitch_joint": -0.363,
-    "left_ankle_roll_joint": 0.0, "right_ankle_roll_joint": 0.0,
-    "waist_yaw_joint": 0.0, "waist_roll_joint": 0.0, "waist_pitch_joint": 0.0,
-    "left_shoulder_pitch_joint": 0.2, "right_shoulder_pitch_joint": 0.2,
-    "left_shoulder_roll_joint": 0.2, "right_shoulder_roll_joint": -0.2,
-    "left_shoulder_yaw_joint": 0.0, "right_shoulder_yaw_joint": 0.0,
-    "left_elbow_joint": 0.6, "right_elbow_joint": 0.6,
-    "left_wrist_roll_joint": 0.0, "right_wrist_roll_joint": 0.0,
-    "left_wrist_pitch_joint": 0.0, "right_wrist_pitch_joint": 0.0,
-    "left_wrist_yaw_joint": 0.0, "right_wrist_yaw_joint": 0.0,
+    "left_hip_pitch_joint": -0.312,
+    "right_hip_pitch_joint": -0.312,
+    "left_hip_roll_joint": 0.0,
+    "right_hip_roll_joint": 0.0,
+    "left_hip_yaw_joint": 0.0,
+    "right_hip_yaw_joint": 0.0,
+    "left_knee_joint": 0.669,
+    "right_knee_joint": 0.669,
+    "left_ankle_pitch_joint": -0.363,
+    "right_ankle_pitch_joint": -0.363,
+    "left_ankle_roll_joint": 0.0,
+    "right_ankle_roll_joint": 0.0,
+    "waist_yaw_joint": 0.0,
+    "waist_roll_joint": 0.0,
+    "waist_pitch_joint": 0.0,
+    "left_shoulder_pitch_joint": 0.2,
+    "right_shoulder_pitch_joint": 0.2,
+    "left_shoulder_roll_joint": 0.2,
+    "right_shoulder_roll_joint": -0.2,
+    "left_shoulder_yaw_joint": 0.0,
+    "right_shoulder_yaw_joint": 0.0,
+    "left_elbow_joint": 0.6,
+    "right_elbow_joint": 0.6,
+    "left_wrist_roll_joint": 0.0,
+    "right_wrist_roll_joint": 0.0,
+    "left_wrist_pitch_joint": 0.0,
+    "right_wrist_pitch_joint": 0.0,
+    "left_wrist_yaw_joint": 0.0,
+    "right_wrist_yaw_joint": 0.0,
 }
 
 
@@ -87,9 +136,11 @@ def _g1_hand_finger_links(side: str) -> List[str]:
     no palm body); the localized g1.usd prims additionally live under the
     ``{side}_hand/`` scope, hence the per-backend forms below.
     """
-    return [f"{side}_hand_{part}_{k}_link"
-            for part, n in (("index", 2), ("middle", 2), ("thumb", 3))
-            for k in range(n)]
+    return [
+        f"{side}_hand_{part}_{k}_link"
+        for part, n in (("index", 2), ("middle", 2), ("thumb", 3))
+        for k in range(n)
+    ]
 
 
 # Named grasp groups (declarative): the robot-level
@@ -114,8 +165,7 @@ def _g1_hand_finger_links(side: str) -> List[str]:
 G1_GRASP_GROUPS: Dict[str, Dict[str, List[str]]] = {
     side: {
         "mujoco": _g1_hand_finger_links(side),
-        "isaaclab": [f"{side}_hand/{link}"
-                     for link in _g1_hand_finger_links(side)],
+        "isaaclab": [f"{side}_hand/{link}" for link in _g1_hand_finger_links(side)],
     }
     for side in ("left", "right")
 }
@@ -126,12 +176,11 @@ G1_GRASP_GROUPS: Dict[str, Dict[str, List[str]]] = {
 # success trees, over the depth-2 whitelist).  Additive: left/right keep
 # their exact bodies, so every existing declaration resolves unchanged.
 G1_GRASP_GROUPS["both"] = {
-    "mujoco": (_g1_hand_finger_links("left")
-               + _g1_hand_finger_links("right")),
-    "isaaclab": ([f"left_hand/{link}"
-                  for link in _g1_hand_finger_links("left")]
-                 + [f"right_hand/{link}"
-                    for link in _g1_hand_finger_links("right")]),
+    "mujoco": (_g1_hand_finger_links("left") + _g1_hand_finger_links("right")),
+    "isaaclab": (
+        [f"left_hand/{link}" for link in _g1_hand_finger_links("left")]
+        + [f"right_hand/{link}" for link in _g1_hand_finger_links("right")]
+    ),
 }
 
 
@@ -143,19 +192,18 @@ G1_GRASP_GROUPS["both"] = {
 G1_BODY_PARTS: Dict[str, Dict | List | str] = {
     "feet": list(G1_FOOT_BODIES),
     "base": G1_BASE_BODY,
-    "joints": list(G1_JOINT_ORDER_IL),            # full policy order (29)
+    "joints": list(G1_JOINT_ORDER_IL),  # full policy order (29)
     # dominant proximal joints
     "hips": ["left_hip_pitch_joint", "right_hip_pitch_joint"],
     # humanoid extensions
-    "legs": [j for j in G1_JOINT_ORDER_IL
-             if "hip" in j or "knee" in j or "ankle" in j],
+    "legs": [j for j in G1_JOINT_ORDER_IL if "hip" in j or "knee" in j or "ankle" in j],
     "waist": ["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
-    "arms": [j for j in G1_JOINT_ORDER_IL
-             if "shoulder" in j or "elbow" in j or "wrist" in j],
+    "arms": [j for j in G1_JOINT_ORDER_IL if "shoulder" in j or "elbow" in j or "wrist" in j],
     "upper_body": [G1_JOINT_ORDER_IL[i] for i in G1_UPPER_BODY_IDX],
     "lower_body": [G1_JOINT_ORDER_IL[i] for i in G1_LOWER_BODY_IDX],
-    "grasp": {side: {be: list(bodies) for be, bodies in m.items()}
-              for side, m in G1_GRASP_GROUPS.items()},
+    "grasp": {
+        side: {be: list(bodies) for be, bodies in m.items()} for side, m in G1_GRASP_GROUPS.items()
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -166,20 +214,28 @@ G1_BODY_PARTS: Dict[str, Dict | List | str] = {
 # ratings are the contract.
 # ---------------------------------------------------------------------------
 G1_EFFORT_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 139.0, ".*_hip_roll_joint": 139.0,
-    ".*_knee_joint": 139.0, ".*_hip_yaw_joint": 88.0,
+    ".*_hip_pitch_joint": 139.0,
+    ".*_hip_roll_joint": 139.0,
+    ".*_knee_joint": 139.0,
+    ".*_hip_yaw_joint": 88.0,
 }
 G1_EFFORT_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 25.0, ".*_ankle_roll_joint": 25.0,
+    ".*_ankle_pitch_joint": 25.0,
+    ".*_ankle_roll_joint": 25.0,
 }
 G1_EFFORT_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 50.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0,
+    "waist_yaw_joint": 50.0,
+    "waist_roll_joint": 50.0,
+    "waist_pitch_joint": 50.0,
 }
 G1_EFFORT_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 25.0, ".*_shoulder_roll_joint": 25.0,
-    ".*_shoulder_yaw_joint": 25.0, ".*_elbow_joint": 25.0,
+    ".*_shoulder_pitch_joint": 25.0,
+    ".*_shoulder_roll_joint": 25.0,
+    ".*_shoulder_yaw_joint": 25.0,
+    ".*_elbow_joint": 25.0,
     ".*_wrist_roll_joint": 25.0,
-    ".*_wrist_pitch_joint": 5.0, ".*_wrist_yaw_joint": 5.0,
+    ".*_wrist_pitch_joint": 5.0,
+    ".*_wrist_yaw_joint": 5.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -188,34 +244,47 @@ G1_EFFORT_ARMS: Dict[str, float] = {
 # yaml ``actuator`` whole-group replacement (collect.py build_actuator).
 # ---------------------------------------------------------------------------
 G1_KP_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 150.0, ".*_hip_roll_joint": 150.0,
-    ".*_hip_yaw_joint": 150.0, ".*_knee_joint": 200.0,
+    ".*_hip_pitch_joint": 150.0,
+    ".*_hip_roll_joint": 150.0,
+    ".*_hip_yaw_joint": 150.0,
+    ".*_knee_joint": 200.0,
 }
 G1_KD_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 2.0, ".*_hip_roll_joint": 2.0,
-    ".*_hip_yaw_joint": 2.0, ".*_knee_joint": 4.0,
+    ".*_hip_pitch_joint": 2.0,
+    ".*_hip_roll_joint": 2.0,
+    ".*_hip_yaw_joint": 2.0,
+    ".*_knee_joint": 4.0,
 }
 G1_KP_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 40.0, ".*_ankle_roll_joint": 40.0,
+    ".*_ankle_pitch_joint": 40.0,
+    ".*_ankle_roll_joint": 40.0,
 }
 G1_KD_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 2.0, ".*_ankle_roll_joint": 2.0,
+    ".*_ankle_pitch_joint": 2.0,
+    ".*_ankle_roll_joint": 2.0,
 }
 G1_KP_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 250.0, "waist_roll_joint": 250.0,
+    "waist_yaw_joint": 250.0,
+    "waist_roll_joint": 250.0,
     "waist_pitch_joint": 250.0,
 }
 G1_KD_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 5.0, "waist_roll_joint": 5.0, "waist_pitch_joint": 5.0,
+    "waist_yaw_joint": 5.0,
+    "waist_roll_joint": 5.0,
+    "waist_pitch_joint": 5.0,
 }
 G1_KP_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 100.0, ".*_shoulder_roll_joint": 100.0,
-    ".*_shoulder_yaw_joint": 40.0, ".*_elbow_joint": 40.0,
+    ".*_shoulder_pitch_joint": 100.0,
+    ".*_shoulder_roll_joint": 100.0,
+    ".*_shoulder_yaw_joint": 40.0,
+    ".*_elbow_joint": 40.0,
     ".*_wrist_.*_joint": 20.0,
 }
 G1_KD_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 5.0, ".*_shoulder_roll_joint": 5.0,
-    ".*_shoulder_yaw_joint": 2.0, ".*_elbow_joint": 2.0,
+    ".*_shoulder_pitch_joint": 5.0,
+    ".*_shoulder_roll_joint": 5.0,
+    ".*_shoulder_yaw_joint": 2.0,
+    ".*_elbow_joint": 2.0,
     ".*_wrist_.*_joint": 2.0,
 }
 

@@ -5,6 +5,7 @@ closes it.  ``close()`` is idempotent and tears down the SHM bridge, any
 owned recorder close hook and the env backend (the pre-split
 ``collect_cli`` finally path).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 
 
 if TYPE_CHECKING:
+
     class RunEnv(EnvBackend, Protocol):
         """Env backend plus the run-layer wiring and snapshot faces.
 
@@ -63,8 +65,7 @@ class Sink(Protocol):
     def on_step(self, t: int, bundle: dict[str, object]) -> None:
         """Consume one pre-reset engine step."""
 
-    def on_episode_end(
-        self, env_ids: object, bundle: dict[str, object]) -> None:
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
         """Consume the episode-end data side before the reset chain."""
 
     def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
@@ -101,8 +102,7 @@ class RunInstance:
     writer: ShardWriter | None = None
     logger: DataCollectLogger | None = None
     replay: TraceReplay | None = None
-    rewind_providers: list[RewindStateProvider] = field(
-        default_factory=_empty_providers)
+    rewind_providers: list[RewindStateProvider] = field(default_factory=_empty_providers)
     stop_when: Callable[[], bool] | None = None
     artifacts_dir: Path | None = None
     out_dir: str | None = None
@@ -145,7 +145,8 @@ class RunInstance:
             raise RuntimeError(
                 f"RunInstance.model: env {name} has no model_set "
                 f"(backend {self.spec.backend!r} does not build the v103.4 "
-                f"ModelSet)")
+                f"ModelSet)"
+            )
         return model_set
 
     def live_for(self, name: str | None = None) -> LiveModel:
@@ -172,7 +173,8 @@ class RunInstance:
                 raise RuntimeError(
                     f"RunInstance.live_for: this run has "
                     f"{len(model)} articulations {model.names()}; pass an "
-                    f"explicit name (no first-binding fallback)")
+                    f"explicit name (no first-binding fallback)"
+                )
             ir = next(iter(model.articulations.values()))
         else:
             ir = model[name]

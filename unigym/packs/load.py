@@ -21,6 +21,7 @@ module (the robocasa initializers' robot-stage protocol name).
 Nothing here runs at import time: the callers are explicit (the launcher and
 the daemon startup).
 """
+
 from __future__ import annotations
 
 import ast
@@ -68,9 +69,7 @@ Spelled as suffixes because ``tests/meta/packs/test_guard.py`` forbids the
 literal upper-layer import tokens anywhere inside this package.
 """
 
-_FORBIDDEN_CORE_ROOTS = tuple(
-    f"unigym.{name}" for name in _FORBIDDEN_CORE_SUFFIXES
-)
+_FORBIDDEN_CORE_ROOTS = tuple(f"unigym.{name}" for name in _FORBIDDEN_CORE_SUFFIXES)
 
 _ALLOWED_TEXT = ", ".join(_ALLOWED_CORE_ROOTS)
 _FORBIDDEN_TEXT = ", ".join(_FORBIDDEN_CORE_ROOTS)
@@ -143,9 +142,7 @@ def guard_pack_file(path: Path) -> None:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as err:
-        raise PackError(
-            f"{path}:{err.lineno}: cannot parse pack module: {err.msg}"
-        ) from err
+        raise PackError(f"{path}:{err.lineno}: cannot parse pack module: {err.msg}") from err
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -156,14 +153,17 @@ def guard_pack_file(path: Path) -> None:
             reason = _rejection(node.module, node.level)
             if reason:
                 _reject(path, node.lineno, node.module or "", reason)
-        elif (isinstance(node, ast.Attribute)
-              and isinstance(node.value, ast.Name)
-              and node.value.id == "sys"
-              and node.attr in _MUTABLE_SYS_ATTRS):
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "sys"
+            and node.attr in _MUTABLE_SYS_ATTRS
+        ):
             raise PackError(
                 f"{path}:{node.lineno}: pack code touches sys.{node.attr} -- "
                 f"the pack loader owns interpreter state (import the core "
-                f"through unigym.pack_api instead)")
+                f"through unigym.pack_api instead)"
+            )
 
 
 class _GuardedFinder(importlib.abc.MetaPathFinder):
@@ -186,9 +186,7 @@ class _GuardedFinder(importlib.abc.MetaPathFinder):
             The spec resolved by the standard path finder, or ``None`` when
             the name is not this pack's.
         """
-        if fullname != self.module_name and not fullname.startswith(
-            self.module_name + "."
-        ):
+        if fullname != self.module_name and not fullname.startswith(self.module_name + "."):
             return None
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if spec is None or not spec.origin:
@@ -198,8 +196,7 @@ class _GuardedFinder(importlib.abc.MetaPathFinder):
             origin.resolve().relative_to(self.python_dir)
         except ValueError:
             raise PackError(
-                f"pack module {fullname!r} resolves outside its python "
-                f"directory: {origin}"
+                f"pack module {fullname!r} resolves outside its python " f"directory: {origin}"
             ) from None
         if origin.suffix == ".py":
             guard_pack_file(origin)
@@ -215,22 +212,14 @@ def _module_names(module_name: str) -> tuple[str, ...]:
     """Every loaded module belonging to one pack package, sorted."""
     prefix = module_name + "."
     return tuple(
-        sorted(
-            name
-            for name in sys.modules
-            if name == module_name or name.startswith(prefix)
-        )
+        sorted(name for name in sys.modules if name == module_name or name.startswith(prefix))
     )
 
 
 def _unload(module_name: str) -> None:
     """Drop a partially imported package (and submodules) from sys.modules."""
     prefix = module_name + "."
-    for name in [
-        name
-        for name in sys.modules
-        if name == module_name or name.startswith(prefix)
-    ]:
+    for name in [name for name in sys.modules if name == module_name or name.startswith(prefix)]:
         sys.modules.pop(name, None)
 
 
@@ -260,15 +249,11 @@ def load_pack_code(pack: MountedPack) -> tuple[str, ...]:
         _LOADED[pack.name] = names
         return names
     if pack.root is None:
-        raise PackError(
-            f"code pack {pack.name!r} has no root to import from"
-        )
+        raise PackError(f"code pack {pack.name!r} has no root to import from")
     python_dir = (Path(pack.root) / "python").resolve()
     init = python_dir / "__init__.py"
     if not init.is_file():
-        raise PackError(
-            f"code pack {pack.name!r} has no python/__init__.py ({init})"
-        )
+        raise PackError(f"code pack {pack.name!r} has no python/__init__.py ({init})")
     guard_pack_file(init)
     spec = importlib.util.spec_from_file_location(
         module_name,
@@ -276,9 +261,7 @@ def load_pack_code(pack: MountedPack) -> tuple[str, ...]:
         submodule_search_locations=[str(python_dir)],
     )
     if spec is None or spec.loader is None:
-        raise PackError(
-            f"code pack {pack.name!r}: cannot build an import spec for {init}"
-        )
+        raise PackError(f"code pack {pack.name!r}: cannot build an import spec for {init}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     finder = _GuardedFinder(module_name, python_dir)
@@ -292,8 +275,7 @@ def load_pack_code(pack: MountedPack) -> tuple[str, ...]:
         text = traceback.format_exc()
         _unload(module_name)
         raise PackError(
-            f"importing code pack module {module_name!r} ({init}) failed:\n"
-            f"{text}"
+            f"importing code pack module {module_name!r} ({init}) failed:\n" f"{text}"
         ) from err
     finally:
         if finder in sys.meta_path:

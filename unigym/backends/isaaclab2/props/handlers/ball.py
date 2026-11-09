@@ -14,6 +14,7 @@ The spawn config carries ``radius``, ``mass``, ``color`` (rgb) and optional
 ``(x, y, z, yaw)`` from :class:`PropPlacement` (z typically the ball radius so
 it rests on the ground) and parks the velocity to zero.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -50,10 +51,11 @@ def _build_sphere_spawn(spec: PropSpec, c: dict):
     radius = spec.radius if spec.radius is not None else s.get("radius")
     if radius is None:
         raise ValueError(
-            f"sphere prop {spec.name!r}: radius is required "
-            f"(declare radius or spawn.radius)")
+            f"sphere prop {spec.name!r}: radius is required " f"(declare radius or spawn.radius)"
+        )
     radius = float(radius)
     from unigym.props.primitive import resolve_mass
+
     mass = resolve_mass(spec, default=0.1)
     color = s.get("color")
     if color is None:
@@ -83,15 +85,15 @@ def _build_sphere_spawn(spec: PropSpec, c: dict):
 class BallProp(PropHandler):
     """Sphere rigid-object handler (ball_pos_b / ball_vel_b in body frame)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         from unigym.props.primitive import resolve_mass
-        radius = spec.radius if spec.radius is not None \
-            else spec.spawn.get("radius")
+
+        radius = spec.radius if spec.radius is not None else spec.spawn.get("radius")
         if radius is None:
             raise ValueError(
                 f"sphere prop {spec.name!r}: radius is required "
-                f"(declare radius or spawn.radius)")
+                f"(declare radius or spawn.radius)"
+            )
         resolve_mass(spec, default=0.1)
         self.spec = spec
         self.num_envs = num_envs
@@ -114,8 +116,7 @@ class BallProp(PropHandler):
             spawn=spawn,
             init_state=c["RigidObjectCfg"].InitialStateCfg(
                 pos=init_state_pos,
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
             ),
             collision_group=0,
             debug_vis=False,
@@ -159,12 +160,12 @@ class BallProp(PropHandler):
         robot = env.robot
         rd = robot.data
         bd = self._asset.data
-        base_quat = rd.root_quat_w                       # (N, 4) wxyz
+        base_quat = rd.root_quat_w  # (N, 4) wxyz
         # ball position relative to base, in body frame
-        rel = bd.root_pos_w - rd.root_pos_w             # (N, 3) world
+        rel = bd.root_pos_w - rd.root_pos_w  # (N, 3) world
         ball_pos_b = quat_rotate_inverse(base_quat, rel)
         # ball velocity relative to base, in body frame
-        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w   # (N, 3) world
+        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w  # (N, 3) world
         ball_vel_b = quat_rotate_inverse(base_quat, rel_v)
         return {
             "ball_pos_b": ball_pos_b,
@@ -183,5 +184,4 @@ class BallProp(PropHandler):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""
         if self._asset is None or not hasattr(self._asset, "data"):
             return None
-        return (self._asset.data.root_pos_w.clone(),
-                self._asset.data.root_quat_w.clone())
+        return (self._asset.data.root_pos_w.clone(), self._asset.data.root_quat_w.clone())

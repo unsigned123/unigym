@@ -9,6 +9,7 @@ The read face is a CPU ``MjData`` mirror: every warp step is followed by
 ``mjw.get_data_into(mirror, mjm, wd, 0)``.  See ``env.py`` for the precise
 divergences from the CPU mujoco backend.
 """
+
 from __future__ import annotations
 
 from .env import BACKEND_CAPABILITIES, MjwarpEnv

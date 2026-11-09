@@ -28,6 +28,7 @@ and container teardown.
 Stdlib (argparse/subprocess) + yaml only; importable without
 isaaclab/mujoco/torch.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,7 +44,7 @@ from pathlib import Path
 import yaml
 
 from unigym import runtime_dirs
-from unigym.executors import (          # noqa: F401 (docker synthesis home)
+from unigym.executors import (  # noqa: F401 (docker synthesis home)
     Executor,
     collect_cli_in_container,
     container_state,
@@ -57,7 +58,7 @@ from unigym.executors import (          # noqa: F401 (docker synthesis home)
 
 _REPO = Path(__file__).resolve().parents[2]
 _UNIGYM_YAML = _REPO / "unigym.yaml"
-_LOCAL_YAML = _REPO / "unigym.local.yaml"      # gitignored overlay
+_LOCAL_YAML = _REPO / "unigym.local.yaml"  # gitignored overlay
 
 _DEFAULTS = {
     "image": "isaac-lab-2.3.2-ort:uni",
@@ -153,20 +154,30 @@ def _state_root(cfg: dict) -> Path:
     return Path(raw) if raw else runtime_dirs.state_dir(cfg)
 
 
-def write_state(cfg: dict, backend: str, container: str | None, log: Path,
-                cfg_path: Path, out_dir: Path,
-                paused: bool = False, direct: bool = False) -> Path:
+def write_state(
+    cfg: dict,
+    backend: str,
+    container: str | None,
+    log: Path,
+    cfg_path: Path,
+    out_dir: Path,
+    paused: bool = False,
+    direct: bool = False,
+) -> Path:
     state = {
-        "backend": backend, "container": container, "log": str(log),
-        "config": str(cfg_path), "output_dir": str(out_dir),
+        "backend": backend,
+        "container": container,
+        "log": str(log),
+        "config": str(cfg_path),
+        "output_dir": str(out_dir),
         "started": datetime.now().isoformat(timespec="seconds"),
     }
-    if paused:                     # born-paused audit trail (absent == false)
+    if paused:  # born-paused audit trail (absent == false)
         state["paused"] = True
-    if direct:                     # director-mode audit trail (absent == false)
+    if direct:  # director-mode audit trail (absent == false)
         state["direct"] = True
     root = _state_root(cfg)
-    root.mkdir(parents=True, exist_ok=True)    # idempotent (design §2)
+    root.mkdir(parents=True, exist_ok=True)  # idempotent (design §2)
     path = root / f"{cfg['state_prefix']}-{int(time.time())}.json"
     path.write_text(json.dumps(state, indent=1))
     return path
@@ -185,8 +196,7 @@ def newest_state(cfg: dict) -> Path:
     return cands[-1]
 
 
-def worker_args(serve_camera: str | None, state_dir: str,
-                log_path: Path | None) -> list[str]:
+def worker_args(serve_camera: str | None, state_dir: str, log_path: Path | None) -> list[str]:
     """collect_cli flags for the ALWAYS-ON SHM worker .
 
     The old ``--serve``/``--serve_port``/``--serve_webui``/``--serve_token``
@@ -207,17 +217,17 @@ def worker_args(serve_camera: str | None, state_dir: str,
 # --------------------------------------------------------------------------- #
 @dataclass
 class SpawnSpec:
-    backend: str                       # isaaclab | mujoco
-    argv: list[str]                    # full host-view command (nohup included)
+    backend: str  # isaaclab | mujoco
+    argv: list[str]  # full host-view command (nohup included)
     config: Path
     out_dir: Path
     bg: bool
-    container: str | None = None       # isaaclab container name (bg only)
-    log_path: Path | None = None       # bg only (foreground inherits stdio)
-    state_path: Path | None = None     # launcher state json (bg only)
+    container: str | None = None  # isaaclab container name (bg only)
+    log_path: Path | None = None  # bg only (foreground inherits stdio)
+    state_path: Path | None = None  # launcher state json (bg only)
     env_delta: dict = field(default_factory=dict)
-    env_setdefault: bool = False       # True: apply env_delta via setdefault
-    use_nohup: bool = False            # isaaclab bg wraps argv with nohup
+    env_setdefault: bool = False  # True: apply env_delta via setdefault
+    use_nohup: bool = False  # isaaclab bg wraps argv with nohup
     # HARD-set env (daemon GPU
     # alloc -- CUDA_VISIBLE_DEVICES must not inherit the daemon's own env,
     # so setdefault semantics are wrong here).  Empty by default: L1
@@ -254,11 +264,11 @@ class SpawnSpec:
         assert self.log_path is not None, "bg specs carry a log path"
         argv = (["nohup"] + self.argv) if self.use_nohup else self.argv
         with open(self.log_path, "w") as f:
-            return subprocess.Popen(argv, stdout=f, stderr=f,
-                                    start_new_session=True,
-                                    env=self.full_env())
+            return subprocess.Popen(
+                argv, stdout=f, stderr=f, start_new_session=True, env=self.full_env()
+            )
 
-    def exec(self):                        # noqa: A003 (foreground exec semantics)
+    def exec(self):  # noqa: A003 (foreground exec semantics)
         """Foreground launch: replace the current process (never returns)."""
         if self.bg:
             raise RuntimeError("exec() is for fg specs; use spawn()")
@@ -267,12 +277,19 @@ class SpawnSpec:
         os.execvpe(self.argv[0], self.argv, self.full_env())
 
 
-def build_spawn(cfg: dict, config_path: Path, *, backend: str | None = None,
-                passthrough: list[str] | None = None,
-                serve_camera: str | None = None,
-                bg: bool = True, multi: bool = False,
-                track_state: bool = True,
-                paused: bool = False, direct: bool = False) -> SpawnSpec:
+def build_spawn(
+    cfg: dict,
+    config_path: Path,
+    *,
+    backend: str | None = None,
+    passthrough: list[str] | None = None,
+    serve_camera: str | None = None,
+    bg: bool = True,
+    multi: bool = False,
+    track_state: bool = True,
+    paused: bool = False,
+    direct: bool = False,
+) -> SpawnSpec:
     """The one command builder -- direct-run and server both call this.
 
     no serve/webui/port/token knobs -- every spawned run is a
@@ -297,43 +314,58 @@ def build_spawn(cfg: dict, config_path: Path, *, backend: str | None = None,
     # v068: log_dir resolves to <runtime_dir>/logs (explicit yaml wins).
     log_path = None
     if bg:
-        log_root = Path(cfg.get("log_dir")
-                        or runtime_dirs.logs_dir(cfg))
-        log_root.mkdir(parents=True, exist_ok=True)   # idempotent (§2)
+        log_root = Path(cfg.get("log_dir") or runtime_dirs.logs_dir(cfg))
+        log_root.mkdir(parents=True, exist_ok=True)  # idempotent (§2)
         log_path = log_root / f"{cfg['state_prefix']}-{int(time.time())}.log"
 
     # backend -> executor profile (builtin when no executors/backends
     # sections -- byte-identical to the two historical branches).
     ex = executor_for(cfg, backend)
     serve_root = cfg.get("serve_dir") or str(runtime_dirs.serve_dir(cfg))
-    argv = (["-m", "unigym.scripts.collect_cli", "--config", str(config_path)]
-            + passthrough
-            + worker_args(serve_camera, ex.state_dir(serve_root), log_path))
+    argv = (
+        ["-m", "unigym.scripts.collect_cli", "--config", str(config_path)]
+        + passthrough
+        + worker_args(serve_camera, ex.state_dir(serve_root), log_path)
+    )
     if paused:
         argv.append("--serve_pause")
     if direct:
         argv.append("--direct")
     if ex.kind == "docker":
-        name = ex.container_name(bg=bg, multi=multi,
-                                 config_path=str(config_path))
-        spec = SpawnSpec(backend=backend, argv=ex.wrap(argv, bg=bg, name=name),
-                         config=config_path,
-                         out_dir=out_dir_for(cfg, config_path, passthrough),
-                         bg=bg, container=name, use_nohup=bg)
+        name = ex.container_name(bg=bg, multi=multi, config_path=str(config_path))
+        spec = SpawnSpec(
+            backend=backend,
+            argv=ex.wrap(argv, bg=bg, name=name),
+            config=config_path,
+            out_dir=out_dir_for(cfg, config_path, passthrough),
+            bg=bg,
+            container=name,
+            use_nohup=bg,
+        )
     else:
-        spec = SpawnSpec(backend=backend, argv=ex.wrap(argv),
-                         config=config_path,
-                         out_dir=out_dir_for(cfg, config_path, passthrough),
-                         bg=bg,
-                         env_delta={"MUJOCO_GL": "egl"}, env_setdefault=True)
+        spec = SpawnSpec(
+            backend=backend,
+            argv=ex.wrap(argv),
+            config=config_path,
+            out_dir=out_dir_for(cfg, config_path, passthrough),
+            bg=bg,
+            env_delta={"MUJOCO_GL": "egl"},
+            env_setdefault=True,
+        )
 
     if bg and log_path is not None:
         spec.log_path = log_path
         if track_state:
-            spec.state_path = write_state(cfg, spec.backend, spec.container,
-                                          log_path, config_path,
-                                          spec.out_dir, paused=paused,
-                                          direct=direct)
+            spec.state_path = write_state(
+                cfg,
+                spec.backend,
+                spec.container,
+                log_path,
+                config_path,
+                spec.out_dir,
+                paused=paused,
+                direct=direct,
+            )
     return spec
 
 
@@ -345,9 +377,11 @@ def is_complete(log: Path, out_dir: Path) -> bool:
     """Completion criteria: [collect] summary marker + artifacts on disk."""
     txt = log.read_text(errors="replace") if log.exists() else ""
     marker = _SUMMARY_MARKER in txt
-    art = out_dir.exists() and (out_dir / "meta.json").exists() and (
-        (out_dir / "summary.json").exists()
-        or (out_dir / "benchmark_report.json").exists())
+    art = (
+        out_dir.exists()
+        and (out_dir / "meta.json").exists()
+        and ((out_dir / "summary.json").exists() or (out_dir / "benchmark_report.json").exists())
+    )
     return marker and art
 
 
@@ -371,15 +405,21 @@ def cmd_probe(a, extra: list[str]) -> int:
         for key, value in info.probe_env:
             env.setdefault(key, value)
         os.execvpe(cmd[0], cmd, env)
-    docker = docker_base_args(cfg, None) + ["--entrypoint", "/isaac-sim/python.sh",
-                                            cfg["image"], "-m", module] + extra
+    docker = (
+        docker_base_args(cfg, None)
+        + ["--entrypoint", "/isaac-sim/python.sh", cfg["image"], "-m", module]
+        + extra
+    )
     os.execvp(docker[0], docker)
 
 
 def cmd_bash(a, extra: list[str]) -> int:
     cfg = load_cfg()
-    docker = docker_base_args(cfg, None, interactive=True) + ["--entrypoint", "bash",
-                                                              cfg["image"]] + extra
+    docker = (
+        docker_base_args(cfg, None, interactive=True)
+        + ["--entrypoint", "bash", cfg["image"]]
+        + extra
+    )
     os.execvp(docker[0], docker)
 
 

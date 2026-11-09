@@ -31,6 +31,7 @@ isaaclab for the single-box kind, generated URDF for container/table, and
 ``SphereCfg`` respectively) so their long-standing configs and state keys
 are unchanged; they share :func:`resolve_mass` for the density vocabulary.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -47,7 +48,9 @@ from unigym.props.base import (
     quat_rotate_inverse,
 )
 from unigym.props.primitive import (
-    material_colors, resolve_mass, validate_primitive_spec,
+    material_colors,
+    resolve_mass,
+    validate_primitive_spec,
 )
 from unigym.adapters.base import RawObsRequest
 
@@ -89,10 +92,10 @@ def _build_primitive_spawn(spec: PropSpec, c: dict):
             mat["restitution"] = float(restitution)
         kwargs["physics_material"] = RigidBodyMaterialCfg(**mat)
     if spec.type == "cylinder":
-        return CylinderCfg(radius=float(spec.radius),
-                           height=2.0 * float(spec.half_height), **kwargs)
-    return CapsuleCfg(radius=float(spec.radius),
-                      height=2.0 * float(spec.half_height), **kwargs)
+        return CylinderCfg(
+            radius=float(spec.radius), height=2.0 * float(spec.half_height), **kwargs
+        )
+    return CapsuleCfg(radius=float(spec.radius), height=2.0 * float(spec.half_height), **kwargs)
 
 
 class PrimitiveProp(PropHandler):
@@ -102,8 +105,7 @@ class PrimitiveProp(PropHandler):
     body frame (the box-family convention); ``state_keys`` overrides them.
     """
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         validate_primitive_spec(spec)
         self.spec = spec
         self.num_envs = num_envs
@@ -114,8 +116,7 @@ class PrimitiveProp(PropHandler):
         keys = list(spec.state_keys)
         if keys:
             self._pos_key = keys[0]
-            self._vel_key = (keys[1] if len(keys) > 1
-                             else keys[0].replace("_pos_", "_vel_"))
+            self._vel_key = keys[1] if len(keys) > 1 else keys[0].replace("_pos_", "_vel_")
         else:
             self._pos_key = f"{spec.name}_pos_b"
             self._vel_key = f"{spec.name}_vel_b"
@@ -133,8 +134,7 @@ class PrimitiveProp(PropHandler):
             spawn=spawn,
             init_state=c["RigidObjectCfg"].InitialStateCfg(
                 pos=(0.0, 0.0, self.placement.height_offset),
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
             ),
             collision_group=0,
             debug_vis=False,
@@ -196,5 +196,4 @@ class PrimitiveProp(PropHandler):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""
         if self._asset is None or not hasattr(self._asset, "data"):
             return None
-        return (self._asset.data.root_pos_w.clone(),
-                self._asset.data.root_quat_w.clone())
+        return (self._asset.data.root_pos_w.clone(), self._asset.data.root_quat_w.clone())

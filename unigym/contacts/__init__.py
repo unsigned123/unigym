@@ -26,6 +26,7 @@ the keys flow through CollectSink/BenchmarkSink into npz / episode buffers
 The package is numpy/torch-only at import time; backend imports are lazy
 (inside ``build_contact_manager``), mirroring the ``cameras/`` convention.
 """
+
 from __future__ import annotations
 
 from .base import (
@@ -46,9 +47,19 @@ from .base import (
 from .manager import ContactManager, build_contact_manager
 
 __all__ = [
-    "AGGREGATE_CONTACT", "AGGREGATE_VALUE", "BACKENDS", "COMPONENTS",
-    "FORMATS", "FRAMES", "MODES", "ContactGroupSpec", "ContactManager",
-    "apply_format", "build_contact_manager", "contact_key",
-    "resolve_body_part_group", "resolve_contact_entries",
+    "AGGREGATE_CONTACT",
+    "AGGREGATE_VALUE",
+    "BACKENDS",
+    "COMPONENTS",
+    "FORMATS",
+    "FRAMES",
+    "MODES",
+    "ContactGroupSpec",
+    "ContactManager",
+    "apply_format",
+    "build_contact_manager",
+    "contact_key",
+    "resolve_body_part_group",
+    "resolve_contact_entries",
     "resolve_prop_filter",
 ]

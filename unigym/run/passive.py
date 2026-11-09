@@ -6,6 +6,7 @@ every control group selects an explicit subset.  The programmatic builders
 recipe joints are written into ``passive_joints`` instead of inventing a
 runtime action face.  An explicit caller declaration always wins.
 """
+
 from __future__ import annotations
 
 import copy
@@ -31,8 +32,7 @@ def declare_passive_joints(
     art_name = entry.get("name")
     section = copy.deepcopy(entry)
     raw_params = section.get("params")
-    params: dict[str, JsonValue] = (
-        dict(raw_params) if isinstance(raw_params, dict) else {})
+    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     selector = params.pop("profile", None)
     if selector is not None:
         # `params.profile` selects the recipe for a renamed
@@ -43,8 +43,7 @@ def declare_passive_joints(
         from unigym.robots import build_robot_recipe
 
         recipe = build_robot_recipe(section, with_isaaclab=False)
-    except (AttributeError, KeyError, NotImplementedError, TypeError,
-            ValueError):
+    except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
         return
     sets = dict(recipe.joint_sets)
     actuated: list[str] = []
@@ -77,11 +76,9 @@ def declare_passive_joints(
 def declare_world_passive_joints(cfg: dict[str, JsonValue]) -> None:
     """Declare recipe joints of every world articulation no control drives."""
     raw_controls = cfg.get("controls")
-    controls: list[JsonValue] = (
-        list(raw_controls) if isinstance(raw_controls, list) else [])
+    controls: list[JsonValue] = list(raw_controls) if isinstance(raw_controls, list) else []
     raw_entries = cfg.get("articulations")
-    entries: list[JsonValue] = (
-        list(raw_entries) if isinstance(raw_entries, list) else [])
+    entries: list[JsonValue] = list(raw_entries) if isinstance(raw_entries, list) else []
     for entry in entries:
         if is_json_object(entry):
             declare_passive_joints(entry, controls)

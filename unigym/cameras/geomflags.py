@@ -48,15 +48,24 @@ flags round is gone -- zero model mutation on the render path, which is
 what makes the shared model safe under a future multi-threaded
 renderer.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["FLAG_KEYS", "GEOM_MODES", "VISUAL_GROUP",
-           "validate_flags",
-           "validate_render_groups", "reclassify_geom_groups",
-           "collision_mask", "seg_palette",
-           "colorize_seg", "build_legend", "legend_type_name"]
+__all__ = [
+    "FLAG_KEYS",
+    "GEOM_MODES",
+    "VISUAL_GROUP",
+    "validate_flags",
+    "validate_render_groups",
+    "reclassify_geom_groups",
+    "collision_mask",
+    "seg_palette",
+    "colorize_seg",
+    "build_legend",
+    "legend_type_name",
+]
 
 FLAG_KEYS = ("geom", "contacts", "segmentation")
 GEOM_MODES = ("visual", "collision")
@@ -89,30 +98,30 @@ def validate_flags(flags) -> dict:
         raise ValueError(
             f"capture flags must be a complete dict {list(FLAG_KEYS)}, "
             f"got {flags!r} -- the alias expander has no defaults "
-            f"(CLI --flags is deprecated: use --view/--spec)")
+            f"(CLI --flags is deprecated: use --view/--spec)"
+        )
     unknown = sorted(set(flags) - set(FLAG_KEYS))
     if unknown:
         raise ValueError(
             f"unknown capture flag(s) {unknown}; legal flags: "
-            f"{list(FLAG_KEYS)} (camera_contract §14)")
+            f"{list(FLAG_KEYS)} (camera_contract §14)"
+        )
     missing = [k for k in FLAG_KEYS if k not in flags]
     if missing:
         raise ValueError(
             f"capture flags: missing required key(s) {missing}; the "
             f"payload must carry ALL of {list(FLAG_KEYS)} -- legal "
             f"values: geom {list(GEOM_MODES)}, contacts/segmentation "
-            f"bool (CLI --flags is deprecated: use --view/--spec)")
+            f"bool (CLI --flags is deprecated: use --view/--spec)"
+        )
     mode = flags["geom"]
     if mode not in GEOM_MODES:
-        raise ValueError(
-            f"capture flag 'geom' must be one of {list(GEOM_MODES)}, "
-            f"got {mode!r}")
+        raise ValueError(f"capture flag 'geom' must be one of {list(GEOM_MODES)}, " f"got {mode!r}")
     out: dict[str, object] = {"geom": mode}
     for k in ("contacts", "segmentation"):
         v = flags[k]
         if not isinstance(v, bool):
-            raise ValueError(
-                f"capture flag {k!r} must be a bool, got {v!r}")
+            raise ValueError(f"capture flag {k!r} must be a bool, got {v!r}")
         out[k] = v
     return out
 
@@ -127,32 +136,32 @@ def validate_render_groups(render_groups) -> None:
     if not isinstance(render_groups, dict):
         raise ValueError(
             f"render_groups must be a dict with optional keys "
-            f"['visual', 'collision'], got {render_groups!r}")
+            f"['visual', 'collision'], got {render_groups!r}"
+        )
     unknown = set(render_groups) - {"visual", "collision"}
     if unknown:
         raise ValueError(
-            f"render_groups: unknown key(s) {sorted(unknown)} "
-            f"(legal: ['collision', 'visual'])")
+            f"render_groups: unknown key(s) {sorted(unknown)} " f"(legal: ['collision', 'visual'])"
+        )
     visual = set(render_groups.get("visual") or [])
     coll = set(render_groups.get("collision") or [])
     for side, groups in (("visual", visual), ("collision", coll)):
         for g in groups:
             if isinstance(g, bool) or not isinstance(g, int):
-                raise ValueError(
-                    f"render_groups.{side}: groups must be integers, "
-                    f"got {g!r}")
+                raise ValueError(f"render_groups.{side}: groups must be integers, " f"got {g!r}")
     if visual & coll:
         raise ValueError(
             f"render_groups: group(s) {sorted(visual & coll)} are declared "
-            f"both visual and collision (ambiguous)")
+            f"both visual and collision (ambiguous)"
+        )
     if VISUAL_GROUP in coll:
         raise ValueError(
             f"render_groups: collision group {VISUAL_GROUP} is reserved by "
-            f"the flags face (the visual-only home group)")
+            f"the flags face (the visual-only home group)"
+        )
 
 
-def collision_mask(contype, conaffinity, geom_group,
-                   render_groups=None) -> np.ndarray:
+def collision_mask(contype, conaffinity, geom_group, render_groups=None) -> np.ndarray:
     """Per-geom collision-class bool mask (the audit's final mapping).
 
     Default rule: collision iff ``contype != 0 or conaffinity != 0``
@@ -175,8 +184,7 @@ def collision_mask(contype, conaffinity, geom_group,
     return mask
 
 
-def reclassify_geom_groups(contype, conaffinity, geom_group,
-                           render_groups=None) -> np.ndarray:
+def reclassify_geom_groups(contype, conaffinity, geom_group, render_groups=None) -> np.ndarray:
     """The §8.1 load-time layout: geom_group with visual-only geoms moved
     PERMANENTLY into :data:`VISUAL_GROUP`.
 
@@ -189,30 +197,48 @@ def reclassify_geom_groups(contype, conaffinity, geom_group,
     group would silently drop it from ``geom: collision`` renders.
     """
     gg = np.asarray(geom_group).astype(int)
-    natively_reserved = gg[(gg == VISUAL_GROUP)
-                           & collision_mask(contype, conaffinity, gg,
-                                            render_groups)]
+    natively_reserved = gg[
+        (gg == VISUAL_GROUP) & collision_mask(contype, conaffinity, gg, render_groups)
+    ]
     if natively_reserved.size:
         raise ValueError(
             f"reclassify: {natively_reserved.size} collision-class geom(s) "
             f"natively live in the reserved visual group {VISUAL_GROUP}; "
             f"remap them in the asset XML or via render_groups -- the "
-            f"collision render hides that group whole")
+            f"collision render hides that group whole"
+        )
     new = gg.copy()
-    new[~collision_mask(contype, conaffinity, gg, render_groups)] = \
-        VISUAL_GROUP
+    new[~collision_mask(contype, conaffinity, gg, render_groups)] = VISUAL_GROUP
     return new
 
 
 # 24-entry stable palette (no black; deterministic per id -- the legend
 # carries the explicit color so consumers never recompute the hash).
 _PALETTE = [
-    (230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200),
-    (245, 130, 48), (145, 30, 180), (70, 240, 240), (240, 50, 230),
-    (210, 245, 60), (250, 190, 212), (0, 128, 128), (220, 190, 255),
-    (170, 110, 40), (255, 250, 200), (128, 0, 0), (170, 255, 195),
-    (128, 128, 0), (255, 216, 177), (0, 0, 128), (128, 128, 128),
-    (100, 60, 120), (40, 160, 160), (200, 90, 40), (90, 200, 90),
+    (230, 25, 75),
+    (60, 180, 75),
+    (255, 225, 25),
+    (0, 130, 200),
+    (245, 130, 48),
+    (145, 30, 180),
+    (70, 240, 240),
+    (240, 50, 230),
+    (210, 245, 60),
+    (250, 190, 212),
+    (0, 128, 128),
+    (220, 190, 255),
+    (170, 110, 40),
+    (255, 250, 200),
+    (128, 0, 0),
+    (170, 255, 195),
+    (128, 128, 0),
+    (255, 216, 177),
+    (0, 0, 128),
+    (128, 128, 128),
+    (100, 60, 120),
+    (40, 160, 160),
+    (200, 90, 40),
+    (90, 200, 90),
 ]
 
 
@@ -240,8 +266,7 @@ def colorize_seg(seg_ids: np.ndarray) -> np.ndarray:
 
 def legend_type_name(obj_type: int) -> str:
     """MuJoCo mjtObj int -> stable label (engine-free table)."""
-    return {1: "body", 5: "geom", 6: "site"}.get(
-        int(obj_type), f"obj{int(obj_type)}")
+    return {1: "body", 5: "geom", 6: "site"}.get(int(obj_type), f"obj{int(obj_type)}")
 
 
 def build_legend(entries: list[dict], mode: dict) -> dict:
@@ -251,5 +276,8 @@ def build_legend(entries: list[dict], mode: dict) -> dict:
     rows (named objects must carry a real name; unnamed geoms are
     labeled ``<type>_<id>`` -- honest, addressable, never silent).
     """
-    return {"schema": 1, "mode": dict(mode), "objects": sorted(
-        entries, key=lambda e: (-int(e.get("pixels", 0)), int(e["id"])))}
+    return {
+        "schema": 1,
+        "mode": dict(mode),
+        "objects": sorted(entries, key=lambda e: (-int(e.get("pixels", 0)), int(e["id"]))),
+    }

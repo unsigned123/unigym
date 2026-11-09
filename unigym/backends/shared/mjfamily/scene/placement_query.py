@@ -1,4 +1,5 @@
 """Private MuJoCo candidate probes for explicit collision geom bounds."""
+
 from __future__ import annotations
 
 import math
@@ -52,7 +53,8 @@ class ProbeResult:
 def _id(model, kind, name: str) -> int:
     if mujoco is None:  # pragma: no cover
         raise ProbeCapabilityError(
-            f"MuJoCo placement probes are unavailable: {_MUJOCO_IMPORT_ERROR}")
+            f"MuJoCo placement probes are unavailable: {_MUJOCO_IMPORT_ERROR}"
+        )
     value = mujoco.mj_name2id(model, kind, name)
     if value < 0:
         raise ProbeError(f"MuJoCo {kind.name} {name!r} was not found")
@@ -65,8 +67,12 @@ def _pose(position, quaternion_wxyz):
         quat = np.asarray(quaternion_wxyz, dtype=np.float64)
     except (TypeError, ValueError) as exc:
         raise ProbeError("position and quaternion must be numeric vectors") from exc
-    if (pos.shape != (3,) or quat.shape != (4,)
-            or not np.isfinite(pos).all() or not np.isfinite(quat).all()):
+    if (
+        pos.shape != (3,)
+        or quat.shape != (4,)
+        or not np.isfinite(pos).all()
+        or not np.isfinite(quat).all()
+    ):
         raise ProbeError("position must be finite XYZ and quaternion finite WXYZ")
     norm = float(np.linalg.norm(quat))
     if norm <= 1e-12:
@@ -92,7 +98,8 @@ def probe_freejoint_candidate(
     """
     if mujoco is None:  # pragma: no cover
         raise ProbeCapabilityError(
-            f"MuJoCo placement probes are unavailable: {_MUJOCO_IMPORT_ERROR}")
+            f"MuJoCo placement probes are unavailable: {_MUJOCO_IMPORT_ERROR}"
+        )
     try:
         clearance = float(min_clearance_m)
     except (TypeError, ValueError) as exc:
@@ -111,8 +118,8 @@ def probe_freejoint_candidate(
     # All forward and distance queries run on a fresh private data object.
     probe_data = mujoco.MjData(model)
     mujoco.mj_copyData(probe_data, model, live_data)
-    probe_data.qpos[qadr:qadr + 3] = pos
-    probe_data.qpos[qadr + 3:qadr + 7] = quat
+    probe_data.qpos[qadr : qadr + 3] = pos
+    probe_data.qpos[qadr + 3 : qadr + 7] = quat
     mujoco.mj_forward(model, probe_data)
 
     distances = []
@@ -125,14 +132,18 @@ def probe_freejoint_candidate(
             raise ProbeError("penetration_tolerance_m must be finite and non-negative") from exc
         if not math.isfinite(tolerance) or tolerance < 0:
             raise ProbeError("penetration_tolerance_m must be finite and non-negative")
-        distance = float(mujoco.mj_geomDistance(
-            model, probe_data, geom1, geom2, max(1.0, clearance + tolerance), None))
+        distance = float(
+            mujoco.mj_geomDistance(
+                model, probe_data, geom1, geom2, max(1.0, clearance + tolerance), None
+            )
+        )
         distances.append(distance)
         if distance < -tolerance:
             return ProbeResult(False, "penetration", tuple(distances))
         if clearance > 0 and distance < clearance:
             # A support exception is only for near-zero contact, never overlap.
-            if not (pair.allow_support_contact and distance >= -tolerance
-                    and distance <= tolerance):
+            if not (
+                pair.allow_support_contact and distance >= -tolerance and distance <= tolerance
+            ):
                 return ProbeResult(False, "insufficient_clearance", tuple(distances))
     return ProbeResult(True, None, tuple(distances))

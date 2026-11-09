@@ -50,25 +50,49 @@ semantics), mutually exclusive with the spherical ``target``/``d``/
 spherical keys before rendering (:func:`spherical_camera_keys` -- the
 deleted view_presets math, promoted to a first-class capability).
 """
+
 from __future__ import annotations
 
 import math
 
-from .appearance import (selector_key, validate_appearance,
-                         validate_selector)
+from .appearance import selector_key, validate_appearance, validate_selector
 
-__all__ = ["RenderConflictError", "VIEW_MODES", "NAMED_VIEWS",
-           "CAMERA_KEYS", "SCENE_KEYS", "OUTPUT_KEYS",
-           "spherical_camera_keys",
-           "register_preset", "register_view", "preset_names",
-           "view_names", "get_preset", "get_view",
-           "validate_fragment", "combine", "complete_spec",
-           "resolve_render", "spec_declaration", "expand_flags_alias"]
+__all__ = [
+    "RenderConflictError",
+    "VIEW_MODES",
+    "NAMED_VIEWS",
+    "CAMERA_KEYS",
+    "SCENE_KEYS",
+    "OUTPUT_KEYS",
+    "spherical_camera_keys",
+    "register_preset",
+    "register_view",
+    "preset_names",
+    "view_names",
+    "get_preset",
+    "get_view",
+    "validate_fragment",
+    "combine",
+    "complete_spec",
+    "resolve_render",
+    "spec_declaration",
+    "expand_flags_alias",
+]
 
 VIEW_MODES = ("fixed", "orbit", "closeup")
 NAMED_VIEWS = ("top", "side", "front", "iso")
-CAMERA_KEYS = ("mode", "target", "d", "el", "az", "orbit", "views",
-               "contact_select", "pos", "lookat")
+CAMERA_KEYS = (
+    "mode",
+    "target",
+    "d",
+    "el",
+    "az",
+    "orbit",
+    "views",
+    "contact_select",
+    "pos",
+    "lookat",
+)
 #: the spherical form the absolute-pose form (pos/lookat) excludes --
 #: one pose language per camera dict, co-occurrence = teaching error
 SPHERICAL_CAMERA_KEYS = ("target", "d", "el", "az")
@@ -82,10 +106,10 @@ DEFAULT_ORBIT = {"n": 24, "step_deg": 15.0, "ms": 125}
 # probe5 viewpoint table (findings.txt §D): named frames relative to the
 # camera azimuth, lookat = target.
 NAMED_VIEW_PARAMS = {
-    "top":   {"el": -89.9, "d": 0.24, "az_off": 0.0},
-    "side":  {"el": -8.0, "d": 0.20, "az_off": 90.0},
+    "top": {"el": -89.9, "d": 0.24, "az_off": 0.0},
+    "side": {"el": -8.0, "d": 0.20, "az_off": 90.0},
     "front": {"el": -8.0, "d": 0.20, "az_off": 180.0},
-    "iso":   {"el": -45.0, "d": 0.20, "az_off": 135.0},
+    "iso": {"el": -45.0, "d": 0.20, "az_off": 135.0},
 }
 
 
@@ -102,7 +126,8 @@ class RenderConflictError(ValueError):
         super().__init__(
             f"render spec conflict on aspect {aspect!r}: declared by "
             f"{self.sources} -- combine() never silently overrides "
-            f"(camera_contract §14)")
+            f"(camera_contract §14)"
+        )
 
 
 # --------------------------------------------------------------------- #
@@ -138,13 +163,15 @@ def _check_camera(cam, label: str) -> dict:
         raise ValueError(f"{label}: camera must be a dict, got {cam!r}")
     unknown = sorted(set(cam) - set(CAMERA_KEYS))
     if unknown:
-        raise ValueError(f"{label}: unknown camera key(s) {unknown}; "
-                         f"legal: {list(CAMERA_KEYS)}")
+        raise ValueError(
+            f"{label}: unknown camera key(s) {unknown}; " f"legal: {list(CAMERA_KEYS)}"
+        )
     out: dict = {}
     mode = cam.get("mode", "fixed")
     if mode not in VIEW_MODES:
-        raise ValueError(f"{label}: camera.mode must be one of "
-                         f"{list(VIEW_MODES)}, got {mode!r}")
+        raise ValueError(
+            f"{label}: camera.mode must be one of " f"{list(VIEW_MODES)}, got {mode!r}"
+        )
     out["mode"] = mode
     # the absolute-pose form (pos/lookat, world metres -- the
     # camera(aim) semantics) is mutually exclusive with the spherical
@@ -156,74 +183,84 @@ def _check_camera(cam, label: str) -> dict:
         if clash:
             raise RenderConflictError(
                 "camera.pos/lookat",
-                ["pos+lookat (absolute pose)",
-                 f"{'+'.join(clash)} (spherical)"])
+                ["pos+lookat (absolute pose)", f"{'+'.join(clash)} (spherical)"],
+            )
         if not ("pos" in cam and "lookat" in cam):
             raise ValueError(
                 f"{label}: camera.pos and camera.lookat go TOGETHER "
                 f"(world metres -- the absolute free-camera pose), got "
-                f"pos={cam.get('pos')!r} lookat={cam.get('lookat')!r}")
+                f"pos={cam.get('pos')!r} lookat={cam.get('lookat')!r}"
+            )
         for k in ("pos", "lookat"):
             v = cam[k]
-            if (not isinstance(v, (list, tuple)) or len(v) != 3
-                    or not all(isinstance(x, (int, float))
-                               and not isinstance(x, bool)
-                               and math.isfinite(float(x)) for x in v)):
+            if (
+                not isinstance(v, (list, tuple))
+                or len(v) != 3
+                or not all(
+                    isinstance(x, (int, float))
+                    and not isinstance(x, bool)
+                    and math.isfinite(float(x))
+                    for x in v
+                )
+            ):
                 raise ValueError(
                     f"{label}: camera.{k} must be [x, y, z] finite "
-                    f"numbers (world metres), got {v!r}")
+                    f"numbers (world metres), got {v!r}"
+                )
             out[k] = [float(x) for x in v]
     if "target" in cam:
         t = cam["target"]
         if t != "contact_centroid":
-            if (not isinstance(t, (list, tuple)) or len(t) != 3
-                    or not all(isinstance(x, (int, float))
-                               and not isinstance(x, bool) for x in t)):
+            if (
+                not isinstance(t, (list, tuple))
+                or len(t) != 3
+                or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in t)
+            ):
                 raise ValueError(
-                    f"{label}: camera.target must be 'contact_centroid' "
-                    f"or [x, y, z], got {t!r}")
+                    f"{label}: camera.target must be 'contact_centroid' " f"or [x, y, z], got {t!r}"
+                )
             t = [float(x) for x in t]
         out["target"] = t
     for k in ("d", "el", "az"):
         if k in cam:
             v = cam[k]
             if isinstance(v, bool) or not isinstance(v, (int, float)):
-                raise ValueError(f"{label}: camera.{k} must be a number, "
-                                 f"got {v!r}")
+                raise ValueError(f"{label}: camera.{k} must be a number, " f"got {v!r}")
             out[k] = float(v)
     if "orbit" in cam:
         orb = cam["orbit"]
         if not isinstance(orb, dict):
-            raise ValueError(f"{label}: camera.orbit must be a dict "
-                             f"{list(ORBIT_KEYS)}, got {orb!r}")
+            raise ValueError(
+                f"{label}: camera.orbit must be a dict " f"{list(ORBIT_KEYS)}, got {orb!r}"
+            )
         unknown = sorted(set(orb) - set(ORBIT_KEYS))
         if unknown:
-            raise ValueError(f"{label}: unknown camera.orbit key(s) "
-                             f"{unknown}; legal: {list(ORBIT_KEYS)}")
+            raise ValueError(
+                f"{label}: unknown camera.orbit key(s) " f"{unknown}; legal: {list(ORBIT_KEYS)}"
+            )
         norm = dict(DEFAULT_ORBIT)
         for k in ORBIT_KEYS:
             if k in orb:
                 v = orb[k]
-                if isinstance(v, bool) or not isinstance(v, (int, float)) \
-                        or v <= 0:
-                    raise ValueError(f"{label}: camera.orbit.{k} must be "
-                                     f"a positive number, got {v!r}")
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+                    raise ValueError(
+                        f"{label}: camera.orbit.{k} must be " f"a positive number, got {v!r}"
+                    )
                 norm[k] = v
         norm["n"] = int(norm["n"])
         norm["ms"] = int(norm["ms"])
         out["orbit"] = norm
     if "views" in cam:
         views = cam["views"]
-        if (not isinstance(views, (list, tuple))
-                or not all(v in NAMED_VIEWS for v in views)):
+        if not isinstance(views, (list, tuple)) or not all(v in NAMED_VIEWS for v in views):
             raise ValueError(
                 f"{label}: camera.views must be a list drawn from "
-                f"{list(NAMED_VIEWS)}, got {views!r}")
+                f"{list(NAMED_VIEWS)}, got {views!r}"
+            )
         out["views"] = list(dict.fromkeys(views))
     if "contact_select" in cam:
         sel = cam["contact_select"]
-        out["contact_select"] = (None if sel is None
-                                 else validate_selector(sel))
+        out["contact_select"] = None if sel is None else validate_selector(sel)
     return out
 
 
@@ -235,14 +272,14 @@ def validate_fragment(spec, label: str = "spec") -> dict:
     the generator validators).  The result is a fragment dict with
     ONLY the declared aspects present."""
     if not isinstance(spec, dict):
-        raise ValueError(f"{label}: render spec must be a dict, got "
-                         f"{spec!r}")
+        raise ValueError(f"{label}: render spec must be a dict, got " f"{spec!r}")
     legal = set(EXCLUSIVE_ASPECTS) | {"appearance", "decor"}
     unknown = sorted(set(spec) - legal)
     if unknown:
         raise ValueError(
             f"{label}: unknown render spec key(s) {unknown}; legal keys: "
-            f"{sorted(legal)} (camera_contract §14)")
+            f"{sorted(legal)} (camera_contract §14)"
+        )
     out: dict = {}
     if "camera" in spec:
         out["camera"] = _check_camera(spec["camera"], label)
@@ -250,21 +287,24 @@ def validate_fragment(spec, label: str = "spec") -> dict:
         out["appearance"] = validate_appearance(spec["appearance"], label)
     if "decor" in spec:
         if not isinstance(spec["decor"], (list, tuple)):
-            raise ValueError(f"{label}: decor must be a list of entries, "
-                             f"got {spec['decor']!r}")
+            raise ValueError(f"{label}: decor must be a list of entries, " f"got {spec['decor']!r}")
         # lazy import: the decor package (generators) is the registry
         # this validation consults; keeping it function-local lets the
         # schema layer be imported (and unit-tested) standalone
         from .decor import validate_decor_entry
-        out["decor"] = [validate_decor_entry(e, label)
-                        for e in spec["decor"]]
+
+        out["decor"] = [validate_decor_entry(e, label) for e in spec["decor"]]
     if "buffers" in spec:
         bufs = spec["buffers"]
-        if (not isinstance(bufs, (list, tuple)) or not bufs
-                or not all(b in ("rgb", "seg") for b in bufs)):
+        if (
+            not isinstance(bufs, (list, tuple))
+            or not bufs
+            or not all(b in ("rgb", "seg") for b in bufs)
+        ):
             raise ValueError(
                 f"{label}: buffers must be a non-empty list drawn from "
-                f"['rgb', 'seg'], got {bufs!r}")
+                f"['rgb', 'seg'], got {bufs!r}"
+            )
         out["buffers"] = ["rgb"] + (["seg"] if "seg" in bufs else [])
     if "scene" in spec:
         sc = spec["scene"]
@@ -272,22 +312,26 @@ def validate_fragment(spec, label: str = "spec") -> dict:
             raise ValueError(f"{label}: scene must be a dict, got {sc!r}")
         unknown = sorted(set(sc) - set(SCENE_KEYS))
         if unknown:
-            raise ValueError(f"{label}: unknown scene key(s) {unknown}; "
-                             f"legal: {list(SCENE_KEYS)}")
+            raise ValueError(
+                f"{label}: unknown scene key(s) {unknown}; " f"legal: {list(SCENE_KEYS)}"
+            )
         norm = {}
         if "geom_class" in sc:
             if sc["geom_class"] not in ("all", "collision"):
                 raise ValueError(
                     f"{label}: scene.geom_class must be 'all'|'collision',"
-                    f" got {sc['geom_class']!r}")
+                    f" got {sc['geom_class']!r}"
+                )
             norm["geom_class"] = sc["geom_class"]
         for k in ("shadow", "reflection", "skybox"):
             if k in sc:
                 v = sc[k]
                 if v is not None and not isinstance(v, bool):
-                    raise ValueError(f"{label}: scene.{k} must be bool or "
-                                     f"null (null = engine default), got "
-                                     f"{v!r}")
+                    raise ValueError(
+                        f"{label}: scene.{k} must be bool or "
+                        f"null (null = engine default), got "
+                        f"{v!r}"
+                    )
                 norm[k] = v
         out["scene"] = norm
     if "output" in spec:
@@ -296,21 +340,19 @@ def validate_fragment(spec, label: str = "spec") -> dict:
             raise ValueError(f"{label}: output must be a dict, got {op!r}")
         unknown = sorted(set(op) - set(OUTPUT_KEYS))
         if unknown:
-            raise ValueError(f"{label}: unknown output key(s) {unknown}; "
-                             f"legal: {list(OUTPUT_KEYS)}")
+            raise ValueError(
+                f"{label}: unknown output key(s) {unknown}; " f"legal: {list(OUTPUT_KEYS)}"
+            )
         norm = {}
         for k in ("gif", "caption", "legend"):
             if k in op:
                 if not isinstance(op[k], bool):
-                    raise ValueError(f"{label}: output.{k} must be bool, "
-                                     f"got {op[k]!r}")
+                    raise ValueError(f"{label}: output.{k} must be bool, " f"got {op[k]!r}")
                 norm[k] = op[k]
         if "gif_ms" in op:
             v = op["gif_ms"]
-            if isinstance(v, bool) or not isinstance(v, (int, float)) \
-                    or v <= 0:
-                raise ValueError(f"{label}: output.gif_ms must be a "
-                                 f"positive number, got {v!r}")
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+                raise ValueError(f"{label}: output.gif_ms must be a " f"positive number, got {v!r}")
             norm["gif_ms"] = int(v)
         out["output"] = norm
     return out
@@ -344,8 +386,7 @@ def combine(entries: list) -> dict:
             if aspect in frag:
                 claim(aspect, name)
                 val = frag[aspect]
-                merged[aspect] = dict(val) if isinstance(val, dict) \
-                    else list(val)
+                merged[aspect] = dict(val) if isinstance(val, dict) else list(val)
         if "appearance" in frag:
             slot = merged.setdefault("appearance", [])
             seen = {selector_key(e["select"]) for e in slot}
@@ -353,8 +394,8 @@ def combine(entries: list) -> dict:
                 key = selector_key(e["select"])
                 if key in seen:
                     raise RenderConflictError(
-                        f"appearance[{key}]",
-                        [_appearance_owner(merged, key), name])
+                        f"appearance[{key}]", [_appearance_owner(merged, key), name]
+                    )
                 seen.add(key)
                 slot.append(e)
         if "decor" in frag:
@@ -364,8 +405,8 @@ def combine(entries: list) -> dict:
                 key = (e["gen"], e["target"])
                 if key in seen:
                     raise RenderConflictError(
-                        f"decor[{key[0]}@{key[1]}]",
-                        [_decor_owner(merged, key), name])
+                        f"decor[{key[0]}@{key[1]}]", [_decor_owner(merged, key), name]
+                    )
                 seen.add(key)
                 slot.append(e)
     return merged
@@ -385,8 +426,7 @@ def complete_spec(fragment: dict) -> dict:
     fixed rig camera, no appearance/decor, rgb buffer, engine scene
     flags, no caption -- view ``visual`` renders bitwise-identically to
     the flagless path by construction."""
-    cam = {"mode": "fixed", "target": "contact_centroid",
-           "contact_select": None}
+    cam = {"mode": "fixed", "target": "contact_centroid", "contact_select": None}
     cam.update(fragment.get("camera", {}))
     if "pos" in cam or "lookat" in cam:
         # pos/lookat IS the pose -- the contact_centroid default
@@ -400,10 +440,8 @@ def complete_spec(fragment: dict) -> dict:
         "appearance": list(fragment.get("appearance", [])),
         "decor": list(fragment.get("decor", [])),
         "buffers": list(fragment.get("buffers", ["rgb"])),
-        "scene": {"geom_class": "all", "shadow": None, "reflection": None,
-                  "skybox": None},
-        "output": {"gif": False, "gif_ms": 125, "caption": False,
-                   "legend": False},
+        "scene": {"geom_class": "all", "shadow": None, "reflection": None, "skybox": None},
+        "output": {"gif": False, "gif_ms": 125, "caption": False, "legend": False},
     }
     spec["scene"].update(fragment.get("scene", {}))
     spec["output"].update(fragment.get("output", {}))
@@ -419,13 +457,11 @@ VIEWS: dict[str, dict] = {}
 
 def spec_declaration(fragment: dict) -> dict:
     """What a fragment actually writes (registration-time truth)."""
-    decl: dict = {"aspects": sorted(a for a in EXCLUSIVE_ASPECTS
-                                    if a in fragment),
-                  "appearance": sorted(selector_key(e["select"])
-                                       for e in fragment.get("appearance",
-                                                             [])),
-                  "decor": sorted(f"{e['gen']}@{e['target']}"
-                                  for e in fragment.get("decor", []))}
+    decl: dict = {
+        "aspects": sorted(a for a in EXCLUSIVE_ASPECTS if a in fragment),
+        "appearance": sorted(selector_key(e["select"]) for e in fragment.get("appearance", [])),
+        "decor": sorted(f"{e['gen']}@{e['target']}" for e in fragment.get("decor", [])),
+    }
     return decl
 
 
@@ -436,27 +472,33 @@ def _check_claims(name: str, claims, fragment: dict) -> None:
     if not isinstance(claims, dict):
         raise ValueError(
             f"preset {name!r}: claims must be a dict "
-            f"{{aspects?, appearance?, decor?}}, got {claims!r}")
+            f"{{aspects?, appearance?, decor?}}, got {claims!r}"
+        )
     unknown = sorted(set(claims) - {"aspects", "appearance", "decor"})
     if unknown:
-        raise ValueError(f"preset {name!r}: unknown claims key(s) "
-                         f"{unknown}; legal: ['appearance', 'aspects', "
-                         f"'decor']")
+        raise ValueError(
+            f"preset {name!r}: unknown claims key(s) "
+            f"{unknown}; legal: ['appearance', 'aspects', "
+            f"'decor']"
+        )
     if sorted(claims.get("aspects", [])) != decl["aspects"]:
         raise ValueError(
             f"preset {name!r}: claims.aspects "
             f"{sorted(claims.get('aspects', []))} != the spec's actual "
             f"aspects {decl['aspects']} -- claims must match the spec "
-            f"(fail-fast at registration, camera_contract §14)")
+            f"(fail-fast at registration, camera_contract §14)"
+        )
     if sorted(claims.get("appearance", [])) != decl["appearance"]:
         raise ValueError(
             f"preset {name!r}: claims.appearance "
             f"{sorted(claims.get('appearance', []))} != the spec's "
-            f"actual selector keys {decl['appearance']}")
+            f"actual selector keys {decl['appearance']}"
+        )
     if sorted(claims.get("decor", [])) != decl["decor"]:
         raise ValueError(
             f"preset {name!r}: claims.decor {sorted(claims.get('decor', []))}"
-            f" != the spec's actual decor keys {decl['decor']}")
+            f" != the spec's actual decor keys {decl['decor']}"
+        )
 
 
 def register_preset(name: str, claims=None, spec: dict | None = None):
@@ -482,15 +524,18 @@ def register_view(name: str, *entries):
 
 def get_preset(name: str) -> dict:
     if name not in PRESETS:
-        raise ValueError(f"unknown preset {name!r}; available presets: "
-                         f"{sorted(PRESETS)} (camera_contract §14)")
+        raise ValueError(
+            f"unknown preset {name!r}; available presets: "
+            f"{sorted(PRESETS)} (camera_contract §14)"
+        )
     return PRESETS[name]
 
 
 def get_view(name: str) -> dict:
     if name not in VIEWS:
-        raise ValueError(f"unknown view {name!r}; available views: "
-                         f"{sorted(VIEWS)} (camera_contract §14)")
+        raise ValueError(
+            f"unknown view {name!r}; available views: " f"{sorted(VIEWS)} (camera_contract §14)"
+        )
     return VIEWS[name]
 
 
@@ -519,7 +564,8 @@ def resolve_render(render) -> tuple[dict, str]:
         raise ValueError(
             f"render must be a dict: {{'view': name}}, {{'view': name, "
             f"...overrides}} or a full inline spec ({{}} = all defaults);"
-            f" available views: {view_names()} (camera_contract §14)")
+            f" available views: {view_names()} (camera_contract §14)"
+        )
     if "view" in render:
         name = render["view"]
         if not isinstance(name, str):
@@ -528,8 +574,9 @@ def resolve_render(render) -> tuple[dict, str]:
         entries = [(label, get_view(name))]
         rest = {k: v for k, v in render.items() if k != "view"}
         if rest:
-            entries.append((f"override[{sorted(rest)}]",
-                            validate_fragment(rest, "render override")))
+            entries.append(
+                (f"override[{sorted(rest)}]", validate_fragment(rest, "render override"))
+            )
         return complete_spec(combine(entries)), label
     return complete_spec(validate_fragment(render, "render")), "spec"
 
@@ -548,6 +595,7 @@ def expand_flags_alias(flags: dict) -> dict:
     ``segmentation: true``   buffers = ["rgb", "seg"]
     =======================  =================================="""
     from .geomflags import validate_flags
+
     norm = validate_flags(flags)
     frag: dict = {}
     if norm["geom"] == "collision":
@@ -572,99 +620,153 @@ _SLATE = [0.42, 0.47, 0.55]
 _HAND_SEL = {"body_prefix": "right_hand"}
 _HAND_CONTACTS = {"body_prefix": "right_hand"}
 
-register_preset("hand_solid",
-                claims={"appearance": ["body_prefix:right_hand",
-                                       "body_prefix:right_wrist"]},
-                spec={"appearance": [
-                    {"select": _HAND_SEL, "rgba": _WHITE + [1.0]},
-                    {"select": {"body_prefix": "right_wrist"},
-                     "rgba": _WHITE + [1.0]}]})
-register_preset("hand_xray",
-                claims={"appearance": ["body_prefix:right_hand",
-                                       "body_prefix:right_wrist"]},
-                spec={"appearance": [
-                    {"select": _HAND_SEL, "rgba": _WHITE + [0.35]},
-                    {"select": {"body_prefix": "right_wrist"},
-                     "rgba": _WHITE + [0.35]}]})
-register_preset("crate_shell_occl",
-                claims={"appearance": ["body_prefix:crate"]},
-                spec={"appearance": [{"select": {"body_prefix": "crate"},
-                                      "rgba": _CYAN + [0.0]}]})
-register_preset("crate_shell_xray",
-                claims={"appearance": ["body_prefix:crate"]},
-                spec={"appearance": [{"select": {"body_prefix": "crate"},
-                                      "rgba": _CYAN + [0.45]}]})
-register_preset("ghost_rest",
-                claims={"appearance": ["body_prefix:"]},
-                spec={"appearance": [{"select": {"body_prefix": ""},
-                                      "rgba": _ORANGE + [0.05]}]})
-register_preset("floor_opaque",
-                claims={"appearance": ["body:world"]},
-                spec={"appearance": [{"select": {"body": "world"},
-                                      "rgba": _SLATE + [1.0]}]})
+register_preset(
+    "hand_solid",
+    claims={"appearance": ["body_prefix:right_hand", "body_prefix:right_wrist"]},
+    spec={
+        "appearance": [
+            {"select": _HAND_SEL, "rgba": _WHITE + [1.0]},
+            {"select": {"body_prefix": "right_wrist"}, "rgba": _WHITE + [1.0]},
+        ]
+    },
+)
+register_preset(
+    "hand_xray",
+    claims={"appearance": ["body_prefix:right_hand", "body_prefix:right_wrist"]},
+    spec={
+        "appearance": [
+            {"select": _HAND_SEL, "rgba": _WHITE + [0.35]},
+            {"select": {"body_prefix": "right_wrist"}, "rgba": _WHITE + [0.35]},
+        ]
+    },
+)
+register_preset(
+    "crate_shell_occl",
+    claims={"appearance": ["body_prefix:crate"]},
+    spec={"appearance": [{"select": {"body_prefix": "crate"}, "rgba": _CYAN + [0.0]}]},
+)
+register_preset(
+    "crate_shell_xray",
+    claims={"appearance": ["body_prefix:crate"]},
+    spec={"appearance": [{"select": {"body_prefix": "crate"}, "rgba": _CYAN + [0.45]}]},
+)
+register_preset(
+    "ghost_rest",
+    claims={"appearance": ["body_prefix:"]},
+    spec={"appearance": [{"select": {"body_prefix": ""}, "rgba": _ORANGE + [0.05]}]},
+)
+register_preset(
+    "floor_opaque",
+    claims={"appearance": ["body:world"]},
+    spec={"appearance": [{"select": {"body": "world"}, "rgba": _SLATE + [1.0]}]},
+)
 register_preset(
     "crate_cage",
     claims={"decor": ["cage_grid@crate"]},
-    spec={"decor": [{
-        "gen": "cage_grid", "target": "crate",
-        "r_dense": 0.03, "seg": 0.004, "radius": 0.0005,
-        "depth_tint": {"mesh_body": "right_hand", "band": 0.006},
-        "contact_select": _HAND_CONTACTS}]})
+    spec={
+        "decor": [
+            {
+                "gen": "cage_grid",
+                "target": "crate",
+                "r_dense": 0.03,
+                "seg": 0.004,
+                "radius": 0.0005,
+                "depth_tint": {"mesh_body": "right_hand", "band": 0.006},
+                "contact_select": _HAND_CONTACTS,
+            }
+        ]
+    },
+)
 register_preset(
     "contact_marks",
     claims={"decor": ["contact_dots@*", "contact_normals@*"]},
-    spec={"decor": [
-        {"gen": "contact_dots", "target": "*", "r": 0.0035,
-         "force_scale": 1.2, "contact_select": _HAND_CONTACTS},
-        {"gen": "contact_normals", "target": "*", "len": 0.02,
-         "contact_select": _HAND_CONTACTS}]})
-register_preset("contact_mjvis_simple",
-                claims={"decor": ["contact_mjvis@*"]},
-                spec={"decor": [{"gen": "contact_mjvis", "target": "*"}]})
-register_preset("clean_collision",
-                claims={"aspects": ["scene"]},
-                spec={"scene": {"geom_class": "collision"}})
+    spec={
+        "decor": [
+            {
+                "gen": "contact_dots",
+                "target": "*",
+                "r": 0.0035,
+                "force_scale": 1.2,
+                "contact_select": _HAND_CONTACTS,
+            },
+            {
+                "gen": "contact_normals",
+                "target": "*",
+                "len": 0.02,
+                "contact_select": _HAND_CONTACTS,
+            },
+        ]
+    },
+)
+register_preset(
+    "contact_mjvis_simple",
+    claims={"decor": ["contact_mjvis@*"]},
+    spec={"decor": [{"gen": "contact_mjvis", "target": "*"}]},
+)
+register_preset(
+    "clean_collision", claims={"aspects": ["scene"]}, spec={"scene": {"geom_class": "collision"}}
+)
 
-_CAM_ORBIT = {"camera": {
-    "mode": "orbit", "target": "contact_centroid", "d": 0.20, "el": -32.0,
-    "az": 0.0, "orbit": {"n": 24, "step_deg": 15.0, "ms": 125},
-    "views": ["top", "side"], "contact_select": _HAND_CONTACTS}}
-_CAM_CLOSEUP = {"camera": {
-    "mode": "closeup", "target": "contact_centroid", "d": 0.16, "el": -30.0,
-    "az": 0.0, "orbit": {"n": 2, "step_deg": 180.0},
-    "contact_select": _HAND_CONTACTS}}
-_SCENE_CLEAN = {"scene": {"geom_class": "collision", "shadow": False,
-                          "reflection": False, "skybox": False}}
+_CAM_ORBIT = {
+    "camera": {
+        "mode": "orbit",
+        "target": "contact_centroid",
+        "d": 0.20,
+        "el": -32.0,
+        "az": 0.0,
+        "orbit": {"n": 24, "step_deg": 15.0, "ms": 125},
+        "views": ["top", "side"],
+        "contact_select": _HAND_CONTACTS,
+    }
+}
+_CAM_CLOSEUP = {
+    "camera": {
+        "mode": "closeup",
+        "target": "contact_centroid",
+        "d": 0.16,
+        "el": -30.0,
+        "az": 0.0,
+        "orbit": {"n": 2, "step_deg": 180.0},
+        "contact_select": _HAND_CONTACTS,
+    }
+}
+_SCENE_CLEAN = {
+    "scene": {"geom_class": "collision", "shadow": False, "reflection": False, "skybox": False}
+}
 _OUTPUT_LIVE = {"output": {"gif": True, "gif_ms": 125, "caption": True}}
 
-register_view("palm_pose_occl",
-              ("hand_solid", get_preset("hand_solid")),
-              ("crate_shell_occl", get_preset("crate_shell_occl")),
-              ("crate_cage", get_preset("crate_cage")),
-              ("contact_marks", get_preset("contact_marks")),
-              ("ghost_rest", get_preset("ghost_rest")),
-              ("floor_opaque", get_preset("floor_opaque")),
-              ("camera", _CAM_ORBIT),
-              ("scene", _SCENE_CLEAN),
-              ("output", _OUTPUT_LIVE))
-register_view("palm_pose_xray",
-              ("hand_xray", get_preset("hand_xray")),
-              ("crate_shell_xray", get_preset("crate_shell_xray")),
-              ("crate_cage", get_preset("crate_cage")),
-              ("contact_marks", get_preset("contact_marks")),
-              ("ghost_rest", get_preset("ghost_rest")),
-              ("floor_opaque", get_preset("floor_opaque")),
-              ("camera", _CAM_CLOSEUP),
-              ("scene", _SCENE_CLEAN),
-              ("output", _OUTPUT_LIVE))
-register_view("clean_collision", ("clean_collision",
-                                   get_preset("clean_collision")))
+register_view(
+    "palm_pose_occl",
+    ("hand_solid", get_preset("hand_solid")),
+    ("crate_shell_occl", get_preset("crate_shell_occl")),
+    ("crate_cage", get_preset("crate_cage")),
+    ("contact_marks", get_preset("contact_marks")),
+    ("ghost_rest", get_preset("ghost_rest")),
+    ("floor_opaque", get_preset("floor_opaque")),
+    ("camera", _CAM_ORBIT),
+    ("scene", _SCENE_CLEAN),
+    ("output", _OUTPUT_LIVE),
+)
+register_view(
+    "palm_pose_xray",
+    ("hand_xray", get_preset("hand_xray")),
+    ("crate_shell_xray", get_preset("crate_shell_xray")),
+    ("crate_cage", get_preset("crate_cage")),
+    ("contact_marks", get_preset("contact_marks")),
+    ("ghost_rest", get_preset("ghost_rest")),
+    ("floor_opaque", get_preset("floor_opaque")),
+    ("camera", _CAM_CLOSEUP),
+    ("scene", _SCENE_CLEAN),
+    ("output", _OUTPUT_LIVE),
+)
+register_view("clean_collision", ("clean_collision", get_preset("clean_collision")))
 register_view("visual", ("empty", {}))
 # per-camera style axis (camera unification): the WebUI style selector
 # and camera(style) write these as a camera's live render state
-register_view("contacts", ("contact_mjvis_simple",
-                           get_preset("contact_mjvis_simple")))
-register_view("cage_contacts",
-              ("clean_collision", get_preset("clean_collision")),
-              ("crate_cage", get_preset("crate_cage")),
-              ("contact_marks", get_preset("contact_marks")))
+register_view("contacts", ("contact_mjvis_simple", get_preset("contact_mjvis_simple")))
+register_view(
+    "cage_contacts",
+    ("clean_collision", get_preset("clean_collision")),
+    ("crate_cage", get_preset("crate_cage")),
+    ("contact_marks", get_preset("contact_marks")),
+)

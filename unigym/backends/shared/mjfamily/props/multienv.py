@@ -5,13 +5,15 @@ engine-agnostic bookkeeping moved to ``unigym.backends.collect_core``.
 Every function takes the live env as its first argument and reads the
 same private tables the inline bodies used; N=1 output is unchanged.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 
-def reject_model_global_unsupported(num_envs: int, prop_manager,
-                                    camera_manager, director_cfg) -> None:
+def reject_model_global_unsupported(
+    num_envs: int, prop_manager, camera_manager, director_cfg
+) -> None:
     """Fail fast for model-global writes that have no per-env face.
 
     Cameras re-pose one rig state, the director edits one body/eq table,
@@ -22,8 +24,10 @@ def reject_model_global_unsupported(num_envs: int, prop_manager,
     if num_envs <= 1:
         return
     anchored = [
-        h.spec.name for h in getattr(prop_manager, "_handlers", ())
-        if getattr(h.spec, "type", None) == "articulation"]
+        h.spec.name
+        for h in getattr(prop_manager, "_handlers", ())
+        if getattr(h.spec, "type", None) == "articulation"
+    ]
     unsupported = []
     if camera_manager is not None:
         unsupported.append("camera_manager")
@@ -37,7 +41,8 @@ def reject_model_global_unsupported(num_envs: int, prop_manager,
             f"model-global state: {', '.join(unsupported)} | each env "
             f"shares one MjModel, so camera rigs / director ops / anchored "
             f"articulation anchors have no per-env write face; run these "
-            f"features with num_envs=1 or switch to a free_articulation prop")
+            f"features with num_envs=1 or switch to a free_articulation prop"
+        )
 
 
 def foot_contact_forces(env, d=None) -> np.ndarray:

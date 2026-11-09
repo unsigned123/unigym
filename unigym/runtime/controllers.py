@@ -18,6 +18,7 @@ Rules:
 
 This module is runtime data plus duck-typed resolution.  It names no engine.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping as AbcMapping, Sequence
@@ -87,12 +88,11 @@ def strategy_for_drive(drive: str) -> DriveStrategy:
         return DRIVE_STRATEGIES[drive]
     except KeyError:
         raise ControlError(
-            f"unknown control drive {drive!r}; legal drives are "
-            f"{list(CONTROL_DRIVES)}") from None
+            f"unknown control drive {drive!r}; legal drives are " f"{list(CONTROL_DRIVES)}"
+        ) from None
 
 
-def _as_q0(values: torch.Tensor | Sequence[float] | None, count: int,
-            what: str) -> torch.Tensor:
+def _as_q0(values: torch.Tensor | Sequence[float] | None, count: int, what: str) -> torch.Tensor:
     if isinstance(values, torch.Tensor):
         q0 = values.to(dtype=torch.float32)
     else:
@@ -103,8 +103,7 @@ def _as_q0(values: torch.Tensor | Sequence[float] | None, count: int,
         except (TypeError, ValueError):
             raise ControlError(f"{what} q0 must be numeric") from None
     if tuple(q0.shape) != (count,):
-        raise ControlError(
-            f"{what} q0 has {tuple(q0.shape)} entries for {count} joints")
+        raise ControlError(f"{what} q0 has {tuple(q0.shape)} entries for {count} joints")
     return q0
 
 
@@ -171,20 +170,18 @@ class ArticulationRuntime:
         self.spawn = dict(spawn)
         addresses: Mapping[str, JsonValue] = self.addresses or {}
         self.addresses = dict(addresses)
-        self.q0 = _as_q0(self.q0, len(self.joint_names),
-                         f"articulation {self.name!r}")
+        self.q0 = _as_q0(self.q0, len(self.joint_names), f"articulation {self.name!r}")
 
     def q0_for(self, joint_names: Sequence[str]) -> torch.Tensor:
         """Default positions for *joint_names* (subset order preserved)."""
         assert isinstance(self.q0, torch.Tensor)
         lut = dict(zip(self.joint_names, self.q0.tolist()))
         try:
-            return torch.tensor([lut[name] for name in joint_names],
-                                dtype=torch.float32)
+            return torch.tensor([lut[name] for name in joint_names], dtype=torch.float32)
         except KeyError as exc:
             raise ControlError(
-                f"articulation {self.name!r} has no q0 for joint "
-                f"{exc.args[0]!r}") from None
+                f"articulation {self.name!r} has no q0 for joint " f"{exc.args[0]!r}"
+            ) from None
 
 
 @dataclass
@@ -241,32 +238,28 @@ class ControlRuntime:
         for key in ("name", "action_face", "adapter", "articulation"):
             value = getattr(self, key)
             if not value:
-                raise ControlError(
-                    f"control runtime {self.name!r} {key} must be non-empty")
+                raise ControlError(f"control runtime {self.name!r} {key} must be non-empty")
             setattr(self, key, str(value))
         if self.drive not in CONTROL_DRIVES:
             raise ControlError(
                 f"control runtime {self.name!r} drive must be one of "
-                f"{list(CONTROL_DRIVES)}, got {self.drive!r}")
+                f"{list(CONTROL_DRIVES)}, got {self.drive!r}"
+            )
         expected = target_for_drive(self.drive)
         if self.target != expected:
             raise ControlError(
                 f"control runtime {self.name!r} drive {self.drive!r} "
-                f"requires target {expected!r}, got {self.target!r}")
+                f"requires target {expected!r}, got {self.target!r}"
+            )
         self.joint_names = tuple(str(n) for n in (self.joint_names or ()))
         if not self.joint_names:
-            raise ControlError(
-                f"control runtime {self.name!r} owns no joints")
+            raise ControlError(f"control runtime {self.name!r} owns no joints")
         if len(set(self.joint_names)) != len(self.joint_names):
-            raise ControlError(
-                f"control runtime {self.name!r} joint_names contains "
-                f"duplicates")
-        self.q0 = _as_q0(self.q0, len(self.joint_names),
-                         f"control {self.name!r}")
+            raise ControlError(f"control runtime {self.name!r} joint_names contains " f"duplicates")
+        self.q0 = _as_q0(self.q0, len(self.joint_names), f"control {self.name!r}")
         gains: Mapping[str, float] = self.gains or {}
         self.gains = {str(k): float(v) for k, v in dict(gains).items()}
-        self.asset_joint_names = tuple(
-            str(n) for n in (self.asset_joint_names or ()))
+        self.asset_joint_names = tuple(str(n) for n in (self.asset_joint_names or ()))
         self.feet = tuple(str(n) for n in (self.feet or ()))
         addresses: Mapping[str, JsonValue] = self.addresses or {}
         self.addresses = dict(addresses)
@@ -282,8 +275,7 @@ class ControlRuntime:
     def strategy_name(self) -> str:
         """The backend strategy key (== the drive)."""
         if self.strategy is None:
-            raise ControlError(
-                f"control runtime {self.name!r} has no resolved strategy")
+            raise ControlError(f"control runtime {self.name!r} has no resolved strategy")
         return self.strategy.strategy
 
 
@@ -291,8 +283,9 @@ def _recipe_defaults(recipe: RobotRecipe | None) -> dict[str, float]:
     return dict(getattr(recipe, "default_joint_pos", {}) or {})
 
 
-def _control_q0(group: ControlGroup, joint_names: Sequence[str],
-                recipe: RobotRecipe | None, what: str) -> tuple[float, ...]:
+def _control_q0(
+    group: ControlGroup, joint_names: Sequence[str], recipe: RobotRecipe | None, what: str
+) -> tuple[float, ...]:
     defaults = _recipe_defaults(recipe)
     values: list[float] = []
     for joint in joint_names:
@@ -304,13 +297,12 @@ def _control_q0(group: ControlGroup, joint_names: Sequence[str],
             values.append(0.0)
         else:
             raise ControlError(
-                f"{what} has no q0 for joint {joint!r} (only position "
-                f"drives may default to 0)")
+                f"{what} has no q0 for joint {joint!r} (only position " f"drives may default to 0)"
+            )
     return tuple(values)
 
 
-def _explicit_joint_set(group: ControlGroup,
-                        recipe: RobotRecipe | None) -> tuple[str, ...]:
+def _explicit_joint_set(group: ControlGroup, recipe: RobotRecipe | None) -> tuple[str, ...]:
     """Resolve ``group.joint_set`` against the articulation's recipe.
 
     Fail-fast when the articulation has no recipe or the set is unknown; no
@@ -322,34 +314,37 @@ def _explicit_joint_set(group: ControlGroup,
             f"control group {group.name!r} selects joint_set {name!r} on "
             f"articulation {group.articulation!r}, which has no RobotRecipe; "
             f"`joint_set` requires a recipe-backed articulation (list "
-            f"`joints` explicitly for recipe-less articulations)")
-    sets: Mapping[str, tuple[str, ...]] = dict(
-        getattr(recipe, "joint_sets", None) or {})
+            f"`joints` explicitly for recipe-less articulations)"
+        )
+    sets: Mapping[str, tuple[str, ...]] = dict(getattr(recipe, "joint_sets", None) or {})
     try:
         joints = tuple(str(j) for j in sets[name])
     except KeyError:
         raise ControlError(
             f"control group {group.name!r} selects unknown joint_set "
             f"{name!r} on articulation {group.articulation!r}; the recipe "
-            f"declares {sorted(sets)}") from None
+            f"declares {sorted(sets)}"
+        ) from None
     if not joints:
         raise ControlError(
             f"control group {group.name!r} joint_set {name!r} resolves no "
-            f"joints on articulation {group.articulation!r}")
+            f"joints on articulation {group.articulation!r}"
+        )
     return joints
 
 
 def _declared_control_runtime(
-        group: ControlGroup,
-        arts: Mapping[str, ArticulationSpec],
-        recipes: Mapping[str, RobotRecipe],
+    group: ControlGroup,
+    arts: Mapping[str, ArticulationSpec],
+    recipes: Mapping[str, RobotRecipe],
 ) -> ControlRuntime:
     """Build one declared ``controls[]`` runtime (fail-fast resolution)."""
     art = arts.get(group.articulation)
     if art is None:
         raise ControlError(
             f"control group {group.name!r} names articulation "
-            f"{group.articulation!r}, which is not declared")
+            f"{group.articulation!r}, which is not declared"
+        )
     recipe = recipes.get(group.articulation)
     # explicit resolution: explicit joints win; otherwise the named
     # joint_set is expanded once from the recipe; no group-name inference.
@@ -362,19 +357,20 @@ def _declared_control_runtime(
     else:
         raise ControlError(
             f"control group {group.name!r} declares neither `joints` nor "
-            f"`joint_set`; every group must select its joints explicitly")
+            f"`joint_set`; every group must select its joints explicitly"
+        )
     if not bare:
         raise ControlError(
             f"control group {group.name!r} resolves no joints (declare "
-            f"`joints` or use a recipe-backed articulation)")
+            f"`joints` or use a recipe-backed articulation)"
+        )
     return ControlRuntime(
         name=group.name,
         action_face=group.name,
         adapter=group.adapter,
         articulation=group.articulation,
         joint_names=tuple(bare),
-        q0=_control_q0(group, bare, recipe,
-                       f"control group {group.name!r}"),
+        q0=_control_q0(group, bare, recipe, f"control group {group.name!r}"),
         gains=dict(group.gains),
         drive=group.drive,
         target=group.target,
@@ -438,12 +434,12 @@ class ResolvedControlPlan:
                 return control
         raise KeyError(
             f"resolved plan has no control {name!r}; declared: "
-            f"{[c.name for c in self.controls]}")
+            f"{[c.name for c in self.controls]}"
+        )
 
     def for_articulation(self, articulation: str) -> tuple[ResolvedControl, ...]:
         """Every resolved control of one articulation (declaration order)."""
-        return tuple(c for c in self.controls
-                     if c.articulation == articulation)
+        return tuple(c for c in self.controls if c.articulation == articulation)
 
     def to_table(self) -> list[dict[str, JsonValue]]:
         """The plan as a list of plain-data rows (read-only projection)."""
@@ -451,8 +447,8 @@ class ResolvedControlPlan:
 
 
 def build_control_plan(
-        controls: Sequence[ControlGroup] | None = None,
-        runtimes: Sequence[ControlRuntime] | None = None,
+    controls: Sequence[ControlGroup] | None = None,
+    runtimes: Sequence[ControlRuntime] | None = None,
 ) -> ResolvedControlPlan:
     """Freeze the resolved-control result into a read-only plan.
 
@@ -463,30 +459,31 @@ def build_control_plan(
     rows: list[ResolvedControl] = []
     for runtime in tuple(runtimes or ()):
         group = groups.get(runtime.name)
-        joint_set = (group.joint_set if group is not None
-                     else runtime.joint_set)
-        rows.append(ResolvedControl(
-            name=runtime.name,
-            articulation=runtime.articulation,
-            adapter=runtime.adapter,
-            joint_set=joint_set,
-            source=runtime.source,
-            joint_names=tuple(runtime.joint_names),
-            drive=runtime.drive,
-            target=runtime.target,
-            q0=(tuple(float(v) for v in runtime.q0.tolist())
-                if isinstance(runtime.q0, torch.Tensor) else
-                tuple(float(v) for v in (runtime.q0 or ()))),
-        ))
+        joint_set = group.joint_set if group is not None else runtime.joint_set
+        rows.append(
+            ResolvedControl(
+                name=runtime.name,
+                articulation=runtime.articulation,
+                adapter=runtime.adapter,
+                joint_set=joint_set,
+                source=runtime.source,
+                joint_names=tuple(runtime.joint_names),
+                drive=runtime.drive,
+                target=runtime.target,
+                q0=(
+                    tuple(float(v) for v in runtime.q0.tolist())
+                    if isinstance(runtime.q0, torch.Tensor)
+                    else tuple(float(v) for v in (runtime.q0 or ()))
+                ),
+            )
+        )
     return ResolvedControlPlan(tuple(rows))
 
 
-def _actuated_joints(art: ArticulationSpec,
-                     recipe: RobotRecipe | None) -> tuple[str, ...]:
+def _actuated_joints(art: ArticulationSpec, recipe: RobotRecipe | None) -> tuple[str, ...]:
     """The articulation's full actuated joint vocabulary (§4)."""
     if recipe is not None:
-        sets: Mapping[str, Sequence[str]] = dict(
-            getattr(recipe, "joint_sets", None) or {})
+        sets: Mapping[str, Sequence[str]] = dict(getattr(recipe, "joint_sets", None) or {})
         union: list[str] = []
         for joints in sets.values():
             for joint in joints:
@@ -498,10 +495,11 @@ def _actuated_joints(art: ArticulationSpec,
 
 
 def validate_resolved_coverage(
-        articulations: Iterable[ArticulationSpec] | None,
-        recipes: AbcMapping[str, RobotRecipe] | None,
-        controls: Iterable[ControlGroup] | None,
-        runtimes: Iterable[ControlRuntime] | None) -> None:
+    articulations: Iterable[ArticulationSpec] | None,
+    recipes: AbcMapping[str, RobotRecipe] | None,
+    controls: Iterable[ControlGroup] | None,
+    runtimes: Iterable[ControlRuntime] | None,
+) -> None:
     """Validate the resolved control coverage of every articulation (§4).
 
     For each articulation with declared controls:
@@ -530,7 +528,8 @@ def validate_resolved_coverage(
         if art is None:
             raise ControlError(
                 f"control {runtime.name!r} names articulation "
-                f"{runtime.articulation!r}, which is not declared")
+                f"{runtime.articulation!r}, which is not declared"
+            )
         bare = list(runtime.joint_names)
         owned = driven.setdefault(art.name, [])
         overlap = sorted(set(owned) & set(bare))
@@ -538,7 +537,8 @@ def validate_resolved_coverage(
             raise ControlError(
                 f"articulation {art.name!r}: control groups overlap on "
                 f"joints {overlap} (group {runtime.name!r}); every driven "
-                f"joint must belong to exactly one group")
+                f"joint must belong to exactly one group"
+            )
         owned.extend(bare)
 
     for name, owned in driven.items():
@@ -551,7 +551,8 @@ def validate_resolved_coverage(
         if conflict:
             raise ControlError(
                 f"articulation {name!r}: joints {conflict} are both driven "
-                f"by a control group and listed in passive_joints")
+                f"by a control group and listed in passive_joints"
+            )
         if not actuated:
             # recipe-less articulation without declared joints: the actuated
             # vocabulary is not knowable here; overlap is still enforced.
@@ -562,19 +563,21 @@ def validate_resolved_coverage(
             raise ControlError(
                 f"articulation {name!r}: actuated joints {missing} are "
                 f"neither driven by a control group nor listed in "
-                f"passive_joints; declare the drive explicitly")
+                f"passive_joints; declare the drive explicitly"
+            )
         unknown = sorted(covered - actuated)
         if unknown:
             raise ControlError(
                 f"articulation {name!r}: joints {unknown} are not in the "
                 f"articulation's actuated joint vocabulary (recipe "
-                f"joint_sets or ArticulationSpec.joints)")
+                f"joint_sets or ArticulationSpec.joints)"
+            )
 
 
 def build_control_runtimes(
-        controls: Sequence[ControlGroup] | None,
-        articulations: Sequence[ArticulationSpec] | None,
-        recipes: Mapping[str, RobotRecipe] | None,
+    controls: Sequence[ControlGroup] | None,
+    articulations: Sequence[ArticulationSpec] | None,
+    recipes: Mapping[str, RobotRecipe] | None,
 ) -> tuple[ControlRuntime, ...]:
     """Build neutral :class:`ControlRuntime` entries from the run declaration.
 
@@ -598,15 +601,13 @@ def build_control_runtimes(
     arts = {art.name: art for art in tuple(articulations or ())}
     recipes = dict(recipes or {})
     declared = tuple(controls or ())
-    out = tuple(_declared_control_runtime(group, arts, recipes)
-                for group in declared)
+    out = tuple(_declared_control_runtime(group, arts, recipes) for group in declared)
     validate_resolved_coverage(arts.values(), recipes, declared, out)
     return out
 
 
 def _iter_controls(
-        controls: Mapping[str, ControlRuntime]
-        | Sequence[ControlRuntime] | None,
+    controls: Mapping[str, ControlRuntime] | Sequence[ControlRuntime] | None,
 ) -> tuple[ControlRuntime, ...]:
     if controls is None:
         return ()
@@ -629,8 +630,7 @@ def control_of(env: EnvBackend, adapter: Adapter) -> ControlRuntime:
         ControlError: no adapter name is available, or the ownership
             partition does not identify exactly one body group.
     """
-    name = (getattr(adapter, "_unigym_name", None)
-            or getattr(adapter, "name", None))
+    name = getattr(adapter, "_unigym_name", None) or getattr(adapter, "name", None)
     runtimes = _iter_controls(getattr(env, "controls", None))
     if not runtimes:
         raise ControlError("env exposes no controls")
@@ -644,13 +644,14 @@ def control_of(env: EnvBackend, adapter: Adapter) -> ControlRuntime:
             f"adapter {type(adapter).__name__} carries no registry name "
             f"(_unigym_name) and the run has {len(declared)} declared "
             f"control groups; cannot resolve its control group without a "
-            f"name")
-    declared = [c for c in runtimes
-                if c.adapter == name and not c.prop]
+            f"name"
+        )
+    declared = [c for c in runtimes if c.adapter == name and not c.prop]
     if not declared:
         raise ControlError(
             f"adapter {name!r} owns no declared control group; controls: "
-            f"{[(c.name, c.adapter) for c in runtimes]}")
+            f"{[(c.name, c.adapter) for c in runtimes]}"
+        )
     if len(declared) == 1:
         return declared[0]
     body = [c for c in declared if c.action_face == c.articulation]
@@ -659,14 +660,13 @@ def control_of(env: EnvBackend, adapter: Adapter) -> ControlRuntime:
     raise ControlError(
         f"adapter {name!r} owns several control groups and none is a "
         f"unique body face: {[c.name for c in declared]}; pass the group "
-        f"explicitly instead of guessing")
+        f"explicitly instead of guessing"
+    )
 
 
 def single_articulation_runtime(env: EnvBackend) -> ArticulationRuntime:
     """The one articulation runtime (a cardinality fact, no primary rank)."""
-    arts: Mapping[str, ArticulationRuntime] = getattr(
-        env, "articulations", None) or {}
+    arts: Mapping[str, ArticulationRuntime] = getattr(env, "articulations", None) or {}
     if len(arts) != 1:
-        raise RuntimeError(
-            f"expected exactly one articulation, found {sorted(arts)}")
+        raise RuntimeError(f"expected exactly one articulation, found {sorted(arts)}")
     return next(iter(arts.values()))

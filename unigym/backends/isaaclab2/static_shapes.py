@@ -17,6 +17,7 @@ physics stays an infinite plane).
 
 isaaaclab stays a lazy import: callers inject ``classes=`` for offline tests.
 """
+
 from __future__ import annotations
 
 #: neutral primitive kind -> the cfg-class name that spawns it
@@ -37,6 +38,7 @@ def _resolve(classes):
         return classes
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
+
     return {
         "AssetBaseCfg": AssetBaseCfg,
         "CuboidCfg": sim_utils.CuboidCfg,
@@ -61,24 +63,22 @@ def _spawn(kind: str, params: dict, c: dict, color):
     visual = c["PreviewSurfaceCfg"](diffuse_color=color)
     common = dict(collision_props=collision, visual_material=visual)
     if kind == "box":
-        return c["CuboidCfg"](size=tuple(float(v) for v in params["size"]),
-                              **common)
+        return c["CuboidCfg"](size=tuple(float(v) for v in params["size"]), **common)
     if kind == "sphere":
         return c["SphereCfg"](radius=float(params["radius"]), **common)
     if kind == "cylinder":
-        return c["CylinderCfg"](radius=float(params["radius"]),
-                                height=2.0 * float(params["half_height"]),
-                                **common)
+        return c["CylinderCfg"](
+            radius=float(params["radius"]), height=2.0 * float(params["half_height"]), **common
+        )
     if kind == "capsule":
         # USD capsule ``height`` is the cylindrical section (caps are
         # added on top): the neutral half_height is that half-length.
         return c["CapsuleCfg"](
-            radius=float(params["radius"]),
-            height=2.0 * float(params["half_height"]),
-            **common)
+            radius=float(params["radius"]), height=2.0 * float(params["half_height"]), **common
+        )
     raise ValueError(
-        f"static primitive kind {kind!r} has no isaaclab mapping "
-        f"(known: {sorted(_CFG_CLASS)})")
+        f"static primitive kind {kind!r} has no isaaclab mapping " f"(known: {sorted(_CFG_CLASS)})"
+    )
 
 
 def build_static_scene_fields(declarations, *, classes=None) -> dict:
@@ -102,12 +102,13 @@ def build_static_scene_fields(declarations, *, classes=None) -> dict:
         if kind not in _CFG_CLASS:
             raise ValueError(
                 f"static primitive {decl.get('name')!r}: kind {kind!r} has "
-                f"no isaaclab static mapping (known: {sorted(_CFG_CLASS)})")
+                f"no isaaclab static mapping (known: {sorted(_CFG_CLASS)})"
+            )
         field = f"static_{decl['name']}"
         if field in fields:
             raise ValueError(
-                f"static primitive {decl['name']!r}: duplicate scene field "
-                f"{field!r}")
+                f"static primitive {decl['name']!r}: duplicate scene field " f"{field!r}"
+            )
         spawn = _spawn(kind, dict(decl["params"]), c, _DEFAULT_COLOR)
         fields[field] = c["AssetBaseCfg"](
             prim_path=f"{{ENV_REGEX_NS}}/Static_{decl['name']}",

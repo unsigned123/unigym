@@ -6,6 +6,7 @@ stand-alone probes may bind a backend with only ``mj_model``/``mj_data``;
 describing the model keeps those paths working without a second, divergent
 parser in the backend code.
 """
+
 from __future__ import annotations
 
 
@@ -46,10 +47,11 @@ def camera_id(ir, name):
 
 def actuator_by_joint(ir):
     """Return ``{joint name: actuator slot}`` for joint actuators."""
-    return {act.target: int(act.actuator_id)
-            for act in ir.actuators
-            if act.trntype in ("joint", "jointinparent")
-            and act.actuator_id is not None}
+    return {
+        act.target: int(act.actuator_id)
+        for act in ir.actuators
+        if act.trntype in ("joint", "jointinparent") and act.actuator_id is not None
+    }
 
 
 def qpos_addresses(ir, names):

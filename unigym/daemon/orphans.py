@@ -25,6 +25,7 @@ daemon is kept, and the sweep is skipable entirely with
 ``UNIGYM_ORPHAN_SWEEP=off``.  Action: SIGTERM -> grace -> SIGKILL ->
 unlink the segment, one log line each.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,7 +37,7 @@ from unigym.runtime.bridge import HDR_SIZE, MAGIC, H_HB_TS, H_PID
 
 __all__ = ["sweep_orphans", "MIN_AGE_S", "TERM_GRACE_S"]
 
-MIN_AGE_S = 3600.0               # 1h stale before anything is touched
+MIN_AGE_S = 3600.0  # 1h stale before anything is touched
 TERM_GRACE_S = 5.0
 SHM_PREFIX = "unigym_"
 
@@ -54,7 +55,7 @@ def _pid_alive(pid: int | None) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True               # someone else's live process
+        return True  # someone else's live process
     except OSError:
         return False
 
@@ -77,13 +78,16 @@ def _header(path: str) -> tuple[float, int]:
     return 0.0, 0
 
 
-def sweep_orphans(shm_dir: str = "/dev/shm",
-                  now: float | None = None,
-                  min_age_s: float = MIN_AGE_S,
-                  registered: set[str] | None = None,
-                  pid_alive=None,
-                  log=_log, kill: bool = True,
-                  term_grace_s: float = TERM_GRACE_S) -> list[dict]:
+def sweep_orphans(
+    shm_dir: str = "/dev/shm",
+    now: float | None = None,
+    min_age_s: float = MIN_AGE_S,
+    registered: set[str] | None = None,
+    pid_alive=None,
+    log=_log,
+    kill: bool = True,
+    term_grace_s: float = TERM_GRACE_S,
+) -> list[dict]:
     """One sweep pass; returns the per-segment action report.
 
     ``registered`` -- run_ids claimed by reachable daemons (the caller
@@ -103,15 +107,20 @@ def sweep_orphans(shm_dir: str = "/dev/shm",
         if not name.startswith(SHM_PREFIX):
             continue
         path = os.path.join(shm_dir, name)
-        run_id = name[len(SHM_PREFIX):]
+        run_id = name[len(SHM_PREFIX) :]
         hb, pid = _header(path)
         try:
             mtime = os.stat(path).st_mtime
         except OSError:
-            continue                   # vanished mid-sweep
+            continue  # vanished mid-sweep
         age = (now - hb) if hb > 0 else (now - mtime)
-        rec = {"segment": name, "run_id": run_id, "pid": pid or None,
-               "age_s": round(age, 1), "registered": run_id in registered}
+        rec = {
+            "segment": name,
+            "run_id": run_id,
+            "pid": pid or None,
+            "age_s": round(age, 1),
+            "registered": run_id in registered,
+        }
         if age <= min_age_s:
             rec["action"] = "keep (fresh)"
             reports.append(rec)
@@ -133,14 +142,18 @@ def sweep_orphans(shm_dir: str = "/dev/shm",
         if kill:
             try:
                 os.unlink(path)
-                log(f"orphan sweep: removed {name} (age {age / 3600:.1f}h"
+                log(
+                    f"orphan sweep: removed {name} (age {age / 3600:.1f}h"
                     f", pid {pid or '?'}, "
-                    f"{'killed' if rec['action'].startswith('kill') else 'owner dead'})")
+                    f"{'killed' if rec['action'].startswith('kill') else 'owner dead'})"
+                )
             except OSError as e:
                 log(f"orphan sweep: unlink {name} failed: {e}")
         else:
-            log(f"orphan sweep (dry): would remove {name} "
-                f"(age {age / 3600:.1f}h, pid {pid or '?'})")
+            log(
+                f"orphan sweep (dry): would remove {name} "
+                f"(age {age / 3600:.1f}h, pid {pid or '?'})"
+            )
     return reports
 
 

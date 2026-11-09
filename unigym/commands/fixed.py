@@ -1,4 +1,5 @@
 """Fixed (constant) command sampler."""
+
 from __future__ import annotations
 
 import torch

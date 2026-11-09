@@ -30,6 +30,7 @@ dynamic rigid body) and adds: aabb validation, aabb metadata exposure
 (``aabb_center``/``aabb_half``), and world-frame ``get_world_pose`` for the
 ``object/*`` record-key layer (props/object_state).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,11 +39,18 @@ import numpy as np
 import torch
 
 from unigym.props.base import (
-    PropSpec, _quat_mul, _yaw_quat, quat_rotate, quat_rotate_inverse,
+    PropSpec,
+    _quat_mul,
+    _yaw_quat,
+    quat_rotate,
+    quat_rotate_inverse,
 )
 from unigym.props import container as container_mod
 from unigym.props.container import (
-    _DEFAULT_COLOR, _DEFAULT_MASS, _declared_aabb, _positive_size,
+    _DEFAULT_COLOR,
+    _DEFAULT_MASS,
+    _declared_aabb,
+    _positive_size,
     validate_box_spec,
 )
 from unigym.props.primitive import resolve_mass
@@ -61,8 +69,7 @@ def _build_cuboid_spawn(spec: PropSpec, c: dict):
     s = dict(spec.spawn)
     size = _positive_size(spec)
     mass = resolve_mass(spec, default=_DEFAULT_MASS["box"])
-    color = tuple(float(v) for v in list(s.get(
-        "color", _DEFAULT_COLOR["box"]))[:3])
+    color = tuple(float(v) for v in list(s.get("color", _DEFAULT_COLOR["box"]))[:3])
     kwargs: dict[str, Any] = dict(
         size=tuple(float(v) for v in size),
         mass_props=c["MassPropertiesCfg"](mass=mass),
@@ -91,8 +98,7 @@ def _box_origin_offset(spec: PropSpec, quat: torch.Tensor) -> torch.Tensor:
     centre.  The offset is the local ``[0, 0, sz/2]`` rotated by the body
     orientation, so the two conventions stay interchangeable under yaw/roll.
     """
-    offset = torch.zeros((quat.shape[0], 3), dtype=quat.dtype,
-                         device=quat.device)
+    offset = torch.zeros((quat.shape[0], 3), dtype=quat.dtype, device=quat.device)
     offset[:, 2] = float(_positive_size(spec)[2]) / 2.0
     return quat_rotate(quat, offset)
 
@@ -113,8 +119,7 @@ class BoxProp(GenericProp):
     ``<name>_pos_b`` / ``<name>_vel_b`` in the robot body frame.
     """
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         validate_box_spec(spec)
         if spec.type == "box":
             spec.urdf_path = None
@@ -122,8 +127,7 @@ class BoxProp(GenericProp):
             spec.urdf_path = container_mod.generate_box_urdf(spec)
         if not spec.state_keys:
             spec.state_keys = [f"{spec.name}_pos_b", f"{spec.name}_vel_b"]
-        super().__init__(spec, num_envs=num_envs, device=device,
-                         base_dir=base_dir)
+        super().__init__(spec, num_envs=num_envs, device=device, base_dir=base_dir)
 
     # ---- isaaclab scene build ------------------------------------------ #
     def setup_scene(self, *, classes=None) -> tuple[str, Any]:
@@ -134,15 +138,17 @@ class BoxProp(GenericProp):
         spawn = _build_cuboid_spawn(self.spec, c)
         roll_q = self._roll_quat
         offset = _box_origin_offset(self.spec, roll_q.reshape(1, 4))[0]
-        init_pos = (float(offset[0]), float(offset[1]),
-                    float(self.placement.height_offset + offset[2]))
+        init_pos = (
+            float(offset[0]),
+            float(offset[1]),
+            float(self.placement.height_offset + offset[2]),
+        )
         cfg = c["RigidObjectCfg"](
             prim_path=f"{{ENV_REGEX_NS}}/Prop_{self.spec.name}",
             spawn=spawn,
             init_state=c["RigidObjectCfg"].InitialStateCfg(
                 pos=init_pos,
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
             ),
             collision_group=0,
             debug_vis=False,
@@ -150,8 +156,7 @@ class BoxProp(GenericProp):
         return self.spec.name, cfg
 
     # ---- runtime: keep the logical bottom-face origin ------------------ #
-    def _logical_pos(self, root_pos: torch.Tensor,
-                     quat: torch.Tensor) -> torch.Tensor:
+    def _logical_pos(self, root_pos: torch.Tensor, quat: torch.Tensor) -> torch.Tensor:
         if self.spec.type != "box":
             return root_pos
         return root_pos - _box_origin_offset(self.spec, quat)
@@ -217,12 +222,14 @@ class BoxProp(GenericProp):
         """
         pose = self.get_world_pose(env)
         if pose is None:
-            raise RuntimeError(
-                f"prop {self.spec.name!r}: get_aabb_world before bind_env")
+            raise RuntimeError(f"prop {self.spec.name!r}: get_aabb_world before bind_env")
         pos, quat = pose
-        center_w = pos + quat_rotate(quat, torch.as_tensor(
-            self.aabb_center, dtype=pos.dtype, device=pos.device
-        ).unsqueeze(0).expand_as(pos))
+        center_w = pos + quat_rotate(
+            quat,
+            torch.as_tensor(self.aabb_center, dtype=pos.dtype, device=pos.device)
+            .unsqueeze(0)
+            .expand_as(pos),
+        )
         return center_w, self.aabb_half
 
     # ---- world pose for the object/* record layer ---------------------- #

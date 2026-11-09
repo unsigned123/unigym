@@ -21,6 +21,7 @@ Drive semantics:
 Joints that are not driven must be listed in the owning articulation's
 ``passive_joints``; coverage is validated here at construction time.
 """
+
 from __future__ import annotations
 
 import math
@@ -84,8 +85,20 @@ class ProjectedGroup(TypedDict):
     drive: str
     target: str
 
-_CONTROL_KEYS = ("name", "adapter", "articulation", "joint_set", "joints",
-                 "drive", "target", "q0", "gains", "command", "control_dt")
+
+_CONTROL_KEYS = (
+    "name",
+    "adapter",
+    "articulation",
+    "joint_set",
+    "joints",
+    "drive",
+    "target",
+    "q0",
+    "gains",
+    "command",
+    "control_dt",
+)
 
 
 class ControlError(ValueError):
@@ -101,8 +114,7 @@ def _is_controls_iterable(
     value: object,
 ) -> TypeGuard[Iterable[ControlGroup | Mapping[str, JsonValue]]]:
     """True for an iterable of control groups (not a mapping/string block)."""
-    return (not isinstance(value, (Mapping, str, bytes))
-            and isinstance(value, Iterable))
+    return not isinstance(value, (Mapping, str, bytes)) and isinstance(value, Iterable)
 
 
 def target_for_drive(drive: str) -> str:
@@ -113,7 +125,8 @@ def target_for_drive(drive: str) -> str:
         raise ControlError(
             f"unknown control drive {drive!r}; legal drives are "
             f"{list(CONTROL_DRIVES)} (passive joints are declared in the "
-            f"articulation's `passive_joints`, not as a group)") from None
+            f"articulation's `passive_joints`, not as a group)"
+        ) from None
 
 
 def _finite(value: JsonValue, what: str) -> float:
@@ -132,13 +145,11 @@ def _strings(value: Iterable[JsonValue] | None, what: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, (str, bytes)) or isinstance(value, Mapping):
-        raise ControlError(
-            f"{what} must be a list of joint names, got {value!r}")
+        raise ControlError(f"{what} must be a list of joint names, got {value!r}")
     try:
         names = tuple(str(name) for name in value)
     except TypeError:
-        raise ControlError(
-            f"{what} must be a list of joint names, got {value!r}") from None
+        raise ControlError(f"{what} must be a list of joint names, got {value!r}") from None
     if len(set(names)) != len(names):
         raise ControlError(f"{what} contains duplicate names {names!r}")
     return names
@@ -148,8 +159,7 @@ def _raw_strings(value: JsonValue, what: str) -> tuple[str, ...] | None:
     if value is None:
         return None
     if not isinstance(value, (list, tuple)):
-        raise ControlError(
-            f"{what} must be a list of joint names, got {value!r}")
+        raise ControlError(f"{what} must be a list of joint names, got {value!r}")
     return _strings(value, what)
 
 
@@ -158,8 +168,7 @@ def _raw_float_map(value: JsonValue, what: str) -> Mapping[str, float]:
         return {}
     if not isinstance(value, Mapping):
         raise ControlError(f"{what} must be a mapping, got {value!r}")
-    return {str(name): _finite(val, f"{what}[{name!r}]")
-            for name, val in value.items()}
+    return {str(name): _finite(val, f"{what}[{name!r}]") for name, val in value.items()}
 
 
 def _raw_command(value: JsonValue, what: str) -> Mapping[str, JsonValue] | None:
@@ -176,15 +185,15 @@ def _raw_joint_set(value: JsonValue, group_name: JsonValue) -> str | None:
     if not isinstance(value, str):
         raise ControlError(
             f"control group {group_name!r} joint_set must be a non-empty set "
-            f"name, got {value!r}")
+            f"name, got {value!r}"
+        )
     return value
 
 
 def _required_text(entry: Mapping[str, JsonValue], key: str) -> str:
     value = entry[key]
     if not value:
-        raise ControlError(
-            f"control group {entry.get('name')!r} {key} must be non-empty")
+        raise ControlError(f"control group {entry.get('name')!r} {key} must be non-empty")
     return str(value)
 
 
@@ -229,33 +238,39 @@ class ControlGroup:
         for key in ("name", "adapter", "articulation"):
             value = getattr(self, key)
             if not value:
-                raise ControlError(
-                    f"control group {self.name!r} {key} must be non-empty")
+                raise ControlError(f"control group {self.name!r} {key} must be non-empty")
             object.__setattr__(self, key, str(value))
         if self.drive not in CONTROL_DRIVES:
             raise ControlError(
                 f"control group {self.name!r} drive must be one of "
-                f"{list(CONTROL_DRIVES)}, got {self.drive!r}")
+                f"{list(CONTROL_DRIVES)}, got {self.drive!r}"
+            )
         if self.target not in CONTROL_TARGETS:
             raise ControlError(
                 f"control group {self.name!r} target must be one of "
-                f"{list(CONTROL_TARGETS)}, got {self.target!r}")
+                f"{list(CONTROL_TARGETS)}, got {self.target!r}"
+            )
         expected = target_for_drive(self.drive)
         if self.target != expected:
             raise ControlError(
                 f"control group {self.name!r} declares drive {self.drive!r} "
                 f"with target {self.target!r}; drive {self.drive!r} requires "
-                f"target {expected!r}")
+                f"target {expected!r}"
+            )
         joint_set = self.joint_set
         if joint_set is not None:
             if not isinstance(joint_set, str) or not joint_set.strip():
                 raise ControlError(
                     f"control group {self.name!r} joint_set must be a "
-                    f"non-empty set name, got {joint_set!r}")
+                    f"non-empty set name, got {joint_set!r}"
+                )
             joint_set = joint_set.strip()
         object.__setattr__(self, "joint_set", joint_set)
-        joints = (None if self.joints is None else _strings(
-            self.joints, f"control group {self.name!r} joints"))
+        joints = (
+            None
+            if self.joints is None
+            else _strings(self.joints, f"control group {self.name!r} joints")
+        )
         if joints == ():
             joints = None
         if (joint_set is None) == (joints is None):
@@ -263,52 +278,63 @@ class ControlGroup:
                 f"control group {self.name!r} must declare exactly one of "
                 f"`joint_set` or non-empty `joints` (got "
                 f"joint_set={joint_set!r}, joints={joints!r}); both set, "
-                f"both empty and `joints: []` are rejected")
+                f"both empty and `joints: []` are rejected"
+            )
         object.__setattr__(self, "joints", joints)
-        object.__setattr__(self, "q0", {
-            str(name): _finite(value, f"control group {self.name!r} "
-                                      f"q0[{name!r}]")
-            for name, value in dict(self.q0 or {}).items()})
-        object.__setattr__(self, "gains", {
-            str(name): _finite(value, f"control group {self.name!r} "
-                                      f"gains[{name!r}]")
-            for name, value in dict(self.gains or {}).items()})
+        object.__setattr__(
+            self,
+            "q0",
+            {
+                str(name): _finite(value, f"control group {self.name!r} " f"q0[{name!r}]")
+                for name, value in dict(self.q0 or {}).items()
+            },
+        )
+        object.__setattr__(
+            self,
+            "gains",
+            {
+                str(name): _finite(value, f"control group {self.name!r} " f"gains[{name!r}]")
+                for name, value in dict(self.gains or {}).items()
+            },
+        )
         if self.command is not None:
             if not isinstance(self.command, Mapping):
                 raise ControlError(
                     f"control group {self.name!r} command must be a mapping, "
-                    f"got {self.command!r}")
+                    f"got {self.command!r}"
+                )
             object.__setattr__(self, "command", dict(self.command))
         if self.control_dt is not None:
-            dt = _finite(self.control_dt,
-                         f"control group {self.name!r} control_dt")
+            dt = _finite(self.control_dt, f"control group {self.name!r} control_dt")
             if dt <= 0:
                 raise ControlError(
-                    f"control group {self.name!r} control_dt must be > 0, "
-                    f"got {dt!r}")
+                    f"control group {self.name!r} control_dt must be > 0, " f"got {dt!r}"
+                )
             object.__setattr__(self, "control_dt", dt)
 
     @classmethod
     def from_mapping(
-        cls, entry: ControlGroup | Mapping[str, JsonValue],
+        cls,
+        entry: ControlGroup | Mapping[str, JsonValue],
     ) -> ControlGroup:
         """Normalize one ``controls[]`` entry."""
         if isinstance(entry, cls):
             return entry
         if not isinstance(entry, Mapping):
-            raise ControlError(
-                f"controls entries must be mappings, got {entry!r}")
+            raise ControlError(f"controls entries must be mappings, got {entry!r}")
         unknown = sorted(set(entry) - set(_CONTROL_KEYS))
         if unknown:
             raise ControlError(
                 f"control group {entry.get('name')!r} declares unknown keys "
-                f"{unknown}; allowed keys are {list(_CONTROL_KEYS)}")
+                f"{unknown}; allowed keys are {list(_CONTROL_KEYS)}"
+            )
         for required in ("name", "adapter", "articulation", "drive", "target"):
             if required not in entry:
                 raise ControlError(
                     f"control group {entry.get('name')!r} is missing the "
                     f"required key {required!r}; every group declares "
-                    f"name/adapter/articulation/drive/target")
+                    f"name/adapter/articulation/drive/target"
+                )
         group_name = entry.get("name")
         return cls(
             name=_required_text(entry, "name"),
@@ -317,17 +343,15 @@ class ControlGroup:
             drive=str(entry["drive"]),
             target=str(entry["target"]),
             joint_set=_raw_joint_set(entry.get("joint_set"), group_name),
-            joints=_raw_strings(
-                entry.get("joints"), f"control group {group_name!r} joints"),
-            q0=_raw_float_map(
-                entry.get("q0"), f"control group {group_name!r} q0"),
-            gains=_raw_float_map(
-                entry.get("gains"), f"control group {group_name!r} gains"),
-            command=_raw_command(
-                entry.get("command"), f"control group {group_name!r} command"),
-            control_dt=(None if entry.get("control_dt") is None else _finite(
-                entry["control_dt"],
-                f"control group {group_name!r} control_dt")),
+            joints=_raw_strings(entry.get("joints"), f"control group {group_name!r} joints"),
+            q0=_raw_float_map(entry.get("q0"), f"control group {group_name!r} q0"),
+            gains=_raw_float_map(entry.get("gains"), f"control group {group_name!r} gains"),
+            command=_raw_command(entry.get("command"), f"control group {group_name!r} command"),
+            control_dt=(
+                None
+                if entry.get("control_dt") is None
+                else _finite(entry["control_dt"], f"control group {group_name!r} control_dt")
+            ),
         )
 
 
@@ -339,27 +363,25 @@ def normalize_control(
 
 
 def normalize_controls(
-    entries: Iterable[ControlGroup | Mapping[str, JsonValue]]
-    | Mapping[str, JsonValue] | None,
+    entries: Iterable[ControlGroup | Mapping[str, JsonValue]] | Mapping[str, JsonValue] | None,
 ) -> tuple[ControlGroup, ...]:
     """Normalize the run-level ``controls:`` list (unique group names)."""
     if entries is None:
         return ()
     if not _is_controls_iterable(entries):
         raise ControlError(
-            "controls must be a list of group mappings, got "
-            f"{type(entries).__name__}")
+            "controls must be a list of group mappings, got " f"{type(entries).__name__}"
+        )
     try:
         raw = tuple(entries)
     except TypeError:
         raise ControlError(
-            "controls must be a list of group mappings, got "
-            f"{entries!r}") from None
+            "controls must be a list of group mappings, got " f"{entries!r}"
+        ) from None
     groups = tuple(normalize_control(entry) for entry in raw)
     names = [group.name for group in groups]
     if len(set(names)) != len(names):
-        raise ControlError(
-            f"control group names must be unique, got {names!r}")
+        raise ControlError(f"control group names must be unique, got {names!r}")
     return groups
 
 
@@ -368,11 +390,13 @@ def _passive_map(
     passive_joints_by_articulation: Mapping[str, Iterable[str]] | None,
 ) -> dict[str, tuple[str, ...]]:
     if passive_joints_by_articulation is not None:
-        return {str(name): tuple(str(j) for j in (joints or ()))
-                for name, joints in dict(
-                    passive_joints_by_articulation).items()}
-    return {art.name: tuple(getattr(art, "passive_joints", ()) or ())
-            for art in articulations or ()}
+        return {
+            str(name): tuple(str(j) for j in (joints or ()))
+            for name, joints in dict(passive_joints_by_articulation).items()
+        }
+    return {
+        art.name: tuple(getattr(art, "passive_joints", ()) or ()) for art in articulations or ()
+    }
 
 
 def validate_controls(
@@ -406,8 +430,7 @@ def validate_controls(
 
     names = [group.name for group in controls]
     if len(set(names)) != len(names):
-        raise ControlError(
-            f"control group names must be unique, got {names!r}")
+        raise ControlError(f"control group names must be unique, got {names!r}")
 
     driven: dict[str, list[str]] = {}
     unresolved: set[str] = set()
@@ -417,7 +440,8 @@ def validate_controls(
             raise ControlError(
                 f"control group {group.name!r} names articulation "
                 f"{group.articulation!r}, which is not declared; declared "
-                f"articulations: {sorted(arts)}")
+                f"articulations: {sorted(arts)}"
+            )
         declared = {joint.name for joint in getattr(art, "joints", ()) or ()}
         group_joints = tuple(group.joints or ())
         if group.joints is None and group.joint_set is not None:
@@ -429,7 +453,8 @@ def validate_controls(
                 raise ControlError(
                     f"control group {group.name!r} names joints {unknown} "
                     f"that are not declared on articulation "
-                    f"{art.name!r}; declared joints: {sorted(declared)}")
+                    f"{art.name!r}; declared joints: {sorted(declared)}"
+                )
         owned = driven.setdefault(art.name, [])
         if group_joints:
             overlap = sorted(set(owned) & set(group_joints))
@@ -437,7 +462,8 @@ def validate_controls(
                 raise ControlError(
                     f"control groups of articulation {art.name!r} overlap on "
                     f"joints {overlap} (group {group.name!r}); every driven "
-                    f"joint must belong to exactly one group")
+                    f"joint must belong to exactly one group"
+                )
             owned.extend(group_joints)
 
     # control_dt consistency per adapter (MVP)
@@ -447,12 +473,14 @@ def validate_controls(
             continue
         previous = dts.get(group.adapter)
         if previous is not None and not math.isclose(
-                previous[1], group.control_dt, rel_tol=0.0, abs_tol=1e-9):
+            previous[1], group.control_dt, rel_tol=0.0, abs_tol=1e-9
+        ):
             raise ControlError(
                 f"adapter {group.adapter!r} declares inconsistent "
                 f"control_dt: group {previous[0]!r} = {previous[1]!r}s vs "
                 f"group {group.name!r} = {group.control_dt!r}s; all groups "
-                f"of one adapter must agree (absent values inherit)")
+                f"of one adapter must agree (absent values inherit)"
+            )
         dts.setdefault(group.adapter, (group.name, group.control_dt))
 
     passive = _passive_map(articulations, passive_joints_by_articulation)
@@ -465,7 +493,8 @@ def validate_controls(
         if unknown_passive:
             raise ControlError(
                 f"articulation {art.name!r} passive_joints "
-                f"{unknown_passive} are not declared joints")
+                f"{unknown_passive} are not declared joints"
+            )
         if art.name in unresolved:
             # a joint_set group is resolved by the recipe at build time;
             # coverage is validated there, not against a partial
@@ -479,16 +508,20 @@ def validate_controls(
             raise ControlError(
                 f"articulation {art.name!r} actuated joints {missing} are "
                 f"neither covered by a controls[] group nor listed in "
-                f"passive_joints; declare the drive explicitly")
+                f"passive_joints; declare the drive explicitly"
+            )
         if extra:
             raise ControlError(
                 f"articulation {art.name!r} control groups drive joints "
                 f"{extra} that are declared passive -- a joint cannot be "
-                f"both driven and passive")
+                f"both driven and passive"
+            )
 
 
 def project_group(
-    group: ControlGroup, *, defaults: Mapping[str, float] | None = None,
+    group: ControlGroup,
+    *,
+    defaults: Mapping[str, float] | None = None,
     prefix: str | None = None,
 ) -> ProjectedGroup:
     """Project a group into the runtime-facing order/q0 (engine-neutral).
@@ -512,7 +545,8 @@ def project_group(
         raise ControlError(
             f"control group {group.name!r} selects joint_set "
             f"{group.joint_set!r}; resolve it against the articulation's "
-            f"RobotRecipe before projecting (joints are not known here)")
+            f"RobotRecipe before projecting (joints are not known here)"
+        )
     base = dict(defaults or {})
     base.update(group.q0)
     q0: list[float] = []
@@ -520,11 +554,13 @@ def project_group(
         if joint not in base:
             raise ControlError(
                 f"control group {group.name!r} has no q0 for joint "
-                f"{joint!r}; declare control.q0 or extend the recipe")
-        q0.append(_finite(base[joint], f"control group {group.name!r} "
-                                       f"q0[{joint!r}]"))
-    names = tuple(f"{prefix}{joint}" if prefix and not joint.startswith(prefix)
-                  else joint for joint in group.joints)
+                f"{joint!r}; declare control.q0 or extend the recipe"
+            )
+        q0.append(_finite(base[joint], f"control group {group.name!r} " f"q0[{joint!r}]"))
+    names = tuple(
+        f"{prefix}{joint}" if prefix and not joint.startswith(prefix) else joint
+        for joint in group.joints
+    )
     return {
         "name": group.name,
         "action_face": group.name,

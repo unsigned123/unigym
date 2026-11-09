@@ -39,6 +39,7 @@ unknown mode / ``actuated`` without ``stiffness`` / ``passive`` without
 ``damping`` / an asset joint left undeclared / a declared joint missing
 from the asset / a latch naming a joint outside the declared table.
 """
+
 from __future__ import annotations
 
 import math
@@ -91,13 +92,14 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
         if mode not in JOINT_MODES:
             raise ValueError(
                 f"articulation prop {spec.name!r}: joint {jname!r} mode "
-                f"must be one of {JOINT_MODES}, got {mode!r}")
+                f"must be one of {JOINT_MODES}, got {mode!r}"
+            )
         stiffness = p.get("stiffness")
         damping = p.get("damping")
         if mode == "actuated" and stiffness is None:
             raise ValueError(
-                f"articulation prop {spec.name!r}: actuated joint "
-                f"{jname!r} requires stiffness")
+                f"articulation prop {spec.name!r}: actuated joint " f"{jname!r} requires stiffness"
+            )
         # a passive damping is OPTIONAL: an
         # asset-driven passive joint (the composite chains' springdamper)
         # declares none -- a required declaration could only override the
@@ -107,23 +109,24 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
             rng = [float(rng[0]), float(rng[1])]
             if rng[0] > rng[1]:
                 raise ValueError(
-                    f"articulation prop {spec.name!r}: joint {jname!r} "
-                    f"range {rng} has lo > hi")
+                    f"articulation prop {spec.name!r}: joint {jname!r} " f"range {rng} has lo > hi"
+                )
         init = float(p.get("init", 0.0))
         if not np.isfinite(init):
             raise ValueError(
                 f"articulation prop {spec.name!r}: joint {jname!r} init "
-                f"must be finite, got {init!r}")
+                f"must be finite, got {init!r}"
+            )
         if rng is not None and not (rng[0] <= init <= rng[1]):
             raise ValueError(
                 f"articulation prop {spec.name!r}: joint {jname!r} init "
-                f"{init!r} outside the declared range {rng}")
+                f"{init!r} outside the declared range {rng}"
+            )
         out[jname] = {
             "mode": mode,
             "stiffness": float(stiffness) if stiffness is not None else 0.0,
             "damping": float(damping) if damping is not None else 0.0,
-            "effort_limit": (None if p.get("effort_limit") is None
-                             else float(p["effort_limit"])),
+            "effort_limit": (None if p.get("effort_limit") is None else float(p["effort_limit"])),
             "range": rng,
             "init": init,
         }
@@ -142,8 +145,8 @@ def validate_joints(spec: PropSpec) -> dict[str, dict]:
         # fail-fast class; the free kind was exempt from the start --
         # the injected freejoint is the whole dof face).
         raise ValueError(
-            f"articulation prop {spec.name!r}: joints must declare at "
-            f"least one joint")
+            f"articulation prop {spec.name!r}: joints must declare at " f"least one joint"
+        )
     return out
 
 
@@ -174,28 +177,30 @@ def validate_latch(spec: PropSpec, joints: dict[str, dict]) -> dict | None:
     if lock_joint not in joints:
         raise ValueError(
             f"articulation prop {spec.name!r}: latch.lock_joint "
-            f"{lock_joint!r} is not a declared joint")
+            f"{lock_joint!r} is not a declared joint"
+        )
     if sense_joint not in joints:
         raise ValueError(
             f"articulation prop {spec.name!r}: latch.sense_joint "
-            f"{sense_joint!r} is not a declared joint")
+            f"{sense_joint!r} is not a declared joint"
+        )
     locked = dict(cfg.get("locked") or {})
     if not any(k in locked for k in ("stiffness", "damping", "friction")):
         raise ValueError(
             f"articulation prop {spec.name!r}: latch.locked must declare "
-            f"at least one of stiffness/damping/friction")
+            f"at least one of stiffness/damping/friction"
+        )
     threshold = float(cfg.get("unlock_threshold_deg", -20.0))
     if not math.isfinite(threshold):
         raise ValueError(
             f"articulation prop {spec.name!r}: latch.unlock_threshold_deg "
-            f"must be finite, got {cfg.get('unlock_threshold_deg')!r}")
+            f"must be finite, got {cfg.get('unlock_threshold_deg')!r}"
+        )
     default_joint = joints[lock_joint]
     unlocked_in = dict(cfg.get("unlocked") or {})
     unlocked = {
-        "stiffness": float(unlocked_in.get("stiffness",
-                                           default_joint["stiffness"])),
-        "damping": float(unlocked_in.get("damping",
-                                         default_joint["damping"])),
+        "stiffness": float(unlocked_in.get("stiffness", default_joint["stiffness"])),
+        "damping": float(unlocked_in.get("damping", default_joint["damping"])),
         "friction": float(unlocked_in.get("friction", 0.0)),
     }
     return {
@@ -213,8 +218,7 @@ def validate_latch(spec: PropSpec, joints: dict[str, dict]) -> dict | None:
 
 def __getattr__(name: str):
     """Lazy compat re-export of the isaaclab articulation handlers (G4)."""
-    if name in ("PropArticulation", "UsdArticulationProp",
-                "FreeArticulationProp"):
+    if name in ("PropArticulation", "UsdArticulationProp", "FreeArticulationProp"):
         from .base import _compat_class
 
         return _compat_class(name)

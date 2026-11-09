@@ -25,6 +25,7 @@ frame mismatch were both hand-written quaternion math — this module is the
 mechanization that bans it (new quaternion arithmetic outside core/quat.py
 is a review-flagged smell; see test_arch quat soft-gate).
 """
+
 from __future__ import annotations
 
 import math
@@ -34,21 +35,36 @@ import numpy as np
 import torch
 
 __all__ = [
-    "WXYZ", "XYZW",
-    "to_wxyz", "to_xyzw", "normalize",
-    "mul", "conj", "rotate", "rotate_inv", "to_rotmat",
-    "yaw_from_quat", "about_x", "about_z",
-    "yaw_pitch", "yaw_pitch_batch", "lookat", "lookat_batch",
-    "az_el", "to_euler_rpy",
-    "camera_bridge_quat", "camera_isaac_to_mujoco",
-    "from_isaaclab_data", "to_isaaclab_cfg",
+    "WXYZ",
+    "XYZW",
+    "to_wxyz",
+    "to_xyzw",
+    "normalize",
+    "mul",
+    "conj",
+    "rotate",
+    "rotate_inv",
+    "to_rotmat",
+    "yaw_from_quat",
+    "about_x",
+    "about_z",
+    "yaw_pitch",
+    "yaw_pitch_batch",
+    "lookat",
+    "lookat_batch",
+    "az_el",
+    "to_euler_rpy",
+    "camera_bridge_quat",
+    "camera_isaac_to_mujoco",
+    "from_isaaclab_data",
+    "to_isaaclab_cfg",
 ]
 
 # component-order conventions (external world)
-WXYZ = "wxyz"   # repo-internal / mujoco / IsaacLab 2.x data / IsaacLab 2.x cfg
-XYZW = "xyzw"   # scipy(R.from_quat) / IsaacLab 3.x data / Warp / PhysX
+WXYZ = "wxyz"  # repo-internal / mujoco / IsaacLab 2.x data / IsaacLab 2.x cfg
+XYZW = "xyzw"  # scipy(R.from_quat) / IsaacLab 3.x data / Warp / PhysX
 
-_REORDER = [1, 2, 3, 0]      # xyzw -> wxyz (and the inverse permutation)
+_REORDER = [1, 2, 3, 0]  # xyzw -> wxyz (and the inverse permutation)
 _FWD_REORDER = [3, 0, 1, 2]  # wxyz -> xyzw
 
 
@@ -93,20 +109,27 @@ def mul(a, b):
         aw, ax, ay, az = a.unbind(-1)
         bw, bx, by, bz = b.unbind(-1)
         return torch.stack(
-            [aw * bw - ax * bx - ay * by - az * bz,
-             aw * bx + ax * bw + ay * bz - az * by,
-             aw * by - ax * bz + ay * bw + az * bx,
-             aw * bz + ax * by - ay * bx + az * bw], dim=-1)
+            [
+                aw * bw - ax * bx - ay * by - az * bz,
+                aw * bx + ax * bw + ay * bz - az * by,
+                aw * by - ax * bz + ay * bw + az * bx,
+                aw * bz + ax * by - ay * bx + az * bw,
+            ],
+            dim=-1,
+        )
     a = np.asarray(a)
     b = np.asarray(b)
     w1, x1, y1, z1 = np.moveaxis(a, -1, 0)
     w2, x2, y2, z2 = np.moveaxis(b, -1, 0)
     return np.stack(
-        [w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-         w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-         w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-         w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2],
-        axis=-1)
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ],
+        axis=-1,
+    )
 
 
 def conj(q):
@@ -147,17 +170,29 @@ def to_rotmat(q):
     if isinstance(q, torch.Tensor):
         q = q / q.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         w, x, y, z = q.unbind(-1)
-        return torch.stack([
-            1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
-            2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
-            2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y),
-        ], dim=-1).unflatten(-1, (3, 3))
+        return torch.stack(
+            [
+                1 - 2 * (y * y + z * z),
+                2 * (x * y - w * z),
+                2 * (x * z + w * y),
+                2 * (x * y + w * z),
+                1 - 2 * (x * x + z * z),
+                2 * (y * z - w * x),
+                2 * (x * z - w * y),
+                2 * (y * z + w * x),
+                1 - 2 * (x * x + y * y),
+            ],
+            dim=-1,
+        ).unflatten(-1, (3, 3))
     w, x, y, z = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ], dtype=np.float64)
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
 
 
 def yaw_from_quat(q):
@@ -168,9 +203,7 @@ def yaw_from_quat(q):
 
 def about_x(angle) -> torch.Tensor:
     """Rotation about +X by *angle* rad, wxyz float32 tensor (4,)."""
-    return torch.tensor(
-        [math.cos(angle / 2), math.sin(angle / 2), 0.0, 0.0],
-        dtype=torch.float32)
+    return torch.tensor([math.cos(angle / 2), math.sin(angle / 2), 0.0, 0.0], dtype=torch.float32)
 
 
 def about_z(theta):
@@ -181,11 +214,12 @@ def about_z(theta):
     """
     if isinstance(theta, torch.Tensor):
         half = 0.5 * theta
-        return torch.stack([torch.cos(half), torch.zeros_like(half),
-                            torch.zeros_like(half), torch.sin(half)], dim=-1)
+        return torch.stack(
+            [torch.cos(half), torch.zeros_like(half), torch.zeros_like(half), torch.sin(half)],
+            dim=-1,
+        )
     half = 0.5 * float(theta)
-    return np.array([math.cos(half), 0.0, 0.0, math.sin(half)],
-                    dtype=np.float64)
+    return np.array([math.cos(half), 0.0, 0.0, math.sin(half)], dtype=np.float64)
 
 
 # --------------------------------------------------------------------------- #
@@ -217,17 +251,21 @@ def yaw_pitch_roll(yaw_rad, pitch_rad, roll_rad) -> np.ndarray:
     :func:`yaw_pitch` exactly and (0, 0, 0) is the identity.
     """
     r = 0.5 * float(roll_rad)
-    return cast(np.ndarray, mul(yaw_pitch(yaw_rad, pitch_rad),
-                                np.array([math.cos(r), math.sin(r), 0.0, 0.0])))
+    return cast(
+        np.ndarray,
+        mul(yaw_pitch(yaw_rad, pitch_rad), np.array([math.cos(r), math.sin(r), 0.0, 0.0])),
+    )
 
 
-def yaw_pitch_roll_batch(yaw: torch.Tensor, pitch: torch.Tensor,
-                         roll: torch.Tensor) -> torch.Tensor:
+def yaw_pitch_roll_batch(
+    yaw: torch.Tensor, pitch: torch.Tensor, roll: torch.Tensor
+) -> torch.Tensor:
     """Batched :func:`yaw_pitch_roll`: (k,) rad x3 -> (k, 4) wxyz."""
     cr, sr = torch.cos(0.5 * roll), torch.sin(0.5 * roll)
     zero = torch.zeros_like(sr)
-    return cast(torch.Tensor, mul(yaw_pitch_batch(yaw, pitch),
-                                  torch.stack([cr, sr, zero, zero], dim=-1)))
+    return cast(
+        torch.Tensor, mul(yaw_pitch_batch(yaw, pitch), torch.stack([cr, sr, zero, zero], dim=-1))
+    )
 
 
 def lookat(pos, lookat) -> np.ndarray:
@@ -255,11 +293,19 @@ def lookat_batch(pos: torch.Tensor, lookat: torch.Tensor) -> torch.Tensor:
     d = d / torch.linalg.norm(d, dim=-1, keepdim=True).clamp_min(1e-8)
     yaw = torch.atan2(d[:, 1], d[:, 0])
     elev = torch.asin(torch.clamp(d[:, 2], -1.0, 1.0))
-    q_yaw = torch.stack([torch.cos(0.5 * yaw), torch.zeros_like(yaw),
-                         torch.zeros_like(yaw), torch.sin(0.5 * yaw)], dim=-1)
-    q_pitch = torch.stack([torch.cos(0.5 * elev), torch.zeros_like(elev),
-                           -torch.sin(0.5 * elev), torch.zeros_like(elev)],
-                          dim=-1)
+    q_yaw = torch.stack(
+        [torch.cos(0.5 * yaw), torch.zeros_like(yaw), torch.zeros_like(yaw), torch.sin(0.5 * yaw)],
+        dim=-1,
+    )
+    q_pitch = torch.stack(
+        [
+            torch.cos(0.5 * elev),
+            torch.zeros_like(elev),
+            -torch.sin(0.5 * elev),
+            torch.zeros_like(elev),
+        ],
+        dim=-1,
+    )
     return cast(torch.Tensor, mul(q_yaw, q_pitch))
 
 
@@ -314,8 +360,7 @@ def camera_bridge_quat() -> np.ndarray:
 def camera_isaac_to_mujoco(q_isaac_wxyz) -> np.ndarray:
     """Isaac-convention camera quat (w,x,y,z; forward +X up +Z) ->
     MuJoCo camera quat (forward -Z up +Y): ``q_isaac (x) q_bridge``."""
-    return cast(np.ndarray, mul(np.asarray(q_isaac_wxyz, dtype=np.float64),
-                                camera_bridge_quat()))
+    return cast(np.ndarray, mul(np.asarray(q_isaac_wxyz, dtype=np.float64), camera_bridge_quat()))
 
 
 # --------------------------------------------------------------------------- #

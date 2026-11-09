@@ -13,6 +13,7 @@ doctor understands no specific environments.  Discovery renders a PURE
 function of probe findings (unit tests never touch the real box).  The
 GPU item shares probe_cli.nvidia_rows (single source).  Stdlib + yaml.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -33,11 +34,9 @@ from unigym import executors as ex
 from unigym.backends.registry import MJWARP_BACKEND
 from unigym.scripts import spawn_spec as ss
 
-_PROBE_TIMEOUT = 60.0                    # isaaclab lazy import must not wake Kit
-_WHITELIST = frozenset({"unigym", "mujoco", "isaaclab", "torch",
-                       "warp", "mujoco_warp"})
-_BACKEND_MODULES = {"mujoco": "mujoco", "mjwarp": "mujoco_warp",
-                    "isaaclab": "isaaclab"}
+_PROBE_TIMEOUT = 60.0  # isaaclab lazy import must not wake Kit
+_WHITELIST = frozenset({"unigym", "mujoco", "isaaclab", "torch", "warp", "mujoco_warp"})
+_BACKEND_MODULES = {"mujoco": "mujoco", "mjwarp": "mujoco_warp", "isaaclab": "isaaclab"}
 #: extra -> its runtime import names (find_spec only -- doctor imports
 #: nothing).  webui repeats daemon on purpose: it is a meta-extra that
 #: pulls the same runtime (``unigym[webui]`` == portal + daemon).
@@ -52,6 +51,8 @@ _EXTRA_MODULES = {
     "warp": ("mujoco_warp", "warp"),
     "dev": ("pytest", "ruff", "pre_commit", "importlinter", "radon"),
 }
+
+
 def _venv_globs() -> tuple[str, ...]:
     """Discovery globs: home-relative plus the configured dependency root.
 
@@ -59,8 +60,7 @@ def _venv_globs() -> tuple[str, ...]:
     product's own deps anchor (env ``UNIGYM_DEPS_ROOT`` / yaml).  When the
     anchor is unset the home-relative patterns still work.
     """
-    globs = ["~/.venv*/bin/python", "~/venv*/bin/python",
-             "~/*/venv*/bin/python"]
+    globs = ["~/.venv*/bin/python", "~/venv*/bin/python", "~/*/venv*/bin/python"]
     from unigym.errors import ConfigError
 
     try:
@@ -70,9 +70,11 @@ def _venv_globs() -> tuple[str, ...]:
     except ConfigError:
         root = None
     if root:
-        globs += [f"{root}/*/.venv*/bin/python",
-                  f"{root}/*/*/.venv*/bin/python",
-                  f"{root}/*/*/*/.venv*/bin/python"]
+        globs += [
+            f"{root}/*/.venv*/bin/python",
+            f"{root}/*/*/.venv*/bin/python",
+            f"{root}/*/*/*/.venv*/bin/python",
+        ]
     return tuple(globs)
 
 
@@ -88,8 +90,7 @@ def probe_code(modules: list[str]) -> str:
     bad = sorted(set(mods) - _WHITELIST)
     if bad:
         raise ValueError(f"probe modules not in whitelist: {bad}")
-    return ("; ".join(f"import {m}" for m in mods)
-            + f"; print({mods[-1]}.__file__)")
+    return "; ".join(f"import {m}" for m in mods) + f"; print({mods[-1]}.__file__)"
 
 
 def _real_module_file(stdout: str) -> str:
@@ -103,14 +104,16 @@ def probe_argv(e: ex.Executor, modules: list[str]) -> list[str]:
     return e.wrap(["-c", probe_code(modules)])
 
 
-def run_probe(e: ex.Executor, modules: list[str],
-              timeout: float = _PROBE_TIMEOUT) -> tuple[bool, str]:
+def run_probe(
+    e: ex.Executor, modules: list[str], timeout: float = _PROBE_TIMEOUT
+) -> tuple[bool, str]:
     """(ok, detail) -- detail = module __file__ when ok, error tail when not.
     cwd=/tmp: `import unigym` must resolve via the env's own editable/.pth,
     never via the checkout the doctor happens to run from."""
     try:
-        r = subprocess.run(probe_argv(e, modules), capture_output=True,
-                           text=True, timeout=timeout, cwd="/tmp")
+        r = subprocess.run(
+            probe_argv(e, modules), capture_output=True, text=True, timeout=timeout, cwd="/tmp"
+        )
     except subprocess.TimeoutExpired:
         return False, f"timeout after {timeout:.0f}s"
     except OSError as err:
@@ -135,6 +138,7 @@ def _warp_lane_diag() -> ex.Diag:
         mujoco_warp_version,
         select_backend,
     )
+
     try:
         select_backend("mjwarp")
     except BackendSelectionError as err:
@@ -155,21 +159,34 @@ def executor_diags(cfg: dict, run_probe=run_probe) -> list[ex.Diag]:
         e = table[name]
         out += e.check()
         ok, why = run_probe(e, [])
-        out.append(ex.Diag(
-            f"executors.{name}.import_unigym", "ok" if ok else "fail", why,
-            "" if ok else f"fix the env (editable/.pth) or rebind "
-                          f"executors.{name} (unigym doctor --suggest)"))
+        out.append(
+            ex.Diag(
+                f"executors.{name}.import_unigym",
+                "ok" if ok else "fail",
+                why,
+                ""
+                if ok
+                else f"fix the env (editable/.pth) or rebind "
+                f"executors.{name} (unigym doctor --suggest)",
+            )
+        )
     for backend in sorted(binding):
         mod = _BACKEND_MODULES.get(backend)
         if not mod:
             continue
         e = table[binding[backend]]
         ok, why = run_probe(e, [mod])
-        out.append(ex.Diag(
-            f"backends.{backend}", "ok" if ok else "fail",
-            f"via {binding[backend]}: import {mod}" + (f" ({why})" if why else ""),
-            "" if ok else f"install {mod} into the executor env, or rebind "
-                          f"backends.{backend} (unigym doctor --suggest)"))
+        out.append(
+            ex.Diag(
+                f"backends.{backend}",
+                "ok" if ok else "fail",
+                f"via {binding[backend]}: import {mod}" + (f" ({why})" if why else ""),
+                ""
+                if ok
+                else f"install {mod} into the executor env, or rebind "
+                f"backends.{backend} (unigym doctor --suggest)",
+            )
+        )
     if MJWARP_BACKEND not in binding:
         out.append(_warp_lane_diag())
     return out
@@ -191,8 +208,7 @@ def _writable(p: Path) -> tuple[bool, str]:
 def _port_state(port: int) -> str:
     """'free' | 'unigymd' (healthy /api/health) | 'busy' (stranger)."""
     try:
-        with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/api/health", timeout=2) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as r:
             json.loads(r.read())
         return "unigymd"
     except (OSError, ValueError):
@@ -218,16 +234,23 @@ def _asset_face_diag(asset_pack_root) -> ex.Diag:
     """
     try:
         root = Path(asset_pack_root())
-    except OSError as err:                  # AssetPathError is a FileNotFound
-        return ex.Diag("platform.asset_face", "fail", str(err),
-                       "declare the asset face (unigym.yaml "
-                       "`unigym_asset_pack_root`) or set UNIGYM_ASSET_PACK")
+    except OSError as err:  # AssetPathError is a FileNotFound
+        return ex.Diag(
+            "platform.asset_face",
+            "fail",
+            str(err),
+            "declare the asset face (unigym.yaml "
+            "`unigym_asset_pack_root`) or set UNIGYM_ASSET_PACK",
+        )
     generators = root / "generators"
     if generators.is_dir():
         return ex.Diag("platform.asset_face", "ok", str(generators))
     return ex.Diag(
-        "platform.asset_face", "fail", f"{generators} (absent)",
-        "fold the missing payload: python tools/pack_asset_closure.py")
+        "platform.asset_face",
+        "fail",
+        f"{generators} (absent)",
+        "fold the missing payload: python tools/pack_asset_closure.py",
+    )
 
 
 def extras_diags(find_spec=importlib.util.find_spec) -> list[ex.Diag]:
@@ -248,49 +271,72 @@ def extras_diags(find_spec=importlib.util.find_spec) -> list[ex.Diag]:
     for extra, modules in _EXTRA_MODULES.items():
         missing = [m for m in modules if find_spec(m) is None]
         if missing:
-            out.append(ex.Diag(
-                f"extras.{extra}", "warn",
-                "missing: " + ", ".join(missing),
-                f"pip install 'unigym[{extra}]' (or 'unigym[all]')"))
+            out.append(
+                ex.Diag(
+                    f"extras.{extra}",
+                    "warn",
+                    "missing: " + ", ".join(missing),
+                    f"pip install 'unigym[{extra}]' (or 'unigym[all]')",
+                )
+            )
         else:
             out.append(ex.Diag(f"extras.{extra}", "ok", ", ".join(modules)))
     return out
 
 
 def platform_diags(cfg: dict) -> list[ex.Diag]:
-    from unigym.core.asset_root import (                # lazy (thin-CLI door)
+    from unigym.core.asset_root import (  # lazy (thin-CLI door)
         asset_pack_root,
         asset_root,
     )
+
     a = asset_root()
-    out = [ex.Diag("platform.asset_root",
-                   "ok" if os.path.isdir(a) else "fail", a,
-                   "" if os.path.isdir(a)
-                   else "set UNIGYM_ASSET_ROOT (unigym/core/asset_root.py)")]
+    out = [
+        ex.Diag(
+            "platform.asset_root",
+            "ok" if os.path.isdir(a) else "fail",
+            a,
+            "" if os.path.isdir(a) else "set UNIGYM_ASSET_ROOT (unigym/core/asset_root.py)",
+        )
+    ]
     out.append(_asset_face_diag(asset_pack_root))
-    for label, p in (("runs_root", ss.runs_root(cfg)),
-                     ("data_out", Path(cfg.get("output_root") or "data_out"))):
+    for label, p in (
+        ("runs_root", ss.runs_root(cfg)),
+        ("data_out", Path(cfg.get("output_root") or "data_out")),
+    ):
         if not p.is_absolute():
             p = ss._REPO / p
         ok, why = _writable(p)
-        out.append(ex.Diag(f"platform.{label}", "ok" if ok else "fail",
-                           str(p), "" if ok else why))
-    for label, key, dflt in (("api_port", "daemon_api_port", 8670),
-                             ("webui_port", "webui_port", 8600)):
+        out.append(ex.Diag(f"platform.{label}", "ok" if ok else "fail", str(p), "" if ok else why))
+    for label, key, dflt in (
+        ("api_port", "daemon_api_port", 8670),
+        ("webui_port", "webui_port", 8600),
+    ):
         port = int(cfg.get(key) or dflt)
         st = _port_state(port)
-        out.append(ex.Diag(
-            f"platform.{label}", "warn" if st == "busy" else "ok",
-            f"{port} ({st})",
-            "occupied by a non-unigym process -- free it or change the port"
-            if st == "busy" else ""))
-    from unigym.scripts.probe_cli import nvidia_rows   # single source
+        out.append(
+            ex.Diag(
+                f"platform.{label}",
+                "warn" if st == "busy" else "ok",
+                f"{port} ({st})",
+                "occupied by a non-unigym process -- free it or change the port"
+                if st == "busy"
+                else "",
+            )
+        )
+    from unigym.scripts.probe_cli import nvidia_rows  # single source
+
     rows, err = nvidia_rows()
     if err:
         missing = "No such file" in err
-        out.append(ex.Diag("platform.gpu", "warn" if missing else "fail",
-                           f"nvidia-smi: {err}",
-                           "" if missing else "check the driver"))
+        out.append(
+            ex.Diag(
+                "platform.gpu",
+                "warn" if missing else "fail",
+                f"nvidia-smi: {err}",
+                "" if missing else "check the driver",
+            )
+        )
     else:
         out.append(ex.Diag("platform.gpu", "ok", " | ".join(rows) or "none"))
     return out
@@ -312,7 +358,11 @@ def _import_ok(python: str, module: str, timeout: float = 30.0) -> bool:
     try:
         r = subprocess.run(
             [python, "-c", f"import {module}; print({module}.__file__)"],
-            capture_output=True, text=True, timeout=timeout, cwd="/tmp")
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd="/tmp",
+        )
         # namespace-package guard: a stray cwd dir makes `import X` "pass"
         # with __file__ None -- that is not an install.
         return r.returncode == 0 and _real_module_file(r.stdout) != ""
@@ -338,62 +388,70 @@ def discover(cfg: dict) -> dict:
         p = ln.split()[-1] if ln.split() else ""
         if p.startswith("/"):
             add(f"{p}/bin/python", "conda")
-    if (u := _run(["uv", "python", "find"])):
+    if u := _run(["uv", "python", "find"]):
         add(u.strip(), "uv")
     for g in _venv_globs():
         for p in glob.glob(os.path.expanduser(g)):
             add(p, "venv")
     for info in pythons.values():
-        for m in ("unigym", "mujoco", "isaaclab"):    # carrier-decisive first
+        for m in ("unigym", "mujoco", "isaaclab"):  # carrier-decisive first
             info["has"][m] = _import_ok(info["python"], m)
         # torch is informational (scoring only) -- skip the ~5s import on
         # envs that cannot be carriers anyway (no unigym).
-        info["has"]["torch"] = (_import_ok(info["python"], "torch")
-                                if info["has"]["unigym"] else False)
+        info["has"]["torch"] = (
+            _import_ok(info["python"], "torch") if info["has"]["unigym"] else False
+        )
         # the MuJoCo Warp backend carrier: probe only where the
         # base mujoco stack exists (mujoco_warp imports mujoco + warp).
         info["has"]["mujoco_warp"] = (
             _import_ok(info["python"], "mujoco_warp")
             if info["has"].get("unigym") and info["has"].get("mujoco")
-            else False)
-    images = sorted({ln.strip() for ln in
-                     (_run(["docker", "images", "--format",
-                            "{{.Repository}}:{{.Tag}}"]) or "").splitlines()
-                     if ln.strip() and "<none>" not in ln
-                     and any(fnmatch.fnmatch(ln.strip(), p)
-                             for p in ("isaac-lab*", "*uni*"))})
-    return {"pythons": sorted(pythons.values(), key=lambda x: x["python"]),
-            "images": images}
+            else False
+        )
+    images = sorted(
+        {
+            ln.strip()
+            for ln in (
+                _run(["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"]) or ""
+            ).splitlines()
+            if ln.strip()
+            and "<none>" not in ln
+            and any(fnmatch.fnmatch(ln.strip(), p) for p in ("isaac-lab*", "*uni*"))
+        }
+    )
+    return {"pythons": sorted(pythons.values(), key=lambda x: x["python"]), "images": images}
 
 
 def render_suggestion(cfg: dict, findings: dict) -> str:
     """findings -> yaml fragment (PURE; the isaaclab carrier is a host env
     ONLY if it actually imports isaaclab -- otherwise the docker image)."""
     images = list(findings["images"])
-    if cfg.get("image") in images:            # continuity: keep the pinned image
+    if cfg.get("image") in images:  # continuity: keep the pinned image
         images = [cfg["image"]] + [i for i in images if i != cfg["image"]]
 
     def qualified(needs: tuple[str, ...]) -> list[dict]:
-        cands = [p for p in findings["pythons"]
-                 if all(p["has"].get(m) for m in needs)]
+        cands = [p for p in findings["pythons"] if all(p["has"].get(m) for m in needs)]
         cands.sort(key=lambda p: (-sum(p["has"].values()), p["python"]))
         cands.sort(key=lambda c: c["python"] != cfg.get("venv_python"))
         return cands
 
     def ename(python: str) -> str:
         base = os.path.basename(os.path.dirname(os.path.dirname(python)))
-        return "host_" + "".join(
-            ch if ch.isalnum() else "_" for ch in base).lstrip("_")
+        return "host_" + "".join(ch if ch.isalnum() else "_" for ch in base).lstrip("_")
 
-    lines = ["# unigym doctor --suggest -- machine-local overlay fragment",
-             "# (review, then: unigym doctor --suggest --write)", "executors:"]
+    lines = [
+        "# unigym doctor --suggest -- machine-local overlay fragment",
+        "# (review, then: unigym doctor --suggest --write)",
+        "executors:",
+    ]
     backends: list[tuple[str, str, str]] = []
 
     def host(needs: tuple[str, ...], backend: str, why: str) -> None:
         cands = qualified(needs)
         if not cands:
-            lines.append(f"  # hint: no python with {'+'.join(needs)} found"
-                         " -- install them, then rerun")
+            lines.append(
+                f"  # hint: no python with {'+'.join(needs)} found" " -- install them, then rerun"
+            )
             return
         p = cands[0]
         n = ename(p["python"])
@@ -402,19 +460,23 @@ def render_suggestion(cfg: dict, findings: dict) -> str:
         backends.append((backend, n, f"{why} ({p['source']})"))
 
     host(("unigym", "mujoco"), "mujoco", "imports unigym+mujoco")
-    host(("unigym", "mujoco", "mujoco_warp"), "mjwarp",
-         "imports unigym+mujoco_warp")
+    host(("unigym", "mujoco", "mujoco_warp"), "mjwarp", "imports unigym+mujoco_warp")
     if qualified(("unigym", "isaaclab")):
         host(("unigym", "isaaclab"), "isaaclab", "imports unigym+isaaclab")
     elif images:
         lines.append(f"  docker_il: {{kind: docker, image: {images[0]}}}")
         n_probed = sum(1 for p in findings["pythons"] if p["has"].get("unigym"))
-        backends.append(("isaaclab", "docker_il",
-                         f"docker image (probed {n_probed} unigym env(s), "
-                         "none imports isaaclab)"))
+        backends.append(
+            (
+                "isaaclab",
+                "docker_il",
+                f"docker image (probed {n_probed} unigym env(s), " "none imports isaaclab)",
+            )
+        )
     else:
-        lines.append("  # hint: no isaaclab carrier -- no env imports it and"
-                     " no isaac-lab* image")
+        lines.append(
+            "  # hint: no isaaclab carrier -- no env imports it and" " no isaac-lab* image"
+        )
     if backends:
         lines.append("backends:")
         lines += [f"  {b}: {n}   # {why}" for b, n, why in backends]
@@ -428,24 +490,26 @@ def write_local(cfg: dict, fragment: str, force: bool) -> int:
     """Write unigym.local.yaml -- only after the fragment passes a re-check."""
     path = ss._LOCAL_YAML
     if path.exists() and not force:
-        print(f"[unigym doctor] REFUSED: {path} already exists "
-              "(--force overrides)", file=sys.stderr)
+        print(
+            f"[unigym doctor] REFUSED: {path} already exists " "(--force overrides)",
+            file=sys.stderr,
+        )
         return 1
     merged = ss._deep_merge(cfg, yaml.safe_load(fragment) or {})
     fails = [d for d in executor_diags(merged) if d.status == "fail"]
     for d in fails:
-        print(f"[unigym doctor] FAIL {d.name}: {d.detail}\n"
-              f"    hint: {d.hint}", file=sys.stderr)
+        print(f"[unigym doctor] FAIL {d.name}: {d.detail}\n" f"    hint: {d.hint}", file=sys.stderr)
     if fails:
-        print("[unigym doctor] NOT written: suggested profile must be green "
-              "first", file=sys.stderr)
+        print(
+            "[unigym doctor] NOT written: suggested profile must be green " "first", file=sys.stderr
+        )
         return 1
     path.write_text(
         "# unigym.local.yaml -- written by `unigym doctor --suggest --write` "
         f"({datetime.datetime.now():%Y-%m-%d %H:%M}); machine overlay, "
-        "gitignored\n" + fragment)
-    print(f"[unigym doctor] wrote {path} (checks green; "
-          "run `unigym doctor` for the full exam)")
+        "gitignored\n" + fragment
+    )
+    print(f"[unigym doctor] wrote {path} (checks green; " "run `unigym doctor` for the full exam)")
     return 0
 
 
@@ -453,36 +517,36 @@ def cmd_doctor(a, extra: list[str]) -> int:
     cfg = ss.load_cfg()
     if a.suggest:
         frag = render_suggestion(cfg, discover(cfg))
-        print(json.dumps({"suggestion": frag}) if a.json else frag,
-              end="" if not a.json else "\n")
+        print(json.dumps({"suggestion": frag}) if a.json else frag, end="" if not a.json else "\n")
         return write_local(cfg, frag, a.force) if a.write else 0
     diags = executor_diags(cfg) + platform_diags(cfg) + extras_diags()
-    n = {s: sum(1 for d in diags if d.status == s)
-         for s in ("ok", "warn", "fail")}
+    n = {s: sum(1 for d in diags if d.status == s) for s in ("ok", "warn", "fail")}
     if a.json:
-        print(json.dumps({"ok": n["fail"] == 0,
-                          "checks": [vars(d) for d in diags]}))
+        print(json.dumps({"ok": n["fail"] == 0, "checks": [vars(d) for d in diags]}))
     else:
         for d in diags:
             tag = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}[d.status]
-            print(f"{tag} {d.name}: {d.detail}".rstrip()
-                  + (f"\n    hint: {d.hint}" if d.hint else ""))
-        print(f"[unigym doctor] {n['ok']} ok / {n['warn']} warn / "
-              f"{n['fail']} fail")
+            print(
+                f"{tag} {d.name}: {d.detail}".rstrip() + (f"\n    hint: {d.hint}" if d.hint else "")
+            )
+        print(f"[unigym doctor] {n['ok']} ok / {n['warn']} warn / " f"{n['fail']} fail")
     return 1 if n["fail"] else 0
 
 
 def add_doctor_subparser(sub) -> None:
-    d = sub.add_parser("doctor", help="health check / env discovery / "
-                                       "local-overlay writer")
-    d.add_argument("--suggest", action="store_true",
-                   help="discover pythons + docker images, print a "
-                        "unigym.local.yaml fragment")
-    d.add_argument("--write", action="store_true",
-                   help="with --suggest: write unigym.local.yaml (refuses "
-                        "to overwrite; --force)")
-    d.add_argument("--force", action="store_true",
-                   help="overwrite an existing unigym.local.yaml")
-    d.add_argument("--json", action="store_true",
-                   help="single JSON document on stdout (errors too)")
+    d = sub.add_parser("doctor", help="health check / env discovery / " "local-overlay writer")
+    d.add_argument(
+        "--suggest",
+        action="store_true",
+        help="discover pythons + docker images, print a " "unigym.local.yaml fragment",
+    )
+    d.add_argument(
+        "--write",
+        action="store_true",
+        help="with --suggest: write unigym.local.yaml (refuses " "to overwrite; --force)",
+    )
+    d.add_argument("--force", action="store_true", help="overwrite an existing unigym.local.yaml")
+    d.add_argument(
+        "--json", action="store_true", help="single JSON document on stdout (errors too)"
+    )
     d.set_defaults(fn=cmd_doctor)

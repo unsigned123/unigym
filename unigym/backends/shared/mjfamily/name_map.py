@@ -10,6 +10,7 @@ Prefix policy is backend-owned: the default is no prefix
 explicit ``auto_prefix: true`` attaches every asset-bearing articulation
 with the short ``<articulation>_`` prefix.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ __all__ = [
 def _strip(prefix: str | None, name: str) -> str:
     """Strip *prefix* from *name* when present."""
     if prefix and name.startswith(prefix):
-        return name[len(prefix):]
+        return name[len(prefix) :]
     return name
 
 
@@ -53,12 +54,15 @@ class MjNameMap:
 
     def __post_init__(self):
         object.__setattr__(self, "prefixes", dict(self.prefixes))
-        object.__setattr__(self, "joints", {
-            key: tuple(value) for key, value in self.joints.items()})
-        object.__setattr__(self, "bodies", {
-            key: tuple(value) for key, value in self.bodies.items()})
-        object.__setattr__(self, "actuators", {
-            key: tuple(value) for key, value in self.actuators.items()})
+        object.__setattr__(
+            self, "joints", {key: tuple(value) for key, value in self.joints.items()}
+        )
+        object.__setattr__(
+            self, "bodies", {key: tuple(value) for key, value in self.bodies.items()}
+        )
+        object.__setattr__(
+            self, "actuators", {key: tuple(value) for key, value in self.actuators.items()}
+        )
 
     # ------------------------------------------------------------------ #
     # articulation-scoped lookups
@@ -84,8 +88,9 @@ class MjNameMap:
 
     def backend_joint_names(self, articulation: str) -> tuple[str, ...]:
         """Every compiled joint name of *articulation* (asset order)."""
-        return tuple(self.backend_name(articulation, name)
-                     for name in self.unigym_joint_names(articulation))
+        return tuple(
+            self.backend_name(articulation, name) for name in self.unigym_joint_names(articulation)
+        )
 
     def backend_body(self, articulation: str, unigym_body: str) -> str:
         """The compiled body name of one unigym body."""
@@ -112,24 +117,20 @@ class MjNameMap:
         """Strip the owning articulation prefix (identity when unowned)."""
         # longest prefix first: articulation names may be prefixes of one
         # another (``g1`` / ``g1b``).
-        for prefix in sorted(
-                (p for p in self.prefixes.values() if p),
-                key=len, reverse=True):
+        for prefix in sorted((p for p in self.prefixes.values() if p), key=len, reverse=True):
             if backend_name.startswith(prefix):
-                return backend_name[len(prefix):]
+                return backend_name[len(prefix) :]
         return backend_name
 
     def is_articulation_name(self, backend_name: str) -> bool:
         """True when *backend_name* belongs to a composed articulation."""
         return any(
             backend_name in set(self.backend_joint_names(art))
-            or backend_name in {
-                self.backend_body(art, name)
-                for name in self.bodies.get(art, ())}
-            or backend_name in {
-                self.backend_actuator(art, name)
-                for name in self.actuators.get(art, ())}
-            for art in self.prefixes)
+            or backend_name in {self.backend_body(art, name) for name in self.bodies.get(art, ())}
+            or backend_name
+            in {self.backend_actuator(art, name) for name in self.actuators.get(art, ())}
+            for art in self.prefixes
+        )
 
     @classmethod
     def identity(cls) -> MjNameMap:
@@ -146,8 +147,7 @@ class MjComposition:
     applied_prefixes: Mapping[str, str | None] = field(default_factory=dict)
 
     def __post_init__(self):
-        object.__setattr__(self, "applied_prefixes",
-                           dict(self.applied_prefixes))
+        object.__setattr__(self, "applied_prefixes", dict(self.applied_prefixes))
 
 
 @dataclass(frozen=True)
@@ -166,8 +166,14 @@ class MjControlBinding:
     perm_il2pol: tuple[int, ...] = ()
 
     def __post_init__(self):
-        for key in ("unigym_joint_names", "backend_joint_names", "jadr",
-                    "jdr", "act", "perm_il2pol"):
+        for key in (
+            "unigym_joint_names",
+            "backend_joint_names",
+            "jadr",
+            "jdr",
+            "act",
+            "perm_il2pol",
+        ):
             object.__setattr__(self, key, tuple(getattr(self, key) or ()))
 
 
@@ -183,6 +189,5 @@ class MjArticulationBinding:
     backend_feet: tuple[str, ...] = ()
 
     def __post_init__(self):
-        for key in ("unigym_joint_names", "backend_joint_names",
-                    "unigym_feet", "backend_feet"):
+        for key in ("unigym_joint_names", "backend_joint_names", "unigym_feet", "backend_feet"):
             object.__setattr__(self, key, tuple(getattr(self, key) or ()))

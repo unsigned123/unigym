@@ -5,6 +5,7 @@ Every guard fails fast with a ``ValueError`` carrying the owner label
 returning the normalized value keeps the frozen dataclasses' fields
 canonical (tuples of floats, strict bools).
 """
+
 from __future__ import annotations
 
 import math
@@ -54,11 +55,7 @@ def _require_nonneg(owner: str, name: str, value) -> float:
 
 def _require_finite(owner: str, name: str, value) -> float:
     """Validate one finite scalar of any sign (the MJCF float face)."""
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{owner}: {name} must be a finite number, got {value!r}")
     return float(value)
 

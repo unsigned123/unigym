@@ -10,6 +10,7 @@ Yaml usage::
 
 Filters are applied in list order; the first ``False`` discards the episode.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -20,14 +21,13 @@ from .velocity import VelocityRangeFilter
 
 FILTER_REGISTRY = {
     "base_contact": FallenFilter,
-    "fallen": FallenFilter,            # alias
+    "fallen": FallenFilter,  # alias
     "termination": TerminationFilter,  # generic (terminations-based)
     "velocity": VelocityRangeFilter,
 }
 
 
-def build_filter_chain(filters_cfg: list | None,
-                       articulations=None) -> list[EpisodeFilter]:
+def build_filter_chain(filters_cfg: list | None, articulations=None) -> list[EpisodeFilter]:
     """Build an ordered list of filters from the yaml ``filters`` section.
 
     *articulations* is the run's ordered policy-binding names.  When exactly
@@ -44,19 +44,20 @@ def build_filter_chain(filters_cfg: list | None,
     for entry in filters_cfg:
         name = entry["name"]
         if name not in FILTER_REGISTRY:
-            raise ValueError(
-                f"unknown filter '{name}'; available: {sorted(FILTER_REGISTRY)}")
+            raise ValueError(f"unknown filter '{name}'; available: {sorted(FILTER_REGISTRY)}")
         params = dict(entry.get("params", {}))
         cls = FILTER_REGISTRY[name]
-        if single is not None and "articulation" not in params \
-                and "articulation" in inspect.signature(cls.__init__).parameters:
+        if (
+            single is not None
+            and "articulation" not in params
+            and "articulation" in inspect.signature(cls.__init__).parameters
+        ):
             params["articulation"] = single
         chain.append(cls(**params))
     return chain
 
 
-def run_filter_chain(chain: list[EpisodeFilter],
-                     episode_data: dict) -> tuple[bool, str | None]:
+def run_filter_chain(chain: list[EpisodeFilter], episode_data: dict) -> tuple[bool, str | None]:
     """Run all filters in order.
 
     Returns (keep, rejected_by).  *rejected_by* is the name of the first

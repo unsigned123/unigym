@@ -27,6 +27,7 @@ Composition mechanisms:
 No articulation declares ``model.mjcf`` -> :func:`compose_articulation_spec`
 returns ``None`` and the caller keeps the historical fused load path.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,7 +62,7 @@ def _field(entry, key, default=None):
 
 
 def articulation_assets(
-        articulations: Sequence | None,
+    articulations: Sequence | None,
 ) -> tuple[tuple[str, str], ...]:
     """Ordered ``(name, mjcf_path)`` for articulations declaring ``model.mjcf``.
 
@@ -72,7 +73,7 @@ def articulation_assets(
     assets = []
     for entry in articulations or ():
         model = _field(entry, "model")
-        mjcf = (_field(model, "mjcf") if model is not None else None)
+        mjcf = _field(model, "mjcf") if model is not None else None
         if mjcf:
             assets.append((str(_field(entry, "name") or ""), os.fspath(mjcf)))
     return tuple(assets)
@@ -85,14 +86,16 @@ def _prefix_for(name: str, auto_prefix: bool) -> str | None:
 
 def _child_names(spec) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """``(bodies, joints, actuators)`` declared by one child MjSpec."""
+
     def names(table):
         return tuple(str(element.name) for element in table if element.name)
 
     return names(spec.bodies), names(spec.joints), names(spec.actuators)
 
 
-def compose_articulation_spec(world_base_mjcf, articulations: Sequence | None,
-                              *, auto_prefix: bool = False):
+def compose_articulation_spec(
+    world_base_mjcf, articulations: Sequence | None, *, auto_prefix: bool = False
+):
     """Return the composed :class:`MjComposition` or ``None`` when fused.
 
     Args:
@@ -120,13 +123,12 @@ def compose_articulation_spec(world_base_mjcf, articulations: Sequence | None,
 
     base = os.fspath(world_base_mjcf)
     if not os.path.isfile(base):
-        raise ConfigError(f"articulation composition: world_base MJCF not "
-                          f"found: {base}")
+        raise ConfigError(f"articulation composition: world_base MJCF not " f"found: {base}")
     for _, path in assets:
         if not os.path.isfile(path):
             raise ConfigError(
-                f"articulation composition: declared articulation MJCF not "
-                f"found: {path}")
+                f"articulation composition: declared articulation MJCF not " f"found: {path}"
+            )
 
     if auto_prefix:
         warnings.warn(
@@ -134,21 +136,24 @@ def compose_articulation_spec(world_base_mjcf, articulations: Sequence | None,
             f"{len(assets)} articulation asset(s) with backend-owned "
             f"prefixes {[f'{name}_' for name, _ in assets]}; neutral names "
             "stay unigym_name and the mapping remains backend-private",
-            RuntimeWarning, stacklevel=2)
-        log.warning("auto_prefix enabled for articulations %s",
-                    [name for name, _ in assets])
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        log.warning("auto_prefix enabled for articulations %s", [name for name, _ in assets])
 
     if len(assets) == 1 and not auto_prefix:
         spec = _compose_marker_include(mujoco, base, assets[0][1])
         if spec is not None:
-            name_map = _build_name_map(mujoco, base, assets,
-                                       prefixes={assets[0][0]: None},
-                                       articulations=articulations)
+            name_map = _build_name_map(
+                mujoco, base, assets, prefixes={assets[0][0]: None}, articulations=articulations
+            )
             _assert_unique_names(spec)
-            return MjComposition(spec=spec, name_map=name_map,
-                                 applied_prefixes={assets[0][0]: None})
-    return _compose_attach(mujoco, base, assets, auto_prefix=auto_prefix,
-                           articulations=articulations)
+            return MjComposition(
+                spec=spec, name_map=name_map, applied_prefixes={assets[0][0]: None}
+            )
+    return _compose_attach(
+        mujoco, base, assets, auto_prefix=auto_prefix, articulations=articulations
+    )
 
 
 def _compose_marker_include(mujoco, base: str, robot: str):
@@ -162,10 +167,10 @@ def _compose_marker_include(mujoco, base: str, robot: str):
     if ARTICULATION_MARKER not in text:
         return None
     include = _include_target(base, robot)
-    composed = text.replace(
-        ARTICULATION_MARKER, f'<include file="{escape(include)}"/>', 1)
-    temp = os.path.join(os.path.dirname(os.path.abspath(base)),
-                        f".unigym-articulation-{uuid.uuid4().hex}.xml")
+    composed = text.replace(ARTICULATION_MARKER, f'<include file="{escape(include)}"/>', 1)
+    temp = os.path.join(
+        os.path.dirname(os.path.abspath(base)), f".unigym-articulation-{uuid.uuid4().hex}.xml"
+    )
     try:
         with open(temp, "w", encoding="utf-8") as handle:
             handle.write(composed)
@@ -212,15 +217,12 @@ def _frame_pose(spawn: dict):
     if pos is not None:
         values = [float(v) for v in pos]
         if len(values) != 3 or not all(math.isfinite(v) for v in values):
-            raise ConfigError(
-                f"articulation spawn.pos must be a finite 3-vector, got "
-                f"{pos!r}")
+            raise ConfigError(f"articulation spawn.pos must be a finite 3-vector, got " f"{pos!r}")
         frame_pos = values
     if yaw is not None:
         angle = float(yaw)
         if not math.isfinite(angle):
-            raise ConfigError(
-                f"articulation spawn.yaw must be finite radians, got {yaw!r}")
+            raise ConfigError(f"articulation spawn.yaw must be finite radians, got {yaw!r}")
         frame_quat = [math.cos(angle / 2), 0.0, 0.0, math.sin(angle / 2)]
     return frame_pos, frame_quat
 
@@ -236,14 +238,12 @@ def _build_name_map(mujoco, base, assets, *, prefixes, articulations):
         bodies[name] = body_names
         joints[name] = joint_names
         actuators[name] = actuator_names
-    return MjNameMap(prefixes=prefixes, joints=joints, bodies=bodies,
-                     actuators=actuators)
+    return MjNameMap(prefixes=prefixes, joints=joints, bodies=bodies, actuators=actuators)
 
 
-def _compose_attach(mujoco, base: str,
-                    assets: Sequence[tuple[str, str]],
-                    *, auto_prefix: bool,
-                    articulations=None):
+def _compose_attach(
+    mujoco, base: str, assets: Sequence[tuple[str, str]], *, auto_prefix: bool, articulations=None
+):
     """Attach each asset into the base spec (short ``<name>_`` when enabled)."""
     spec = mujoco.MjSpec.from_file(base)
     spawns = _spawn_map(articulations)
@@ -259,16 +259,14 @@ def _compose_attach(mujoco, base: str,
         if place:
             frame_pos, frame_quat = _frame_pose(spawns.get(name) or {})
         frame = spec.worldbody.add_frame(
-            name=f"{prefix}attach" if prefix else None,
-            pos=frame_pos, quat=frame_quat)
+            name=f"{prefix}attach" if prefix else None, pos=frame_pos, quat=frame_quat
+        )
         spec.attach(child, prefix=prefix or "", suffix="", frame=frame)
-    name_map = _build_name_map(mujoco, base, assets, prefixes=prefixes,
-                               articulations=articulations)
+    name_map = _build_name_map(mujoco, base, assets, prefixes=prefixes, articulations=articulations)
     if auto_prefix:
         _rebind_base_cameras(spec, assets[0][0], name_map)
     _assert_unique_names(spec)
-    return MjComposition(spec=spec, name_map=name_map,
-                         applied_prefixes=prefixes)
+    return MjComposition(spec=spec, name_map=name_map, applied_prefixes=prefixes)
 
 
 def _rebind_base_cameras(spec, first_name: str, name_map: MjNameMap) -> None:
@@ -289,27 +287,29 @@ def _rebind_base_cameras(spec, first_name: str, name_map: MjNameMap) -> None:
 
 def _assert_no_cross_asset_collision(mujoco, assets) -> None:
     """Fail fast with the duplicate names before ``MjSpec.attach`` renames."""
-    for kind, attr in (("body", "bodies"), ("joint", "joints"),
-                       ("actuator", "actuators")):
+    for kind, attr in (("body", "bodies"), ("joint", "joints"), ("actuator", "actuators")):
         names = []
         for _, path in assets:
             child = mujoco.MjSpec.from_file(path)
             table = getattr(child, attr)
-            names.extend(str(element.name) for element in table
-                         if element.name)
+            names.extend(str(element.name) for element in table if element.name)
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise ConfigError(
                 f"articulation composition: duplicate {kind} names without "
                 f"auto_prefix: {duplicates} | hint: enable "
                 f"env.backend_options.<backend>.compose.auto_prefix or give "
-                f"each asset distinct names")
+                f"each asset distinct names"
+            )
 
 
 def _assert_unique_names(spec) -> None:
     """Fail fast when the shared body/joint/actuator namespace collides."""
-    for kind, elements in (("body", spec.bodies), ("joint", spec.joints),
-                           ("actuator", spec.actuators)):
+    for kind, elements in (
+        ("body", spec.bodies),
+        ("joint", spec.joints),
+        ("actuator", spec.actuators),
+    ):
         names = [element.name for element in elements if element.name]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
@@ -317,4 +317,5 @@ def _assert_unique_names(spec) -> None:
                 f"articulation composition: duplicate {kind} names after "
                 f"attachment: {duplicates} | hint: give each articulation a "
                 f"unique `name` or enable env.backend_options."
-                f"<backend>.compose.auto_prefix")
+                f"<backend>.compose.auto_prefix"
+            )

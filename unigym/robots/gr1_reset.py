@@ -24,6 +24,7 @@ ONE numpy stream (the initializer's ``rng``), consumed in the fixed
 documented order: placement draws first, then the 14 cotrain noise
 draws (model document order, stage 4).
 """
+
 from __future__ import annotations
 
 from typing import Callable, Dict, Optional
@@ -35,11 +36,10 @@ from .gr1_constants import GR1_COTRAIN_POSE
 # ---------------------------------------------------------------------------
 # stage constants (audit §7)
 # ---------------------------------------------------------------------------
-GR1_SETTLE_SUBSTEPS = 250          # 10 * (0.05 control / 0.002 model)
-GR1_ELBOW_JOINTS = [
-    "robot0_l_elbow_pitch", "robot0_r_elbow_pitch"]
-GR1_ELBOW_MIX = (0.7, 0.3)         # range[0]*0.7 + range[1]*0.3 -> -2.1
-GR1_COTRAIN_NOISE = 0.2            # per-joint U(-0.2, 0.2)
+GR1_SETTLE_SUBSTEPS = 250  # 10 * (0.05 control / 0.002 model)
+GR1_ELBOW_JOINTS = ["robot0_l_elbow_pitch", "robot0_r_elbow_pitch"]
+GR1_ELBOW_MIX = (0.7, 0.3)  # range[0]*0.7 + range[1]*0.3 -> -2.1
+GR1_COTRAIN_NOISE = 0.2  # per-joint U(-0.2, 0.2)
 GR1_RESET_PROTOCOL = "gr1_cotrain"  # the only protocol name (fail-fast)
 
 
@@ -59,35 +59,26 @@ class Gr1ResetSpec:
 
     def __init__(self, cfg: dict):
         if not isinstance(cfg, dict):
-            raise ValueError(
-                f"reset stage spec must be a mapping, got "
-                f"{type(cfg).__name__}")
+            raise ValueError(f"reset stage spec must be a mapping, got " f"{type(cfg).__name__}")
         protocol = str(cfg.get("protocol", ""))
         if protocol != GR1_RESET_PROTOCOL:
             raise ValueError(
                 f"reset.protocol {protocol!r} unknown | legal: "
                 f"[{GR1_RESET_PROTOCOL!r}] (the audited GR1 four-stage "
-                f"chain, audit v063 §7)")
+                f"chain, audit v063 §7)"
+            )
         self.protocol = protocol
         self.seed = int(cfg.get("seed", 0))
-        self.settle_substeps = int(cfg.get("settle_substeps",
-                                           GR1_SETTLE_SUBSTEPS))
+        self.settle_substeps = int(cfg.get("settle_substeps", GR1_SETTLE_SUBSTEPS))
         if self.settle_substeps < 0:
-            raise ValueError(
-                f"reset.settle_substeps must be >= 0, got "
-                f"{self.settle_substeps}")
-        self.cotrain_noise = float(cfg.get("cotrain_noise",
-                                           GR1_COTRAIN_NOISE))
+            raise ValueError(f"reset.settle_substeps must be >= 0, got " f"{self.settle_substeps}")
+        self.cotrain_noise = float(cfg.get("cotrain_noise", GR1_COTRAIN_NOISE))
         if self.cotrain_noise < 0:
-            raise ValueError(
-                f"reset.cotrain_noise must be >= 0, got "
-                f"{self.cotrain_noise}")
+            raise ValueError(f"reset.cotrain_noise must be >= 0, got " f"{self.cotrain_noise}")
         self.elbow_joints = list(cfg.get("elbow_joints", GR1_ELBOW_JOINTS))
         mix = list(cfg.get("elbow_mix", GR1_ELBOW_MIX))
         if len(mix) != 2 or abs(sum(mix) - 1.0) > 1e-9:
-            raise ValueError(
-                f"reset.elbow_mix must be a 2-vector summing to "
-                f"1, got {mix}")
+            raise ValueError(f"reset.elbow_mix must be a 2-vector summing to " f"1, got {mix}")
         self.elbow_mix = (float(mix[0]), float(mix[1]))
         # the protocol-local stream: same seed -> bit-identical resets
         self.rng = np.random.default_rng(self.seed)
@@ -96,8 +87,9 @@ class Gr1ResetSpec:
 # ---------------------------------------------------------------------------
 # reset stages 2-4 (stage 1 is the backend's B7 q0 write)
 # ---------------------------------------------------------------------------
-def stage_elbow_release(model, data, joint_names=None,
-                        mix: tuple = GR1_ELBOW_MIX) -> Dict[str, float]:
+def stage_elbow_release(
+    model, data, joint_names=None, mix: tuple = GR1_ELBOW_MIX
+) -> Dict[str, float]:
     """Stage 3: force the declared elbow joints to their mixed range pose.
 
     ``range[0]*mix[0] + range[1]*mix[1]`` (tabletop.py:1080-1091).
@@ -111,8 +103,7 @@ def stage_elbow_release(model, data, joint_names=None,
     for name in names:
         jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
         if jid < 0:
-            raise ValueError(
-                f"reset stage 3: elbow joint {name!r} not in the MJ model")
+            raise ValueError(f"reset stage 3: elbow joint {name!r} not in the MJ model")
         lo, hi = (float(v) for v in model.jnt_range[jid])
         val = mix[0] * lo + mix[1] * hi
         data.qpos[model.jnt_qposadr[jid]] = val
@@ -120,9 +111,9 @@ def stage_elbow_release(model, data, joint_names=None,
     return written
 
 
-def stage_cotrain_noise(model, data, rng,
-                        noise: float = GR1_COTRAIN_NOISE,
-                        pose: Optional[Dict[str, float]] = None) -> int:
+def stage_cotrain_noise(
+    model, data, rng, noise: float = GR1_COTRAIN_NOISE, pose: Optional[Dict[str, float]] = None
+) -> int:
     """Stage 4: overwrite the cotrain-table joints with the noisy pose.
 
     Model document order, ``pose + U(-noise, +noise)``; every other
@@ -135,15 +126,19 @@ def stage_cotrain_noise(model, data, rng,
     for j in range(model.njnt):
         name = model.joint(j).name
         if name in pose:
-            data.qpos[model.jnt_qposadr[j]] = (
-                pose[name] + rng.uniform(-noise, noise))
+            data.qpos[model.jnt_qposadr[j]] = pose[name] + rng.uniform(-noise, noise)
             hits += 1
     return hits
 
 
-def apply_gr1_reset_stages(model, data, rng, spec: Gr1ResetSpec,
-                           settle_fn: Optional[Callable[[int], None]] = None,
-                           forward: bool = True) -> dict:
+def apply_gr1_reset_stages(
+    model,
+    data,
+    rng,
+    spec: Gr1ResetSpec,
+    settle_fn: Optional[Callable[[int], None]] = None,
+    forward: bool = True,
+) -> dict:
     """Stages 2-4 in the audited order: settle -> elbow -> cotrain -> forward.
 
     A single ``mj_forward`` closes the chain; ``settle_fn`` is the
@@ -154,10 +149,10 @@ def apply_gr1_reset_stages(model, data, rng, spec: Gr1ResetSpec,
     """
     if settle_fn is not None and spec.settle_substeps > 0:
         settle_fn(spec.settle_substeps)
-    elbows = stage_elbow_release(model, data, spec.elbow_joints,
-                                 spec.elbow_mix)
+    elbows = stage_elbow_release(model, data, spec.elbow_joints, spec.elbow_mix)
     hits = stage_cotrain_noise(model, data, rng, spec.cotrain_noise)
     if forward:
         import mujoco
+
         mujoco.mj_forward(model, data)
     return {"elbows": elbows, "cotrain_joints": hits}

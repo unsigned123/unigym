@@ -16,6 +16,7 @@ The engine (S5) owns the compiled scene XML: it captures the composed text
 before compilation and passes it to :func:`write_compile_report`, which
 writes ``composed.xml`` next to ``compile.json``.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -94,9 +95,7 @@ def _write_json(
     out = os.fspath(out_dir)
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, filename)
-    text = json.dumps(
-        payload, sort_keys=True, indent=2, ensure_ascii=False
-    ) + "\n"
+    text = json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
     return path
@@ -127,9 +126,7 @@ def write_resolution(out_dir: str | os.PathLike[str], resolution: object) -> str
     Returns:
         The written path.
     """
-    return _write_json(
-        out_dir, "resolution.json", _artifact_mapping(resolution)
-    )
+    return _write_json(out_dir, "resolution.json", _artifact_mapping(resolution))
 
 
 def write_scene_json(out_dir: str | os.PathLike[str], scene: object) -> str:
@@ -156,9 +153,7 @@ def write_payload_index(out_dir: str | os.PathLike[str], payload_set: object) ->
     Returns:
         The written path.
     """
-    return _write_json(
-        out_dir, "payload_index.json", _artifact_mapping(payload_set)
-    )
+    return _write_json(out_dir, "payload_index.json", _artifact_mapping(payload_set))
 
 
 def write_composed_xml(out_dir: str | os.PathLike[str], composed_xml: str) -> str:
@@ -176,8 +171,7 @@ def write_composed_xml(out_dir: str | os.PathLike[str], composed_xml: str) -> st
     """
     if not isinstance(composed_xml, str):
         raise TypeError(
-            f"composed scene text must be a string, got "
-            f"{type(composed_xml).__name__}"
+            f"composed scene text must be a string, got " f"{type(composed_xml).__name__}"
         )
     out = os.fspath(out_dir)
     os.makedirs(out, exist_ok=True)
@@ -206,9 +200,7 @@ def write_compile_report(
     """
     if composed_xml is not None:
         write_composed_xml(out_dir, composed_xml)
-    return _write_json(
-        out_dir, "compile.json", _artifact_mapping(compiled)
-    )
+    return _write_json(out_dir, "compile.json", _artifact_mapping(compiled))
 
 
 def write_build_artifacts(

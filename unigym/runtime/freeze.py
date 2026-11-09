@@ -18,6 +18,7 @@ daemonless runs too.
 Capability-gated: adapters without ``set_freeze_hook`` (every non-agent
 adapter) mount nothing -- zero behavior change.
 """
+
 from __future__ import annotations
 
 from typing import Protocol

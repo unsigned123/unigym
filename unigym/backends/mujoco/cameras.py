@@ -51,6 +51,7 @@ GL backend
 ``env/backends/mujoco_env.py`` via ``os.environ.setdefault``; verified
 on the humanoid_1 host at ~0.5 ms/frame @224²).
 """
+
 from __future__ import annotations
 
 import math
@@ -64,19 +65,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco imported lazily)
 
 from unigym.cameras import geomflags
 from unigym.cameras.appearance import appearance_plan
-from unigym.cameras.base import (CameraSpec, depth_key, rgb_key,
-                                 rig_hide_geom_groups)
+from unigym.cameras.base import CameraSpec, depth_key, rgb_key, rig_hide_geom_groups
 from unigym.cameras.state import check_single_env, make_state_table
 from unigym.cameras.base import rig_type
 from unigym.cameras.decor import DecorContext, run_generators
-from unigym.cameras.rigs import (DEFAULT_CHASE_OFFSET, lookat_quat,
-                                 yaw_pitch_roll_quat)
+from unigym.cameras.rigs import DEFAULT_CHASE_OFFSET, lookat_quat, yaw_pitch_roll_quat
 
 # injected MJCF camera names are namespaced to avoid collisions with
 # cameras shipped inside the robot/scene XML (scene_43dof has "tracking"
 # and "head_camera" already).
-from unigym.cameras.spec import (NAMED_VIEW_PARAMS, DEFAULT_ORBIT,
-                                 spherical_camera_keys)
+from unigym.cameras.spec import NAMED_VIEW_PARAMS, DEFAULT_ORBIT, spherical_camera_keys
 
 from unigym.backends.shared.mjfamily.cameras.helpers import (  # noqa: F401
     DEFAULT_BODY_MOUNT,
@@ -91,6 +89,7 @@ from unigym.backends.shared.mjfamily.cameras.helpers import (  # noqa: F401
     quat_to_rotmat,
     rotmat_to_quat,
 )
+
 
 # --------------------------------------------------------------------------- #
 # rigs (mujoco flavour of cameras/rigs.py)
@@ -140,17 +139,17 @@ class _MjRigBase:
         # is untouched (G1 default camera behavior stays bitwise).
         self._hide_groups = rig_hide_geom_groups(rig, spec.name)
         self._live_offset = np.zeros(3)
-        self._live_yaw = 0.0    # rad
+        self._live_yaw = 0.0  # rad
         self._live_pitch = 0.0  # rad
-        self._live_roll = 0.0   # rad (view-axis roll)
+        self._live_roll = 0.0  # rad (view-axis roll)
         # single-world pose state (mujoco has exactly ONE world;
         # the table's shared None row is the authoritative pose -- see
         # ``_apply_live_pose`` / ``get_world_pose``).
         self.state_table = make_state_table(self.name, "shared")
         # base mount (body/world): the pre-offset body-local/world pose
         self._mount_pos = np.array(
-            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))],
-            dtype=np.float64)
+            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))], dtype=np.float64
+        )
         self._mount_quat = _rig_offset_quat(spec)  # isaac convention (4,)
         # the render-side mjData copy (lazily allocated at first render;
         # refreshed per render via mj_copyData -- see _render_copy())
@@ -167,20 +166,17 @@ class _MjRigBase:
 
     def _require_env(self) -> Any:
         if self._env is None:
-            raise RuntimeError(f"mujoco camera {self.name!r}: not bound "
-                               "(bind_env)")
+            raise RuntimeError(f"mujoco camera {self.name!r}: not bound " "(bind_env)")
         return self._env
 
     def _require_renderer(self) -> mujoco.Renderer:
         if self._renderer is None:
-            raise RuntimeError(f"mujoco camera {self.name!r}: no renderer "
-                               "(bind_env)")
+            raise RuntimeError(f"mujoco camera {self.name!r}: no renderer " "(bind_env)")
         return self._renderer
 
     def _require_cam_id(self) -> int:
         if self._cam_id is None:
-            raise RuntimeError(f"mujoco camera {self.name!r}: no camera id "
-                               "(bind_env)")
+            raise RuntimeError(f"mujoco camera {self.name!r}: no camera id " "(bind_env)")
         return self._cam_id
 
     # -- lifecycle -------------------------------------------------------- #
@@ -195,19 +191,19 @@ class _MjRigBase:
         """
         import mujoco  # lazy
 
-        from unigym.backends.shared.mjfamily.model.ir_access import (
-            camera_id, model_ir_of)
+        from unigym.backends.shared.mjfamily.model.ir_access import camera_id, model_ir_of
 
         self._env = env
         cid = camera_id(model_ir_of(env), self._mj_name)
         if cid < 0:
             raise RuntimeError(
                 f"mujoco camera '{self._mj_name}' missing from the compiled "
-                f"model (injection lost?)")
+                f"model (injection lost?)"
+            )
         self._cam_id = cid
         self._renderer = mujoco.Renderer(
-            env.mj_model, height=int(self.spec.height),
-            width=int(self.spec.width))
+            env.mj_model, height=int(self.spec.height), width=int(self.spec.width)
+        )
         self._reclassify_groups()
 
     def _reclassify_groups(self) -> None:
@@ -228,8 +224,8 @@ class _MjRigBase:
         """
         m = self._require_env().mj_model
         m.geom_group[:] = geomflags.reclassify_geom_groups(
-            m.geom_contype, m.geom_conaffinity, m.geom_group,
-            self.render_groups)
+            m.geom_contype, m.geom_conaffinity, m.geom_group, self.render_groups
+        )
         self._plain_opt = self._build_plain_option()
 
     def _build_plain_option(self):
@@ -268,26 +264,34 @@ class _MjRigBase:
         self.sync_pose(env_ids=env_ids)
 
     # -- live properties  ------------------------------------------ #
-    def apply_properties(self, pose_offset=None, yaw_deg=None,
-                         pitch_deg=None, roll_deg=None, target_env=None,
-                         env_ids: list[int] | None = None):
+    def apply_properties(
+        self,
+        pose_offset=None,
+        yaw_deg=None,
+        pitch_deg=None,
+        roll_deg=None,
+        target_env=None,
+        env_ids: list[int] | None = None,
+    ):
         """Update the live pose properties (manager pre-validates keys)."""
         if env_ids is not None and list(env_ids) != [0]:
             raise ValueError(
                 f"camera '{self.name}': mujoco is single-env; env_ids must "
-                f"be None or [0], got {env_ids}")
+                f"be None or [0], got {env_ids}"
+            )
         if target_env is not None:
             if int(target_env) != 0:
                 raise ValueError(
                     f"camera '{self.name}': mujoco is single-env; target_env "
-                    f"must be 0, got {target_env}")
+                    f"must be 0, got {target_env}"
+                )
             self.target_env = 0
         if pose_offset is not None:
-            off = np.asarray([float(x) for x in pose_offset],
-                             dtype=np.float64)
+            off = np.asarray([float(x) for x in pose_offset], dtype=np.float64)
             if off.shape != (3,):
-                raise ValueError(f"camera '{self.name}': pose_offset must be "
-                                 f"[dx, dy, dz], got {list(off)}")
+                raise ValueError(
+                    f"camera '{self.name}': pose_offset must be " f"[dx, dy, dz], got {list(off)}"
+                )
             self._live_offset = off
         if yaw_deg is not None:
             self._live_yaw = math.radians(float(yaw_deg))
@@ -301,17 +305,19 @@ class _MjRigBase:
     def begin_world_pose(self, pos, quat_wxyz):
         raise NotImplementedError(
             f"camera '{self.name}': transient world pose is supported on "
-            f"world rigs only (this rig: {rig_type(self.spec)!r})")
+            f"world rigs only (this rig: {rig_type(self.spec)!r})"
+        )
 
     def end_world_pose(self, saved) -> None:
         raise NotImplementedError(
-            f"camera '{self.name}': transient world pose is supported on "
-            f"world rigs only")
+            f"camera '{self.name}': transient world pose is supported on " f"world rigs only"
+        )
 
     def set_world_pose(self, pos, quat_wxyz):
         raise NotImplementedError(
             f"camera '{self.name}': world-pose set is supported on "
-            f"world rigs only (this rig: {rig_type(self.spec)!r})")
+            f"world rigs only (this rig: {rig_type(self.spec)!r})"
+        )
 
     def get_world_pose(self):
         """Read-back: the rig's CURRENT world pose (Isaac convention wxyz).
@@ -321,6 +327,7 @@ class _MjRigBase:
         engine-side resolution lives in ``camera_pose.read_world_pose``.
         """
         from .camera_pose import read_world_pose
+
         return read_world_pose(self)
 
     def _apply_live_pose(self) -> None:
@@ -334,15 +341,15 @@ class _MjRigBase:
             return
         q = self._mount_quat
         if self._live_yaw or self._live_pitch or self._live_roll:
-            q = _quat_mul_np(yaw_pitch_roll_quat(
-                self._live_yaw, self._live_pitch, self._live_roll), q)
-        self.state_table.set(self.name, None,
-                             self._mount_pos + self._live_offset,
-                             np.asarray(q, dtype=np.float64))
+            q = _quat_mul_np(
+                yaw_pitch_roll_quat(self._live_yaw, self._live_pitch, self._live_roll), q
+            )
+        self.state_table.set(
+            self.name, None, self._mount_pos + self._live_offset, np.asarray(q, dtype=np.float64)
+        )
         row = self.state_table.get(self.name)
         if row is None:
-            raise RuntimeError(
-                f"camera {self.name!r}: pose table row missing after write")
+            raise RuntimeError(f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
@@ -393,10 +400,12 @@ class _MjRigBase:
         d2 = self._render_copy()
         mujoco.mj_forward(self._require_env().mj_model, d2)
         self._require_renderer().update_scene(
-            d2, camera=self._require_cam_id(),
-            scene_option=(self._plain_opt
-                          if self._plain_opt is not None
-                          else self._build_plain_option()))
+            d2,
+            camera=self._require_cam_id(),
+            scene_option=(
+                self._plain_opt if self._plain_opt is not None else self._build_plain_option()
+            ),
+        )
 
     def _read_rgb(self) -> torch.Tensor:
         """(1, H, W, 3) uint8 — OWNED copy (aliasing rule)."""
@@ -415,9 +424,7 @@ class _MjRigBase:
         renderer.disable_depth_rendering()
         arr = arr.reshape(int(self.spec.height), int(self.spec.width))
         arr[arr > float(self.spec.far_clip)] = np.inf  # "nothing observed"
-        return torch.from_numpy(np.ascontiguousarray(arr)).reshape(1, 1,
-                                                                   arr.shape[0],
-                                                                   arr.shape[1])
+        return torch.from_numpy(np.ascontiguousarray(arr)).reshape(1, 1, arr.shape[0], arr.shape[1])
 
     def read(self, env_ids=None) -> dict:
         """Render + read this rig's streams: ``{key: tensor}``.
@@ -470,15 +477,19 @@ class _MjRigBase:
             force[i] = f6[:3]
             geoms[i] = (int(all_geoms[i, 0]), int(all_geoms[i, 1]))
         return DecorContext(
-            model=m, data=d, contact_pos=pos, contact_normal=normal,
-            contact_force=force, contact_geoms=geoms,
-            body_names=[mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b)
-                        for b in range(m.nbody)],
+            model=m,
+            data=d,
+            contact_pos=pos,
+            contact_normal=normal,
+            contact_force=force,
+            contact_geoms=geoms,
+            body_names=[mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in range(m.nbody)],
             geom_bodyid=np.asarray(m.geom_bodyid),
             geom_contype=np.asarray(m.geom_contype),
             geom_conaffinity=np.asarray(m.geom_conaffinity),
             box_type=int(mujoco.mjtGeom.mjGEOM_BOX),
-            mesh_type=int(mujoco.mjtGeom.mjGEOM_MESH))
+            mesh_type=int(mujoco.mjtGeom.mjGEOM_MESH),
+        )
 
     def _capture_option(self, spec):
         """Per-render MjvOption for the spec path: explicit ALWAYS.
@@ -508,9 +519,11 @@ class _MjRigBase:
         (view ``visual`` stays bitwise); a bool = explicit per-render
         override.  Never a model write.
         """
-        for key, flag in (("shadow", "mjRND_SHADOW"),
-                          ("reflection", "mjRND_REFLECTION"),
-                          ("skybox", "mjRND_SKYBOX")):
+        for key, flag in (
+            ("shadow", "mjRND_SHADOW"),
+            ("reflection", "mjRND_REFLECTION"),
+            ("skybox", "mjRND_SKYBOX"),
+        ):
             val = spec["scene"].get(key)
             if val is not None:
                 import mujoco  # lazy
@@ -578,24 +591,33 @@ class _MjRigBase:
             if start + k >= scn.maxgeom:
                 break
             g = scn.geoms[start + k]
-            gtype = getattr(mujoco.mjtGeom,
-                            "mjGEOM_" + str(dsc["type"]).upper())
+            gtype = getattr(mujoco.mjtGeom, "mjGEOM_" + str(dsc["type"]).upper())
             rgba = np.asarray(dsc["rgba"], dtype=np.float32)
-            mujoco.mjv_initGeom(g, gtype, np.zeros(3), np.zeros(3),
-                                np.zeros(9), rgba)
-            mujoco.mjv_connector(g, gtype, float(dsc["radius"]),
-                                 np.asarray(dsc["from"], dtype=np.float64),
-                                 np.asarray(dsc["to"], dtype=np.float64))
+            mujoco.mjv_initGeom(g, gtype, np.zeros(3), np.zeros(3), np.zeros(9), rgba)
+            mujoco.mjv_connector(
+                g,
+                gtype,
+                float(dsc["radius"]),
+                np.asarray(dsc["from"], dtype=np.float64),
+                np.asarray(dsc["to"], dtype=np.float64),
+            )
             g.rgba[:] = rgba
             for attr, val in (
-                    ("objtype", int(mujoco.mjtObj.mjOBJ_UNKNOWN)),
-                    ("objid", -1),
-                    ("category", int(mujoco.mjtCatBit.mjCAT_DECOR)),
-                    ("matid", -1), ("texid", -1), ("segid", -1),
-                    ("dataid", -1), ("camdist", 0.5),
-                    ("modelrbound", 0.0), ("emission", 0.0),
-                    ("specular", 0.0), ("shininess", 0.0),
-                    ("reflectance", 0.0), ("transparent", 0)):
+                ("objtype", int(mujoco.mjtObj.mjOBJ_UNKNOWN)),
+                ("objid", -1),
+                ("category", int(mujoco.mjtCatBit.mjCAT_DECOR)),
+                ("matid", -1),
+                ("texid", -1),
+                ("segid", -1),
+                ("dataid", -1),
+                ("camdist", 0.5),
+                ("modelrbound", 0.0),
+                ("emission", 0.0),
+                ("specular", 0.0),
+                ("shininess", 0.0),
+                ("reflectance", 0.0),
+                ("transparent", 0),
+            ):
                 try:
                     setattr(g, attr, val)
                 except (AttributeError, TypeError):
@@ -604,19 +626,16 @@ class _MjRigBase:
         scn.ngeom = start + n
         return n
 
-    def _render_one(self, data, option, spec, plan, descs,
-                    cam=None) -> np.ndarray:
+    def _render_one(self, data, option, spec, plan, descs, cam=None) -> np.ndarray:
         """THE single-pass frame: update -> flags -> paint -> inject -> render.
 
         ONE mjr_render (GL depth occludes natively; probe5).
         """
         renderer = self._require_renderer()
         if cam is None:
-            renderer.update_scene(data, camera=self._require_cam_id(),
-                                  scene_option=option)
+            renderer.update_scene(data, camera=self._require_cam_id(), scene_option=option)
         else:
-            renderer.update_scene(data, camera=cam,
-                                  scene_option=option)
+            renderer.update_scene(data, camera=cam, scene_option=option)
         scn = renderer.scene
         self._apply_scene_flags(scn, spec)
         if plan is not None:
@@ -637,17 +656,22 @@ class _MjRigBase:
         im = Image.fromarray(img)
         dr = ImageDraw.Draw(im)
         try:
-            font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
-            small = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
+            small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
         except Exception:
             font = small = ImageFont.load_default()
-        dr.text((10, 8), title, font=font, fill=(255, 255, 255),
-                stroke_width=2, stroke_fill=(0, 0, 0))
+        dr.text(
+            (10, 8), title, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0)
+        )
         if sub:
-            dr.text((10, 30), sub, font=small, fill=(205, 220, 255),
-                    stroke_width=2, stroke_fill=(0, 0, 0))
+            dr.text(
+                (10, 30),
+                sub,
+                font=small,
+                fill=(205, 220, 255),
+                stroke_width=2,
+                stroke_fill=(0, 0, 0),
+            )
         return np.asarray(im)
 
     def capture_render(self, spec: dict) -> dict:
@@ -671,9 +695,11 @@ class _MjRigBase:
         d = self._render_copy()
         mujoco.mj_forward(m, d)
         spec = dict(spec)
-        need_ctx = bool(spec["decor"]) or \
-            spec["camera"]["mode"] in ("orbit", "closeup") or \
-            any(k in spec["camera"] for k in ("d", "el", "az"))
+        need_ctx = (
+            bool(spec["decor"])
+            or spec["camera"]["mode"] in ("orbit", "closeup")
+            or any(k in spec["camera"] for k in ("d", "el", "az"))
+        )
         ctx = self._build_decor_context(d) if need_ctx else None
         if spec["decor"]:
             assert ctx is not None
@@ -686,10 +712,13 @@ class _MjRigBase:
         if spec["appearance"]:
             plan = appearance_plan(
                 spec["appearance"],
-                [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b)
-                 for b in range(m.nbody)],
-                m.geom_bodyid, m.geom_contype, m.geom_conaffinity,
-                m.geom_group, self.render_groups)
+                [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in range(m.nbody)],
+                m.geom_bodyid,
+                m.geom_contype,
+                m.geom_conaffinity,
+                m.geom_group,
+                self.render_groups,
+            )
         camc = spec["camera"]
         if "pos" in camc or "lookat" in camc:
             # the absolute-pose free-camera form (camera_contract
@@ -702,21 +731,19 @@ class _MjRigBase:
             if "pos" not in camc or "lookat" not in camc:
                 raise ValueError(
                     "camera: pos and lookat go TOGETHER (world metres "
-                    "-- the absolute free-camera pose)")
+                    "-- the absolute free-camera pose)"
+                )
             camc = dict(camc)
-            camc.update(spherical_camera_keys(camc.pop("pos"),
-                                              camc.pop("lookat")))
+            camc.update(spherical_camera_keys(camc.pop("pos"), camc.pop("lookat")))
         out: dict = {}
         az0 = float(camc.get("az", 0.0))
         label = spec.get("_label", "spec")
         out_cfg = spec["output"]
 
         def frame_title(extra: str) -> str:
-            return f"[{label}] {camc['mode']}" + (f" {extra}" if extra
-                                                  else "")
+            return f"[{label}] {camc['mode']}" + (f" {extra}" if extra else "")
 
-        if camc["mode"] == "fixed" and not any(k in camc
-                                               for k in ("d", "el", "az")):
+        if camc["mode"] == "fixed" and not any(k in camc for k in ("d", "el", "az")):
             # historical rig-camera path (view ``visual`` == the plain
             # capture bitwise: same camera, same option discipline)
             img = self._render_one(d, option, spec, plan, descs)
@@ -725,49 +752,54 @@ class _MjRigBase:
             out["rgb"] = img.astype(np.uint8)
         else:
             if ctx is None:
-                raise RuntimeError("camera: decor context missing for the "
-                                   "requested capture")
+                raise RuntimeError("camera: decor context missing for the " "requested capture")
             lookat = self._resolve_lookat(camc, ctx)
             frames: list[tuple[str, np.ndarray]] = []
 
             def az_frame(az: float, el: float, dist: float) -> np.ndarray:
                 return self._render_one(
-                    d, option, spec, plan, descs,
-                    cam=self._free_camera(lookat, dist, az, el))
+                    d, option, spec, plan, descs, cam=self._free_camera(lookat, dist, az, el)
+                )
 
             if camc["mode"] == "fixed":
-                frames.append((
-                    "fixed", az_frame(camc.get("az", 0.0),
-                                      camc.get("el", -45.0),
-                                      camc.get("d", 0.5))))
+                frames.append(
+                    (
+                        "fixed",
+                        az_frame(camc.get("az", 0.0), camc.get("el", -45.0), camc.get("d", 0.5)),
+                    )
+                )
             else:
                 orbit = camc.get("orbit", dict(DEFAULT_ORBIT))
                 n, step = int(orbit["n"]), float(orbit["step_deg"])
                 orbit_frames = []
                 for i in range(n):
                     az = az0 + i * step
-                    img = az_frame(az, camc.get("el", -32.0),
-                                   camc.get("d", 0.20))
+                    img = az_frame(az, camc.get("el", -32.0), camc.get("d", 0.20))
                     if out_cfg["caption"]:
                         img = self._caption(
-                            img, frame_title(f"az={az % 360:.0f} ({i + 1}/{n})"
-                                             f" d={camc.get('d', 0.2):.2f}"
-                                             f" el={camc.get('el', -32):.0f}"))
+                            img,
+                            frame_title(
+                                f"az={az % 360:.0f} ({i + 1}/{n})"
+                                f" d={camc.get('d', 0.2):.2f}"
+                                f" el={camc.get('el', -32):.0f}"
+                            ),
+                        )
                     orbit_frames.append(img)
                 out["rgb"] = orbit_frames[0].astype(np.uint8)
                 if out_cfg["gif"]:
-                    out["gif"] = self._pack_gif(orbit_frames,
-                                                out_cfg["gif_ms"])
+                    out["gif"] = self._pack_gif(orbit_frames, out_cfg["gif_ms"])
                 if camc["mode"] == "closeup":
-                    frames = [(f"az{int(round(az0 + i * step)) % 360}", f)
-                              for i, f in enumerate(orbit_frames)]
+                    frames = [
+                        (f"az{int(round(az0 + i * step)) % 360}", f)
+                        for i, f in enumerate(orbit_frames)
+                    ]
             for name in camc.get("views", ()):
                 p = NAMED_VIEW_PARAMS[name]
                 img = az_frame(az0 + p["az_off"], p["el"], p["d"])
                 if out_cfg["caption"]:
                     img = self._caption(
-                        img, frame_title(f"{name} d={p['d']:.2f}"
-                                         f" el={p['el']:.0f}"))
+                        img, frame_title(f"{name} d={p['d']:.2f}" f" el={p['el']:.0f}")
+                    )
                 frames.append((name, img))
             if frames:
                 primary = out.get("rgb")
@@ -788,8 +820,7 @@ class _MjRigBase:
         # segid=-1 -> honest background) + legend
         if "seg" in spec["buffers"]:
             renderer.enable_segmentation_rendering()
-            renderer.update_scene(d, camera=self._require_cam_id(),
-                                  scene_option=option)
+            renderer.update_scene(d, camera=self._require_cam_id(), scene_option=option)
             seg_raw = np.asarray(renderer.render()).copy()
             renderer.disable_segmentation_rendering()
             seg = np.asarray(seg_raw, dtype=np.int64)
@@ -799,8 +830,8 @@ class _MjRigBase:
             out["seg"] = geomflags.colorize_seg(ids)
             if out_cfg["legend"]:
                 out["legend"] = self._legend(
-                    ids, types, spec["scene"].get("geom_class", "all"),
-                    contacts=bool(opt_flags))
+                    ids, types, spec["scene"].get("geom_class", "all"), contacts=bool(opt_flags)
+                )
         return out
 
     @staticmethod
@@ -816,13 +847,18 @@ class _MjRigBase:
 
         ims = [Image.fromarray(f) for f in frames]
         buf = io.BytesIO()
-        ims[0].save(buf, format="GIF", save_all=True,
-                    append_images=ims[1:], duration=int(ms), loop=0,
-                     optimize=True)
+        ims[0].save(
+            buf,
+            format="GIF",
+            save_all=True,
+            append_images=ims[1:],
+            duration=int(ms),
+            loop=0,
+            optimize=True,
+        )
         return buf.getvalue()
 
-    def _legend(self, ids: np.ndarray, types: np.ndarray, mode: str,
-                contacts: bool) -> dict:
+    def _legend(self, ids: np.ndarray, types: np.ndarray, mode: str, contacts: bool) -> dict:
         """id->name table for the hit pixels -> the legend document."""
         import mujoco  # lazy
 
@@ -841,13 +877,16 @@ class _MjRigBase:
             rows = int((ids == oid).sum())
             color = geomflags.seg_palette(oid + 1)[oid].tolist()
             entries[oid] = {
-                "id": oid, "type": label,
+                "id": oid,
+                "type": label,
                 "name": name or f"{label}_{oid}",
-                "body": body, "color": color, "pixels": rows,
+                "body": body,
+                "color": color,
+                "pixels": rows,
             }
         return geomflags.build_legend(
-            list(entries.values()),
-            {"geom": mode, "contacts": contacts, "segmentation": True})
+            list(entries.values()), {"geom": mode, "contacts": contacts, "segmentation": True}
+        )
 
 
 class MjBodyRig(_MjRigBase):
@@ -879,18 +918,18 @@ class MjWorldRig(_MjRigBase):
         bitwise (no convention round-trip).
         """
         if self._env is None or self._cam_id is None:
-            raise RuntimeError(
-                f"camera '{self.name}': not bound (bind_env)")
+            raise RuntimeError(f"camera '{self.name}': not bound (bind_env)")
         m = self._env.mj_model
-        saved = (m.cam_pos[self._cam_id].copy(),
-                 m.cam_quat[self._cam_id].copy())
-        self.state_table.set(self.name, None,
-                             np.asarray(pos, dtype=np.float64),
-                             np.asarray(quat_wxyz, dtype=np.float64))
+        saved = (m.cam_pos[self._cam_id].copy(), m.cam_quat[self._cam_id].copy())
+        self.state_table.set(
+            self.name,
+            None,
+            np.asarray(pos, dtype=np.float64),
+            np.asarray(quat_wxyz, dtype=np.float64),
+        )
         row = self.state_table.get(self.name)
         if row is None:
-            raise RuntimeError(
-                f"camera {self.name!r}: pose table row missing after write")
+            raise RuntimeError(f"camera {self.name!r}: pose table row missing after write")
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
         return saved
@@ -900,11 +939,10 @@ class MjWorldRig(_MjRigBase):
         m = self._env.mj_model
         m.cam_pos[self._cam_id], m.cam_quat[self._cam_id] = saved
         # the table read-back is the world-convention mirror of the slots
-        q_isaac = _quat_mul_np(np.asarray(saved[1], dtype=np.float64),
-                               _quat_conj(bridge_quat()))
-        self.state_table.set(self.name, None,
-                             np.asarray(saved[0], dtype=np.float64).copy(),
-                             q_isaac)
+        q_isaac = _quat_mul_np(np.asarray(saved[1], dtype=np.float64), _quat_conj(bridge_quat()))
+        self.state_table.set(
+            self.name, None, np.asarray(saved[0], dtype=np.float64).copy(), q_isaac
+        )
 
     def set_world_pose(self, pos, quat_wxyz, env_idx: int | None = None):
         """Persistent absolute world pose (freecam face).
@@ -919,17 +957,19 @@ class MjWorldRig(_MjRigBase):
         if env_idx not in (None, 0):
             raise ValueError(
                 f"camera '{self.name}': mujoco is single-env; env_idx "
-                f"must be None or 0, got {env_idx}")
+                f"must be None or 0, got {env_idx}"
+            )
         if self._env is None or self._cam_id is None:
-            raise RuntimeError(
-                f"camera '{self.name}': not bound (bind_env)")
-        self.state_table.set(self.name, None,
-                             np.asarray(pos, dtype=np.float64),
-                             np.asarray(quat_wxyz, dtype=np.float64))
+            raise RuntimeError(f"camera '{self.name}': not bound (bind_env)")
+        self.state_table.set(
+            self.name,
+            None,
+            np.asarray(pos, dtype=np.float64),
+            np.asarray(quat_wxyz, dtype=np.float64),
+        )
         row = self.state_table.get(self.name)
         if row is None:
-            raise RuntimeError(
-                f"camera {self.name!r}: pose table row missing after write")
+            raise RuntimeError(f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
@@ -950,8 +990,7 @@ class MjChaseRig(_MjRigBase):
         pos = rig.get("pos", DEFAULT_CHASE_OFFSET["pos"])
         lookat = rig.get("lookat", DEFAULT_CHASE_OFFSET["lookat"])
         self._pos_off = np.asarray([float(x) for x in pos], dtype=np.float64)
-        self._look_off = np.asarray([float(x) for x in lookat],
-                                    dtype=np.float64)
+        self._look_off = np.asarray([float(x) for x in lookat], dtype=np.float64)
 
     def _apply_live_pose(self) -> None:
         # chase recomputes its world pose from the root every sync; just
@@ -965,7 +1004,8 @@ class MjChaseRig(_MjRigBase):
             raise ValueError(
                 f"chase camera '{self.name}': mujoco backend is single-env "
                 f"(num_envs={env.num_envs}); target_env must be 0, got "
-                f"{self.target_env}")
+                f"{self.target_env}"
+            )
 
     def sync_pose(self, env_ids=None) -> None:
         """Re-pose the chase camera from the root (per-step tail).
@@ -993,23 +1033,24 @@ class MjChaseRig(_MjRigBase):
         c, s = math.cos(yaw), math.sin(yaw)
 
         def _rot_xy(off: np.ndarray) -> np.ndarray:
-            return np.array([off[0] * c - off[1] * s,
-                             off[0] * s + off[1] * c, off[2]])
+            return np.array([off[0] * c - off[1] * s, off[0] * s + off[1] * c, off[2]])
 
         pos = root + _rot_xy(self._pos_off + self._live_offset)
         lookat = root + _rot_xy(self._look_off)
         q_isaac = lookat_quat(pos, lookat)
         if self._live_yaw or self._live_pitch or self._live_roll:
             q_isaac = _quat_mul_np(
-                yaw_pitch_roll_quat(self._live_yaw, self._live_pitch,
-                                    self._live_roll), q_isaac)
-        self.state_table.set(self.name, None,
-                             np.asarray(pos, dtype=np.float64),
-                             np.asarray(q_isaac, dtype=np.float64))
+                yaw_pitch_roll_quat(self._live_yaw, self._live_pitch, self._live_roll), q_isaac
+            )
+        self.state_table.set(
+            self.name,
+            None,
+            np.asarray(pos, dtype=np.float64),
+            np.asarray(q_isaac, dtype=np.float64),
+        )
         row = self.state_table.get(self.name)
         if row is None:
-            raise RuntimeError(
-                f"camera {self.name!r}: pose table row missing after write")
+            raise RuntimeError(f"camera {self.name!r}: pose table row missing after write")
         m = self._env.mj_model
         m.cam_pos[self._cam_id] = row.pos
         m.cam_quat[self._cam_id] = mj_camera_quat(row.quat)
@@ -1029,8 +1070,8 @@ def build_mj_rig(spec: CameraSpec, render_groups=None) -> _MjRigBase:
     if rtype == "fixed":
         raise ValueError(
             f"camera {spec.name!r}: rig type 'fixed' was renamed 'world' "
-            f"(camera unification) -- update the config; there is no alias")
+            f"(camera unification) -- update the config; there is no alias"
+        )
     if rtype == "chase":
         return MjChaseRig(spec, render_groups=render_groups)
-    raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} "
-                     "(body|world|chase)")
+    raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} " "(body|world|chase)")

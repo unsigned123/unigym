@@ -19,6 +19,7 @@ the computed pose is the only record (bit-identical math: it reuses
 ``cameras.rigs.lookat_quat``, the same function the run-side write path
 uses).
 """
+
 from __future__ import annotations
 
 import json
@@ -37,27 +38,37 @@ SOURCES = ("snapshot", "capture", "camera_get", "orbit")
 def posed_world(pos, lookat) -> dict:
     """World doc for a transient posed capture (contract §sidecar bitwise anchor):
     quat from the repo's own lookat compose; fwd/up derived from it."""
-    q = lookat_quat(np.asarray(pos, dtype=np.float64),
-                    np.asarray(lookat, dtype=np.float64))
+    q = lookat_quat(np.asarray(pos, dtype=np.float64), np.asarray(lookat, dtype=np.float64))
     fwd, up = quat_axes(q)
-    return {"pos": [float(v) for v in pos],
-            "quat_wxyz": [float(v) for v in q],
-            "fwd": fwd, "up": up,
-            "lookat": [float(v) for v in lookat]}
+    return {
+        "pos": [float(v) for v in pos],
+        "quat_wxyz": [float(v) for v in q],
+        "fwd": fwd,
+        "up": up,
+        "lookat": [float(v) for v in lookat],
+    }
 
 
-def write_sidecar(jpg_path: str | Path, *, source: str, camera: str,
-                  run_id: str | None = None, tick: int | None = None,
-                  sim_ts: float | None = None, phase: str | None = None,
-                  world: dict | None = None, intrinsics: dict | None = None,
-                  convention: str | None = None, rig: str | None = None,
-                  mount: dict | None = None,
-                  world_error: str | None = None,
-                  extra: dict | None = None) -> Path:
+def write_sidecar(
+    jpg_path: str | Path,
+    *,
+    source: str,
+    camera: str,
+    run_id: str | None = None,
+    tick: int | None = None,
+    sim_ts: float | None = None,
+    phase: str | None = None,
+    world: dict | None = None,
+    intrinsics: dict | None = None,
+    convention: str | None = None,
+    rig: str | None = None,
+    mount: dict | None = None,
+    world_error: str | None = None,
+    extra: dict | None = None,
+) -> Path:
     """Write ``<jpg_path>.json`` (fail-fast on unknown source); returns it."""
     if source not in SOURCES:
-        raise ValueError(f"sidecar source must be one of {SOURCES}, "
-                         f"got {source!r}")
+        raise ValueError(f"sidecar source must be one of {SOURCES}, " f"got {source!r}")
     doc = {
         "schema": SCHEMA,
         "camera": camera,

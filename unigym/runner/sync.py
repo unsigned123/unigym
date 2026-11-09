@@ -20,6 +20,7 @@ are computed here (``TerminationState.from_extra`` + ``term_group.check``) —
 pure tensor ops, no RNG consumption, so moving them relative to collect.py's
 inline computation cannot perturb bit-exact rollouts.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -45,30 +46,33 @@ def _adapter_groups(instance):
     if not controls:
         return None
     adapter = getattr(instance, "adapter", None)
-    name = (getattr(adapter, "_unigym_name", None)
-            or getattr(getattr(instance, "spec", None), "adapter_name", None))
+    name = getattr(adapter, "_unigym_name", None) or getattr(
+        getattr(instance, "spec", None), "adapter_name", None
+    )
     groups = getattr(env, "adapter_groups", None)
     if groups is not None:
         if name in groups:
             return tuple(groups[name])
         raise ValueError(
             f"adapter {name!r} has no entry in env.adapter_groups "
-            f"(declared adapters: {sorted(groups)})")
+            f"(declared adapters: {sorted(groups)})"
+        )
     if not name:
         # test doubles / direct construction: the body control faces are a
         # cardinality fact, not a guess.
-        owned = tuple(c.action_face for c in controls.values()
-                      if c.action_face == c.articulation)
+        owned = tuple(c.action_face for c in controls.values() if c.action_face == c.articulation)
         if owned:
             return owned
         raise ValueError(
             "cannot resolve the adapter's control groups: no registry "
-            "name on the adapter and no env.adapter_groups partition")
+            "name on the adapter and no env.adapter_groups partition"
+        )
     owned = tuple(c.name for c in controls.values() if c.adapter == name)
     if not owned:
         raise ValueError(
             f"adapter {name!r} owns no control group in env.controls; "
-            f"declared groups: {[(c.name, c.adapter) for c in controls.values()]}")
+            f"declared groups: {[(c.name, c.adapter) for c in controls.values()]}"
+        )
     return owned
 
 
@@ -164,10 +168,21 @@ class SyncRunner:
             adapter_groups=_adapter_groups(instance),
         )
 
-    def __init__(self, cfg, profile, adapter, sampler, term_group, env, sink,
-                 reset_on_termination: bool = False, reset_mask_fn=None,
-                 replay=None, auto_reset: bool = True,
-                 adapter_groups=None):
+    def __init__(
+        self,
+        cfg,
+        profile,
+        adapter,
+        sampler,
+        term_group,
+        env,
+        sink,
+        reset_on_termination: bool = False,
+        reset_mask_fn=None,
+        replay=None,
+        auto_reset: bool = True,
+        adapter_groups=None,
+    ):
         self.cfg = cfg
         self.profile = profile
         self.adapter = adapter
@@ -182,10 +197,8 @@ class SyncRunner:
         # v104.3: the build-time controls[] partition names exactly the
         # control groups this adapter owns.  None = no control surface
         # (test doubles / direct construction) -> historical behavior.
-        self.adapter_groups = (None if adapter_groups is None
-                               else tuple(adapter_groups))
-        self.adapter_name = (getattr(adapter, "_unigym_name", None)
-                             or type(adapter).__name__)
+        self.adapter_groups = None if adapter_groups is None else tuple(adapter_groups)
+        self.adapter_name = getattr(adapter, "_unigym_name", None) or type(adapter).__name__
         self.controls = dict(getattr(env, "controls", None) or {})
         self.total_steps = int(cfg["collect"]["steps"])
         # rewind seam: the resumable loop counter + the snapshot's
@@ -199,8 +212,7 @@ class SyncRunner:
         self._obs_frame = None
         # joint-limit terminations consume a per-articulation limits mapping
         self._term_joint_limits = None
-        if any(getattr(t, "requires_joint_limits", False)
-                for t in term_group.terminations):
+        if any(getattr(t, "requires_joint_limits", False) for t in term_group.terminations):
             self._term_joint_limits = _joint_limits_by_articulation(env)
 
     def _notify_rewind(self, info: dict) -> None:
@@ -226,7 +238,8 @@ class SyncRunner:
         if not isinstance(actions, dict):
             raise TypeError(
                 f"adapter {self.adapter_name!r} returned "
-                f"{type(actions).__name__}, expected dict[str, NamedAction]")
+                f"{type(actions).__name__}, expected dict[str, NamedAction]"
+            )
         owned = set(self.adapter_groups)
         keys = set(actions)
         missing = sorted(owned - keys)
@@ -235,13 +248,15 @@ class SyncRunner:
             raise ValueError(
                 f"adapter {self.adapter_name!r} action groups mismatch: "
                 f"missing={missing}, extra={extra}, "
-                f"declared={list(self.adapter_groups)}")
+                f"declared={list(self.adapter_groups)}"
+            )
         for face, entry in actions.items():
             control = self.controls.get(face)
             if control is None:
                 raise ValueError(
                     f"action face {face!r} is not a declared control "
-                    f"(declared controls: {sorted(self.controls)})")
+                    f"(declared controls: {sorted(self.controls)})"
+                )
             kind = getattr(entry, "kind", None)
             if kind != control.target:
                 from unigym.runtime.actions import LEGAL_ACTION_KINDS
@@ -249,7 +264,8 @@ class SyncRunner:
                 raise ValueError(
                     f"action face {face!r}: configured target "
                     f"{control.target!r}, actual kind {kind!r}; legal "
-                    f"kinds: {list(LEGAL_ACTION_KINDS)}")
+                    f"kinds: {list(LEGAL_ACTION_KINDS)}"
+                )
 
     def _start(self) -> None:
         """Reset the run-scoped iteration state (cmd / obs frame)."""
@@ -319,20 +335,20 @@ class SyncRunner:
         # dataset-facing frame (default returns obs_frame itself: the
         # recorded "obs" stays the policy frame unless an adapter
         # overrides compute_obs_collect)
-        obs_collect = adapter.compute_obs_collect(
-            obs_frame, env.obs_cache, cmd, env)
+        obs_collect = adapter.compute_obs_collect(obs_frame, env.obs_cache, cmd, env)
         # effective recorded/language command: sampler output, or the
         # adapter's self-generated cascade command (available after act)
         eff_cmd = cmd
         if eff_cmd is None and generates_command:
             eff_cmd = adapter.last_command
         # unified termination check (pure tensor ops, no RNG consumption)
-        term_state = TerminationState.from_extra(
-            extra, joint_pos_limits=self._term_joint_limits)
+        term_state = TerminationState.from_extra(extra, joint_pos_limits=self._term_joint_limits)
         terminated = self.term_group.check(term_state)
         alive = (~terminated) & torch.isfinite(obs_frame).all(dim=-1)
-        term_metrics = {"terminated": float(terminated.float().mean()),
-                        "fallen": float(terminated.float().mean())}
+        term_metrics = {
+            "terminated": float(terminated.float().mean()),
+            "fallen": float(terminated.float().mean()),
+        }
         if len(self.term_group) > 1:
             for k, m in self.term_group.check_detail(term_state).items():
                 term_metrics[f"term_{k}"] = float(m.float().mean())
@@ -366,17 +382,18 @@ class SyncRunner:
             self._cmd = cmd
             self._notify_rewind(dict(getattr(rb, "info", {}) or {}))
             return StepResult(
-                t=t, obs=obs, extra=extra,
-                reset_env_ids=torch.zeros(0, dtype=torch.int64,
-                                          device=device),
-                terminated=terminated)
+                t=t,
+                obs=obs,
+                extra=extra,
+                reset_env_ids=torch.zeros(0, dtype=torch.int64, device=device),
+                terminated=terminated,
+            )
         self._tick = t + 1
         # reset policy: episode clock due | (terminated | custom mask)
         due = extra["reset_env_ids"]
         added = None
         if self.reset_mask_fn is not None:
-            added = torch.as_tensor(self.reset_mask_fn(bundle),
-                                    dtype=torch.int64, device=device)
+            added = torch.as_tensor(self.reset_mask_fn(bundle), dtype=torch.int64, device=device)
         elif self.reset_on_termination:
             added = torch.nonzero(terminated).squeeze(-1).to(torch.int64)
         if added is not None and added.numel() > 0:
@@ -393,8 +410,7 @@ class SyncRunner:
         self.sink.on_step_end(t, bundle)
         self._obs_frame = obs_frame
         self._cmd = cmd
-        return StepResult(t=t, obs=obs, extra=extra,
-                          reset_env_ids=due, terminated=terminated)
+        return StepResult(t=t, obs=obs, extra=extra, reset_env_ids=due, terminated=terminated)
 
     def run(self, stop_when: Callable[[], bool] | None = None) -> dict:
         """Run the rollout; returns the sink's summary dict.
@@ -416,9 +432,8 @@ class SyncRunner:
             exhausted = getattr(self.adapter, "actions_exhausted", None)
             if callable(exhausted) and exhausted():
                 break
-            if self.replay is not None and not self.replay.has_tick(
-                    int(self._tick)):
-                break                       # trace exhausted (§7.3: stop)
+            if self.replay is not None and not self.replay.has_tick(int(self._tick)):
+                break  # trace exhausted (§7.3: stop)
             self.tick()
 
         return self.sink.on_run_end()
@@ -445,8 +460,7 @@ class SyncRunner:
             self.adapter.on_reset(due)
             if self.sampler is not None and not (fresh and env_ids is None):
                 self._cmd = self.sampler.reset(due)
-        return StepResult(t=int(self._tick), obs={}, extra={},
-                          reset_env_ids=due, terminated=None)
+        return StepResult(t=int(self._tick), obs={}, extra={}, reset_env_ids=due, terminated=None)
 
     def close(self) -> None:
         """No-op: the synchronous runner owns no loop/thread to stop."""

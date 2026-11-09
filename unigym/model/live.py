@@ -15,6 +15,7 @@ Only the MuJoCo family is bound today (``MujocoEnv`` and its ``mjwarp``
 mirror, which shares the ``MjModel``/``MjData`` contract).  Any other
 backend fails fast with ``NotImplementedError``.
 """
+
 from __future__ import annotations
 
 import re
@@ -63,13 +64,16 @@ class _LiveBinder(Protocol):
     """The backend half of a live binding (implemented by the engine layer)."""
 
     def select(
-        self, env: int | None,
+        self,
+        env: int | None,
     ) -> tuple[object, Sequence[_MjData], Sequence[int]]:
         """Return ``(native_env, datas, indices)`` for an env selector."""
         ...
 
     def joint_addresses(
-        self, native: object, info: Joint,
+        self,
+        native: object,
+        info: Joint,
     ) -> tuple[int, int]:
         """Return ``(qpos_adr, dof_adr)`` for one joint."""
         ...
@@ -91,19 +95,17 @@ class LiveTable(Table[_LiveT], Generic[_LiveT]):
     __slots__ = ()
 
     @overload
-    def __getitem__(self, key: int) -> _LiveT:
-        ...
+    def __getitem__(self, key: int) -> _LiveT: ...
 
     @overload
-    def __getitem__(self, key: str) -> _LiveT:
-        ...
+    def __getitem__(self, key: str) -> _LiveT: ...
 
     @overload
-    def __getitem__(self, key: slice) -> LiveTable[_LiveT]:
-        ...
+    def __getitem__(self, key: slice) -> LiveTable[_LiveT]: ...
 
     def __getitem__(
-        self, key: int | str | slice,
+        self,
+        key: int | str | slice,
     ) -> _LiveT | LiveTable[_LiveT]:
         """Slice into a ``LiveTable``; int/name lookup stays Table-like."""
         if isinstance(key, slice):
@@ -115,7 +117,8 @@ class LiveTable(Table[_LiveT], Generic[_LiveT]):
         return LiveTable(super().matching(regex))
 
     def filter(
-        self, pred: Callable[[_LiveT], bool] | None = None,
+        self,
+        pred: Callable[[_LiveT], bool] | None = None,
         **fields: JsonValue,
     ) -> LiveTable[_LiveT]:
         """Return a ``LiveTable`` satisfying *pred* and equality fields."""
@@ -167,8 +170,8 @@ class LiveJoint:
         adr, _ = self._model._joint_addresses(native, self._info)
         size = _qpos_size(self._info)
         if single:
-            return _readonly(datas[indices[0]].qpos[adr:adr + size])
-        rows = [datas[e].qpos[adr:adr + size] for e in indices]
+            return _readonly(datas[indices[0]].qpos[adr : adr + size])
+        rows = [datas[e].qpos[adr : adr + size] for e in indices]
         return _readonly(np.stack(rows))
 
     def qvel(self, env: int | None = None) -> _Floats:
@@ -187,8 +190,8 @@ class LiveJoint:
         _, dof_adr = self._model._joint_addresses(native, self._info)
         size = _qvel_size(self._info)
         if single:
-            return _readonly(datas[indices[0]].qvel[dof_adr:dof_adr + size])
-        rows = [datas[e].qvel[dof_adr:dof_adr + size] for e in indices]
+            return _readonly(datas[indices[0]].qvel[dof_adr : dof_adr + size])
+        rows = [datas[e].qvel[dof_adr : dof_adr + size] for e in indices]
         return _readonly(np.stack(rows))
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -229,11 +232,9 @@ class LiveBody:
         return getattr(self._info, name)
 
     def world_pose(
-        self, env: int | None = None,
-    ) -> (
-        tuple[_Floats, QuatWXYZ]
-        | tuple[_Floats, list[QuatWXYZ]]
-    ):
+        self,
+        env: int | None = None,
+    ) -> tuple[_Floats, QuatWXYZ] | tuple[_Floats, list[QuatWXYZ]]:
         """Return ``(pos, quat)`` in the world frame, read-only.
 
         Args:
@@ -252,11 +253,9 @@ class LiveBody:
         body_id = self._model._body_id(native, self._info)
         if single:
             data = datas[indices[0]]
-            return (_readonly(data.xpos[body_id]),
-                    QuatWXYZ(_readonly(data.xquat[body_id])))
+            return (_readonly(data.xpos[body_id]), QuatWXYZ(_readonly(data.xquat[body_id])))
         positions = np.stack([datas[e].xpos[body_id] for e in indices])
-        quats = [QuatWXYZ(_readonly(datas[e].xquat[body_id]))
-                 for e in indices]
+        quats = [QuatWXYZ(_readonly(datas[e].xquat[body_id])) for e in indices]
         return _readonly(positions), quats
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -274,7 +273,8 @@ def _qpos_size(info: Joint) -> int:
     if size is None:
         raise ValueError(
             f"live model: joint {info.name!r} has unsupported type "
-            f"{info.type!r} (expected hinge/slide/ball/free)")
+            f"{info.type!r} (expected hinge/slide/ball/free)"
+        )
     return size
 
 
@@ -284,7 +284,8 @@ def _qvel_size(info: Joint) -> int:
     if size is None:
         raise ValueError(
             f"live model: joint {info.name!r} has unsupported type "
-            f"{info.type!r} (expected hinge/slide/ball/free)")
+            f"{info.type!r} (expected hinge/slide/ball/free)"
+        )
     return size
 
 
@@ -294,7 +295,9 @@ def _backend_label(ir: ModelIR, env: object) -> str:
 
 
 def _resolve_live_binder(
-    ir: ModelIR, env: object, label: str,
+    ir: ModelIR,
+    env: object,
+    label: str,
 ) -> _LiveBinder:
     """Resolve the backend's ``live_provider`` face (registry, lazy).
 
@@ -311,11 +314,11 @@ def _resolve_live_binder(
     if provider is None:
         raise NotImplementedError(
             f"live proxies: backend {label!r} has no live model binding "
-            f"(hint: live proxies: mujoco/mjwarp today)")
+            f"(hint: live proxies: mujoco/mjwarp today)"
+        )
     binder = provider()(ir, env)
     if not isinstance(binder, _LiveBinder):
-        raise NotImplementedError(
-            f"live proxies: backend {label!r} returned an invalid binder")
+        raise NotImplementedError(f"live proxies: backend {label!r} returned an invalid binder")
     return binder
 
 
@@ -337,10 +340,8 @@ class LiveModel:
         self._ir = ir
         self._backend = _backend_label(ir, env)
         self._binder = _resolve_live_binder(ir, env, self._backend)
-        self._joints = LiveTable[LiveJoint](
-            [LiveJoint(self, row) for row in ir.joints])
-        self._bodies = LiveTable[LiveBody](
-            [LiveBody(self, row) for row in ir.bodies])
+        self._joints = LiveTable[LiveJoint]([LiveJoint(self, row) for row in ir.joints])
+        self._bodies = LiveTable[LiveBody]([LiveBody(self, row) for row in ir.bodies])
 
     @property
     def ir(self) -> ModelIR:
@@ -363,13 +364,16 @@ class LiveModel:
         return self._bodies
 
     def _select(
-        self, env: int | None,
+        self,
+        env: int | None,
     ) -> tuple[object, Sequence[_MjData], Sequence[int]]:
         """Return ``(native_env, datas, indices)`` for an env selector."""
         return self._binder.select(env)
 
     def _joint_addresses(
-        self, native: object, info: Joint,
+        self,
+        native: object,
+        info: Joint,
     ) -> tuple[int, int]:
         """Return and cache ``(qpos_adr, dof_adr)`` for one joint."""
         return self._binder.joint_addresses(native, info)
@@ -380,5 +384,7 @@ class LiveModel:
 
     def __repr__(self) -> str:
         """Return a compact binding summary."""
-        return (f"LiveModel(backend={self._backend!r}, "
-                f"joints={len(self._joints)}, bodies={len(self._bodies)})")
+        return (
+            f"LiveModel(backend={self._backend!r}, "
+            f"joints={len(self._joints)}, bodies={len(self._bodies)})"
+        )

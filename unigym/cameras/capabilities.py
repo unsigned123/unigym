@@ -4,15 +4,14 @@
 backend's own declaration table
 is the only truth.  No second capability type, no second gate.
 """
+
 from __future__ import annotations
 
 from unigym.backends.registry import BackendInfo, Trait
 
 __all__ = ["check", "check_backend", "required_traits"]
 
-_LEGAL_COMBINATIONS = (
-    "(global, shared), (per_env, shared), (per_env, per_instance)"
-)
+_LEGAL_COMBINATIONS = "(global, shared), (per_env, shared), (per_env, per_instance)"
 
 
 def required_traits(spec) -> tuple[Trait, ...]:
@@ -55,7 +54,8 @@ def check(backend_info: BackendInfo, spec, num_envs: int | None = None) -> None:
             f"capability {[t.name for t in missing]} requested by camera "
             f"{spec.name!r} (count={spec.count!r}, state={spec.state!r}) "
             f"| hint: legal (count, state) combinations: "
-            f"{_LEGAL_COMBINATIONS}; backend declares {available}")
+            f"{_LEGAL_COMBINATIONS}; backend declares {available}"
+        )
     blocked = backend_info.blocked(required, num_envs)
     if blocked:
         trait, scope = blocked[0]
@@ -65,4 +65,5 @@ def check(backend_info: BackendInfo, spec, num_envs: int | None = None) -> None:
             f"num_envs={num_envs}: trait is scoped to "
             f"max_envs={scope.max_envs} (requested num_envs={num_envs}) "
             f"| hint: {scope.note or 'this capability is N=1 only'}; "
-            f"legal (count, state) combinations: {_LEGAL_COMBINATIONS}")
+            f"legal (count, state) combinations: {_LEGAL_COMBINATIONS}"
+        )

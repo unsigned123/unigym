@@ -62,6 +62,7 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
   duration sampling (torch, same as the isaaclab backend), so same-seed
   runs are bit-comparable.
 """
+
 from __future__ import annotations
 
 import os
@@ -107,8 +108,7 @@ from unigym.backends.shared.mjfamily.model.ir_access import (
     body_id,
     site_id,
 )
-from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, \
-    wire_reset_face
+from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, wire_reset_face
 from unigym.backends import collect_core
 from unigym.backends.shared.mjfamily.props import multienv
 from unigym.backends.shared.mjfamily.scene.scene_spawn import (
@@ -167,15 +167,15 @@ BASE_BODY = "pelvis"
 # actuator_seam is ON: the pluggable ctrl laws (unigym/actuators,
 # env.params.actuators) -- isaaclab backends reject non-standard
 # declarations at the capability gate until their ActuatorBase mapping lands.
-BACKEND_CAPABILITIES = BackendCapabilities(recorder=True, cameras=True,
-                                           contacts=True, props=True,
-                                           actuator_seam=True,
-                                           multi_env=True)
+BACKEND_CAPABILITIES = BackendCapabilities(
+    recorder=True, cameras=True, contacts=True, props=True, actuator_seam=True, multi_env=True
+)
 
 
 def _gather_gain(joint: str, table) -> Optional[float]:
     """First regex (fullmatch) hit in a g1_constants gain group table."""
     import re
+
     for expr, val in table.items():
         if re.fullmatch(expr, joint):
             return float(val)
@@ -210,7 +210,8 @@ def _policy_gains(joint_names, kp_override=None, kd_override=None):
             raise ValueError(
                 f"mujoco backend: no PD gain group matches policy joint "
                 f"{name!r} (kp={kv}, kd={dv}); extend the gain tables or "
-                f"set env.params.kp/kd")
+                f"set env.params.kp/kd"
+            )
         kp.append(kv)
         kd.append(dv)
     return np.asarray(kp, dtype=np.float64), np.asarray(kd, dtype=np.float64)
@@ -220,6 +221,7 @@ def _override_hit(name: str, override) -> Optional[float]:
     if not override:
         return None
     import re
+
     if name in override:
         return float(override[name])
     for expr, val in override.items():
@@ -259,8 +261,14 @@ def _mj_enum(val):
     if isinstance(val, (int, float)):
         return int(val)
     import mujoco
-    for enum_t in (mujoco.mjtIntegrator, mujoco.mjtCone, mujoco.mjtJoint,
-                   mujoco.mjtSolver, mujoco.mjtEnableBit):
+
+    for enum_t in (
+        mujoco.mjtIntegrator,
+        mujoco.mjtCone,
+        mujoco.mjtJoint,
+        mujoco.mjtSolver,
+        mujoco.mjtEnableBit,
+    ):
         member = getattr(enum_t, str(val), None)
         if member is not None:
             return int(member)
@@ -417,44 +425,56 @@ class MujocoEnv:
     _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
 
-    def __init__(self, robot_profile, adapter, num_envs: int = 1,
-                 episode_length_s: float = 10.0,
-                 decimation: int = 4, sim_dt: float = 0.005,
-                 backend_params: Optional[dict] = None,
-                 world_base=None,
-                 articulations=None,
-                 device: str = "cpu",
-        terrain_cfg=None, env_spacing: float = 4.0,
-        events_cfg=None, recorder=None,
-        prop_manager=None, lighting=None, depth_camera=None,
-                 init_pose=None, camera_manager=None, contact_manager=None,
-                 director_cfg=None, artifact_dir: Optional[str] = None,
-                 controls=None, recipes=None, backend_options=None,
-                 articulation_specs=None):
+    def __init__(
+        self,
+        robot_profile,
+        adapter,
+        num_envs: int = 1,
+        episode_length_s: float = 10.0,
+        decimation: int = 4,
+        sim_dt: float = 0.005,
+        backend_params: Optional[dict] = None,
+        world_base=None,
+        articulations=None,
+        device: str = "cpu",
+        terrain_cfg=None,
+        env_spacing: float = 4.0,
+        events_cfg=None,
+        recorder=None,
+        prop_manager=None,
+        lighting=None,
+        depth_camera=None,
+        init_pose=None,
+        camera_manager=None,
+        contact_manager=None,
+        director_cfg=None,
+        artifact_dir: Optional[str] = None,
+        controls=None,
+        recipes=None,
+        backend_options=None,
+        articulation_specs=None,
+    ):
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
                 f"mujoco backend requires mujoco (host .venv_sim); "
-                f"import failed with: {_MUJOCO_IMPORT_ERROR}")
+                f"import failed with: {_MUJOCO_IMPORT_ERROR}"
+            )
         n = int(num_envs)
         if n < 1:
-            raise ValueError(
-                f"MujocoEnv requires num_envs>=1, got {num_envs}")
+            raise ValueError(f"MujocoEnv requires num_envs>=1, got {num_envs}")
         if str(torch.device(device)) != "cpu":
-            raise NotImplementedError(
-                f"MujocoEnv is cpu-only, got device {device!r}")
-        if any(x is not None for x in (events_cfg,
-                                       lighting, depth_camera, init_pose)):
+            raise NotImplementedError(f"MujocoEnv is cpu-only, got device {device!r}")
+        if any(x is not None for x in (events_cfg, lighting, depth_camera, init_pose)):
             raise NotImplementedError(
                 "mujoco backend does not implement events/"
                 "depth_camera/init_pose; the capability gate should have "
-                "rejected this request")
+                "rejected this request"
+            )
         if n > 1:
-            multienv.reject_model_global_unsupported(
-                n, prop_manager, camera_manager, director_cfg)
+            multienv.reject_model_global_unsupported(n, prop_manager, camera_manager, director_cfg)
         params = dict(backend_params or {})
         options = dict(backend_options or {})
-        auto_prefix = bool((options.get("compose") or {}).get(
-            "auto_prefix", False))
+        auto_prefix = bool((options.get("compose") or {}).get("auto_prefix", False))
         reject_legacy_mj_model(params, source="env.params")
 
         # ---- model load (flat-ground scene; timestep -> sim_dt) ----
@@ -490,37 +510,34 @@ class MujocoEnv:
         # base BEFORE the scene/props/camera/director injections.  None
         # means the base is already fused (no articulation declares
         # model.mjcf) and the historical load path stays byte-identical.
-        composition = compose_articulation_spec(
-            mj_path, articulations, auto_prefix=auto_prefix)
+        composition = compose_articulation_spec(mj_path, articulations, auto_prefix=auto_prefix)
         self._mj_composition = composition
-        self._mj_name_map = (composition.name_map if composition is not None
-                             else MjNameMap.identity())
-        composed_spec = (composition.spec if composition is not None
-                         else None)
+        self._mj_name_map = (
+            composition.name_map if composition is not None else MjNameMap.identity()
+        )
+        composed_spec = composition.spec if composition is not None else None
         if composed_spec is not None or needs_spec(
-                self.camera_manager, self.prop_manager, self.director_cfg,
-                self.mj_scene, spawn_base):
+            self.camera_manager, self.prop_manager, self.director_cfg, self.mj_scene, spawn_base
+        ):
             from unigym.scenes.registry import build_scene_definition
             from unigym.backends.shared.mjfamily.scene.scene_engine import compose_and_attach
 
-            mjspec = (composed_spec if composed_spec is not None
-                      else mujoco.MjSpec.from_file(mj_path))
+            mjspec = (
+                composed_spec if composed_spec is not None else mujoco.MjSpec.from_file(mj_path)
+            )
             scene = None
             if self.mj_scene is not None:
                 # the mj_scene_params slot dict rides the provider
                 # dispatch verbatim; absent -> the provider's own gates
-                scene = build_scene_definition(
-                    str(self.mj_scene), self._mj_scene_params)
-                scene, self._fill_record = _fill_scene_content(
-                    scene, self._content_spec)
+                scene = build_scene_definition(str(self.mj_scene), self._mj_scene_params)
+                scene, self._fill_record = _fill_scene_content(scene, self._content_spec)
                 self._placement_regions = compose_and_attach(mjspec, scene)
             # the fixed-base spawn declaration (None -> XML-baked pose)
             apply_spawn_base_pose(mjspec, spawn_base)
             # the scene artifact face serializes the SAME chain the A/B
             # dump tool pins (base model + scene + spawn rewrite), BEFORE
             # the camera/prop/director layers join the spec and compile.
-            composed_xml = capture_composed_xml(
-                mjspec, self.artifact_dir, scene)
+            composed_xml = capture_composed_xml(mjspec, self.artifact_dir, scene)
             if self.camera_manager is not None:
                 # inject the declared rigs as <camera> elements BEFORE
                 # compilation (MjSpec path; see cameras/mujoco_backend.py)
@@ -528,11 +545,11 @@ class MujocoEnv:
             if self.prop_manager is not None:
                 self.prop_manager.inject_spec(mjspec)
             if self.director_cfg is not None:
-                from unigym.backends.mujoco.director.gripper import (
-                    add_director_bodies)
-                add_director_bodies(mjspec, self.director_cfg,
-                                    self.prop_manager)
+                from unigym.backends.mujoco.director.gripper import add_director_bodies
+
+                add_director_bodies(mjspec, self.director_cfg, self.prop_manager)
             from unigym.backends.shared.mjfamily.model.provider import MujocoModelProvider
+
             self._model = mjspec.compile()
             # the assembled IR is the COMPILED one (addresses/ids
             # filled from MjModel); the conformance digest still builds
@@ -540,18 +557,24 @@ class MujocoEnv:
             self._model_ir = MujocoModelProvider().describe(self._model)
             self._native_model_ir = self._model_ir
             self.artifact_paths = write_scene_artifacts(
-                self.artifact_dir, scene, self.mj_scene, self._model,
-                self._mj_scene_params, composed_xml,
-                fill_record=self._fill_record)
+                self.artifact_dir,
+                scene,
+                self.mj_scene,
+                self._model,
+                self._mj_scene_params,
+                composed_xml,
+                fill_record=self._fill_record,
+            )
         else:
             self._model = mujoco.MjModel.from_xml_path(mj_path)
             from unigym.backends.shared.mjfamily.model.provider import MujocoModelProvider
+
             self._model_ir = MujocoModelProvider().describe(self._model)
             self._native_model_ir = self._model_ir
         if self._placement_regions:
             from unigym.backends.shared.mjfamily.scene.scene_render import bind_placement_regions
-            self._placement_regions = bind_placement_regions(
-                self._model, self._placement_regions)
+
+            self._placement_regions = bind_placement_regions(self._model, self._placement_regions)
         self._model.opt.timestep = float(sim_dt)  # XML ships 0.002 (500 Hz)
         # SIMPLE-alignment knob (env.params.mj_opt): engine-option overrides
         # applied post-compile, e.g. {impratio: 10, integrator:
@@ -561,8 +584,8 @@ class MujocoEnv:
         for opt_key, opt_val in (params.get("mj_opt") or {}).items():
             if not hasattr(self._model.opt, opt_key):
                 raise ValueError(
-                    f"mujoco backend: mj_opt key {opt_key!r} is not an "
-                    f"mjtOption field")
+                    f"mujoco backend: mj_opt key {opt_key!r} is not an " f"mjtOption field"
+                )
             cur = getattr(self._model.opt, opt_key)
             val = _mj_enum(opt_val) if isinstance(cur, int) else type(cur)(opt_val)
             setattr(self._model.opt, opt_key, val)
@@ -579,14 +602,15 @@ class MujocoEnv:
             if self._boost_body_id < 0:
                 raise ValueError(
                     f"mujoco backend: obj_gravity_boost body {bname!r} "
-                    f"not found in the MJ model")
+                    f"not found in the MJ model"
+                )
             self._boost_fz = float(boost.get("force_z", 0.0))
         else:
             self._boost_body_id, self._boost_fz = -1, 0.0
         # EEF site record family (env.params.record_sites)
         self._record_sites = self._resolve_record_sites(params)
         self._datas = [mujoco.MjData(self._model) for _ in range(n)]
-        self._data = self._datas[0]   # legacy alias: tests/scene/director read it
+        self._data = self._datas[0]  # legacy alias: tests/scene/director read it
         self._active_data = self._datas[0]
         m = self._model
         self._decimation = int(decimation)
@@ -602,26 +626,24 @@ class MujocoEnv:
         # spawn_xy/spawn_yaw (forward-port from the cyx g1_nav fork): planar
         # spawn pose written into the freejoint qpos on EVERY reset.  Fail-fast
         # validation; the defaults keep the origin spawn bit-for-bit identical.
-        self._spawn_xy = np.asarray(params.get("spawn_xy", [0., 0.]),
-                                    dtype=float)
-        self._spawn_yaw = float(params.get("spawn_yaw", 0.))
-        if (self._spawn_xy.shape != (2,)
-                or not np.isfinite(self._spawn_xy).all()
-                or not np.isfinite(self._spawn_yaw)):
-            raise ValueError(
-                "spawn_xy must be finite xy; spawn_yaw must be finite radians")
+        self._spawn_xy = np.asarray(params.get("spawn_xy", [0.0, 0.0]), dtype=float)
+        self._spawn_yaw = float(params.get("spawn_yaw", 0.0))
+        if (
+            self._spawn_xy.shape != (2,)
+            or not np.isfinite(self._spawn_xy).all()
+            or not np.isfinite(self._spawn_yaw)
+        ):
+            raise ValueError("spawn_xy must be finite xy; spawn_yaw must be finite radians")
         # fixed-base (no freejoint) state-readout constants --
         # the base frame IS the configured spawn pose (the base is welded
         # to the world and never moves), velocities are zero, projected
         # gravity follows the spawn yaw.  The freejoint path never reads
         # these (its base state lives in qpos[0:7]/qvel[0:6]).
-        self._fixed_base_pos_w = np.array(
-            [*self._spawn_xy, self._spawn_height], dtype=np.float64)
+        self._fixed_base_pos_w = np.array([*self._spawn_xy, self._spawn_height], dtype=np.float64)
         self._fixed_base_quat_w = np.array(
-            [np.cos(self._spawn_yaw / 2), 0., 0.,
-             np.sin(self._spawn_yaw / 2)], dtype=np.float64)
-        self._contact_force_threshold = float(
-            params.get("contact_force_threshold", 1.0))
+            [np.cos(self._spawn_yaw / 2), 0.0, 0.0, np.sin(self._spawn_yaw / 2)], dtype=np.float64
+        )
+        self._contact_force_threshold = float(params.get("contact_force_threshold", 1.0))
 
         # ---- feat/contact-manager: bind AFTER model/data exist (body ids,
         # geom tables); no scene elements are needed (setup_scene is a no-op)
@@ -635,6 +657,7 @@ class MujocoEnv:
         self.prop_backend = None
         if self.prop_manager is not None:
             from unigym.backends.shared.mjfamily.props.props import MujocoPropBackend
+
             self.prop_backend = MujocoPropBackend(self.prop_manager)
             self.prop_backend.bind_env(self)
             self.prop_backend.on_reset([0], self)
@@ -647,28 +670,28 @@ class MujocoEnv:
         self._articulation_specs = tuple(articulations or ())
         self._recipes = dict(recipes or {})
         self._planned_controls = tuple(controls or ())
-        self._jid0 = 1 if int(m.jnt_type[0]) == int(mujoco.mjtJoint.mjJNT_FREE) \
-            else 0
+        self._jid0 = 1 if int(m.jnt_type[0]) == int(mujoco.mjtJoint.mjJNT_FREE) else 0
         self._has_freejoint = bool(self._jid0)
-        init_tables(self, m, params, _policy_gains,
-                    label="mujoco backend")
+        init_tables(self, m, params, _policy_gains, label="mujoco backend")
         self._hand_names = sorted(
-            n for art in self._articulation_order
+            n
+            for art in self._articulation_order
             for c in self._control_order
             if c.articulation == art.name and c.action_face != art.name
-            for n in c.joint_names)
+            for n in c.joint_names
+        )
         self._action_resolver = MujocoJointResolver(
-            m, [], [], prop_actuators=self._prop_actuators,
-            model_ir=self._model_ir)
+            m, [], [], prop_actuators=self._prop_actuators, model_ir=self._model_ir
+        )
         self._joint_gathers: dict = {}
         first = next(
-            (c for c in self._control_order
-             if not c.prop and c.action_face == c.articulation),
-            self._control_order[0] if self._control_order else None)
+            (c for c in self._control_order if not c.prop and c.action_face == c.articulation),
+            self._control_order[0] if self._control_order else None,
+        )
         if first is not None:
             self._perm_il2pol = torch.tensor(
-                [int(i) for i in first.addresses.get("perm_il2pol", ())],
-                dtype=torch.int64)
+                [int(i) for i in first.addresses.get("perm_il2pol", ())], dtype=torch.int64
+            )
             self._perm_pol2il = torch.argsort(self._perm_il2pol)
             self._restricted_to_policy = torch.argsort(self._perm_pol2il)
         else:  # pragma: no cover - a run always declares controls
@@ -689,8 +712,7 @@ class MujocoEnv:
         # and the GR1 robot-body stages keep their engine-side call
         # site below (unchanged order, shared stream -- determinism
         # red line).  See unigym/backends/shared/mjfamily/props/reset_face.py.
-        (self._initializer, self._reset_spec) = \
-            wire_reset_face(self, params, robot_profile)
+        (self._initializer, self._reset_spec) = wire_reset_face(self, params, robot_profile)
 
         # ---- compatibility aliases for the first articulation ----
         # (_read_state / _foot_contact_forces / multienv helpers still read
@@ -709,8 +731,7 @@ class MujocoEnv:
         # ---- obs cache (exactly the adapter's requests) ----
         self._obs_requests = adapter.get_obs_requests()
         if self.contact_manager is not None:
-            self.contact_manager.register_obs_requests(
-                {r.key for r in self._obs_requests})
+            self.contact_manager.register_obs_requests({r.key for r in self._obs_requests})
         # per-articulation catalogs (camera/contact/prop/record-site keys
         # join the FIRST articulation's catalog; robot-state keys are
         # namespaced per articulation).
@@ -724,9 +745,13 @@ class MujocoEnv:
                 prop_manager=self.prop_manager,
                 contact_manager=self.contact_manager,
                 articulation_joint_names=list(art.joint_names),
-                record_sites=(tuple(name for name, _ in self._record_sites)
-                              if art is self._articulation_order[0] else None),
-                articulation=art.name)
+                record_sites=(
+                    tuple(name for name, _ in self._record_sites)
+                    if art is self._articulation_order[0]
+                    else None
+                ),
+                articulation=art.name,
+            )
             art.catalog = cat
             self.obs_catalogs[art.name] = cat
             entries.update(cat.entries)
@@ -738,7 +763,10 @@ class MujocoEnv:
         for req in self._obs_requests:
             self.obs_catalog.validate_request(req)
             if split_articulation_key(req.key)[1] in (
-                    "joint_pos_rel", "joint_vel", "applied_torque"):
+                "joint_pos_rel",
+                "joint_vel",
+                "applied_torque",
+            ):
                 self._joint_gather(req.joint_names, req)
         self.obs_cache: dict = {}
 
@@ -746,8 +774,7 @@ class MujocoEnv:
         self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
         self._episode_id = torch.zeros(n, dtype=torch.int64)
         self._time_in_episode = torch.zeros(n)
-        self._episode_dur = sample_durations(
-            self._dur_lo, self._dur_hi, n, self.device)
+        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, n, self.device)
 
         # cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:
@@ -774,14 +801,18 @@ class MujocoEnv:
             self.model_set, self._model_ir = build_model_set(
                 self._native_model_ir,
                 single_name=self._articulation_order[0].name,
-                meta=meta, name_map=self._mj_name_map)
+                meta=meta,
+                name_map=self._mj_name_map,
+            )
         else:
-            allow_merge = not (
-                any(p for p in self._mj_name_map.prefixes.values()))
+            allow_merge = not (any(p for p in self._mj_name_map.prefixes.values()))
             self.model_set, self._model_ir = build_model_set(
-                self._native_model_ir, runtimes=self._articulation_order,
-                meta=meta, name_map=self._mj_name_map,
-                allow_merge=allow_merge)
+                self._native_model_ir,
+                runtimes=self._articulation_order,
+                meta=meta,
+                name_map=self._mj_name_map,
+                allow_merge=allow_merge,
+            )
         self.model_irs = dict(self.model_set.articulations)
 
     # ------------------------------------------------------------------ #
@@ -839,8 +870,7 @@ class MujocoEnv:
         0..J-1; the MJ hinge order interleaves the fingers, so the full-IL
         gather would be out of range AND semantically wrong there).
         """
-        if (self._control_order
-                and x_il.shape[-1] == len(self._control_order[0].joint_names)):
+        if self._control_order and x_il.shape[-1] == len(self._control_order[0].joint_names):
             return x_il[..., self._restricted_to_policy]
         return x_il[:, self._perm_il2pol]
 
@@ -858,7 +888,8 @@ class MujocoEnv:
                 raise ValueError(
                     f"mujoco backend: obs key {key!r} does not name an "
                     f"articulation; this run has "
-                    f"{sorted(self.articulations)}")
+                    f"{sorted(self.articulations)}"
+                )
             return self._articulation_order[0]
         try:
             return self.articulations[name]
@@ -866,12 +897,14 @@ class MujocoEnv:
             raise ValueError(
                 f"mujoco backend: obs key {key!r} names unknown "
                 f"articulation {name!r}; declared: "
-                f"{sorted(self.articulations)}") from None
+                f"{sorted(self.articulations)}"
+            ) from None
 
     def _joint_gather(self, names, req=None) -> tuple:
         """Cached name->asset-index gather for one joint obs request."""
-        art = (self._articulation_for_key(req.key) if req is not None
-               else self._articulation_order[0])
+        art = (
+            self._articulation_for_key(req.key) if req is not None else self._articulation_order[0]
+        )
         key = (art.name, tuple(names))
         cached = self._joint_gathers.get(key)
         if cached is None:
@@ -880,7 +913,8 @@ class MujocoEnv:
             if missing:
                 raise ValueError(
                     f"mujoco backend: obs joint names {missing} are not "
-                    f"asset joints of articulation {art.name!r}")
+                    f"asset joints of articulation {art.name!r}"
+                )
             np_idx = np.asarray([index[n] for n in names], dtype=np.int64)
             cached = (np_idx, torch.tensor(np_idx, dtype=torch.int64))
             self._joint_gathers[key] = cached
@@ -895,17 +929,13 @@ class MujocoEnv:
         rows = []
         for d in self._datas:
             if base == "joint_pos_rel":
-                q = torch.tensor(d.qpos[art.jadr_art][np_idx],
-                                 dtype=torch.float32)
+                q = torch.tensor(d.qpos[art.jadr_art][np_idx], dtype=torch.float32)
                 rows.append(q - q0[t_idx])
                 continue
             if base == "applied_torque":
-                rows.append(torch.tensor(
-                    d.qfrc_actuator[art.jdr_art][np_idx],
-                    dtype=torch.float32))
+                rows.append(torch.tensor(d.qfrc_actuator[art.jdr_art][np_idx], dtype=torch.float32))
                 continue
-            rows.append(torch.tensor(d.qvel[art.jdr_art][np_idx],
-                                     dtype=torch.float32))
+            rows.append(torch.tensor(d.qvel[art.jdr_art][np_idx], dtype=torch.float32))
         return torch.stack(rows, dim=0)
 
     def _refresh_obs_cache(self, raw_action=None, cmd=None) -> None:
@@ -920,30 +950,27 @@ class MujocoEnv:
         for req in self._obs_requests:
             # camera-served keys (ImageObsRequest or depth alias): validate
             # by FULL SHAPE + dtype (the manager contract), not last-dim
-            if (self.camera_manager is not None
-                    and req.key in self.camera_manager.obs_keys()):
+            if self.camera_manager is not None and req.key in self.camera_manager.obs_keys():
                 val = self.obs_cache.get(req.key)
                 if val is not None:
                     validate_image_frame(
-                        self.camera_manager.frame_request(req.key), val,
-                        self.num_envs)
+                        self.camera_manager.frame_request(req.key), val, self.num_envs
+                    )
                 continue
             # contact-served keys: validate last-dim against the request
-            if (self.contact_manager is not None
-                    and req.key in self.contact_manager.obs_keys()):
+            if self.contact_manager is not None and req.key in self.contact_manager.obs_keys():
                 val = self.obs_cache.get(req.key)
                 if val is not None and val.shape[-1] != req.dim:
                     raise ValueError(
-                        f"obs '{req.key}' dim {val.shape[-1]} != requested "
-                        f"{req.dim}")
+                        f"obs '{req.key}' dim {val.shape[-1]} != requested " f"{req.dim}"
+                    )
                 continue
             # ops detail keys: dict-record lists served above -- no
             # tensor validation (the adapter consumes the records as-is)
             if req.key.startswith("contact_ops/"):
                 continue
             base = split_articulation_key(req.key)[1]
-            if base in ("joint_pos_rel", "joint_vel",
-                        "applied_torque"):
+            if base in ("joint_pos_rel", "joint_vel", "applied_torque"):
                 val = self._joint_obs(req)
             elif base not in fetch:
                 # prop-provided key (injected above by the prop backend when
@@ -955,17 +982,15 @@ class MujocoEnv:
                     self.obs_cache[req.key] = v
                 elif v.shape[-1] != req.dim:
                     raise ValueError(
-                        f"obs '{req.key}' dim {v.shape[-1]} != requested "
-                        f"{req.dim}")
+                        f"obs '{req.key}' dim {v.shape[-1]} != requested " f"{req.dim}"
+                    )
                 continue
             else:
                 val = fetch[base]()
             if val is None:
                 continue  # passthrough not provided this call; keep stale
             if val.shape[-1] != req.dim:
-                raise ValueError(
-                    f"obs '{req.key}' dim {val.shape[-1]} != requested "
-                    f"{req.dim}")
+                raise ValueError(f"obs '{req.key}' dim {val.shape[-1]} != requested " f"{req.dim}")
             self.obs_cache[req.key] = val
 
     # ------------------------------------------------------------------ #
@@ -990,8 +1015,9 @@ class MujocoEnv:
     # ------------------------------------------------------------------ #
     # stepping (software PD @ sim rate, targets held per policy step)
     # ------------------------------------------------------------------ #
-    def _damping_stability_scale(self, d, dofs: np.ndarray,
-                                 kp: np.ndarray, kd: np.ndarray) -> np.ndarray:
+    def _damping_stability_scale(
+        self, d, dofs: np.ndarray, kp: np.ndarray, kd: np.ndarray
+    ) -> np.ndarray:
         """Per-dof scale (<= 1) on the explicit damping term of the PD.
 
         The damping term ``-kd*dq`` is integrated explicitly at the sim
@@ -1015,13 +1041,12 @@ class MujocoEnv:
         dt = self._sim_dt
         Mfull = np.zeros((self._model.nv, self._model.nv))
         try:
-            mujoco.mj_fullM(self._model, d, Mfull)   # mujoco >= 3.2
+            mujoco.mj_fullM(self._model, d, Mfull)  # mujoco >= 3.2
         except TypeError:
             getattr(mujoco, "mj_fullM")(self._model, Mfull, d.qM)  # legacy layout
         M = np.maximum(Mfull[dofs, dofs], 1e-9)
         ratio = dt * np.asarray(kd, dtype=np.float64) / M
-        resolvable = dt * np.sqrt(np.maximum(
-            np.asarray(kp, dtype=np.float64), 0.0) / M) < 2.0
+        resolvable = dt * np.sqrt(np.maximum(np.asarray(kp, dtype=np.float64), 0.0) / M) < 2.0
         return np.where((ratio > 1.0) & resolvable, 1.0 / (1.0 + ratio), 1.0)
 
     # ------------------------------------------------------------------ #
@@ -1040,11 +1065,11 @@ class MujocoEnv:
         targets = {}
         for control in self._control_order:
             if control.prop:
-                targets[control.name] = np.zeros(
-                    (1, len(control.joint_names)), dtype=np.float64)
+                targets[control.name] = np.zeros((1, len(control.joint_names)), dtype=np.float64)
             else:
-                targets[control.name] = control.q0.detach().cpu().numpy()[
-                    None, :].astype(np.float64)
+                targets[control.name] = (
+                    control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
+                )
         for _ in range(int(n)):
             if self._actuator_seam_declared:
                 for feed in self._actuator_feeds:
@@ -1070,17 +1095,14 @@ class MujocoEnv:
         import mujoco
 
         if self.prop_backend is None:
-            raise RuntimeError(
-                "mujoco backend: _prop_extents needs a wired prop backend")
+            raise RuntimeError("mujoco backend: _prop_extents needs a wired prop backend")
         bid, _, _ = self.prop_backend.free_addresses(name)
         m = self._model
         half_xy, height = 0.0, 0.0
-        for g in range(m.body_geomadr[bid],
-                       m.body_geomadr[bid] + m.body_geomnum[bid]):
+        for g in range(m.body_geomadr[bid], m.body_geomadr[bid] + m.body_geomnum[bid]):
             if int(m.geom_type[g]) != int(mujoco.mjtGeom.mjGEOM_BOX):
                 continue
-            half_xy = max(half_xy, float(max(m.geom_size[g][0],
-                                             m.geom_size[g][1])))
+            half_xy = max(half_xy, float(max(m.geom_size[g][0], m.geom_size[g][1])))
             height = max(height, float(m.geom_size[g][2]) * 2)
         return half_xy, height
 
@@ -1102,22 +1124,31 @@ class MujocoEnv:
         try:
             if self._initializer is None:
                 raise RuntimeError(
-                    "mujoco backend: _apply_reset_protocol called without a "
-                    "declared initializer")
+                    "mujoco backend: _apply_reset_protocol called without a " "declared initializer"
+                )
             placements = self._initializer.apply()
-            declared = {s.name for s in self.prop_manager.specs} \
-                if self.prop_manager is not None else set()
+            declared = (
+                {s.name for s in self.prop_manager.specs}
+                if self.prop_manager is not None
+                else set()
+            )
             unknown = sorted(set(placements) - declared)
             if unknown:
                 raise ValueError(
                     f"mujoco backend: initializer sampled undeclared prop "
-                    f"names {unknown} | declared props: {sorted(declared)}")
+                    f"names {unknown} | declared props: {sorted(declared)}"
+                )
             if self._reset_spec is not None:
                 from unigym.robots.gr1_reset import apply_gr1_reset_stages
+
                 apply_gr1_reset_stages(
-                    self._model, self._active_data, self._initializer.rng,
+                    self._model,
+                    self._active_data,
+                    self._initializer.rng,
                     self._reset_spec,
-                    settle_fn=self._settle_substeps, forward=False)
+                    settle_fn=self._settle_substeps,
+                    forward=False,
+                )
         finally:
             self._active_data = prev
 
@@ -1130,15 +1161,17 @@ class MujocoEnv:
         declared = params.get("record_sites")
         if declared is None:
             return sites
-        if not isinstance(declared, (list, tuple)) \
-                or not all(isinstance(s, str) and s for s in declared):
+        if not isinstance(declared, (list, tuple)) or not all(
+            isinstance(s, str) and s for s in declared
+        ):
             raise ValueError(
                 f"mujoco backend: env.params.record_sites must be a "
-                f"list of site names, got {declared!r}")
+                f"list of site names, got {declared!r}"
+            )
         if len(set(declared)) != len(declared):
             raise ValueError(
-                f"mujoco backend: record_sites carries duplicate "
-                f"names: {sorted(declared)}")
+                f"mujoco backend: record_sites carries duplicate " f"names: {sorted(declared)}"
+            )
         for sname in declared:
             sid = site_id(self._model_ir, sname)
             if sid < 0:
@@ -1147,7 +1180,8 @@ class MujocoEnv:
                     f"found in the MJ model | hint: site names come "
                     f"from the scene XML ('<site name=...' entries); "
                     f"the GR1 tabletop scene carries "
-                    f"gripper0_{{left,right}}_grip_site")
+                    f"gripper0_{{left,right}}_grip_site"
+                )
             sites.append((sname, sid))
         return sites
 
@@ -1176,13 +1210,15 @@ class MujocoEnv:
         if not isinstance(cfg, dict):
             raise ValueError(
                 f"env.params.actuators must be a mapping of group name -> "
-                f"group spec, got {type(cfg).__name__}")
+                f"group spec, got {type(cfg).__name__}"
+            )
         acts, claimed = [], {}
         for gname, gcfg in cfg.items():
             if not isinstance(gcfg, dict):
                 raise ValueError(
                     f"env.params.actuators.{gname} must be a group spec "
-                    f"mapping, got {type(gcfg).__name__}")
+                    f"mapping, got {type(gcfg).__name__}"
+                )
             act = build_actuator(gcfg)
             act.bind(self, gcfg)
             slot_list = act.bound_slots.tolist()
@@ -1192,16 +1228,16 @@ class MujocoEnv:
                 raise ValueError(
                     f"env.params.actuators.{gname} re-addresses ctrl slots "
                     f"{dup} already owned by group(s) {owners} (each "
-                    f"actuator slot must have exactly one ctrl law)")
-            prop_hit = sorted(
-                set(slot_list)
-                & set(np.nonzero(self._prop_ctrl_mask)[0].tolist()))
+                    f"actuator slot must have exactly one ctrl law)"
+                )
+            prop_hit = sorted(set(slot_list) & set(np.nonzero(self._prop_ctrl_mask)[0].tolist()))
             if prop_hit:
                 raise ValueError(
                     f"env.params.actuators.{gname} claims prop-servo ctrl "
                     f"slots {prop_hit} (props own their position-hold "
                     f"write face; actuator groups address ROBOT joints "
-                    f"only)")
+                    f"only)"
+                )
             for s in slot_list:
                 claimed[s] = gname
             acts.append(act)
@@ -1220,7 +1256,8 @@ class MujocoEnv:
                 f"exactly once; uncovered: {missing}"
                 + (f"; over-covered: {extra}" if extra else "")
                 + f" | hint: group regexes fullmatch against the robot "
-                  f"hinge names, e.g. {robot_universe[:4]} ...")
+                f"hinge names, e.g. {robot_universe[:4]} ..."
+            )
         owner = {}
         for control in controls:
             for index, name in enumerate(control.joint_names):
@@ -1231,8 +1268,7 @@ class MujocoEnv:
             feeds.append(_ActuatorTargetFeed(act, sources))
         self._actuators = acts
         self._actuator_feeds = feeds
-        self._actuator_phase_split = any(
-            not isinstance(a, StandardPdActuator) for a in acts)
+        self._actuator_phase_split = any(not isinstance(a, StandardPdActuator) for a in acts)
         self._actuator_seam_declared = True
         self._actuator_default_path = False
 
@@ -1246,9 +1282,9 @@ class MujocoEnv:
                 return float(gains[control.joint_names.index(joint_name)])
         return None
 
-    def step(self, actions: dict,
-             raw_action: torch.Tensor | None = None,
-             cmd: torch.Tensor | None = None) -> tuple[dict, dict]:
+    def step(
+        self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
+    ) -> tuple[dict, dict]:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
         ``actions`` is a ``dict[str, NamedAction]`` (the adapter's
@@ -1264,8 +1300,7 @@ class MujocoEnv:
         for e, d in enumerate(self._datas):
             # prop position servos: ctrl IS the position target ;
             # written once per policy step, held across the decimation loop
-            d.ctrl[self._prop_ctrl_mask] = \
-                self._prop_targets[e][self._prop_ctrl_mask]
+            d.ctrl[self._prop_ctrl_mask] = self._prop_targets[e][self._prop_ctrl_mask]
             if self._actuator_seam_declared:
                 # declared ctrl laws (fresh-forward): targets fed once
                 # per control step (held across the substeps); laws recompute
@@ -1321,7 +1356,8 @@ class MujocoEnv:
         if bool(((env_ids < 0) | (env_ids >= self.num_envs)).any()):
             raise ValueError(
                 f"mujoco backend: num_envs={self.num_envs}, cannot reset "
-                f"env ids {env_ids.tolist()}")
+                f"env ids {env_ids.tolist()}"
+            )
         m = self._model
         for e in env_ids.tolist():
             d = self._datas[e]
@@ -1351,7 +1387,8 @@ class MujocoEnv:
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
         self._episode_dur[env_ids] = sample_durations(
-            self._dur_lo, self._dur_hi, env_ids.numel(), self.device)
+            self._dur_lo, self._dur_hi, env_ids.numel(), self.device
+        )
         if self.camera_manager is not None:
             # re-pose the rigs to the spawn state BEFORE the refresh, so the
             # post-reset render/read sees the spawn view (pose first, read after)
@@ -1361,8 +1398,7 @@ class MujocoEnv:
 
     def reset_all(self) -> torch.Tensor:
         """Reset every env (``reset_envs(arange(num_envs))``)."""
-        return self.reset_envs(
-            torch.arange(self.num_envs, dtype=torch.int64))
+        return self.reset_envs(torch.arange(self.num_envs, dtype=torch.int64))
 
     # ------------------------------------------------------------------ #
     # snapshot / restore (Round B B1 rewind)
@@ -1389,40 +1425,62 @@ class MujocoEnv:
         spec = int(mujoco.mjtState.mjSTATE_INTEGRATION)
         size = mujoco.mj_stateSize(m, spec)
         bits = {
-            1: "time", 2: "qpos", 4: "qvel", 8: "act", 16: "history",
-            32: "warmstart", 64: "ctrl", 128: "qfrc_applied",
-            256: "xfrc_applied", 512: "eq_active", 1024: "mocap_pos",
-            2048: "mocap_quat", 4096: "userdata", 8192: "plugin",
+            1: "time",
+            2: "qpos",
+            4: "qvel",
+            8: "act",
+            16: "history",
+            32: "warmstart",
+            64: "ctrl",
+            128: "qfrc_applied",
+            256: "xfrc_applied",
+            512: "eq_active",
+            1024: "mocap_pos",
+            2048: "mocap_quat",
+            4096: "userdata",
+            8192: "plugin",
         }
         if self.num_envs == 1:
             d = self._data
             buf = np.zeros(size, dtype=np.float64)
             mujoco.mj_getState(m, d, buf, spec)
-            return {"state": buf, "tick": None,
-                    "meta": {"spec": "mjSTATE_INTEGRATION", "spec_bits": spec,
-                             "bits": [n for b, n in sorted(bits.items())
-                                      if spec & b],
-                             "mj_time": float(d.time)},
-                    # backend bookkeeping OUTSIDE mjSTATE: the episode clock
-                    # and the sampled episode duration are sim truth and roll
-                    # back with the rewind (episode_id is process truth and
-                    # deliberately stays out -- counter dichotomy)
-                    "extra": {"time_in_episode":
-                              self._time_in_episode.clone(),
-                              "episode_dur": self._episode_dur.clone()}}
+            return {
+                "state": buf,
+                "tick": None,
+                "meta": {
+                    "spec": "mjSTATE_INTEGRATION",
+                    "spec_bits": spec,
+                    "bits": [n for b, n in sorted(bits.items()) if spec & b],
+                    "mj_time": float(d.time),
+                },
+                # backend bookkeeping OUTSIDE mjSTATE: the episode clock
+                # and the sampled episode duration are sim truth and roll
+                # back with the rewind (episode_id is process truth and
+                # deliberately stays out -- counter dichotomy)
+                "extra": {
+                    "time_in_episode": self._time_in_episode.clone(),
+                    "episode_dur": self._episode_dur.clone(),
+                },
+            }
         bufs = []
         for d in self._datas:
             buf = np.zeros(size, dtype=np.float64)
             mujoco.mj_getState(m, d, buf, spec)
             bufs.append(buf)
-        return {"states": bufs, "tick": None,
-                "meta": {"spec": "mjSTATE_INTEGRATION", "spec_bits": spec,
-                         "bits": [n for b, n in sorted(bits.items())
-                                  if spec & b],
-                         "mj_time": float(self._datas[0].time)},
-                "extra": {"time_in_episode":
-                          self._time_in_episode.clone(),
-                          "episode_dur": self._episode_dur.clone()}}
+        return {
+            "states": bufs,
+            "tick": None,
+            "meta": {
+                "spec": "mjSTATE_INTEGRATION",
+                "spec_bits": spec,
+                "bits": [n for b, n in sorted(bits.items()) if spec & b],
+                "mj_time": float(self._datas[0].time),
+            },
+            "extra": {
+                "time_in_episode": self._time_in_episode.clone(),
+                "episode_dur": self._episode_dur.clone(),
+            },
+        }
 
     def restore(self, state) -> int:
         """Restore a :meth:`snapshot` payload bit-exactly; returns 0 tick.
@@ -1447,18 +1505,19 @@ class MujocoEnv:
                     f"mujoco backend: snapshot state shape {buf.shape} does "
                     f"not match mjSTATE_INTEGRATION size "
                     f"{mujoco.mj_stateSize(m, spec)} (model changed since the "
-                    f"snapshot?)")
+                    f"snapshot?)"
+                )
             mujoco.mj_setState(m, d, buf, spec)
             mujoco.mj_forward(m, d)
-            mujoco.mj_setState(m, d, buf, spec)   # re-pin the warm-start
+            mujoco.mj_setState(m, d, buf, spec)  # re-pin the warm-start
         else:
             bufs = state.get("states")
-            if (not isinstance(bufs, (list, tuple))
-                    or len(bufs) != self.num_envs):
+            if not isinstance(bufs, (list, tuple)) or len(bufs) != self.num_envs:
                 raise ValueError(
                     f"mujoco backend: multi-env snapshot carries "
                     f"{len(bufs) if isinstance(bufs, (list, tuple)) else 0} "
-                    f"states, need {self.num_envs}")
+                    f"states, need {self.num_envs}"
+                )
             want = mujoco.mj_stateSize(m, spec)
             for d, raw in zip(self._datas, bufs):
                 buf = np.ascontiguousarray(raw, dtype=np.float64)
@@ -1466,10 +1525,11 @@ class MujocoEnv:
                     raise ValueError(
                         f"mujoco backend: snapshot state shape {buf.shape} "
                         f"does not match mjSTATE_INTEGRATION size {want} "
-                        f"(model changed since the snapshot?)")
+                        f"(model changed since the snapshot?)"
+                    )
                 mujoco.mj_setState(m, d, buf, spec)
                 mujoco.mj_forward(m, d)
-                mujoco.mj_setState(m, d, buf, spec)   # re-pin the warm-start
+                mujoco.mj_setState(m, d, buf, spec)  # re-pin the warm-start
         extra = state.get("extra") or {}
         if "time_in_episode" in extra:
             self._time_in_episode = extra["time_in_episode"].clone()

@@ -19,6 +19,7 @@ Everything else (how to draw, how to match, how to place) belongs to the
 engine side.  Every failure names the instance id, the rule it broke and
 the fix; every artifact view is sorted by id and JSON-ready.
 """
+
 from __future__ import annotations
 
 import os
@@ -83,7 +84,8 @@ def _is_pathlike(value: object) -> TypeGuard[os.PathLike[str]]:
 
 @overload
 def _jsonify(
-    value: Mapping[str, JsonValue], path: str = "params",
+    value: Mapping[str, JsonValue],
+    path: str = "params",
 ) -> dict[str, JsonValue]: ...
 
 
@@ -103,20 +105,13 @@ def _jsonify(value: object, path: str = "params") -> JsonValue:
         result: dict[str, JsonValue] = {}
         for key in sorted(value, key=str):
             if not isinstance(key, str):
-                raise TypeError(
-                    f"{path}: artifact views need string mapping keys, got {key!r}"
-                )
+                raise TypeError(f"{path}: artifact views need string mapping keys, got {key!r}")
             result[key] = _jsonify(value[key], f"{path}.{key}")
         return result
     if _is_sequence(value):
-        return [
-            _jsonify(entry, f"{path}[{index}]")
-            for index, entry in enumerate(value)
-        ]
+        return [_jsonify(entry, f"{path}[{index}]") for index, entry in enumerate(value)]
     if _is_set(value):
-        return sorted(
-            (_jsonify(entry, f"{path}[]") for entry in value), key=repr
-        )
+        return sorted((_jsonify(entry, f"{path}[]") for entry in value), key=repr)
     raise TypeError(
         f"{path}: {type(value).__name__} is not JSON-ready -- recipe values "
         f"must be plain data (mapping, sequence, set, string, number or None)"
@@ -128,8 +123,7 @@ class BuildContext:
     """What a pipeline needs to build one scene (data, never a handle)."""
 
     recipe: Mapping[str, JsonValue]
-    mounts: Mapping[str, str | os.PathLike[str]] = field(
-        default_factory=_empty_mounts)
+    mounts: Mapping[str, str | os.PathLike[str]] = field(default_factory=_empty_mounts)
     seed: int | None = None
     recipe_path: str = ""
 
@@ -137,8 +131,7 @@ class BuildContext:
         """Validate and copy the context fields."""
         if not isinstance(self.recipe, Mapping):
             raise SceneBindingError(
-                f"build context: recipe must be a mapping, got "
-                f"{type(self.recipe).__name__}"
+                f"build context: recipe must be a mapping, got " f"{type(self.recipe).__name__}"
             )
         if not isinstance(self.mounts, Mapping):
             raise SceneBindingError(
@@ -179,14 +172,18 @@ class ContentProvider(Protocol):
     """Opaque fill record the provider exposes after :meth:`fill`."""
 
     def fill(
-        self, scene: Scene, spec: Mapping[str, JsonValue], rng: random.Random,
+        self,
+        scene: Scene,
+        spec: Mapping[str, JsonValue],
+        rng: random.Random,
     ) -> tuple[Instance, ...]:
         """Return the instances this provider adds to *scene*."""
         ...
 
 
 def register_content_provider(
-    name: str, factory: _ContentFactory,
+    name: str,
+    factory: _ContentFactory,
 ) -> _ContentFactory:
     """Register one content-provider factory under a snake_case name.
 
@@ -214,13 +211,11 @@ def register_content_provider(
         )
     if not callable(factory):
         raise SceneBindingError(
-            f"content provider {name!r} factory must be callable, got "
-            f"{type(factory).__name__}"
+            f"content provider {name!r} factory must be callable, got " f"{type(factory).__name__}"
         )
     if name in _CONTENT_PROVIDERS:
         raise SceneBindingError(
-            f"content provider {name!r} is registered twice -- give each "
-            f"provider a unique name"
+            f"content provider {name!r} is registered twice -- give each " f"provider a unique name"
         )
     _CONTENT_PROVIDERS[name] = factory
     return factory
@@ -240,9 +235,7 @@ def content_provider(name: str) -> _ContentFactory:
             legal set.
     """
     if not isinstance(name, str) or not name:
-        raise SceneBindingError(
-            f"content provider name must be a non-empty string, got {name!r}"
-        )
+        raise SceneBindingError(f"content provider name must be a non-empty string, got {name!r}")
     try:
         return _CONTENT_PROVIDERS[name]
     except KeyError:
@@ -330,9 +323,7 @@ def _slot_references(instance: Instance) -> list[str]:
         elif isinstance(value, (list, tuple)) and all(
             isinstance(entry, str) and entry for entry in value
         ):
-            references.extend(
-                entry for entry in value if isinstance(entry, str)
-            )
+            references.extend(entry for entry in value if isinstance(entry, str))
         else:
             raise SceneBindingError(
                 f"instance {instance.id!r}: params[{key!r}] must name a slot id "
@@ -369,9 +360,7 @@ def validate_binding(
             f"{type(generator_exists).__name__} -- pass the registry predicate"
         )
     legal_slots = (
-        frozenset(slot.id for slot in scene.slots)
-        if slot_ids is None
-        else frozenset(slot_ids)
+        frozenset(slot.id for slot in scene.slots) if slot_ids is None else frozenset(slot_ids)
     )
     legal_frames = {"world"}
     for slot in scene.slots:
@@ -429,9 +418,7 @@ class Scaffold:
             )
         self._pipeline: ScenePipeline = pipeline
         self._generator_exists: Callable[[str], bool] = (
-            registered_generators().__contains__
-            if generator_exists is None
-            else generator_exists
+            registered_generators().__contains__ if generator_exists is None else generator_exists
         )
         if not callable(self._generator_exists):
             raise SceneBindingError(
@@ -487,8 +474,7 @@ class Scaffold:
         """
         if not isinstance(context, BuildContext):
             raise SceneBindingError(
-                f"scaffold: build expected a BuildContext, got "
-                f"{type(context).__name__}"
+                f"scaffold: build expected a BuildContext, got " f"{type(context).__name__}"
             )
         scene = self._pipeline.build(context)
         validate_scene(scene)

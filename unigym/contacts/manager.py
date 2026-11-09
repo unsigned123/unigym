@@ -25,6 +25,7 @@ Obs path (plan §4, decoupled from recording): adapters may request
 ``contact/<name>`` keys; the env backends inject the same values into
 ``obs_cache`` for requested keys (last-dim validated against the request).
 """
+
 from __future__ import annotations
 
 from typing import Callable, Optional, Protocol, cast, runtime_checkable
@@ -103,8 +104,7 @@ class ContactManager:
     def register_obs_requests(self, requested_keys) -> None:
         """Mark the subset of *requested_keys* served as obs (called once at
         env construction with the adapter's request keys)."""
-        self._obs_requested = {k for k in requested_keys
-                               if k in set(self.keys())}
+        self._obs_requested = {k for k in requested_keys if k in set(self.keys())}
 
     # ---- director override face  --------------------------------- #
     def set_override(self, name: str, state: str) -> None:
@@ -118,7 +118,7 @@ class ContactManager:
         """
         if state not in ("on", "off"):
             raise ValueError(f"override state must be on|off, got {state!r}")
-        self._override_spec(name)          # validates existence + format
+        self._override_spec(name)  # validates existence + format
         self._overrides[name] = state
 
     def clear_override(self, name: str) -> None:
@@ -137,7 +137,8 @@ class ContactManager:
                     raise ValueError(
                         f"group {name!r} has format {s.format!r} -- only "
                         f"format: contact groups are overridable (sensor "
-                        f"face; forces have no honest forced value)")
+                        f"face; forces have no honest forced value)"
+                    )
                 return s
         raise KeyError(name)
 
@@ -160,12 +161,10 @@ class ContactManager:
                 # forced value in the SAME dtype/shape as the physical
                 # reading (torch or numpy -- apply_format is dual-stack)
                 if torch.is_tensor(value):
-                    value = torch.ones_like(value) if state == "on" \
-                        else torch.zeros_like(value)
+                    value = torch.ones_like(value) if state == "on" else torch.zeros_like(value)
                 else:
                     arr = np.asarray(value)
-                    value = np.ones_like(arr) if state == "on" \
-                        else np.zeros_like(arr)
+                    value = np.ones_like(arr) if state == "on" else np.zeros_like(arr)
             out[contact_key(spec.name)] = self._to_record_tensor(value)
         return out
 
@@ -184,7 +183,8 @@ class ContactManager:
         if not callable(fn):
             raise NotImplementedError(
                 f"contact backend {type(self.backend).__name__} has no "
-                f"per-contact detail face (contact_ops/{name})")
+                f"per-contact detail face (contact_ops/{name})"
+            )
         detail = cast(Callable[[ContactGroupSpec], list[dict]], fn)
         return detail(self._spec(name))
 
@@ -197,8 +197,7 @@ class ContactManager:
     def _to_record_tensor(self, value) -> torch.Tensor:
         if torch.is_tensor(value):
             t = value.detach()
-            return t if str(t.device) == str(torch.device(self.device)) \
-                else t.to(self.device)
+            return t if str(t.device) == str(torch.device(self.device)) else t.to(self.device)
         return torch.as_tensor(np.asarray(value)).to(self.device)
 
     # ---- env lifecycle passthrough ---------------------------------------- #
@@ -212,12 +211,15 @@ class ContactManager:
         self.backend.close()
 
 
-def build_contact_manager(cfg, backend: str, device: str = "cpu",
-                          adapter_requests: Optional[set] = None,
-                          body_parts: Optional[dict] = None,
-                          prop_names: Optional[list] = None,
-                          articulated_props: Optional[set] = None
-                          ) -> Optional[ContactManager]:
+def build_contact_manager(
+    cfg,
+    backend: str,
+    device: str = "cpu",
+    adapter_requests: Optional[set] = None,
+    body_parts: Optional[dict] = None,
+    prop_names: Optional[list] = None,
+    articulated_props: Optional[set] = None,
+) -> Optional[ContactManager]:
     """collect_cli entry point.
 
     Args:
@@ -246,13 +248,17 @@ def build_contact_manager(cfg, backend: str, device: str = "cpu",
     if not cfg:
         return None
     from .base import build_contact_backend, resolve_contact_entries
-    specs = [ContactGroupSpec.from_yaml(e)
-             for e in resolve_contact_entries(cfg, backend,
-                                              body_parts=body_parts,
-                                              prop_names=prop_names,
-                                              articulated_props=(
-                                                  frozenset(articulated_props
-                                                            or ())))]
+
+    specs = [
+        ContactGroupSpec.from_yaml(e)
+        for e in resolve_contact_entries(
+            cfg,
+            backend,
+            body_parts=body_parts,
+            prop_names=prop_names,
+            articulated_props=(frozenset(articulated_props or ())),
+        )
+    ]
     names = [s.name for s in specs]
     if len(set(names)) != len(names):
         dupes = sorted({n for n in names if names.count(n) > 1})

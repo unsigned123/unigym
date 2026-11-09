@@ -49,6 +49,7 @@ Naming note: the unprefixed names are the historical spelling;
 new code should use the ``Asset*`` aliases to avoid collision with
 ``unigym.model`` entities.
 """
+
 from __future__ import annotations
 
 from ._declarations import MaterialDef as MaterialDef

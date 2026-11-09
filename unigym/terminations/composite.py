@@ -1,4 +1,5 @@
 """Composite termination group (OR / AND combination) + inversion wrapper."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -39,8 +40,7 @@ class TerminationGroup:
     "no terminations configured -> nothing triggers" contract.
     """
 
-    def __init__(self, terminations: list[Termination] | None = None,
-                 mode: str = "or"):
+    def __init__(self, terminations: list[Termination] | None = None, mode: str = "or"):
         if mode not in ("or", "and"):
             raise ValueError(f"mode must be 'or' or 'and', got {mode!r}")
         self.terminations = list(terminations or [])

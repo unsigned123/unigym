@@ -1,4 +1,5 @@
 """Sinks: consumers of the SyncRunner callback stream."""
+
 from __future__ import annotations
 
 from .benchmark import BenchmarkSink

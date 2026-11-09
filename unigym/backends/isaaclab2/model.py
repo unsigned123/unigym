@@ -18,6 +18,7 @@ The module imports no isaaclab/pxr symbol at import time: cfg/data reads
 are duck-typed and the optional USD lookup imports ``pxr``/``omni.usd``
 inside the call.  The provider therefore runs in the base lane too.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -86,8 +87,7 @@ def _vec(values, size, default):
     return tuple(float(item) for item in seq[:size])
 
 
-def _fixed_vec3(values, default: tuple[float, float, float]
-                ) -> tuple[float, float, float]:
+def _fixed_vec3(values, default: tuple[float, float, float]) -> tuple[float, float, float]:
     """Return an exact 3-tuple from *values*, else *default* (validated)."""
     seq = _as_sequence(values)
     if seq is None or len(seq) < 3:
@@ -95,8 +95,9 @@ def _fixed_vec3(values, default: tuple[float, float, float]
     return (float(seq[0]), float(seq[1]), float(seq[2]))
 
 
-def _fixed_vec4(values, default: tuple[float, float, float, float]
-                ) -> tuple[float, float, float, float]:
+def _fixed_vec4(
+    values, default: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
     """Return an exact 4-tuple from *values*, else *default* (validated)."""
     seq = _as_sequence(values)
     if seq is None or len(seq) < 4:
@@ -162,13 +163,11 @@ def _scene_parts(cfg):
     except TypeError:
         fields = {}
     if props is None:
-        props = {key[5:]: value for key, value in fields.items()
-                 if key.startswith("prop_")}
+        props = {key[5:]: value for key, value in fields.items() if key.startswith("prop_")}
     else:
         props = _named_values(props, "prop_")
     if cameras is None:
-        cameras = {key[4:]: value for key, value in fields.items()
-                   if key.startswith("cam_")}
+        cameras = {key[4:]: value for key, value in fields.items() if key.startswith("cam_")}
     else:
         cameras = _named_values(cameras, "cam_")
     return robot, props, cameras
@@ -181,10 +180,15 @@ def _declared_joints(cfg, body_name):
     """Build the declared joint rows of one articulation cfg."""
     rows = []
     for name in _declared_joint_names(cfg):
-        rows.append(Joint(
-            name=name, type=_UNKNOWN_JOINT, body=body_name,
-            path=(body_name, name),
-            qualname=f"{body_name}/{name}"))
+        rows.append(
+            Joint(
+                name=name,
+                type=_UNKNOWN_JOINT,
+                body=body_name,
+                path=(body_name, name),
+                qualname=f"{body_name}/{name}",
+            )
+        )
     return rows
 
 
@@ -194,9 +198,7 @@ def _declared_actuators(cfg, body_name, attrs):
     groups = getattr(cfg, "actuators", None) or {}
     for name, group in groups.items():
         expr = _names(getattr(group, "joint_names_expr", None))
-        rows.append(Actuator(
-            name=str(name), kind="robot", owner=body_name,
-            qualname=str(name)))
+        rows.append(Actuator(name=str(name), kind="robot", owner=body_name, qualname=str(name)))
         attrs[f"actuator/{name}"] = {
             "joint_names_expr": expr,
             "stiffness": getattr(group, "stiffness", None),
@@ -211,8 +213,7 @@ def _declared_camera(name, cfg, body_name, attrs, prim_paths):
     path = _prim_path(cfg)
     offset = getattr(cfg, "offset", None)
     pos = _fixed_vec3(getattr(offset, "pos", None), (0.0, 0.0, 0.0))
-    quat = _fixed_vec4(getattr(offset, "rot", None),
-                       (1.0, 0.0, 0.0, 0.0))
+    quat = _fixed_vec4(getattr(offset, "rot", None), (1.0, 0.0, 0.0, 0.0))
     if path:
         prim_paths[str(name)] = path
     attrs[f"camera/{name}"] = {
@@ -263,8 +264,7 @@ def _physx_rows(view, method, count):
 
 def _physx_values(view, method, count):
     """Call one PhysX view getter and return *count* finite floats."""
-    return [_finite(item)
-            for item in _physx_rows(view, method, count)]
+    return [_finite(item) for item in _physx_rows(view, method, count)]
 
 
 def _finite(value):
@@ -310,8 +310,9 @@ def _resolve_root_prim(articulation):
     if path:
         # InteractiveScene rewrites the cfg regex to ``/World/envs/env_.*``;
         # the raw ``{ENV_REGEX_NS}`` form appears before construction.
-        return (path.replace("{ENV_REGEX_NS}", "/World/envs/env_0")
-                .replace("/World/envs/env_.*", "/World/envs/env_0"))
+        return path.replace("{ENV_REGEX_NS}", "/World/envs/env_0").replace(
+            "/World/envs/env_.*", "/World/envs/env_0"
+        )
     view = getattr(articulation, "root_physx_view", None)
     if view is None:
         view = getattr(articulation, "_root_physx_view", None)
@@ -402,12 +403,18 @@ def _body_rows(body_names, data, masses, inertias, facts):
     for index, name in enumerate(body_names):
         parent = facts["parents"].get(name)
         path = _body_path(name, facts["parents"])
-        rows.append(Body(
-            name=name, parent=parent, path=path,
-            qualname="/".join(path), pos=_row_at(positions, index, 3)
-            or (0.0, 0.0, 0.0),
-            quat=_row_at(quats, index, 4) or (1.0, 0.0, 0.0, 0.0),
-            mass=masses[index], inertia=inertias[index]))
+        rows.append(
+            Body(
+                name=name,
+                parent=parent,
+                path=path,
+                qualname="/".join(path),
+                pos=_row_at(positions, index, 3) or (0.0, 0.0, 0.0),
+                quat=_row_at(quats, index, 4) or (1.0, 0.0, 0.0, 0.0),
+                mass=masses[index],
+                inertia=inertias[index],
+            )
+        )
     return rows
 
 
@@ -439,10 +446,17 @@ def _joint_rows(joint_names, data, root_body, facts, attrs):
         joint_range = _limit_pair(limits, index)
         body = facts["joint_body"].get(name, root_body)
         path = _body_path(body, facts["parents"]) + (name,)
-        rows.append(Joint(
-            name=name, type=facts["joint_type"].get(name, _UNKNOWN_JOINT),
-            body=body, range=joint_range, limited=joint_range is not None,
-            path=path, qualname="/".join(path)))
+        rows.append(
+            Joint(
+                name=name,
+                type=facts["joint_type"].get(name, _UNKNOWN_JOINT),
+                body=body,
+                range=joint_range,
+                limited=joint_range is not None,
+                path=path,
+                qualname="/".join(path),
+            )
+        )
         attrs[f"joint/{name}"] = {
             "vel_limit": _scalar_at(vel_limits, index),
             "default_joint_pos": _scalar_at(defaults, index),
@@ -459,9 +473,7 @@ def _live_actuator_rows(articulation, root_body, attrs):
         return []
     rows = []
     for name, group in groups.items():
-        rows.append(Actuator(
-            name=str(name), kind="robot", owner=root_body,
-            qualname=str(name)))
+        rows.append(Actuator(name=str(name), kind="robot", owner=root_body, qualname=str(name)))
         attrs[f"actuator/{name}"] = {
             "joint_names": _names(getattr(group, "joint_names", None)),
             "class": type(group).__name__,
@@ -498,30 +510,26 @@ class IsaacLabModelProvider:
         robot_body = None
         if robot is not None:
             robot_body = _tail(robot_prim) or "robot"
-            bodies.append(Body(name=robot_body, path=(robot_body,),
-                               qualname=robot_body))
+            bodies.append(Body(name=robot_body, path=(robot_body,), qualname=robot_body))
             if robot_prim:
                 prim_paths[robot_body] = robot_prim
-            attrs["robot"] = {"prim_path": robot_prim,
-                              "usd_path": _usd_path(robot)}
+            attrs["robot"] = {"prim_path": robot_prim, "usd_path": _usd_path(robot)}
             joints.extend(_declared_joints(robot, robot_body))
         for name, prop in props.items():
             path = _prim_path(prop)
-            bodies.append(Body(name=str(name), path=(str(name),),
-                               qualname=str(name)))
+            bodies.append(Body(name=str(name), path=(str(name),), qualname=str(name)))
             if path:
                 prim_paths[str(name)] = path
-            attrs[f"prop/{name}"] = {
-                "prim_path": path, "usd_path": _usd_path(prop)}
+            attrs[f"prop/{name}"] = {"prim_path": path, "usd_path": _usd_path(prop)}
             joints.extend(_declared_joints(prop, str(name)))
         host = _camera_host(bodies, robot_body)
         if cameras and not bodies:
             bodies.append(Body(name=host, path=(host,), qualname=host))
         camera_rows = [
             _declared_camera(name, camera, host, attrs, prim_paths)
-            for name, camera in cameras.items()]
-        actuators = (_declared_actuators(robot, robot_body, attrs)
-                     if robot is not None else [])
+            for name, camera in cameras.items()
+        ]
+        actuators = _declared_actuators(robot, robot_body, attrs) if robot is not None else []
         return ModelIR(
             name=_scene_name(cfg),
             backend=self.backend,
@@ -530,9 +538,7 @@ class IsaacLabModelProvider:
             joints=Table(joints),
             cameras=Table(camera_rows),
             actuators=Table(actuators),
-            ext={"usd": UsdExt(
-                prim_paths=prim_paths, articulation=robot_prim,
-                attrs=attrs)},
+            ext={"usd": UsdExt(prim_paths=prim_paths, articulation=robot_prim, attrs=attrs)},
         ).validate()
 
     def describe(self, articulation):
@@ -558,10 +564,8 @@ class IsaacLabModelProvider:
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)
         masses, inertias = _mass_and_inertia(articulation, body_names)
-        attrs = {"robot": {"prim_path": root_prim,
-                           "root_body": root_body}}
-        bodies = _body_rows(
-            body_names, data, masses, inertias, facts)
+        attrs = {"robot": {"prim_path": root_prim, "root_body": root_body}}
+        bodies = _body_rows(body_names, data, masses, inertias, facts)
         joints = _joint_rows(joint_names, data, root_body, facts, attrs)
         actuators = _live_actuator_rows(articulation, root_body, attrs)
         prim_paths = dict(facts["prim_paths"])
@@ -575,9 +579,7 @@ class IsaacLabModelProvider:
             bodies=Table(bodies),
             joints=Table(joints),
             actuators=Table(actuators),
-            ext={"usd": UsdExt(
-                prim_paths=prim_paths, articulation=root_prim,
-                attrs=attrs)},
+            ext={"usd": UsdExt(prim_paths=prim_paths, articulation=root_prim, attrs=attrs)},
         ).validate()
 
 

@@ -22,6 +22,7 @@ a prefix, or a name.
 
 Stdlib only (pathlib); importable without isaaclab/mujoco/torch.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,7 +39,7 @@ def _repo_runs_face() -> Path:
 
 CONFIG_DIR = _repo_runs_face()
 _GLOB_CHARS = ("*", "?", "[")
-_MAX_CANDIDATES = 8                      # listed in error messages
+_MAX_CANDIDATES = 8  # listed in error messages
 
 
 class ConfigResolveError(ValueError):
@@ -51,11 +52,11 @@ def resolve_config(spec: str) -> list[Path]:
     if any(c in s for c in _GLOB_CHARS):
         return _glob_expand(s)
     p = Path(s).expanduser()
-    if p.is_absolute():                  # absolute: the only verbatim form
+    if p.is_absolute():  # absolute: the only verbatim form
         if not p.is_file():
             raise ConfigResolveError(f"config not found: {p}")
         return [p.resolve()]
-    return _exact_expand(s)              # relative: always config/-anchored
+    return _exact_expand(s)  # relative: always config/-anchored
 
 
 def _runs_names() -> list[str]:
@@ -66,37 +67,40 @@ def _runs_names() -> list[str]:
     that tree (the ``runs`` face enumeration cannot see it).
     """
     packs = pack_roots()
-    mounted = {runs.resolve() for pack in packs
-               if (runs := pack.faces.get("runs")) is not None}
+    mounted = {runs.resolve() for pack in packs if (runs := pack.faces.get("runs")) is not None}
     if CONFIG_DIR.resolve() in mounted:
-        return sorted(str(path.relative_to(runs))
-                      for pack, path in find("runs", suffix=".yaml")
-                      if (runs := pack.faces.get("runs")) is not None)
-    return sorted(str(p.relative_to(CONFIG_DIR))
-                  for p in CONFIG_DIR.rglob("*.yaml"))
+        return sorted(
+            str(path.relative_to(runs))
+            for pack, path in find("runs", suffix=".yaml")
+            if (runs := pack.faces.get("runs")) is not None
+        )
+    return sorted(str(p.relative_to(CONFIG_DIR)) for p in CONFIG_DIR.rglob("*.yaml"))
 
 
 def _candidates_line() -> str:
     names = _runs_names()
     head = ", ".join(names[:_MAX_CANDIDATES])
-    more = "" if len(names) <= _MAX_CANDIDATES \
+    more = (
+        ""
+        if len(names) <= _MAX_CANDIDATES
         else f" (+{len(names) - _MAX_CANDIDATES} more; GET /api/configs)"
+    )
     return head + more
 
 
 def _glob_expand(spec: str) -> list[Path]:
     if Path(spec).is_absolute() or spec.startswith("~"):
-        raise ConfigResolveError(
-            f"glob config spec must be config-dir-relative: {spec!r}")
+        raise ConfigResolveError(f"glob config spec must be config-dir-relative: {spec!r}")
     rel = spec[2:] if spec.startswith("./") else spec
     prefix = CONFIG_DIR.name + "/"
-    if rel.startswith(prefix):           # repo-root spelling -> config-anchored
-        rel = rel[len(prefix):]
+    if rel.startswith(prefix):  # repo-root spelling -> config-anchored
+        rel = rel[len(prefix) :]
     hits = sorted(CONFIG_DIR.glob(rel))
     if not hits:
         raise ConfigResolveError(
             f"config glob {spec!r} matched nothing under {CONFIG_DIR} "
-            f"(candidates: {_candidates_line()})")
+            f"(candidates: {_candidates_line()})"
+        )
     return [p.resolve() for p in hits]
 
 
@@ -114,14 +118,15 @@ def _exact_expand(spec: str) -> list[Path]:
     """
     rel = spec[2:] if spec.startswith("./") else spec
     prefix = CONFIG_DIR.name + "/"
-    if rel.startswith(prefix):           # repo-root spelling -> config-anchored
-        rel = rel[len(prefix):]
+    if rel.startswith(prefix):  # repo-root spelling -> config-anchored
+        rel = rel[len(prefix) :]
     external = _external_exact(rel)
     if len(external) > 1:
         listing = ", ".join(f"{pack.name}:{path}" for pack, path in external)
         raise ConfigResolveError(
             f"ambiguous config {spec!r}: found in {listing}; "
-            f"use 'pack:<name>/{rel}' or an absolute path")
+            f"use 'pack:<name>/{rel}' or an absolute path"
+        )
     if external:
         return [external[0][1].resolve()]
     p = CONFIG_DIR / rel
@@ -130,7 +135,8 @@ def _exact_expand(spec: str) -> list[Path]:
     raise ConfigResolveError(
         f"config not found: {spec!r} (exact name under {CONFIG_DIR} like "
         f"'props/drawer_scripted_mj.yaml', an explicit path, or a glob; "
-        f"candidates: {_candidates_line()})")
+        f"candidates: {_candidates_line()})"
+    )
 
 
 def _external_exact(rel: str) -> list[tuple[MountedPack, Path]]:

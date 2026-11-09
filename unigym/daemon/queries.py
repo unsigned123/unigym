@@ -12,6 +12,7 @@ Query path (design §2/§3): the daemon attaches ONCE per request via
 ``unigym.core.session`` and speaks the SHM command slot's typed queries
 (cmd 10-12) -- no run-side HTTP, no new channel, same-host promise.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,9 +32,9 @@ from unigym.runtime.bridge import hb_alive, probe_heartbeat
 
 from . import runrec
 
-try:                                   # libyaml C loader: ~10x pure-python
+try:  # libyaml C loader: ~10x pure-python
     from yaml import CSafeLoader as _YAML_LOADER
-except ImportError:                    # pragma: no cover - env without libyaml
+except ImportError:  # pragma: no cover - env without libyaml
     from yaml import SafeLoader as _YAML_LOADER
 
 # /api/configs summary cache: key=(path, mtime); configs rarely change and
@@ -58,24 +59,20 @@ def delete_run(svc, body) -> tuple[int, dict]:
     root = Path(svc.output_root).resolve()
     target = Path(out).expanduser().resolve()
     if target != root and root not in target.parents:
-        return 400, {"ok": False,
-                     "error": f"output_dir escapes the scan root ({root})"}
+        return 400, {"ok": False, "error": f"output_dir escapes the scan root ({root})"}
     if not target.is_dir():
         return 404, {"ok": False, "error": f"no such run dir: {target}"}
-    if not ((target / "run.json").is_file()
-            or list(target.glob("run.json.pending-*"))):
-        return 400, {"ok": False,
-                     "error": "no run.json ledger in this dir -- refusing "
-                              "to delete non-run data"}
+    if not ((target / "run.json").is_file() or list(target.glob("run.json.pending-*"))):
+        return 400, {
+            "ok": False,
+            "error": "no run.json ledger in this dir -- refusing " "to delete non-run data",
+        }
     doc = runrec.read(target) or {}
     pid = doc.get("pid")
     if hb_alive(probe_heartbeat(run_id=doc.get("run_id"), pid=pid)):
-        return 409, {"ok": False,
-                     "error": "run is alive (heartbeat fresh) -- "
-                              "kill it first"}
+        return 409, {"ok": False, "error": "run is alive (heartbeat fresh) -- " "kill it first"}
     if pid and runrec.process_alive(pid):
-        return 409, {"ok": False,
-                     "error": f"run pid {pid} is alive -- kill it first"}
+        return 409, {"ok": False, "error": f"run pid {pid} is alive -- kill it first"}
     shutil.rmtree(target)
     return 200, {"ok": True, "deleted": str(target)}
 
@@ -94,7 +91,7 @@ def _repo_face(face: str, fallback: str) -> Path:
 CONFIG_DIR = _repo_face("runs", "config")
 PACKS_DIR = _repo_face("benchmarks", "benchmark_packs")
 
-DEFAULT_LOG_TAIL = 4000          # characters (spawn_spec.log_tail semantic)
+DEFAULT_LOG_TAIL = 4000  # characters (spawn_spec.log_tail semantic)
 
 # task_face (contract §1.20): the config-snapshot modes collect_cli
 # implements; anything else keeps the field honest at null
@@ -133,8 +130,9 @@ def media_section(svc, run_id: str) -> dict | None:
         gw.release(run_id)
 
 
-def query_run(svc, run_id: str, kind: str, timeout: float = 10.0,
-              params: dict | None = None) -> tuple[int, dict]:
+def query_run(
+    svc, run_id: str, kind: str, timeout: float = 10.0, params: dict | None = None
+) -> tuple[int, dict]:
     """One typed query against a live run (command slot, req-ack).
 
     ``params`` rides the command payload (scene ``full`` escape hatch
@@ -147,28 +145,36 @@ def query_run(svc, run_id: str, kind: str, timeout: float = 10.0,
             payload = s.query(kind, timeout_s=timeout, params=params)
     except SessionOpError as e:
         msg = str(e)
-        if "no ack within" in msg:      # wedged/STOPPED run: poller-friendly
-            return 202, {"ok": None, "run_id": run_id, "error": msg,
-                         "hint": "run is not answering queries (stalled or "
-                                 "SIGSTOPped?); poll /api/runs/<id> and retry"}
+        if "no ack within" in msg:  # wedged/STOPPED run: poller-friendly
+            return 202, {
+                "ok": None,
+                "run_id": run_id,
+                "error": msg,
+                "hint": "run is not answering queries (stalled or "
+                "SIGSTOPped?); poll /api/runs/<id> and retry",
+            }
         return _err(msg)
     except SessionError as e:
         msg = str(e)
-        if ("bad magic" in msg or "bad version" in msg
-                or "legacy segment layout" in msg
-                or "segment version" in msg):
+        if (
+            "bad magic" in msg
+            or "bad version" in msg
+            or "legacy segment layout" in msg
+            or "segment version" in msg
+        ):
             # UNKNOWN segment (exists, unreadable -- a foreign layout or
             # corrupt magic).  The attach face is honestly dead; say so as
             # an error doc (never a 500) and point at the live view.
-            return _err(msg, 409,
-                        hint="run is UNKNOWN -- its segment is unreadable; "
-                             "see the error column of GET /api/runs")
-        code = 404 if ("no live bridge run" in msg
-                       or "cannot attach" in msg) else 400
-        return _err(msg, code,
-                    hint="GET /api/runs lists the live runs")
+            return _err(
+                msg,
+                409,
+                hint="run is UNKNOWN -- its segment is unreadable; "
+                "see the error column of GET /api/runs",
+            )
+        code = 404 if ("no live bridge run" in msg or "cannot attach" in msg) else 400
+        return _err(msg, code, hint="GET /api/runs lists the live runs")
     doc = {"ok": True, "run_id": run_id, kind: payload}
-    if kind == "metrics":               # media telemetry section
+    if kind == "metrics":  # media telemetry section
         doc["media"] = media_section(svc, run_id)
     return 200, doc
 
@@ -192,11 +198,12 @@ def query_status(svc, run_id: str) -> tuple[int, dict]:
         # an UNKNOWN view row must say what is actually wrong
         for r in svc.view():
             if r.get("run_id") == run_id and r.get("phase") == "UNKNOWN":
-                return _err(f"run {run_id} is UNKNOWN: {r.get('error')}",
-                            409, hint="see GET /api/runs")
+                return _err(
+                    f"run {run_id} is UNKNOWN: {r.get('error')}", 409, hint="see GET /api/runs"
+                )
         return _err(f"no such run: {run_id}", 404, hint="GET /api/runs")
     try:
-        rd.latest()                     # one observation per status poll
+        rd.latest()  # one observation per status poll
         st = rd.status()
         st["media"] = rd.media()
         # watchers brief (per-tick status JSON -> top-level section, the
@@ -223,8 +230,7 @@ def query_status(svc, run_id: str) -> tuple[int, dict]:
     return 200, {"ok": True, **st}
 
 
-def query_events(svc, run_id: str, tail: int = 50,
-                 kind: str | None = None) -> tuple[int, dict]:
+def query_events(svc, run_id: str, tail: int = 50, kind: str | None = None) -> tuple[int, dict]:
     """GET /api/runs/<id>/events (contract §1.18, watchers.md §3).
 
     The run's events.jsonl tail (timeline).  Pure file read off the
@@ -233,6 +239,7 @@ def query_events(svc, run_id: str, tail: int = 50,
     """
     from unigym.core.session import resolve_run_id
     from unigym.watchers.timeline import read_tail
+
     try:
         run_id = resolve_run_id(run_id)
     except SessionError as e:
@@ -240,19 +247,20 @@ def query_events(svc, run_id: str, tail: int = 50,
     entry = core_registry.read_entry(run_id)
     od = entry.get("output_dir")
     if not od:
-        return _err(f"no output_dir registered for run {run_id}", 404,
-                    hint="events.jsonl lives in the run output dir")
+        return _err(
+            f"no output_dir registered for run {run_id}",
+            404,
+            hint="events.jsonl lives in the run output dir",
+        )
     root = Path(od)
     if not root.is_absolute():
         root = REPO_ROOT / root
     path = root / "events.jsonl"
     events = read_tail(path, tail=tail, kind=kind)
-    return 200, {"ok": True, "run_id": run_id, "path": str(path),
-                 "kind": kind, "events": events}
+    return 200, {"ok": True, "run_id": run_id, "path": str(path), "kind": kind, "events": events}
 
 
-def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) \
-        -> tuple[int, dict]:
+def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) -> tuple[int, dict]:
     """The run's own log file tail (registry v2 log_path; plain file read).
 
     ``tail`` is in CHARACTERS (spawn_spec.log_tail semantics), clamped to
@@ -261,17 +269,17 @@ def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) \
     entry = core_registry.read_entry(run_id)
     log = entry.get("log_path")
     if not log:
-        return _err(f"no log path registered for run {run_id}", 404,
-                    hint="registry v2 carries log_path; runs spawned by "
-                         "older builds may lack it")
+        return _err(
+            f"no log path registered for run {run_id}",
+            404,
+            hint="registry v2 carries log_path; runs spawned by " "older builds may lack it",
+        )
     tail = max(1, min(int(tail or DEFAULT_LOG_TAIL), 200000))
     try:
         text = Path(log).read_text(errors="replace")[-tail:]
     except OSError as e:
-        return _err(f"log unreadable: {e}", 404,
-                    hint="the run may be gone; check GET /api/runs")
-    return 200, {"ok": True, "run_id": run_id, "log_path": log,
-                 "tail": text}
+        return _err(f"log unreadable: {e}", 404, hint="the run may be gone; check GET /api/runs")
+    return 200, {"ok": True, "run_id": run_id, "log_path": log, "tail": text}
 
 
 # --------------------------------------------------------------------------- #
@@ -279,14 +287,12 @@ def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) \
 # --------------------------------------------------------------------------- #
 def _config_summary(path: Path) -> dict:
     """Parse one config for the wizard summary (guarded; errors are data)."""
-    summary: dict = {"backend": None, "mode": None,
-                     "benchmark_tasks": [], "cameras": []}
+    summary: dict = {"backend": None, "mode": None, "benchmark_tasks": [], "cameras": []}
     try:
         mtime = path.stat().st_mtime
         hit = _SUMMARY_CACHE.get(str(path))
         if hit and hit[0] == mtime:
-            return dict(summary, **{k: v for k, v in hit[1].items()
-                                    if k != "error"})
+            return dict(summary, **{k: v for k, v in hit[1].items() if k != "error"})
         cfg = yaml.load(path.read_text(), Loader=_YAML_LOADER) or {}
     except (OSError, ValueError) as e:
         return dict(summary, error=f"unreadable: {e}")
@@ -296,15 +302,13 @@ def _config_summary(path: Path) -> dict:
     # the wizard's label-input placeholder shows the run_name this
     # config will produce (yaml run_name, else the file stem -- the
     # same resolution runrec.run_name_of applies at spawn)
-    summary["run_name"] = (str(cfg.get("run_name"))
-                           if cfg.get("run_name") else path.stem)
+    summary["run_name"] = str(cfg.get("run_name")) if cfg.get("run_name") else path.stem
     bench = cfg.get("benchmark") or {}
-    summary["benchmark_tasks"] = [t.get("name") for t in
-                                  bench.get("tasks") or []
-                                  if isinstance(t, dict) and t.get("name")]
+    summary["benchmark_tasks"] = [
+        t.get("name") for t in bench.get("tasks") or [] if isinstance(t, dict) and t.get("name")
+    ]
     cams = cfg.get("cameras") or []
-    summary["cameras"] = [c.get("name") for c in cams
-                          if isinstance(c, dict) and c.get("name")]
+    summary["cameras"] = [c.get("name") for c in cams if isinstance(c, dict) and c.get("name")]
     _SUMMARY_CACHE[str(path)] = (mtime, summary)
     return summary
 
@@ -340,9 +344,7 @@ def list_configs(svc) -> tuple[int, dict]:
             continue
         summary = _config_summary(real)
         run_name = str(summary.get("run_name") or p.stem)
-        entry = {"path": str(real),
-                 "relative": str(p.relative_to(face)),
-                 **summary}
+        entry = {"path": str(real), "relative": str(p.relative_to(face)), **summary}
         index = seen.get(run_name)
         if index is None:
             seen[run_name] = len(configs)
@@ -375,15 +377,20 @@ def list_configs(svc) -> tuple[int, dict]:
                 doc = yaml.load(meta.read_text(), Loader=_YAML_LOADER) or {}
             except (OSError, ValueError):
                 doc = {}
-            tasks = sorted(x.stem for x in
-                           (p / "tasks").glob("*.yaml")) \
-                if (p / "tasks").is_dir() else []
-            packs.append({"name": doc.get("name") or p.name,
-                          "version": doc.get("version"),
-                          "relative": str(p.relative_to(face)),
-                          "tasks": tasks})
-    return 200, {"ok": True, "configs": configs,
-                 "benchmark_packs": packs, "shadowed": shadowed}
+            tasks = (
+                sorted(x.stem for x in (p / "tasks").glob("*.yaml"))
+                if (p / "tasks").is_dir()
+                else []
+            )
+            packs.append(
+                {
+                    "name": doc.get("name") or p.name,
+                    "version": doc.get("version"),
+                    "relative": str(p.relative_to(face)),
+                    "tasks": tasks,
+                }
+            )
+    return 200, {"ok": True, "configs": configs, "benchmark_packs": packs, "shadowed": shadowed}
 
 
 # --------------------------------------------------------------------------- #
@@ -404,7 +411,8 @@ def resolve_whitelisted_config(config: str) -> Path:
     if CONFIG_DIR.resolve() not in real.parents:
         raise ValueError(
             f"config {config!r} resolves outside the whitelist "
-            f"({CONFIG_DIR}); pick one from GET /api/configs")
+            f"({CONFIG_DIR}); pick one from GET /api/configs"
+        )
     return real
 
 
@@ -421,8 +429,9 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
     if "spec" not in body:
         config = (body.get("config") or "").strip()
         if not config:
-            return _err("'config' (or 'spec') required",
-                        hint="GET /api/configs lists valid choices")
+            return _err(
+                "'config' (or 'spec') required", hint="GET /api/configs lists valid choices"
+            )
         ov = body.get("overrides") or {}
         passthrough: list[str] = []
         if ov.get("steps") is not None:
@@ -444,31 +453,36 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
         env_hard: dict = {}
         if gpu and gpu.lower() != "auto":
             if not gpu.isdigit():
-                return _err(f"overrides.gpu must be 'auto' or a GPU "
-                            f"index, got {ov.get('gpu')!r}",
-                            hint="e.g. \"auto\" (freest GPU) or \"2\"")
+                return _err(
+                    f"overrides.gpu must be 'auto' or a GPU " f"index, got {ov.get('gpu')!r}",
+                    hint='e.g. "auto" (freest GPU) or "2"',
+                )
             env_hard["CUDA_VISIBLE_DEVICES"] = gpu
             gpu = None
-        body = dict(body, spec={"config": config,
-                                "backend": ov.get("backend") or None,
-                                "gpu": gpu or None,
-                                "passthrough": passthrough,
-                                "env": env_hard,
-                                "paused": bool(body.get("paused")),
-                                "direct": bool(body.get("direct")),
-                                "label": label,
-                                "adapter_params":
-                                    body.get("adapter_params") or {}})
+        body = dict(
+            body,
+            spec={
+                "config": config,
+                "backend": ov.get("backend") or None,
+                "gpu": gpu or None,
+                "passthrough": passthrough,
+                "env": env_hard,
+                "paused": bool(body.get("paused")),
+                "direct": bool(body.get("direct")),
+                "label": label,
+                "adapter_params": body.get("adapter_params") or {},
+            },
+        )
     try:
         spec = run_ops.RunSpec.from_dict(body.get("spec") or {})
     except ValueError as e:
-        return _err(str(e), hint="POST /api/start {'spec': {...}} or "
-                                 "{'config': ..., 'overrides': {...}}")
+        return _err(
+            str(e), hint="POST /api/start {'spec': {...}} or " "{'config': ..., 'overrides': {...}}"
+        )
     try:
         spec.config = str(resolve_whitelisted_config(spec.config))
     except ValueError as e:
-        return _err(str(e), hint="GET /api/configs lists the whitelisted "
-                                 "configs")
+        return _err(str(e), hint="GET /api/configs lists the whitelisted " "configs")
     warnings: list[str] = []
     if body.get("debug"):
         code, doc = _preflight(spec, warnings)
@@ -480,8 +494,7 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
         return _err(str(e))
     except RuntimeError as e:
         return _err(str(e), 503)
-    doc = {"ok": True, "handle": handle, "alloc": allocd,
-           "warnings": warnings}
+    doc = {"ok": True, "handle": handle, "alloc": allocd, "warnings": warnings}
     if body.get("debug"):
         code, doc = _wait_debug(svc, body, handle, doc)
         if code:
@@ -497,6 +510,7 @@ def _preflight(spec, warnings) -> tuple[int, dict]:
     """
     from unigym.core.spawn import resolve_backend
     from unigym.scripts.client import DebugPreflightError, debug_preflight
+
     cfg_path = Path(spec.config).expanduser().resolve()
     try:
         cfg = yaml.safe_load(cfg_path.read_text()) or {}
@@ -504,8 +518,7 @@ def _preflight(spec, warnings) -> tuple[int, dict]:
         return _err(f"config unreadable: {e}")
     backend = resolve_backend(cfg_path, spec.backend)
     try:
-        warnings.extend(debug_preflight(cfg, backend, spec.passthrough,
-                                        config_path=cfg_path))
+        warnings.extend(debug_preflight(cfg, backend, spec.passthrough, config_path=cfg_path))
     except DebugPreflightError as e:
         return _err(str(e), hint="fix the preflight failure above")
     return 0, {}
@@ -514,23 +527,30 @@ def _preflight(spec, warnings) -> tuple[int, dict]:
 def _wait_debug(svc, body, handle, doc) -> tuple[int, dict]:
     """Debug flow: wait for the worker registry + attach the /info doc."""
     from unigym.runtime.bridge import serve_state_paths
+
     known = {str(p) for p in serve_state_paths()}
     reg = svc.wait_new_registry(
-        known, float(body.get("wait_timeout") or 180.0),
-        poll=float(body.get("poll") or 1.0))
+        known, float(body.get("wait_timeout") or 180.0), poll=float(body.get("poll") or 1.0)
+    )
     if reg is None:
-        return 504, {"ok": False, "handle": handle,
-                     "error": f"run worker did not come up within "
-                              f"{body.get('wait_timeout') or 180.0}s "
-                              f"-- check the run log: {handle['log_path']}"}
+        return 504, {
+            "ok": False,
+            "handle": handle,
+            "error": f"run worker did not come up within "
+            f"{body.get('wait_timeout') or 180.0}s "
+            f"-- check the run log: {handle['log_path']}",
+        }
     doc["registry"] = reg
     try:
         from .media import run_info_document
+
         doc["info"] = run_info_document(str(reg["run_id"]), svc.media)
-    except Exception as e:                 # noqa: BLE001
-        return 502, {"ok": False, "handle": handle,
-                     "error": f"run is up but its SHM status is "
-                              f"unreadable: {e}"}
+    except Exception as e:  # noqa: BLE001
+        return 502, {
+            "ok": False,
+            "handle": handle,
+            "error": f"run is up but its SHM status is " f"unreadable: {e}",
+        }
     return 0, doc
 
 
@@ -573,8 +593,11 @@ def task_face_for(output_dir: str | None) -> dict | None:
         if isinstance(cfg, dict):
             mode = cfg.get("mode", "collect")
             bench = cfg.get("benchmark")
-            tasks = [t.get("name") for t in (bench or {}).get("tasks") or []
-                     if isinstance(t, dict) and t.get("name")]
+            tasks = [
+                t.get("name")
+                for t in (bench or {}).get("tasks") or []
+                if isinstance(t, dict) and t.get("name")
+            ]
             if mode in TASK_FACE_MODES:
                 doc = {"mode": mode, "tasks": tasks}
     except (OSError, ValueError):
@@ -624,8 +647,7 @@ def history_rows(svc, limit: int = DEFAULT_HISTORY_LIMIT) -> tuple[int, dict]:
     # the CACHED view (the rebuild loop publishes every 2s) --
     # a request must not pay for a rebuild; fresh=True stays reserved
     # for admin ops.
-    live_by_id = {r["run_id"]: r for r in svc.view(fresh=False)
-                  if r.get("run_id")}
+    live_by_id = {r["run_id"]: r for r in svc.view(fresh=False) if r.get("run_id")}
     rows: list[tuple[float, dict]] = []
     seen: set[str] = set()
     # oversample so the merge keeps `limit` rows after live replacement
@@ -635,14 +657,16 @@ def history_rows(svc, limit: int = DEFAULT_HISTORY_LIMIT) -> tuple[int, dict]:
             seen.add(rid)
         row = _history_row(rec, live_by_id.get(rid))
         rows.append((row["started_ts"], row))
-    for rid, live in live_by_id.items():           # live with no ledger
+    for rid, live in live_by_id.items():  # live with no ledger
         if rid in seen:
             continue
-        rows.append((float(live.get("start_ts") or 0.0),
-                     _live_history_row(live)))
+        rows.append((float(live.get("start_ts") or 0.0), _live_history_row(live)))
     rows.sort(key=lambda t: t[0], reverse=True)
-    return 200, {"ok": True, "output_root": str(svc.output_root),
-                 "runs": [r for _, r in rows[:limit]]}
+    return 200, {
+        "ok": True,
+        "output_root": str(svc.output_root),
+        "runs": [r for _, r in rows[:limit]],
+    }
 
 
 def _history_row(rec: dict, live: dict | None) -> dict:
@@ -655,13 +679,13 @@ def _history_row(rec: dict, live: dict | None) -> dict:
     if live is None:
         # the scan face recomputes the task face from meta.json -- the
         # ledger's spawn-time copy is usually null (flush happens later)
-        row["task_face"] = task_face_for(rec.get("output_dir")) \
-            if row["task_face"] is None else row["task_face"]
+        row["task_face"] = (
+            task_face_for(rec.get("output_dir")) if row["task_face"] is None else row["task_face"]
+        )
         row["error"] = None
         return row
     row["state"] = live.get("phase") or row["state"]
-    row["stale"] = (live.get("phase") in ("RUNNING", "PAUSED")
-                    and not live.get("alive"))
+    row["stale"] = live.get("phase") in ("RUNNING", "PAUSED") and not live.get("alive")
     row["task_face"] = live.get("task_face") or row["task_face"]
     row["pid"] = live.get("pid") or row["pid"]
     row["started_ts"] = float(live.get("start_ts") or row["started_ts"])
@@ -677,20 +701,24 @@ def _live_history_row(live: dict) -> dict:
     HistoryRow shape, honest nulls.
     """
     out_dir = live.get("output_dir") or ""
-    return {"run_id": live.get("run_id"),
-            "run_name": Path(out_dir).name if out_dir else None,
-            "label": None,
-            "output_dir": out_dir, "config": live.get("config") or None,
-            "backend": None, "overrides": {},
-            "paused": False,
-            "started_ts": float(live.get("start_ts") or 0.0),
-            "pid": live.get("pid"),
-            "task_face": live.get("task_face"),
-            "exit": None, "results": None,
-            "state": live.get("phase") or "RUNNING",
-            "stale": (live.get("phase") in ("RUNNING", "PAUSED")
-                      and not live.get("alive")),
-            "error": live.get("error") or None}      # UNKNOWN rows carry it
+    return {
+        "run_id": live.get("run_id"),
+        "run_name": Path(out_dir).name if out_dir else None,
+        "label": None,
+        "output_dir": out_dir,
+        "config": live.get("config") or None,
+        "backend": None,
+        "overrides": {},
+        "paused": False,
+        "started_ts": float(live.get("start_ts") or 0.0),
+        "pid": live.get("pid"),
+        "task_face": live.get("task_face"),
+        "exit": None,
+        "results": None,
+        "state": live.get("phase") or "RUNNING",
+        "stale": (live.get("phase") in ("RUNNING", "PAUSED") and not live.get("alive")),
+        "error": live.get("error") or None,
+    }  # UNKNOWN rows carry it
 
 
 def shutdown_unknown(svc, run: str) -> tuple[int, dict] | None:
@@ -705,33 +733,35 @@ def shutdown_unknown(svc, run: str) -> tuple[int, dict] | None:
         original attach error).
     """
     from unigym.core.session import resolve_run_id
+
     try:
         rid = resolve_run_id(run)
     except SessionError:
         return None
-    row = next((r for r in svc.view(fresh=True)
-                if r.get("run_id") == rid), None)
+    row = next((r for r in svc.view(fresh=True) if r.get("run_id") == rid), None)
     if row is None or row.get("phase") != "UNKNOWN":
         return None
     pid = int(row.get("pid") or 0)
     if not pid or not runrec.process_alive(pid):
-        return 409, {"ok": False,
-                     "error": f"run {rid} is UNKNOWN and its pid is gone "
-                              f"-- nothing to kill",
-                     "hint": "delete the record instead: POST "
-                             "/api/runs/delete {output_dir}"}
+        return 409, {
+            "ok": False,
+            "error": f"run {rid} is UNKNOWN and its pid is gone " f"-- nothing to kill",
+            "hint": "delete the record instead: POST " "/api/runs/delete {output_dir}",
+        }
     os.kill(pid, signal.SIGTERM)
-    return 200, {"ok": True, "run_id": rid, "pid": pid,
-                 "shutdown": "sigterm (UNKNOWN run: segment unreadable, "
-                             "pid signaled directly)",
-                 "error": row.get("error")}
+    return 200, {
+        "ok": True,
+        "run_id": rid,
+        "pid": pid,
+        "shutdown": "sigterm (UNKNOWN run: segment unreadable, " "pid signaled directly)",
+        "error": row.get("error"),
+    }
 
 
 # --------------------------------------------------------------------------- #
 # artifact whitelist (semantics; the portal only sends the bytes)
 # --------------------------------------------------------------------------- #
-def resolve_artifact(svc, run: str, job: str,
-                     name: str) -> tuple[int, str, str, bytes | None]:
+def resolve_artifact(svc, run: str, job: str, name: str) -> tuple[int, str, str, bytes | None]:
     """Whitelisted artifact -> (code, error_text, ctype, payload).
 
     Basename names only -- plus the ONE sanctioned subdirectory
@@ -746,9 +776,12 @@ def resolve_artifact(svc, run: str, job: str,
     """
     if name != Path(name).name:
         parts = Path(name).parts
-        if (len(parts) != 2 or parts[0] != "capture"
-                or parts[1] != Path(parts[1]).name
-                or parts[1] in ("", ".", "..")):
+        if (
+            len(parts) != 2
+            or parts[0] != "capture"
+            or parts[1] != Path(parts[1]).name
+            or parts[1] in ("", ".", "..")
+        ):
             return 400, "bad name", "text/plain", None
     elif name in ("", ".", ".."):
         return 400, "bad name", "text/plain", None
@@ -771,8 +804,8 @@ def _known_output_dir(svc, run: str, job: str) -> str | None:
         entry = core_registry.read_entry(run)
         if entry.get("output_dir"):
             return entry["output_dir"]
-        return _ledger_output_dir(svc, run)    # post-mortem
-    return None      # no job world -> no job-sourced whitelist
+        return _ledger_output_dir(svc, run)  # post-mortem
+    return None  # no job world -> no job-sourced whitelist
 
 
 # positive ledger lookups only (run_id -> output_dir); a record never
@@ -791,7 +824,7 @@ def _ledger_output_dir(svc, run_id: str) -> str | None:
     except OSError:
         return None
     if od:
-        if len(_PM_CACHE) > 512:               # bound (dirs churn)
+        if len(_PM_CACHE) > 512:  # bound (dirs churn)
             _PM_CACHE.clear()
         _PM_CACHE[run_id] = od
     return od

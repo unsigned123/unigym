@@ -5,6 +5,7 @@ called synchronously in construction order -- CollectSink first, then
 BenchmarkSink -- and each sees the identical
 bundle objects, so recording and scoring cannot diverge.
 """
+
 from __future__ import annotations
 
 
@@ -31,5 +32,4 @@ class FanOutSink:
             sink.on_step_end(t, bundle)
 
     def on_run_end(self) -> dict:
-        return {type(sink).__name__: sink.on_run_end()
-                for sink in self.sinks}
+        return {type(sink).__name__: sink.on_run_end() for sink in self.sinks}

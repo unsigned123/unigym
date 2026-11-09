@@ -6,6 +6,7 @@ mujoco, PyYAML).  Everything else is an extra: the import site calls
 with one teaching line that names the exact install command, never a
 bare traceback from deep inside a worker.
 """
+
 from __future__ import annotations
 
 import importlib

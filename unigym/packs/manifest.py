@@ -7,6 +7,7 @@ Validation is fail-closed: every malformed or unsupported declaration
 raises :class:`~unigym.packs.PackError` with the offending path and the
 legal form.
 """
+
 from __future__ import annotations
 
 import re
@@ -83,8 +84,7 @@ def _check_unigym_requirement(expr: str, path: Path) -> None:
         match = _COMPARATOR_RE.match(part.strip())
         if match is None:
             raise PackError(
-                f"unsupported requirement form {expr!r} in {path}; "
-                f"expected e.g. '>=0.80,<1.0'"
+                f"unsupported requirement form {expr!r} in {path}; " f"expected e.g. '>=0.80,<1.0'"
             )
         op, target = match.group(1), match.group(2)
         try:
@@ -96,8 +96,7 @@ def _check_unigym_requirement(expr: str, path: Path) -> None:
             ) from err
         if not _compare(op, current_tuple, target_tuple):
             raise PackError(
-                f"pack requires unigym {expr!r}, this checkout is {current} "
-                f"({path})"
+                f"pack requires unigym {expr!r}, this checkout is {current} " f"({path})"
             )
 
 
@@ -106,8 +105,7 @@ def _face_path(root: Path, value: str, face: str, path: Path) -> Path:
     rel = Path(value)
     if rel.is_absolute():
         raise PackError(
-            f"pack face {face!r} must be relative to the pack root: "
-            f"{value!r} ({path})"
+            f"pack face {face!r} must be relative to the pack root: " f"{value!r} ({path})"
         )
     base = Path(root).resolve()
     candidate = (base / rel).resolve()
@@ -115,13 +113,10 @@ def _face_path(root: Path, value: str, face: str, path: Path) -> Path:
         candidate.relative_to(base)
     except ValueError:
         raise PackError(
-            f"pack face {face!r} escapes the pack root: {value!r} "
-            f"({path}; root = {base})"
+            f"pack face {face!r} escapes the pack root: {value!r} " f"({path}; root = {base})"
         ) from None
     if not candidate.exists():
-        raise PackError(
-            f"pack face {face!r} does not exist: {candidate} ({path})"
-        )
+        raise PackError(f"pack face {face!r} does not exist: {candidate} ({path})")
     return candidate
 
 
@@ -133,9 +128,7 @@ def load_manifest(root: Path) -> PackManifest:
 
     name = doc.get("name")
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-        raise PackError(
-            f"pack name {name!r} must match [a-z][a-z0-9_]* ({path})"
-        )
+        raise PackError(f"pack name {name!r} must match [a-z][a-z0-9_]* ({path})")
 
     version = doc.get("version")
     if not isinstance(version, str) or not version.strip():
@@ -143,9 +136,7 @@ def load_manifest(root: Path) -> PackManifest:
 
     api = doc.get("api")
     if isinstance(api, bool) or not isinstance(api, int) or api != PACK_API:
-        raise PackError(
-            f"unsupported pack api {api!r} in {path}; supported api: {PACK_API}"
-        )
+        raise PackError(f"unsupported pack api {api!r} in {path}; supported api: {PACK_API}")
 
     raw_requires = doc.get("requires") or {}
     if not isinstance(raw_requires, Mapping):
@@ -157,8 +148,7 @@ def load_manifest(root: Path) -> PackManifest:
     trust = doc.get("trust")
     if trust not in TRUST_LEVELS:
         raise PackError(
-            f"pack {name!r} trust {trust!r} must be one of {list(TRUST_LEVELS)} "
-            f"({path})"
+            f"pack {name!r} trust {trust!r} must be one of {list(TRUST_LEVELS)} " f"({path})"
         )
     python_dir = root / "python"
     if trust == "content" and python_dir.exists():
@@ -168,8 +158,7 @@ def load_manifest(root: Path) -> PackManifest:
         )
     if trust == "code" and not (python_dir / "__init__.py").is_file():
         raise PackError(
-            f"pack {name!r} declares trust: code but has no "
-            f"python/__init__.py ({python_dir})"
+            f"pack {name!r} declares trust: code but has no " f"python/__init__.py ({python_dir})"
         )
 
     raw_faces = doc.get("faces") or {}
@@ -179,13 +168,10 @@ def load_manifest(root: Path) -> PackManifest:
     for face, value in raw_faces.items():
         if face not in FACE_NAMES:
             raise PackError(
-                f"unknown pack face {face!r} in {path}; known faces: "
-                f"{list(FACE_NAMES)}"
+                f"unknown pack face {face!r} in {path}; known faces: " f"{list(FACE_NAMES)}"
             )
         if not isinstance(value, str) or not value.strip():
-            raise PackError(
-                f"pack face {face!r} must be a non-empty relative path ({path})"
-            )
+            raise PackError(f"pack face {face!r} must be a non-empty relative path ({path})")
         faces[face] = _face_path(root, value, face, path)
 
     return PackManifest(

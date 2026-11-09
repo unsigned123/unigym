@@ -23,6 +23,7 @@ has no unit field (not NotImplemented: the field simply does not exist).
 Pure logic + stdlib only (no torch/numpy): offline-unit-testable and safe
 on the bridge's stdlib-only CLI import path.
 """
+
 from __future__ import annotations
 
 import time
@@ -74,13 +75,13 @@ class StepGate:
         if isinstance(n, bool) or not isinstance(n, int):
             raise ConsoleError(f"step: 'n' must be an integer, got {n!r}")
         if not 1 <= n <= MAX_FAST_FORWARD:
-            raise ConsoleError(
-                f"step: 'n' must be in [1, {MAX_FAST_FORWARD}], got {n}")
+            raise ConsoleError(f"step: 'n' must be in [1, {MAX_FAST_FORWARD}], got {n}")
         if not self.paused:
             raise ConsoleError(
                 "pause first: 'step' is only served while paused -- send "
                 '{"type": "pause"} to POST /control (or run `unigym '
-                'pause`) first, then re-queue this step')
+                "pause`) first, then re-queue this step"
+            )
         self.pending_steps = int(n)
         return int(n)
 
@@ -100,8 +101,7 @@ class StepGate:
                 return False
         return True
 
-    def wait(self, env, service_fn, stop_fn=None, poll_interval: float = 0.02) \
-            -> None:
+    def wait(self, env, service_fn, stop_fn=None, poll_interval: float = 0.02) -> None:
         """Park the engine: poll until resumed or a step budget is queued.
 
         ``service_fn`` (zero-arg) keeps the command block + broadcast
@@ -130,15 +130,17 @@ class StepGate:
             hooks.append((render, "sim.render", False))
         if scene_update is not None:
             hooks.append((scene_update, "scene.update", True))
-        while self.paused and self.pending_steps == 0 and not \
-                (stop_fn is not None and stop_fn()):
+        while self.paused and self.pending_steps == 0 and not (stop_fn is not None and stop_fn()):
             service_fn()
             for fn, label, needs_dt in hooks:
                 try:
                     fn(0) if needs_dt else fn()
-                except Exception as e:       # noqa: BLE001 -- degrade once
-                    print(f"[console] freeze-period {label} disabled after "
-                          f"one failure: {type(e).__name__}: {e}", flush=True)
+                except Exception as e:  # noqa: BLE001 -- degrade once
+                    print(
+                        f"[console] freeze-period {label} disabled after "
+                        f"one failure: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
                     hooks = [h for h in hooks if h[1] != label]
             time.sleep(poll_interval)
 

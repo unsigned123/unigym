@@ -8,6 +8,7 @@ flat snake_case).
 * ``stand``             -- upright/height quality of a standing policy.
 * ``velocity_tracking`` -- per-frame body-frame velocity command tracking.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -62,10 +63,8 @@ class StandTask(Task):
         self._alive_thr = float(self.p.get("alive_threshold", 0.9))
 
     def score(self, ep: EpisodeData) -> EpisodeResult:
-        g = np.asarray(ep.data[self.resolve_key(ep.data, "gravity_b")],
-                       dtype=float)  # (T, 3)
-        z = np.asarray(ep.data[self.resolve_key(ep.data, "base_pos")],
-                       dtype=float)[:, 2]  # (T,)
+        g = np.asarray(ep.data[self.resolve_key(ep.data, "gravity_b")], dtype=float)  # (T, 3)
+        z = np.asarray(ep.data[self.resolve_key(ep.data, "base_pos")], dtype=float)[:, 2]  # (T,)
         upright = np.abs(g[:, 2] + 1.0) <= self._alive_tol
         alive_fraction = float(upright.mean())
         # tilt: angle between body +z and world +z; cos(tilt) == -g_z
@@ -73,8 +72,7 @@ class StandTask(Task):
         tilt_exceed_fraction = float((tilt_deg > self._tilt_max_deg).mean())
         base_z_mean = float(z.mean())
         base_z_var = float(z.var())
-        success = (alive_fraction >= self._alive_thr
-                   and self._z_lo <= base_z_mean <= self._z_hi)
+        success = alive_fraction >= self._alive_thr and self._z_lo <= base_z_mean <= self._z_hi
         return EpisodeResult(
             metrics={
                 "alive_fraction": alive_fraction,
@@ -125,15 +123,18 @@ class VelocityTrackingTask(Task):
             raise ValueError(
                 "benchmark task 'velocity_tracking' requires a command "
                 "channel: configure a yaml `command:` sampler or use an "
-                "adapter with generates_command=True (none present)")
+                "adapter with generates_command=True (none present)"
+            )
         self._err_thr = float(self.p.get("error_threshold", 0.5))
         self._succ_frac = float(self.p.get("success_fraction", 0.8))
 
     def score(self, ep: EpisodeData) -> EpisodeResult:
-        v = np.asarray(ep.data[self.resolve_key(ep.data, "base_lin_vel")],
-                       dtype=float)[:, :2]  # (T, 2)
-        cmd = np.asarray(ep.data[self.resolve_key(ep.data, "command")],
-                         dtype=float)[:, :2]  # (T, 2)
+        v = np.asarray(ep.data[self.resolve_key(ep.data, "base_lin_vel")], dtype=float)[
+            :, :2
+        ]  # (T, 2)
+        cmd = np.asarray(ep.data[self.resolve_key(ep.data, "command")], dtype=float)[
+            :, :2
+        ]  # (T, 2)
         err = np.linalg.norm(v - cmd, axis=1)  # (T,)
         success_fraction = float((err <= self._err_thr).mean())
         return EpisodeResult(

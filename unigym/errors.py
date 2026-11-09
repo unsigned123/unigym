@@ -5,6 +5,7 @@ catch one base type without importing backend-specific modules.  The model
 IR errors keep their historical names and additional builtin bases for
 backward compatibility (a ``ModelIRError`` is still a ``ValueError``).
 """
+
 from __future__ import annotations
 
 __all__ = [

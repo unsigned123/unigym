@@ -1,4 +1,5 @@
 """Manual adapter + a tiny self-authored MJCF: external action smoke."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -88,17 +89,18 @@ def _make_env(tmp_path):
         spawn={"pos": [0.0, 0.0, 0.8]},
         body_parts={"base": "base"},
     )
-    group = ControlGroup.from_mapping({
-        "name": "tiny",
-        "adapter": "manual",
-        "articulation": "tiny",
-        "joints": ["hinge"],
-        "drive": "position_pd",
-        "target": "position",
-        "gains": {"kp": 40.0, "kd": 2.0},
-    })
-    controls = build_control_runtimes((group,), (articulation,),
-                                      {"tiny": profile})
+    group = ControlGroup.from_mapping(
+        {
+            "name": "tiny",
+            "adapter": "manual",
+            "articulation": "tiny",
+            "joints": ["hinge"],
+            "drive": "position_pd",
+            "target": "position",
+            "gains": {"kp": 40.0, "kd": 2.0},
+        }
+    )
+    controls = build_control_runtimes((group,), (articulation,), {"tiny": profile})
     adapter = _spy_adapter()
     env = MujocoEnv(
         robot_profile=profile,
@@ -140,9 +142,11 @@ def _runner(env, adapter, sink):
 
 
 def _action(value):
-    return {"tiny": NamedAction(
-        torch.tensor([[value]], dtype=torch.float32),
-        ["hinge"], kind="position")}
+    return {
+        "tiny": NamedAction(
+            torch.tensor([[value]], dtype=torch.float32), ["hinge"], kind="position"
+        )
+    }
 
 
 def test_manual_adapter_act_is_a_loud_error():

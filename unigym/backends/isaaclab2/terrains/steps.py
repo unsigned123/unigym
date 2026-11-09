@@ -14,6 +14,7 @@ Platform-top height = (num_steps + 1) * step_height; IsaaclabEnv's robot
 spawn_height (e.g. 0.34 m) is added on top of this origin z by the scene, so
 the robot stands on the platform surface.
 """
+
 from __future__ import annotations
 
 from .base import TerrainPreset
@@ -25,6 +26,7 @@ def _resolve(classes):
     import isaaclab.sim as sim_utils
     import isaaclab.terrains as terrain_gen
     from isaaclab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
+
     return {
         "TerrainImporterCfg": TerrainImporterCfg,
         "TerrainGeneratorCfg": TerrainGeneratorCfg,
@@ -37,10 +39,16 @@ def _resolve(classes):
 class StepTerrain(TerrainPreset):
     """Pyramid-stairs terrain with configurable step geometry."""
 
-    def __init__(self, step_width: float = 0.3, step_height: float = 0.08,
-                 num_steps: int = 8, platform_width: float = 1.0,
-                 border_width: float = 0.5, friction: float = 0.8,
-                 color=(0.5, 0.45, 0.4)):
+    def __init__(
+        self,
+        step_width: float = 0.3,
+        step_height: float = 0.08,
+        num_steps: int = 8,
+        platform_width: float = 1.0,
+        border_width: float = 0.5,
+        friction: float = 0.8,
+        color=(0.5, 0.45, 0.4),
+    ):
         self.step_width = step_width
         self.step_height = step_height
         self.num_steps = num_steps
@@ -49,8 +57,7 @@ class StepTerrain(TerrainPreset):
         self.friction = friction
         self.color = color
 
-    def build(self, num_envs: int, env_spacing: float, *,
-              classes=None, **kwargs) -> dict:
+    def build(self, num_envs: int, env_spacing: float, *, classes=None, **kwargs) -> dict:
         """Build the stair-steps preset (see TerrainPreset.build).
 
         Returns:

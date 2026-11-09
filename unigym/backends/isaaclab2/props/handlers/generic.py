@@ -17,6 +17,7 @@ backend keeps the §8 representation tiers (static scenery included).
 Articulated props moved to :class:`props.articulation.PropArticulation`
 ; this handler serves ``rigid_object`` / ``usd`` only.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -35,12 +36,13 @@ from unigym.props.base import (
 from ..spawn import _build_urdf_spawn, _build_usd_spawn
 from unigym.adapters.base import RawObsRequest
 
-_STATE_PREFIX = "prop"   # default state-key prefix; name-specific keys override
+_STATE_PREFIX = "prop"  # default state-key prefix; name-specific keys override
 
 
-def _static_init_state(placement: PropPlacement, roll_quat,
-                       ) -> tuple[tuple[float, float, float],
-                                  tuple[float, float, float, float]]:
+def _static_init_state(
+    placement: PropPlacement,
+    roll_quat,
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
     """Init (pos, rot) for a STATIC stage-decoration prop from its placement.
 
     Static prims have no reset surface, so the placement sample is applied
@@ -50,22 +52,20 @@ def _static_init_state(placement: PropPlacement, roll_quat,
     p0 = placement.sample(1, device="cpu")[0]
     yaw_q = _yaw_quat(p0[3:4])
     total_q = _quat_mul(yaw_q, roll_quat.expand(1, 4))[0]
-    return ((float(p0[0]), float(p0[1]),
-             float(p0[2]) + placement.height_offset),
-            (float(total_q[0]), float(total_q[1]),
-             float(total_q[2]), float(total_q[3])))
+    return (
+        (float(p0[0]), float(p0[1]), float(p0[2]) + placement.height_offset),
+        (float(total_q[0]), float(total_q[1]), float(total_q[2]), float(total_q[3])),
+    )
 
 
 class GenericProp(PropHandler):
     """Generic URDF prop handler (prop_pos_b / prop_vel_b in body frame)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         self.spec = spec
         self.num_envs = num_envs
         self.device = device
-        self.static = bool(self.spec.type == "usd"
-                           and self.spec.spawn.get("static", False))
+        self.static = bool(self.spec.type == "usd" and self.spec.spawn.get("static", False))
         """Stage-decoration mode : no dynamic state surface."""
         self.placement = PropPlacement(spec.placement)
         self._roll_quat = _roll_quat(spec.init_roll)
@@ -75,8 +75,11 @@ class GenericProp(PropHandler):
         # Falls back to prop_pos_b / prop_vel_b when the spec leaves it empty.
         if spec.state_keys:
             self._pos_key = spec.state_keys[0]
-            self._vel_key = spec.state_keys[1] if len(spec.state_keys) > 1 else (
-                spec.state_keys[0].replace("_pos_", "_vel_"))
+            self._vel_key = (
+                spec.state_keys[1]
+                if len(spec.state_keys) > 1
+                else (spec.state_keys[0].replace("_pos_", "_vel_"))
+            )
         else:
             self._pos_key = f"{_STATE_PREFIX}_pos_b"
             self._vel_key = f"{_STATE_PREFIX}_vel_b"
@@ -107,8 +110,7 @@ class GenericProp(PropHandler):
                 cfg = c["AssetBaseCfg"](
                     prim_path=f"{{ENV_REGEX_NS}}/Prop_{self.spec.name}",
                     spawn=spawn,
-                    init_state=c["AssetBaseCfg"].InitialStateCfg(
-                        pos=pos, rot=rot),
+                    init_state=c["AssetBaseCfg"].InitialStateCfg(pos=pos, rot=rot),
                 )
                 return self.spec.name, cfg
             # native USD spawn -- RigidObject rooted at the USD's
@@ -120,8 +122,7 @@ class GenericProp(PropHandler):
                 spawn=spawn,
                 init_state=c["RigidObjectCfg"].InitialStateCfg(
                     pos=(0.0, 0.0, self.placement.height_offset),
-                    rot=(float(roll_q[0]), float(roll_q[1]),
-                         float(roll_q[2]), float(roll_q[3])),
+                    rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
                 ),
                 collision_group=0,
                 debug_vis=False,
@@ -135,8 +136,7 @@ class GenericProp(PropHandler):
             spawn=spawn,
             init_state=c["RigidObjectCfg"].InitialStateCfg(
                 pos=init_state_pos,
-                rot=(float(roll_q[0]), float(roll_q[1]),
-                     float(roll_q[2]), float(roll_q[3])),
+                rot=(float(roll_q[0]), float(roll_q[1]), float(roll_q[2]), float(roll_q[3])),
             ),
             collision_group=0,
             debug_vis=False,
@@ -210,5 +210,4 @@ class GenericProp(PropHandler):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""
         if self._asset is None or not hasattr(self._asset, "data"):
             return None
-        return (self._asset.data.root_pos_w.clone(),
-                self._asset.data.root_quat_w.clone())
+        return (self._asset.data.root_pos_w.clone(), self._asset.data.root_quat_w.clone())

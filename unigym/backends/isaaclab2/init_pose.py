@@ -15,6 +15,7 @@ yaml form::
       height: 0.42            # spawn base-z (m); the low clearance lets the
                               # fall settle naturally toward the target pose
 """
+
 from __future__ import annotations
 
 import torch
@@ -38,8 +39,7 @@ def _euler_xyz_to_quat(roll, pitch, yaw):
     return torch.stack([w, x, y, z], dim=-1)
 
 
-def sample_init_pose(n, roll_range, pitch_range, yaw_range, height=0.42,
-                     device="cpu"):
+def sample_init_pose(n, roll_range, pitch_range, yaw_range, height=0.42, device="cpu"):
     """Sample per-env initial root poses, optionally lying/fallen.
 
     Args:
@@ -55,10 +55,12 @@ def sample_init_pose(n, roll_range, pitch_range, yaw_range, height=0.42,
         ``(pos, quat)``: shape ``(n, 3)`` base positions at height and
         ``(n, 4)`` (w, x, y, z) quaternions drawn uniformly from the ranges.
     """
-    lo = torch.tensor([r[0] for r in (roll_range, pitch_range, yaw_range)],
-                      device=device, dtype=torch.float32)
-    hi = torch.tensor([r[1] for r in (roll_range, pitch_range, yaw_range)],
-                      device=device, dtype=torch.float32)
+    lo = torch.tensor(
+        [r[0] for r in (roll_range, pitch_range, yaw_range)], device=device, dtype=torch.float32
+    )
+    hi = torch.tensor(
+        [r[1] for r in (roll_range, pitch_range, yaw_range)], device=device, dtype=torch.float32
+    )
     deg = lo + (hi - lo) * torch.rand(n, 3, device=device)
     rad = torch.deg2rad(deg)
     pos = torch.zeros(n, 3, device=device)

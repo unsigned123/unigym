@@ -16,6 +16,7 @@ filter may name its ``articulation`` explicitly; otherwise it resolves the
 unique recorded articulation (a cardinality fact) and fails fast when the
 episode carries several.
 """
+
 from __future__ import annotations
 
 from unigym.terminations import (
@@ -37,7 +38,8 @@ def _single_articulation(state: TerminationState, who: str) -> str:
         return names[0]
     raise ValueError(
         f"{who}: needs exactly one articulation in the episode data, found "
-        f"{names}; pass an explicit 'articulation' (v103.6: no primary)")
+        f"{names}; pass an explicit 'articulation' (v103.6: no primary)"
+    )
 
 
 class FallenFilter(EpisodeFilter):
@@ -64,31 +66,37 @@ class FallenFilter(EpisodeFilter):
             recorded articulation (fail-fast when several).
     """
 
-    def __init__(self, max_fallen_ratio: float = 0.1,
-                 height_threshold: float = DEFAULT_HEIGHT_THRESHOLD,
-                 check_all_feet_airborne: bool = True,
-                 check_tilt: bool = True,
-                 tilt_threshold: float | None = DEFAULT_TILT_THRESHOLD,
-                 articulation: str | None = None):
+    def __init__(
+        self,
+        max_fallen_ratio: float = 0.1,
+        height_threshold: float = DEFAULT_HEIGHT_THRESHOLD,
+        check_all_feet_airborne: bool = True,
+        check_tilt: bool = True,
+        tilt_threshold: float | None = DEFAULT_TILT_THRESHOLD,
+        articulation: str | None = None,
+    ):
         self.max_fallen_ratio = float(max_fallen_ratio)
         self.height_threshold = float(height_threshold)
         self.check_all_feet_airborne = bool(check_all_feet_airborne)
         self.check_tilt = bool(check_tilt)
-        self.tilt_threshold = (None if tilt_threshold is None
-                               else float(tilt_threshold))
+        self.tilt_threshold = None if tilt_threshold is None else float(tilt_threshold)
         self.articulation = articulation
-        self.group = (None if articulation is None
-                      else self._build_group(articulation))
+        self.group = None if articulation is None else self._build_group(articulation)
 
     def _build_group(self, articulation: str) -> TerminationGroup:
         # unified termination backend: height OR tilt (tilt term disabled
         # when check_tilt=False, mirroring the reference semantics exactly)
-        return TerminationGroup([FallTermination({
-            "articulation": articulation,
-            "height_threshold": self.height_threshold,
-            "tilt_threshold": (self.tilt_threshold if self.check_tilt
-                               else None),
-        })])
+        return TerminationGroup(
+            [
+                FallTermination(
+                    {
+                        "articulation": articulation,
+                        "height_threshold": self.height_threshold,
+                        "tilt_threshold": (self.tilt_threshold if self.check_tilt else None),
+                    }
+                )
+            ]
+        )
 
     def __call__(self, episode_data: dict) -> bool:
         state = TerminationState.from_episode_data(episode_data)
@@ -119,8 +127,7 @@ def _bind_cfg_articulation(cfg: list, articulation: str) -> list:
     for entry in cfg:
         item = dict(entry)
         params = dict(item.get("params") or {})
-        if (item.get("articulation") is None
-                and params.get("articulation") is None):
+        if item.get("articulation") is None and params.get("articulation") is None:
             params["articulation"] = articulation
         item["params"] = params
         bound.append(item)
@@ -143,23 +150,26 @@ class TerminationFilter(EpisodeFilter):
                 params: {height_threshold: 0.15, tilt_threshold: 0.8}
     """
 
-    def __init__(self, max_terminated_ratio: float = 0.1,
-                 terminations: list | None = None,
-                 articulation: str | None = None):
+    def __init__(
+        self,
+        max_terminated_ratio: float = 0.1,
+        terminations: list | None = None,
+        articulation: str | None = None,
+    ):
         self.max_terminated_ratio = float(max_terminated_ratio)
         self._cfg = list(terminations or [])
         self.articulation = articulation
-        self.group = (build_termination_group(
-            _bind_cfg_articulation(self._cfg, articulation))
-            if articulation is not None else None)
+        self.group = (
+            build_termination_group(_bind_cfg_articulation(self._cfg, articulation))
+            if articulation is not None
+            else None
+        )
 
     def __call__(self, episode_data: dict) -> bool:
         state = TerminationState.from_episode_data(episode_data)
         if self.group is None:
-            name = self.articulation or _single_articulation(
-                state, "TerminationFilter")
-            self.group = build_termination_group(
-                _bind_cfg_articulation(self._cfg, name))
+            name = self.articulation or _single_articulation(state, "TerminationFilter")
+            self.group = build_termination_group(_bind_cfg_articulation(self._cfg, name))
         if len(self.group) == 0:
             return True  # nothing configured -> keep everything
         ratio = float(self.group.check(state).mean())

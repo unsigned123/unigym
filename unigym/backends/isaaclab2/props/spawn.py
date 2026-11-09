@@ -4,6 +4,7 @@ The isaaclab half of the old neutral ``unigym/props`` package.
 Every isaaclab import stays inside :func:`_resolve`; the module body is
 import-safe without the kit so unit tests can inject fake cfg classes.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,14 +21,19 @@ def _resolve(classes):
     from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
     from isaaclab.sim import schemas
     from isaaclab.sim.converters import UrdfConverterCfg
+
     # SphereCfg/UrdfFileCfg are re-exported at the spawners top level
     # (spawners/__init__ does ``from .shapes import *``); importing the names
     # directly avoids the shapes-module-vs-package ambiguity.
     from isaaclab.sim.spawners import (
-        CapsuleCfg, CuboidCfg, CylinderCfg, SphereCfg, UrdfFileCfg,
-        UsdFileCfg)
-    from isaaclab.sim.spawners.materials import (
-        PreviewSurfaceCfg, RigidBodyMaterialCfg)
+        CapsuleCfg,
+        CuboidCfg,
+        CylinderCfg,
+        SphereCfg,
+        UrdfFileCfg,
+        UsdFileCfg,
+    )
+    from isaaclab.sim.spawners.materials import PreviewSurfaceCfg, RigidBodyMaterialCfg
 
     return {
         "UrdfFileCfg": UrdfFileCfg,
@@ -74,8 +80,7 @@ def _build_urdf_spawn(spec: PropSpec, c: dict):
     if spec.type == "articulation":
         JointDriveCfg = c["UrdfConverterCfg"].JointDriveCfg
         PDGainsCfg = JointDriveCfg.PDGainsCfg
-        kwargs["joint_drive"] = JointDriveCfg(
-            gains=PDGainsCfg(stiffness=0.0, damping=0.0))
+        kwargs["joint_drive"] = JointDriveCfg(gains=PDGainsCfg(stiffness=0.0, damping=0.0))
     else:
         kwargs["joint_drive"] = None
     return UrdfFileCfg(**kwargs)
@@ -98,7 +103,7 @@ def _build_usd_spawn(spec: PropSpec, c: dict):
     """
     UsdFileCfg = c["UsdFileCfg"]
     spawn_cfg = dict(spec.spawn)
-    kwargs = dict(usd_path=spec.usd_path)   # isaaclab 2.3.2: usd_path (UrdfFileCfg uses asset_path)
+    kwargs = dict(usd_path=spec.usd_path)  # isaaclab 2.3.2: usd_path (UrdfFileCfg uses asset_path)
     mass = spawn_cfg.get("mass")
     if mass is not None:
         kwargs["mass_props"] = c["MassPropertiesCfg"](mass=float(mass))
@@ -112,10 +117,10 @@ def _build_usd_spawn(spec: PropSpec, c: dict):
     kwargs["rigid_props"] = c["RigidBodyPropertiesCfg"](**rb)
     if spawn_cfg.get("strip_articulation"):
         kwargs["articulation_props"] = c["ArticulationRootPropertiesCfg"](
-            articulation_enabled=False)
+            articulation_enabled=False
+        )
     if spawn_cfg.get("strip_collision"):
-        kwargs["collision_props"] = c["CollisionPropertiesCfg"](
-            collision_enabled=False)
+        kwargs["collision_props"] = c["CollisionPropertiesCfg"](collision_enabled=False)
     if spawn_cfg.get("visible") is not None:
         kwargs["visible"] = bool(spawn_cfg["visible"])
     return UsdFileCfg(**kwargs)
@@ -134,8 +139,7 @@ def _build_actuators(spec: PropSpec, c: dict) -> dict:
                 damping=float(gains.get("damping", 0.0)),
             )
     else:
-        actuators["all"] = ImplicitActuatorCfg(
-            joint_names_expr=[".*"], stiffness=0.0, damping=0.0)
+        actuators["all"] = ImplicitActuatorCfg(joint_names_expr=[".*"], stiffness=0.0, damping=0.0)
     return actuators
 
 

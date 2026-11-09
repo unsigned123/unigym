@@ -20,6 +20,7 @@ INJECTED as the :attr:`unigym.backends.registry.BackendInfo.gripper_backend`
 factory by the backend ops that already knows its identity --
 no env attribute sniffing, no compatibility shim.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -44,13 +45,11 @@ def normalize_gripper_cfg(cfg: dict | None) -> dict | None:
         return None
     if not isinstance(cfg, dict):
         raise ValueError(f"director.gripper must be a mapping, got {cfg!r}")
-    out = {k: (dict(v) if isinstance(v, dict) else v)
-           for k, v in GRIPPER_DEFAULTS.items()}
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in GRIPPER_DEFAULTS.items()}
     known = set(GRIPPER_DEFAULTS)
     extra = sorted(set(cfg) - known)
     if extra:
-        raise ValueError(f"director.gripper: unknown key(s) {extra} "
-                         f"(known: {sorted(known)})")
+        raise ValueError(f"director.gripper: unknown key(s) {extra} " f"(known: {sorted(known)})")
     for key in ("name",):
         if key in cfg:
             out[key] = str(cfg[key])
@@ -59,18 +58,17 @@ def normalize_gripper_cfg(cfg: dict | None) -> dict | None:
             vals = [float(v) for v in cfg[key]]
             want = 3 if key in ("size", "pos") else 4
             if len(vals) != want:
-                raise ValueError(f"director.gripper.{key} needs {want} "
-                                 f"values, got {vals}")
+                raise ValueError(f"director.gripper.{key} needs {want} " f"values, got {vals}")
             out[key] = vals
     cam = cfg.get("camera")
     if cam is not None:
         if not isinstance(cam, dict):
-            raise ValueError("director.gripper.camera must be a mapping "
-                             "{name, fovy}")
+            raise ValueError("director.gripper.camera must be a mapping " "{name, fovy}")
         extra = sorted(set(cam) - {"name", "fovy"})
         if extra:
-            raise ValueError(f"director.gripper.camera: unknown key(s) "
-                             f"{extra} (known: ['fovy', 'name'])")
+            raise ValueError(
+                f"director.gripper.camera: unknown key(s) " f"{extra} (known: ['fovy', 'name'])"
+            )
         out["camera"].update(cam)
     return out
 
@@ -96,7 +94,6 @@ def build_gripper(env, cfg: dict | None, gripper_backend) -> Gripper | None:
     if cfg is None:
         return None
     if gripper_backend is None:
-        raise NotImplementedError(
-            "this backend declares no director gripper face")
+        raise NotImplementedError("this backend declares no director gripper face")
     grip_cls = gripper_backend()
     return grip_cls(env, cfg["name"])

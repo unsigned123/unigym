@@ -21,6 +21,7 @@ importing it: one mechanical rule, a local copy, so this module stays
 standard-library only (the rule is shared between the asset and scene
 vocabularies).
 """
+
 from __future__ import annotations
 
 import math
@@ -151,29 +152,27 @@ def _require_text(owner: str, name: str, value: object) -> str:
 
 
 def _require_vec(
-    owner: str, name: str, value: Sequence[object], lengths: int | tuple[int, ...],
+    owner: str,
+    name: str,
+    value: Sequence[object],
+    lengths: int | tuple[int, ...],
 ) -> tuple[float, ...]:
     """Validate a fixed-length finite float vector (one of *lengths*)."""
     allowed = (lengths,) if isinstance(lengths, int) else lengths
     if not isinstance(value, (list, tuple)):
         wanted = " or ".join(str(n) for n in allowed)
         raise ValueError(
-            f"{owner}: {name} must be a {wanted}-vector of finite numbers, "
-            f"got {value!r}"
+            f"{owner}: {name} must be a {wanted}-vector of finite numbers, " f"got {value!r}"
         )
     if len(value) not in allowed or any(
-        isinstance(v, bool)
-        or not isinstance(v, (int, float))
-        or not math.isfinite(v)
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
         for v in value
     ):
         want = " or ".join(str(n) for n in allowed)
         raise ValueError(
             f"{owner}: {name} must be a {want}-vector of finite numbers, got {value!r}"
         )
-    return tuple(
-        float(v) for v in value if isinstance(v, (int, float))
-    )
+    return tuple(float(v) for v in value if isinstance(v, (int, float)))
 
 
 def _require_quat(owner: str, value: Sequence[object]) -> tuple[float, ...]:
@@ -255,13 +254,10 @@ class Instance:
             raise ValueError(
                 f"instance {self.id!r}: pose must be a Pose, got {type(self.pose).__name__}"
             )
-        object.__setattr__(
-            self, "source", _require_source(f"instance {self.id!r}", self.source)
-        )
+        object.__setattr__(self, "source", _require_source(f"instance {self.id!r}", self.source))
         if self.role not in INSTANCE_ROLES:
             raise ValueError(
-                f"instance {self.id!r}: role {self.role!r} must be one of "
-                f"{INSTANCE_ROLES}"
+                f"instance {self.id!r}: role {self.role!r} must be one of " f"{INSTANCE_ROLES}"
             )
 
 
@@ -283,9 +279,7 @@ class Region:
     def __post_init__(self):
         """Validate the name, owner, frame, extent and source."""
         object.__setattr__(self, "name", require_neutral_name("region", self.name))
-        object.__setattr__(
-            self, "owner", require_neutral_name("region owner", self.owner)
-        )
+        object.__setattr__(self, "owner", require_neutral_name("region owner", self.owner))
         object.__setattr__(
             self, "frame", _require_text(f"region {self.name!r}", "frame", self.frame)
         )
@@ -294,9 +288,7 @@ class Region:
             "extent",
             _require_vec(f"region {self.name!r}", "extent", self.extent, (2, 3)),
         )
-        object.__setattr__(
-            self, "source", _require_source(f"region {self.name!r}", self.source)
-        )
+        object.__setattr__(self, "source", _require_source(f"region {self.name!r}", self.source))
 
 
 @dataclass(frozen=True)
@@ -319,16 +311,12 @@ class Slot:
     def __post_init__(self):
         """Validate the id, frame, extent, optional owner, tags and source."""
         object.__setattr__(self, "id", require_neutral_name("slot", self.id))
-        object.__setattr__(
-            self, "frame", _require_text(f"slot {self.id!r}", "frame", self.frame)
-        )
+        object.__setattr__(self, "frame", _require_text(f"slot {self.id!r}", "frame", self.frame))
         object.__setattr__(
             self, "extent", _require_vec(f"slot {self.id!r}", "extent", self.extent, (2, 3))
         )
         if self.owner:
-            object.__setattr__(
-                self, "owner", require_neutral_name("slot owner", self.owner)
-            )
+            object.__setattr__(self, "owner", require_neutral_name("slot owner", self.owner))
         if not isinstance(self.tags, tuple) or any(
             not isinstance(tag, str) or not tag for tag in self.tags
         ):
@@ -391,8 +379,7 @@ class Scene:
         _require_entries("materials", self.materials, Material)
         if not isinstance(self.engine_hints, Mapping):
             raise ValueError(
-                f"scene engine_hints must be a mapping, got "
-                f"{type(self.engine_hints).__name__}"
+                f"scene engine_hints must be a mapping, got " f"{type(self.engine_hints).__name__}"
             )
         object.__setattr__(self, "engine_hints", dict(self.engine_hints))
         if self.terrain is not None:
@@ -407,7 +394,9 @@ class Scene:
 
 
 def _require_entries(
-    field_name: str, entries: tuple[object, ...], entry_type: type[_T],
+    field_name: str,
+    entries: tuple[object, ...],
+    entry_type: type[_T],
 ) -> None:
     """Validate one typed tuple member (a sequence of *entry_type*)."""
     if not isinstance(entries, tuple):
@@ -424,7 +413,10 @@ def _require_entries(
 
 
 def _check_unique(
-    kind: str, key: str, names: Iterable[str], scene_name: str,
+    kind: str,
+    key: str,
+    names: Iterable[str],
+    scene_name: str,
 ) -> None:
     """Reject a duplicate declaration name within one kind."""
     seen: set[str] = set()
@@ -439,16 +431,10 @@ def _check_unique(
 
 def _validate_uniqueness(scene: Scene) -> None:
     """Reject duplicate instance ids, region names, slot ids and materials."""
-    _check_unique(
-        "instance", "id", (entry.id for entry in scene.instances), scene.name
-    )
-    _check_unique(
-        "region", "name", (entry.name for entry in scene.regions), scene.name
-    )
+    _check_unique("instance", "id", (entry.id for entry in scene.instances), scene.name)
+    _check_unique("region", "name", (entry.name for entry in scene.regions), scene.name)
     _check_unique("slot", "id", (entry.id for entry in scene.slots), scene.name)
-    _check_unique(
-        "material", "name", (entry.name for entry in scene.materials), scene.name
-    )
+    _check_unique("material", "name", (entry.name for entry in scene.materials), scene.name)
 
 
 def validate_scene(scene: Scene) -> None:
@@ -465,16 +451,13 @@ def validate_scene(scene: Scene) -> None:
         ValueError: The value is not a Scene or a uniqueness rule fails.
     """
     if not isinstance(scene, Scene):
-        raise ValueError(
-            f"scene expected, got {type(scene).__name__}"
-        )
+        raise ValueError(f"scene expected, got {type(scene).__name__}")
     if scene.terrain is not None:
         from .terrain import Terrain
 
         if not isinstance(scene.terrain, Terrain):
             raise ValueError(
-                f"scene terrain must be a Terrain or None, got "
-                f"{type(scene.terrain).__name__}"
+                f"scene terrain must be a Terrain or None, got " f"{type(scene.terrain).__name__}"
             )
     _validate_uniqueness(scene)
 

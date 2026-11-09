@@ -43,6 +43,7 @@ chains' quaternion dofs with their mass-spring ``springdamper``
 parametrization) and the material ``specular`` appearance attribute
 are also rendered.
 """
+
 from __future__ import annotations
 
 import functools
@@ -82,7 +83,8 @@ def material_texture_width() -> int:
     probe = mujoco.MjSpec.from_string(
         '<mujoco model="probe"><asset><material name="m"/></asset>'
         '<worldbody><body><geom type="box" size="0.1 0.1 0.1"'
-        ' material="m"/></body></worldbody></mujoco>')
+        ' material="m"/></body></worldbody></mujoco>'
+    )
     return len(list(probe.materials[0].textures))
 
 
@@ -108,7 +110,8 @@ def material_textures(bound: list[str]) -> list[str]:
     if len(bound) > width:
         raise ValueError(
             f"material texture binding carries {len(bound)} slots -- "
-            f"the engine declares {width}")
+            f"the engine declares {width}"
+        )
     return list(bound) + [""] * (width - len(bound))
 
 
@@ -123,7 +126,8 @@ def add_ir_body(mjspec, handler, asset: AssetDefinition) -> None:
             f"prop {handler.spec.name!r}: a forest payload (worldbody-level "
             f"roots) attaches only through the scene composer's verbatim "
             f"face (scene_render) -- the prop runtime mounts anchored "
-            f"single-root payloads")
+            f"single-root payloads"
+        )
     child, joints = _build_child(handler, asset)
     _apply_declared_overrides(handler, joints)
     ranges = _effective_ranges(handler, asset)
@@ -160,24 +164,28 @@ def add_ir_free_body(mjspec, handler, asset: AssetDefinition) -> None:
         raise ValueError(
             f"free_articulation prop {handler.spec.name!r}: a forest "
             f"payload (worldbody-level roots) attaches only through the "
-            f"scene composer's verbatim face (scene_render)")
+            f"scene composer's verbatim face (scene_render)"
+        )
     child, joints = _build_child(handler, asset)
-    passive = [j for j in joints.values()
-               if j.type in (mujoco.mjtJoint.mjJNT_HINGE,
-                             mujoco.mjtJoint.mjJNT_SLIDE)]
+    passive = [
+        j
+        for j in joints.values()
+        if j.type in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+    ]
     if len(passive) != len(joints):
         raise ValueError(
             f"free_articulation prop {handler.spec.name!r}: a generated "
             f"payload carries passive hinge/slide internal joints only "
             f"in v1 (the injected freejoint is the prop's live dof); "
-            f"got {sorted(joints)}")
-    if len(child.worldbody.bodies) > 1 \
-            and child.worldbody.bodies[0].joints:
+            f"got {sorted(joints)}"
+        )
+    if len(child.worldbody.bodies) > 1 and child.worldbody.bodies[0].joints:
         raise ValueError(
             f"free_articulation prop {handler.spec.name!r}: the payload "
             f"ROOT body carries an internal joint -- the injected "
             f"freejoint owns the root's dofs; internal joints live on "
-            f"child bodies (the laptop lid face)")
+            f"child bodies (the laptop lid face)"
+        )
     root = child.worldbody.bodies[0]
     free = root.add_joint(name="free", type=mujoco.mjtJoint.mjJNT_FREE)
     free.damping = [_OFFICIAL_FREE_DAMPING, 0.0, 0.0]
@@ -200,7 +208,8 @@ def _build_child(handler, asset: AssetDefinition):
     if asset.name != spec.name:
         raise ValueError(
             f"articulation prop {spec.name!r}: the asset definition names "
-            f"{asset.name!r} -- a payload must carry its own prop identity")
+            f"{asset.name!r} -- a payload must carry its own prop identity"
+        )
     child = mujoco.MjSpec.from_string(_CHILD_MODEL)
     _add_declarations(mujoco, child, asset)
     joints: dict = {}
@@ -227,8 +236,7 @@ def _add_declarations(mujoco, child, asset: AssetDefinition) -> None:
         "cube": mujoco.mjtTexture.mjTEXTURE_CUBE,
     }
     for mesh in asset.meshes:
-        kwargs = {"name": mesh.name,
-                  "file": resolve_asset_path(mesh.file)}
+        kwargs = {"name": mesh.name, "file": resolve_asset_path(mesh.file)}
         if mesh.scale is not None:
             kwargs["scale"] = [float(v) for v in mesh.scale]
         obj = child.add_mesh(**kwargs)
@@ -238,8 +246,9 @@ def _add_declarations(mujoco, child, asset: AssetDefinition) -> None:
             # would (the engine applies it to the loaded vertices)
             obj.refquat = [float(v) for v in mesh.refquat]
     for tex in asset.textures:
-        child.add_texture(name=tex.name, type=kind_enum[tex.kind],
-                          file=resolve_asset_path(tex.file))
+        child.add_texture(
+            name=tex.name, type=kind_enum[tex.kind], file=resolve_asset_path(tex.file)
+        )
     for mat in asset.materials:
         kwargs = {}
         if mat.rgba is not None:
@@ -265,8 +274,7 @@ def _add_body(mujoco, parent, body, hints, joints) -> None:
     Raw names: the attach prefix lands later, exactly as for a fragment
     file.
     """
-    mjs_body = parent.add_body(name=body.name,
-                               pos=list(body.pos), quat=list(body.quat))
+    mjs_body = parent.add_body(name=body.name, pos=list(body.pos), quat=list(body.quat))
     if body.inertial is not None:
         # the explicit-inertial face: the dump's full-precision
         # row verbatim; the engine flags the body explicitinertial and
@@ -280,8 +288,7 @@ def _add_body(mujoco, parent, body, hints, joints) -> None:
     for geom in body.geoms:
         _add_geom(mujoco, mjs_body, geom, hints.contact)
     for joint in body.joints:
-        joints[joint.name] = _add_joint(mujoco, mjs_body, joint,
-                                        hints.joint)
+        joints[joint.name] = _add_joint(mujoco, mjs_body, joint, hints.joint)
     for site in body.sites:
         _add_site(mjs_body, site)
     for child in body.children:
@@ -355,7 +362,7 @@ def _add_site(mjs_body, site) -> None:
 
     obj = mjs_body.add_site(name=site.name, pos=list(site.pos))
     if site.size_vector is not None:
-        obj.size = [*site.size_vector, *obj.size[len(site.size_vector):]]
+        obj.size = [*site.size_vector, *obj.size[len(site.size_vector) :]]
     elif site.size is not None:
         obj.size[0] = float(site.size)
     if site.rgba is not None:
@@ -387,7 +394,7 @@ def _contact_kwargs(contact: ContactHints) -> dict:
     if contact.solver_impedance is not None:
         curve = list(contact.solver_impedance)
         if len(curve) < 5:
-            curve.extend(_SOLIMP_DEFAULT_TAIL[len(curve) - 2:])
+            curve.extend(_SOLIMP_DEFAULT_TAIL[len(curve) - 2 :])
         kwargs["solimp"] = curve
     if contact.margin is not None:
         kwargs["margin"] = float(contact.margin)
@@ -444,11 +451,11 @@ def _apply_joint_hints(jobj, hints: JointHints) -> None:
     """
     if hints.limit_solver_ref is not None:
         values = tuple(hints.limit_solver_ref)
-        values += _SOLREFLIMIT_DEFAULT_TAIL[len(values):]
+        values += _SOLREFLIMIT_DEFAULT_TAIL[len(values) :]
         jobj.solref_limit = list(values)
     if hints.limit_solver_impedance is not None:
         values = tuple(hints.limit_solver_impedance)
-        values += _SOLIMP_DEFAULT_TAIL[len(values) - 2:]
+        values += _SOLIMP_DEFAULT_TAIL[len(values) - 2 :]
         jobj.solimp_limit = list(values)
 
 
@@ -478,17 +485,15 @@ def _effective_ranges(handler, asset: AssetDefinition) -> dict:
     at bind time.  Declared ranges win; IR ranges fill the silence.
     """
     declared_raw = handler.spec.joints or {}
-    declared = (handler.joints or {})
+    declared = handler.joints or {}
     ranges: dict = {}
     for body in iter_asset_bodies(asset):
         for joint in body.joints:
             raw = declared_raw.get(joint.name) or {}
             if raw.get("range") is not None:
-                ranges[joint.name] = [float(v) for v in
-                                      declared[joint.name]["range"]]
+                ranges[joint.name] = [float(v) for v in declared[joint.name]["range"]]
             elif joint.range is not None:
-                ranges[joint.name] = [float(joint.range[0]),
-                                      float(joint.range[1])]
+                ranges[joint.name] = [float(joint.range[0]), float(joint.range[1])]
     return ranges
 
 
@@ -501,8 +506,7 @@ def _add_servos(mjspec, handler, ranges: dict) -> None:
         if p["mode"] != "actuated":
             continue
         kp, kd = p["stiffness"], p["damping"]
-        effective = (p["range"] if p["range"] is not None
-                     else ranges.get(jname))
+        effective = p["range"] if p["range"] is not None else ranges.get(jname)
         if effective is None:
             lo, hi, limited = 0.0, 0.0, False
         else:
@@ -518,7 +522,9 @@ def _add_servos(mjspec, handler, ranges: dict) -> None:
             # position servo: force = kp*ctrl - kp*q - kd*dq  (biasprm[1]
             # carries the NEGATED stiffness -- the mjcf <position> form)
             biasprm=np.array([0.0, -kp, -kd] + [0.0] * 7),
-            ctrllimited=limited, ctrlrange=[lo, hi])
+            ctrllimited=limited,
+            ctrlrange=[lo, hi],
+        )
 
 
 def verify_prop_subtree(m, prop_name: str, declared_joints) -> dict:
@@ -532,22 +538,21 @@ def verify_prop_subtree(m, prop_name: str, declared_joints) -> dict:
     import mujoco
 
     prefix = f"Prop_{prop_name}_"
-    names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b)
-             for b in range(m.nbody)]
+    names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in range(m.nbody)]
     cands = [b for b, n in enumerate(names) if n and n.startswith(prefix)]
-    roots = [b for b in cands
-             if not (names[m.body_parentid[b]] or "").startswith(prefix)]
+    roots = [b for b in cands if not (names[m.body_parentid[b]] or "").startswith(prefix)]
     if len(roots) != 1:
         raise ValueError(
             f"articulation prop {prop_name!r}: expected exactly one root "
-            f"body under prefix {prefix!r}, found {roots}")
+            f"body under prefix {prefix!r}, found {roots}"
+        )
     joints = {}
     for jname in declared_joints:
-        jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT,
-                                f"{prefix}{jname}")
+        jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"{prefix}{jname}")
         if jid < 0:
             raise ValueError(
                 f"articulation prop {prop_name!r}: joint {jname!r} "
-                f"({prefix + jname!r}) not in the compiled model")
+                f"({prefix + jname!r}) not in the compiled model"
+            )
         joints[jname] = jid
     return {"root_bid": roots[0], "joints": joints}

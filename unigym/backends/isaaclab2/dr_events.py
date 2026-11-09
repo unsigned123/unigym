@@ -4,6 +4,7 @@ The core logic (tupleization / asset_cfg conversion / function resolution) is
 written in dependency-injection form so it is unit-testable locally without
 isaaclab; ``build_events_cfg`` is the server-side wrapper.
 """
+
 from __future__ import annotations
 
 
@@ -56,8 +57,7 @@ DEPRECATED_EVENT_FUNCS = {
 }
 
 
-def build_event_terms(events_list: list, *, mdp_module, term_cfg_cls,
-                      scene_entity_cfg_cls) -> list:
+def build_event_terms(events_list: list, *, mdp_module, term_cfg_cls, scene_entity_cfg_cls) -> list:
     """Build [(term_name, term_cfg), ...] from the yaml events list.
 
     term_cfg_cls / scene_entity_cfg_cls admit fake implementations for local
@@ -76,7 +76,8 @@ def build_event_terms(events_list: list, *, mdp_module, term_cfg_cls,
                 f"event entry #{i} uses deprecated func '{spec['func']}': it accumulates "
                 f"CoM offsets across resets (random walk) and destabilizes long runs. "
                 f"Use '{DEPRECATED_EVENT_FUNCS[spec['func']]}' instead"
-                f" (dr_events.randomize_rigid_body_com_abs, anchored to default CoM).")
+                f" (dr_events.randomize_rigid_body_com_abs, anchored to default CoM)."
+            )
         func = resolve_func(spec["func"], mdp_module)
         params = convert_params(spec.get("params", {}), scene_entity_cfg_cls)
         kwargs = {"func": func, "mode": spec["mode"], "params": params}
@@ -153,6 +154,11 @@ def build_events_cfg(events_list: list) -> dict:
 
     mdp = types.SimpleNamespace(**vars(mdp))
     mdp.randomize_rigid_body_com_abs = randomize_rigid_body_com_abs
-    return dict(build_event_terms(
-        events_list, mdp_module=mdp, term_cfg_cls=EventTermCfg,
-        scene_entity_cfg_cls=SceneEntityCfg))
+    return dict(
+        build_event_terms(
+            events_list,
+            mdp_module=mdp,
+            term_cfg_cls=EventTermCfg,
+            scene_entity_cfg_cls=SceneEntityCfg,
+        )
+    )

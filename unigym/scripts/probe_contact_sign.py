@@ -38,9 +38,11 @@ for i in range(d.ncon):
     f_world = frame.T @ f6[:3]
     g1b = m.geom_bodyid[con.geom1]
     g2b = m.geom_bodyid[con.geom2]
-    mass = float(m.body('ball').mass)
-    print(f"contact {i}: geom1={m.geom(con.geom1).name}(body={m.body(g1b).name}) "
-          f"geom2={m.geom(con.geom2).name}(body={m.body(g2b).name})")
+    mass = float(m.body("ball").mass)
+    print(
+        f"contact {i}: geom1={m.geom(con.geom1).name}(body={m.body(g1b).name}) "
+        f"geom2={m.geom(con.geom2).name}(body={m.body(g2b).name})"
+    )
     print(f"  frc6[:3] (contact frame) = {f6[:3]}")
     print(f"  world force (frame.T @ f) = {f_world}")
     print(f"  ball mass = {mass}, expected on-ball = +mg = {mass * 9.81:.3f} N up")

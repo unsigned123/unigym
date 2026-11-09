@@ -62,6 +62,7 @@ by the controller BEFORE the sidecar dump / safety capture / restore
 ``unigym.io.writer``).  A refused rewind is a zero-change rejection;
 the apply-face guards remain as the second line.
 """
+
 from __future__ import annotations
 
 import copy
@@ -72,15 +73,17 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 import numpy as np
 
 from unigym.io.writer import validate_commit_state
-from unigym.runtime.rewind import (RewindGateError, RewindStateProvider,
-                                   SnapshotValue)
+from unigym.runtime.rewind import RewindGateError, RewindStateProvider, SnapshotValue
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.io.writer import ShardWriter
 
-__all__ = ["BenchmarkSinkProvider", "CollectSinkProvider",
-           "InitializerStateProvider",
-           "build_rewind_providers"]
+__all__ = [
+    "BenchmarkSinkProvider",
+    "CollectSinkProvider",
+    "InitializerStateProvider",
+    "build_rewind_providers",
+]
 
 
 EpisodeBuffers: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
@@ -162,13 +165,15 @@ class _EpisodeBufferProvider:
         bufs = self._bufs()
         marks_state = self._marks()
         state: dict[str, SnapshotValue] = {
-            "bufs": [[_copy_slice(s) for s in buf]
-                     for buf in (bufs or [])],
-            "marks": ([[dict(m) for m in marks]
-                       for marks in marks_state]
-                      if marks_state is not None else None),
+            "bufs": [[_copy_slice(s) for s in buf] for buf in (bufs or [])],
+            "marks": (
+                [[dict(m) for m in marks] for marks in marks_state]
+                if marks_state is not None
+                else None
+            ),
             "episode_stamp": self._live_stamp(bufs),
-            "fuse": self._fuse()}
+            "fuse": self._fuse(),
+        }
         return state
 
     def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
@@ -195,20 +200,17 @@ class _EpisodeBufferProvider:
         # controller's pre-flight
         self._guard_state(bufs, state)
         if bufs is not None:
-            bufs[:] = [[_copy_slice(s) for s in buf]
-                       for buf in state["bufs"]]
+            bufs[:] = [[_copy_slice(s) for s in buf] for buf in state["bufs"]]
         marks = self._marks()
         if marks is not None and state.get("marks") is not None:
-            marks[:] = [[dict(m) for m in m_list]
-                        for m_list in state["marks"]]
+            marks[:] = [[dict(m) for m in m_list] for m_list in state["marks"]]
         fuse: Mapping[str, SnapshotValue] = state.get("fuse") or {}
         live_fuse = self._fuse()
         for k, v in fuse.items():
             if k in live_fuse:
                 setattr(self.sink, k, v)
 
-    def _guard_state(self, live_bufs: EpisodeBuffers,
-                     state: dict[str, SnapshotValue]) -> None:
+    def _guard_state(self, live_bufs: EpisodeBuffers, state: dict[str, SnapshotValue]) -> None:
         """The shared refusal judgment (single source).
 
         Buffer shape drift + the cross-episode stamp check.  Raises
@@ -223,7 +225,8 @@ class _EpisodeBufferProvider:
                 f"rewind provider '{self.name}': buffer shape drift "
                 f"(checkpoint holds episode buffers but the live sink "
                 f"has none) -- refusing rather than partially "
-                f"restoring")
+                f"restoring"
+            )
         live = self._live_stamp(live_bufs)
         stamp = state.get("episode_stamp")
         if stamp is not None and live is not None and int(stamp) != int(live):
@@ -231,7 +234,8 @@ class _EpisodeBufferProvider:
                 f"rewind provider '{self.name}': cross-episode rewind "
                 f"refused (checkpoint episode {int(stamp)} != live "
                 f"episode {int(live)}) -- cross-set rewind is out of the "
-                f"v1 scope")
+                f"v1 scope"
+            )
 
     def episode_hint(self) -> int:
         """The episode ordinal for the sidecar filename (process truth)."""
@@ -306,8 +310,10 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
         return getattr(self.sink, "_ep_rewinds", None)
 
     def _fuse(self) -> dict[str, SnapshotValue]:
-        return {"n_episodes": int(getattr(self.sink, "n_episodes", 0)),
-                "_stop": bool(getattr(self.sink, "_stop", False))}
+        return {
+            "n_episodes": int(getattr(self.sink, "n_episodes", 0)),
+            "_stop": bool(getattr(self.sink, "_stop", False)),
+        }
 
 
 class CollectSinkProvider(_EpisodeBufferProvider):
@@ -329,8 +335,11 @@ class CollectSinkProvider(_EpisodeBufferProvider):
         return None
 
     def _fuse(self) -> dict[str, SnapshotValue]:
-        return {"n_episodes": int(getattr(self.sink, "n_episodes", 0))} \
-            if hasattr(self.sink, "n_episodes") else {}
+        return (
+            {"n_episodes": int(getattr(self.sink, "n_episodes", 0))}
+            if hasattr(self.sink, "n_episodes")
+            else {}
+        )
 
     def _writer(self) -> ShardWriter | None:
         """The sink's shard writer (absent on provider-protocol doubles).
@@ -354,8 +363,11 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             # walk made this shape reachable in production: plain
             # collect runs now mount the provider too)
             state: dict[str, SnapshotValue] = {
-                "bufs": None, "marks": None, "episode_stamp": None,
-                "fuse": self._fuse()}
+                "bufs": None,
+                "marks": None,
+                "episode_stamp": None,
+                "fuse": self._fuse(),
+            }
         else:
             state = super().rewind_state()
         w = self._writer()
@@ -396,9 +408,10 @@ class CollectSinkProvider(_EpisodeBufferProvider):
                 raise RewindGateError(
                     f"rewind provider '{self.name}': {e}",
                     hint="the snapshot's shard commit state is "
-                         "corrupt or unreachable against the live "
-                         "shard dir; rewind refuses rather than "
-                         "truncate") from e
+                    "corrupt or unreachable against the live "
+                    "shard dir; rewind refuses rather than "
+                    "truncate",
+                ) from e
 
     def apply_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
         """Restore the buffers (base) and then the shard cursor.
@@ -426,9 +439,9 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             w.restore_commit(commit)
 
 
-def build_rewind_providers(sink: object,
-                           initializer: object | None = None
-                           ) -> list[RewindStateProvider]:
+def build_rewind_providers(
+    sink: object, initializer: object | None = None
+) -> list[RewindStateProvider]:
     """One provider per provider-capable sink in the fan-out chain.
 
     collect_cli wiring; a plain sink or None -> whatever applies.
@@ -455,15 +468,17 @@ def build_rewind_providers(sink: object,
         kind = type(s).__name__
         if kind == "BenchmarkSink" or hasattr(s, "_ep_rewinds"):
             out.append(BenchmarkSinkProvider(s))
-        elif kind == "CollectSink" or (hasattr(s, "ep_bufs")
-                                       and getattr(s, "ep_bufs", None)
-                                       is not None):
+        elif kind == "CollectSink" or (
+            hasattr(s, "ep_bufs") and getattr(s, "ep_bufs", None) is not None
+        ):
             out.append(CollectSinkProvider(s))
 
     walk(sink)
-    if (initializer is not None
-            and callable(getattr(initializer, "snapshot_state", None))
-            and callable(getattr(initializer, "restore_state", None))):
+    if (
+        initializer is not None
+        and callable(getattr(initializer, "snapshot_state", None))
+        and callable(getattr(initializer, "restore_state", None))
+    ):
         out.append(InitializerStateProvider(initializer))
     return out
 

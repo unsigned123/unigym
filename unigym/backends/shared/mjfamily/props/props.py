@@ -27,6 +27,7 @@ carries, "equivalent combination").  Runtime:
 N is always 1 (MujocoEnv is single-env); record tensors are batched
 to (1, ...) so the object layer is backend-agnostic.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -40,7 +41,8 @@ from unigym.props.base import PropHandler, PropPlacement, PropSpec
 from unigym.props import container as container_mod
 from unigym.props.container import _declared_aabb, validate_box_spec
 from unigym.props.primitive import (
-    resolve_mass, validate_primitive_spec,
+    resolve_mass,
+    validate_primitive_spec,
 )
 
 
@@ -59,7 +61,7 @@ def _spawn_geom_kwargs(spec, material: str | None = None) -> dict:
             kwargs["friction"] = [float(v) for v in friction]
         else:
             f = float(friction)
-            kwargs["friction"] = [f, f, f]   # slide, spin, roll
+            kwargs["friction"] = [f, f, f]  # slide, spin, roll
     for key in ("condim", "priority", "solref", "solimp"):
         if spec.spawn.get(key) is not None:
             kwargs[key] = spec.spawn[key]
@@ -83,8 +85,7 @@ def _spawn_geom_kwargs(spec, material: str | None = None) -> dict:
 class MujocoPropHandler(PropHandler):
     """Declaration-only mujoco prop handler (no scene-cfg face)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         self.spec = spec
         self.num_envs = num_envs
         self.device = device
@@ -104,14 +105,13 @@ class MujocoPropHandler(PropHandler):
 class MujocoBallProp(MujocoPropHandler):
     """Sphere prop declaration (mujoco)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
-        radius = spec.radius if spec.radius is not None \
-            else spec.spawn.get("radius")
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
+        radius = spec.radius if spec.radius is not None else spec.spawn.get("radius")
         if radius is None:
             raise ValueError(
                 f"sphere prop {spec.name!r}: radius is required "
-                f"(declare radius or spawn.radius)")
+                f"(declare radius or spawn.radius)"
+            )
         resolve_mass(spec, default=0.1)
         super().__init__(spec, num_envs, device, base_dir)
         self._pos_key = "ball_pos_b"
@@ -121,15 +121,16 @@ class MujocoBallProp(MujocoPropHandler):
 class MujocoGenericProp(MujocoPropHandler):
     """URDF/USD rigid-object prop declaration (mujoco)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         super().__init__(spec, num_envs, device, base_dir)
-        self.static = bool(spec.type == "usd"
-                           and spec.spawn.get("static", False))
+        self.static = bool(spec.type == "usd" and spec.spawn.get("static", False))
         if spec.state_keys:
             self._pos_key = spec.state_keys[0]
-            self._vel_key = spec.state_keys[1] if len(spec.state_keys) > 1 \
+            self._vel_key = (
+                spec.state_keys[1]
+                if len(spec.state_keys) > 1
                 else spec.state_keys[0].replace("_pos_", "_vel_")
+            )
         self._quat_key = self._pos_key.replace("_pos_", "_quat_")
 
     @property
@@ -147,22 +148,19 @@ class MujocoGenericProp(MujocoPropHandler):
 class MujocoPrimitiveProp(MujocoPropHandler):
     """Cylinder / capsule prop declaration (mujoco)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         validate_primitive_spec(spec)
         super().__init__(spec, num_envs, device, base_dir)
         keys = list(spec.state_keys)
         if keys:
             self._pos_key = keys[0]
-            self._vel_key = (keys[1] if len(keys) > 1
-                             else keys[0].replace("_pos_", "_vel_"))
+            self._vel_key = keys[1] if len(keys) > 1 else keys[0].replace("_pos_", "_vel_")
 
 
 class MujocoBoxProp(MujocoGenericProp):
     """Container / table / box prop declaration (mujoco)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         validate_box_spec(spec)
         if spec.type == "box":
             spec.urdf_path = None
@@ -188,11 +186,9 @@ class MujocoBoxProp(MujocoGenericProp):
 class MujocoArticulationProp(MujocoPropHandler):
     """Anchored articulation prop declaration (mujoco)."""
 
-    def __init__(self, spec: PropSpec, num_envs: int, device: str,
-                 base_dir: str | None = None):
+    def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         self.joints = validate_joints(spec)
-        self.actuated_joints = [n for n, p in self.joints.items()
-                                if p["mode"] == "actuated"]
+        self.actuated_joints = [n for n, p in self.joints.items() if p["mode"] == "actuated"]
         self.latch = validate_latch(spec, self.joints)
         self.latch_enabled = self.latch is not None
         self._latch_unlocked: set[int] = set()
@@ -246,17 +242,18 @@ class MujocoPropBackendFace:
             raise ValueError(
                 f"prop {spec.name!r}: unknown type {spec.type!r} "
                 f"(known: {known}); a plane is static scene geometry and "
-                f"cannot be a dynamic prop body") from None
+                f"cannot be a dynamic prop body"
+            ) from None
 
     def compat(self, name: str):
         """The mujoco face has no public legacy class names."""
         raise AttributeError(name)
 
-    def build_handler(self, spec: PropSpec, *, num_envs: int, device: str,
-                      base_dir: str | None = None) -> PropHandler:
+    def build_handler(
+        self, spec: PropSpec, *, num_envs: int, device: str, base_dir: str | None = None
+    ) -> PropHandler:
         """Instantiate the declared handler for one spec."""
-        return self.handler_for(spec)(
-            spec, num_envs=num_envs, device=device, base_dir=base_dir)
+        return self.handler_for(spec)(spec, num_envs=num_envs, device=device, base_dir=base_dir)
 
     def scene_fields(self, manager, *, classes=None) -> dict:
         """No-op: the mujoco form injects into the MjSpec pre-compile."""
@@ -289,9 +286,11 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
             # injects the root freejoint).
             if spec.type == "free_articulation":
                 from ..scene.asset_render import add_ir_free_body
+
                 add_ir_free_body(mjspec, handler, asset)
             else:
                 from ..scene.asset_render import add_ir_body
+
                 add_ir_body(mjspec, handler, asset)
             continue
         if spec.type == "usd_articulation":
@@ -302,61 +301,75 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
             raise ValueError(
                 f"usd_articulation prop {spec.name!r}: isaaclab-only kind "
                 f"(no mujoco USD articulation loader); use type: "
-                f"articulation with a URDF fragment on the mujoco backend")
+                f"articulation with a URDF fragment on the mujoco backend"
+            )
         if spec.type == "articulation":
             # anchored articulated props (jointed fragment; build +
             # runtime live in mujoco_articulation.py -- same package, same
             # mujoco-only convention, split by the file-size discipline)
             from .props_articulation import add_articulation_body
+
             add_articulation_body(mjspec, handler)
             continue
         if spec.type == "free_articulation":
             # free-floating articulated props (the root
             # keeps its freejoint; build + runtime in props_articulation.py)
             from .props_articulation import add_free_articulation_body
+
             add_free_articulation_body(mjspec, handler)
             continue
         name = f"Prop_{spec.name}"
         if spec.type == "usd" or (
-                spec.type == "rigid_object"
-                and (spec.mujoco or {}).get("representation")):
+            spec.type == "rigid_object" and (spec.mujoco or {}).get("representation")
+        ):
             # declared mjcf representation (usd kind, or the
             # URDF-less rigid_object declaration): attachable fragment /
             # envelope tiers live in props_usd.add_usd_body
             from .props_usd import add_usd_body
+
             add_usd_body(mjspec, spec, mjspec.worldbody)
             continue
         body = mjspec.worldbody.add_body(name=name)
         body.add_joint(name=f"{name}_free", type=mujoco.mjtJoint.mjJNT_FREE)
         from unigym.props.primitive import resolve_mass
+
         if spec.type == "sphere":
             # sphere props reuse the spawn parameters (radius/mass) with the
             # S2c top-level radius / density vocabulary as the declared form
-            radius = (spec.radius if spec.radius is not None
-                      else spec.spawn.get("radius", 0.05))
+            radius = spec.radius if spec.radius is not None else spec.spawn.get("radius", 0.05)
             mass = resolve_mass(spec, default=0.1)
-            body.add_geom(name=f"{name}_geom",
-                          type=mujoco.mjtGeom.mjGEOM_SPHERE,
-                          size=[float(radius), 0.0, 0.0], mass=mass)
+            body.add_geom(
+                name=f"{name}_geom",
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=[float(radius), 0.0, 0.0],
+                mass=mass,
+            )
             continue
         if spec.type in ("cylinder", "capsule"):
             # dynamic primitive free body (S2c): the neutral half_height is
             # mujoco's axial size slot, inertia stays engine-computed
-            geom = (mujoco.mjtGeom.mjGEOM_CYLINDER
-                    if spec.type == "cylinder"
-                    else mujoco.mjtGeom.mjGEOM_CAPSULE)
+            geom = (
+                mujoco.mjtGeom.mjGEOM_CYLINDER
+                if spec.type == "cylinder"
+                else mujoco.mjtGeom.mjGEOM_CAPSULE
+            )
             from .props_usd import add_material
-            kwargs = _spawn_geom_kwargs(
-                spec, add_material(mjspec, spec))
-            body.add_geom(name=f"{name}_geom", type=geom,
-                          size=[float(spec.radius),
-                                float(spec.half_height), 0.0],
-                          mass=resolve_mass(spec), **kwargs)
+
+            kwargs = _spawn_geom_kwargs(spec, add_material(mjspec, spec))
+            body.add_geom(
+                name=f"{name}_geom",
+                type=geom,
+                size=[float(spec.radius), float(spec.half_height), 0.0],
+                mass=resolve_mass(spec),
+                **kwargs,
+            )
             continue
         from unigym.props.container import box_layout
+
         boxes = box_layout(spec)
         mass = resolve_mass(spec, default=1.0)
         from .props_usd import add_material
+
         mat_name = add_material(mjspec, spec)
         per = mass / len(boxes)
         for i, (center, half) in enumerate(boxes):
@@ -364,11 +377,14 @@ def add_prop_bodies(prop_manager, mjspec) -> None:
             # contact params live in spawn, e.g. {condim: 6, priority: 10}
             # (SIMPLE engines/mujoco.py _build_primitive).
             kwargs = _spawn_geom_kwargs(spec, mat_name)
-            body.add_geom(name=f"{name}_geom{i}",
-                          type=mujoco.mjtGeom.mjGEOM_BOX,
-                          pos=[float(v) for v in center],
-                          size=[float(v) for v in half],
-                          mass=per, **kwargs)
+            body.add_geom(
+                name=f"{name}_geom{i}",
+                type=mujoco.mjtGeom.mjGEOM_BOX,
+                pos=[float(v) for v in center],
+                size=[float(v) for v in half],
+                mass=per,
+                **kwargs,
+            )
 
 
 class MujocoPropBackend:
@@ -381,7 +397,7 @@ class MujocoPropBackend:
         self._ids: dict[str, int] = {}
         self._qadr: dict[str, int] = {}
         self._vadr: dict[str, int] = {}
-        self._articulations = {}   # name -> MujocoPropArticulation
+        self._articulations = {}  # name -> MujocoPropArticulation
         self._env = None
 
     # ------------------------------------------------------------------ #
@@ -395,30 +411,29 @@ class MujocoPropBackend:
             spec = handler.spec
             if spec.type == "articulation":
                 from .props_articulation import MujocoPropArticulation
+
                 art = MujocoPropArticulation(handler)
                 art.bind_env(env)
                 self._articulations[spec.name] = art
                 continue
             if spec.type == "free_articulation":
                 from .props_articulation import MujocoPropFreeArticulation
+
                 art = MujocoPropFreeArticulation(handler)
                 art.bind_env(env)
                 self._articulations[spec.name] = art
                 continue
             name = f"Prop_{spec.name}"
             body_row = ir.bodies[name] if name in ir.bodies else None
-            bid = -1 if body_row is None or body_row.body_id is None \
-                else int(body_row.body_id)
+            bid = -1 if body_row is None or body_row.body_id is None else int(body_row.body_id)
             if bid < 0:
                 raise ValueError(f"prop body {name!r} not in the MJ model")
             joints = [j for j in ir.joints if j.body == name]
             if len(joints) != 1 or joints[0].type != "free":
-                raise ValueError(
-                    f"prop body {name!r} must carry exactly one freejoint")
+                raise ValueError(f"prop body {name!r} must carry exactly one freejoint")
             joint = joints[0]
             if joint.qpos_adr is None or joint.dof_adr is None:
-                raise ValueError(
-                    f"prop body {name!r} freejoint has no compiled address")
+                raise ValueError(f"prop body {name!r} freejoint has no compiled address")
             self._ids[handler.spec.name] = bid
             self._qadr[handler.spec.name] = int(joint.qpos_adr)
             self._vadr[handler.spec.name] = int(joint.dof_adr)
@@ -440,15 +455,14 @@ class MujocoPropBackend:
                 spec = handler.spec
                 art = self._articulations.get(spec.name)
                 if art is not None:
-                    art.on_reset(m, d)     # anchored: re-anchor + zero joints
+                    art.on_reset(m, d)  # anchored: re-anchor + zero joints
                     continue
                 x, y, z, yaw = handler.placement.sample(1, "cpu")[0].tolist()
                 adr = self._qadr[spec.name]
-                d.qpos[adr:adr + 3] = [x, y, z]
-                d.qpos[adr + 3:adr + 7] = [np.cos(yaw / 2), 0.0, 0.0,
-                                           np.sin(yaw / 2)]
+                d.qpos[adr : adr + 3] = [x, y, z]
+                d.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
                 vadr = self._vadr[spec.name]
-                d.qvel[vadr:vadr + 6] = 0.0
+                d.qvel[vadr : vadr + 6] = 0.0
             mujoco.mj_forward(m, d)
 
     # ------------------------------------------------------------------ #
@@ -460,16 +474,15 @@ class MujocoPropBackend:
         for name, bid in self._ids.items():
             poss, quats = [], []
             for d in datas:
-                poss.append(torch.from_numpy(
-                    np.asarray(d.xpos[bid], dtype=np.float32)))
-                quats.append(torch.from_numpy(
-                    np.asarray(d.xquat[bid], dtype=np.float32)))
-            out[name] = (torch.stack(poss, dim=0),
-                         torch.stack(quats, dim=0))
+                poss.append(torch.from_numpy(np.asarray(d.xpos[bid], dtype=np.float32)))
+                quats.append(torch.from_numpy(np.asarray(d.xquat[bid], dtype=np.float32)))
+            out[name] = (torch.stack(poss, dim=0), torch.stack(quats, dim=0))
         for name, art in self._articulations.items():
             poses = [art.get_world_pose(e) for e in range(len(datas))]
-            out[name] = (torch.cat([p[0] for p in poses], dim=0),
-                         torch.cat([p[1] for p in poses], dim=0))
+            out[name] = (
+                torch.cat([p[0] for p in poses], dim=0),
+                torch.cat([p[1] for p in poses], dim=0),
+            )
         return out
 
     def get_joint_states(self, env=None) -> dict:
@@ -479,14 +492,12 @@ class MujocoPropBackend:
         out = {}
         for name, art in self._articulations.items():
             per = [art.get_joint_states(e) for e in range(len(datas))]
-            out[name] = {j: torch.cat([p[j] for p in per], dim=0)
-                         for j in per[0]}
+            out[name] = {j: torch.cat([p[j] for p in per], dim=0) for j in per[0]}
         return out
 
     def actuated_addresses(self) -> dict:
         """``{name: {jname: ctrl_adr}}`` for the resolver's prop tables."""
-        return {name: art.actuated_addresses()
-                for name, art in self._articulations.items()}
+        return {name: art.actuated_addresses() for name, art in self._articulations.items()}
 
     # ---- director accessors (unigym/director) -------------------- #
     def free_prop_names(self) -> list[str]:
@@ -532,14 +543,11 @@ class MujocoPropBackend:
                 bq_conj = np.array([bq[0], -bq[1], -bq[2], -bq[3]])
                 rel = d.xpos[bid] - bp
                 jadr = self._vadr[name]
-                vel = d.qvel[jadr:jadr + 3] - bv
-                poss.append(torch.tensor(
-                    rot_t @ rel, dtype=torch.float32))
-                vels.append(torch.tensor(
-                    rot_t @ vel, dtype=torch.float32))
+                vel = d.qvel[jadr : jadr + 3] - bv
+                poss.append(torch.tensor(rot_t @ rel, dtype=torch.float32))
+                vels.append(torch.tensor(rot_t @ vel, dtype=torch.float32))
                 q = np.asarray(d.xquat[bid], dtype=np.float64)
-                quats.append(torch.tensor(
-                    _quat_mul_np(bq_conj, q), dtype=torch.float32))
+                quats.append(torch.tensor(_quat_mul_np(bq_conj, q), dtype=torch.float32))
             out[f"{name}_pos_b"] = torch.stack(poss, dim=0)
             out[f"{name}_vel_b"] = torch.stack(vels, dim=0)
             out[f"{name}_quat_b"] = torch.stack(quats, dim=0)
@@ -564,19 +572,24 @@ def _quat_mul_np(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """
     w1, x1, y1, z1 = (float(v) for v in a)
     w2, x2, y2, z2 = (float(v) for v in b)
-    return np.array([
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
 
 
 def _quat_to_rotmat_t(quat_wxyz: np.ndarray) -> np.ndarray:
     """Rotation-matrix TRANSPOSE (world <- body -> body <- world)."""
     w, x, y, z = (float(v) for v in quat_wxyz)
-    rot = np.asarray([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ])
+    rot = np.asarray(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
     return rot.T

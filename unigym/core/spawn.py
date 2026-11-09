@@ -7,9 +7,10 @@ byte-exact snapshots (docs/contracts/launcher_contract.md §1 guardrail).
 This facade is the ONLY access point for the core/daemon layers,
 so no second synthesis path can appear.  probe/bash/pytest exec bodies are re-exported here as well.
 """
+
 from __future__ import annotations
 
-from unigym.scripts.spawn_spec import (          # noqa: F401 (facade)
+from unigym.scripts.spawn_spec import (  # noqa: F401 (facade)
     BACKENDS,
     SpawnSpec,
     build_spawn,

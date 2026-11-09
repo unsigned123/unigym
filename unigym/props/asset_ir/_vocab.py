@@ -5,6 +5,7 @@ the name guard is the anti-leak face: an IR element may never be
 NAMED after an engine element, so a renderer can never re-interpret a
 payload string as engine structure.
 """
+
 from __future__ import annotations
 
 import re

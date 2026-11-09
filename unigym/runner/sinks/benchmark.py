@@ -28,6 +28,7 @@ Callback contract (docs/contracts/runner_contract.md §3):
 Device/thread discipline matches CollectSink: episode buffers hold cpu
 clones (``slice_step_for_env``), task scoring is pure numpy.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,6 +58,7 @@ def _record_key(key: str) -> str:
     if sep and leaf in _KEY_MAP:
         return f"{head}/{_KEY_MAP[leaf]}"
     return key
+
 
 RESULTS_SCHEMA = "results.v1"
 METRICS_NPZ = "metrics.npz"
@@ -93,9 +95,16 @@ class BenchmarkSink:
             director_contract.md §7).
     """
 
-    def __init__(self, tasks: list[Task], meta: dict, min_episodes: int,
-                 max_steps: int, report_path: str, director=None,
-                 retain_frames: bool = False):
+    def __init__(
+        self,
+        tasks: list[Task],
+        meta: dict,
+        min_episodes: int,
+        max_steps: int,
+        report_path: str,
+        director=None,
+        retain_frames: bool = False,
+    ):
         self.tasks = list(tasks)
         self.meta = dict(meta)
         self.min_episodes = int(min_episodes)
@@ -114,15 +123,14 @@ class BenchmarkSink:
         self.steps_total = 0
         self._stop = False
         self._t0 = time.time()
-        self._metrics_pending: list[dict] = []   # bridge metrics feed
+        self._metrics_pending: list[dict] = []  # bridge metrics feed
         self._director = director
-        self.episode_directed: list[bool] = []   # parallel to episodes
+        self.episode_directed: list[bool] = []  # parallel to episodes
         # rewind marking (Round B B1): per-env rewind records for the OPEN
         # episode buffers (process-order interval intersection -- policy
         # tick numbers repeat across a fork, so the open-buffer rule is
         # the honest reading of "episode interval intersection"); parallel to ep_bufs
-        self._ep_rewinds: list[list[dict]] = \
-            [[] for _ in range(self.num_envs)]
+        self._ep_rewinds: list[list[dict]] = [[] for _ in range(self.num_envs)]
 
     # ------------------------------------------------------------------ #
     # early stop predicate (passed to SyncRunner.run(stop_when=...))
@@ -155,7 +163,7 @@ class BenchmarkSink:
             # adapter), so expose it under each declared policy articulation
             # -- benchmark tasks read articulation/<name>/command and there
             # is no primary binding.
-            for name in (self.meta.get("articulations") or {}):
+            for name in self.meta.get("articulations") or {}:
                 rec[f"articulation/{name}/command"] = eff_cmd
         for ei in range(self.num_envs):
             self.ep_bufs[ei].append(slice_step_for_env(rec, ei))
@@ -176,9 +184,11 @@ class BenchmarkSink:
         benchmark_contract §4)."""
         for buf in self._ep_rewinds:
             buf.append(dict(info))
-        print(f"[rewind] episode buffers marked rewound at tick "
-              f"{info.get('tick')} (restored to {info.get('restored_tick')})",
-              flush=True)
+        print(
+            f"[rewind] episode buffers marked rewound at tick "
+            f"{info.get('tick')} (restored to {info.get('restored_tick')})",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------ #
     # episode end (before-reset data side; reset chain is engine-driven)
@@ -208,8 +218,9 @@ class BenchmarkSink:
             # directed labelling: the Director's per-env mark is
             # still live here (this sink runs before the director's
             # episode-end snapshot in the fan-out)
-            directed = bool(self._director is not None
-                            and self._director.is_episode_directed(int(ei)))
+            directed = bool(
+                self._director is not None and self._director.is_episode_directed(int(ei))
+            )
             self.episode_directed.append(directed)
             # bridge metrics feed: PRIMARY task (first) supplies the
             # episode's reward/success slot (exact alignment with the env
@@ -219,8 +230,7 @@ class BenchmarkSink:
                 try:
                     detail = getattr(task, "score_detail", None)
                     if detail is not None:
-                        result, leaves, frames = detail(
-                            ep, retain_frames=self.retain_frames)
+                        result, leaves, frames = detail(ep, retain_frames=self.retain_frames)
                     else:
                         result, leaves, frames = task.score(ep), {}, {}
                     self.results[task.name].append(result)
@@ -228,37 +238,43 @@ class BenchmarkSink:
                         primary = result
                     # results.v1 episode doc (engine's own
                     # verdicts -- analyze/probe render, never re-compute)
-                    self.episode_docs.append({
-                        "env": int(ei),
-                        "episode_id": ep.episode_id,
-                        "verdict": _verdict(result.success,
-                                            ep.ended_by_termination),
-                        "gate": task.name,
-                        "predicates": dict(leaves),
-                        "metrics": {k: float(v) for k, v
-                                    in result.metrics.items()},
-                        "rewound": ep.rewound,
-                        **({"frames": frames} if frames else {}),
-                    })
+                    self.episode_docs.append(
+                        {
+                            "env": int(ei),
+                            "episode_id": ep.episode_id,
+                            "verdict": _verdict(result.success, ep.ended_by_termination),
+                            "gate": task.name,
+                            "predicates": dict(leaves),
+                            "metrics": {k: float(v) for k, v in result.metrics.items()},
+                            "rewound": ep.rewound,
+                            **({"frames": frames} if frames else {}),
+                        }
+                    )
                 except Exception as exc:  # noqa: BLE001 -- isolate tasks
-                    print(f"[benchmark] task '{task.name}' failed on "
-                          f"env{ei}/ep{ep.episode_id}: {exc!r} (skipped)",
-                          flush=True)
-            self._metrics_pending.append({
-                "reward": (primary.metrics.get("reward")
-                           if primary is not None else None),
-                "success": (primary.success
-                            if primary is not None else None),
-                "directed": directed,
-                "rewound": ep.rewound})
+                    print(
+                        f"[benchmark] task '{task.name}' failed on "
+                        f"env{ei}/ep{ep.episode_id}: {exc!r} (skipped)",
+                        flush=True,
+                    )
+            self._metrics_pending.append(
+                {
+                    "reward": (primary.metrics.get("reward") if primary is not None else None),
+                    "success": (primary.success if primary is not None else None),
+                    "directed": directed,
+                    "rewound": ep.rewound,
+                }
+            )
 
     # ------------------------------------------------------------------ #
     # light progress (post-reset, mirrors CollectSink's logging rhythm)
     # ------------------------------------------------------------------ #
     def on_step_end(self, t: int, bundle: dict) -> None:
         if (t + 1) % 500 == 0:
-            print(f"[benchmark] step {t + 1}/{self.max_steps} | episodes "
-                  f"{self.n_episodes}/{self.min_episodes}", flush=True)
+            print(
+                f"[benchmark] step {t + 1}/{self.max_steps} | episodes "
+                f"{self.n_episodes}/{self.min_episodes}",
+                flush=True,
+            )
 
     # ------------------------------------------------------------------ #
     # run end: aggregate + report json + summary dict
@@ -272,8 +288,7 @@ class BenchmarkSink:
             tasks_report[task.name] = {
                 "params": dict(task.params),
                 "n_episodes": agg.get("n_episodes", len(results)),
-                "metrics": {k: v for k, v in agg.items()
-                            if isinstance(v, dict)},
+                "metrics": {k: v for k, v in agg.items() if isinstance(v, dict)},
                 "success_rate": agg.get("success_rate"),
             }
         return {
@@ -291,18 +306,18 @@ class BenchmarkSink:
             # never policy capability
             "directed": any(self.episode_directed),
             "episodes_directed": [
-                {"episode_id": ep.episode_id, "env_id": ep.env_id,
-                 "directed": d}
-                for ep, d in zip(self.episodes, self.episode_directed)],
+                {"episode_id": ep.episode_id, "env_id": ep.env_id, "directed": d}
+                for ep, d in zip(self.episodes, self.episode_directed)
+            ],
             # rewind boundary (Round B B1, benchmark_contract §4): episodes
             # that straddled a timeline fork keep ALL forked data and are
             # labelled -- rewound successes never mix into physics-legal
             # claims either
             "rewound": any(ep.rewound for ep in self.episodes),
             "episodes_rewound": [
-                {"episode_id": ep.episode_id, "env_id": ep.env_id,
-                 "rewound": ep.rewound}
-                for ep in self.episodes],
+                {"episode_id": ep.episode_id, "env_id": ep.env_id, "rewound": ep.rewound}
+                for ep in self.episodes
+            ],
             "wall_time_s": wall,
         }
 
@@ -316,8 +331,11 @@ class BenchmarkSink:
         self._write_results()
         print(f"[benchmark] report -> {self.report_path}", flush=True)
         for name, entry in report["tasks"].items():
-            print(f"[benchmark]   {name}: n={entry['n_episodes']} "
-                  f"success_rate={entry['success_rate']}", flush=True)
+            print(
+                f"[benchmark]   {name}: n={entry['n_episodes']} "
+                f"success_rate={entry['success_rate']}",
+                flush=True,
+            )
         return report
 
     # ------------------------------------------------------------------ #
@@ -329,26 +347,33 @@ class BenchmarkSink:
         for doc in self.episode_docs:
             episodes.append({k: v for k, v in doc.items() if k != "frames"})
         backend = self.meta.get("backend")
-        return {"schema": RESULTS_SCHEMA,
-                "run": os.path.dirname(self.report_path) or ".",
-                "backend": backend,
-                "episodes": episodes,
-                "source": "engine"}
+        return {
+            "schema": RESULTS_SCHEMA,
+            "run": os.path.dirname(self.report_path) or ".",
+            "backend": backend,
+            "episodes": episodes,
+            "source": "engine",
+        }
 
     def _write_results(self) -> None:
         parent = os.path.dirname(self.report_path)
         if not parent or not self.episode_docs:
-            return                                   # nothing scored
+            return  # nothing scored
         doc = self.results_document()
         with open(os.path.join(parent, RESULTS_JSON), "w") as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)
-        frames = {f"metric/e{i}/{mid}": fr
-                  for i, d in enumerate(self.episode_docs)
-                  for mid, fr in (d.get("frames") or {}).items()}
+        frames = {
+            f"metric/e{i}/{mid}": fr
+            for i, d in enumerate(self.episode_docs)
+            for mid, fr in (d.get("frames") or {}).items()
+        }
         if frames:
             np.savez(os.path.join(parent, METRICS_NPZ), **frames)
-            print(f"[benchmark] results -> {RESULTS_JSON} + {METRICS_NPZ} "
-                  f"({len(frames)} frame series)", flush=True)
+            print(
+                f"[benchmark] results -> {RESULTS_JSON} + {METRICS_NPZ} "
+                f"({len(frames)} frame series)",
+                flush=True,
+            )
         else:
             print(f"[benchmark] results -> {RESULTS_JSON}", flush=True)
 
@@ -371,10 +396,11 @@ class BenchmarkSink:
 
     def metrics_progress(self) -> dict:
         """Benchmark counters for the live view (episode-level)."""
-        return {"episodes": self.n_episodes,
-                "min_episodes": self.min_episodes,
-                "by_task": {t.name: len(self.results[t.name])
-                            for t in self.tasks}}
+        return {
+            "episodes": self.n_episodes,
+            "min_episodes": self.min_episodes,
+            "by_task": {t.name: len(self.results[t.name]) for t in self.tasks},
+        }
 
     def metrics_report(self) -> dict | None:
         """Draft report (same shape as on_run_end, wall_time_s=None).

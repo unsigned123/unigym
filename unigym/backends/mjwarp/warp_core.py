@@ -10,6 +10,7 @@ mirrors are the read face.  Every per-world write is a ``wd.<field>[e]``
 slice copy; 1-D ``time`` is written as a rebuilt vector because warp forbids
 item indexing on 1-D arrays.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -48,16 +49,21 @@ class WarpBatchMixin:
         default, which is asserted here so a batch can never silently
         overflow the contact arena at N>1.
         """
-        wdata = mjw.put_data(self._model, mirror, nworld=int(nworld),
-                             nconmax=self._capacity.nconmax,
-                             njmax=self._capacity.njmax)
+        wdata = mjw.put_data(
+            self._model,
+            mirror,
+            nworld=int(nworld),
+            nconmax=self._capacity.nconmax,
+            njmax=self._capacity.njmax,
+        )
         naconmax = getattr(wdata, "naconmax", None)
         want = int(self._capacity.nconmax) * int(nworld)
         if naconmax is not None and int(naconmax) < want:
             raise RuntimeError(
                 f"mjwarp backend: allocated naconmax={int(naconmax)} does "
                 f"not cover nworld={nworld} x nconmax="
-                f"{int(self._capacity.nconmax)} (need >= {want})")
+                f"{int(self._capacity.nconmax)} (need >= {want})"
+            )
         return wdata
 
     @staticmethod
@@ -82,8 +88,7 @@ class WarpBatchMixin:
             return
         if int(target.nworld) == 1:
             arr = self._source_array(dst_all, src)
-            wp.copy(dst_all, wp.array(arr, dtype=dst_all.dtype,
-                                      device=dst_all.device))
+            wp.copy(dst_all, wp.array(arr, dtype=dst_all.dtype, device=dst_all.device))
             return
         dst = dst_all[e]
         arr = self._source_array(dst, src)
@@ -96,12 +101,19 @@ class WarpBatchMixin:
         else:
             values = [float(d.time) for d in self._datas]
         arr = np.asarray(values, dtype=np.float32)
-        wp.copy(target.time, wp.array(arr, dtype=target.time.dtype,
-                                      device=target.time.device))
+        wp.copy(target.time, wp.array(arr, dtype=target.time.dtype, device=target.time.device))
 
-    _STATE_FIELDS = ("qpos", "qvel", "ctrl", "qfrc_applied", "xfrc_applied",
-                     "eq_active", "mocap_pos", "mocap_quat",
-                     "qacc_warmstart")
+    _STATE_FIELDS = (
+        "qpos",
+        "qvel",
+        "ctrl",
+        "qfrc_applied",
+        "xfrc_applied",
+        "eq_active",
+        "mocap_pos",
+        "mocap_quat",
+        "qacc_warmstart",
+    )
 
     def _restore_warp_state(self, warp_state: dict) -> None:
         """Copy warp-only continuation arrays (qacc/qacc_smooth) back."""
@@ -110,8 +122,7 @@ class WarpBatchMixin:
             if target is None:
                 continue
             arr = np.ascontiguousarray(value, dtype=np.float32)
-            wp.copy(target, wp.array(arr, dtype=wp.float32,
-                                     device=target.device))
+            wp.copy(target, wp.array(arr, dtype=wp.float32, device=target.device))
 
     def _copy_warmstart(self, mirror, e: int = 0, wdata=None) -> None:
         """Re-assert the mirror's solver warm-start on its device world."""
@@ -146,8 +157,7 @@ class WarpBatchMixin:
     #: device model).  ``eq_data`` is padded 11 -> 12 by mujoco_warp on
     #: mujoco < 3.16, so the source is padded to the device component
     #: count rather than copied verbatim.
-    _MODEL_FIELDS = ("body_pos", "body_quat", "eq_data", "eq_obj2id",
-                     "eq_type")
+    _MODEL_FIELDS = ("body_pos", "body_quat", "eq_data", "eq_obj2id", "eq_type")
 
     @staticmethod
     def _model_source_array(dst, src) -> np.ndarray:

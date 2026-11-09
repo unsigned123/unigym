@@ -20,6 +20,7 @@ All joint/foot quantities exposed to the adapter and written to disk are in
 the adapter's declared (policy) order; the env gathers them from Isaac Lab
 buffers by name, so ordering is correct by construction.
 """
+
 from __future__ import annotations
 
 import torch
@@ -73,7 +74,8 @@ def _resolve_terrain_cfg(terrain_cfg, terrain, num_envs, env_spacing):
     if terrain_cfg is None:
         raise ValueError(
             "IsaaclabEnv requires a terrain preset: pass terrain_cfg "
-            "(yaml terrain) or terrain=<Terrain>")
+            "(yaml terrain) or terrain=<Terrain>"
+        )
     return terrain_cfg
 
 
@@ -91,8 +93,8 @@ def _add_static_shape_fields(scene, static_shapes) -> None:
     for key, value in build_static_scene_fields(static_shapes).items():
         if hasattr(scene, key):
             raise ValueError(
-                f"static primitive scene field {key!r} collides with an "
-                f"existing scene entry")
+                f"static primitive scene field {key!r} collides with an " f"existing scene entry"
+            )
         setattr(scene, key, value)
 
 
@@ -110,10 +112,22 @@ def _az_el_to_quat(az_deg: float, el_deg: float) -> tuple:
     return quat.az_el(az_deg, el_deg)
 
 
-def _configure_robot_scene(cfg, robot_profile, adapter, controls,
-                           articulations, recipes, prop_manager, *, events_cfg,
-                           recorder, camera_manager,
-                           contact_manager, director_cfg, init_pose_cfg):
+def _configure_robot_scene(
+    cfg,
+    robot_profile,
+    adapter,
+    controls,
+    articulations,
+    recipes,
+    prop_manager,
+    *,
+    events_cfg,
+    recorder,
+    camera_manager,
+    contact_manager,
+    director_cfg,
+    init_pose_cfg,
+):
     """Fill the scene/action cfg for the single or partitioned layout.
 
     Returns ``(partitioned, fields)``.  Kept out of ``IsaaclabEnv.__init__``
@@ -126,12 +140,16 @@ def _configure_robot_scene(cfg, robot_profile, adapter, controls,
         from . import articulation_runtime as _articulation_runtime
 
         _articulation_runtime.validate_options(
-            adapter, events_cfg=events_cfg, recorder=recorder,
+            adapter,
+            events_cfg=events_cfg,
+            recorder=recorder,
             prop_manager=prop_manager,
-            camera_manager=camera_manager, contact_manager=contact_manager,
-            director_cfg=director_cfg, init_pose_cfg=init_pose_cfg)
-        fields = _articulation_runtime.configure_scene(
-            cfg, controls, ars, dict(recipes or {}))
+            camera_manager=camera_manager,
+            contact_manager=contact_manager,
+            director_cfg=director_cfg,
+            init_pose_cfg=init_pose_cfg,
+        )
+        fields = _articulation_runtime.configure_scene(cfg, controls, ars, dict(recipes or {}))
         return partitioned, fields
     cfg.scene.robot = robot_profile.articulation_cfg
     # The generic `.*_foot` regex only matches foot-style body names;
@@ -140,7 +158,8 @@ def _configure_robot_scene(cfg, robot_profile, adapter, controls,
     # (profiles without body_parts — behavior unchanged for all
     # existing robot profiles).
     cfg.scene.contact_forces.prim_path = contact_sensor_prim_path(
-        (robot_profile.body_parts or {}).get("feet"))
+        (robot_profile.body_parts or {}).get("feet")
+    )
     # G1: the Nucleus g1.usd carries 14 finger DOFs beyond the 29
     # policy joints, so the action term must target exactly the profile's
     # declared joints instead of all asset DOFs.  When joint_order covers
@@ -160,31 +179,41 @@ def _configure_robot_scene(cfg, robot_profile, adapter, controls,
             if hasattr(cfg.actions, h.spec.name):
                 raise ValueError(
                     f"prop action entry {h.spec.name!r} collides with "
-                    f"an existing action term name")
-            setattr(cfg.actions, h.spec.name, JointPositionActionCfg(
-                asset_name=f"prop_{h.spec.name}",
-                joint_names=actuated,
-                scale=1.0,
-                use_default_offset=False,
-                preserve_order=True))
+                    f"an existing action term name"
+                )
+            setattr(
+                cfg.actions,
+                h.spec.name,
+                JointPositionActionCfg(
+                    asset_name=f"prop_{h.spec.name}",
+                    joint_names=actuated,
+                    scale=1.0,
+                    use_default_offset=False,
+                    preserve_order=True,
+                ),
+            )
     # profile-declared extra NamedAction faces (the G1 "hand"
     # dex3 finger face on with-hand assets) -- one preserve_order term
     # per declared entry, field name == the NamedAction entry key
     # (declaration-becomes-capability, same rule as the prop terms
     # above).  ``None`` (every profile built without actuate_hands)
     # leaves the action surface untouched.
-    for term_name, term_joints in (
-            robot_profile.extra_action_terms or {}).items():
+    for term_name, term_joints in (robot_profile.extra_action_terms or {}).items():
         if hasattr(cfg.actions, term_name):
             raise ValueError(
-                f"extra action entry {term_name!r} collides with an "
-                f"existing action term name")
-        setattr(cfg.actions, term_name, JointPositionActionCfg(
-            asset_name="robot",
-            joint_names=list(term_joints),
-            scale=1.0,
-            use_default_offset=False,
-            preserve_order=True))
+                f"extra action entry {term_name!r} collides with an " f"existing action term name"
+            )
+        setattr(
+            cfg.actions,
+            term_name,
+            JointPositionActionCfg(
+                asset_name="robot",
+                joint_names=list(term_joints),
+                scale=1.0,
+                use_default_offset=False,
+                preserve_order=True,
+            ),
+        )
     return partitioned, None
 
 
@@ -260,21 +289,33 @@ class IsaaclabEnv(ManagerBasedEnv):
     ``unigym/env/backends/base.py`` and docs/contracts/backend_contract.md.
     """
 
-    def __init__(self, robot_profile, adapter, terrain_cfg, num_envs: int,
-                 episode_length_s: float, env_spacing: float = 4.0,
-                 decimation: int = 4, sim_dt: float = 0.005,
-                 contact_force_threshold: float = 1.0,
-                 events_cfg=None, recorder=None,
-                 prop_manager=None,
-                 lighting: dict | None = None,
-                 init_pose: dict | None = None,
-                 camera_manager: CameraManager | None = None,
-                 contact_manager: ContactManager | None = None,
-                 director_cfg: dict | None = None,
-                 device: str = "cuda:0", terrain=None,
-                 static_shapes=None,
-                 articulations=None, controls=None, recipes=None,
-                 backend_options=None):
+    def __init__(
+        self,
+        robot_profile,
+        adapter,
+        terrain_cfg,
+        num_envs: int,
+        episode_length_s: float,
+        env_spacing: float = 4.0,
+        decimation: int = 4,
+        sim_dt: float = 0.005,
+        contact_force_threshold: float = 1.0,
+        events_cfg=None,
+        recorder=None,
+        prop_manager=None,
+        lighting: dict | None = None,
+        init_pose: dict | None = None,
+        camera_manager: CameraManager | None = None,
+        contact_manager: ContactManager | None = None,
+        director_cfg: dict | None = None,
+        device: str = "cuda:0",
+        terrain=None,
+        static_shapes=None,
+        articulations=None,
+        controls=None,
+        recipes=None,
+        backend_options=None,
+    ):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
         Args:
@@ -358,7 +399,8 @@ class IsaaclabEnv(ManagerBasedEnv):
         if backend_options:
             raise ValueError(
                 "isaaclab backend declares no backend_options (unknown keys "
-                f"{sorted(backend_options)}); supported options: []")
+                f"{sorted(backend_options)}); supported options: []"
+            )
         self._planned_controls = tuple(controls or ())
 
         cfg = _IsaaclabEnvCfg()
@@ -370,22 +412,28 @@ class IsaaclabEnv(ManagerBasedEnv):
         cfg.sim.render_interval = decimation
         cfg.scene.num_envs = num_envs
         cfg.scene.env_spacing = env_spacing
-        terrain_cfg = _resolve_terrain_cfg(
-            terrain_cfg, terrain, num_envs, env_spacing)
+        terrain_cfg = _resolve_terrain_cfg(terrain_cfg, terrain, num_envs, env_spacing)
         for key, value in terrain_cfg.items():  # merge terrain preset fields
             setattr(cfg.scene, key, value)
         # v102b: more than one policy binding switches the scene/action cfg
         # to the multi-articulation layout (independent articulation clones +
         # one action term per binding).  One binding (or none) keeps the
         # historical single-robot configuration byte-identically.
-        (self._partitioned, self._articulation_fields) = \
-            _configure_robot_scene(
-                cfg, robot_profile, adapter, controls, articulations,
-                recipes, prop_manager, events_cfg=events_cfg,
-                recorder=recorder,
-                camera_manager=camera_manager,
-                contact_manager=contact_manager,
-                director_cfg=director_cfg, init_pose_cfg=self._init_pose)
+        (self._partitioned, self._articulation_fields) = _configure_robot_scene(
+            cfg,
+            robot_profile,
+            adapter,
+            controls,
+            articulations,
+            recipes,
+            prop_manager,
+            events_cfg=events_cfg,
+            recorder=recorder,
+            camera_manager=camera_manager,
+            contact_manager=contact_manager,
+            director_cfg=director_cfg,
+            init_pose_cfg=self._init_pose,
+        )
         # note: `recorder` intentionally unused here (no scene contribution
         # kept in the signature for capability gating kwargs).
         if prop_manager is not None:  # merge interactive prop fields
@@ -398,9 +446,9 @@ class IsaaclabEnv(ManagerBasedEnv):
         # base KINEMATIC rigid body (--direct only; director_contract §4.3)
         self.director_cfg = director_cfg
         if director_cfg is not None:
-            from unigym.backends.isaaclab2.director.gripper import (
-                isaaclab_scene_fields)
+            from unigym.backends.isaaclab2.director.gripper import isaaclab_scene_fields
             from unigym.director.gripper import normalize_gripper_cfg
+
             gcfg = normalize_gripper_cfg(director_cfg.get("gripper"))
             if gcfg is not None:
                 for key, value in isaaclab_scene_fields(gcfg).items():
@@ -416,8 +464,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         # r4 ha_open_door: opt-in reset-time render (adapter-declared t0
         # frame contract -- upstream provider fills the frame BEFORE the
         # first control tick; applied in reset_envs)
-        self._render_on_reset = bool(
-            getattr(adapter, "wants_reset_render", False))
+        self._render_on_reset = bool(getattr(adapter, "wants_reset_render", False))
         if self.camera_manager is not None:
             self.camera_manager.setup_scene(cfg.scene)
         # feat/contact-manager: contact-group sensors join the scene before
@@ -442,17 +489,18 @@ class IsaaclabEnv(ManagerBasedEnv):
         # input dim i == cfg.joint_names[i] and IsaaclabJointResolver maps
         # adapter entry columns onto the term's flat input slice.
         from unigym.runtime.actions import IsaaclabJointResolver
+
         self.action_entry_names = list(self.action_manager.active_terms)
         self._term_resolvers = {}
         for name in self.action_entry_names:
             term = self.action_manager.get_term(name)
-            joint_names = getattr(getattr(term, "cfg", None), "joint_names",
-                                  None)
+            joint_names = getattr(getattr(term, "cfg", None), "joint_names", None)
             if not joint_names:
                 raise ValueError(
                     f"action term {name!r} has no explicit joint_names; the "
                     f"NamedAction contract requires preserve_order=True "
-                    f"terms with explicit name lists")
+                    f"terms with explicit name lists"
+                )
             self._term_resolvers[name] = IsaaclabJointResolver(joint_names)
         if self.camera_manager is not None:
             self.camera_manager.bind_env(self)
@@ -467,8 +515,10 @@ class IsaaclabEnv(ManagerBasedEnv):
         if "reset" in self.event_manager.available_modes:
             all_ids = torch.arange(num_envs, device=self.device)
             self.event_manager.apply(
-                mode="reset", env_ids=all_ids,
-                global_env_step_count=self._sim_step_counter // self.cfg.decimation)
+                mode="reset",
+                env_ids=all_ids,
+                global_env_step_count=self._sim_step_counter // self.cfg.decimation,
+            )
             self.scene.write_data_to_sim()
             self.sim.forward()
 
@@ -487,12 +537,17 @@ class IsaaclabEnv(ManagerBasedEnv):
         _articulation_runtime.bind_articulations(self, robot_profile)
         # single articulation keeps the historical flat compatibility attrs
         art = next(iter(self.articulations.values()))
-        pol_names = list(art.addresses.get("policy_joints") or
-                         (adapter.joint_order or robot_profile.joint_order))
+        pol_names = list(
+            art.addresses.get("policy_joints") or (adapter.joint_order or robot_profile.joint_order)
+        )
         body_control = next(
-            (c for c in self._control_order
-             if c.articulation == art.name and c.action_face == art.name),
-            self._control_order[0] if self._control_order else None)
+            (
+                c
+                for c in self._control_order
+                if c.articulation == art.name and c.action_face == art.name
+            ),
+            self._control_order[0] if self._control_order else None,
+        )
         if body_control is not None:
             pol_names = list(body_control.joint_names)
         il_names = list(art.joint_names)
@@ -502,13 +557,15 @@ class IsaaclabEnv(ManagerBasedEnv):
             raise ValueError(
                 f"joint name mismatch between adapter/profile and asset:\n"
                 f"  asset:   {il_names}\n  policy: {pol_names}\n"
-                f"  missing in asset: {missing}")
+                f"  missing in asset: {missing}"
+            )
         if extra:
-            print(f"[isaaclab2.env] note: asset has {len(extra)} non-policy "
-                  f"DOFs (actuated, excluded from obs/action): {extra}",
-                  flush=True)
-        self._perm_il2pol = torch.tensor(
-            [il_names.index(n) for n in pol_names], device=self.device)
+            print(
+                f"[isaaclab2.env] note: asset has {len(extra)} non-policy "
+                f"DOFs (actuated, excluded from obs/action): {extra}",
+                flush=True,
+            )
+        self._perm_il2pol = torch.tensor([il_names.index(n) for n in pol_names], device=self.device)
         self._perm_pol2il = torch.argsort(self._perm_il2pol)
         self._q0_art = art.q0_art
         self._joint_gathers: dict = {}
@@ -518,18 +575,21 @@ class IsaaclabEnv(ManagerBasedEnv):
         if set(body_names) != set(foot_names):
             raise ValueError(
                 f"foot name mismatch between adapter/profile and contact sensor:\n"
-                f"  sensor:  {body_names}\n  policy: {foot_names}")
+                f"  sensor:  {body_names}\n  policy: {foot_names}"
+            )
         self._foot_perm = torch.tensor(
-            [body_names.index(f) for f in foot_names], device=self.device)
+            [body_names.index(f) for f in foot_names], device=self.device
+        )
         self._foot_body_idx = torch.tensor(
             [self.robot.data.body_names.index(n) for n in foot_names],
-            device=self.device, dtype=torch.long)
+            device=self.device,
+            dtype=torch.long,
+        )
 
         # ---- obs cache: fill only what the adapter requested ----
         self._obs_requests = adapter.get_obs_requests()
         if self.contact_manager is not None:
-            self.contact_manager.register_obs_requests(
-                {r.key for r in self._obs_requests})
+            self.contact_manager.register_obs_requests({r.key for r in self._obs_requests})
         self._obs_requests = canonicalize_obs_requests(self._obs_requests)
         # rebuild the catalogs with the wired managers (camera/contact/props)
         entries = {}
@@ -543,25 +603,29 @@ class IsaaclabEnv(ManagerBasedEnv):
                 contact_manager=self.contact_manager,
                 zero_fill_props=True,
                 articulation_joint_names=list(a.joint_names),
-                articulation=a.name)
+                articulation=a.name,
+            )
             a.catalog = cat
             self.obs_catalogs[a.name] = cat
             entries.update(cat.entries)
             requestable |= cat.requestable
         from unigym.env.obs_catalog import ObsCatalog
+
         self.obs_catalog = ObsCatalog(entries, requestable)
         for req in self._obs_requests:
             self.obs_catalog.validate_request(req)
             if split_articulation_key(req.key)[1] in (
-                    "joint_pos_rel", "joint_vel", "applied_torque"):
+                "joint_pos_rel",
+                "joint_vel",
+                "applied_torque",
+            ):
                 self._joint_gather(req.joint_names, req)
         self.obs_cache: dict = {}
 
         # ---- episode bookkeeping (per-env) ----
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur = sample_durations(
-            self._dur_lo, self._dur_hi, num_envs, self.device)
+        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -578,15 +642,14 @@ class IsaaclabEnv(ManagerBasedEnv):
         if self._obs_requests:  # pragma: no cover - rejected pre-super
             raise NotImplementedError(
                 "isaaclab2 backend: adapter obs requests are not supported "
-                "with multiple articulations")
+                "with multiple articulations"
+            )
         _articulation_runtime.bind_articulations(self)
         self.obs_cache: dict = {}
 
-        self._episode_id = torch.zeros(num_envs, dtype=torch.int64,
-                                       device=self.device)
+        self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur = sample_durations(
-            self._dur_lo, self._dur_hi, num_envs, self.device)
+        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -656,15 +719,13 @@ class IsaaclabEnv(ManagerBasedEnv):
         if lighting.get("distant_enabled", True):
             di_raw = lighting.get("distant_intensity")
             di = float(di_raw) if di_raw is not None else 3000.0
-            dcolor = tuple(float(c) for c in lighting.get(
-                "distant_color", (0.95, 0.95, 0.95)))
+            dcolor = tuple(float(c) for c in lighting.get("distant_color", (0.95, 0.95, 0.95)))
             spawn = sim_utils.DistantLightCfg(intensity=di, color=dcolor)
             init = AssetBaseCfg.InitialStateCfg()
             angle = lighting.get("distant_angle")
             if angle is not None:
                 init.rot = _az_el_to_quat(float(angle[0]), float(angle[1]))
-            scene.light = AssetBaseCfg(
-                prim_path="/World/light", spawn=spawn, init_state=init)
+            scene.light = AssetBaseCfg(prim_path="/World/light", spawn=spawn, init_state=init)
         else:
             scene.light = None
 
@@ -718,7 +779,8 @@ class IsaaclabEnv(ManagerBasedEnv):
             if len(self.articulations) != 1:
                 raise ValueError(
                     f"isaaclab2 backend: obs key {key!r} does not name an "
-                    f"articulation; this run has {sorted(self.articulations)}")
+                    f"articulation; this run has {sorted(self.articulations)}"
+                )
             return next(iter(self.articulations.values()))
         try:
             return self.articulations[name]
@@ -726,11 +788,15 @@ class IsaaclabEnv(ManagerBasedEnv):
             raise ValueError(
                 f"isaaclab2 backend: obs key {key!r} names unknown "
                 f"articulation {name!r}; declared: "
-                f"{sorted(self.articulations)}") from None
+                f"{sorted(self.articulations)}"
+            ) from None
 
     def _joint_gather(self, names, req=None) -> torch.Tensor:
-        art = (self._articulation_for_key(req.key) if req is not None
-               else next(iter(self.articulations.values())))
+        art = (
+            self._articulation_for_key(req.key)
+            if req is not None
+            else next(iter(self.articulations.values()))
+        )
         key = (art.name, tuple(names))
         g = self._joint_gathers.get(key)
         if g is None:
@@ -739,9 +805,9 @@ class IsaaclabEnv(ManagerBasedEnv):
             if missing:
                 raise ValueError(
                     f"isaaclab2 backend: obs joint names {missing} are not "
-                    f"asset joints of articulation {art.name!r}")
-            g = torch.tensor([index[n] for n in names], dtype=torch.int64,
-                             device=self.device)
+                    f"asset joints of articulation {art.name!r}"
+                )
+            g = torch.tensor([index[n] for n in names], dtype=torch.int64, device=self.device)
             self._joint_gathers[key] = g
         return g
 
@@ -757,8 +823,9 @@ class IsaaclabEnv(ManagerBasedEnv):
             return d.applied_torque[:, g]
         return d.joint_vel[:, g]
 
-    def _refresh_obs_cache(self, raw_action: torch.Tensor | None = None,
-                           cmd: torch.Tensor | None = None) -> None:
+    def _refresh_obs_cache(
+        self, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
+    ) -> None:
         if self._partitioned:
             from . import articulation_runtime as _articulation_runtime
 
@@ -781,8 +848,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         # feat/contact-manager: adapter-requested contact/<name> keys are
         # injected every step (same serve pattern as prop keys above); NOT
         # requested -> never enters the obs cache, recording unaffected.
-        if (self.contact_manager is not None
-                and self.contact_manager.obs_keys()):
+        if self.contact_manager is not None and self.contact_manager.obs_keys():
             for k, v in self.contact_manager.read().items():
                 if k in self.contact_manager.obs_keys():
                     self.obs_cache[k] = v
@@ -795,9 +861,9 @@ class IsaaclabEnv(ManagerBasedEnv):
             # additive obs sources (policy foot order)
             "base_ang_vel_b": lambda: d.root_ang_vel_b,
             "foot_contact_force": lambda: torch.norm(
-                self.contact.data.net_forces_w[:, self._foot_perm], dim=-1),
-            "base_yaw": lambda: math_utils.euler_xyz_from_quat(d.root_quat_w)[2]
-                .unsqueeze(-1),
+                self.contact.data.net_forces_w[:, self._foot_perm], dim=-1
+            ),
+            "base_yaw": lambda: math_utils.euler_xyz_from_quat(d.root_quat_w)[2].unsqueeze(-1),
             # additive obs source (recovery-switching termination state)
             "base_pos_w": lambda: d.root_pos_w,
             # additive obs source (SymmLoco projected_forward_vec needs
@@ -807,17 +873,15 @@ class IsaaclabEnv(ManagerBasedEnv):
         for req in self._obs_requests:
             # camera-served keys (ImageObsRequest or depth alias): validate
             # by FULL SHAPE + dtype (the manager contract), not last-dim
-            if (self.camera_manager is not None
-                    and req.key in self.camera_manager.obs_keys()):
+            if self.camera_manager is not None and req.key in self.camera_manager.obs_keys():
                 val = self.obs_cache.get(req.key)
                 if val is not None:
                     validate_image_frame(
-                        self.camera_manager.frame_request(req.key), val,
-                        self.num_envs)
+                        self.camera_manager.frame_request(req.key), val, self.num_envs
+                    )
                 continue
             base = split_articulation_key(req.key)[1]
-            if base in ("joint_pos_rel", "joint_vel",
-                        "applied_torque"):
+            if base in ("joint_pos_rel", "joint_vel", "applied_torque"):
                 val = self._joint_obs(req)
             elif base not in fetch:
                 # prop-provided key (or zero-fill when no props configured):
@@ -827,24 +891,22 @@ class IsaaclabEnv(ManagerBasedEnv):
                     v = torch.zeros(self.num_envs, req.dim, device=self.device)
                     self.obs_cache[req.key] = v
                 elif v.shape[-1] != req.dim:
-                    raise ValueError(
-                        f"obs '{req.key}' dim {v.shape[-1]} != requested {req.dim}")
+                    raise ValueError(f"obs '{req.key}' dim {v.shape[-1]} != requested {req.dim}")
                 continue
             else:
                 val = fetch[base]()
             if val is None:
                 continue  # passthrough value not provided this call; keep stale entry
             if val.shape[-1] != req.dim:
-                raise ValueError(
-                    f"obs '{req.key}' dim {val.shape[-1]} != requested {req.dim}")
+                raise ValueError(f"obs '{req.key}' dim {val.shape[-1]} != requested {req.dim}")
             self.obs_cache[req.key] = val
 
     # ------------------------------------------------------------------ #
     # stepping
     # ------------------------------------------------------------------ #
-    def step(self, actions: dict,
-             raw_action: torch.Tensor | None = None,
-             cmd: torch.Tensor | None = None) -> tuple[dict, dict]:
+    def step(
+        self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
+    ) -> tuple[dict, dict]:
         """Advance one policy step.
 
         Args:
@@ -891,19 +953,21 @@ class IsaaclabEnv(ManagerBasedEnv):
         return _articulation_runtime.route_actions(self, actions)
         if not isinstance(actions, dict):
             raise TypeError(
-                f"IsaaclabEnv.step expects dict[str, NamedAction], got "
-                f"{type(actions).__name__}")
+                f"IsaaclabEnv.step expects dict[str, NamedAction], got " f"{type(actions).__name__}"
+            )
         unknown = sorted(set(actions) - set(self.action_entry_names))
         if unknown:
             raise ValueError(
                 f"action entries {unknown} match no action term; known "
-                f"terms: {self.action_entry_names}")
+                f"terms: {self.action_entry_names}"
+            )
         missing = [k for k in self.action_entry_names if k not in actions]
         if missing:
             raise ValueError(
                 f"action entries missing for terms {missing}; every action "
                 f"term must receive exactly one NamedAction entry "
-                f"(terms: {self.action_entry_names})")
+                f"(terms: {self.action_entry_names})"
+            )
         n = self.num_envs
         chunks = []
         for key in self.action_entry_names:
@@ -912,17 +976,16 @@ class IsaaclabEnv(ManagerBasedEnv):
             dim = int(term.action_dim)
             if na.num_envs != n:
                 raise ValueError(
-                    f"action entry {key!r} has {na.num_envs} env rows, "
-                    f"expected {n}")
+                    f"action entry {key!r} has {na.num_envs} env rows, " f"expected {n}"
+                )
             if na.dim != dim:
                 raise ValueError(
                     f"action entry {key!r} addresses {na.dim} joints but "
-                    f"term {key!r} covers {dim}")
-            gather = self._term_resolvers[key].gather(
-                na.joint_names).to(self.device)
+                    f"term {key!r} covers {dim}"
+                )
+            gather = self._term_resolvers[key].gather(na.joint_names).to(self.device)
             buf = torch.zeros(n, dim, dtype=torch.float32, device=self.device)
-            buf[:, gather] = na.values.to(device=self.device,
-                                          dtype=torch.float32)
+            buf[:, gather] = na.values.to(device=self.device, dtype=torch.float32)
             chunks.append(buf)
         return torch.cat(chunks, dim=-1)
 
@@ -931,17 +994,20 @@ class IsaaclabEnv(ManagerBasedEnv):
         from . import articulation_runtime as _articulation_runtime
 
         extra = _articulation_runtime.build_extra(self)
-        contact_values = self.contact_manager.read() \
-            if self.contact_manager is not None else None
+        contact_values = self.contact_manager.read() if self.contact_manager is not None else None
         if contact_values is not None:
             extra.update(contact_values)
         if self.prop_manager is not None:
             from unigym.props.object_state import build_object_extra
+
             self.prop_manager.on_step(self)
-            extra.update(build_object_extra(
-                self.prop_manager, self.prop_manager.get_world_poses(self),
-                joint_states=self.prop_manager.get_articulation_joint_states(
-                    self)))
+            extra.update(
+                build_object_extra(
+                    self.prop_manager,
+                    self.prop_manager.get_world_poses(self),
+                    joint_states=self.prop_manager.get_articulation_joint_states(self),
+                )
+            )
         return extra
 
     # ------------------------------------------------------------------ #
@@ -984,8 +1050,9 @@ class IsaaclabEnv(ManagerBasedEnv):
         # When ``init_pose`` is configured we additionally override the root
         # pose of a (prob) fraction of envs with a randomized orientation so
         # the episode starts lying/fallen (recovery data collection).
-        if (not self._partitioned and (self._init_pose is not None
-                or "reset" in self.event_manager.available_modes)):
+        if not self._partitioned and (
+            self._init_pose is not None or "reset" in self.event_manager.available_modes
+        ):
             robot = self.scene["robot"]
             dr = robot.data.default_root_state[env_ids].clone()
             dj = robot.data.default_joint_pos[env_ids]
@@ -996,26 +1063,31 @@ class IsaaclabEnv(ManagerBasedEnv):
                 if pick.any():
                     n_pick = int(pick.sum().item())
                     pos, quat = sample_init_pose(
-                        n_pick, ip["roll_range"], ip["pitch_range"],
-                        ip["yaw_range"], ip["height"], self.device)
+                        n_pick,
+                        ip["roll_range"],
+                        ip["pitch_range"],
+                        ip["yaw_range"],
+                        ip["height"],
+                        self.device,
+                    )
                     drm = dr[pick].clone()
                     drm[:, :3] = pos
                     drm[:, 3:7] = quat
                     drm[:, 7:13] = 0.0  # at rest before first contact
                     dr[pick] = drm
-            robot.write_root_pose_to_sim(
-                root_pose=dr[:, :7], env_ids=env_ids)
-            robot.write_root_velocity_to_sim(
-                root_velocity=dr[:, 7:13], env_ids=env_ids)
+            robot.write_root_pose_to_sim(root_pose=dr[:, :7], env_ids=env_ids)
+            robot.write_root_velocity_to_sim(root_velocity=dr[:, 7:13], env_ids=env_ids)
             robot.write_joint_state_to_sim(
-                position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids)
+                position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids
+            )
             robot.data.root_state_w[env_ids] = dr
         self.scene.write_data_to_sim()
         self.sim.forward()
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
         self._episode_dur[env_ids] = sample_durations(
-            self._dur_lo, self._dur_hi, env_ids.numel(), self.device)
+            self._dur_lo, self._dur_hi, env_ids.numel(), self.device
+        )
         if self.camera_manager is not None:
             # re-pose body/chase rigs to the spawn state (the reference chain
             # called _sync_depth_camera_pose at this exact point)
@@ -1048,11 +1120,13 @@ class IsaaclabEnv(ManagerBasedEnv):
         raise NotImplementedError(
             "isaaclab2 backend does not implement snapshot()/restore() "
             "(rewind is mujoco-only); run the "
-            "rewind face against env.backend: mujoco")
+            "rewind face against env.backend: mujoco"
+        )
 
     def restore(self, state) -> int:
         """Not implemented on isaaclab v1 (rewind is mujoco-only, Round B)."""
         raise NotImplementedError(
             "isaaclab2 backend does not implement snapshot()/restore() "
             "(rewind is mujoco-only); run the "
-            "rewind face against env.backend: mujoco")
+            "rewind face against env.backend: mujoco"
+        )

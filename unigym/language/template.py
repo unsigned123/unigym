@@ -5,6 +5,7 @@ Replaces ``{key}`` placeholders in a template string with values drawn from
 (per-env via indexing).  This class is a convenience base for simple use-cases;
 specialised generators subclass it or implement ``describe`` directly.
 """
+
 from __future__ import annotations
 
 from typing import List

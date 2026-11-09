@@ -5,6 +5,7 @@ boundaries *before* validation.  Use it instead of ``Any`` for raw config and
 JSON payloads: it keeps the data shape honest (scalars, lists and string-keyed
 maps) while still allowing arbitrary document trees.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

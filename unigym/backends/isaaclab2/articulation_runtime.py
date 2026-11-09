@@ -9,6 +9,7 @@ the namespaced observation/termination records.
 There is no policy runtime type: a policy is a ``position_pd`` control plus
 an adapter.
 """
+
 from __future__ import annotations
 
 import math
@@ -47,9 +48,17 @@ def _contact_field(name: str, first: bool) -> str:
     return _scene_field(name, first, prefix="contact_forces")
 
 
-def validate_options(adapter, *, events_cfg, recorder,
-                     prop_manager, camera_manager, contact_manager,
-                     director_cfg, init_pose_cfg) -> None:
+def validate_options(
+    adapter,
+    *,
+    events_cfg,
+    recorder,
+    prop_manager,
+    camera_manager,
+    contact_manager,
+    director_cfg,
+    init_pose_cfg,
+) -> None:
     """Reject the partition options this MVP does not implement."""
     requests = adapter.get_obs_requests()
     if requests:
@@ -57,18 +66,21 @@ def validate_options(adapter, *, events_cfg, recorder,
             f"{_LABEL}: adapter obs requests are not supported with "
             f"multiple articulations; every articulation is published "
             f"under articulation/<name>/... (use an external/manual driver) "
-            f"| requested: {sorted({r.key for r in requests})}")
+            f"| requested: {sorted({r.key for r in requests})}"
+        )
     for option, value in (
-            ("prop_manager", prop_manager),
-            ("camera_manager", camera_manager),
-            ("contact_manager", contact_manager),
-            ("director_cfg", director_cfg),
-            ("events_cfg", events_cfg),
-            ("init_pose", init_pose_cfg)):
+        ("prop_manager", prop_manager),
+        ("camera_manager", camera_manager),
+        ("contact_manager", contact_manager),
+        ("director_cfg", director_cfg),
+        ("events_cfg", events_cfg),
+        ("init_pose", init_pose_cfg),
+    ):
         if value is not None:
             raise NotImplementedError(
                 f"{_LABEL}: {option} is not supported with multiple "
-                f"articulations (MVP: one env, external/manual driver)")
+                f"articulations (MVP: one env, external/manual driver)"
+            )
     del recorder
 
 
@@ -88,8 +100,8 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
     """Add per-articulation scene fields + one action term per control."""
     if len(articulations) < 2:
         raise ValueError(
-            f"{_LABEL}: partitioned scene needs >= 2 articulations, got "
-            f"{len(articulations)}")
+            f"{_LABEL}: partitioned scene needs >= 2 articulations, got " f"{len(articulations)}"
+        )
     if hasattr(cfg.actions, "g1"):
         delattr(cfg.actions, "g1")
     controls = tuple(controls or ())
@@ -97,20 +109,19 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
     for index, spec in enumerate(articulations):
         recipe = recipes.get(spec.name)
         if recipe is None:
-            raise ValueError(
-                f"{_LABEL}: articulation {spec.name!r} has no recipe")
+            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no recipe")
         asset_cfg = recipe.articulation_cfg
         if asset_cfg is None:
             raise ValueError(
                 f"{_LABEL}: articulation {spec.name!r} recipe carries no "
-                f"ArticulationCfg (the isaaclab backend needs one)")
+                f"ArticulationCfg (the isaaclab backend needs one)"
+            )
         first = index == 0
         field = _scene_field(spec.name, first)
         leaf = "Robot" if first else f"Robot_{spec.name}"
         prim_path = f"{ENV_REGEX_NS}/{leaf}"
         init = asset_cfg.init_state
-        base_pos = tuple(float(v) for v in (getattr(init, "pos", None)
-                                            or (0.0, 0.0, 0.0)))
+        base_pos = tuple(float(v) for v in (getattr(init, "pos", None) or (0.0, 0.0, 0.0)))
         spawn = dict(getattr(spec, "spawn", {}) or {})
         spawn_pos = spawn.get("pos")
         if spawn_pos is not None:
@@ -118,7 +129,8 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
             if len(pos) != 3:
                 raise ValueError(
                     f"{_LABEL}: articulation {spec.name!r} spawn.pos "
-                    f"must be a 3-vector, got {spawn_pos!r}")
+                    f"must be a 3-vector, got {spawn_pos!r}"
+                )
         else:
             offset = DEFAULT_SPAWN_OFFSET_X * index
             pos = (base_pos[0] + offset, base_pos[1], base_pos[2])
@@ -133,13 +145,13 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
         setattr(cfg.scene, field, new_cfg)
         fields[spec.name] = field
 
-        feet = tuple((getattr(spec, "body_parts", {}) or {}).get("feet")
-                     or ())
+        feet = tuple((getattr(spec, "body_parts", {}) or {}).get("feet") or ())
         feet_regex = ("(" + "|".join(feet) + ")") if feet else ".*_foot"
-        setattr(cfg.scene, _contact_field(spec.name, first),
-                ContactSensorCfg(
-                    prim_path=f"{ENV_REGEX_NS}/{leaf}/{feet_regex}",
-                    history_length=1))
+        setattr(
+            cfg.scene,
+            _contact_field(spec.name, first),
+            ContactSensorCfg(prim_path=f"{ENV_REGEX_NS}/{leaf}/{feet_regex}", history_length=1),
+        )
 
     for control in controls:
         if control.prop:
@@ -150,33 +162,41 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
         if not str(face).isidentifier():
             raise ValueError(
                 f"{_LABEL}: action face {face!r} of articulation "
-                f"{control.articulation!r} is not a valid action-term name")
+                f"{control.articulation!r} is not a valid action-term name"
+            )
         if hasattr(cfg.actions, face):
             raise ValueError(
-                f"{_LABEL}: action entry {face!r} collides with an "
-                f"existing action term name")
-        setattr(cfg.actions, face, JointPositionActionCfg(
-            asset_name=fields[control.articulation],
-            joint_names=list(control.joint_names),
-            scale=1.0,
-            use_default_offset=False,
-            preserve_order=True,
-        ))
+                f"{_LABEL}: action entry {face!r} collides with an " f"existing action term name"
+            )
+        setattr(
+            cfg.actions,
+            face,
+            JointPositionActionCfg(
+                asset_name=fields[control.articulation],
+                joint_names=list(control.joint_names),
+                scale=1.0,
+                use_default_offset=False,
+                preserve_order=True,
+            ),
+        )
     return fields
 
 
 def _articulation_runtime(env, spec, recipe, asset, contact) -> ArticulationRuntime:
     asset_names = tuple(asset.joint_names)
     defaults = dict(getattr(recipe, "default_joint_pos", {}) or {})
-    q0_art = torch.tensor([float(defaults.get(n, 0.0)) for n in asset_names],
-                          dtype=torch.float32, device=env.device)
+    q0_art = torch.tensor(
+        [float(defaults.get(n, 0.0)) for n in asset_names], dtype=torch.float32, device=env.device
+    )
     feet = tuple(getattr(recipe, "foot_bodies", None) or ())
     body_names = list(contact.body_names)
-    foot_perm = torch.tensor([body_names.index(f) for f in feet],
-                             dtype=torch.int64, device=env.device)
+    foot_perm = torch.tensor(
+        [body_names.index(f) for f in feet], dtype=torch.int64, device=env.device
+    )
     asset_bodies = list(asset.data.body_names)
-    foot_body_idx = torch.tensor([asset_bodies.index(n) for n in feet],
-                                 dtype=torch.long, device=env.device)
+    foot_body_idx = torch.tensor(
+        [asset_bodies.index(n) for n in feet], dtype=torch.long, device=env.device
+    )
     art = ArticulationRuntime(
         name=spec.name,
         model=getattr(spec, "model", None),
@@ -194,8 +214,8 @@ def _articulation_runtime(env, spec, recipe, asset, contact) -> ArticulationRunt
     art.foot_perm = foot_perm
     art.foot_body_idx = foot_body_idx
     art.catalog = build_obs_catalog(
-        recipe, articulation_joint_names=list(asset_names),
-        articulation=spec.name)
+        recipe, articulation_joint_names=list(asset_names), articulation=spec.name
+    )
     return art
 
 
@@ -205,11 +225,9 @@ def _bind_scene_fields(env, specs, fields, partitioned) -> str:
     for index, spec in enumerate(specs):
         field = fields.get(spec.name, "robot" if index == 0 else None)
         if field is None:
-            raise ValueError(
-                f"{_LABEL}: articulation {spec.name!r} has no scene field")
+            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no scene field")
         env.robots[spec.name] = env.scene[field]
-        cf = _contact_field(spec.name, index == 0) if partitioned \
-            else "contact_forces"
+        cf = _contact_field(spec.name, index == 0) if partitioned else "contact_forces"
         env.contacts[spec.name] = env.scene[cf]
     first = specs[0].name
     env.robot = env.robots[first]
@@ -229,7 +247,8 @@ def _bind_term_resolvers(env) -> None:
             raise ValueError(
                 f"action term {name!r} has no explicit joint_names; the "
                 f"NamedAction contract requires preserve_order=True terms "
-                f"with explicit name lists")
+                f"with explicit name lists"
+            )
         env._term_resolvers[name] = IsaaclabJointResolver(joint_names)
 
 
@@ -237,58 +256,67 @@ def _bind_control_runtimes(env, specs, recipes, partitioned, first) -> dict:
     env.articulations = {}
     for spec in specs:
         env.articulations[spec.name] = _articulation_runtime(
-            env, spec, recipes[spec.name], env.robots[spec.name],
-            env.contacts[spec.name])
+            env, spec, recipes[spec.name], env.robots[spec.name], env.contacts[spec.name]
+        )
     controls: dict[str, ControlRuntime] = {}
     for control in tuple(env._planned_controls or ()):
-        if not control.prop and control.drive not in (
-                "position_pd", "position_servo"):
+        if not control.prop and control.drive not in ("position_pd", "position_servo"):
             raise NotImplementedError(
                 f"{_LABEL}: articulation {control.articulation!r} control "
                 f"{control.name!r} requests drive {control.drive!r}; the "
                 f"isaaclab backend implements only position joint targets "
                 f"(position_pd / position_servo) | hint: use drive "
-                f"position_pd or a backend that supports the drive")
+                f"position_pd or a backend that supports the drive"
+            )
         art = env.articulations.get(control.articulation)
         if art is None:
             raise ValueError(
                 f"{_LABEL}: control {control.name!r} names articulation "
-                f"{control.articulation!r}, which has no runtime")
+                f"{control.articulation!r}, which has no runtime"
+            )
         control.asset_joint_names = tuple(art.joint_names)
         control.feet = tuple(art.feet)
         control.addresses["term"] = control.action_face
         index = {n: i for i, n in enumerate(art.joint_names)}
-        control.addresses["perm_il2pol"] = [
-            index[n] for n in control.joint_names if n in index]
+        control.addresses["perm_il2pol"] = [index[n] for n in control.joint_names if n in index]
         controls[control.name] = control
     # every remaining action term (articulated props) becomes a servo control
     for term in env.action_entry_names:
         if term in controls:
             continue
-        joint_names = tuple(
-            getattr(env.action_manager.get_term(term).cfg, "joint_names", ()))
+        joint_names = tuple(getattr(env.action_manager.get_term(term).cfg, "joint_names", ()))
         controls[term] = ControlRuntime(
-            name=term, action_face=term, adapter="prop", articulation=first,
-            joint_names=joint_names, q0=tuple(0.0 for _ in joint_names),
-            drive="position_servo", target="position", required=True,
-            prop=True)
+            name=term,
+            action_face=term,
+            adapter="prop",
+            articulation=first,
+            joint_names=joint_names,
+            q0=tuple(0.0 for _ in joint_names),
+            drive="position_servo",
+            target="position",
+            required=True,
+            prop=True,
+        )
     return controls
 
 
 def _bind_control_order(env, controls) -> None:
     env.controls = controls
-    env._control_order = [controls[n] for n in env.action_entry_names
-                          if n in controls]
+    env._control_order = [controls[n] for n in env.action_entry_names if n in controls]
     for art in env.articulations.values():
         body = next(
-            (c for c in env._control_order
-             if c.articulation == art.name and c.action_face == art.name),
-            None)
-        perm = (body.addresses["perm_il2pol"] if body is not None
-                else list(range(len(art.joint_names))))
+            (
+                c
+                for c in env._control_order
+                if c.articulation == art.name and c.action_face == art.name
+            ),
+            None,
+        )
+        perm = (
+            body.addresses["perm_il2pol"] if body is not None else list(range(len(art.joint_names)))
+        )
         art.addresses["perm_il2pol"] = list(perm)
-        art.perm_il2pol = torch.tensor(
-            list(perm), dtype=torch.int64, device=env.device)
+        art.perm_il2pol = torch.tensor(list(perm), dtype=torch.int64, device=env.device)
     env._joint_limits_by_articulation = {}
     for art in env.articulations.values():
         lim = getattr(art.asset.data, "joint_pos_limits", None)
@@ -297,8 +325,7 @@ def _bind_control_order(env, controls) -> None:
             continue
         lim = torch.as_tensor(lim)
         perm = art.perm_il2pol
-        env._joint_limits_by_articulation[art.name] = (
-            lim[:, perm, 0], lim[:, perm, 1])
+        env._joint_limits_by_articulation[art.name] = (lim[:, perm, 0], lim[:, perm, 1])
 
 
 def _bind_obs_catalogs(env) -> None:
@@ -338,28 +365,30 @@ def sync_articulation_controls(env, articulation: str) -> None:
     """Fill the first control's address table for the flat compatibility face."""
     art = env.articulations[articulation]
     index = {n: i for i, n in enumerate(art.joint_names)}
-    art.addresses["perm_il2pol"] = [
-        index[n] for n in art.joint_names if n in index]
+    art.addresses["perm_il2pol"] = [index[n] for n in art.joint_names if n in index]
 
 
 def route_actions(env, actions: dict) -> torch.Tensor:
     """Resolve every control's action face onto the flat action-term input."""
     if not isinstance(actions, dict):
         raise TypeError(
-            f"{_LABEL} step expects dict[str, NamedAction], got "
-            f"{type(actions).__name__}")
+            f"{_LABEL} step expects dict[str, NamedAction], got " f"{type(actions).__name__}"
+        )
     accepted = [c.action_face for c in env._control_order]
     unknown = sorted(set(actions) - set(accepted))
     if unknown:
         raise ValueError(
             f"{_LABEL}: action entries {unknown} match no control face; "
-            f"accepted action faces: {accepted}")
-    missing = [c.action_face for c in env._control_order
-               if c.required and c.action_face not in actions]
+            f"accepted action faces: {accepted}"
+        )
+    missing = [
+        c.action_face for c in env._control_order if c.required and c.action_face not in actions
+    ]
     if missing:
         raise ValueError(
             f"{_LABEL}: action entries leave controls unaddressed: "
-            f"{missing}; accepted action faces: {accepted}")
+            f"{missing}; accepted action faces: {accepted}"
+        )
     n = env.num_envs
     chunks = []
     for control in env._control_order:
@@ -372,18 +401,15 @@ def route_actions(env, actions: dict) -> torch.Tensor:
             chunks.append(buf)
             continue
         if na.num_envs != n:
-            raise ValueError(
-                f"action entry {face!r} has {na.num_envs} env rows, "
-                f"expected {n}")
+            raise ValueError(f"action entry {face!r} has {na.num_envs} env rows, " f"expected {n}")
         if na.dim != dim:
             raise ValueError(
                 f"action entry {face!r} addresses {na.dim} joints but "
-                f"term {face!r} covers {dim}")
-        gather = env._term_resolvers[face].gather(
-            na.joint_names).to(env.device)
+                f"term {face!r} covers {dim}"
+            )
+        gather = env._term_resolvers[face].gather(na.joint_names).to(env.device)
         buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
-        buf[:, gather] = na.values.to(device=env.device,
-                                      dtype=torch.float32)
+        buf[:, gather] = na.values.to(device=env.device, dtype=torch.float32)
         chunks.append(buf)
     return torch.cat(chunks, dim=-1)
 
@@ -395,8 +421,7 @@ def _articulation_extra(env, art) -> dict:
     return {
         f"{prefix}/joint_pos": d.joint_pos[:, art.perm_il2pol].clone(),
         f"{prefix}/joint_vel": d.joint_vel[:, art.perm_il2pol].clone(),
-        f"{prefix}/applied_torque": d.applied_torque[
-            :, art.perm_il2pol].clone(),
+        f"{prefix}/applied_torque": d.applied_torque[:, art.perm_il2pol].clone(),
         f"{prefix}/gravity_b": d.projected_gravity_b.clone(),
         f"{prefix}/base_pos_w": d.root_pos_w.clone(),
         f"{prefix}/base_quat_w": d.root_quat_w.clone(),
@@ -434,10 +459,12 @@ def refresh_obs_cache(env, raw_action=None, cmd=None) -> None:
         env.obs_cache[f"{prefix}/base_pos_w"] = d.root_pos_w.clone()
         env.obs_cache[f"{prefix}/base_quat_w"] = d.root_quat_w.clone()
         env.obs_cache[f"{prefix}/base_ang_vel_b"] = d.root_ang_vel_b.clone()
-        env.obs_cache[f"{prefix}/base_yaw"] = math_utils.euler_xyz_from_quat(
-            d.root_quat_w)[2].unsqueeze(-1)
+        env.obs_cache[f"{prefix}/base_yaw"] = math_utils.euler_xyz_from_quat(d.root_quat_w)[
+            2
+        ].unsqueeze(-1)
         env.obs_cache[f"{prefix}/foot_contact_force"] = torch.norm(
-            art.contact.data.net_forces_w[:, art.foot_perm], dim=-1)
+            art.contact.data.net_forces_w[:, art.foot_perm], dim=-1
+        )
 
 
 def reset_articulations(env, env_ids) -> None:
@@ -448,17 +475,16 @@ def reset_articulations(env, env_ids) -> None:
         dr = robot.data.default_root_state[env_ids].clone()
         spawn = dict(art.spawn or {})
         if spawn.get("pos") is not None:
-            dr[:, :3] = torch.tensor(
-                spawn["pos"], dtype=dr.dtype, device=dr.device)
+            dr[:, :3] = torch.tensor(spawn["pos"], dtype=dr.dtype, device=dr.device)
         if spawn.get("yaw") is not None:
             yaw = float(spawn["yaw"])
             dr[:, 3:7] = torch.tensor(
                 [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)],
-                dtype=dr.dtype, device=dr.device)
+                dtype=dr.dtype,
+                device=dr.device,
+            )
         dj = art.q0_art.unsqueeze(0).expand(n, -1).clone()
         robot.write_root_pose_to_sim(root_pose=dr[:, :7], env_ids=env_ids)
-        robot.write_root_velocity_to_sim(root_velocity=dr[:, 7:13],
-                                         env_ids=env_ids)
-        robot.write_joint_state_to_sim(
-            position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids)
+        robot.write_root_velocity_to_sim(root_velocity=dr[:, 7:13], env_ids=env_ids)
+        robot.write_joint_state_to_sim(position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids)
         robot.data.root_state_w[env_ids] = dr

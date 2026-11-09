@@ -9,6 +9,7 @@ single ramp, or a staircase that climbs one way. Two generators are exported:
 
 Both are height-field generators decorated with :func:`height_field_to_mesh`.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -42,9 +43,8 @@ def unidirectional_stairs_terrain(difficulty: float, cfg) -> np.ndarray:
     """Equal-width step bands climbing along +x (each band strictly taller)."""
     width_pixels = int(cfg.size[0] / cfg.horizontal_scale)
     length_pixels = int(cfg.size[1] / cfg.horizontal_scale)
-    step_height = (
-        cfg.step_height_range[0]
-        + difficulty * (cfg.step_height_range[1] - cfg.step_height_range[0])
+    step_height = cfg.step_height_range[0] + difficulty * (
+        cfg.step_height_range[1] - cfg.step_height_range[0]
     )
     step_width = max(1, int(cfg.step_width / cfg.horizontal_scale))
     step_height = int(step_height / cfg.vertical_scale)

@@ -16,6 +16,7 @@ INSIDE``; the exact pass returns ``-b * sgn`` with ``sgn`` the side of
 the closest triangle, and unresolved points keep the AABB distance
 negated (outside = negative).
 """
+
 from __future__ import annotations
 
 import itertools
@@ -24,8 +25,7 @@ import numpy as np
 
 __all__ = ["GeomSDF", "geom_tris"]
 
-_BOX_QUADS = ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1),
-              (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3))
+_BOX_QUADS = ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3))
 
 
 def geom_tris(model, data, geom_ids, box_type: int, mesh_type: int) -> np.ndarray:
@@ -41,9 +41,8 @@ def geom_tris(model, data, geom_ids, box_type: int, mesh_type: int) -> np.ndarra
             di = int(model.geom_dataid[g])
             va, vn = int(model.mesh_vertadr[di]), int(model.mesh_vertnum[di])
             fa, fn = int(model.mesh_faceadr[di]), int(model.mesh_facenum[di])
-            verts = (model.mesh_vert[va:va + vn].astype(np.float64) @ rot.T
-                     + pos)
-            faces = model.mesh_face[fa:fa + fn].astype(int)
+            verts = model.mesh_vert[va : va + vn].astype(np.float64) @ rot.T + pos
+            faces = model.mesh_face[fa : fa + fn].astype(int)
             tris.append(verts[faces])
         elif gtype == box_type:
             half = np.asarray(model.geom_size[g][:3], dtype=np.float64)
@@ -60,12 +59,11 @@ def geom_tris(model, data, geom_ids, box_type: int, mesh_type: int) -> np.ndarra
 class GeomSDF:
     """Signed distance to a geom set: ``depth(P) > 0`` == inside."""
 
-    COARSE_RADIUS = 0.015   # AABB pre-filter (probe5: 15mm)
-    EXACT_RADIUS = 0.010    # per-geom exact pass gate
-    MIN_DEPTH = 3e-4        # |d| below this snaps to -MIN (sign stability)
+    COARSE_RADIUS = 0.015  # AABB pre-filter (probe5: 15mm)
+    EXACT_RADIUS = 0.010  # per-geom exact pass gate
+    MIN_DEPTH = 3e-4  # |d| below this snaps to -MIN (sign stability)
 
-    def __init__(self, tris: np.ndarray, boxes: list[tuple],
-                 slices: list[tuple[int, int]]):
+    def __init__(self, tris: np.ndarray, boxes: list[tuple], slices: list[tuple[int, int]]):
         """``tris`` (n, 3, 3) world triangles; ``boxes`` = per-geom
         ``(center, half)`` coarse level; ``slices`` = per-geom ``(lo, hi)``
         triangle ranges into ``tris`` (same order as ``boxes``)."""
@@ -78,8 +76,7 @@ class GeomSDF:
         self._slices = list(slices)
 
     @classmethod
-    def from_geoms(cls, model, data, geom_ids, box_type: int,
-                   mesh_type: int) -> GeomSDF:
+    def from_geoms(cls, model, data, geom_ids, box_type: int, mesh_type: int) -> GeomSDF:
         tris = geom_tris(model, data, geom_ids, box_type, mesh_type)
         boxes = []
         off = 0
@@ -95,7 +92,7 @@ class GeomSDF:
                 # mesh: slice its triangles out of `tris` by face count
                 di = int(model.geom_dataid[g])
                 n_t = int(model.mesh_facenum[di])
-                sub = tris[off:off + n_t].reshape(-1, 3)
+                sub = tris[off : off + n_t].reshape(-1, 3)
                 lo, hi = sub.min(axis=0), sub.max(axis=0)
                 center = (lo + hi) / 2
                 half = (hi - lo) / 2
@@ -110,12 +107,12 @@ class GeomSDF:
 
     # -- internals -------------------------------------------------------- #
     def _aabb_dist(self, points: np.ndarray) -> np.ndarray:
-        d = (np.abs(points[:, None, :] - self._ca[None])
-             - self._ha[None])
+        d = np.abs(points[:, None, :] - self._ca[None]) - self._ha[None]
         return np.linalg.norm(np.maximum(d, 0), axis=2).min(axis=1)
 
-    def _exact(self, points: np.ndarray, tri_idx: np.ndarray,
-               chunk: int = 512) -> tuple[np.ndarray, np.ndarray]:
+    def _exact(
+        self, points: np.ndarray, tri_idx: np.ndarray, chunk: int = 512
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Closest distance + side sign for each point against the given
         triangle subset (vectorized Ericson closest-point)."""
         n = len(points)
@@ -126,8 +123,7 @@ class GeomSDF:
         tc = self.tris[tri_idx, 2]
         tn = self._tn[tri_idx]
         for s in range(0, len(tri_idx), chunk):
-            a, b, c = (ta[s:s + chunk][None], tb[s:s + chunk][None],
-                       tc[s:s + chunk][None])
+            a, b, c = (ta[s : s + chunk][None], tb[s : s + chunk][None], tc[s : s + chunk][None])
             ab, ac = b - a, c - a
             ap = points[:, None] - a
             d1 = (ab * ap).sum(-1)
@@ -145,15 +141,13 @@ class GeomSDF:
             with np.errstate(divide="ignore", invalid="ignore"):
                 v = vb / den
                 w = vc / den
-            inside = ((np.abs(den) > 1e-12) & (v >= 0) & (w >= 0)
-                      & (v + w <= 1))
+            inside = (np.abs(den) > 1e-12) & (v >= 0) & (w >= 0) & (v + w <= 1)
             q = a + ab * v[..., None] + ac * w[..., None]
             din = np.linalg.norm(points[:, None] - q, axis=-1)
 
             def seg(pa, pb):
                 e = pb - pa
-                t = np.clip(((points[:, None] - pa) * e).sum(-1)
-                            / ((e * e).sum(-1) + 1e-18), 0, 1)
+                t = np.clip(((points[:, None] - pa) * e).sum(-1) / ((e * e).sum(-1) + 1e-18), 0, 1)
                 proj = pa + t[..., None] * e
                 return np.linalg.norm(points[:, None] - proj, axis=-1), proj
 
@@ -172,7 +166,7 @@ class GeomSDF:
             upd = dmin < best
             best[upd] = dmin[upd]
             qi = closest[np.arange(n), flat]
-            sg = np.sign(((points - qi) * tn[s:s + chunk][flat]).sum(-1))
+            sg = np.sign(((points - qi) * tn[s : s + chunk][flat]).sum(-1))
             sign[upd] = np.where(np.abs(sg[upd]) > 0, sg[upd], 1.0)
         return best, sign
 
@@ -192,8 +186,7 @@ class GeomSDF:
             if not len(near):
                 break
             dd = np.abs(points[near] - c) - h
-            sel = near[np.linalg.norm(np.maximum(dd, 0), axis=1)
-                       < self.EXACT_RADIUS]
+            sel = near[np.linalg.norm(np.maximum(dd, 0), axis=1) < self.EXACT_RADIUS]
             if not len(sel):
                 continue
             lo, hi = self._slices[gi]

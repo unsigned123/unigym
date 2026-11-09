@@ -10,6 +10,7 @@ bridge are all constructed by :func:`unigym.run.build.build_instance`.
 The input ``cfg`` dict is deep-copied first, so callers may reuse their
 parsed yaml document.
 """
+
 from __future__ import annotations
 
 import copy
@@ -125,8 +126,10 @@ class RunSpec:
     #: config-backed runs.  Not serialized into the yaml config today.
     static_shapes: tuple[JsonValue, ...] = ()
 
+
 def _route_content(
-    cfg: dict[str, JsonValue], env_cfg: dict[str, JsonValue],
+    cfg: dict[str, JsonValue],
+    env_cfg: dict[str, JsonValue],
     backend_label: str,
 ) -> None:
     """Route the run's content spec into ``env.params.content`` (mujoco).
@@ -145,17 +148,20 @@ def _route_content(
             f"[collect] error: the 'objects:' content spec "
             f"(sets/demands) is not supported by the {backend_label!r} "
             f"backend | hint: declare a backend with a content fill or "
-            f"drop the content keys")
+            f"drop the content keys"
+        )
     info.content_router()(spec, env_cfg)
 
 
 _STATIC_SHAPE_HINT = (
     "inline static shapes are mujoco-only; use dynamic=True (props path) "
-    "or a static prop/terrain for isaaclab")
+    "or a static prop/terrain for isaaclab"
+)
 
 
 def _guard_mujoco_only_scene(
-    env_cfg: dict[str, JsonValue], backend_label: str,
+    env_cfg: dict[str, JsonValue],
+    backend_label: str,
 ) -> None:
     """Fail fast when a run declares a scene fill its backend cannot consume.
 
@@ -167,7 +173,7 @@ def _guard_mujoco_only_scene(
     an unmapped inline scene or a registered mujoco scene.
     """
     if backend_info(backend_label).mj_scene_consumer:
-        return   # the backend has a scene-IR / mj_scene consumer
+        return  # the backend has a scene-IR / mj_scene consumer
     params = env_cfg.get("params")
     scene_name = params.get("mj_scene") if isinstance(params, dict) else None
     if scene_name is None:
@@ -177,11 +183,13 @@ def _guard_mujoco_only_scene(
     raise ConfigError(
         f"env.params.mj_scene={scene_name!r} is a mujoco-only scene fill "
         f"({backend_label!r} backend has no scene-IR consumer) | hint: "
-        f"{_STATIC_SHAPE_HINT}")
+        f"{_STATIC_SHAPE_HINT}"
+    )
 
 
 def _validate_world_base(
-    cfg: dict[str, JsonValue], env_cfg: dict[str, JsonValue],
+    cfg: dict[str, JsonValue],
+    env_cfg: dict[str, JsonValue],
     backend_label: str,
 ) -> JsonValue:
     """Resolve/validate the run-level ``world_base`` declaration (A1).
@@ -201,7 +209,8 @@ def _validate_world_base(
             "env.params.mj_model was removed in v101 A1; declare the "
             "run-level `world_base: {mjcf: <path>}` instead (scene "
             "bundles: `backend.mujoco.world_base`) -- there is no alias "
-            "and no fallback")
+            "and no fallback"
+        )
     world_base = cfg.get("world_base")
     if not backend_info(backend_label).world_base_required:
         return world_base
@@ -210,16 +219,19 @@ def _validate_world_base(
             f"world_base is required for the {backend_label!r} backend: "
             "declare `world_base: {mjcf: <path>}` at the run config top "
             "level (or `backend.mujoco.world_base` in a scene bundle); "
-            "env.params.mj_model was removed and there is no default model")
+            "env.params.mj_model was removed and there is no default model"
+        )
     if not isinstance(world_base, dict) or not world_base.get("mjcf"):
         raise ConfigError(
             "world_base must be a mapping declaring `mjcf: <path>` for the "
-            f"{backend_label!r} backend; got {world_base!r}")
+            f"{backend_label!r} backend; got {world_base!r}"
+        )
     return {"mjcf": str(world_base["mjcf"])}
 
 
 def _normalize_articulations(
-    cfg: dict[str, JsonValue], source: str,
+    cfg: dict[str, JsonValue],
+    source: str,
 ) -> tuple[ArticulationSpec, ...]:
     """Normalize ``cfg['articulations']`` and reject the removed ``robot:``.
 
@@ -236,7 +248,8 @@ def _normalize_articulations(
             "the top-level `robot:` block was removed in v101 A2; declare "
             "`articulations: [{name: <robot>, params: ..., "
             "body_parts: ...}]` plus a top-level `controls:` list instead "
-            "-- there is no alias")
+            "-- there is no alias"
+        )
     try:
         return normalize_articulations(cfg.get("articulations"))
     except ArticulationError as exc:
@@ -244,7 +257,8 @@ def _normalize_articulations(
 
 
 def _normalize_controls(
-    cfg: dict[str, JsonValue], articulations: tuple[ArticulationSpec, ...],
+    cfg: dict[str, JsonValue],
+    articulations: tuple[ArticulationSpec, ...],
     source: str,
 ) -> tuple[ControlGroup, ...]:
     """Normalize/validate ``cfg['controls']`` against the articulations.
@@ -261,21 +275,20 @@ def _normalize_controls(
             f"{source}: no controls declared; the v104 shape requires a "
             f"top-level `controls:` list (one group per driven joint set): "
             f"`controls: [{{name: <face>, adapter: <name>, articulation: "
-            f"<name>, drive: position_pd, target: position}}]`")
+            f"<name>, drive: position_pd, target: position}}]`"
+        )
     parsed_entries: list[ControlGroup | Mapping[str, JsonValue]]
     if isinstance(entries, Mapping):
-        entry_source: (
-            Mapping[str, JsonValue] | list[ControlGroup | Mapping[str, JsonValue]]
-        ) = entries
+        entry_source: Mapping[str, JsonValue] | list[ControlGroup | Mapping[str, JsonValue]] = (
+            entries
+        )
     else:
         parsed_entries = []
         for entry in entries:
             if isinstance(entry, (ControlGroup, Mapping)):
                 parsed_entries.append(entry)
             else:
-                raise ConfigError(
-                    f"{source}: controls entries must be mappings, "
-                    f"got {entry!r}")
+                raise ConfigError(f"{source}: controls entries must be mappings, " f"got {entry!r}")
         entry_source = parsed_entries
     try:
         controls = normalize_controls(entry_source)
@@ -344,15 +357,15 @@ def _adapter_params_result(
 
 
 def build_spec(
-    cfg: dict[str, JsonValue], args: Namespace | SimpleNamespace,
+    cfg: dict[str, JsonValue],
+    args: Namespace | SimpleNamespace,
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec."""
     raw_cfg = copy.deepcopy(cfg)
     # The content key surface ('objects:') normalizes onto the
     # internal name BEFORE the scene merge, so a run config and the bundle
     # it references both migrate through the one function.
-    cfg = _require_config(
-        normalize_content_keys(raw_cfg, source=args.config), "content keys")
+    cfg = _require_config(normalize_content_keys(raw_cfg, source=args.config), "content keys")
     # scene bundle: the `scene:` reference resolves BEFORE placeholder expansion
     # so the pack's ${UNIGYM_REPO} tokens ride the same single
     # expansion point as the run yaml
@@ -361,15 +374,18 @@ def build_spec(
     # run label (display metadata): fail-fast teaching gate BEFORE any
     # build work -- same rule the daemon's RunSpec.validate enforces.
     from unigym.core.run_ops import check_label
+
     label_err = check_label(getattr(args, "label", None))
     if label_err:
-        raise SystemExit(f"[collect] error: --label rejected: {label_err} "
-                         f"| hint: shorten the label -- it is display "
-                         f"metadata, never a path component")
+        raise SystemExit(
+            f"[collect] error: --label rejected: {label_err} "
+            f"| hint: shorten the label -- it is display "
+            f"metadata, never a path component"
+        )
     # -s key=val overrides (before any engine-side read so the
     # whole tree sees the effective config; diff -> meta.json)
-    from unigym.scripts.config_overrides import apply_overrides, diff_lines, \
-        parse_set_args
+    from unigym.scripts.config_overrides import apply_overrides, diff_lines, parse_set_args
+
     overrides = parse_set_args(getattr(args, "set", None))
     cfg, override_diffs = _override_result(apply_overrides(cfg, overrides))
     for line in diff_lines(override_diffs):
@@ -379,6 +395,7 @@ def build_spec(
     # into cfg["adapter"] ONLY -- env/benchmark/cameras are structurally
     # out of its reach.
     from unigym.adapters import AdapterParamsError, apply_spawn_params
+
     adapter_params: dict[str, JsonValue] = {}
     adapter_overrides: list[str] = []
     raw_params_arg = getattr(args, "adapter_params", None)
@@ -389,28 +406,27 @@ def build_spec(
             raise SystemExit(
                 "[collect] error: --adapter-params is not valid JSON: "
                 f"{e} | hint: pass a JSON object of scalar / scalar-list "
-                "values, e.g. '{\"name\": \"manual\", "
-                "\"control_dt\": 0.02}'") from e
+                'values, e.g. \'{"name": "manual", '
+                '"control_dt": 0.02}\''
+            ) from e
         try:
             adapter_section, adapter_overrides = _adapter_params_result(
-                apply_spawn_params(
-                    _require_config(cfg.get("adapter") or {}, "adapter"),
-                    raw_params))
+                apply_spawn_params(_require_config(cfg.get("adapter") or {}, "adapter"), raw_params)
+            )
         except AdapterParamsError as e:
             raise SystemExit(
                 f"[collect] error: --adapter-params rejected: {e} | "
-                f"details: {json.dumps(e.doc, ensure_ascii=False)}") from e
+                f"details: {json.dumps(e.doc, ensure_ascii=False)}"
+            ) from e
         cfg["adapter"] = adapter_section
         adapter_params = _require_config(raw_params, "adapter params")
         if adapter_overrides:
-            print(f"[collect] adapter params override: "
-                  f"{adapter_overrides}", flush=True)
+            print(f"[collect] adapter params override: " f"{adapter_overrides}", flush=True)
     mode_value = cfg.get("mode", "collect")
-    if not isinstance(mode_value, str) \
-            or mode_value not in ("collect", "benchmark", "both"):
+    if not isinstance(mode_value, str) or mode_value not in ("collect", "benchmark", "both"):
         raise ValueError(
-            f"mode '{mode_value}' is not implemented "
-            "(one of: collect | benchmark | both)")
+            f"mode '{mode_value}' is not implemented " "(one of: collect | benchmark | both)"
+        )
     mode = mode_value
     env_cfg = _require_config(cfg["env"], "env")
     col_cfg = _require_config(cfg["collect"], "collect")
@@ -427,8 +443,7 @@ def build_spec(
     if getattr(args, "instruction", None) is not None:
         adapter_cfg["instruction"] = args.instruction
         cfg["adapter"] = adapter_cfg
-    seed_value = (args.seed if getattr(args, "seed", None) is not None
-                  else cfg.get("seed", 0))
+    seed_value = args.seed if getattr(args, "seed", None) is not None else cfg.get("seed", 0)
     seed = _as_int(seed_value, "seed")
 
     # torch device follows --device (AppLauncher); the env backend also sets
@@ -438,15 +453,14 @@ def build_spec(
     # normalizer) rides env.params into the mujoco scene build.
     backend_label = str(env_cfg.get("backend", "isaaclab"))
     from unigym.errors import ConfigError
+
     raw_backend_options = env_cfg.get("backend_options")
-    if raw_backend_options is not None \
-            and not is_json_object(raw_backend_options):
-        raise ConfigError(
-            f"{args.config}: env.backend_options must be a mapping")
+    if raw_backend_options is not None and not is_json_object(raw_backend_options):
+        raise ConfigError(f"{args.config}: env.backend_options must be a mapping")
     try:
         backend_options = _require_config(
-            validate_backend_options(backend_label, raw_backend_options),
-            "backend options")
+            validate_backend_options(backend_label, raw_backend_options), "backend options"
+        )
     except ValueError as exc:
         raise ConfigError(f"{args.config}: {exc}") from exc
     _guard_mujoco_only_scene(env_cfg, backend_label)
@@ -461,21 +475,17 @@ def build_spec(
     # a reserved key (not deserialized here; inject via SyncRunner).
     runner_cfg = _require_config(cfg.get("runner") or {}, "runner")
     output_root_value = cfg.get("output_root", "data_out")
-    output_root = (output_root_value if isinstance(output_root_value, str)
-                   else "data_out")
+    output_root = output_root_value if isinstance(output_root_value, str) else "data_out"
     run_name = _require_str(cfg["run_name"], "run_name")
     requested_out = getattr(args, "output_dir", None)
     if requested_out is None:
         requested_out = os.path.join(output_root, run_name)
     scene_value = cfg.get("scene")
-    scene = (None if scene_value is None
-             else _require_config(scene_value, "scene"))
+    scene = None if scene_value is None else _require_config(scene_value, "scene")
     director_value = cfg.get("director")
-    director = (None if director_value is None
-                else _require_config(director_value, "director"))
+    director = None if director_value is None else _require_config(director_value, "director")
     adapter_name_value = adapter_cfg.get("name")
-    adapter_name = (None if adapter_name_value is None
-                    else str(adapter_name_value))
+    adapter_name = None if adapter_name_value is None else str(adapter_name_value)
     return RunSpec(
         cfg=cfg,
         config_path=args.config,
@@ -483,8 +493,7 @@ def build_spec(
         seed=seed,
         mode=mode,
         backend=backend_label,
-        backend_params=_require_config(
-            env_cfg.get("params") or {}, "env.params"),
+        backend_params=_require_config(env_cfg.get("params") or {}, "env.params"),
         backend_options=backend_options,
         world_base=world_base,
         articulations=articulations,
@@ -507,8 +516,7 @@ def build_spec(
             "run_log": getattr(args, "run_log", None),
             "serve_pause": bool(getattr(args, "serve_pause", False)),
         },
-        benchmark=_require_config(
-            cfg.get("benchmark") or {}, "benchmark"),
+        benchmark=_require_config(cfg.get("benchmark") or {}, "benchmark"),
         terminations=cfg.get("terminations"),
         runner=runner_cfg,
         output=OutputSpec(

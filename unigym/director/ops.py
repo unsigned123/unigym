@@ -23,6 +23,7 @@ move is done).  Both engines
 stay lazy (function-body imports) — ``director/`` remains agnostic at
 module level.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -36,8 +37,7 @@ from ..backends.registry import Trait, backend_info
 # kinematic-console: the ``hand`` host alias resolves to the FIRST
 # resolvable candidate (G1 finger-link naming, right hand primary -- the
 # scripted-pick fixture hand).  Explicit body/link names stay available.
-HAND_ALIAS_CANDIDATES = ("right_hand_index_0_link",
-                         "left_hand_index_0_link")
+HAND_ALIAS_CANDIDATES = ("right_hand_index_0_link", "left_hand_index_0_link")
 
 # accepted ``prop:``-prefixed host spellings (webui dropdown face)
 _PROP_PREFIX = "prop:"
@@ -46,7 +46,7 @@ _PROP_PREFIX = "prop:"
 def strip_prop_prefix(host: str) -> str:
     """``prop:bench`` -> ``bench`` (plain names pass through)."""
     host = str(host)
-    return host[len(_PROP_PREFIX):] if host.startswith(_PROP_PREFIX) else host
+    return host[len(_PROP_PREFIX) :] if host.startswith(_PROP_PREFIX) else host
 
 
 @dataclass(frozen=True)
@@ -69,10 +69,14 @@ def quat_mul(a, b) -> np.ndarray:
     """Hamilton product a*b (wxyz)."""
     aw, ax, ay, az = a
     bw, bx, by, bz = b
-    return np.array([aw * bw - ax * bx - ay * by - az * bz,
-                     aw * bx + ax * bw + ay * bz - az * by,
-                     aw * by - ax * bz + ay * bw + az * bx,
-                     aw * bz + ax * by - ay * bx + az * bw])
+    return np.array(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ]
+    )
 
 
 def quat_conj(q) -> np.ndarray:
@@ -91,15 +95,15 @@ def quat_rot(q, v) -> np.ndarray:
 def pose_rel(obj_pos, obj_quat, host_pos, host_quat) -> tuple[np.ndarray, np.ndarray]:
     """host<-obj relative pose ``(rel_pos, rel_quat)``: obj = host * rel."""
     dq = quat_conj(host_quat)
-    rel_pos = quat_rot(dq, np.asarray(obj_pos, dtype=np.float64)
-                       - np.asarray(host_pos, dtype=np.float64))
+    rel_pos = quat_rot(
+        dq, np.asarray(obj_pos, dtype=np.float64) - np.asarray(host_pos, dtype=np.float64)
+    )
     return rel_pos, quat_mul(dq, obj_quat)
 
 
 def pose_compose(host_pos, host_quat, rel_pos, rel_quat) -> tuple[np.ndarray, np.ndarray]:
     """obj = host * rel (the per-tick follow write)."""
-    pos = (np.asarray(host_pos, dtype=np.float64)
-           + quat_rot(host_quat, rel_pos))
+    pos = np.asarray(host_pos, dtype=np.float64) + quat_rot(host_quat, rel_pos)
     return pos, quat_mul(host_quat, rel_quat)
 
 
@@ -175,8 +179,7 @@ class DirectorPropOps(Protocol):
         """Robot root velocity write: ``mode`` set|add (the push op)."""
         ...
 
-    def write_joints(self, joints: dict[str, float],
-                     zero_vel: bool) -> dict:
+    def write_joints(self, joints: dict[str, float], zero_vel: bool) -> dict:
         """Robot joint-angle write by name (the joints op).
 
         Pose-teleport semantics (contract §3.11): a one-shot position
@@ -219,5 +222,6 @@ def build_ops(env, director_ops) -> DirectorPropOps:
     if director_ops is None:
         raise TypeError(
             "build_ops requires an explicit director_ops face injected by "
-            "the run layer (no env discovery)")
+            "the run layer (no env discovery)"
+        )
     return director_ops()(env)

@@ -16,6 +16,7 @@ the buffer is never cleared between capture and flush), and the in-memory
 buffer is re-inflated from them so subsequent rows naturally overwrite
 the abandoned branch's positions.
 """
+
 from __future__ import annotations
 
 import json
@@ -102,8 +103,7 @@ class ShardWriter:
     def _flush(self) -> None:
         if self._steps_in_shard == 0:
             return
-        arrays: dict[str, Any] = {
-            k: np.stack(v, axis=0) for k, v in self._buf.items()}  # (T, N, D)
+        arrays: dict[str, Any] = {k: np.stack(v, axis=0) for k, v in self._buf.items()}  # (T, N, D)
         path = os.path.join(self.out_dir, f"shard_{self._shard_idx:04d}.npz")
         np.savez(path, **arrays)
         if not self._meta_written:
@@ -132,8 +132,7 @@ class ShardWriter:
         whose values are recoverable at restore time from the boundary
         shard's head (the buffer is never cleared between capture and
         its flush)."""
-        return {"committed_shards": int(self._shard_idx),
-                "committed_rows": int(self._total_steps)}
+        return {"committed_shards": int(self._shard_idx), "committed_rows": int(self._total_steps)}
 
     def restore_commit(self, state: dict) -> None:
         """Roll the writer back to *state* (an earlier ``commit_state``):
@@ -156,8 +155,7 @@ class ShardWriter:
         # rewrite the file, re-inflate the buffer from the same rows
         if r > 0:
             if head is not None:
-                np.savez(os.path.join(self.out_dir,
-                                      f"shard_{n_shards:04d}.npz"), **head)
+                np.savez(os.path.join(self.out_dir, f"shard_{n_shards:04d}.npz"), **head)
                 self._buf = defaultdict(list)
                 for k, v in head.items():
                     self._buf[k].extend(v[i] for i in range(r))
@@ -203,13 +201,13 @@ def validate_commit_state(state: dict, writer: ShardWriter) -> tuple:
     n_shards = int(state["committed_shards"])
     n_rows = int(state["committed_rows"])
     ss = writer.shard_steps
-    if not (n_shards >= 0 and n_shards * ss <= n_rows
-            < (n_shards + 1) * ss):
+    if not (n_shards >= 0 and n_shards * ss <= n_rows < (n_shards + 1) * ss):
         raise ValueError(
             f"shard commit state corrupt: committed_shards="
             f"{n_shards}, committed_rows={n_rows}, shard_steps={ss} "
-            f"(need 0 <= N and N*ss <= M < (N+1)*ss)")
-    r = n_rows - n_shards * ss     # checkpoint rows riding the buffer
+            f"(need 0 <= N and N*ss <= M < (N+1)*ss)"
+        )
+    r = n_rows - n_shards * ss  # checkpoint rows riding the buffer
     # validate the boundary shard BEFORE deleting anything (the whole
     # restore stays atomic on failure -- nothing half-truncated)
     head = None
@@ -225,7 +223,8 @@ def validate_commit_state(state: dict, writer: ShardWriter) -> tuple:
             raise ValueError(
                 f"boundary shard_{n_shards:04d}.npz shorter than "
                 f"the commit state ({r} rows needed) -- shard dir "
-                f"and commit state disagree")
+                f"and commit state disagree"
+            )
         head = {k: v[:r].copy() for k, v in data.items()}
     elif r > 0:
         # never flushed past the checkpoint: the rows must still live
@@ -237,5 +236,6 @@ def validate_commit_state(state: dict, writer: ShardWriter) -> tuple:
                 f"shard buffer holds fewer rows than the commit "
                 f"state ({have} < {r}) and "
                 f"shard_{n_shards:04d}.npz is absent -- commit "
-                f"state unreachable")
+                f"state unreachable"
+            )
     return n_shards, n_rows, r, head

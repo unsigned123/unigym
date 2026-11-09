@@ -80,6 +80,7 @@ multi-machine = one daemon per machine. This module depends only on stdlib
 + numpy (lazy: the pure status/command paths do not trigger the numpy
 import).
 """
+
 from __future__ import annotations
 
 import io
@@ -96,8 +97,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from glob import glob
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import (TYPE_CHECKING, Any, Callable, Protocol, TypedDict,
-                    TypeAlias, overload, runtime_checkable)
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Protocol,
+    TypedDict,
+    TypeAlias,
+    overload,
+    runtime_checkable,
+)
 
 from unigym import runtime_dirs
 from unigym._typing import JsonValue
@@ -109,12 +118,26 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.cameras.manager import CameraManager
     from unigym.cameras.base import CameraSpec
 
-__all__ = ["Bridge", "ShmClient", "BridgeError",
-           "BridgeTimeout", "make_run_id", "active_run_ids",
-           "clean_zombies", "serve_state_paths", "CMD_NAMES",
-           "SHM_PREFIX", "MAGIC", "VERSION",
-           "HB_TIMEOUT_S", "probe_heartbeat", "hb_alive",
-           "METRICS_OFF", "METRICS_JSON", "METRICS_SIZE"]
+__all__ = [
+    "Bridge",
+    "ShmClient",
+    "BridgeError",
+    "BridgeTimeout",
+    "make_run_id",
+    "active_run_ids",
+    "clean_zombies",
+    "serve_state_paths",
+    "CMD_NAMES",
+    "SHM_PREFIX",
+    "MAGIC",
+    "VERSION",
+    "HB_TIMEOUT_S",
+    "probe_heartbeat",
+    "hb_alive",
+    "METRICS_OFF",
+    "METRICS_JSON",
+    "METRICS_SIZE",
+]
 
 # --------------------------------------------------------------------------- #
 # protocol constants (docs/contracts/runtime_contract.md §2/§3)
@@ -122,13 +145,12 @@ __all__ = ["Bridge", "ShmClient", "BridgeError",
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 SHM_PREFIX = "unigym_"
 MAGIC = b"UGYM"
-VERSION = 5                             # header heartbeat (hb_seq/hb_ts); the
-                                        # layout table lives in
-                                        # docs/contracts/runtime_contract.md §2
+VERSION = 5  # header heartbeat (hb_seq/hb_ts); the
+# layout table lives in
+# docs/contracts/runtime_contract.md §2
 
 PHASE_RUNNING, PHASE_PAUSED, PHASE_DONE = 0, 1, 2
-PHASE_NAMES = {PHASE_RUNNING: "RUNNING", PHASE_PAUSED: "PAUSED",
-               PHASE_DONE: "DONE"}
+PHASE_NAMES = {PHASE_RUNNING: "RUNNING", PHASE_PAUSED: "PAUSED", PHASE_DONE: "DONE"}
 
 CMD_NONE = 0
 CMD_PAUSE = 1
@@ -136,30 +158,41 @@ CMD_RESUME = 2
 CMD_SET_PROPS = 3
 CMD_GET_VIEW = 4
 CMD_SHUTDOWN = 5
-CMD_SET_CAMERA = 6              # S2: stream_bind producer rebind
-CMD_STEP = 7                    # console: paused step/fast-forward
-CMD_INSPECT = 8                 # console: summary/obs/extra/eval
-CMD_SAVE_NPZ = 9                # console: npz dump
-CMD_METRICS = 10                # typed query: metrics document
-CMD_CONFIG = 11                 # typed query: effective config
-CMD_REPORT = 12                 # typed query: benchmark draft
-CMD_GET_POSE = 13               # freecam: world-pose readback
-CMD_DIRECT = 14                 # director: direct.* op family
-CMD_WATCH = 15                  # watchers: add/list/clear/update/test
-CMD_SCENE = 16                  # typed query: curated scene face
-CMD_SNAPSHOT = 17               # rewind: capture an engine snapshot {label?}
-CMD_REWIND = 18                 # rewind: restore a snapshot (auto-pauses)
-CMD_SNAPSHOTS = 19              # rewind: list live snapshot slots
-CMD_NAMES = {CMD_PAUSE: "pause", CMD_RESUME: "resume",
-             CMD_SET_PROPS: "set_props", CMD_GET_VIEW: "get_view",
-             CMD_SHUTDOWN: "shutdown", CMD_SET_CAMERA: "set_camera",
-             CMD_STEP: "step", CMD_INSPECT: "inspect",
-             CMD_SAVE_NPZ: "save_npz", CMD_METRICS: "metrics",
-             CMD_CONFIG: "config", CMD_REPORT: "report",
-             CMD_GET_POSE: "get_world_pose",
-             CMD_DIRECT: "direct", CMD_WATCH: "watch",
-             CMD_SCENE: "scene", CMD_SNAPSHOT: "snapshot",
-             CMD_REWIND: "rewind", CMD_SNAPSHOTS: "snapshots"}
+CMD_SET_CAMERA = 6  # S2: stream_bind producer rebind
+CMD_STEP = 7  # console: paused step/fast-forward
+CMD_INSPECT = 8  # console: summary/obs/extra/eval
+CMD_SAVE_NPZ = 9  # console: npz dump
+CMD_METRICS = 10  # typed query: metrics document
+CMD_CONFIG = 11  # typed query: effective config
+CMD_REPORT = 12  # typed query: benchmark draft
+CMD_GET_POSE = 13  # freecam: world-pose readback
+CMD_DIRECT = 14  # director: direct.* op family
+CMD_WATCH = 15  # watchers: add/list/clear/update/test
+CMD_SCENE = 16  # typed query: curated scene face
+CMD_SNAPSHOT = 17  # rewind: capture an engine snapshot {label?}
+CMD_REWIND = 18  # rewind: restore a snapshot (auto-pauses)
+CMD_SNAPSHOTS = 19  # rewind: list live snapshot slots
+CMD_NAMES = {
+    CMD_PAUSE: "pause",
+    CMD_RESUME: "resume",
+    CMD_SET_PROPS: "set_props",
+    CMD_GET_VIEW: "get_view",
+    CMD_SHUTDOWN: "shutdown",
+    CMD_SET_CAMERA: "set_camera",
+    CMD_STEP: "step",
+    CMD_INSPECT: "inspect",
+    CMD_SAVE_NPZ: "save_npz",
+    CMD_METRICS: "metrics",
+    CMD_CONFIG: "config",
+    CMD_REPORT: "report",
+    CMD_GET_POSE: "get_world_pose",
+    CMD_DIRECT: "direct",
+    CMD_WATCH: "watch",
+    CMD_SCENE: "scene",
+    CMD_SNAPSHOT: "snapshot",
+    CMD_REWIND: "rewind",
+    CMD_SNAPSHOTS: "snapshots",
+}
 CMD_IDS = {v: k for k, v in CMD_NAMES.items()}
 _CONSOLE_CMDS = frozenset((CMD_STEP, CMD_INSPECT, CMD_SAVE_NPZ))
 _REWIND_CMDS = frozenset((CMD_SNAPSHOT, CMD_REWIND, CMD_SNAPSHOTS))
@@ -173,7 +206,7 @@ DTYPE_UINT8, DTYPE_FLOAT32 = 0, 1
 # past 8KB -- tree (joint-limit rows) + state ~8.4KB honest doc
 PAYLOAD_JSON = 16384
 STATUS_JSON = 8192
-DEFAULT_FRAME_CAPACITY = 4 * 1024 * 1024   # per slot; fits 1280x800x3 ego (2.93MB) with headroom
+DEFAULT_FRAME_CAPACITY = 4 * 1024 * 1024  # per slot; fits 1280x800x3 ego (2.93MB) with headroom
 CAMERA_NAME_LEN = 64
 MAX_DIMS = 8
 
@@ -192,18 +225,18 @@ MAX_DIMS = 8
 HDR_SIZE = 64
 H_MAGIC, H_VERSION = 0, 4
 H_PHASE, H_PAUSED, H_VIEWER, H_FMT = 6, 7, 8, 9
-H_CAP = 12                       # u32 frame slot payload capacity
-H_FPTR = 16                      # u64 publish pointer: (frame_id << 8) | slot
-H_STARTED = 24                   # f64 unix ts
-H_PID = 32                       # u64 owner pid (display / kill target)
-H_PORT = 40                      # u16 retired (always 0; runs have no HTTP port)
-H_HB_SEQ = 48                    # u64 heartbeat counter (loop iterations)
-H_HB_TS = 56                     # f64 unix ts of the last heartbeat bump
+H_CAP = 12  # u32 frame slot payload capacity
+H_FPTR = 16  # u64 publish pointer: (frame_id << 8) | slot
+H_STARTED = 24  # f64 unix ts
+H_PID = 32  # u64 owner pid (display / kill target)
+H_PORT = 40  # u16 retired (always 0; runs have no HTTP port)
+H_HB_SEQ = 48  # u64 heartbeat counter (loop iterations)
+H_HB_TS = 56  # f64 unix ts of the last heartbeat bump
 
 CMD_OFF = 64
 C_REQ, C_CMD, C_JSON = 0, 8, 16
 C_CK = 16 + PAYLOAD_JSON
-CMD_SIZE = 16416                 # 16 hdr + 16384 payload + 8 ck (16-aligned)
+CMD_SIZE = 16416  # 16 hdr + 16384 payload + 8 ck (16-aligned)
 
 ACK_OFF = CMD_OFF + CMD_SIZE
 A_REQ, A_STATUS, A_JSON = 0, 8, 16
@@ -214,7 +247,7 @@ STATUS_OFF = ACK_OFF + ACK_SIZE
 S_SEQ, S_STEP, S_EP, S_JSON = 0, 8, 16, 24
 S_TS = 24 + STATUS_JSON
 S_CK = S_TS + 8
-STATUS_SIZE = 8240               # 8 seq + 8+8 + 8192 json + 8 ts + 8 ck
+STATUS_SIZE = 8240  # 8 seq + 8+8 + 8192 json + 8 ts + 8 ck
 
 # ---- metrics block (docs/contracts/runtime_contract.md §2) --------
 # seqlock-guarded like status: scalar prefix (timing, updated per tick) +
@@ -224,16 +257,16 @@ STATUS_SIZE = 8240               # 8 seq + 8+8 + 8192 json + 8 ts + 8 ck
 METRICS_OFF = STATUS_OFF + STATUS_SIZE
 M_SEQ, M_GEN, M_FPS_P, M_FPS_S, M_SIMT, M_TS = 0, 8, 16, 24, 32, 40
 M_JSON = 48
-METRICS_JSON = 8192              # document budget (fail-fast, never clipped)
-M_CK = M_JSON + METRICS_JSON     # 8240
-METRICS_SIZE = 8256              # 6 scalars + 8192 json + ts + ck (16-align)
+METRICS_JSON = 8192  # document budget (fail-fast, never clipped)
+M_CK = M_JSON + METRICS_JSON  # 8240
+METRICS_SIZE = 8256  # 6 scalars + 8192 json + ts + ck (16-align)
 
 SLOT_OFF = METRICS_OFF + METRICS_SIZE
-SLOT_HDR = 192                   # 176 + step u64 + ts u64 (16-aligned)
+SLOT_HDR = 192  # 176 + step u64 + ts u64 (16-aligned)
 L_SEQ, L_FID, L_NAME = 0, 8, 16
 L_NDIM, L_DTYPE, L_SHAPE = 80, 84, 88
 L_LEN, L_FMT = 152, 160
-L_STEP, L_TS = 168, 176          # publish-time policy step + monotonic
+L_STEP, L_TS = 168, 176  # publish-time policy step + monotonic
 L_DATA = 192
 
 # registry schema version (serve-registry v2 keys; see Bridge).
@@ -273,14 +306,11 @@ class ConsoleFace(Protocol):
 
     env: object | None
 
-    def cmd_step(self, rid: int,
-                 params: dict[str, JsonValue]) -> AckResult: ...
+    def cmd_step(self, rid: int, params: dict[str, JsonValue]) -> AckResult: ...
 
-    def cmd_inspect(self, rid: int,
-                    params: dict[str, JsonValue]) -> AckResult: ...
+    def cmd_inspect(self, rid: int, params: dict[str, JsonValue]) -> AckResult: ...
 
-    def cmd_save_npz(self, rid: int,
-                     params: dict[str, JsonValue]) -> AckResult: ...
+    def cmd_save_npz(self, rid: int, params: dict[str, JsonValue]) -> AckResult: ...
 
 
 @runtime_checkable
@@ -366,8 +396,8 @@ def _put_bytes(buf: Buf, off: int, raw: bytes, region: int) -> None:
     """Write raw into buf[off:off+region] and NUL-pad the remainder."""
     if len(raw) > region:
         raise BridgeError(f"payload {len(raw)}B exceeds fixed slot {region}B")
-    buf[off:off + len(raw)] = raw
-    buf[off + len(raw):off + region] = _ZEROS[:region - len(raw)]
+    buf[off : off + len(raw)] = raw
+    buf[off + len(raw) : off + region] = _ZEROS[: region - len(raw)]
 
 
 _ZEROS = bytes(max(PAYLOAD_JSON, STATUS_JSON, METRICS_JSON))
@@ -398,8 +428,7 @@ def _payload_ck(raw: bytes) -> int:
     return zlib.adler32(raw) & 0xFFFFFFFF
 
 
-def _write_command(buf: Buf, cmd_id: int,
-                   payload: dict[str, JsonValue]) -> int:
+def _write_command(buf: Buf, cmd_id: int, payload: dict[str, JsonValue]) -> int:
     """Publish one command into the SHM command block (req_id LAST).
 
     The one wire discipline shared by every writer (CLI, daemon media
@@ -412,13 +441,13 @@ def _write_command(buf: Buf, cmd_id: int,
     _u16(buf, CMD_OFF + C_CMD, int(cmd_id))
     _put_bytes(buf, CMD_OFF + C_JSON, raw, PAYLOAD_JSON)
     _u64(buf, CMD_OFF + C_CK, _payload_ck(raw))
-    _u64(buf, CMD_OFF + C_REQ, rid)               # publish LAST
+    _u64(buf, CMD_OFF + C_REQ, rid)  # publish LAST
     return rid
 
 
-def _poll_ack(buf: Buf, rid: int, deadline: float,
-              phase_fn: Callable[[], int]
-              ) -> tuple[int, dict[str, Any]] | None:
+def _poll_ack(
+    buf: Buf, rid: int, deadline: float, phase_fn: Callable[[], int]
+) -> tuple[int, dict[str, Any]] | None:
     """Poll the ack block for ``rid`` until deadline; None on timeout.
 
     ``phase_fn`` is a zero-arg callable returning the current phase int
@@ -428,8 +457,7 @@ def _poll_ack(buf: Buf, rid: int, deadline: float,
         a = _u64(buf, ACK_OFF + A_REQ)
         if a == rid:
             status = _u16(buf, ACK_OFF + A_STATUS)
-            raw = bytes(buf[ACK_OFF + A_JSON:
-                            ACK_OFF + A_JSON + PAYLOAD_JSON])
+            raw = bytes(buf[ACK_OFF + A_JSON : ACK_OFF + A_JSON + PAYLOAD_JSON])
             raw = raw.split(b"\x00", 1)[0]
             try:
                 result: dict[str, Any] = json.loads(raw)
@@ -439,7 +467,8 @@ def _poll_ack(buf: Buf, rid: int, deadline: float,
         if phase_fn() == PHASE_DONE:
             raise BridgeError(
                 f"run finished before ack for "
-                f"'{CMD_NAMES.get(_u16(buf, CMD_OFF + C_CMD), '?')}'")
+                f"'{CMD_NAMES.get(_u16(buf, CMD_OFF + C_CMD), '?')}'"
+            )
         if time.time() >= deadline:
             return None
         time.sleep(0.005)
@@ -448,8 +477,9 @@ def _poll_ack(buf: Buf, rid: int, deadline: float,
 # --------------------------------------------------------------------------- #
 # seqlock primitives (single writer / single reader, no locks)
 # --------------------------------------------------------------------------- #
-def _seqlock_read(buf: Buf, base: int, start: int, length: int,
-                  retries: int = 2000) -> bytes | None:
+def _seqlock_read(
+    buf: Buf, base: int, start: int, length: int, retries: int = 2000
+) -> bytes | None:
     """Tear-free read of buf[base+start : base+start+length].
 
     Writer marks seq odd during write and even after; a stable even seq
@@ -460,7 +490,7 @@ def _seqlock_read(buf: Buf, base: int, start: int, length: int,
     for _ in range(retries):
         s1 = _u64(buf, base)
         if not s1 & 1:
-            data = bytes(buf[base + start:base + start + length])
+            data = bytes(buf[base + start : base + start + length])
             if _u64(buf, base) == s1:
                 return data
         time.sleep(0.0005)
@@ -472,7 +502,7 @@ def _read_status_block(buf: Buf) -> StatusDoc:
     if data is None:
         raise BridgeError("status seqlock unreadable (writer starving?)")
     step, ep = struct.unpack_from("<QQ", data, 0)
-    raw = data[16:16 + STATUS_JSON].split(b"\x00", 1)[0]
+    raw = data[16 : 16 + STATUS_JSON].split(b"\x00", 1)[0]
     ck = struct.unpack_from("<Q", data, 16 + STATUS_JSON + 8)[0]
     metrics: JsonValue = {}
     if raw and _payload_ck(raw) == ck:
@@ -500,24 +530,33 @@ def _read_frame_slot(buf: Buf, base: int) -> FrameSlot | None:
     if hdr is None:
         return None
     fid = struct.unpack_from("<Q", hdr, L_FID - 8)[0]
-    name = hdr[L_NAME - 8:L_NAME - 8 + CAMERA_NAME_LEN].split(
-        b"\x00", 1)[0].decode("utf-8", "replace")
+    name = (
+        hdr[L_NAME - 8 : L_NAME - 8 + CAMERA_NAME_LEN]
+        .split(b"\x00", 1)[0]
+        .decode("utf-8", "replace")
+    )
     ndim, dtype = struct.unpack_from("<II", hdr, L_NDIM - 8)
-    shape = list(struct.unpack_from(f"<{MAX_DIMS}Q", hdr,
-                                    L_SHAPE - 8))[:ndim]
+    shape = list(struct.unpack_from(f"<{MAX_DIMS}Q", hdr, L_SHAPE - 8))[:ndim]
     n, fmt = struct.unpack_from("<QI", hdr, L_LEN - 8)
     if fid == 0 or n == 0 or n > _frame_cap(buf):
         return None
     # publish-time policy step + monotonic stamp (the seqlock
     # region above covers the whole header, so these are tear-free)
     step, ts = struct.unpack_from("<QQ", hdr, L_STEP - 8)
-    data = bytes(buf[base + L_DATA:base + L_DATA + n])
-    return {"frame_id": fid, "camera": name, "dtype": dtype, "shape": shape,
-            "format": fmt, "step": step, "ts": ts, "data": data}
+    data = bytes(buf[base + L_DATA : base + L_DATA + n])
+    return {
+        "frame_id": fid,
+        "camera": name,
+        "dtype": dtype,
+        "shape": shape,
+        "format": fmt,
+        "step": step,
+        "ts": ts,
+        "data": data,
+    }
 
 
-def _read_latest_frame(buf: Buf,
-                       retries: int = 200) -> dict[str, Any] | None:
+def _read_latest_frame(buf: Buf, retries: int = 200) -> dict[str, Any] | None:
     """Reader entry point: publish pointer -> slot seqlock read.
 
     The publish pointer (header, aligned u64) selects the slot AFTER the
@@ -537,8 +576,7 @@ def _read_latest_frame(buf: Buf,
         frame = _read_frame_slot(buf, base)
         f2 = _u64(buf, H_FPTR)
         s2 = _u64(buf, base)
-        if (frame is not None and f1 == f2 and s1 == s2
-                and frame.get("frame_id") == fid):
+        if frame is not None and f1 == f2 and s1 == s2 and frame.get("frame_id") == fid:
             return dict(frame)
         time.sleep(0.0005)
     return None
@@ -585,14 +623,16 @@ def make_run_id(run_name: str) -> str:
     when two ``Run`` objects carry the same ``run_name``).
     """
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(run_name)).strip("_") or "run"
-    return (f"{time.strftime('%Y%m%d-%H%M%S')}-{safe}"
-            f"-{os.getpid() % 100000}-{uuid.uuid4().hex[:6]}")
+    return (
+        f"{time.strftime('%Y%m%d-%H%M%S')}-{safe}" f"-{os.getpid() % 100000}-{uuid.uuid4().hex[:6]}"
+    )
 
 
 def active_run_ids() -> list[str]:
     """Run ids of live `unigym_*` segments present in /dev/shm."""
-    return sorted(p[len(SHM_PREFIX):] for p in
-                  (os.path.basename(x) for x in glob(f"/dev/shm/{SHM_PREFIX}*")))
+    return sorted(
+        p[len(SHM_PREFIX) :] for p in (os.path.basename(x) for x in glob(f"/dev/shm/{SHM_PREFIX}*"))
+    )
 
 
 def serve_state_paths(state_dir: str | os.PathLike[str] | None = None) -> list[Path]:
@@ -603,9 +643,7 @@ def serve_state_paths(state_dir: str | os.PathLike[str] | None = None) -> list[P
     [explicit state_dir, UNIGYM_SERVE_DIR, runtime serve dir, repo root
     (docker registries mount the repo)]; no /tmp-root fallback.
     """
-    return runtime_dirs.serve_registry_paths(state_dir, extra_dirs=[
-        str(_REPO_ROOT)])
-
+    return runtime_dirs.serve_registry_paths(state_dir, extra_dirs=[str(_REPO_ROOT)])
 
 
 def _pid_alive(pid: int) -> bool:
@@ -628,7 +666,7 @@ def _pid_alive(pid: int) -> bool:
 # -- heartbeat (the run liveness signal) -------------------------------------
 # The worker bumps hb_seq/hb_ts on EVERY engine-loop iteration (the parked
 # gate loop included); readers judge liveness purely by hb_ts freshness.
-HB_TIMEOUT_S = 10.0              # liveness window (worker loop period <= 1s)
+HB_TIMEOUT_S = 10.0  # liveness window (worker loop period <= 1s)
 
 
 def hb_alive(hb_ts: float, now: float | None = None) -> bool:
@@ -677,8 +715,7 @@ def read_header_pid(name: str) -> int:
     return 0
 
 
-def probe_heartbeat(run_id: str | None = None,
-                    pid: int | None = None) -> float:
+def probe_heartbeat(run_id: str | None = None, pid: int | None = None) -> float:
     """The heartbeat readable for a run without a full attach.
 
     By segment name (``unigym_<run_id>``) when the run_id is known; the
@@ -696,15 +733,18 @@ def probe_heartbeat(run_id: str | None = None,
                     head = f.read(HDR_SIZE)
             except OSError:
                 continue
-            if len(head) == HDR_SIZE and head[:4] == MAGIC \
-                    and struct.unpack_from("<Q", head, H_PID)[0] == want:
+            if (
+                len(head) == HDR_SIZE
+                and head[:4] == MAGIC
+                and struct.unpack_from("<Q", head, H_PID)[0] == want
+            ):
                 return struct.unpack_from("<d", head, H_HB_TS)[0]
     return 0.0
 
 
-def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
-                  dry_run: bool = False,
-                  force: bool = False) -> list[str]:
+def clean_zombies(
+    state_dir: str | os.PathLike[str] | None = None, dry_run: bool = False, force: bool = False
+) -> list[str]:
     """Remove zombie `unigym_*` segments (+ their dead-pid serve-state files).
 
     Zombie = header phase DONE (run finished but segment leaked) or
@@ -730,8 +770,7 @@ def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
                     # exists but unattachable (UNKNOWN state's probe twin)
                     verdict = "version-mismatch"
                 else:
-                    phase, pid = head[6], struct.unpack_from("<Q", head,
-                                                             H_PID)[0]
+                    phase, pid = head[6], struct.unpack_from("<Q", head, H_PID)[0]
                     if phase == PHASE_DONE:
                         verdict = "done"
                     else:
@@ -739,16 +778,17 @@ def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
                         if hb_alive(hb):
                             verdict = "leaked-live"
                         else:
-                            age = ("" if not hb else
-                                   f", hb {time.time() - hb:.0f}s stale")
+                            age = "" if not hb else f", hb {time.time() - hb:.0f}s stale"
                             verdict = f"dead(pid {pid}{age})"
             else:
                 verdict = "corrupt"
         except OSError as e:
             verdict = f"unreadable({e})"
-        removable = (verdict == "done" or verdict.startswith("dead(")
-                     or (force and verdict in ("version-mismatch",
-                                               "corrupt")))
+        removable = (
+            verdict == "done"
+            or verdict.startswith("dead(")
+            or (force and verdict in ("version-mismatch", "corrupt"))
+        )
         if removable:
             if not dry_run:
                 try:
@@ -761,9 +801,11 @@ def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
         else:
             # only the force-removable classes get the hint -- a
             # leaked-live segment is never garbage, force or not
-            hint = " (--force removes it)" \
-                if force and verdict in ("version-mismatch", "corrupt") \
+            hint = (
+                " (--force removes it)"
+                if force and verdict in ("version-mismatch", "corrupt")
                 else ""
+            )
             print(f"[clean] keep {name} ({verdict}){hint}")
     for p in serve_state_paths(state_dir):
         try:
@@ -775,8 +817,7 @@ def clean_zombies(state_dir: str | os.PathLike[str] | None = None,
             if not dry_run:
                 p.unlink(missing_ok=True)
             verb = "removed" if not dry_run else "(dry-run) would remove"
-            print(f"[clean] {verb} stale serve-state {p.name} "
-                  f"(pid {pid} dead)")
+            print(f"[clean] {verb} stale serve-state {p.name} " f"(pid {pid} dead)")
     return removed
 
 
@@ -797,6 +838,7 @@ def _attach_segment(name: str) -> mmap.mmap:
 def _encode_jpeg(arr: NDArray[Any]) -> bytes:
     """JPEG-encode an (H,W,3) uint8 array (float32 depth: min-max norm)."""
     import numpy as np
+
     a = np.asarray(arr)
     if a.dtype != np.uint8:
         a = a.astype(np.float32)
@@ -810,8 +852,7 @@ def _encode_jpeg(arr: NDArray[Any]) -> bytes:
     except ImportError as exc:
         from unigym._optional import MissingExtraError
 
-        raise MissingExtraError(
-            "PIL.Image", "record", "JPEG capture") from exc
+        raise MissingExtraError("PIL.Image", "record", "JPEG capture") from exc
     buf = io.BytesIO()
     Image.fromarray(a).save(buf, "JPEG", quality=90)
     return buf.getvalue()
@@ -883,16 +924,23 @@ class Bridge:
             raise BridgeError("shared memory segment is closed")
         return buf
 
-    def __init__(self, run_id: str, camera_manager: CameraManager | None = None,
-                 *, camera: str | None = None,
-                 frame_capacity: int = DEFAULT_FRAME_CAPACITY,
-                 poll_interval: float = 0.02, config: str | None = None,
-                 out_dir: str | None = None, state_dir: str | None = None,
-                 obs_catalog: Iterable[str] | None = None,
-                 paused: bool = False,
-                 log_path: str | None = None,
-                 config_doc: Mapping[str, JsonValue] | None = None,
-                 metrics_source: MetricsSource | None = None):
+    def __init__(
+        self,
+        run_id: str,
+        camera_manager: CameraManager | None = None,
+        *,
+        camera: str | None = None,
+        frame_capacity: int = DEFAULT_FRAME_CAPACITY,
+        poll_interval: float = 0.02,
+        config: str | None = None,
+        out_dir: str | None = None,
+        state_dir: str | None = None,
+        obs_catalog: Iterable[str] | None = None,
+        paused: bool = False,
+        log_path: str | None = None,
+        config_doc: Mapping[str, JsonValue] | None = None,
+        metrics_source: MetricsSource | None = None,
+    ):
         self.run_id = str(run_id)
         self.shm_name = SHM_PREFIX + self.run_id
         self.camera_manager = camera_manager
@@ -900,22 +948,21 @@ class Bridge:
         self.camera_names = names
         self.camera = camera or (names[0] if names else None)
         if camera is not None and names and camera not in names:
-            raise BridgeError(f"camera {camera!r} not instantiated "
-                              f"(cameras: {names})")
+            raise BridgeError(f"camera {camera!r} not instantiated " f"(cameras: {names})")
         # the run's obs catalog key list (carried in registry v2)
-        self.obs_catalog_keys = (sorted(obs_catalog)
-                                 if obs_catalog is not None else [])
+        self.obs_catalog_keys = sorted(obs_catalog) if obs_catalog is not None else []
         self.frame_capacity = int(frame_capacity)
         self.poll_interval = float(poll_interval)
         try:
             self.shm = shared_memory.SharedMemory(
-                name=self.shm_name, create=True,
-                size=SLOT_OFF
-                + 2 * (SLOT_HDR + self.frame_capacity))
+                name=self.shm_name,
+                create=True,
+                size=SLOT_OFF + 2 * (SLOT_HDR + self.frame_capacity),
+            )
         except FileExistsError as e:
             raise BridgeError(
-                f"shm {self.shm_name} already exists (stale segment? run "
-                f"`unigym clean`)") from e
+                f"shm {self.shm_name} already exists (stale segment? run " f"`unigym clean`)"
+            ) from e
         buf = self.buf
         # fresh POSIX shm is zero-filled; write the header fields explicitly
         struct.pack_into("<4sH", buf, H_MAGIC, MAGIC, VERSION)
@@ -924,7 +971,7 @@ class Bridge:
         _f64(buf, H_STARTED, time.time())
         _u64(buf, H_PID, os.getpid())
         _u64(buf, H_HB_SEQ, 0)
-        _f64(buf, H_HB_TS, time.time())   # born alive: the segment carries a
+        _f64(buf, H_HB_TS, time.time())  # born alive: the segment carries a
         # fresh heartbeat from construction, so the spawn-window faces
         # (registry wait / ledger rows) read it as alive before tick 1
         # phase/paused/viewer/fmt/port stay 0 (RUNNING / not paused /
@@ -961,6 +1008,7 @@ class Bridge:
         # Lazy import: stepping is stdlib-only, so the stdlib-only CLI
         # import path stays numpy-free.
         from ..console.stepping import StepGate
+
         self._gate = StepGate(paused=bool(paused))
         if paused:
             buf[H_PAUSED] = 1
@@ -968,7 +1016,7 @@ class Bridge:
         self.console: ConsoleFace | None = None
         # runtime extension face: ``fn(rid, params) -> result dict``
         self._handlers: dict[int, CommandHandler] = {}
-        self.out_dir = out_dir          # console npz dump root (data_out/<run>)
+        self.out_dir = out_dir  # console npz dump root (data_out/<run>)
         self._bundle: Mapping[str, JsonValue] | None = None
         # current step bundle (inspector view)
         self._watchers: WatcherFace | None = None  # watcher engine (attach face)
@@ -985,27 +1033,28 @@ class Bridge:
         self._rewind_info: RewindInfo | None = None
         self.rewind_log: list[RewindInfo] = []
 
-        self._cmd_lock = threading.Lock()   # serializes in-process writers
+        self._cmd_lock = threading.Lock()  # serializes in-process writers
         self._write_status_locked(step=0, metrics={})
 
         # ---- metrics block (runtime_contract §2) -----------------
         # bounded structured telemetry: timing scalars per tick, typed
         # document at episode end, typed queries (cmd 10-12) for the daemon.
         from .metrics import MetricsWriter
+
         self._metrics = MetricsWriter(buf)
         self._metrics_source = metrics_source
         self._config_doc = None
         if config_doc is not None:
-            try:                            # JSON-safe snapshot, captured ONCE
-                self._config_doc = json.loads(
-                    json.dumps(config_doc, default=str))
+            try:  # JSON-safe snapshot, captured ONCE
+                self._config_doc = json.loads(json.dumps(config_doc, default=str))
             except (TypeError, ValueError) as e:
                 raise BridgeError(f"config snapshot not serializable: {e}")
             if len(json.dumps(self._config_doc).encode()) > PAYLOAD_JSON:
                 raise BridgeError(
                     f"effective config snapshot exceeds the {PAYLOAD_JSON}B "
                     f"query payload -- shrink the config (startup fail-fast, "
-                    f"design §2)")
+                    f"design §2)"
+                )
 
         # ---- serve registry v2 (breaking schema change; design §2) ------------
         # {run_id, pid, shm, output_dir, log_path, start_ts, cameras[]} is
@@ -1013,49 +1062,55 @@ class Bridge:
         # daemon's display/preflight face.  port/auth/webui_url/curl_base/
         # tunnel_hint are RETIRED (the run has no port and no token).
         self._state_path = None
-        state = {"schema": REGISTRY_SCHEMA,
-                 "run_id": self.run_id, "pid": os.getpid(),
-                 "shm": self.shm_name,
-                 "output_dir": out_dir, "log_path": log_path,
-                 "start_ts": time.time(), "cameras": names,
-                 "camera": self.camera, "config": config,
-                 "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
-                 "obs_catalog_keys": self.obs_catalog_keys,
-                 "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+        state = {
+            "schema": REGISTRY_SCHEMA,
+            "run_id": self.run_id,
+            "pid": os.getpid(),
+            "shm": self.shm_name,
+            "output_dir": out_dir,
+            "log_path": log_path,
+            "start_ts": time.time(),
+            "cameras": names,
+            "camera": self.camera,
+            "config": config,
+            "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
+            "obs_catalog_keys": self.obs_catalog_keys,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
         # default registry home is <runtime_dir>/serve;
         # the explicit --serve_state_dir
         # and the UNIGYM_SERVE_DIR legacy entry keep winning.
-        sdir = Path(state_dir or os.environ.get("UNIGYM_SERVE_DIR")
-                    or runtime_dirs.serve_dir())
+        sdir = Path(state_dir or os.environ.get("UNIGYM_SERVE_DIR") or runtime_dirs.serve_dir())
         try:
             sdir.mkdir(parents=True, exist_ok=True)
             self._state_path = sdir / f"unigym-serve-{self.run_id}.json"
             self._state_path.write_text(json.dumps(state, indent=1))
         except OSError as e:
             print(f"[bridge] serve-state write skipped: {e}", flush=True)
-        print(f"[bridge] worker ready run_id={self.run_id} "
-              f"shm={self.shm_name} (camera: {self.camera}, "
-              f"registry: {self._state_path})", flush=True)
+        print(
+            f"[bridge] worker ready run_id={self.run_id} "
+            f"shm={self.shm_name} (camera: {self.camera}, "
+            f"registry: {self._state_path})",
+            flush=True,
+        )
 
     # -- sink protocol (docs/contracts/runner_contract.md §3) -------------------------
     def on_step(self, t: int, bundle: Mapping[str, JsonValue]) -> None:
         """Sink hook: the engine loop's per-step entry (= :meth:`tick`)."""
         self.tick(t, bundle)
 
-    def on_episode_end(self, env_ids: torch.Tensor,
-                       bundle: Mapping[str, JsonValue]) -> None:
+    def on_episode_end(self, env_ids: torch.Tensor, bundle: Mapping[str, JsonValue]) -> None:
         """Sink hook: episode counters + metrics document + watchers."""
         self._episodes += int(env_ids.numel())
         # metrics feed: bounded rings + document (existing sink
         # hook -- no new engine plumbing; benchmark facts come from the
         # duck-typed source scored BEFORE this callback in the fan-out).
-        self._metrics.note_episode(env_ids, bundle,
-                                   source=self._metrics_source)
+        self._metrics.note_episode(env_ids, bundle, source=self._metrics_source)
         # watchers: callable on_reset lifecycle hooks (§8.3); never fatal
         if self._watchers is not None:
             try:
                 self._watchers.on_reset(env_ids)
-            except Exception as e:             # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 print(f"[watcher] on_reset hook skipped: {e}", flush=True)
 
     def on_step_end(self, t: int, bundle: Mapping[str, JsonValue]) -> None:
@@ -1064,10 +1119,13 @@ class Bridge:
 
     def on_run_end(self) -> dict[str, JsonValue]:
         """Sink hook: final summary + :meth:`close` (idempotent)."""
-        summary = {"run_id": self.run_id, "shm": self.shm_name,
-                   "frames_published": self._frame_count,
-                   "frames_dropped": self._frames_dropped,
-                   "commands_served": self._n_served}
+        summary = {
+            "run_id": self.run_id,
+            "shm": self.shm_name,
+            "frames_published": self._frame_count,
+            "frames_dropped": self._frames_dropped,
+            "commands_served": self._n_served,
+        }
         self.close()
         return summary
 
@@ -1101,19 +1159,17 @@ class Bridge:
             metrics["render_source"] = state["render_source"]
         # ALWAYS carried (null = no capture face): the webui auto-disable
         # signal must distinguish "isaaclab" from "field absent"
-        metrics["capture_backend"] = getattr(self.camera_manager,
-                                             "capture_backend", None)
+        metrics["capture_backend"] = getattr(self.camera_manager, "capture_backend", None)
         self._last_metrics = metrics
         self._write_status_locked(step=int(t), metrics=metrics)
         # tick-level metrics cost = timing scalars only (µs)
-        self._metrics.note_tick(int(t), bundle.get("env")
-                                if isinstance(bundle, dict) else None)
-        self._bundle = bundle              # inspector view of this step
-        if self._gate.arrive():            # paused + budget exhausted -> park
+        self._metrics.note_tick(int(t), bundle.get("env") if isinstance(bundle, dict) else None)
+        self._bundle = bundle  # inspector view of this step
+        if self._gate.arrive():  # paused + budget exhausted -> park
             self._gate_park()
         self._tick_count += 1
-        if self._publish_due():            # unconditional, interval-
-            self._copy_broadcast_frame()   # paced (no viewer gate anywhere)
+        if self._publish_due():  # unconditional, interval-
+            self._copy_broadcast_frame()  # paced (no viewer gate anywhere)
         self._serve_commands()
         if self._rewind_next_tick is not None:
             # a rewind was applied while serving this boundary (running
@@ -1169,12 +1225,11 @@ class Bridge:
         _u64(buf, H_HB_SEQ, _u64(buf, H_HB_SEQ) + 1)
         _f64(buf, H_HB_TS, time.time())
 
-    def _write_status_locked(self, step: int,
-                             metrics: Mapping[str, JsonValue]) -> None:
-        self._last_step = int(step)   # frame header step source
+    def _write_status_locked(self, step: int, metrics: Mapping[str, JsonValue]) -> None:
+        self._last_step = int(step)  # frame header step source
         buf = self.buf
         seq = _u64(buf, STATUS_OFF + S_SEQ)
-        _u64(buf, STATUS_OFF + S_SEQ, seq + 1)          # odd = writing
+        _u64(buf, STATUS_OFF + S_SEQ, seq + 1)  # odd = writing
         try:
             raw = json.dumps(metrics).encode()
         except (TypeError, ValueError):
@@ -1186,14 +1241,16 @@ class Bridge:
         _put_bytes(buf, STATUS_OFF + S_JSON, raw, STATUS_JSON)
         _f64(buf, STATUS_OFF + S_TS, time.time())
         _u64(buf, STATUS_OFF + S_CK, _payload_ck(raw))
-        _u64(buf, STATUS_OFF + S_SEQ, seq + 2)          # even = stable
+        _u64(buf, STATUS_OFF + S_SEQ, seq + 2)  # even = stable
 
     # -- frame slots ---------------------------------------------------------
-    def _write_frame(self, arr: NDArray[Any] | bytes | bytearray,
-                     camera: str, fmt: int = FMT_RAW) -> int | None:
+    def _write_frame(
+        self, arr: NDArray[Any] | bytes | bytearray, camera: str, fmt: int = FMT_RAW
+    ) -> int | None:
         """Copy one frame into the next double-buffer slot; publish id."""
         import numpy as np
-        if isinstance(arr, (bytes, bytearray)):     # opaque payload (jpeg)
+
+        if isinstance(arr, (bytes, bytearray)):  # opaque payload (jpeg)
             a = np.frombuffer(bytes(arr), dtype=np.uint8)
             code = DTYPE_UINT8
         else:
@@ -1212,10 +1269,13 @@ class Bridge:
             self._frames_dropped += 1
             if not self._oversize_warned:
                 self._oversize_warned = True
-                print(f"[bridge] frame of camera '{camera}' is {n}B > slot "
-                      f"capacity {self.frame_capacity}B -> dropped "
-                      f"(counted; raise --serve_frame_mb or shrink the "
-                      f"camera resolution)", flush=True)
+                print(
+                    f"[bridge] frame of camera '{camera}' is {n}B > slot "
+                    f"capacity {self.frame_capacity}B -> dropped "
+                    f"(counted; raise --serve_frame_mb or shrink the "
+                    f"camera resolution)",
+                    flush=True,
+                )
             return None
         if len(a.shape) > MAX_DIMS:
             raise BridgeError(f"frame rank {len(a.shape)} > {MAX_DIMS}")
@@ -1223,25 +1283,23 @@ class Bridge:
         slot = self._frame_count & 1
         base = _slot_base(buf, slot)
         seq = _u64(buf, base)
-        _u64(buf, base, seq + 1)                        # slot seq odd
-        name = camera.encode()[:CAMERA_NAME_LEN - 1]
+        _u64(buf, base, seq + 1)  # slot seq odd
+        name = camera.encode()[: CAMERA_NAME_LEN - 1]
         struct.pack_into("<Q", buf, base + L_FID, self._frame_count + 1)
         # NUL-fill the whole name field: a shorter name after a longer one
         # must not leak stale bytes (stream_bind-era camera
         # switching exposed this latent bug: "chase"->"ego" read
         # back as "egose")
-        buf[base + L_NAME:base + L_NAME + CAMERA_NAME_LEN] = \
-            name.ljust(CAMERA_NAME_LEN, b"\x00")
+        buf[base + L_NAME : base + L_NAME + CAMERA_NAME_LEN] = name.ljust(CAMERA_NAME_LEN, b"\x00")
         struct.pack_into("<II", buf, base + L_NDIM, len(a.shape), code)
         shape = list(a.shape) + [0] * (MAX_DIMS - len(a.shape))
         struct.pack_into(f"<{MAX_DIMS}Q", buf, base + L_SHAPE, *shape)
         struct.pack_into("<QI", buf, base + L_LEN, n, fmt)
         # publish-time telemetry, same tick as the status block
         # (step) + monotonic write stamp (ts) -- inside the seqlock window
-        struct.pack_into("<QQ", buf, base + L_STEP, self._last_step,
-                         time.monotonic_ns())
-        buf[base + L_DATA:base + L_DATA + n] = a.data.cast("B")
-        _u64(buf, base, seq + 2)                        # slot seq even
+        struct.pack_into("<QQ", buf, base + L_STEP, self._last_step, time.monotonic_ns())
+        buf[base + L_DATA : base + L_DATA + n] = a.data.cast("B")
+        _u64(buf, base, seq + 2)  # slot seq even
         # publish LAST (aligned u64 store): (frame_id << 8) | slot
         _u64(buf, H_FPTR, ((self._frame_count + 1) << 8) | slot)
         self._frame_count += 1
@@ -1284,7 +1342,7 @@ class Bridge:
             try:
                 fps: Any = fn(self.camera)
                 return float(fps) if fps else None
-            except Exception:              # noqa: BLE001 (status face)
+            except Exception:  # noqa: BLE001 (status face)
                 return None
         for s in self._specs():
             if s.name == self.camera:
@@ -1327,14 +1385,13 @@ class Bridge:
         """
         return self._render_state_named(self.camera)
 
-    def _render_state_named(self, name: str | None) \
-            -> dict[str, JsonValue] | None:
+    def _render_state_named(self, name: str | None) -> dict[str, JsonValue] | None:
         getter = getattr(self.camera_manager, "render_state", None)
         if getter is None or not name:
             return None
         try:
             return getter(name)
-        except Exception:                     # noqa: BLE001 (status face)
+        except Exception:  # noqa: BLE001 (status face)
             return None
 
     def _refresh_status_block(self) -> None:
@@ -1351,10 +1408,9 @@ class Bridge:
                 metrics["render_source"] = state["render_source"]
             else:
                 metrics.pop("render_source", None)
-            metrics["capture_backend"] = getattr(self.camera_manager,
-                                                 "capture_backend", None)
+            metrics["capture_backend"] = getattr(self.camera_manager, "capture_backend", None)
             self._write_status_locked(step=self._last_step, metrics=metrics)
-        except Exception:                     # noqa: BLE001 (status face)
+        except Exception:  # noqa: BLE001 (status face)
             pass
 
     def _copy_broadcast_frame(self) -> None:
@@ -1376,12 +1432,13 @@ class Bridge:
             state = self._render_state()
             if state is not None:
                 doc: dict[str, Any] = self.camera_manager.capture(
-                    self.camera, None, render=state["render"])
+                    self.camera, None, render=state["render"]
+                )
                 self._write_frame(doc["rgb"], self.camera, FMT_RAW)
                 return
             frame = self.camera_manager.get_view(self.camera, None)
             self._write_frame(frame, self.camera, FMT_RAW)
-        except Exception as e:                    # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             print(f"[bridge] broadcast frame skipped: {e}", flush=True)
 
     # -- command block -------------------------------------------------------
@@ -1391,15 +1448,15 @@ class Bridge:
         if rid == 0 or rid == self._last_served:
             return
         payload = b""
-        for _ in range(2):                    # ck re-read for torn writes
+        for _ in range(2):  # ck re-read for torn writes
             cmd = _u16(buf, CMD_OFF + C_CMD)
-            raw = bytes(buf[CMD_OFF + C_JSON:CMD_OFF + C_JSON + PAYLOAD_JSON])
+            raw = bytes(buf[CMD_OFF + C_JSON : CMD_OFF + C_JSON + PAYLOAD_JSON])
             payload = raw.split(b"\x00", 1)[0]
             if _payload_ck(payload) == _u64(buf, CMD_OFF + C_CK):
                 break
             time.sleep(0.001)
         else:
-            return                            # still torn; retry next tick
+            return  # still torn; retry next tick
         # claim BEFORE dispatch: the pause freeze loop serves commands
         # re-entrantly, so the in-flight command must never re-fire
         self._last_served = rid
@@ -1408,8 +1465,7 @@ class Bridge:
     def _dispatch(self, rid: int, cmd: int, payload: bytes) -> None:
         status, result = ACK_OK, AckResult()
         try:
-            params: dict[str, JsonValue] = (
-                json.loads(payload) if payload else {})
+            params: dict[str, JsonValue] = json.loads(payload) if payload else {}
             handler = self._handlers.get(cmd)
             if handler is not None:
                 result = handler(rid, params)
@@ -1417,7 +1473,7 @@ class Bridge:
                 was = self.buf[H_PAUSED]
                 self.buf[H_PAUSED] = 1
                 self.buf[H_PHASE] = PHASE_PAUSED
-                self._gate.pause()         # pause wins over a step budget
+                self._gate.pause()  # pause wins over a step budget
                 result = {"paused": True, "was_paused": bool(was)}
             elif cmd == CMD_RESUME:
                 self._gate.resume()
@@ -1431,8 +1487,8 @@ class Bridge:
                 if name is None:
                     raise BridgeError("no camera selected for set_props")
                 self.camera_manager.apply_properties(
-                    name, _as_mapping(params.get("params")),
-                    _as_int(params.get("env_id")))
+                    name, _as_mapping(params.get("params")), _as_int(params.get("env_id"))
+                )
                 result = {"applied": True, "camera": name}
                 # the ack echoes the resulting live render state
                 # (the applied source label; the full spec rides when
@@ -1468,44 +1524,44 @@ class Bridge:
                 # stream_bind (L2): rebind the publishing producer
                 name = _as_str(params.get("camera"))
                 if name is None or name not in self.camera_names:
-                    raise BridgeError(f"unknown camera {name!r} "
-                                      f"(cameras: {self.camera_names})")
+                    raise BridgeError(f"unknown camera {name!r} " f"(cameras: {self.camera_names})")
                 was = self.camera
                 self.camera = name
-                self._copy_broadcast_frame()       # publish a first frame
+                self._copy_broadcast_frame()  # publish a first frame
                 result = {"camera": name, "was": was}
             elif cmd == CMD_METRICS:
                 # typed query: document + live status counters
                 result = self._metrics.metrics_document(
-                    self.run_id, int(_u64(self.buf,
-                                          STATUS_OFF + S_STEP)),
-                    self._episodes)
+                    self.run_id, int(_u64(self.buf, STATUS_OFF + S_STEP)), self._episodes
+                )
             elif cmd == CMD_CONFIG:
                 # typed query: effective config (startup snapshot)
                 result = {"config": self._config_doc}
             elif cmd == CMD_REPORT:
                 # typed query: benchmark draft (None w/o benchmark)
                 src = self._metrics_source
-                result = {"report": src.metrics_report()
-                          if src is not None else None}
+                result = {"report": src.metrics_report() if src is not None else None}
             else:
                 if cmd in _CONSOLE_CMDS:
                     raise BridgeError(
                         "console not attached to this bridge "
-                        "(the run process wires unigym.console at start)")
+                        "(the run process wires unigym.console at start)"
+                    )
                 if cmd == CMD_SCENE:
                     raise BridgeError(
                         "scene face not mounted on this run (a scene-enabled "
-                        "required; older builds answer no typed scene query)")
+                        "required; older builds answer no typed scene query)"
+                    )
                 if cmd in _REWIND_CMDS:
                     raise BridgeError(
                         "rewind face not mounted on this run (the run "
                         "process wires unigym.runtime.rewind at start; "
                         "needs a snapshot-capable backend + rewindable "
-                        "adapter)")
+                        "adapter)"
+                    )
                 status = ACK_ERR
                 result = {"error": f"unknown command id {cmd}"}
-        except Exception as e:                # noqa: BLE001 -> ack, not crash
+        except Exception as e:  # noqa: BLE001 -> ack, not crash
             # handlers may attach a next-action hint (director_contract
             # §6 error face: {error, hint}).  The ack
             # is the error transport -- prefix the type so a handler bug
@@ -1545,15 +1601,17 @@ class Bridge:
         env = self.console.env if self.console is not None else None
 
         def service():
-            self._bump_heartbeat()     # parked != dead: the loop iterates
-            if self._pump_due():       # the frozen render pump
+            self._bump_heartbeat()  # parked != dead: the loop iterates
+            if self._pump_due():  # the frozen render pump
                 self._copy_broadcast_frame()
             self._serve_commands()
 
-        self._gate.wait(env, service,
-                        stop_fn=lambda: self._closed
-                        or self.shutdown_requested,
-                        poll_interval=self.poll_interval)
+        self._gate.wait(
+            env,
+            service,
+            stop_fn=lambda: self._closed or self.shutdown_requested,
+            poll_interval=self.poll_interval,
+        )
 
     def _cmd_get_view(self, params: dict[str, JsonValue]) -> AckResult:
         if self.camera_manager is None:
@@ -1561,11 +1619,9 @@ class Bridge:
         pos, lookat = params.get("pos"), params.get("lookat")
         posed = pos is not None or lookat is not None
         # ux-7: a posed snapshot defaults to the debug fly camera "free"
-        name = _as_str(params.get("camera")) or \
-            ("free" if posed else self.camera)
+        name = _as_str(params.get("camera")) or ("free" if posed else self.camera)
         if name is None:
-            raise BridgeError(
-                "no broadcast camera in this run; pass an explicit camera")
+            raise BridgeError("no broadcast camera in this run; pass an explicit camera")
         if "flags" in params:
             # The flags key is GONE at the bridge
             # layer (no deprecation window; the CLI's --flags is the
@@ -1576,8 +1632,12 @@ class Bridge:
                 "'flags' was removed in v054 (RenderSpec face): send "
                 "render={'view': name} or a RenderSpec dict -- got "
                 f"flags={params['flags']!r}"
-                + (" TOGETHER with render= (the two keys are mutually "
-                   "exclusive)" if "render" in params else ""))
+                + (
+                    " TOGETHER with render= (the two keys are mutually " "exclusive)"
+                    if "render" in params
+                    else ""
+                )
+            )
         if "render" in params:
             # RenderSpec capture face (camera_contract §14): the spec is
             # resolved by the manager (view registry + aspect-merge
@@ -1589,54 +1649,64 @@ class Bridge:
             # reader); the legend JSON + effective_render/render_source
             # ride this ack.
             doc: dict[str, Any] = self.camera_manager.capture(
-                name, _as_int(params.get("env_id")),
-                pos=pos, lookat=lookat, render=params["render"])
-            result = {"frame_id": self._write_frame(doc["rgb"], name,
-                                                    FMT_RAW),
-                      "camera": name, "format": FMT_RAW,
-                      "effective_render": doc["effective_render"],
-                      "render_source": doc["render_source"]}
+                name, _as_int(params.get("env_id")), pos=pos, lookat=lookat, render=params["render"]
+            )
+            result = {
+                "frame_id": self._write_frame(doc["rgb"], name, FMT_RAW),
+                "camera": name,
+                "format": FMT_RAW,
+                "effective_render": doc["effective_render"],
+                "render_source": doc["render_source"],
+            }
             if "gif" in doc:
                 gif_path = self._write_capture_artifact(
-                    name, result["frame_id"], ".gif", doc["gif"])
+                    name, result["frame_id"], ".gif", doc["gif"]
+                )
                 if gif_path is not None:
                     result["gif_path"] = gif_path
                 else:
-                    result["gif_error"] = (
-                        "gif not written (no out_dir on this bridge)")
+                    result["gif_error"] = "gif not written (no out_dir on this bridge)"
             if doc.get("frames"):
-                paths = {label: p for label, p in
-                         self._write_capture_artifacts(
-                             name, result["frame_id"], doc["frames"],
-                             ".png").items() if p is not None}
+                paths = {
+                    label: p
+                    for label, p in self._write_capture_artifacts(
+                        name, result["frame_id"], doc["frames"], ".png"
+                    ).items()
+                    if p is not None
+                }
                 if paths:
                     result["frame_paths"] = paths
             if "seg" in doc:
                 seg_path = self._write_capture_artifact(
-                    name, result["frame_id"], "_seg.png", doc["seg"])
+                    name, result["frame_id"], "_seg.png", doc["seg"]
+                )
                 if seg_path is not None:
                     result["seg_path"] = seg_path
                 else:
-                    result["seg_error"] = (
-                        "seg not written (no out_dir on this bridge)")
+                    result["seg_error"] = "seg not written (no out_dir on this bridge)"
             if "legend" in doc:
                 result["legend"] = doc["legend"]
         else:
             if posed:
                 frame = self.camera_manager.get_view(
-                    name, _as_int(params.get("env_id")),
-                    pos=pos, lookat=lookat)
+                    name, _as_int(params.get("env_id")), pos=pos, lookat=lookat
+                )
             else:
-                frame = self.camera_manager.get_view(
-                    name, _as_int(params.get("env_id")))
+                frame = self.camera_manager.get_view(name, _as_int(params.get("env_id")))
             if params.get("jpeg"):
                 jpg = _encode_jpeg(frame)
-                result = {"frame_id": self._write_frame(jpg, name, FMT_JPEG),
-                          "camera": name, "format": FMT_JPEG,
-                          "bytes": len(jpg)}
+                result = {
+                    "frame_id": self._write_frame(jpg, name, FMT_JPEG),
+                    "camera": name,
+                    "format": FMT_JPEG,
+                    "bytes": len(jpg),
+                }
             else:
-                result = {"frame_id": self._write_frame(frame, name, FMT_RAW),
-                          "camera": name, "format": FMT_RAW}
+                result = {
+                    "frame_id": self._write_frame(frame, name, FMT_RAW),
+                    "camera": name,
+                    "format": FMT_RAW,
+                }
         intr = self._camera_intrinsics(name)
         if intr is not None:
             result["intrinsics"] = intr
@@ -1649,13 +1719,14 @@ class Bridge:
         """
         for s in self._specs():
             if s.name == name:
-                w, h, f = (getattr(s, "width", None),
-                           getattr(s, "height", None),
-                           getattr(s, "hfov_deg", None))
+                w, h, f = (
+                    getattr(s, "width", None),
+                    getattr(s, "height", None),
+                    getattr(s, "hfov_deg", None),
+                )
                 if w is None or h is None or f is None:
                     return None
-                return {"width": int(w), "height": int(h),
-                        "hfov_deg": float(f)}
+                return {"width": int(w), "height": int(h), "hfov_deg": float(f)}
         return None
 
     def _capture_dir(self) -> str | None:
@@ -1666,9 +1737,9 @@ class Bridge:
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _write_capture_artifact(self, name: str, fid: int, suffix: str,
-                                payload: NDArray[Any] | bytes
-                                | bytearray) -> str | None:
+    def _write_capture_artifact(
+        self, name: str, fid: int, suffix: str, payload: NDArray[Any] | bytes | bytearray
+    ) -> str | None:
         """One run-side artifact under ``<out_dir>/capture/``.
 
         ``payload``: GIF/PNG bytes, or an array (2-D int id buffer is
@@ -1681,8 +1752,7 @@ class Bridge:
             return None
         import numpy as np
 
-        path = os.path.join(
-            d, f"{time.strftime('%Y%m%d_%H%M%S')}_{name}_{fid}{suffix}")
+        path = os.path.join(d, f"{time.strftime('%Y%m%d_%H%M%S')}_{name}_{fid}{suffix}")
         if isinstance(payload, (bytes, bytearray)):
             with open(path, "wb") as f:
                 f.write(payload)
@@ -1692,18 +1762,18 @@ class Bridge:
         except ImportError as exc:
             from unigym._optional import MissingExtraError
 
-            raise MissingExtraError(
-                "PIL.Image", "record", "image capture") from exc
+            raise MissingExtraError("PIL.Image", "record", "image capture") from exc
         arr = np.asarray(payload)
-        if arr.ndim == 2:                     # (H, W) int id buffer safety
+        if arr.ndim == 2:  # (H, W) int id buffer safety
             from unigym.cameras.geomflags import colorize_seg
+
             arr = colorize_seg(arr)
         Image.fromarray(np.ascontiguousarray(arr)).save(path)
         return path
 
-    def _write_capture_artifacts(self, name: str, fid: int,
-                                 frames: Mapping[str, NDArray[Any] | bytes],
-                                 suffix: str) -> dict[str, str | None]:
+    def _write_capture_artifacts(
+        self, name: str, fid: int, frames: Mapping[str, NDArray[Any] | bytes], suffix: str
+    ) -> dict[str, str | None]:
         """Named stills -> ``<ts>_<name>_<fid>_<label>.png`` files.
 
         Labels are sanitized to filename-safe characters; a failed write
@@ -1712,13 +1782,13 @@ class Bridge:
         out: dict[str, str | None] = {}
         for label, frame in frames.items():
             safe = "".join(c if c.isalnum() else "_" for c in str(label))
-            out[str(label)] = self._write_capture_artifact(
-                name, fid, f"_{safe}{suffix}", frame)
+            out[str(label)] = self._write_capture_artifact(name, fid, f"_{safe}{suffix}", frame)
         return out
 
     @staticmethod
     def _decode_frame(frame: Mapping[str, Any]) -> NDArray[Any]:
         import numpy as np
+
         dt = np.uint8 if frame["dtype"] == DTYPE_UINT8 else np.float32
         return np.frombuffer(frame["data"], dtype=dt).reshape(frame["shape"])
 
@@ -1736,8 +1806,9 @@ class Bridge:
         """
         cmd_id = CMD_IDS.get(name) if isinstance(name, str) else int(name)
         if cmd_id is None:
-            raise BridgeError(f"unknown command name {name!r} "
-                              f"(known: {sorted(CMD_NAMES.values())})")
+            raise BridgeError(
+                f"unknown command name {name!r} " f"(known: {sorted(CMD_NAMES.values())})"
+            )
         self._handlers[cmd_id] = fn
 
     def _install_console(self, console: ConsoleFace) -> None:
@@ -1754,30 +1825,33 @@ class Bridge:
         except (TypeError, ValueError):
             raw = json.dumps({"error": "unserializable result"}).encode()
         if len(raw) > PAYLOAD_JSON:
-            raw = json.dumps({"error": "result too large"}).encode()[
-                :PAYLOAD_JSON - 1]
+            raw = json.dumps({"error": "result too large"}).encode()[: PAYLOAD_JSON - 1]
         _u16(buf, ACK_OFF + A_STATUS, status)
         _put_bytes(buf, ACK_OFF + A_JSON, raw, PAYLOAD_JSON)
         _u64(buf, ACK_OFF + A_CK, _payload_ck(raw))
-        _u64(buf, ACK_OFF + A_REQ, rid)               # publish LAST
+        _u64(buf, ACK_OFF + A_REQ, rid)  # publish LAST
 
     # -- status / teardown ----------------------------------------------------
     def read_status(self) -> StatusDoc:
         """Owner-side status view (SHM status + bridge-private fields)."""
         buf = self.buf
         st = _read_status_block(buf)
-        st.update({"run_id": self.run_id, "shm": self.shm_name,
-                   "phase": PHASE_NAMES.get(buf[H_PHASE], "?"),
-                   "paused": bool(buf[H_PAUSED]),
-                   "gate": self._gate.state,
-                   "camera": self.camera,
-                   "cameras": list[JsonValue](self.camera_names),
-                   "obs_catalog_keys": list[JsonValue](
-                       self.obs_catalog_keys),
-                   "pid": os.getpid(),
-                   "frame_id": _u64(buf, H_FPTR) >> 8,
-                   "frames_dropped": self._frames_dropped,
-                   "rewinds": len(self.rewind_log)})
+        st.update(
+            {
+                "run_id": self.run_id,
+                "shm": self.shm_name,
+                "phase": PHASE_NAMES.get(buf[H_PHASE], "?"),
+                "paused": bool(buf[H_PAUSED]),
+                "gate": self._gate.state,
+                "camera": self.camera,
+                "cameras": list[JsonValue](self.camera_names),
+                "obs_catalog_keys": list[JsonValue](self.obs_catalog_keys),
+                "pid": os.getpid(),
+                "frame_id": _u64(buf, H_FPTR) >> 8,
+                "frames_dropped": self._frames_dropped,
+                "rewinds": len(self.rewind_log),
+            }
+        )
         # the owner-side status carries the live render state
         # (the applied source label; null = plain path) + the capture
         # backend face (the webui auto-disable signal) directly; the
@@ -1785,15 +1859,14 @@ class Bridge:
         state = self._render_state()
         if state is not None:
             st["render_source"] = state["render_source"]
-        st["capture_backend"] = getattr(self.camera_manager,
-                                        "capture_backend", None)
+        st["capture_backend"] = getattr(self.camera_manager, "capture_backend", None)
         # the full watcher status face rides only the owner-side view;
         # cross-process readers get the per-tick status_brief via the
         # status JSON block (metrics["watchers"])
         if self._watchers is not None:
             try:
                 st["watchers"] = self._watchers.status()
-            except Exception:                  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 st["watchers"] = None
         return st
 
@@ -1833,10 +1906,9 @@ class ShmClient:
         self.run_id = run_id
         self.shm_name = name or (SHM_PREFIX + run_id)
         self._buf: mmap.mmap | None = _attach_segment(self.shm_name)
-        if bytes(self.buf[H_MAGIC:H_MAGIC + 4]) != MAGIC:
+        if bytes(self.buf[H_MAGIC : H_MAGIC + 4]) != MAGIC:
             self.close()
-            raise BridgeError(f"{self.shm_name}: bad magic "
-                              "(not a unigym bridge segment)")
+            raise BridgeError(f"{self.shm_name}: bad magic " "(not a unigym bridge segment)")
         ver = _u16(self.buf, H_VERSION)
         if ver != VERSION:
             self.close()
@@ -1845,10 +1917,11 @@ class ShmClient:
                 # up as an UNKNOWN row, visible / killable / deletable
                 raise BridgeError(
                     f"{self.shm_name}: legacy segment layout (no heartbeat; "
-                    f"respawn the run process)")
+                    f"respawn the run process)"
+                )
             raise BridgeError(
-                f"{self.shm_name}: segment version {ver} > supported "
-                f"{VERSION} (upgrade unigym)")
+                f"{self.shm_name}: segment version {ver} > supported " f"{VERSION} (upgrade unigym)"
+            )
 
     @property
     def buf(self) -> mmap.mmap:
@@ -1891,8 +1964,7 @@ class ShmClient:
         self.close()
 
     # -- status / frames -------------------------------------------------------
-    def read_status(self, camera_fallback: str | None = None) \
-            -> StatusDoc:
+    def read_status(self, camera_fallback: str | None = None) -> StatusDoc:
         """Tear-free SHM status + header identity counters (any process).
 
         ``camera_fallback`` names what the caller already knows from the
@@ -1904,13 +1976,20 @@ class ShmClient:
         buf = self.buf
         st = _read_status_block(buf)
         fptr = _u64(buf, H_FPTR)
-        st.update({"run_id": self.run_id, "shm": self.shm_name,
-                   "phase": self.phase, "paused": self.paused,
-                   "camera": self._camera_name(camera_fallback),
-                   "pid": _u64(buf, H_PID), "frame_id": fptr >> 8,
-                   "started": _f64(buf, H_STARTED),
-                   "hb_seq": _u64(buf, H_HB_SEQ),
-                   "hb_ts": _f64(buf, H_HB_TS)})
+        st.update(
+            {
+                "run_id": self.run_id,
+                "shm": self.shm_name,
+                "phase": self.phase,
+                "paused": self.paused,
+                "camera": self._camera_name(camera_fallback),
+                "pid": _u64(buf, H_PID),
+                "frame_id": fptr >> 8,
+                "started": _f64(buf, H_STARTED),
+                "hb_seq": _u64(buf, H_HB_SEQ),
+                "hb_ts": _f64(buf, H_HB_TS),
+            }
+        )
         return st
 
     @property
@@ -1936,8 +2015,9 @@ class ShmClient:
             pass
         return ""
 
-    def read_frame(self, want_fid: int | None = None,
-                   timeout: float = 5.0) -> dict[str, Any] | None:
+    def read_frame(
+        self, want_fid: int | None = None, timeout: float = 5.0
+    ) -> dict[str, Any] | None:
         """Latest frame snapshot; with want_fid, wait until published.
 
         None on timeout.
@@ -1945,29 +2025,29 @@ class ShmClient:
         deadline = time.time() + timeout
         while True:
             frame = _read_latest_frame(self.buf, retries=20)
-            if frame is not None and (want_fid is None
-                                      or frame["frame_id"] >= want_fid):
+            if frame is not None and (want_fid is None or frame["frame_id"] >= want_fid):
                 return frame
             if time.time() > deadline:
                 return None
             time.sleep(0.02)
 
     # -- commands ------------------------------------------------------------
-    def send(self, cmd: str | int,
-             payload: dict[str, JsonValue] | None = None,
-             timeout: float = 10.0) -> tuple[int, dict[str, Any]]:
+    def send(
+        self, cmd: str | int, payload: dict[str, JsonValue] | None = None, timeout: float = 10.0
+    ) -> tuple[int, dict[str, Any]]:
         """Write a command, poll the ack.  Returns (status, result)."""
         cmd_id = CMD_IDS[cmd] if isinstance(cmd, str) else int(cmd)
         if self.phase == PHASE_DONE:
             raise BridgeError(
                 f"run {self.run_id} is DONE — nothing left to serve "
-                f"'{CMD_NAMES.get(cmd_id, cmd_id)}'")
+                f"'{CMD_NAMES.get(cmd_id, cmd_id)}'"
+            )
         rid = _write_command(self.buf, cmd_id, payload or {})
-        got = _poll_ack(self.buf, rid, time.time() + timeout,
-                        lambda: self.buf[H_PHASE])
+        got = _poll_ack(self.buf, rid, time.time() + timeout, lambda: self.buf[H_PHASE])
         if got is None:
             raise BridgeTimeout(
                 f"no ack within {timeout}s for "
                 f"'{CMD_NAMES.get(cmd_id, cmd_id)}' (req_id {rid}); is the run "
-                f"alive and stepping? (phase={self.phase})")
+                f"alive and stepping? (phase={self.phase})"
+            )
         return got

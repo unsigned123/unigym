@@ -15,6 +15,7 @@ the ``(sx, sy)`` metric extent of the rectangle and ``resolution`` the
 NumPy is the only dependency.  ``flat`` returns ``None``: "no terrain" is
 the absence of the neutral member, not a zero field.
 """
+
 from __future__ import annotations
 
 import math
@@ -52,25 +53,20 @@ def _finite(value: object, what: str) -> float:
 
 
 def _pair(
-    values: Sequence[object], what: str, *, positive: bool,
+    values: Sequence[object],
+    what: str,
+    *,
+    positive: bool,
 ) -> tuple[float, float]:
     """Validate a finite 2-vector (optionally strictly positive)."""
     if not isinstance(values, (list, tuple)):
-        raise ValueError(
-            f"terrain: {what} must be a 2-vector of finite numbers, got {values!r}"
-        )
+        raise ValueError(f"terrain: {what} must be a 2-vector of finite numbers, got {values!r}")
     if len(values) != 2 or any(
-        isinstance(v, bool)
-        or not isinstance(v, (int, float))
-        or not math.isfinite(v)
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
         for v in values
     ):
-        raise ValueError(
-            f"terrain: {what} must be a 2-vector of finite numbers, got {values!r}"
-        )
-    nums = tuple(
-        float(v) for v in values if isinstance(v, (int, float))
-    )
+        raise ValueError(f"terrain: {what} must be a 2-vector of finite numbers, got {values!r}")
+    nums = tuple(float(v) for v in values if isinstance(v, (int, float)))
     pair = (nums[0], nums[1])
     if positive and (pair[0] <= 0 or pair[1] <= 0):
         raise ValueError(f"terrain: {what} components must be > 0, got {values!r}")
@@ -81,24 +77,23 @@ def _resolution(values: Sequence[object]) -> tuple[int, int]:
     """Validate an integer ``(nx, ny)`` resolution with both axes >= 2."""
     if not isinstance(values, (list, tuple)):
         raise ValueError(
-            f"terrain: resolution must be a 2-vector of integers >= 2, "
-            f"got {values!r}"
+            f"terrain: resolution must be a 2-vector of integers >= 2, " f"got {values!r}"
         )
     if len(values) != 2 or any(
         isinstance(v, bool) or not isinstance(v, int) or v < 2 for v in values
     ):
         raise ValueError(
-            f"terrain: resolution must be a 2-vector of integers >= 2, "
-            f"got {values!r}"
+            f"terrain: resolution must be a 2-vector of integers >= 2, " f"got {values!r}"
         )
-    nums = tuple(
-        int(v) for v in values if isinstance(v, int) and not isinstance(v, bool)
-    )
+    nums = tuple(int(v) for v in values if isinstance(v, int) and not isinstance(v, bool))
     return (nums[0], nums[1])
 
 
 def _grid(
-    nx: int, ny: int, sx: float, sy: float,
+    nx: int,
+    ny: int,
+    sx: float,
+    sy: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Cell-centre coordinates of an ``(ny, nx)`` grid over the rectangle."""
     xs = (np.arange(nx, dtype=np.float64) + 0.5) * (sx / nx) - sx / 2.0
@@ -113,25 +108,20 @@ class Terrain:
     kind: str = _TERRAIN_KIND
     size: tuple[float, float] = (0.0, 0.0)
     resolution: tuple[int, int] = (2, 2)
-    heights: np.ndarray = field(
-        default_factory=lambda: np.zeros((2, 2), dtype=np.float32)
-    )
+    heights: np.ndarray = field(default_factory=lambda: np.zeros((2, 2), dtype=np.float32))
     base_z: float = 0.0
     meta: Mapping[str, JsonValue] = field(default_factory=_empty_meta)
 
     def __post_init__(self):
         """Validate the kind, extent, resolution, height map and metadata."""
         if self.kind != _TERRAIN_KIND:
-            raise ValueError(
-                f"terrain: kind {self.kind!r} must be {_TERRAIN_KIND!r}"
-            )
+            raise ValueError(f"terrain: kind {self.kind!r} must be {_TERRAIN_KIND!r}")
         object.__setattr__(self, "size", _pair(self.size, "size", positive=True))
         object.__setattr__(self, "resolution", _resolution(self.resolution))
         heights = np.array(self.heights, dtype=np.float32, copy=True)
         if heights.ndim != 2:
             raise ValueError(
-                f"terrain: heights must be a (ny, nx) array, got shape "
-                f"{heights.shape}"
+                f"terrain: heights must be a (ny, nx) array, got shape " f"{heights.shape}"
             )
         nx, ny = self.resolution
         if heights.shape != (ny, nx):
@@ -147,10 +137,7 @@ class Terrain:
             raise ValueError(f"terrain: base_z must be >= 0, got {base_z!r}")
         object.__setattr__(self, "base_z", base_z)
         if not isinstance(self.meta, Mapping):
-            raise ValueError(
-                f"terrain: meta must be a mapping, got "
-                f"{type(self.meta).__name__}"
-            )
+            raise ValueError(f"terrain: meta must be a mapping, got " f"{type(self.meta).__name__}")
         meta = dict(self.meta)
         raw_name = meta.get("name", "terrain")
         if not isinstance(raw_name, str):
@@ -220,8 +207,7 @@ class Terrain:
         array = np.asarray(heights, dtype=np.float32)
         if array.ndim != 2:
             raise ValueError(
-                f"terrain: heights must be a (ny, nx) array, got shape "
-                f"{array.shape}"
+                f"terrain: heights must be a (ny, nx) array, got shape " f"{array.shape}"
             )
         ny, nx = array.shape
         if size is None:
@@ -256,20 +242,17 @@ class Terrain:
         so a drop test has a landing on both sides.  Heights start at 0.
         """
         if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
-            raise ValueError(f"terrain stairs: steps must be an int >= 1, "
-                             f"got {steps!r}")
+            raise ValueError(f"terrain stairs: steps must be an int >= 1, " f"got {steps!r}")
         rise = _finite(rise, "stairs rise")
         run = _finite(run, "stairs run")
         width = _finite(width, "stairs width")
         if rise <= 0 or run <= 0 or width <= 0:
             raise ValueError(
-                f"terrain stairs: rise/run/width must be > 0, got "
-                f"({rise}, {run}, {width})"
+                f"terrain stairs: rise/run/width must be > 0, got " f"({rise}, {run}, {width})"
             )
         margin = run if margin is None else _finite(margin, "stairs margin")
         if margin < 0:
-            raise ValueError(f"terrain stairs: margin must be >= 0, got "
-                             f"{margin!r}")
+            raise ValueError(f"terrain stairs: margin must be >= 0, got " f"{margin!r}")
         sx = steps * run + 2.0 * margin
         sy = width
         nx, ny = resolution or (max(2, steps * 4 + 8), 8)
@@ -278,11 +261,19 @@ class Terrain:
         levels = np.clip(band, 0.0, float(steps)) * rise
         heights = np.repeat(levels[None, :], ny, axis=0)
         extra: dict[str, JsonValue] = dict(meta) if meta is not None else {}
-        extra.update({"seed": None, "kind": "stairs", "steps": steps,
-                      "rise": rise, "run": run, "width": width,
-                      "margin": margin, "name": name})
-        return cls.heightmap(heights, size=(sx, sy), base_z=base_z,
-                             name=name, meta=extra)
+        extra.update(
+            {
+                "seed": None,
+                "kind": "stairs",
+                "steps": steps,
+                "rise": rise,
+                "run": run,
+                "width": width,
+                "margin": margin,
+                "name": name,
+            }
+        )
+        return cls.heightmap(heights, size=(sx, sy), base_z=base_z, name=name, meta=extra)
 
     @classmethod
     def slope(
@@ -297,20 +288,14 @@ class Terrain:
         """A linear ramp along +x whose rise matches ``angle_deg``."""
         angle = _finite(angle_deg, "slope angle_deg")
         if not -90.0 < angle < 90.0:
-            raise ValueError(
-                f"terrain slope: angle_deg must be in (-90, 90), got {angle!r}"
-            )
+            raise ValueError(f"terrain slope: angle_deg must be in (-90, 90), got {angle!r}")
         sx, sy = _pair(size, "slope size", positive=True)
         nx, ny = resolution or (max(2, int(sx * 8)), max(2, int(sy * 8)))
         xs = np.linspace(-sx / 2.0, sx / 2.0, nx)
         levels = (xs + sx / 2.0) * math.tan(math.radians(angle))
         heights = np.repeat(levels[None, :], ny, axis=0)
         if not np.any(heights):
-            raise ValueError(
-                "terrain slope: angle_deg produced an all-zero height map"
-            )
+            raise ValueError("terrain slope: angle_deg produced an all-zero height map")
         extra: dict[str, JsonValue] = dict(meta) if meta is not None else {}
-        extra.update({"seed": None, "kind": "slope", "angle_deg": angle,
-                      "name": name})
-        return cls.heightmap(heights, size=(sx, sy), base_z=base_z,
-                             name=name, meta=extra)
+        extra.update({"seed": None, "kind": "slope", "angle_deg": angle, "name": name})
+        return cls.heightmap(heights, size=(sx, sy), base_z=base_z, name=name, meta=extra)

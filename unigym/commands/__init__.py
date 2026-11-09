@@ -1,4 +1,5 @@
 """Command sampler registry (torch-only, unit-testable)."""
+
 from __future__ import annotations
 
 from .base import CommandSampler
@@ -15,5 +16,6 @@ COMMAND_REGISTRY = {
 
 def build_sampler(section: dict, num_envs: int, device: str) -> CommandSampler:
     params = {k: v for k, v in section.items() if k not in ("name", "dim")}
-    return COMMAND_REGISTRY[section["name"]](dim=section["dim"], device=device,
-                                             num_envs=num_envs, **params)
+    return COMMAND_REGISTRY[section["name"]](
+        dim=section["dim"], device=device, num_envs=num_envs, **params
+    )

@@ -9,6 +9,7 @@ Regular subpackage marker: import-linter's graph builder (grimp) skips
 namespace subpackages, which would leave every module here out of the
 contract graphs (same pattern as unigym/scripts/__init__.py).
 """
+
 from unigym.initializers.base import (
     INITIALIZER_REGISTRY,
     InitializerBase,

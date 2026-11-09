@@ -24,6 +24,7 @@ mj_step1 -> actuator.step -> mj_step2 phase split.  The isaaclab
 backend rejects non-standard declarations at the capability gate with
 error+hint.
 """
+
 from __future__ import annotations
 
 from .base import (

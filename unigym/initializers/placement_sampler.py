@@ -1,4 +1,5 @@
 """Pure deterministic placement sampling over explicit rectangular geometry."""
+
 from __future__ import annotations
 
 import math
@@ -62,9 +63,12 @@ def _bounds(value, label: str) -> tuple[tuple[float, float, float], tuple[float,
         low, high = tuple(float(v) for v in low), tuple(float(v) for v in high)
     except (TypeError, ValueError) as exc:
         raise PlacementSamplingError(f"{label} must be a pair of XYZ bounds") from exc
-    if (len(low) != 3 or len(high) != 3
-            or any(not math.isfinite(v) for v in (*low, *high))
-            or any(a >= b for a, b in zip(low, high))):
+    if (
+        len(low) != 3
+        or len(high) != 3
+        or any(not math.isfinite(v) for v in (*low, *high))
+        or any(a >= b for a, b in zip(low, high))
+    ):
         raise PlacementSamplingError(f"{label} must contain finite increasing XYZ bounds")
     return low, high
 
@@ -79,32 +83,32 @@ def _rectangle(region: RegionDefinition, relation: str):
     """
     if region.kind != ("support" if relation == "on" else "interior"):
         raise PlacementSamplingError(
-            f"region {region.name!r} kind {region.kind!r} cannot satisfy {relation!r}")
+            f"region {region.name!r} kind {region.kind!r} cannot satisfy {relation!r}"
+        )
     quat = np.asarray(region.quat, dtype=float)
     norm = np.linalg.norm(quat)
     if norm < 1e-12:
-        raise PlacementSamplingError(
-            f"region {region.name!r}: quat must be non-zero")
+        raise PlacementSamplingError(f"region {region.name!r}: quat must be non-zero")
     quat = quat / norm
     if np.allclose(quat, (1.0, 0.0, 0.0, 0.0), atol=1e-9):
         yaw = 0.0
     elif abs(quat[1]) < 1e-9 and abs(quat[2]) < 1e-9:
-        yaw = math.remainder(2.0 * math.atan2(float(quat[3]),
-                                              float(quat[0])), 2.0 * math.pi)
+        yaw = math.remainder(2.0 * math.atan2(float(quat[3]), float(quat[0])), 2.0 * math.pi)
     else:
         raise PlacementSamplingError(
-            "non-yaw region frames are unsupported; provide "
-            "world-aligned or yaw-only geometry")
+            "non-yaw region frames are unsupported; provide " "world-aligned or yaw-only geometry"
+        )
     x, y, z = region.pos
-    z_limits = ((z, z + region.height_m) if relation == "in" else (z, z))
+    z_limits = (z, z + region.height_m) if relation == "in" else (z, z)
     return (x, y), region.width_m, region.depth_m, yaw, z_limits
 
 
 def _footprint(low, high, yaw: float):
     """Return yaw-rotated XY corners relative to the object's origin."""
     c, s = math.cos(yaw), math.sin(yaw)
-    return tuple((c * x - s * y, s * x + c * y)
-                 for x in (low[0], high[0]) for y in (low[1], high[1]))
+    return tuple(
+        (c * x - s * y, s * x + c * y) for x in (low[0], high[0]) for y in (low[1], high[1])
+    )
 
 
 def _yaw_envelope(low, high, lo: float, hi: float):
@@ -115,18 +119,21 @@ def _yaw_envelope(low, high, lo: float, hi: float):
     derivative zero, so include those critical angles analytically.
     """
     angles = [lo, hi]
-    for x0, y0 in ((low[0], low[1]), (low[0], high[1]),
-                   (high[0], low[1]), (high[0], high[1])):
+    for x0, y0 in ((low[0], low[1]), (low[0], high[1]), (high[0], low[1]), (high[0], high[1])):
         for base in (math.atan2(-y0, x0), math.atan2(x0, y0)):
-            for k in range(math.floor((lo - base) / math.pi) - 1,
-                           math.ceil((hi - base) / math.pi) + 2):
+            for k in range(
+                math.floor((lo - base) / math.pi) - 1, math.ceil((hi - base) / math.pi) + 2
+            ):
                 angle = base + k * math.pi
                 if lo <= angle <= hi:
                     angles.append(angle)
-    points = [point for angle in angles
-              for point in _footprint(low, high, angle)]
-    return (min(p[0] for p in points), max(p[0] for p in points),
-            min(p[1] for p in points), max(p[1] for p in points))
+    points = [point for angle in angles for point in _footprint(low, high, angle)]
+    return (
+        min(p[0] for p in points),
+        max(p[0] for p in points),
+        min(p[1] for p in points),
+        max(p[1] for p in points),
+    )
 
 
 def _draw_axis(rng, anchor, domain_lo, domain_hi):

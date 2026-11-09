@@ -18,6 +18,7 @@ the run's own spec/state).
 
 stdlib only -- importable from spawn_spec (no yaml/torch/isaaclab).
 """
+
 from __future__ import annotations
 
 import glob as _glob
@@ -87,8 +88,7 @@ def ensure_tree_safe(cfg: dict | None = None, log=print) -> Path:
     try:
         return ensure_tree(cfg)
     except OSError as e:
-        log(f"runtime tree mkdir failed ({e!r}) -- writers will "
-            f"retry per file")
+        log(f"runtime tree mkdir failed ({e!r}) -- writers will " f"retry per file")
         return runtime_root(cfg)
 
 
@@ -122,8 +122,9 @@ def serve_registry_trace(rid: str) -> bool:
     return False
 
 
-def serve_registry_paths(state_dir: str | os.PathLike | None = None,
-                         extra_dirs: list[str] | None = None) -> list[Path]:
+def serve_registry_paths(
+    state_dir: str | os.PathLike | None = None, extra_dirs: list[str] | None = None
+) -> list[Path]:
     """Serve-registry json paths across the scanned directories.
 
     Scan set (design §3): [explicit state_dir, UNIGYM_SERVE_DIR,
@@ -133,10 +134,12 @@ def serve_registry_paths(state_dir: str | os.PathLike | None = None,
     files age out naturally).  Sorted by file name; duplicates by path
     removed.
     """
-    dirs = [str(state_dir) if state_dir else None,
-            os.environ.get(SERVE_DIR_ENV),
-            str(serve_dir(cfg=None)),
-            *(str(d) for d in (extra_dirs or []))]
+    dirs = [
+        str(state_dir) if state_dir else None,
+        os.environ.get(SERVE_DIR_ENV),
+        str(serve_dir(cfg=None)),
+        *(str(d) for d in (extra_dirs or [])),
+    ]
     out: dict[str, Path] = {}
     for d in filter(None, dict.fromkeys(dirs)):
         for p in sorted(_glob.glob(str(Path(d) / SERVE_GLOB))):

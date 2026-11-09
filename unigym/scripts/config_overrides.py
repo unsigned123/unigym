@@ -8,6 +8,7 @@ string); the effective diff is printed one line per override and lands
 in meta.json (reproducibility).  With NO overrides the config object is
 returned untouched (BITWISE gate: byte-identical runs, tests/test_config_overrides.py).
 """
+
 from __future__ import annotations
 
 import json
@@ -41,8 +42,8 @@ def parse_set_args(items: list[str] | None) -> list[tuple[str, JsonValue]]:
     for item in items or []:
         if "=" not in item:
             raise ValueError(
-                f"-s/--set expects key=value, got {item!r} "
-                "(quote JSON values: -s key='[1,2]')")
+                f"-s/--set expects key=value, got {item!r} " "(quote JSON values: -s key='[1,2]')"
+            )
         key, _, raw = item.partition("=")
         key, raw = key.strip(), raw.strip()
         if not key:
@@ -78,18 +79,19 @@ def apply_overrides(
             if not isinstance(nxt, dict):
                 raise ValueError(
                     f"-s {path}: intermediate '{p}' is "
-                    f"{type(nxt).__name__}, not a mapping (typo?)")
+                    f"{type(nxt).__name__}, not a mapping (typo?)"
+                )
             node = nxt
         leaf = parts[-1]
-        diffs.append({"path": path, "old": node.get(leaf, None),
-                      "new": value})
+        diffs.append({"path": path, "old": node.get(leaf, None), "new": value})
         node[leaf] = value
     return cfg, diffs
 
 
 def diff_lines(diffs: list[dict[str, JsonValue]]) -> list[str]:
     """One line per override: `override: <path> <old> -> <new>`."""
+
     def fmt(v: JsonValue) -> str:
         return json.dumps(v) if isinstance(v, (dict, list)) else repr(v)
-    return [f"override: {d['path']} {fmt(d['old'])} -> {fmt(d['new'])}"
-            for d in diffs]
+
+    return [f"override: {d['path']} {fmt(d['old'])} -> {fmt(d['new'])}" for d in diffs]

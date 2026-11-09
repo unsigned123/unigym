@@ -6,6 +6,7 @@ error: a dynamic proxy read after ``env.close()`` must fail loudly rather
 than return a frozen value (design section 9.11).  All three also derive
 from the public :class:`unigym.errors.UniGymError` base (S1a).
 """
+
 from __future__ import annotations
 
 from unigym.errors import UniGymError

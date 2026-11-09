@@ -16,6 +16,7 @@ The factory is written in dependency-injection form (the ``classes`` argument
 admits fake implementations); the core logic is unit-testable locally without
 isaaclab.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -57,13 +58,13 @@ def build_actuator(cfg: dict, classes: dict | None = None):
         # the isaaclab dependency is imported only when a builtin type needs it
         # (the custom branch stays isaaclab-free)
         from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
+
         classes = {"implicit_pd": ImplicitActuatorCfg, "dc_motor": DCMotorCfg}
 
     if atype == "implicit_pd":
         cls = classes["implicit_pd"]
         kwargs = {"joint_names_expr": params.pop("joint_names", [".*"])}
-        for k in ("stiffness", "damping", "effort_limit", "velocity_limit",
-                  "armature", "friction"):
+        for k in ("stiffness", "damping", "effort_limit", "velocity_limit", "armature", "friction"):
             if k in params:
                 kwargs[k] = params.pop(k)
         _no_leftover(params, atype)
@@ -72,8 +73,15 @@ def build_actuator(cfg: dict, classes: dict | None = None):
     if atype == "dc_motor":
         cls = classes["dc_motor"]
         kwargs = {"joint_names_expr": params.pop("joint_names", [".*"])}
-        for k in ("stiffness", "damping", "effort_limit", "velocity_limit",
-                  "saturation_effort", "armature", "friction"):
+        for k in (
+            "stiffness",
+            "damping",
+            "effort_limit",
+            "velocity_limit",
+            "saturation_effort",
+            "armature",
+            "friction",
+        ):
             if k in params:
                 kwargs[k] = params.pop(k)
         # Default motor ratings: peak torque / velocity limits
@@ -93,12 +101,22 @@ def build_actuator(cfg: dict, classes: dict | None = None):
             cls = classes["actuator_net"]
         else:
             from isaaclab.actuators import ActuatorNetMLPCfg
+
             cls = ActuatorNetMLPCfg
-        kwargs = {"joint_names_expr": params.pop("joint_names_expr",
-                      params.pop("joint_names", [".*"]))}
-        for k in ("network_file", "pos_scale", "vel_scale", "torque_scale",
-                  "input_order", "input_idx", "effort_limit",
-                  "saturation_effort", "velocity_limit"):
+        kwargs = {
+            "joint_names_expr": params.pop("joint_names_expr", params.pop("joint_names", [".*"]))
+        }
+        for k in (
+            "network_file",
+            "pos_scale",
+            "vel_scale",
+            "torque_scale",
+            "input_order",
+            "input_idx",
+            "effort_limit",
+            "saturation_effort",
+            "velocity_limit",
+        ):
             if k in params:
                 kwargs[k] = params.pop(k)
         _no_leftover(params, atype)
@@ -110,8 +128,9 @@ def build_actuator(cfg: dict, classes: dict | None = None):
         cls = _load_class(cfg["class"])
         return cls(**params)
 
-    raise ValueError(f"unknown actuator type '{atype}' "
-                     "(implicit_pd | dc_motor | actuator_net | custom)")
+    raise ValueError(
+        f"unknown actuator type '{atype}' " "(implicit_pd | dc_motor | actuator_net | custom)"
+    )
 
 
 def _no_leftover(params: dict, atype: str) -> None:

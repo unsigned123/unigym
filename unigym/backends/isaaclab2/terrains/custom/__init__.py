@@ -13,6 +13,7 @@ Use them from a yaml ``generator`` terrain via the ``custom:`` escape hatch::
       gap: {type: "custom:unigym.backends.isaaclab2.terrains.custom.gap.gap_terrain",
             proportion: 0.5, params: {gap_width: 0.6, gap_depth: -1.0}}
 """
+
 from __future__ import annotations
 
 from .gap import gap_terrain

@@ -10,6 +10,7 @@ merges these into its scene config.
 The ``classes`` injection point lets unit tests substitute fake cfg classes
 without importing isaaclab, mirroring the actuator factory pattern.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

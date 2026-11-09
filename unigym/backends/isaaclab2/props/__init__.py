@@ -4,16 +4,23 @@ The neutral ``unigym.props`` manager resolves this object through
 :attr:`BackendInfo.prop_backend`; it owns the type -> handler registry, the
 scene-cfg builder (``scene_fields``) and the lazy cfg-class resolver.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from unigym.props.base import PropHandler, PropSpec
 
-from .handlers import (BallProp, BoxProp, FreeArticulationProp, GenericProp,
-                       PrimitiveProp, PropArticulation, UsdArticulationProp)
-from .spawn import (_build_actuators, _build_urdf_spawn, _build_usd_spawn,
-                    _resolve)
+from .handlers import (
+    BallProp,
+    BoxProp,
+    FreeArticulationProp,
+    GenericProp,
+    PrimitiveProp,
+    PropArticulation,
+    UsdArticulationProp,
+)
+from .spawn import _build_actuators, _build_urdf_spawn, _build_usd_spawn, _resolve
 
 #: type -> handler class (the isaaclab handler registry)
 _REGISTRY: dict[str, type[PropHandler]] = {
@@ -33,8 +40,15 @@ _REGISTRY: dict[str, type[PropHandler]] = {
 #: public compatibility name -> handler class
 _CLASSES: dict[str, type[PropHandler]] = {
     cls.__name__: cls
-    for cls in (BallProp, GenericProp, PropArticulation, UsdArticulationProp,
-                FreeArticulationProp, BoxProp, PrimitiveProp)
+    for cls in (
+        BallProp,
+        GenericProp,
+        PropArticulation,
+        UsdArticulationProp,
+        FreeArticulationProp,
+        BoxProp,
+        PrimitiveProp,
+    )
 }
 
 
@@ -55,17 +69,18 @@ class IsaacLabPropBackend:
             raise ValueError(
                 f"prop {spec.name!r}: unknown type {spec.type!r} "
                 f"(known: {known}); a plane is static scene geometry and "
-                f"cannot be a dynamic prop body") from None
+                f"cannot be a dynamic prop body"
+            ) from None
 
     def compat(self, name: str) -> type[PropHandler]:
         """Resolve a legacy public handler class name."""
         return _CLASSES[name]
 
-    def build_handler(self, spec: PropSpec, *, num_envs: int, device: str,
-                      base_dir: str | None = None) -> PropHandler:
+    def build_handler(
+        self, spec: PropSpec, *, num_envs: int, device: str, base_dir: str | None = None
+    ) -> PropHandler:
         """Instantiate the declared handler for one spec."""
-        return self.handler_for(spec)(
-            spec, num_envs=num_envs, device=device, base_dir=base_dir)
+        return self.handler_for(spec)(spec, num_envs=num_envs, device=device, base_dir=base_dir)
 
     def resolve_classes(self, classes=None) -> dict:
         """The lazy isaaclab cfg-class table (compat for the director)."""

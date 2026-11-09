@@ -5,6 +5,7 @@ tuples become lists, so a ``to_dict`` capture is byte-stable across
 processes and hosts.  The inverse turns the hex spellings back into floats
 while leaving ordinary strings untouched.
 """
+
 from __future__ import annotations
 
 import re
@@ -27,8 +28,13 @@ __all__ = ["JsonValue", "decode", "encode", "from_row", "row_dict"]
 # The JSON wire shape: tuples are accepted as list-like input and encode to
 # lists, so every raw row value is a member of this recursive type.
 JsonValue: TypeAlias = (
-    bool | int | float | str | None
-    | list["JsonValue"] | tuple["JsonValue", ...]
+    bool
+    | int
+    | float
+    | str
+    | None
+    | list["JsonValue"]
+    | tuple["JsonValue", ...]
     | Mapping[str, "JsonValue"]
 )
 
@@ -77,16 +83,14 @@ def encode(value: Any) -> JsonValue:
     if isinstance(value, Enum):
         if isinstance(value, SupportsInt):
             return encode(int(value))
-        raise TypeError(
-            f"encode: cannot convert {type(value).__name__} enum to int")
+        raise TypeError(f"encode: cannot convert {type(value).__name__} enum to int")
     if isinstance(value, float):
         return float.hex(value)
     if isinstance(value, int):
         return value
     if _is_dict(value):
         return {
-            str(key): encode(item)
-            for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))
+            str(key): encode(item) for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))
         }
     if _is_sequence(value):
         return [encode(item) for item in value]
@@ -126,8 +130,9 @@ def row_dict(row: object) -> dict[str, JsonValue]:
     return {str(name): value for name, value in vars(row).items()}
 
 
-def from_row(cls: Callable[..., _T], row: Mapping[str, JsonValue],
-             tuple_fields: Iterable[str] = ()) -> _T:
+def from_row(
+    cls: Callable[..., _T], row: Mapping[str, JsonValue], tuple_fields: Iterable[str] = ()
+) -> _T:
     """Build a frozen dataclass *cls* from one mapping row."""
     dataclass_fields = getattr(cls, "__dataclass_fields__", {})
     kwargs: dict[str, object] = {}

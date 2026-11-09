@@ -6,6 +6,7 @@ helpers.  It is a ``Sequence`` (iteration yields rows, integer/slice
 indexing works) and a ``Mapping`` (a string key resolves to one row), so
 the same object answers both "the third joint" and "the elbow joint".
 """
+
 # The dual protocol (Sequence + Mapping) is a deliberate design conflict:
 # integer/slice indexing yields rows while string indexing yields one row, so
 # the two ABCs cannot be satisfied simultaneously by static analysis.  The
@@ -45,8 +46,7 @@ def _row_dict(row: object) -> dict[str, JsonValue]:
 
 def _markdown_cell(value: object) -> str:
     """Escape one cell for a GitHub-flavoured Markdown table."""
-    return (str(value).replace("\\", "\\\\").replace("|", "\\|")
-            .replace("\n", "<br>"))
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
 class Table(Sequence[T], Mapping[str, T], Generic[T]):
@@ -76,34 +76,31 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             name = getattr(row, "name", None)
             if not isinstance(name, str) or not name:
                 raise ValueError(
-                    f"Table rows must carry a non-empty string name, got "
-                    f"{name!r} on {row!r}")
+                    f"Table rows must carry a non-empty string name, got " f"{name!r} on {row!r}"
+                )
             if name in by_name:
                 raise ValueError(
                     f"Table row name {name!r} is duplicated: names are the "
-                    f"compiled global identity and must be unique")
+                    f"compiled global identity and must be unique"
+                )
             by_name[name] = row
             qualname = getattr(row, "qualname", None)
             if isinstance(qualname, str) and qualname:
                 if qualname in by_qualname:
-                    raise ValueError(
-                        f"Table qualname {qualname!r} is duplicated")
+                    raise ValueError(f"Table qualname {qualname!r} is duplicated")
                 by_qualname[qualname] = row
         self._rows = ordered
         self._by_name = by_name
         self._by_qualname = by_qualname
 
     @overload
-    def __getitem__(self, key: int) -> T:
-        ...
+    def __getitem__(self, key: int) -> T: ...
 
     @overload
-    def __getitem__(self, key: str) -> T:
-        ...
+    def __getitem__(self, key: str) -> T: ...
 
     @overload
-    def __getitem__(self, key: slice) -> Table[T]:
-        ...
+    def __getitem__(self, key: slice) -> Table[T]: ...
 
     def __getitem__(self, key: int | str | slice) -> T | Table[T]:
         """Return a row by position/slice, or by name/qualname string."""
@@ -119,8 +116,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
                     return self._by_qualname[key]
                 except KeyError:
                     raise KeyError(key) from None
-        raise TypeError(
-            f"Table keys are int, slice or str, not {type(key).__name__}")
+        raise TypeError(f"Table keys are int, slice or str, not {type(key).__name__}")
 
     def __iter__(self) -> Iterator[T]:
         """Iterate rows in insertion order (Sequence semantics)."""
@@ -163,14 +159,14 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         """Return a new table of rows whose name/qualname matches *regex*."""
         pattern = re.compile(regex) if isinstance(regex, str) else regex
         selected = [
-            row for row in self._rows
+            row
+            for row in self._rows
             if pattern.search(str(getattr(row, "name", "")))
             or pattern.search(str(getattr(row, "qualname", "") or ""))
         ]
         return Table(selected)
 
-    def filter(self, pred: Callable[[T], bool] | None = None,
-               **fields: JsonValue) -> Table[T]:
+    def filter(self, pred: Callable[[T], bool] | None = None, **fields: JsonValue) -> Table[T]:
         """Return the rows satisfying *pred* and every equality field.
 
         Args:
@@ -181,8 +177,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         for row in self._rows:
             if pred is not None and not pred(row):
                 continue
-            if all(getattr(row, key, None) == value
-                   for key, value in fields.items()):
+            if all(getattr(row, key, None) == value for key, value in fields.items()):
                 selected.append(row)
         return Table(selected)
 
@@ -192,8 +187,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
 
     def to_dict(self) -> dict[str, dict[str, JsonValue]]:
         """Return ``{name: row dict}`` in insertion order."""
-        return {str(getattr(row, "name")): _row_dict(row)
-                for row in self._rows}
+        return {str(getattr(row, "name")): _row_dict(row) for row in self._rows}
 
     def to_pandas(self) -> object:
         """Return a pandas ``DataFrame`` (pandas is an optional dependency).
@@ -205,8 +199,8 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             import pandas
         except ImportError as err:  # pragma: no cover - depends on the host
             raise ImportError(
-                "Table.to_pandas() requires pandas; install it or use "
-                "to_rows()/to_dict()") from err
+                "Table.to_pandas() requires pandas; install it or use " "to_rows()/to_dict()"
+            ) from err
         frame = getattr(pandas, "DataFrame")
         return frame(self.to_rows(), index=self.names())
 
@@ -214,8 +208,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         """Return an escaped HTML table (first 20 rows, then a count row)."""
         rows = self.to_rows()
         if not rows:
-            return ("<table><tbody><tr><td>Table(0 rows)</td></tr>"
-                    "</tbody></table>")
+            return "<table><tbody><tr><td>Table(0 rows)</td></tr>" "</tbody></table>"
         columns = list(rows[0])
         shown = rows[:_MAX_REPR_ROWS]
         lines = ["<table>", "<thead>", "<tr>"]
@@ -223,15 +216,11 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         lines.extend(["</tr>", "</thead>", "<tbody>"])
         for row in shown:
             lines.append("<tr>")
-            lines.extend(
-                f"<td>{escape(str(row.get(column, '')))}</td>"
-                for column in columns)
+            lines.extend(f"<td>{escape(str(row.get(column, '')))}</td>" for column in columns)
             lines.append("</tr>")
         remaining = len(rows) - len(shown)
         if remaining:
-            lines.append(
-                f"<tr><td colspan='{len(columns)}'>... {remaining} more"
-                f"</td></tr>")
+            lines.append(f"<tr><td colspan='{len(columns)}'>... {remaining} more" f"</td></tr>")
         lines.extend(["</tbody>", "</table>"])
         return "\n".join(lines)
 
@@ -242,15 +231,13 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             return "Table(0 rows)"
         columns = list(rows[0])
         lines = [
-            "| " + " | ".join(_markdown_cell(column) for column in columns)
-            + " |",
+            "| " + " | ".join(_markdown_cell(column) for column in columns) + " |",
             "| " + " | ".join("---" for _ in columns) + " |",
         ]
         lines.extend(
-            "| " + " | ".join(
-                _markdown_cell(row.get(column, "")) for column in columns)
-            + " |"
-            for row in rows)
+            "| " + " | ".join(_markdown_cell(row.get(column, "")) for column in columns) + " |"
+            for row in rows
+        )
         return "\n".join(lines)
 
     def __repr__(self) -> str:
@@ -262,18 +249,14 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         shown = rows[:_MAX_REPR_ROWS]
         cells = [[str(row.get(col, "")) for col in columns] for row in shown]
         widths = [
-            max(len(columns[i]), *(len(row[i]) for row in cells))
-            for i in range(len(columns))
+            max(len(columns[i]), *(len(row[i]) for row in cells)) for i in range(len(columns))
         ]
         lines = [
-            "  ".join(columns[i].ljust(widths[i])
-                      for i in range(len(columns))),
+            "  ".join(columns[i].ljust(widths[i]) for i in range(len(columns))),
             "  ".join("-" * widths[i] for i in range(len(columns))),
         ]
         lines.extend(
-            "  ".join(cell.ljust(widths[i])
-                      for i, cell in enumerate(row))
-            for row in cells
+            "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) for row in cells
         )
         if len(rows) > _MAX_REPR_ROWS:
             lines.append(f"... {len(rows) - _MAX_REPR_ROWS} more")

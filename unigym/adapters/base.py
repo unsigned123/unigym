@@ -9,6 +9,7 @@ name, never by a flat positional slice.
 This module must only depend on torch (no isaaclab) so adapters are
 unit-testable on a plain laptop python.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -38,19 +39,31 @@ class _RawObsChanges(TypedDict, total=False):
     joint_names: tuple[str, ...] | None
     articulation: str | None
 
+
 #: robot-state keys that are scoped to ONE articulation.  Kept in sync with
 #: :data:`unigym.env.obs_catalog.PER_ARTICULATION_KEYS`; the import is local
 #: to keep this module torch-only at import time.
-_ROBOT_STATE_KEYS = frozenset({
-    "gravity_b", "joint_pos_rel", "joint_vel", "applied_torque",
-    "prev_action", "command",
-    "base_yaw", "base_pos_w", "base_quat_w", "base_ang_vel_b",
-    "foot_contact_force", "base_lin_vel_b", "foot_contact",
-    "foot_contact_force_z", "foot_pos_z",
-})
+_ROBOT_STATE_KEYS = frozenset(
+    {
+        "gravity_b",
+        "joint_pos_rel",
+        "joint_vel",
+        "applied_torque",
+        "prev_action",
+        "command",
+        "base_yaw",
+        "base_pos_w",
+        "base_quat_w",
+        "base_ang_vel_b",
+        "foot_contact_force",
+        "base_lin_vel_b",
+        "foot_contact",
+        "foot_contact_force_z",
+        "foot_pos_z",
+    }
+)
 #: joint-vector keys whose request MUST carry an explicit ``joint_names``.
-_JOINT_VECTOR_KEYS = frozenset({"joint_pos_rel", "joint_vel",
-                                "applied_torque"})
+_JOINT_VECTOR_KEYS = frozenset({"joint_pos_rel", "joint_vel", "applied_torque"})
 
 
 @dataclass(frozen=True)
@@ -90,19 +103,19 @@ class RawObsRequest:
                 raise ValueError(
                     f"RawObsRequest({key!r}) is articulation-scoped but "
                     f"declares no articulation; name it explicitly "
-                    f"(e.g. articulation='g1')")
+                    f"(e.g. articulation='g1')"
+                )
         if key in _JOINT_VECTOR_KEYS:
             names = tuple(self.joint_names or ())
             if not names:
                 raise ValueError(
                     f"RawObsRequest({key!r}) addresses joints but carries "
                     f"no joint_names; joint-vector requests must be "
-                    f"explicit")
+                    f"explicit"
+                )
             if len(set(names)) != len(names):
                 dupes = sorted({n for n in names if names.count(n) > 1})
-                raise ValueError(
-                    f"RawObsRequest({key!r}) has duplicate joint names "
-                    f"{dupes}")
+                raise ValueError(f"RawObsRequest({key!r}) has duplicate joint names " f"{dupes}")
 
     def _replace(self, **changes: Unpack[_RawObsChanges]) -> RawObsRequest:
         """NamedTuple-compatible update helper (canonicalization)."""
@@ -181,7 +194,8 @@ class Adapter(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not implement on_rewind "
             f"(rewindable={self.rewindable!r}); the rewind face needs the "
-            f"adapter resync hook")
+            f"adapter resync hook"
+        )
 
     def snapshot_internal(self) -> dict[str, JsonValue] | None:
         """Serialize the adapter's internal streaming state (rewind face).
@@ -194,8 +208,7 @@ class Adapter(ABC):
 
     def restore_internal(self, state: dict[str, JsonValue]) -> None:
         """Restore a :meth:`snapshot_internal` payload (rewind face)."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement restore_internal")
+        raise NotImplementedError(f"{type(self).__name__} does not implement restore_internal")
 
     @abstractmethod
     def get_obs_requests(self) -> list[RawObsRequest]:
@@ -212,8 +225,9 @@ class Adapter(ABC):
         """Adapter control period in seconds (e.g. 0.02 for 50 Hz)."""
 
     @abstractmethod
-    def compute_obs(self, obs_cache: dict[str, torch.Tensor],
-                    cmd: torch.Tensor, env: AdapterEnv) -> torch.Tensor:
+    def compute_obs(
+        self, obs_cache: dict[str, torch.Tensor], cmd: torch.Tensor, env: AdapterEnv
+    ) -> torch.Tensor:
         """Assemble the single-frame adapter observation from raw quantities.
 
         Includes scales and concatenation order.  May also update internal
@@ -222,9 +236,13 @@ class Adapter(ABC):
         state under ``articulation/<name>/...``).
         """
 
-    def compute_obs_collect(self, obs_frame: torch.Tensor,
-                            obs_cache: dict[str, torch.Tensor],
-                            cmd: torch.Tensor, env: AdapterEnv) -> torch.Tensor:
+    def compute_obs_collect(
+        self,
+        obs_frame: torch.Tensor,
+        obs_cache: dict[str, torch.Tensor],
+        cmd: torch.Tensor,
+        env: AdapterEnv,
+    ) -> torch.Tensor:
         """Dataset-facing observation frame (recorded as ``rec["obs"]``).
 
         Default: return *obs_frame* unchanged — record exactly the frame the
@@ -268,8 +286,7 @@ class Adapter(ABC):
         resolve the names to simulator addresses.
         """
 
-    def named_action(self, values: torch.Tensor,
-                     kind: str = "position") -> NamedAction:
+    def named_action(self, values: torch.Tensor, kind: str = "position") -> NamedAction:
         """Convenience: wrap *values* as a NamedAction over
         :attr:`joint_order` (the body group)."""
 
@@ -277,9 +294,9 @@ class Adapter(ABC):
         if order is None:
             raise RuntimeError(
                 f"{type(self).__name__}.named_action requires joint_order; "
-                f"declare the adapter's joint order before wrapping values")
-        return NamedAction(values=values, joint_names=list(order),
-                           kind=kind)
+                f"declare the adapter's joint order before wrapping values"
+            )
+        return NamedAction(values=values, joint_names=list(order), kind=kind)
 
     def on_reset(self, env_ids: torch.Tensor) -> None:
         """Called on episode reset for the given env ids (clear history etc.)."""
@@ -316,7 +333,9 @@ class Adapter(ABC):
         return None
 
     def build_language_states(
-        self, extra_info: dict[str, torch.Tensor], cmd: torch.Tensor,
+        self,
+        extra_info: dict[str, torch.Tensor],
+        cmd: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         """Assemble the per-env language *states* dict from env data + command.
 
@@ -335,9 +354,7 @@ class Adapter(ABC):
         if meanings is not None:
             for name, idx in meanings.items():
                 states[name] = cmd[..., idx]
-        states.update(
-            {k: v for k, v in extra_info.items()
-             if k in ("vx", "vy", "wz", "base_z")})
+        states.update({k: v for k, v in extra_info.items() if k in ("vx", "vy", "wz", "base_z")})
         return states
 
     # ------------------------------------------------------------ #

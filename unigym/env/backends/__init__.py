@@ -12,6 +12,7 @@ Usage (collect.py):
     env = build_env_backend(cfg["env"].get("backend", "isaaclab"),
                             robot_profile=profile, adapter=adapter, ...)
 """
+
 from __future__ import annotations
 
 import importlib
@@ -63,12 +64,10 @@ def build_env_backend(name: str | None = None, **kwargs):
 
     canonical = build_name(name)
     env_cls = _env_class(canonical)
-    mod = sys.modules.get(env_cls.__module__) or \
-        importlib.import_module(env_cls.__module__)
+    mod = sys.modules.get(env_cls.__module__) or importlib.import_module(env_cls.__module__)
     caps = getattr(mod, "BACKEND_CAPABILITIES", None)
     if caps is not None:
-        gate_capabilities(canonical, caps, kwargs,
-                          num_envs=kwargs.get("num_envs"))
+        gate_capabilities(canonical, caps, kwargs, num_envs=kwargs.get("num_envs"))
     env = env_cls(**kwargs)
     assert_backend_contract(env)
     return env

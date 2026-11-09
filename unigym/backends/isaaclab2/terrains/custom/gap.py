@@ -4,6 +4,7 @@ Flat ground (height 0) with a full-length trench cut across the middle along
 *y*: the robot approaches along +x and must jump the gap. Height-field
 generator decorated with :func:`height_field_to_mesh`.
 """
+
 from __future__ import annotations
 
 import numpy as np

@@ -68,6 +68,7 @@ Request validation (subset semantics)
 
 This module is torch-only (importable without isaaclab/mujoco).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -102,13 +103,25 @@ CATALOG_VERSION = 3
 # Every fixed-table key that belongs to ONE articulation (robot state).  The
 # catalog publishes these under ``articulation/<name>/...`` only; a bare
 # request is resolved to the adapter's unique controller at the env boundary.
-PER_ARTICULATION_KEYS = frozenset({
-    "gravity_b", "joint_pos_rel", "joint_vel", "applied_torque",
-    "prev_action", "command",
-    "base_yaw", "base_pos_w", "base_quat_w", "base_ang_vel_b",
-    "foot_contact_force",
-    "base_lin_vel_b", "foot_contact", "foot_contact_force_z", "foot_pos_z",
-})
+PER_ARTICULATION_KEYS = frozenset(
+    {
+        "gravity_b",
+        "joint_pos_rel",
+        "joint_vel",
+        "applied_torque",
+        "prev_action",
+        "command",
+        "base_yaw",
+        "base_pos_w",
+        "base_quat_w",
+        "base_ang_vel_b",
+        "foot_contact_force",
+        "base_lin_vel_b",
+        "foot_contact",
+        "foot_contact_force_z",
+        "foot_pos_z",
+    }
+)
 
 
 def is_per_articulation_key(key: str) -> bool:
@@ -125,7 +138,7 @@ def split_articulation_key(key: str) -> tuple[str | None, str]:
     prefix = f"{ARTICULATION_PREFIX}/"
     if not key.startswith(prefix):
         return None, key
-    rest = key[len(prefix):]
+    rest = key[len(prefix) :]
     name, _, base = rest.partition("/")
     if name and base in PER_ARTICULATION_KEYS:
         return name, base
@@ -147,7 +160,8 @@ def resolve_obs_request_key(req) -> str:
     if not name:
         raise ValueError(
             f"obs request '{key}' is articulation-scoped but carries no "
-            f"articulation; set RawObsRequest.articulation explicitly")
+            f"articulation; set RawObsRequest.articulation explicitly"
+        )
     return articulation_key(str(name), key)
 
 
@@ -165,6 +179,7 @@ def canonicalize_obs_requests(requests):
         out.append(req)
     return list(out)
 
+
 # torch dtype -> snapshot name (and back)
 _DTYPE_TO_NAME = {torch.float32: "f32", torch.uint8: "u8", torch.bool: "bool"}
 
@@ -173,8 +188,14 @@ _DTYPE_TO_NAME = {torch.float32: "f32", torch.uint8: "u8", torch.bool: "bool"}
 # running without a props section.  Dims mirror props/{door,ball,generic}.py
 # state_requests; the table moves here (single source) with the catalog.
 _ZERO_FILL_PROP_KEYS = {
-    "door_pos": 3, "door_normal": 3, "door_angle": 1, "left_or_right": 2,
-    "ball_pos_b": 3, "ball_vel_b": 3, "prop_pos_b": 3, "prop_vel_b": 3,
+    "door_pos": 3,
+    "door_normal": 3,
+    "door_angle": 1,
+    "left_or_right": 2,
+    "ball_pos_b": 3,
+    "ball_vel_b": 3,
+    "prop_pos_b": 3,
+    "prop_vel_b": 3,
 }
 
 # keys whose width is decided by the caller at run time (passthrough values:
@@ -220,8 +241,10 @@ class ObsSpec:
 def _dtype_name(dtype) -> str:
     name = _DTYPE_TO_NAME.get(dtype)
     if name is None:
-        raise ValueError(f"unsupported frame dtype {dtype!r} for the "
-                         f"obs catalog (allowed: {sorted(_DTYPE_TO_NAME, key=str)})")
+        raise ValueError(
+            f"unsupported frame dtype {dtype!r} for the "
+            f"obs catalog (allowed: {sorted(_DTYPE_TO_NAME, key=str)})"
+        )
     return name
 
 
@@ -231,19 +254,19 @@ def _dtype_name(dtype) -> str:
 class ObsCatalog:
     """The run's observation catalog: specs per key + request validation."""
 
-    def __init__(self, entries: dict, requestable=None,
-                 articulation: str | None = None):
+    def __init__(self, entries: dict, requestable=None, articulation: str | None = None):
         self.entries: dict[str, ObsSpec] = dict(entries)
-        self.requestable: set[str] = set(self.entries) \
-            if requestable is None else set(requestable)
+        self.requestable: set[str] = set(self.entries) if requestable is None else set(requestable)
         # the articulation this per-controller catalog belongs to; bare
         # requests validate against its namespaced keys (None for the merged
         # multi catalog -- every request there is already namespaced)
         self.articulation = articulation
         unknown = self.requestable - set(self.entries)
         if unknown:
-            raise ValueError(f"requestable keys {sorted(unknown)} have no "
-                             f"catalog entry (internal wiring bug)")
+            raise ValueError(
+                f"requestable keys {sorted(unknown)} have no "
+                f"catalog entry (internal wiring bug)"
+            )
 
     # ---- container surface ---------------------------------------------- #
     def __contains__(self, key: str) -> bool:
@@ -283,12 +306,14 @@ class ObsCatalog:
         if spec is None:
             raise ValueError(
                 f"adapter requested unsupported obs key '{key}'; "
-                f"available obs keys: {sorted(self.requestable)}")
+                f"available obs keys: {sorted(self.requestable)}"
+            )
         if key not in self.requestable:
             raise ValueError(
                 f"obs key '{key}' is record-only "
                 f"(source={spec.source}); it never enters obs_cache; "
-                f"requestable obs keys: {sorted(self.requestable)}")
+                f"requestable obs keys: {sorted(self.requestable)}"
+            )
 
         if isinstance(req, ImageObsRequest):
             self._validate_image(req, spec)
@@ -305,24 +330,26 @@ class ObsCatalog:
             want = len(tuple(getattr(req, "joint_names", None) or ()))
             if req.dim != want:
                 raise ValueError(
-                    f"obs request '{req.key}' dim {req.dim} != "
-                    f"len(joint_names) {want}")
+                    f"obs request '{req.key}' dim {req.dim} != " f"len(joint_names) {want}"
+                )
             return
         if req.dim != spec.shape[-1]:
             raise ValueError(
                 f"obs request '{req.key}' dim {req.dim} != catalog "
-                f"{list(spec.shape)} (last dim {spec.shape[-1]})")
+                f"{list(spec.shape)} (last dim {spec.shape[-1]})"
+            )
 
     def _validate_image(self, req: ImageObsRequest, spec: ObsSpec) -> None:
         if tuple(req.shape) != tuple(spec.shape or ()):
             raise ValueError(
                 f"obs request '{req.key}' shape {tuple(req.shape)} != "
-                f"catalog {list(spec.shape or ())}")
+                f"catalog {list(spec.shape or ())}"
+            )
         want = _DTYPE_TO_NAME.get(req.dtype)
         if want != spec.dtype:
             raise ValueError(
-                f"obs request '{req.key}' dtype {req.dtype} != catalog "
-                f"'{spec.dtype}'")
+                f"obs request '{req.key}' dtype {req.dtype} != catalog " f"'{spec.dtype}'"
+            )
 
     def _validate_joint_names(self, req: RawObsRequest, spec: ObsSpec) -> None:
         """Subset semantics: explicit, non-empty, duplicate-free,
@@ -334,7 +361,8 @@ class ObsCatalog:
                 raise ValueError(
                     f"obs request '{req.key}' declares joint_names "
                     f"{list(req_names)} but the catalog key is not a "
-                    f"joint-vector key")
+                    f"joint-vector key"
+                )
             return
         if req_names is None:
             raise ValueError(
@@ -342,26 +370,30 @@ class ObsCatalog:
                 f"no joint_names; joint-vector requests "
                 f"must be explicit (the catalog publishes "
                 f"{len(spec.joint_names)} joints: "
-                f"{list(spec.joint_names)})")
+                f"{list(spec.joint_names)})"
+            )
         names = tuple(req_names)
         if not names:
             raise ValueError(
                 f"obs request '{req.key}' carries an empty joint_names "
                 f"tuple (the catalog publishes {len(spec.joint_names)} "
-                f"joints: {list(spec.joint_names)})")
+                f"joints: {list(spec.joint_names)})"
+            )
         dupes = sorted({n for n in names if names.count(n) > 1})
         if dupes:
             raise ValueError(
                 f"obs request '{req.key}' has duplicate joint names "
                 f"{dupes} (a duplicate would make the column mapping "
-                f"ambiguous)")
+                f"ambiguous)"
+            )
         known = set(spec.joint_names)
         unknown = [n for n in names if n not in known]
         if unknown:
             raise ValueError(
                 f"obs request '{req.key}' names joints the catalog does "
                 f"not publish: {unknown}; the catalog publishes "
-                f"{len(spec.joint_names)} joints: {list(spec.joint_names)}")
+                f"{len(spec.joint_names)} joints: {list(spec.joint_names)}"
+            )
         # names ⊆ catalog names, in the requester's order — accepted.
 
     # ---- meta snapshot ---------------------------------------------------- #
@@ -371,11 +403,9 @@ class ObsCatalog:
             "version": CATALOG_VERSION,
             "keys": {
                 spec.key: {
-                    "shape": (None if spec.shape is None
-                              else [int(d) for d in spec.shape]),
+                    "shape": (None if spec.shape is None else [int(d) for d in spec.shape]),
                     "dtype": spec.dtype,
-                    "joint_names": (None if spec.joint_names is None
-                                    else list(spec.joint_names)),
+                    "joint_names": (None if spec.joint_names is None else list(spec.joint_names)),
                     "unit": spec.unit,
                     "frame": spec.frame,
                     "source": spec.source,
@@ -393,59 +423,64 @@ def _fixed_entries(profile, joint_names=None) -> tuple[dict, set]:
     actuated DOF incl. non-policy fingers); ``None`` falls back to
     ``profile.full_joint_names`` then ``profile.joint_order``.
     """
-    joints = tuple(joint_names or profile.full_joint_names
-                   or profile.joint_order or ())
+    joints = tuple(joint_names or profile.full_joint_names or profile.joint_order or ())
     feet = tuple(profile.foot_bodies or ())
     f = len(feet)
     entries = {
         # ---- requestable obs-cache keys (fixed, every backend) ----
-        "gravity_b": ObsSpec("gravity_b", (3,), "f32", unit="g",
-                             frame="base", source="computed"),
-        "joint_pos_rel": ObsSpec("joint_pos_rel", (len(joints),), "f32",
-                                 joint_names=joints, unit="rad",
-                                 source="robot"),
-        "joint_vel": ObsSpec("joint_vel", (len(joints),), "f32",
-                             joint_names=joints, unit="rad/s",
-                             source="robot"),
-        "applied_torque": ObsSpec("applied_torque", (len(joints),), "f32",
-                                  joint_names=joints, unit="N·m",
-                                  source="robot"),
-        "prev_action": ObsSpec("prev_action", None, "f32",
-                               source="adapter"),
+        "gravity_b": ObsSpec("gravity_b", (3,), "f32", unit="g", frame="base", source="computed"),
+        "joint_pos_rel": ObsSpec(
+            "joint_pos_rel", (len(joints),), "f32", joint_names=joints, unit="rad", source="robot"
+        ),
+        "joint_vel": ObsSpec(
+            "joint_vel", (len(joints),), "f32", joint_names=joints, unit="rad/s", source="robot"
+        ),
+        "applied_torque": ObsSpec(
+            "applied_torque", (len(joints),), "f32", joint_names=joints, unit="N·m", source="robot"
+        ),
+        "prev_action": ObsSpec("prev_action", None, "f32", source="adapter"),
         "command": ObsSpec("command", None, "f32", source="sampler"),
-        "base_yaw": ObsSpec("base_yaw", (1,), "f32", unit="rad",
-                            frame="world", source="robot"),
-        "base_pos_w": ObsSpec("base_pos_w", (3,), "f32", unit="m",
-                              frame="world", source="robot"),
-        "base_quat_w": ObsSpec("base_quat_w", (4,), "f32",
-                               frame="world", source="robot"),  # (w,x,y,z)
-        "base_ang_vel_b": ObsSpec("base_ang_vel_b", (3,), "f32",
-                                  unit="rad/s", frame="base",
-                                  source="robot"),
-        "foot_contact_force": ObsSpec("foot_contact_force", (f,), "f32",
-                                      unit="N", source="contact_sensor"),
+        "base_yaw": ObsSpec("base_yaw", (1,), "f32", unit="rad", frame="world", source="robot"),
+        "base_pos_w": ObsSpec("base_pos_w", (3,), "f32", unit="m", frame="world", source="robot"),
+        "base_quat_w": ObsSpec(
+            "base_quat_w", (4,), "f32", frame="world", source="robot"
+        ),  # (w,x,y,z)
+        "base_ang_vel_b": ObsSpec(
+            "base_ang_vel_b", (3,), "f32", unit="rad/s", frame="base", source="robot"
+        ),
+        "foot_contact_force": ObsSpec(
+            "foot_contact_force", (f,), "f32", unit="N", source="contact_sensor"
+        ),
         # ---- record-only extras (documented; never obs_cache) ----
-        "base_lin_vel_b": ObsSpec("base_lin_vel_b", (3,), "f32",
-                                  unit="m/s", frame="base",
-                                  source="robot"),
-        "foot_contact": ObsSpec("foot_contact", (f,), "bool",
-                                source="contact_sensor"),
-        "foot_contact_force_z": ObsSpec("foot_contact_force_z", (f,), "f32",
-                                        unit="N", frame="world",
-                                        source="contact_sensor"),
-        "foot_pos_z": ObsSpec("foot_pos_z", (f,), "f32", unit="m",
-                              frame="world", source="robot"),
+        "base_lin_vel_b": ObsSpec(
+            "base_lin_vel_b", (3,), "f32", unit="m/s", frame="base", source="robot"
+        ),
+        "foot_contact": ObsSpec("foot_contact", (f,), "bool", source="contact_sensor"),
+        "foot_contact_force_z": ObsSpec(
+            "foot_contact_force_z", (f,), "f32", unit="N", frame="world", source="contact_sensor"
+        ),
+        "foot_pos_z": ObsSpec("foot_pos_z", (f,), "f32", unit="m", frame="world", source="robot"),
     }
-    requestable = set(entries) - {"base_lin_vel_b", "foot_contact",
-                                  "foot_contact_force_z", "foot_pos_z"}
+    requestable = set(entries) - {
+        "base_lin_vel_b",
+        "foot_contact",
+        "foot_contact_force_z",
+        "foot_pos_z",
+    }
     return entries, requestable
 
 
-def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
-                      contact_manager=None,
-                      zero_fill_props: bool = False,
-                      articulation_joint_names=None,
-                      record_sites=None, *, articulation: str) -> ObsCatalog:
+def build_obs_catalog(
+    profile,
+    camera_manager=None,
+    prop_manager=None,
+    contact_manager=None,
+    zero_fill_props: bool = False,
+    articulation_joint_names=None,
+    record_sites=None,
+    *,
+    articulation: str,
+) -> ObsCatalog:
     """Build the run's :class:`ObsCatalog` at env-construction time.
 
     Args:
@@ -486,15 +521,21 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
         raise ValueError(
             "build_obs_catalog requires an articulation name (v103.5: every "
             "per-articulation robot-state key is namespaced "
-            "articulation/<name>/...; there is no bare projection)")
+            "articulation/<name>/...; there is no bare projection)"
+        )
     entries, requestable = _fixed_entries(profile, articulation_joint_names)
     # v103.5: the fixed table is robot state owned by ONE articulation --
     # publish it namespaced (single and multi use the same rule).
     entries = {
         articulation_key(articulation, key): ObsSpec(
-            articulation_key(articulation, spec.key), spec.shape, spec.dtype,
-            joint_names=spec.joint_names, unit=spec.unit, frame=spec.frame,
-            source=spec.source)
+            articulation_key(articulation, spec.key),
+            spec.shape,
+            spec.dtype,
+            joint_names=spec.joint_names,
+            unit=spec.unit,
+            frame=spec.frame,
+            source=spec.source,
+        )
         for key, spec in entries.items()
     }
     requestable = {articulation_key(articulation, key) for key in requestable}
@@ -504,31 +545,34 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
         for key in sorted(camera_manager.obs_keys()):
             frame = camera_manager.frame_request(key)
             entries[key] = ObsSpec(
-                key, tuple(int(d) for d in frame.shape),
-                _dtype_name(frame.dtype), frame="sensor", source="camera")
+                key,
+                tuple(int(d) for d in frame.shape),
+                _dtype_name(frame.dtype),
+                frame="sensor",
+                source="camera",
+            )
         requestable |= set(camera_manager.obs_keys())
 
     # ---- prop obs keys + object record keys
     if prop_manager is not None:
         for req in prop_manager.state_requests:
-            entries[req.key] = ObsSpec(req.key, (int(req.dim),), "f32",
-                                       frame="base", source="prop")
+            entries[req.key] = ObsSpec(req.key, (int(req.dim),), "f32", frame="base", source="prop")
             requestable.add(req.key)
         for key in object_record_keys(prop_manager):
             if key.endswith("/pos"):
-                spec = ObsSpec(key, (3,), "f32", unit="m", frame="world",
-                               source="object")
+                spec = ObsSpec(key, (3,), "f32", unit="m", frame="world", source="object")
             elif "/joints/" in key:
-                spec = ObsSpec(key, (1,), "f32", unit="rad", frame="world",
-                               source="object")   # joint state
+                spec = ObsSpec(
+                    key, (1,), "f32", unit="rad", frame="world", source="object"
+                )  # joint state
             else:  # /quat: (w,x,y,z)
-                spec = ObsSpec(key, (4,), "f32", frame="world",
-                               source="object")
+                spec = ObsSpec(key, (4,), "f32", frame="world", source="object")
             entries[key] = spec
     elif zero_fill_props:
         for key, dim in sorted(_ZERO_FILL_PROP_KEYS.items()):
-            entries[key] = ObsSpec(key, (dim,), "f32", frame="base",
-                                   source="prop")  # zero-filled, no props
+            entries[key] = ObsSpec(
+                key, (dim,), "f32", frame="base", source="prop"
+            )  # zero-filled, no props
             requestable.add(key)
 
     # ---- contact keys (shapes resolved by the bound backend)
@@ -537,14 +581,17 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
             key = f"contact/{spec.name}"
             shape = contact_manager.group_shape(spec.name)
             entries[key] = ObsSpec(
-                key, shape, "bool" if spec.format == "contact" else "f32",
-                frame=spec.frame, source="contact")
+                key,
+                shape,
+                "bool" if spec.format == "contact" else "f32",
+                frame=spec.frame,
+                source="contact",
+            )
             requestable.add(key)
             # v057 ops detail face: per-contact records (list of dicts,
             # variable length) -- passthrough shape, runtime authoritative
             ops_key = f"contact_ops/{spec.name}"
-            entries[ops_key] = ObsSpec(ops_key, None, "json",
-                                       frame=spec.frame, source="contact")
+            entries[ops_key] = ObsSpec(ops_key, None, "json", frame=spec.frame, source="contact")
             requestable.add(ops_key)
 
     # ---- declared record sites (T3.2 EEF site family): the
@@ -552,7 +599,6 @@ def build_obs_catalog(profile, camera_manager=None, prop_manager=None,
     # (never obs_cache), consumed by pack criteria (FormulaTask keys).
     for name in tuple(record_sites or ()):
         key = f"site/{name}/pos"
-        entries[key] = ObsSpec(key, (3,), "f32", unit="m", frame="world",
-                               source="site")
+        entries[key] = ObsSpec(key, (3,), "f32", unit="m", frame="world", source="site")
 
     return ObsCatalog(entries, requestable, articulation=articulation)

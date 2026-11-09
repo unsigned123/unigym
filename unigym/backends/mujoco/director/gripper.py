@@ -16,12 +16,12 @@ that Director.attach enables at runtime.
 
 Naming collisions with existing model/scene names fail fast at build time.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from unigym.backends.shared.mjfamily.director.gripper import (
-    add_director_bodies)
+from unigym.backends.shared.mjfamily.director.gripper import add_director_bodies
 
 __all__ = ["MujocoGripper", "add_director_bodies"]
 
@@ -35,16 +35,17 @@ class MujocoGripper:
         m = env.mj_model
         bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, name)
         if bid < 0:
-            raise ValueError(f"director gripper body {name!r} not in the "
-                             f"MJ model (was the run started with --direct "
-                             f"and a director.gripper section?)")
+            raise ValueError(
+                f"director gripper body {name!r} not in the "
+                f"MJ model (was the run started with --direct "
+                f"and a director.gripper section?)"
+            )
         self.name = name
         self.bid = bid
         self.mocapid = int(m.body_mocapid[bid])
         if self.mocapid < 0:
             raise ValueError(f"body {name!r} is not a mocap body")
-        site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE,
-                                 f"{name}_grasp")
+        site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, f"{name}_grasp")
         self.grasp_site = int(site)
         self._mujoco = mujoco
 
@@ -52,8 +53,7 @@ class MujocoGripper:
     def get_pose(self, env) -> tuple[np.ndarray, np.ndarray]:
         """Current mocap world pose ``(pos (3,), quat (4,) wxyz)``."""
         d = env.mj_data
-        return (np.array(d.mocap_pos[self.mocapid]),
-                np.array(d.mocap_quat[self.mocapid]))
+        return (np.array(d.mocap_pos[self.mocapid]), np.array(d.mocap_quat[self.mocapid]))
 
     def set_pose(self, env, pos=None, quat=None) -> None:
         """Write the mocap world pose (``None`` keeps that component)."""

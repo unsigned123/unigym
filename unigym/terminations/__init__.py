@@ -20,6 +20,7 @@ explicit ``articulation`` (top-level or under ``params``).  There is no
 single-binding injection: a missing ``articulation`` fails fast at
 construction, whether the run has one binding or several.
 """
+
 from __future__ import annotations
 
 from .articulation import ArticulationTermination
@@ -55,8 +56,8 @@ def build_terminations(cfg: list | None) -> list[Termination]:
         name = entry.get("name")
         if name not in TERMINATION_REGISTRY:
             raise ValueError(
-                f"unknown termination '{name}'; "
-                f"available: {sorted(TERMINATION_REGISTRY)}")
+                f"unknown termination '{name}'; " f"available: {sorted(TERMINATION_REGISTRY)}"
+            )
         params = dict(entry.get("params", {}))
         explicit = entry.get("articulation")
         if explicit is not None:
@@ -68,8 +69,7 @@ def build_terminations(cfg: list | None) -> list[Termination]:
     return terms
 
 
-def build_termination_group(cfg: list | None, mode: str = "or"
-                            ) -> TerminationGroup:
+def build_termination_group(cfg: list | None, mode: str = "or") -> TerminationGroup:
     """Build an OR (default) TerminationGroup from the yaml section.
 
     ``None``/empty cfg -> empty group that never fires (no default fall

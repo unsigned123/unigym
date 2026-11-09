@@ -15,6 +15,7 @@ Determinism is part of the contract: keys are sorted, the three index lists
 absolute path, mtime or timestamp may enter a document -- so two builds of
 the same input produce byte-identical JSON and the same digest.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,16 +42,34 @@ DIGEST_NAME = "catalog.digest"
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:[/\\]|[A-Za-z]:[/\\])")
 """An absolute POSIX path, an absolute Windows path, or a rooted path."""
 
-_VOLATILE_KEYS = frozenset({
-    "mtime", "mtime_ns", "ctime", "ctime_ns", "timestamp", "built_at",
-    "created_at", "generated_at", "build_time",
-})
+_VOLATILE_KEYS = frozenset(
+    {
+        "mtime",
+        "mtime_ns",
+        "ctime",
+        "ctime_ns",
+        "timestamp",
+        "built_at",
+        "created_at",
+        "generated_at",
+        "build_time",
+    }
+)
 """Keys that would make the catalog build-dependent; they fail closed."""
 
-_INDEX_KEYS = frozenset({
-    "id", "kind", "carrier", "pack", "tags", "uses", "variants", "files",
-    "capabilities",
-})
+_INDEX_KEYS = frozenset(
+    {
+        "id",
+        "kind",
+        "carrier",
+        "pack",
+        "tags",
+        "uses",
+        "variants",
+        "files",
+        "capabilities",
+    }
+)
 """The catalog-owned keys; every other manifest key is passed through."""
 
 
@@ -77,13 +96,11 @@ def _string_list(where: str, key: str, value: object) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, (list, tuple, set, frozenset)):
-        raise _error(where, f"{key} must be a list of strings, got "
-                            f"{type(value).__name__}")
+        raise _error(where, f"{key} must be a list of strings, got " f"{type(value).__name__}")
     items = list(value)
     for item in items:
         if not isinstance(item, str) or not item:
-            raise _error(where, f"{key} entries must be non-empty strings, "
-                                f"got {item!r}")
+            raise _error(where, f"{key} entries must be non-empty strings, " f"got {item!r}")
     return sorted(set(items))
 
 
@@ -97,7 +114,8 @@ def _scan_volatile(value: object, where: str, path: str) -> None:
                     where,
                     f"{child_path!r} is a volatile key; the catalog is "
                     "rebuilt and digested, so mtime/timestamp data cannot "
-                    "enter it -- remove the key")
+                    "enter it -- remove the key",
+                )
             _scan_volatile(child, where, child_path)
     elif isinstance(value, (list, tuple)):
         for index, child in enumerate(value):
@@ -106,15 +124,19 @@ def _scan_volatile(value: object, where: str, path: str) -> None:
         raise _error(
             where,
             f"{path!r} holds the absolute path {value!r}; the catalog "
-            "carries relative facts only -- make it relative to the pack")
+            "carries relative facts only -- make it relative to the pack",
+        )
 
 
 def _files_count(files: object, where: str) -> int:
     """Count the payload paths a manifest's ``files`` mapping ships."""
     if isinstance(files, bool) or not isinstance(files, int) or files < 0:
-        raise _error(where, f"files must be a non-negative int count, got "
-                            f"{files!r}; the collector counts the manifest's "
-                            "file payloads")
+        raise _error(
+            where,
+            f"files must be a non-negative int count, got "
+            f"{files!r}; the collector counts the manifest's "
+            "file payloads",
+        )
     return files
 
 
@@ -125,25 +147,29 @@ def _normalize_entry(raw: object, index: int) -> dict:
         raise _error(
             where,
             f"a catalog entry must be a mapping, got {type(raw).__name__}; "
-            "pass the manifest dicts the collector produced")
+            "pass the manifest dicts the collector produced",
+        )
     asset_id = raw.get("id")
     if not isinstance(asset_id, str) or not asset_id:
         raise _error(
             where,
             "is missing a non-empty 'id'; every entry names its asset "
-            "(e.g. 'pack:acme/assets/generators/objects/x/y')")
+            "(e.g. 'pack:acme/assets/generators/objects/x/y')",
+        )
     kind = raw.get("kind")
     if not isinstance(kind, str) or kind not in KINDS:
         raise _error(
             where,
             f"is missing a legal 'kind', got {kind!r}; legal kinds are "
-            f"{sorted(KINDS)} (the manifest kind set stays closed)")
+            f"{sorted(KINDS)} (the manifest kind set stays closed)",
+        )
     carrier = raw.get("carrier", "file")
     if carrier not in CARRIERS:
         raise _error(
             where,
             f"carrier must be one of {sorted(CARRIERS)}, got {carrier!r} "
-            "(v086 §2.1: file = fixed payload, generator = computed payload)")
+            "(v086 §2.1: file = fixed payload, generator = computed payload)",
+        )
     try:
         namespace, _ = split_asset_id(asset_id)
     except ManifestError as exc:
@@ -153,7 +179,8 @@ def _normalize_entry(raw: object, index: int) -> dict:
         raise _error(
             where,
             f"declares pack {declared_pack!r} but its id namespace is "
-            f"{namespace!r}; the id is the single source of the pack name")
+            f"{namespace!r}; the id is the single source of the pack name",
+        )
 
     tags = _string_list(where, "tags", raw.get("tags"))
     uses = _string_list(where, "uses", raw.get("uses"))
@@ -162,12 +189,11 @@ def _normalize_entry(raw: object, index: int) -> dict:
         raise _error(
             where,
             "declares 'variants' on a file carrier; variants index the "
-            "computed payload of a generator (carrier: generator)")
+            "computed payload of a generator (carrier: generator)",
+        )
 
     extras = {
-        key: value
-        for key, value in raw.items()
-        if key not in _INDEX_KEYS and key != "schema"
+        key: value for key, value in raw.items() if key not in _INDEX_KEYS and key != "schema"
     }
     entry: dict = {
         "id": asset_id,
@@ -213,7 +239,8 @@ def build_catalog(entries: Iterable[dict]) -> dict:
                 _label(raw, index),
                 f"duplicate asset id {asset_id!r}, also declared by entry "
                 f"#{first}; asset ids are unique across packs (v086 R0) -- "
-                "fix the two manifests or their directory paths")
+                "fix the two manifests or their directory paths",
+            )
         seen[asset_id] = index
         normalized.append(entry)
     normalized.sort(key=lambda item: item["id"])
@@ -226,13 +253,16 @@ def canonical_json(catalog: dict) -> str:
     Sorted keys, UTF-8 text, two-space indent and a trailing newline; the
     digest and the on-disk file are both derived from exactly these bytes.
     """
-    return json.dumps(
-        catalog,
-        sort_keys=True,
-        ensure_ascii=False,
-        indent=2,
-        allow_nan=False,
-    ) + "\n"
+    return (
+        json.dumps(
+            catalog,
+            sort_keys=True,
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n"
+    )
 
 
 def catalog_digest(catalog: dict) -> str:
@@ -241,8 +271,13 @@ def catalog_digest(catalog: dict) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
-def find(catalog: dict, kind: str | None = None, tags: Iterable[str] | None = None,
-         pack: str | None = None, uses: Iterable[str] | None = None) -> list[str]:
+def find(
+    catalog: dict,
+    kind: str | None = None,
+    tags: Iterable[str] | None = None,
+    pack: str | None = None,
+    uses: Iterable[str] | None = None,
+) -> list[str]:
     """Return the sorted asset ids matching every given filter (AND).
 
     Args:
@@ -277,8 +312,11 @@ def _filter_set(key: str, value: Iterable[str] | None) -> frozenset[str]:
     if value is None:
         return frozenset()
     if isinstance(value, (str, bytes)):
-        raise _error("", f"{key} filter must be a list of strings, not a bare "
-                        f"string; pass [{value!r}] to require one {key} entry")
+        raise _error(
+            "",
+            f"{key} filter must be a list of strings, not a bare "
+            f"string; pass [{value!r}] to require one {key} entry",
+        )
     return frozenset(value)
 
 
@@ -293,8 +331,7 @@ def write_catalog(catalog: dict, out_dir: str | Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / CATALOG_NAME
     path.write_text(canonical_json(catalog), encoding="utf-8")
-    (directory / DIGEST_NAME).write_text(
-        catalog_digest(catalog) + "\n", encoding="utf-8")
+    (directory / DIGEST_NAME).write_text(catalog_digest(catalog) + "\n", encoding="utf-8")
     return path
 
 
@@ -311,21 +348,24 @@ def load_catalog(out_dir: str | Path) -> dict:
     except OSError as exc:
         raise CatalogError(
             f"{path}: cannot read the catalog ({exc}); run "
-            "`python tools/build_asset_catalog.py --out <dir>` first") from exc
+            "`python tools/build_asset_catalog.py --out <dir>` first"
+        ) from exc
     try:
         document = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CatalogError(
             f"{path}: the catalog is not valid JSON ({exc}); rebuild it with "
-            "`python tools/build_asset_catalog.py --out <dir>`") from exc
+            "`python tools/build_asset_catalog.py --out <dir>`"
+        ) from exc
     if not isinstance(document, Mapping):
         raise CatalogError(f"{path}: the catalog must be a JSON object")
     if document.get("schema") != SCHEMA:
         raise CatalogError(
             f"{path}: schema must be {SCHEMA!r}, got {document.get('schema')!r};"
-            " rebuild the catalog instead of editing it")
+            " rebuild the catalog instead of editing it"
+        )
     if not isinstance(document.get("entries"), list):
         raise CatalogError(
-            f"{path}: 'entries' must be a list; rebuild the catalog instead "
-            "of editing it")
+            f"{path}: 'entries' must be a list; rebuild the catalog instead " "of editing it"
+        )
     return cast(dict, document)

@@ -29,6 +29,7 @@ this module accepts).  Everything fail-closed: non-finite or
 non-positive sizes/scales/natives raise ``ValueError`` where the
 official path would silently produce degenerate geometry.
 """
+
 from __future__ import annotations
 
 import math
@@ -68,8 +69,12 @@ _REGION_KEYS = ("main", "bbox")
 
 def _positive(value: Any, what: str) -> float:
     """One finite strictly-positive float (the fail-closed domain)."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)) \
-            or not math.isfinite(value) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise ValueError(f"{what} must be a finite positive number, got {value!r}")
     return float(value)
 
@@ -84,8 +89,7 @@ def parse_size_spec(value: Any) -> tuple:
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         raise ValueError(f"size override must be a 3-entry sequence, got {value!r}")
     return tuple(
-        None if entry is None else _positive(entry, f"size[{i}]")
-        for i, entry in enumerate(value)
+        None if entry is None else _positive(entry, f"size[{i}]") for i, entry in enumerate(value)
     )
 
 
@@ -144,17 +148,19 @@ def native_extents(asset: AssetDefinition) -> tuple:
     if marker is None:
         raise ValueError(
             "payload carries no reg_main/reg_bbox region marker to measure; "
-            f"(region keys found: {sorted(regions)})")
+            f"(region keys found: {sorted(regions)})"
+        )
     if marker.type == "cylinder":
         if len(marker.size) != 2:
             raise ValueError(
                 f"region geom {marker.name!r}: cylinder size must be "
-                f"(radius, half-height), got {marker.size!r}")
+                f"(radius, half-height), got {marker.size!r}"
+            )
         return (2.0 * marker.size[0], 2.0 * marker.size[0], 2.0 * marker.size[1])
     if len(marker.size) != 3:
         raise ValueError(
-            f"region geom {marker.name!r}: expected a 3-entry half-size, "
-            f"got {marker.size!r}")
+            f"region geom {marker.name!r}: expected a 3-entry half-size, " f"got {marker.size!r}"
+        )
     return tuple(2.0 * half for half in marker.size)
 
 
@@ -173,9 +179,11 @@ def scale_from_registry_size(size: Any, native: tuple, max_size: Any = None) -> 
     spec = parse_size_spec(size)
     clamp = None if max_size is None else parse_size_spec(max_size)
     cur = tuple(_positive(entry, f"native extents[{i}]") for i, entry in enumerate(native))
-    scale: list = [spec[0] / cur[0] if spec[0] is not None else None,
-                   spec[1] / cur[1] if spec[1] is not None else None,
-                   spec[2] / cur[2] if spec[2] is not None else None]
+    scale: list = [
+        spec[0] / cur[0] if spec[0] is not None else None,
+        spec[1] / cur[1] if spec[1] is not None else None,
+        spec[2] / cur[2] if spec[2] is not None else None,
+    ]
     # the official fallback chain (fixture.py: the `or` ladder), written
     # as explicit None checks -- equivalent on the positive domain
     if scale[0] is None:
@@ -244,15 +252,25 @@ def _quat2mat(quat: tuple) -> np.ndarray:
     factor = math.sqrt(2.0 / float(n))
     q = (q.astype(np.float64) * factor).astype(np.float32)
     q2 = np.outer(q, q)
-    return np.array([
-        [1.0 - float(q2[2, 2]) - float(q2[3, 3]),
-         float(q2[1, 2] - q2[3, 0]), float(q2[1, 3] + q2[2, 0])],
-        [float(q2[1, 2] + q2[3, 0]),
-         1.0 - float(q2[1, 1]) - float(q2[3, 3]),
-         float(q2[2, 3] - q2[1, 0])],
-        [float(q2[1, 3] - q2[2, 0]), float(q2[2, 3] + q2[1, 0]),
-         1.0 - float(q2[1, 1]) - float(q2[2, 2])],
-    ])
+    return np.array(
+        [
+            [
+                1.0 - float(q2[2, 2]) - float(q2[3, 3]),
+                float(q2[1, 2] - q2[3, 0]),
+                float(q2[1, 3] + q2[2, 0]),
+            ],
+            [
+                float(q2[1, 2] + q2[3, 0]),
+                1.0 - float(q2[1, 1]) - float(q2[3, 3]),
+                float(q2[2, 3] - q2[1, 0]),
+            ],
+            [
+                float(q2[1, 3] - q2[2, 0]),
+                float(q2[2, 3] + q2[1, 0]),
+                1.0 - float(q2[1, 1]) - float(q2[2, 2]),
+            ],
+        ]
+    )
 
 
 def _scale_geom_size(size: tuple, quat: tuple, scale: tuple) -> tuple:
@@ -276,8 +294,8 @@ def _scale_geom_size(size: tuple, quat: tuple, scale: tuple) -> tuple:
         scaled = np.abs(np.linalg.inv(rot) @ (world * scale))[1:3]
         return tuple(float(v) for v in scaled)
     raise ValueError(
-        f"geom size must have 2 or 3 entries to scale (official refusal), "
-        f"got {size!r}")
+        f"geom size must have 2 or 3 entries to scale (official refusal), " f"got {size!r}"
+    )
 
 
 def _scale_geom(geom: Geom, scale: tuple) -> Geom:
@@ -297,11 +315,21 @@ def _scale_geom(geom: Geom, scale: tuple) -> Geom:
         updates["size"] = _scale_geom_size(geom.size, geom.quat, scale)
     if not updates:
         return geom
-    return Geom(geom.name, geom.type, updates.get("size", geom.size),
-                pos=updates.get("pos", geom.pos), quat=geom.quat,
-                material=geom.material, mass=geom.mass, density=geom.density,
-                rgba=geom.rgba, group=geom.group, collidable=geom.collidable,
-                mesh=geom.mesh, hints=geom.hints)
+    return Geom(
+        geom.name,
+        geom.type,
+        updates.get("size", geom.size),
+        pos=updates.get("pos", geom.pos),
+        quat=geom.quat,
+        material=geom.material,
+        mass=geom.mass,
+        density=geom.density,
+        rgba=geom.rgba,
+        group=geom.group,
+        collidable=geom.collidable,
+        mesh=geom.mesh,
+        hints=geom.hints,
+    )
 
 
 def _scale_joint(joint: Joint, scale: tuple) -> Joint:
@@ -327,12 +355,18 @@ def _scale_joint(joint: Joint, scale: tuple) -> Joint:
             updates["range"] = tuple(float(v * factor) for v in joint.range)
     if not updates:
         return joint
-    return Joint(joint.name, joint.type, axis=joint.axis,
-                 pos=updates.get("pos", joint.pos),
-                 range=updates.get("range", joint.range),
-                 damping=joint.damping, armature=joint.armature,
-                 frictionloss=joint.frictionloss, springdamper=joint.springdamper,
-                 stiffness=joint.stiffness)
+    return Joint(
+        joint.name,
+        joint.type,
+        axis=joint.axis,
+        pos=updates.get("pos", joint.pos),
+        range=updates.get("range", joint.range),
+        damping=joint.damping,
+        armature=joint.armature,
+        frictionloss=joint.frictionloss,
+        springdamper=joint.springdamper,
+        stiffness=joint.stiffness,
+    )
 
 
 def _scale_site(site: Site, scale: tuple) -> Site:
@@ -360,9 +394,14 @@ def _scale_site(site: Site, scale: tuple) -> Site:
             updates["size_vector"] = (float(values[0] * float(np.mean(scale))),)
     if not updates:
         return site
-    return Site(site.name, pos=updates.get("pos", site.pos),
-                size=updates.get("size", site.size), rgba=site.rgba,
-                type=site.type, size_vector=updates.get("size_vector", site.size_vector))
+    return Site(
+        site.name,
+        pos=updates.get("pos", site.pos),
+        size=updates.get("size", site.size),
+        rgba=site.rgba,
+        type=site.type,
+        size_vector=updates.get("size_vector", site.size_vector),
+    )
 
 
 def _scale_body(body: Body, scale: tuple) -> Body:
@@ -391,21 +430,24 @@ def _scale_mesh(mesh: MeshDef, scale: tuple) -> MeshDef:
     if mesh.scale is None:
         return MeshDef(mesh.name, mesh.file, scale, mesh.refquat)
     return MeshDef(
-        mesh.name, mesh.file,
-        tuple(float(v * s) for v, s in zip(mesh.scale, scale)),
-        mesh.refquat)
+        mesh.name, mesh.file, tuple(float(v * s) for v, s in zip(mesh.scale, scale)), mesh.refquat
+    )
 
 
 def _scale_region(region: RegionDefinition, scale: tuple) -> RegionDefinition:
     """One region row: per-axis pose and full-extent factors."""
     return RegionDefinition(
-        region.name, region.owner, region.kind,
+        region.name,
+        region.owner,
+        region.kind,
         pos=tuple(float(p * s) for p, s in zip(region.pos, scale)),
         quat=region.quat,
         width_m=region.width_m * scale[0],
         depth_m=region.depth_m * scale[1],
         height_m=None if region.height_m is None else region.height_m * scale[2],
-        body=region.body, site=region.site)
+        body=region.body,
+        site=region.site,
+    )
 
 
 def scale_asset_definition(asset: AssetDefinition, scale: tuple) -> AssetDefinition:

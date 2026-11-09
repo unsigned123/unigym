@@ -16,6 +16,7 @@ full inventory inline) + attributes ``discovered`` (list of
 ``declare sensor_bodies: [...]`` suggestion built from the top likely
 candidate).
 """
+
 from __future__ import annotations
 
 import re
@@ -35,8 +36,7 @@ class ContactCandidateError(ValueError):
         group / arg: the failing contact group name and yaml field.
     """
 
-    def __init__(self, message: str, discovered: list[dict], hint: str,
-                 group: str, arg: str):
+    def __init__(self, message: str, discovered: list[dict], hint: str, group: str, arg: str):
         super().__init__(message)
         self.discovered = discovered
         self.hint = hint
@@ -83,20 +83,25 @@ def _hint_declaration(group: str, arg: str, inventory: list[dict]) -> str:
 
     def score(entry: dict) -> tuple:
         name = str(entry["prim"]).lower()
-        return (sum(1 for t in tokens if t in name),
-                1 if entry.get("likely") else 0,
-                -len(name))          # ties -> the more specific name
+        return (
+            sum(1 for t in tokens if t in name),
+            1 if entry.get("likely") else 0,
+            -len(name),
+        )  # ties -> the more specific name
 
-    ranked = sorted(range(len(inventory)), key=lambda i: score(inventory[i]),
-                    reverse=True)
+    ranked = sorted(range(len(inventory)), key=lambda i: score(inventory[i]), reverse=True)
     top = inventory[ranked[0]]["prim"] if inventory else "<pick>"
     return f"declare {arg}: ['{top}']  (contact group {group!r})"
 
 
-def contact_candidate_error(group: str, arg: str, patterns: Sequence[str],
-                            inventory: list[dict], backend: str,
-                            reason: str = "matched no bodies") \
-        -> ContactCandidateError:
+def contact_candidate_error(
+    group: str,
+    arg: str,
+    patterns: Sequence[str],
+    inventory: list[dict],
+    backend: str,
+    reason: str = "matched no bodies",
+) -> ContactCandidateError:
     """Build the enriched failure (message embeds the full inventory).
 
     ``inventory`` entries are ``{prim, collision}``; the likely marks are
@@ -106,16 +111,18 @@ def contact_candidate_error(group: str, arg: str, patterns: Sequence[str],
     """
     tokens = _name_tokens(group, arg, patterns)
     _mark_likely(inventory, tokens)
-    lines = [f"contact group {group!r}: {arg} {list(patterns)} {reason} "
-             f"-- refusing to guess ({backend} asset).", "discovered:"]
+    lines = [
+        f"contact group {group!r}: {arg} {list(patterns)} {reason} "
+        f"-- refusing to guess ({backend} asset).",
+        "discovered:",
+    ]
     for entry in inventory:
         mark = "*" if entry.get("likely") else " "
         lines.append(f"  {mark} {entry['prim']}  (collision={entry['collision']})")
     lines.append("(*) likely by name; full list above is the asset inventory")
     hint = _hint_declaration(group, arg, inventory)
     lines.append(f"hint: {hint}")
-    return ContactCandidateError("\n".join(lines), inventory, hint,
-                                 group, arg)
+    return ContactCandidateError("\n".join(lines), inventory, hint, group, arg)
 
 
 # --------------------------------------------------------------------------- #
@@ -130,13 +137,12 @@ def mujoco_body_inventory(m) -> list[dict]:
     addresses).
     """
     out: list[dict] = []
-    for i in range(1, m.nbody):                    # skip world
+    for i in range(1, m.nbody):  # skip world
         name = m.body(i).name
         if not name or m.body_geomnum[i] == 0:
             continue
         adr, n = int(m.body_geomadr[i]), int(m.body_geomnum[i])
-        collides = any(m.geom_contype[g] != 0
-                       for g in range(adr, adr + n) if g >= 0)
+        collides = any(m.geom_contype[g] != 0 for g in range(adr, adr + n) if g >= 0)
         out.append({"prim": name, "collision": bool(collides)})
     return out
 
@@ -171,9 +177,10 @@ def usd_robot_inventory(robot) -> list[dict]:
             if not p.HasAPI(UsdPhysics.RigidBodyAPI):
                 continue
             path = str(p.GetPath())
-            rel = path[len(root) + 1:]
-            collides = any(cp.startswith(prefix + rel + "/")
-                           or cp == path for cp in collision_paths)
+            rel = path[len(root) + 1 :]
+            collides = any(
+                cp.startswith(prefix + rel + "/") or cp == path for cp in collision_paths
+            )
             out.append({"prim": rel, "collision": bool(collides)})
         if out:
             return out
@@ -184,8 +191,8 @@ def usd_robot_inventory(robot) -> list[dict]:
         if names:
             return [{"prim": str(n), "collision": True} for n in names]
         raise RuntimeError(
-            f"asset inventory discovery failed ({exc!r}) and no body-name "
-            "fallback is available") from exc
+            f"asset inventory discovery failed ({exc!r}) and no body-name " "fallback is available"
+        ) from exc
     names = getattr(getattr(robot, "data", None), "body_names", None) or []
     return [{"prim": str(n), "collision": True} for n in names]
 
@@ -193,9 +200,13 @@ def usd_robot_inventory(robot) -> list[dict]:
 InventoryFn = Callable[[], list[dict]]
 
 
-def resolve_bucket_names(expected: Sequence[str], robot_bodies: list[str],
-                         spec, inventory_fn: Optional[InventoryFn] = None,
-                         backend: str = "isaaclab") -> list[str]:
+def resolve_bucket_names(
+    expected: Sequence[str],
+    robot_bodies: list[str],
+    spec,
+    inventory_fn: Optional[InventoryFn] = None,
+    backend: str = "isaaclab",
+) -> list[str]:
     """General-group bucket resolution with the candidate-discovery refusal.
 
     Fullmatches the bucket's body-name patterns against the robot's body
@@ -204,19 +215,28 @@ def resolve_bucket_names(expected: Sequence[str], robot_bodies: list[str],
     never a bare "matched nothing".
     """
     compiled = [re.compile(p) for p in expected]
-    names = [n for n in robot_bodies
-             if any(c.fullmatch(n) for c in compiled)]
+    names = [n for n in robot_bodies if any(c.fullmatch(n) for c in compiled)]
     if names:
         return names
     inventory = (inventory_fn or (lambda: []))()
-    raise contact_candidate_error(spec.name, "sensor_bodies",
-                                  list(expected), inventory, backend,
-                                  reason="matched no robot body")
+    raise contact_candidate_error(
+        spec.name,
+        "sensor_bodies",
+        list(expected),
+        inventory,
+        backend,
+        reason="matched no robot body",
+    )
 
 
-def resolve_entry_name(entry: str, robot_bodies: list[str], spec,
-                       index: int, inventory_fn: Optional[InventoryFn] = None,
-                       backend: str = "isaaclab") -> str:
+def resolve_entry_name(
+    entry: str,
+    robot_bodies: list[str],
+    spec,
+    index: int,
+    inventory_fn: Optional[InventoryFn] = None,
+    backend: str = "isaaclab",
+) -> str:
     """Pairwise-entry resolution (exactly one body) with the same refusal."""
     _, name = split_entry_scope(entry)
     compiled = re.compile(name)
@@ -224,11 +244,14 @@ def resolve_entry_name(entry: str, robot_bodies: list[str], spec,
     if len(names) == 1:
         return names[0]
     inventory = (inventory_fn or (lambda: []))()
-    reason = (f"entry {index} matched {len(names)} robot bodies"
-              if names else
-              f"entry {index} ({name!r}) matched no robot body")
-    raise contact_candidate_error(spec.name, "sensor_bodies", [name],
-                                  inventory, backend, reason=reason)
+    reason = (
+        f"entry {index} matched {len(names)} robot bodies"
+        if names
+        else f"entry {index} ({name!r}) matched no robot body"
+    )
+    raise contact_candidate_error(
+        spec.name, "sensor_bodies", [name], inventory, backend, reason=reason
+    )
 
 
 def split_entry_scope(entry: str) -> tuple[Optional[str], str]:

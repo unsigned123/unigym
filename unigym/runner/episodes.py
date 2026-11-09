@@ -4,6 +4,7 @@ Shared by CollectSink and future benchmark sinks: slice a per-step rec dict
 per env, stack an env's step slices into ``(T, D)`` episode arrays, and run
 the episode-level filter chain before handing kept episodes to the writer.
 """
+
 from __future__ import annotations
 
 import numpy as np

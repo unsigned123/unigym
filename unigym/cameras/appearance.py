@@ -27,13 +27,20 @@ Semantics (render-layers Phase 1):
   partial spec never silently repaints the world; view ``visual`` with
   no entries is the historical render bitwise).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["SELECTOR_KEYS", "SELECTOR_CLASSES",
-           "validate_selector", "selector_key", "parse_color",
-           "appearance_plan", "APPEARANCE_ENTRY_KEYS"]
+__all__ = [
+    "SELECTOR_KEYS",
+    "SELECTOR_CLASSES",
+    "validate_selector",
+    "selector_key",
+    "parse_color",
+    "appearance_plan",
+    "APPEARANCE_ENTRY_KEYS",
+]
 
 SELECTOR_KEYS = ("body", "body_prefix", "class", "all")
 SELECTOR_CLASSES = ("collision", "visual")
@@ -55,31 +62,33 @@ def validate_selector(sel) -> dict:
     if not isinstance(sel, dict) or not sel:
         raise ValueError(
             f"appearance selector must be a non-empty dict with exactly "
-            f"one of {list(SELECTOR_KEYS)}, got {sel!r}")
+            f"one of {list(SELECTOR_KEYS)}, got {sel!r}"
+        )
     unknown = sorted(set(sel) - set(SELECTOR_KEYS))
     if unknown:
         raise ValueError(
             f"appearance selector: unknown key(s) {unknown}; legal "
-            f"selector keys: {list(SELECTOR_KEYS)} (camera_contract §14)")
+            f"selector keys: {list(SELECTOR_KEYS)} (camera_contract §14)"
+        )
     if len(sel) > 1:
         raise ValueError(
             f"appearance selector takes exactly ONE key, got "
-            f"{sorted(sel)} -- split it into separate appearance entries")
+            f"{sorted(sel)} -- split it into separate appearance entries"
+        )
     kind, val = next(iter(sel.items()))
     if kind == "all":
         if val is not True:
-            raise ValueError(f"appearance selector 'all' must be true, "
-                             f"got {val!r}")
+            raise ValueError(f"appearance selector 'all' must be true, " f"got {val!r}")
         return {"all": True}
     if kind == "class":
         if val not in SELECTOR_CLASSES:
             raise ValueError(
                 f"appearance selector 'class' must be one of "
-                f"{list(SELECTOR_CLASSES)}, got {val!r}")
+                f"{list(SELECTOR_CLASSES)}, got {val!r}"
+            )
         return {"class": str(val)}
     if not isinstance(val, str):
-        raise ValueError(
-            f"appearance selector {kind!r} must be a string, got {val!r}")
+        raise ValueError(f"appearance selector {kind!r} must be a string, got {val!r}")
     return {kind: val}
 
 
@@ -98,64 +107,73 @@ def parse_color(color) -> list[float]:
     if isinstance(color, str):
         c = color.strip()
         if not c.startswith("#") or len(c) != 7:
-            raise ValueError(
-                f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}")
+            raise ValueError(f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}")
         try:
-            return [int(c[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+            return [int(c[i : i + 2], 16) / 255.0 for i in (1, 3, 5)]
         except ValueError:
-            raise ValueError(
-                f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}"
-            ) from None
-    if (isinstance(color, (list, tuple)) and len(color) == 3
-            and all(isinstance(x, (int, float)) and not isinstance(x, bool)
-                    for x in color)):
+            raise ValueError(f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}") from None
+    if (
+        isinstance(color, (list, tuple))
+        and len(color) == 3
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in color)
+    ):
         return [float(x) for x in color]
-    raise ValueError(
-        f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}")
+    raise ValueError(f"color must be '#rrggbb' or [r,g,b] floats, got {color!r}")
 
 
 def _validate_entry(entry, label: str) -> dict:
     if not isinstance(entry, dict):
-        raise ValueError(f"{label}: appearance entry must be a dict, got "
-                         f"{entry!r}")
+        raise ValueError(f"{label}: appearance entry must be a dict, got " f"{entry!r}")
     unknown = sorted(set(entry) - set(APPEARANCE_ENTRY_KEYS))
     if unknown:
         raise ValueError(
             f"{label}: unknown appearance entry key(s) {unknown}; legal "
-            f"keys: {list(APPEARANCE_ENTRY_KEYS)}")
+            f"keys: {list(APPEARANCE_ENTRY_KEYS)}"
+        )
     if "select" not in entry:
         raise ValueError(f"{label}: appearance entry missing 'select'")
     if "rgba" not in entry:
         raise ValueError(
             f"{label}: appearance entry missing 'rgba' (a recolor with "
-            f"no color is a no-op -- declare it or drop the entry)")
+            f"no color is a no-op -- declare it or drop the entry)"
+        )
     rgba = entry["rgba"]
-    if (not isinstance(rgba, (list, tuple)) or len(rgba) != 4
-            or not all(isinstance(x, (int, float)) and not isinstance(x, bool)
-                       and 0.0 <= float(x) <= 1.0 for x in rgba)):
-        raise ValueError(
-            f"{label}: appearance rgba must be 4 floats in [0, 1], got "
-            f"{rgba!r}")
+    if (
+        not isinstance(rgba, (list, tuple))
+        or len(rgba) != 4
+        or not all(
+            isinstance(x, (int, float)) and not isinstance(x, bool) and 0.0 <= float(x) <= 1.0
+            for x in rgba
+        )
+    ):
+        raise ValueError(f"{label}: appearance rgba must be 4 floats in [0, 1], got " f"{rgba!r}")
     matid = entry.get("matid", -1)
     if isinstance(matid, bool) or not isinstance(matid, int):
-        raise ValueError(f"{label}: appearance matid must be an int, got "
-                         f"{matid!r}")
-    return {"select": validate_selector(entry["select"]),
-            "rgba": [float(x) for x in rgba], "matid": int(matid)}
+        raise ValueError(f"{label}: appearance matid must be an int, got " f"{matid!r}")
+    return {
+        "select": validate_selector(entry["select"]),
+        "rgba": [float(x) for x in rgba],
+        "matid": int(matid),
+    }
 
 
 def validate_appearance(entries, label: str = "appearance") -> list[dict]:
     """Validate a whole appearance list (fragment stage; the merge keys
     off :func:`selector_key`)."""
     if not isinstance(entries, (list, tuple)):
-        raise ValueError(f"{label} must be a list of entries, got "
-                         f"{entries!r}")
+        raise ValueError(f"{label} must be a list of entries, got " f"{entries!r}")
     return [_validate_entry(e, label) for e in entries]
 
 
-def appearance_plan(entries: list[dict], body_names, geom_bodyid,
-                    geom_contype, geom_conaffinity, geom_group,
-                    render_groups=None) -> dict:
+def appearance_plan(
+    entries: list[dict],
+    body_names,
+    geom_bodyid,
+    geom_contype,
+    geom_conaffinity,
+    geom_group,
+    render_groups=None,
+) -> dict:
     """Per-geom-id paint table from validated appearance entries.
 
     Args:
@@ -170,26 +188,25 @@ def appearance_plan(entries: list[dict], body_names, geom_bodyid,
     precedence order, so the plan is order-independent and a partial
     spec leaves unmatched geoms untouched (``painted`` False)."""
     ngeom = int(np.asarray(geom_bodyid).shape[0])
-    names = np.asarray(["" if n is None else str(n) for n in body_names],
-                       dtype=object)
+    names = np.asarray(["" if n is None else str(n) for n in body_names], dtype=object)
     gb = np.asarray(geom_bodyid).astype(int)
     body_of_geom = names[np.clip(gb, 0, len(names) - 1)]
     is_collision = np.asarray(geom_contype) != 0
     is_collision |= np.asarray(geom_conaffinity) != 0
     if render_groups:
         from .geomflags import collision_mask
-        is_collision = collision_mask(geom_contype, geom_conaffinity,
-                                      geom_group, render_groups)
+
+        is_collision = collision_mask(geom_contype, geom_conaffinity, geom_group, render_groups)
 
     def ordered(entries_):
         def sort_key(e):
             sel = e["select"]
             kind, val = next(iter(sel.items()))
-            catchall = kind == "all" or (kind == "body_prefix"
-                                         and str(val) == "")
+            catchall = kind == "all" or (kind == "body_prefix" and str(val) == "")
             rank = 3 if catchall else _RANK[kind]
             spec = 0 if catchall else len(str(val))
             return (rank, -spec, selector_key(sel))
+
         return sorted(entries_, key=sort_key)
 
     painted = np.zeros(ngeom, dtype=bool)

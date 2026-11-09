@@ -1,4 +1,5 @@
 """Backend-neutral placement declarations and query outcomes."""
+
 from __future__ import annotations
 
 import math
@@ -6,8 +7,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 __all__ = [
-    "PlacementRule", "PlacementResult", "PlacementRejection",
-    "PlacementCapabilityError", "order_placement_rules", "rules_from_params",
+    "PlacementRule",
+    "PlacementResult",
+    "PlacementRejection",
+    "PlacementCapabilityError",
+    "order_placement_rules",
+    "rules_from_params",
 ]
 
 
@@ -50,15 +55,16 @@ class PlacementRule:
             raise ValueError("relation must be 'on' or 'in'")
         self._validate_region_face()
         self._validate_anchor_percent()
-        if (not isinstance(self.yaw_range, tuple) or len(self.yaw_range) != 2
-                or any(not isinstance(v, (int, float)) or not math.isfinite(v)
-                       for v in self.yaw_range)
-                or self.yaw_range[0] > self.yaw_range[1]):
+        if (
+            not isinstance(self.yaw_range, tuple)
+            or len(self.yaw_range) != 2
+            or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in self.yaw_range)
+            or self.yaw_range[0] > self.yaw_range[1]
+        ):
             raise ValueError("yaw_range must be an ordered numeric pair")
         for name in ("boundary_margin", "min_clearance"):
             value = getattr(self, name)
-            if (not isinstance(value, (int, float)) or not math.isfinite(value)
-                    or value < 0):
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be non-negative")
         if not isinstance(self.order, int):
             raise ValueError("order must be an integer")
@@ -70,45 +76,59 @@ class PlacementRule:
         if self.region_key and self.region_keys:
             raise ValueError(
                 "declare exactly one of region_key (single region) or "
-                "region_keys (ordered candidate list)")
+                "region_keys (ordered candidate list)"
+            )
         if not self.region_key and not self.region_keys:
             raise ValueError(
                 "declare one region face: region_key (a non-empty string) "
-                "or region_keys (a non-empty string list)")
-        if self.region_key and (not isinstance(self.region_key, str)
-                                or not self.region_key.strip()):
+                "or region_keys (a non-empty string list)"
+            )
+        if self.region_key and (
+            not isinstance(self.region_key, str) or not self.region_key.strip()
+        ):
             raise ValueError("region_key must be a non-empty string")
         if self.region_keys:
-            if (not isinstance(self.region_keys, tuple)
-                    or any(not isinstance(key, str) or not key.strip()
-                           for key in self.region_keys)
-                    or len(set(self.region_keys)) != len(self.region_keys)):
+            if (
+                not isinstance(self.region_keys, tuple)
+                or any(not isinstance(key, str) or not key.strip() for key in self.region_keys)
+                or len(set(self.region_keys)) != len(self.region_keys)
+            ):
                 raise ValueError(
                     "region_keys must be an empty tuple or a non-empty tuple "
-                    "of unique non-empty strings")
+                    "of unique non-empty strings"
+                )
 
     def _validate_anchor_percent(self) -> None:
         """The official obj_x/y_percent face: null or a nullable pair."""
         if self.anchor_percent is None:
             return
-        if (not isinstance(self.anchor_percent, tuple)
-                or len(self.anchor_percent) != 2
-                or all(value is None for value in self.anchor_percent)
-                or any(not (value is None
-                            or (not isinstance(value, bool)
-                                and isinstance(value, (int, float))
-                                and math.isfinite(value)
-                                and 0.0 <= value <= 1.0))
-                       for value in self.anchor_percent)):
+        if (
+            not isinstance(self.anchor_percent, tuple)
+            or len(self.anchor_percent) != 2
+            or all(value is None for value in self.anchor_percent)
+            or any(
+                not (
+                    value is None
+                    or (
+                        not isinstance(value, bool)
+                        and isinstance(value, (int, float))
+                        and math.isfinite(value)
+                        and 0.0 <= value <= 1.0
+                    )
+                )
+                for value in self.anchor_percent
+            )
+        ):
             raise ValueError(
                 "anchor_percent must be None or an [x, y] pair whose "
                 "entries are fractions in [0, 1] or None (per-axis "
-                "uniform)")
+                "uniform)"
+            )
 
     @property
     def region_choices(self) -> tuple[str, ...]:
         """The rule's region candidates in declared order."""
-        return ((self.region_key,) if self.region_key else self.region_keys)
+        return (self.region_key,) if self.region_key else self.region_keys
 
 
 @dataclass(frozen=True)
@@ -134,11 +154,11 @@ class PlacementRejection:
 
 def order_placement_rules(rules: tuple[PlacementRule, ...]) -> tuple[PlacementRule, ...]:
     """Return rules in declared order, preserving input order for ties."""
-    if not isinstance(rules, tuple) or any(not isinstance(rule, PlacementRule)
-                                           for rule in rules):
+    if not isinstance(rules, tuple) or any(not isinstance(rule, PlacementRule) for rule in rules):
         raise ValueError("rules must be a tuple of PlacementRule")
-    return tuple(rule for _, rule in sorted(
-        enumerate(rules), key=lambda item: (item[1].order, item[0])))
+    return tuple(
+        rule for _, rule in sorted(enumerate(rules), key=lambda item: (item[1].order, item[0]))
+    )
 
 
 def rules_from_params(value) -> tuple[PlacementRule, ...]:
@@ -163,11 +183,10 @@ def rules_from_params(value) -> tuple[PlacementRule, ...]:
         if "regions" in data:
             if "region_key" in data:
                 raise ValueError(
-                    f"placement rule {index}: declare either region_key or "
-                    "regions, not both")
+                    f"placement rule {index}: declare either region_key or " "regions, not both"
+                )
             data["region_keys"] = tuple(data.pop("regions"))
-        if (data.get("anchor_percent") is not None
-                and not isinstance(data["anchor_percent"], tuple)):
+        if data.get("anchor_percent") is not None and not isinstance(data["anchor_percent"], tuple):
             data["anchor_percent"] = tuple(data["anchor_percent"])
         rules.append(PlacementRule(**data))
     return tuple(rules)

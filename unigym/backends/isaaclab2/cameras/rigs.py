@@ -27,6 +27,7 @@ convention of the package.
   single-env follow; ``recorder/camera.py`` was removed — the
   recorder binds declared rigs only, no self-built camera path).
 """
+
 from __future__ import annotations
 
 import math
@@ -34,9 +35,14 @@ import math
 import torch
 
 from unigym.cameras.base import CameraSpec, CameraStateTable, rig_type
-from unigym.cameras.rigs import (DEFAULT_CHASE_OFFSET, _lookat_quat_batch,
-                                 _quat_mul_batch, _yaw_from_quat,
-                                 _yaw_pitch_roll_quat_batch, lookat_quat)
+from unigym.cameras.rigs import (
+    DEFAULT_CHASE_OFFSET,
+    _lookat_quat_batch,
+    _quat_mul_batch,
+    _yaw_from_quat,
+    _yaw_pitch_roll_quat_batch,
+    lookat_quat,
+)
 
 
 def build_isaaclab_rig(spec: CameraSpec, render_groups=None):
@@ -57,9 +63,9 @@ def build_isaaclab_rig(spec: CameraSpec, render_groups=None):
     if rtype == "fixed":
         raise ValueError(
             f"camera {spec.name!r}: rig type 'fixed' was renamed 'world' "
-            f"(camera unification) -- update the config; there is no alias")
-    raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} "
-                     "(body|world|chase)")
+            f"(camera unification) -- update the config; there is no alias"
+        )
+    raise ValueError(f"camera {spec.name!r}: unknown rig type {rtype!r} " "(body|world|chase)")
 
 
 class _RigBase:
@@ -82,10 +88,10 @@ class _RigBase:
         self.target_env = int((spec.rig or {}).get("target_env", 0))
         self._target_env_declared = "target_env" in (spec.rig or {})
         self._pose_dirty = False
-        self._pose_off = None   # (N, 3) torch, mount frame
-        self._yaw = None        # (N,) torch, rad
-        self._pitch = None      # (N,) torch, rad
-        self._roll = None       # (N,) torch, rad (view-axis roll)
+        self._pose_off = None  # (N, 3) torch, mount frame
+        self._yaw = None  # (N,) torch, rad
+        self._pitch = None  # (N,) torch, rad
+        self._roll = None  # (N,) torch, rad (view-axis roll)
         # the (camera, env) pose state.  ``world``/``chase`` WRITE
         # resolved poses here and the sensor write is driven from these
         # rows; ``body`` stays derived (FK ∘ offset, never stored).
@@ -97,8 +103,8 @@ class _RigBase:
         """Add the sensor cfg to the scene cfg (before env construction)."""
         # lazy: the sensor-cfg builder lives beside this module
         from .cfg import build_sensor_cfg
-        setattr(scene_cfg, f"cam_{self.spec.name}",
-                build_sensor_cfg(self.spec))
+
+        setattr(scene_cfg, f"cam_{self.spec.name}", build_sensor_cfg(self.spec))
 
     def bind_env(self, env) -> None:
         """Grab the cloned sensor handle after env construction.
@@ -121,6 +127,7 @@ class _RigBase:
         the argument is accepted for protocol symmetry (mujoco N=1 too).
         """
         from .cfg import read_frames
+
         del env_ids
         return read_frames(self._sensor, self.spec, self._env.num_envs)
 
@@ -133,13 +140,12 @@ class _RigBase:
 
     def _check_env_ids(self, env_ids) -> list[int]:
         n = int(self._env.num_envs)
-        ids = self._all_envs() if env_ids is None else sorted(
-            {int(i) for i in env_ids})
+        ids = self._all_envs() if env_ids is None else sorted({int(i) for i in env_ids})
         for i in ids:
             if not 0 <= i < n:
                 raise ValueError(
-                    f"camera '{self.name}': env_id {i} out of range for "
-                    f"{n} env(s)")
+                    f"camera '{self.name}': env_id {i} out of range for " f"{n} env(s)"
+                )
         return ids
 
     def _served_envs(self, env_ids=None) -> list[int]:
@@ -150,7 +156,8 @@ class _RigBase:
                 if not 0 <= te < int(self._env.num_envs):
                     raise ValueError(
                         f"camera '{self.name}': target_env {te} out of "
-                        f"range for {int(self._env.num_envs)} env(s)")
+                        f"range for {int(self._env.num_envs)} env(s)"
+                    )
                 return [te]
             ids = self._check_env_ids(env_ids)
             if ids != [self.target_env]:
@@ -158,7 +165,8 @@ class _RigBase:
                     f"camera '{self.name}' is state=shared: it has a single "
                     f"meaningful instance (env {self.target_env} = "
                     f"target_env); env_ids must be omitted or "
-                    f"[{self.target_env}]")
+                    f"[{self.target_env}]"
+                )
             return ids
         return self._check_env_ids(env_ids)
 
@@ -178,13 +186,19 @@ class _RigBase:
             self._yaw = torch.zeros(n)
             self._pitch = torch.zeros(n)
             self._roll = torch.zeros(n)
-        return (self._pose_off.to(device), self._yaw.to(device),
-                self._pitch.to(device), self._roll.to(device))
+        return (
+            self._pose_off.to(device),
+            self._yaw.to(device),
+            self._pitch.to(device),
+            self._roll.to(device),
+        )
 
     def _has_orientation_offset(self) -> bool:
-        return self._yaw is not None and (bool((self._yaw != 0).any())
-                                          or bool((self._pitch != 0).any())
-                                          or bool((self._roll != 0).any()))
+        return self._yaw is not None and (
+            bool((self._yaw != 0).any())
+            or bool((self._pitch != 0).any())
+            or bool((self._roll != 0).any())
+        )
 
     def _has_pose_offset(self) -> bool:
         return self._pose_off is not None and bool((self._pose_off != 0).any())
@@ -201,9 +215,15 @@ class _RigBase:
             return slice(te, te + 1), [te]
         return slice(None), None
 
-    def apply_properties(self, pose_offset=None, yaw_deg=None,
-                         pitch_deg=None, roll_deg=None, target_env=None,
-                         env_ids: list[int] | None = None) -> None:
+    def apply_properties(
+        self,
+        pose_offset=None,
+        yaw_deg=None,
+        pitch_deg=None,
+        roll_deg=None,
+        target_env=None,
+        env_ids: list[int] | None = None,
+    ) -> None:
         """Update the live pose properties (manager pre-validates keys).
 
         ``env_ids=None`` applies to every instance (per_env semantics);
@@ -216,11 +236,9 @@ class _RigBase:
             self._yaw = torch.zeros(n)
             self._pitch = torch.zeros(n)
             self._roll = torch.zeros(n)
-        sel: any = slice(None) if env_ids is None else torch.tensor(
-            env_ids, dtype=torch.long)
+        sel: any = slice(None) if env_ids is None else torch.tensor(env_ids, dtype=torch.long)
         if pose_offset is not None:
-            self._pose_off[sel] = torch.tensor(
-                [float(x) for x in pose_offset], dtype=torch.float32)
+            self._pose_off[sel] = torch.tensor([float(x) for x in pose_offset], dtype=torch.float32)
         if yaw_deg is not None:
             self._yaw[sel] = math.radians(float(yaw_deg))
         if pitch_deg is not None:
@@ -254,13 +272,14 @@ class _RigBase:
             f"camera '{self.name}': transient world pose is supported on "
             f"world rigs only (this rig: "
             f"{str((self.spec.rig or {}).get('type', '')).strip().lower()!r}"
-            f")")
+            f")"
+        )
 
     def end_world_pose(self, saved) -> None:
         """Restore the pose saved by :meth:`begin_world_pose`."""
         raise NotImplementedError(
-            f"camera '{self.name}': transient world pose is supported on "
-            f"world rigs only")
+            f"camera '{self.name}': transient world pose is supported on " f"world rigs only"
+        )
 
     def set_world_pose(self, pos, quat_wxyz):
         """Persistent absolute world pose (freecam face; world rigs only).
@@ -272,13 +291,14 @@ class _RigBase:
             f"camera '{self.name}': world-pose set is supported on "
             f"world rigs only (this rig: "
             f"{str((self.spec.rig or {}).get('type', '')).strip().lower()!r}"
-            f")")
+            f")"
+        )
 
     def get_world_pose(self):
         """Read-back: ``(pos(3,), quat_wxyz(4,))`` world convention."""
         raise NotImplementedError(
-            f"camera '{self.name}': world-pose read-back is supported on "
-            f"world rigs only")
+            f"camera '{self.name}': world-pose read-back is supported on " f"world rigs only"
+        )
 
 
 class BodyRig(_RigBase):
@@ -306,16 +326,15 @@ class BodyRig(_RigBase):
         self.attach = str(rig.get("attach", "") or "").strip()
         self._prim_mounted = bool(self.attach)
         self._off_pos = torch.tensor(
-            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))],
-            dtype=torch.float32)
+            [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))], dtype=torch.float32
+        )
         if rig.get("rot") is not None:
-            self._off_rot = torch.tensor(
-                [float(x) for x in rig["rot"]], dtype=torch.float32)
+            self._off_rot = torch.tensor([float(x) for x in rig["rot"]], dtype=torch.float32)
         else:
             pitch = math.radians(float(rig.get("pitch_down_deg", 0.0)))
             self._off_rot = torch.tensor(
-                [math.cos(pitch / 2.0), 0.0, math.sin(pitch / 2.0), 0.0],
-                dtype=torch.float32)
+                [math.cos(pitch / 2.0), 0.0, math.sin(pitch / 2.0), 0.0], dtype=torch.float32
+            )
 
     def sync_pose(self, env_ids=None) -> None:
         """Re-pose the render camera to the robot (step-tail semantics).
@@ -349,14 +368,13 @@ class BodyRig(_RigBase):
         if self._has_pose_offset():
             off_pos = off_pos + pose_off[sel]
         off_rot = self._off_rot.to(device).expand(root_quat.shape[0], 4)
-        pos = robot.data.root_pos_w[sel, :3] + math_utils.quat_apply(
-            root_quat, off_pos)
+        pos = robot.data.root_pos_w[sel, :3] + math_utils.quat_apply(root_quat, off_pos)
         rot = math_utils.quat_mul(root_quat, off_rot)
         if self._has_orientation_offset():
-            rot = math_utils.quat_mul(_yaw_pitch_roll_quat_batch(
-                yaw[sel], pitch[sel], roll[sel]), rot)
-        self._sensor.set_world_poses(pos, rot, env_ids=pose_env_ids,
-                                     convention="world")
+            rot = math_utils.quat_mul(
+                _yaw_pitch_roll_quat_batch(yaw[sel], pitch[sel], roll[sel]), rot
+            )
+        self._sensor.set_world_poses(pos, rot, env_ids=pose_env_ids, convention="world")
 
 
 class WorldRig(_RigBase):
@@ -378,12 +396,10 @@ class WorldRig(_RigBase):
         pos = [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))]
         self._base_pos = torch.tensor(pos, dtype=torch.float32)
         if rig.get("rot") is not None:
-            self._base_rot = torch.tensor([float(x) for x in rig["rot"]],
-                                          dtype=torch.float32)
+            self._base_rot = torch.tensor([float(x) for x in rig["rot"]], dtype=torch.float32)
         else:
             lookat = rig.get("lookat", (1.0, 0.0, 0.25))
-            self._base_rot = torch.tensor(
-                lookat_quat(pos, lookat), dtype=torch.float32)
+            self._base_rot = torch.tensor(lookat_quat(pos, lookat), dtype=torch.float32)
         # per-env declared pose override (CameraSpec.env_poses); None = the
         # single base pose for every env
         self._declared_override: dict[int, tuple] | None = None
@@ -392,8 +408,7 @@ class WorldRig(_RigBase):
     def _init_state_rows(self) -> None:
         """Seed the pose table from the single declared base pose."""
         for i in range(int(self._env.num_envs)):
-            self.state_table.set(self.name, i, self._base_pos.clone(),
-                                 self._base_rot.clone())
+            self.state_table.set(self.name, i, self._base_pos.clone(), self._base_rot.clone())
 
     def apply_declared_poses(self, env_poses) -> None:
         """Write the declared pose rows (bind + reset re-application)."""
@@ -401,15 +416,16 @@ class WorldRig(_RigBase):
         if not env_poses:
             self._declared_override = None
             for i in range(n):
-                self.state_table.set(self.name, i,
-                                     self._base_pos.clone(),
-                                     self._base_rot.clone())
+                self.state_table.set(self.name, i, self._base_pos.clone(), self._base_rot.clone())
             return
         rows = [env_poses[0]] * n if len(env_poses) == 1 else list(env_poses)
         self._declared_override = {
-            i: (torch.tensor(rows[i]["pos"], dtype=torch.float32),
-                torch.tensor(rows[i]["quat"], dtype=torch.float32))
-            for i in range(n)}
+            i: (
+                torch.tensor(rows[i]["pos"], dtype=torch.float32),
+                torch.tensor(rows[i]["quat"], dtype=torch.float32),
+            )
+            for i in range(n)
+        }
         self._pose_dirty = True
         self.sync_pose(env_ids=list(range(n)))
 
@@ -451,16 +467,18 @@ class WorldRig(_RigBase):
             if self._has_orientation_offset():
                 r = _quat_mul_batch(
                     _yaw_pitch_roll_quat_batch(
-                        yaw[src:src + 1], pitch[src:src + 1],
-                        roll[src:src + 1]), r.unsqueeze(0))[0]
+                        yaw[src : src + 1], pitch[src : src + 1], roll[src : src + 1]
+                    ),
+                    r.unsqueeze(0),
+                )[0]
             self.state_table.set(self.name, None if shared else i, p, r)
         self._push_state(ids, n)
         self._pose_dirty = False
 
     def _push_state(self, ids, num_envs) -> None:
         from .cfg import push_state_table_poses
-        push_state_table_poses(self._sensor, self.state_table, self.name,
-                               ids, num_envs=num_envs)
+
+        push_state_table_poses(self._sensor, self.state_table, self.name, ids, num_envs=num_envs)
 
     def on_reset(self, env_ids) -> None:
         """Re-apply the declared env_poses after a reset (if declared)."""
@@ -479,18 +497,20 @@ class WorldRig(_RigBase):
         no convention round-trip) -- see :meth:`end_world_pose`.
         """
         if self._sensor is None:
-            raise RuntimeError(
-                f"camera '{self.name}': sensor not bound (bind_env)")
+            raise RuntimeError(f"camera '{self.name}': sensor not bound (bind_env)")
         device = getattr(self._env, "device", "cpu")
         n = int(self._env.num_envs)
         te = self.target_env
         if not 0 <= te < n:
-            raise ValueError(f"camera '{self.name}': target_env {te} out "
-                             f"of range for {n} env(s)")
+            raise ValueError(
+                f"camera '{self.name}': target_env {te} out " f"of range for {n} env(s)"
+            )
         self.state_table.set(
-            self.name, None if self._state_shared() else te,
+            self.name,
+            None if self._state_shared() else te,
             torch.tensor(pos, dtype=torch.float32, device=device),
-            torch.tensor(quat_wxyz, dtype=torch.float32, device=device))
+            torch.tensor(quat_wxyz, dtype=torch.float32, device=device),
+        )
         self._push_state([te], n)
         return None
 
@@ -507,20 +527,20 @@ class WorldRig(_RigBase):
     def get_world_pose(self):
         """Read-back of the state-table row (sensor fallback)."""
         if self._sensor is None:
-            raise RuntimeError(
-                f"camera '{self.name}': sensor not bound (bind_env)")
+            raise RuntimeError(f"camera '{self.name}': sensor not bound (bind_env)")
         idx = 0 if self._state_shared() else self.target_env
         row = self.state_table.get(self.name, idx)
         if row is not None:
             pos, quat = row.pos, row.quat
-            return (torch.as_tensor(pos).detach().cpu().numpy().copy(),
-                    torch.as_tensor(quat).detach().cpu().numpy().copy())
+            return (
+                torch.as_tensor(pos).detach().cpu().numpy().copy(),
+                torch.as_tensor(quat).detach().cpu().numpy().copy(),
+            )
         idx = self._sync_selection()[1] or [0]
         data = self._sensor.data
         pos = data.pos_w[idx[0]]
         quat = data.quat_w[idx[0]]
-        return (pos.detach().cpu().numpy().copy(),
-                quat.detach().cpu().numpy().copy())
+        return (pos.detach().cpu().numpy().copy(), quat.detach().cpu().numpy().copy())
 
     def set_world_pose(self, pos, quat_wxyz, env_idx: int | None = None):
         """Persistent absolute world pose (freecam face).
@@ -531,18 +551,20 @@ class WorldRig(_RigBase):
         last write wins).  ``env_idx`` None = target_env.
         """
         if self._sensor is None:
-            raise RuntimeError(
-                f"camera '{self.name}': sensor not bound (bind_env)")
+            raise RuntimeError(f"camera '{self.name}': sensor not bound (bind_env)")
         device = getattr(self._env, "device", "cpu")
         n = int(self._env.num_envs)
         te = self.target_env if env_idx is None else int(env_idx)
         if not 0 <= te < n:
-            raise ValueError(f"camera '{self.name}': target_env {te} out "
-                             f"of range for {n} env(s)")
+            raise ValueError(
+                f"camera '{self.name}': target_env {te} out " f"of range for {n} env(s)"
+            )
         self.state_table.set(
-            self.name, None if self._state_shared() else te,
+            self.name,
+            None if self._state_shared() else te,
             torch.tensor(pos, dtype=torch.float32, device=device),
-            torch.tensor(quat_wxyz, dtype=torch.float32, device=device))
+            torch.tensor(quat_wxyz, dtype=torch.float32, device=device),
+        )
         self._push_state([te], n)
 
 
@@ -568,10 +590,8 @@ class ChaseRig(_RigBase):
         rig = spec.rig or {}
         pos = rig.get("pos", DEFAULT_CHASE_OFFSET["pos"])
         lookat = rig.get("lookat", DEFAULT_CHASE_OFFSET["lookat"])
-        self._pos_off = torch.tensor([float(x) for x in pos],
-                                     dtype=torch.float32)
-        self._look_off = torch.tensor([float(x) for x in lookat],
-                                      dtype=torch.float32)
+        self._pos_off = torch.tensor([float(x) for x in pos], dtype=torch.float32)
+        self._look_off = torch.tensor([float(x) for x in lookat], dtype=torch.float32)
 
     def _sync_selection(self) -> tuple[slice, list[int] | None]:
         # legacy single-target selector (get_world_pose fallback / the
@@ -602,19 +622,18 @@ class ChaseRig(_RigBase):
         if self._state_shared() and not 0 <= self.target_env < n:
             raise ValueError(
                 f"chase camera '{self.name}': target_env {self.target_env} "
-                f"out of range for {n} env(s)")
+                f"out of range for {n} env(s)"
+            )
         device = robot.data.root_pos_w.device
         for env_idx in ids:
-            te = (self.target_env if self._state_shared()
-                  else self._chase_target(env_idx))
+            te = self.target_env if self._state_shared() else self._chase_target(env_idx)
             if not 0 <= te < n:
                 raise ValueError(
-                    f"chase camera '{self.name}': target_env {te} out of "
-                    f"range for {n} env(s)")
+                    f"chase camera '{self.name}': target_env {te} out of " f"range for {n} env(s)"
+                )
             # chase offsets are computed against TARGET env's root only
-            root_pos = robot.data.root_pos_w[te:te + 1, :3]
-            yaw = _yaw_from_quat(
-                robot.data.root_quat_w[te:te + 1])
+            root_pos = robot.data.root_pos_w[te : te + 1, :3]
+            yaw = _yaw_from_quat(robot.data.root_quat_w[te : te + 1])
             c, s = torch.cos(yaw), torch.sin(yaw)
             pos_off = self._pos_off.to(device)
             if self._has_pose_offset():
@@ -622,22 +641,27 @@ class ChaseRig(_RigBase):
             look_off = self._look_off.to(device)
 
             def _rot_xy(off):
-                return torch.stack([off[0] * c - off[1] * s,
-                                    off[0] * s + off[1] * c,
-                                    off[2].expand_as(c)], dim=-1)
+                return torch.stack(
+                    [off[0] * c - off[1] * s, off[0] * s + off[1] * c, off[2].expand_as(c)], dim=-1
+                )
 
             pos = root_pos + _rot_xy(pos_off)
             lookat = root_pos + _rot_xy(look_off)
             quat = _lookat_quat_batch(pos, lookat)
             if self._has_orientation_offset():
-                quat = _quat_mul_batch(_yaw_pitch_roll_quat_batch(
-                    self._yaw.to(device)[te:te + 1],
-                    self._pitch.to(device)[te:te + 1],
-                    self._roll.to(device)[te:te + 1]), quat)
+                quat = _quat_mul_batch(
+                    _yaw_pitch_roll_quat_batch(
+                        self._yaw.to(device)[te : te + 1],
+                        self._pitch.to(device)[te : te + 1],
+                        self._roll.to(device)[te : te + 1],
+                    ),
+                    quat,
+                )
             self.state_table.set(
-                self.name, None if self._state_shared() else env_idx,
-                pos[0], quat[0])
+                self.name, None if self._state_shared() else env_idx, pos[0], quat[0]
+            )
         from .cfg import push_state_table_poses
+
         push_state_table_poses(
-            self._sensor, self.state_table, self.name, ids, num_envs=n,
-            force_env_ids=True)
+            self._sensor, self.state_table, self.name, ids, num_envs=n, force_env_ids=True
+        )

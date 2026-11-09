@@ -8,6 +8,7 @@ and typed as ``Optional[Any]`` at runtime — profiles built with
 ``with_isaaclab=False`` carry every non-asset field (joint sets, q0, feet,
 body parts) unchanged.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -74,11 +75,9 @@ class RobotRecipe:
         for name, joints in dict(self.joint_sets or {}).items():
             names = tuple(str(joint) for joint in (joints or ()))
             if not names:
-                raise ValueError(
-                    f"RobotRecipe joint set {name!r} is empty")
+                raise ValueError(f"RobotRecipe joint set {name!r} is empty")
             if len(set(names)) != len(names):
-                raise ValueError(
-                    f"RobotRecipe joint set {name!r} contains duplicate names")
+                raise ValueError(f"RobotRecipe joint set {name!r} contains duplicate names")
             sets[str(name)] = names
         if not sets:
             raise ValueError("RobotRecipe must declare at least one joint set")
@@ -109,8 +108,7 @@ class RobotRecipe:
         """Extra NamedAction faces (compatibility capability gate)."""
         if not self._extra_action_terms:
             return None
-        return {str(name): list(joints)
-                for name, joints in self._extra_action_terms.items()}
+        return {str(name): list(joints) for name, joints in self._extra_action_terms.items()}
 
     @property
     def num_joints(self) -> int:

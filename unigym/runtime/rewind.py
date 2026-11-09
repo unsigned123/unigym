@@ -56,6 +56,7 @@ Threading: everything here runs on the engine thread (command dispatch or
 the parked service loop) — the same single-thread discipline as the rest
 of the bridge.
 """
+
 from __future__ import annotations
 
 import collections
@@ -63,8 +64,7 @@ import copy
 import json
 import os
 from collections.abc import Callable, Mapping, Sequence
-from typing import (TYPE_CHECKING, Any, Protocol, TypeAlias, TypedDict,
-                    runtime_checkable)
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypedDict, runtime_checkable
 
 import numpy as np
 
@@ -117,8 +117,8 @@ class _SnapshotBackend(Protocol):
 
     def restore(self, state: SnapshotValue) -> None: ...
 
-__all__ = ["RewindStateProvider", "RewindController", "RewindGateError",
-           "attach", "MAX_SNAPSHOTS"]
+
+__all__ = ["RewindStateProvider", "RewindController", "RewindGateError", "attach", "MAX_SNAPSHOTS"]
 
 
 @runtime_checkable
@@ -142,7 +142,7 @@ class RewindStateProvider(Protocol):
     rewinds.
     """
 
-    name: str          # "benchmark" / "episode_runner" (payload key)
+    name: str  # "benchmark" / "episode_runner" (payload key)
 
     def rewind_state(self) -> SnapshotValue:
         """The facility's necessary state at the freeze point."""
@@ -198,10 +198,15 @@ class RewindController:
             the adapter (fail-fast: any failure aborts the whole rewind).
     """
 
-    def __init__(self, bridge: Bridge, env: _SnapshotBackend,
-                 adapter: Adapter, engine: RewindEngine,
-                 backend_label: str,
-                 providers: Sequence[RewindStateProvider] | None = None):
+    def __init__(
+        self,
+        bridge: Bridge,
+        env: _SnapshotBackend,
+        adapter: Adapter,
+        engine: RewindEngine,
+        backend_label: str,
+        providers: Sequence[RewindStateProvider] | None = None,
+    ):
         self.bridge = bridge
         self.env = env
         self.adapter = adapter
@@ -211,8 +216,7 @@ class RewindController:
         names = [p.name for p in self.providers]
         if len(set(names)) != len(names):
             raise ValueError(f"duplicate rewind provider names: {names}")
-        self._snaps: collections.OrderedDict[int, RewindRecord] = \
-            collections.OrderedDict()
+        self._snaps: collections.OrderedDict[int, RewindRecord] = collections.OrderedDict()
         self._next_id = 1
         bridge.register_command("snapshot", self.cmd_snapshot)
         bridge.register_command("rewind", self.cmd_rewind)
@@ -231,24 +235,29 @@ class RewindController:
                 f"snapshot capability (traits: "
                 f"{sorted(t.value for t in info.traits)})",
                 hint="rewind is mujoco-only in Round B -- run env.backend: "
-                     "mujoco (isaaclab lands it with the isaaclab rewind "
-                     "phase)")
+                "mujoco (isaaclab lands it with the isaaclab rewind "
+                "phase)",
+            )
         ad = self.adapter
-        if (ad is None or not getattr(ad, "rewindable", False)
-                or not callable(getattr(ad, "on_rewind", None))):
+        if (
+            ad is None
+            or not getattr(ad, "rewindable", False)
+            or not callable(getattr(ad, "on_rewind", None))
+        ):
             name = type(ad).__name__ if ad is not None else "<none>"
             raise RewindGateError(
                 f"adapter {name} is not rewindable (rewindable="
                 f"{getattr(ad, 'rewindable', None)!r})",
                 hint="rewind requires rewindable=True + on_rewind on the "
-                     "bound adapter (agent_g1 implements it; the explicit "
-                     "class attribute is the contract, not hasattr)")
+                "bound adapter (agent_g1 implements it; the explicit "
+                "class attribute is the contract, not hasattr)",
+            )
         if getattr(self.engine, "replay", None) is not None:
             raise RewindGateError(
                 "replay runs are not rewindable (trace injection vs a "
                 "forked timeline have no defined composition)",
-                hint="drop --replay or start a fresh run for the rewind "
-                     "face")
+                hint="drop --replay or start a fresh run for the rewind " "face",
+            )
         if getattr(self.engine, "sampler", None) is not None:
             # the gate's true invariant: no unsnapshotted sampler STATE
             # (a random resampler's RNG/timers live outside the
@@ -265,15 +274,15 @@ class RewindController:
                     "(command resampler state lives outside the "
                     "snapshot)",
                     hint="self-commanding adapters (agent_g1, sonic_g1) "
-                         "run without a sampler (or with an explicitly "
-                         "rewind_inert one, e.g. fixed); rewind needs "
-                         "one of those")
+                    "run without a sampler (or with an explicitly "
+                    "rewind_inert one, e.g. fixed); rewind needs "
+                    "one of those",
+                )
 
     # ---------------------------------------------------------------- #
     # command handlers (engine thread; errors land in the ack)
     # ---------------------------------------------------------------- #
-    def cmd_snapshot(self, rid: int,
-                     params: dict[str, JsonValue]) -> AckResult:
+    def cmd_snapshot(self, rid: int, params: dict[str, JsonValue]) -> AckResult:
         """Cmd "snapshot": capture engine+adapter+providers into the ring.
 
         Raises:
@@ -282,12 +291,10 @@ class RewindController:
         self._gate()
         label = params.get("label")
         if label is not None and not str(label).strip():
-            raise RewindGateError("snapshot: 'label' must be a non-empty "
-                                  "string when given")
+            raise RewindGateError("snapshot: 'label' must be a non-empty " "string when given")
         bundle = self.bridge._bundle or {}
         tick = int(getattr(self.bridge, "_last_step", 0) or 0)
-        cache: Mapping[str, SnapshotValue] = getattr(
-            self.env, "obs_cache", None) or {}
+        cache: Mapping[str, SnapshotValue] = getattr(self.env, "obs_cache", None) or {}
         payload: RewindPayload = {
             "tick": tick,
             "env": self.env.snapshot(),
@@ -295,15 +302,15 @@ class RewindController:
             # across steps by design, so the cache is part of the run state
             # the next compute_obs consumes -- branch-A writes must not leak
             "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
-            "adapter": (self.adapter.snapshot_internal()
-                        if callable(getattr(self.adapter,
-                                            "snapshot_internal", None))
-                        else None),
+            "adapter": (
+                self.adapter.snapshot_internal()
+                if callable(getattr(self.adapter, "snapshot_internal", None))
+                else None
+            ),
             # provider states: the SAME freeze point packages the
             # engine + adapter + every facility's necessary state (the
             # consistency guarantee is constructional -- one package)
-            "providers": {p.name: p.rewind_state()
-                          for p in self.providers},
+            "providers": {p.name: p.rewind_state() for p in self.providers},
             # pre-flight face: the backend's episode counter at the
             # freeze point (env 0; process truth per contract §4.1 --
             # never rewinds).  The rewind pre-flight compares it against
@@ -318,53 +325,68 @@ class RewindController:
             "torch_rng": _torch_rng_state(),
         }
         import time as _time
+
         rec: RewindRecord = {
-            "snap_id": self._next_id, "tick": tick,
+            "snap_id": self._next_id,
+            "tick": tick,
             "label": (str(label).strip() if label else None),
-            "ts": _time.time(), "payload": payload}
+            "ts": _time.time(),
+            "payload": payload,
+        }
         self._next_id += 1
-        result: AckResult = {"snap_id": rec["snap_id"], "tick": tick,
-                             "label": rec["label"]}
+        result: AckResult = {"snap_id": rec["snap_id"], "tick": tick, "label": rec["label"]}
         if len(self._snaps) >= MAX_SNAPSHOTS:
-            _, evicted = self._snaps.popitem(last=False)   # LRU: oldest
+            _, evicted = self._snaps.popitem(last=False)  # LRU: oldest
             evicted_doc: dict[str, JsonValue] = {
                 "snap_id": evicted["snap_id"],
                 "tick": evicted["tick"],
-                "label": evicted["label"]}
+                "label": evicted["label"],
+            }
             result["evicted"] = evicted_doc
-            print(f"[rewind] LRU evicted snapshot "
-                  f"{evicted['snap_id']} (tick {evicted['tick']}) -- slot "
-                  f"cap {MAX_SNAPSHOTS} reached; rewinding to it now "
-                  f"errors explicitly", flush=True)
+            print(
+                f"[rewind] LRU evicted snapshot "
+                f"{evicted['snap_id']} (tick {evicted['tick']}) -- slot "
+                f"cap {MAX_SNAPSHOTS} reached; rewinding to it now "
+                f"errors explicitly",
+                flush=True,
+            )
         self._snaps[rec["snap_id"]] = rec
         # checkpoint ring: every snapshot is a freeze point's undo
         # anchor -- one append-only ledger line (the ledger lives on the
         # adapter; absent = bookkeeping-only mount, honest no-op)
         ledger = getattr(self.adapter, "_ledger", None)
         if ledger is not None:
-            ledger.append("checkpoint",
-                          {"label": rec["label"],
-                           "snap_id": rec["snap_id"]},
-                          {"status": "captured",
-                           "message": (f"snapshot {rec['snap_id']} @ tick "
-                                       f"{tick}"
-                                       + (f" (evicted "
-                                          f"{result['evicted']['snap_id']})"
-                                          if "evicted" in result else ""))},
-                          tick)
+            ledger.append(
+                "checkpoint",
+                {"label": rec["label"], "snap_id": rec["snap_id"]},
+                {
+                    "status": "captured",
+                    "message": (
+                        f"snapshot {rec['snap_id']} @ tick "
+                        f"{tick}"
+                        + (
+                            f" (evicted " f"{result['evicted']['snap_id']})"
+                            if "evicted" in result
+                            else ""
+                        )
+                    ),
+                },
+                tick,
+            )
         return result
 
-    def cmd_snapshots(self, rid: int,
-                      params: dict[str, JsonValue]) -> AckResult:
+    def cmd_snapshots(self, rid: int, params: dict[str, JsonValue]) -> AckResult:
         """Cmd "snapshots": the live slot list + the LRU cap."""
         self._gate()
-        return {"snapshots": [{"snap_id": r["snap_id"], "tick": r["tick"],
-                               "label": r["label"], "ts": r["ts"]}
-                              for r in self._snaps.values()],
-                "cap": MAX_SNAPSHOTS}
+        return {
+            "snapshots": [
+                {"snap_id": r["snap_id"], "tick": r["tick"], "label": r["label"], "ts": r["ts"]}
+                for r in self._snaps.values()
+            ],
+            "cap": MAX_SNAPSHOTS,
+        }
 
-    def cmd_rewind(self, rid: int,
-                   params: dict[str, JsonValue]) -> AckResult:
+    def cmd_rewind(self, rid: int, params: dict[str, JsonValue]) -> AckResult:
         """Cmd "rewind": fork the timeline back to a snapshot.
 
         Dumps the abandoned branch's provider buffers first, restores
@@ -380,16 +402,17 @@ class RewindController:
         if isinstance(sid, bool) or not isinstance(sid, int):
             raise RewindGateError(
                 f"rewind: 'snap_id' must be an integer, got {sid!r}",
-                hint="GET snapshots (or `unigym snapshots <run>`) lists the "
-                     "live snapshot slots")
+                hint="GET snapshots (or `unigym snapshots <run>`) lists the " "live snapshot slots",
+            )
         rec = self._snaps.get(sid)
         if rec is None:
             raise RewindGateError(
                 f"rewind: unknown snap_id {sid}",
                 hint=f"live snapshots: "
-                     f"{[r['snap_id'] for r in self._snaps.values()]} "
-                     f"(LRU cap {MAX_SNAPSHOTS}; evicted ids error "
-                     f"explicitly; v1 snapshots are memory-only)")
+                f"{[r['snap_id'] for r in self._snaps.values()]} "
+                f"(LRU cap {MAX_SNAPSHOTS}; evicted ids error "
+                f"explicitly; v1 snapshots are memory-only)",
+            )
         payload = rec["payload"]
         restored_tick = int(payload["tick"])
 
@@ -415,8 +438,7 @@ class RewindController:
         # live states ride the same net -- a provider failing mid-apply
         # rolls the earlier ones back, never a partial restore)
         bundle = self.bridge._bundle or {}
-        cache: Mapping[str, SnapshotValue] = getattr(
-            self.env, "obs_cache", None) or {}
+        cache: Mapping[str, SnapshotValue] = getattr(self.env, "obs_cache", None) or {}
         safety: dict[str, SnapshotValue] = {
             "env": self.env.snapshot(),
             "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
@@ -427,23 +449,23 @@ class RewindController:
             # Adapter in the safety net: it rides the net too -- the
             # docstring always claimed "engine + adapter + providers";
             # the capture was missing the adapter
-            "adapter": (self.adapter.snapshot_internal()
-                        if callable(getattr(self.adapter,
-                                            "snapshot_internal", None))
-                        else None),
-            "providers": {p.name: p.rewind_state()
-                          for p in self.providers}}
+            "adapter": (
+                self.adapter.snapshot_internal()
+                if callable(getattr(self.adapter, "snapshot_internal", None))
+                else None
+            ),
+            "providers": {p.name: p.rewind_state() for p in self.providers},
+        }
         applied: list[str] = []
         try:
             self.env.restore(payload["env"])
-            live_cache: dict[str, SnapshotValue] | None = getattr(
-                self.env, "obs_cache", None)
+            live_cache: dict[str, SnapshotValue] | None = getattr(self.env, "obs_cache", None)
             if live_cache is not None:
                 live_cache.clear()
-                live_cache.update({k: _snap_val(v)
-                                   for k, v in payload["obs_cache"].items()})
+                live_cache.update({k: _snap_val(v) for k, v in payload["obs_cache"].items()})
             if payload.get("adapter") is not None and callable(
-                    getattr(self.adapter, "restore_internal", None)):
+                getattr(self.adapter, "restore_internal", None)
+            ):
                 self.adapter.restore_internal(payload["adapter"])
             # restore order: engine -> adapter -> providers (design
             # §1.2); any provider failure raises through -- the except
@@ -464,24 +486,30 @@ class RewindController:
             sc = getattr(self.env, "obs_cache", None)
             if sc is not None:
                 sc.clear()
-                sc.update({k: _snap_val(v)
-                           for k, v in safety["obs_cache"].items()})
+                sc.update({k: _snap_val(v) for k, v in safety["obs_cache"].items()})
             _set_torch_rng(safety["torch_rng"])
             # Adapter rollback: restore order env -> adapter ->
             # providers mirroring the apply order -- a refused rewind no
             # longer leaves the adapter cursor at the checkpoint value
             # while the world marched on (the live misalignment)
             sad = safety.get("adapter")
-            if sad is not None and callable(getattr(
-                    self.adapter, "restore_internal", None)):
+            if sad is not None and callable(getattr(self.adapter, "restore_internal", None)):
                 try:
                     self.adapter.restore_internal(sad)
-                except (ValueError, RuntimeError, OSError, KeyError,
-                        TypeError, AttributeError) as rb:
-                    print(f"[rewind] safety-net adapter rollback failed "
-                          f"({type(rb).__name__}: {rb}) -- continuing; "
-                          f"the original error below is authoritative",
-                          flush=True)
+                except (
+                    ValueError,
+                    RuntimeError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    AttributeError,
+                ) as rb:
+                    print(
+                        f"[rewind] safety-net adapter rollback failed "
+                        f"({type(rb).__name__}: {rb}) -- continuing; "
+                        f"the original error below is authoritative",
+                        flush=True,
+                    )
             # Except-hardening: each provider rollback is
             # individually guarded with NARROWED types (no new catch-all
             # -- the baseline stays at 32); a rollback failure is
@@ -494,12 +522,21 @@ class RewindController:
                     continue
                 try:
                     p.apply_rewind_state(pre)
-                except (ValueError, RuntimeError, OSError, KeyError,
-                        TypeError, AttributeError) as rb:
-                    print(f"[rewind] safety-net rollback of provider "
-                          f"'{p.name}' failed ({type(rb).__name__}: "
-                          f"{rb}) -- continuing; the original error "
-                          f"below is authoritative", flush=True)
+                except (
+                    ValueError,
+                    RuntimeError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    AttributeError,
+                ) as rb:
+                    print(
+                        f"[rewind] safety-net rollback of provider "
+                        f"'{p.name}' failed ({type(rb).__name__}: "
+                        f"{rb}) -- continuing; the original error "
+                        f"below is authoritative",
+                        flush=True,
+                    )
             raise
         del safety
         # torch RNG: the abandoned branch's consumption must not leak into
@@ -511,24 +548,28 @@ class RewindController:
         # engine seam: loop counter + the snapshot boundary's iteration
         # state (obs frame / command) -- adopted at the RewindBoundary
         self.engine._tick = restored_tick + 1
-        self.engine._rewind_state = {"obs_frame": payload["obs_frame"],
-                                     "cmd": payload["cmd"]}
+        self.engine._rewind_state = {"obs_frame": payload["obs_frame"], "cmd": payload["cmd"]}
         # process-truth record + one-shot boundary + auto-pause (§5-③)
         info: RewindInfo = {
             "tick": int(getattr(self.bridge, "_last_step", 0) or 0),
-            "restored_tick": restored_tick, "snap_id": int(sid),
-            "label": rec["label"]}
+            "restored_tick": restored_tick,
+            "snap_id": int(sid),
+            "label": rec["label"],
+        }
         self.bridge.rewind_log.append(info)
         self.bridge._rewind_next_tick = restored_tick + 1
         self.bridge._rewind_info = info
         self.bridge.pause_for_rewind()
-        return {"restored_tick": restored_tick, "snap_id": int(sid),
-                "paused": True,
-                "providers_applied": applied,
-                "attempts": getattr(self, "_last_attempt_paths", None),
-                "hint": f"world restored to tick {restored_tick} and "
-                        f"paused; resume/step to continue on the forked "
-                        f"timeline"}
+        return {
+            "restored_tick": restored_tick,
+            "snap_id": int(sid),
+            "paused": True,
+            "providers_applied": applied,
+            "attempts": getattr(self, "_last_attempt_paths", None),
+            "hint": f"world restored to tick {restored_tick} and "
+            f"paused; resume/step to continue on the forked "
+            f"timeline",
+        }
 
     # ---------------------------------------------------------------- #
     # pre-flight two-phase: zero-change rejection
@@ -553,24 +594,24 @@ class RewindController:
         bundle = self.bridge._bundle or {}
         snap_ep = payload.get("episode_id")
         live_ep = _episode_stamp(bundle)
-        if (snap_ep is not None and live_ep is not None
-                and int(snap_ep) != int(live_ep)):
+        if snap_ep is not None and live_ep is not None and int(snap_ep) != int(live_ep):
             raise RewindGateError(
                 f"cross-episode rewind refused (snapshot episode "
                 f"{int(snap_ep)} != live episode {int(live_ep)})",
                 hint="the checkpoint belongs to a different episode "
-                     "than the live run -- cross-set rewind is out of "
-                     "the v1 scope; take a fresh "
-                     "checkpoint in the live episode and rewind to it")
+                "than the live run -- cross-set rewind is out of "
+                "the v1 scope; take a fresh "
+                "checkpoint in the live episode and rewind to it",
+            )
         for p in self.providers:
             state = (payload.get("providers") or {}).get(p.name)
             if state is None:
                 raise RewindGateError(
-                    f"provider '{p.name}' has no state in snapshot "
-                    f"{sid}",
+                    f"provider '{p.name}' has no state in snapshot " f"{sid}",
                     hint="the snapshot predates the provider mount or "
-                         "the provider failed at capture; rewind "
-                         "refuses rather than partially restore")
+                    "the provider failed at capture; rewind "
+                    "refuses rather than partially restore",
+                )
             fn = getattr(p, "validate_rewind_state", None)
             if callable(fn):
                 fn(state)
@@ -578,8 +619,7 @@ class RewindController:
     # ---------------------------------------------------------------- #
     # sidecar: the abandoned branch's buffers are data (§1.4)
     # ---------------------------------------------------------------- #
-    def _dump_attempts(self, sid: int, restored_tick: int,
-                       label: str | None) -> None:
+    def _dump_attempts(self, sid: int, restored_tick: int, label: str | None) -> None:
         """Dump every provider's current buffers to the attempts sidecar.
 
         ``<out_dir>/attempts/rewind_{n}_ep{E}_tick{T}.npz`` + a meta json
@@ -592,7 +632,7 @@ class RewindController:
             return
         out_dir = getattr(self.bridge, "out_dir", None)
         if not out_dir:
-            return                      # bookkeeping-only mount
+            return  # bookkeeping-only mount
         attempts = os.path.join(str(out_dir), "attempts")
         n = len(getattr(self.bridge, "rewind_log", [])) + 1
         tick = int(getattr(self.bridge, "_last_step", 0) or 0)
@@ -600,35 +640,48 @@ class RewindController:
             fn = getattr(p, "dump_attempt", None)
             if not callable(fn):
                 continue
-            dump: Callable[[str, str], list[str]] = getattr(
-                p, "dump_attempt")
+            dump: Callable[[str, str], list[str]] = getattr(p, "dump_attempt")
             ep = getattr(p, "episode_hint", lambda: 0)()
             base = f"rewind_{n}_ep{int(ep)}_tick{tick}_{p.name}"
             os.makedirs(attempts, exist_ok=True)
             paths = dump(attempts, base)
             meta: dict[str, SnapshotValue] = {
-                "rewind_ordinal": n, "snap_id": int(sid),
-                "label": label, "provider": p.name,
-                "tick": tick, "restored_tick": int(restored_tick),
-                "reason": ("timeline forked back to the checkpoint "
-                           "state; this branch's frames are kept here"),
-                "files": list(paths)}
+                "rewind_ordinal": n,
+                "snap_id": int(sid),
+                "label": label,
+                "provider": p.name,
+                "tick": tick,
+                "restored_tick": int(restored_tick),
+                "reason": (
+                    "timeline forked back to the checkpoint "
+                    "state; this branch's frames are kept here"
+                ),
+                "files": list(paths),
+            }
             meta_path = os.path.join(attempts, base + ".meta.json")
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=1, ensure_ascii=False)
             self._last_attempt_paths.append(meta_path)
-        print(f"[rewind] attempt sidecar(s): {self._last_attempt_paths}",
-              flush=True)
+        print(f"[rewind] attempt sidecar(s): {self._last_attempt_paths}", flush=True)
 
 
-def attach(bridge: Bridge, env: _SnapshotBackend, adapter: Adapter,
-           engine: RewindEngine, backend_label: str,
-           providers: Sequence[RewindStateProvider] | None = None
-           ) -> RewindController:
+def attach(
+    bridge: Bridge,
+    env: _SnapshotBackend,
+    adapter: Adapter,
+    engine: RewindEngine,
+    backend_label: str,
+    providers: Sequence[RewindStateProvider] | None = None,
+) -> RewindController:
     """Mount the rewind face on a live bridge (collect_cli wiring)."""
-    return RewindController(bridge, env=env, adapter=adapter, engine=engine,
-                            backend_label=backend_label,
-                            providers=providers)
+    return RewindController(
+        bridge,
+        env=env,
+        adapter=adapter,
+        engine=engine,
+        backend_label=backend_label,
+        providers=providers,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -684,8 +737,9 @@ def _snap_val(x: SnapshotValue) -> SnapshotValue:
 def _torch_rng_state() -> SnapshotValue:
     try:
         import torch
+
         return torch.get_rng_state().clone()
-    except ImportError:                       # pragma: no cover
+    except ImportError:  # pragma: no cover
         return None
 
 
@@ -693,4 +747,5 @@ def _set_torch_rng(state: SnapshotValue) -> None:
     if state is None:
         return
     import torch
+
     torch.set_rng_state(state)

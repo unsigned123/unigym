@@ -7,6 +7,7 @@ concrete ``mujoco.Renderer`` rig implementation stays in
 ``backends/mujoco/cameras.py``; this module only holds the engine-light
 pieces both backends need.
 """
+
 from __future__ import annotations
 
 import math
@@ -116,8 +117,7 @@ def _rig_offset_quat(spec: CameraSpec) -> np.ndarray:
         return np.asarray([float(x) for x in rig["rot"]], dtype=np.float64)
     if rtype == "body":
         pitch = math.radians(float(rig.get("pitch_down_deg", 0.0)))
-        return np.array([math.cos(pitch / 2.0), 0.0,
-                         math.sin(pitch / 2.0), 0.0])
+        return np.array([math.cos(pitch / 2.0), 0.0, math.sin(pitch / 2.0), 0.0])
     pos = tuple(float(x) for x in rig.get("pos", (0.0, 0.0, 0.0)))
     lookat = rig.get("lookat", (1.0, 0.0, 0.25))
     return np.asarray(lookat_quat(pos, lookat), dtype=np.float64)
@@ -152,8 +152,8 @@ def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
                 # list the addressable bodies at the failure site
                 bodies = [b.name for b in mjspec.bodies if b.name]
                 raise ValueError(
-                    f"body {body_name!r} not found -- available mount "
-                    f"bodies: {bodies}")
+                    f"body {body_name!r} not found -- available mount " f"bodies: {bodies}"
+                )
             pos = [float(x) for x in rig.get("pos", (0.0, 0.0, 0.0))]
             quat = mj_camera_quat(_rig_offset_quat(spec))
         elif rtype == "world":
@@ -162,22 +162,24 @@ def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
             quat = mj_camera_quat(_rig_offset_quat(spec))
         elif rtype == "chase":
             body = mjspec.worldbody
-            pos = [0.0, 0.0, 1.0]           # placeholder; overwritten per step
+            pos = [0.0, 0.0, 1.0]  # placeholder; overwritten per step
             quat = bridge_quat()
         elif rtype == "fixed":
             raise ValueError(
                 f"camera {spec.name!r}: rig type 'fixed' was renamed "
                 f"'world' (camera unification) -- update the config; "
-                f"there is no alias")
+                f"there is no alias"
+            )
         else:
-            raise ValueError(f"camera {spec.name!r}: unknown rig type "
-                             f"{rtype!r} (body|world|chase)")
+            raise ValueError(
+                f"camera {spec.name!r}: unknown rig type " f"{rtype!r} (body|world|chase)"
+            )
     except (KeyError, ValueError) as e:
         if rtype == "body":
             raise ValueError(
                 f"camera {spec.name!r}: mount body "
                 f"{rig.get('body') or DEFAULT_BODY_MOUNT!r} not found in the "
-                f"MJ model ({e})") from e
+                f"MJ model ({e})"
+            ) from e
         raise
-    body.add_camera(name=name, pos=pos, quat=[float(q) for q in quat],
-                    fovy=fovy)
+    body.add_camera(name=name, pos=pos, quat=[float(q) for q in quat], fovy=fovy)

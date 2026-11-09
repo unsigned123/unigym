@@ -3,6 +3,7 @@
 Importing this package must stay light: no mujoco, no torch.  Backend
 providers import their native engine only inside their methods.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -41,8 +42,7 @@ if TYPE_CHECKING:
     class MujocoModelProvider:
         """Typing stub for the lazily imported MuJoCo model provider."""
 
-        def __init__(self, backend: str | None = None) -> None:
-            ...
+        def __init__(self, backend: str | None = None) -> None: ...
 
         def build(self, mjspec: object) -> ModelIR:
             """Build the declared IR from a native spec."""
@@ -68,14 +68,14 @@ def __getattr__(name: str) -> object:
     if name == "MujocoModelProvider":
         from importlib import import_module
 
-        module = import_module(
-            "unigym.backends.shared.mjfamily.model.provider")
+        module = import_module("unigym.backends.shared.mjfamily.model.provider")
         return module.MujocoModelProvider
     if name in {"LiveModel", "LiveTable", "LiveJoint", "LiveBody"}:
         from . import live
 
         return getattr(live, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Actuator",

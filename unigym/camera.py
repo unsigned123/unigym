@@ -12,6 +12,7 @@ structurally checked on ``add`` and schema-validated when the run locks
 the set at build time.  ``run.model.cameras`` remains the compiled IR
 table; ``run.cameras`` lists the declared specs.
 """
+
 from __future__ import annotations
 
 import copy
@@ -25,18 +26,26 @@ __all__ = ["Camera", "CameraSet"]
 
 def _vec(value, length: int, what: str) -> list:
     """Validate a finite numeric vector and return a float list."""
-    if (not isinstance(value, (list, tuple)) or len(value) != length
-            or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                   or not math.isfinite(v) for v in value)):
-        raise ValueError(f"{what} must be a {length}-vector of finite "
-                         f"numbers, got {value!r}")
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != length
+        or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+            for v in value
+        )
+    ):
+        raise ValueError(f"{what} must be a {length}-vector of finite " f"numbers, got {value!r}")
     return [float(v) for v in value]
 
 
 def _positive(value, what: str) -> float:
     """Validate one finite positive scalar."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)) \
-            or not math.isfinite(value) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise ValueError(f"{what} must be a finite number > 0, got {value!r}")
     return float(value)
 
@@ -45,18 +54,17 @@ def _resolution(width, height) -> tuple:
     """Validate a positive integer resolution."""
     for label, value in (("width", width), ("height", height)):
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"camera {label} must be a positive int, "
-                             f"got {value!r}")
+            raise ValueError(f"camera {label} must be a positive int, " f"got {value!r}")
     return int(width), int(height)
 
 
 def _entry(name, rig, types, width, height, hfov_deg, extra) -> dict:
     """Assemble one cameras-list entry (the existing schema)."""
-    if not isinstance(name, str) or not name or "/" in name \
-            or name.strip() != name:
+    if not isinstance(name, str) or not name or "/" in name or name.strip() != name:
         raise ValueError(
             f"camera name {name!r} must be non-empty, trimmed and free of "
-            f"'/' (it is part of the cam/<name>/<type> key)")
+            f"'/' (it is part of the cam/<name>/<type> key)"
+        )
     width, height = _resolution(width, height)
     if isinstance(types, str):
         types = (types,)
@@ -76,8 +84,18 @@ class Camera:
     """Factories for the existing camera-spec dict schema."""
 
     @staticmethod
-    def world(name, pos, lookat=None, quat=None, width=64, height=48,
-              hfov_deg=87.0, *, types=("rgb",), **extra) -> dict:
+    def world(
+        name,
+        pos,
+        lookat=None,
+        quat=None,
+        width=64,
+        height=48,
+        hfov_deg=87.0,
+        *,
+        types=("rgb",),
+        **extra,
+    ) -> dict:
         """A world-fixed camera (``pos`` + ``lookat`` or ``quat`` wxyz)."""
         rig = {"type": "world", "pos": _vec(pos, 3, "world camera pos")}
         if lookat is not None and quat is not None:
@@ -87,18 +105,27 @@ class Camera:
         elif quat is not None:
             rig["rot"] = _vec(quat, 4, "world camera quat")
         else:
-            raise ValueError("Camera.world needs lookat=[x,y,z] or "
-                             "quat=[w,x,y,z]")
+            raise ValueError("Camera.world needs lookat=[x,y,z] or " "quat=[w,x,y,z]")
         return _entry(name, rig, types, width, height, hfov_deg, extra)
 
     @staticmethod
-    def attached(name, mount, pos=(0.0, 0.0, 0.0), quat=None, width=64,
-                 height=48, hfov_deg=87.0, *, types=("rgb",),
-                 **extra) -> dict:
+    def attached(
+        name,
+        mount,
+        pos=(0.0, 0.0, 0.0),
+        quat=None,
+        width=64,
+        height=48,
+        hfov_deg=87.0,
+        *,
+        types=("rgb",),
+        **extra,
+    ) -> dict:
         """A body-mounted camera (``mount`` = robot link name)."""
         if not isinstance(mount, str) or not mount:
-            raise ValueError(f"Camera.attached mount must be a non-empty "
-                             f"link name, got {mount!r}")
+            raise ValueError(
+                f"Camera.attached mount must be a non-empty " f"link name, got {mount!r}"
+            )
         rig = {
             "type": "body",
             "attach": mount,
@@ -109,14 +136,21 @@ class Camera:
         return _entry(name, rig, types, width, height, hfov_deg, extra)
 
     @staticmethod
-    def chase(name, target_env=0, pos=(0.0, 0.0, 0.0),
-              lookat=(0.0, 0.0, 0.0), width=64, height=48, hfov_deg=87.0,
-              *, types=("rgb",), **extra) -> dict:
+    def chase(
+        name,
+        target_env=0,
+        pos=(0.0, 0.0, 0.0),
+        lookat=(0.0, 0.0, 0.0),
+        width=64,
+        height=48,
+        hfov_deg=87.0,
+        *,
+        types=("rgb",),
+        **extra,
+    ) -> dict:
         """A robot-yaw-relative chase camera for *target_env*."""
-        if isinstance(target_env, bool) or not isinstance(target_env, int) \
-                or target_env < 0:
-            raise ValueError(f"Camera.chase target_env must be an int >= 0, "
-                             f"got {target_env!r}")
+        if isinstance(target_env, bool) or not isinstance(target_env, int) or target_env < 0:
+            raise ValueError(f"Camera.chase target_env must be an int >= 0, " f"got {target_env!r}")
         rig = {
             "type": "chase",
             "pos": _vec(pos, 3, "chase camera pos"),
@@ -146,15 +180,15 @@ class CameraSet(MutableMapping):
         if self._locked:
             raise RuntimeError(
                 "CameraSet.add: the run is already built; cameras are "
-                "declared pre-build only (create a new Run)")
+                "declared pre-build only (create a new Run)"
+            )
         if isinstance(entry, CameraSet):
             last: dict = {}
             for value in entry.values():
                 last = self.add(value)
             return last
         if not isinstance(entry, dict):
-            raise TypeError(f"CameraSet.add expects a dict entry, got "
-                            f"{type(entry).__name__}")
+            raise TypeError(f"CameraSet.add expects a dict entry, got " f"{type(entry).__name__}")
         value = copy.deepcopy(entry)
         if name is not None:
             value["name"] = name
@@ -189,16 +223,14 @@ class CameraSet(MutableMapping):
     def __setitem__(self, key: str, value: dict) -> None:
         if self._locked:
             raise RuntimeError(
-                "CameraSet is locked after build; cameras are declared "
-                "pre-build only")
+                "CameraSet is locked after build; cameras are declared " "pre-build only"
+            )
         if not isinstance(value, dict):
             raise TypeError("camera entry must be a dict")
         entry = copy.deepcopy(value)
         entry.setdefault("name", key)
         if entry["name"] != key:
-            raise ValueError(
-                f"camera entry name {entry['name']!r} does not match key "
-                f"{key!r}")
+            raise ValueError(f"camera entry name {entry['name']!r} does not match key " f"{key!r}")
         self._entries[key] = entry
 
     def __delitem__(self, key: str) -> None:

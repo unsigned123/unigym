@@ -12,6 +12,7 @@ v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
 / ``policy_section``: the drive declaration lives in ``controls[]`` and the
 robot recipe only supplies the joint order / q0 / body parts.
 """
+
 from __future__ import annotations
 
 import math
@@ -52,8 +53,7 @@ def articulation_key(name: str, key: str) -> str:
     if not name:
         raise ArticulationError("articulation name must be non-empty")
     if not key:
-        raise ArticulationError("articulation observation key must be "
-                                "non-empty")
+        raise ArticulationError("articulation observation key must be " "non-empty")
     return f"{ARTICULATION_PREFIX}/{name}/{key}"
 
 
@@ -90,8 +90,7 @@ def _range_value(value: JsonValue, what: str) -> tuple[float, float] | None:
         return None
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise ArticulationError(f"{what} must be [lo, hi], got {value!r}")
-    return (_finite(value[0], f"{what}[0]"),
-            _finite(value[1], f"{what}[1]"))
+    return (_finite(value[0], f"{what}[0]"), _finite(value[1], f"{what}[1]"))
 
 
 def _empty_json_map() -> dict[str, JsonValue]:
@@ -100,13 +99,15 @@ def _empty_json_map() -> dict[str, JsonValue]:
 
 
 def _unknown_keys(
-    mapping: Mapping[str, JsonValue], allowed: tuple[str, ...], what: str,
+    mapping: Mapping[str, JsonValue],
+    allowed: tuple[str, ...],
+    what: str,
 ) -> None:
     unknown = sorted(set(mapping) - set(allowed))
     if unknown:
         raise ArticulationError(
-            f"{what} declares unknown keys {unknown}; allowed keys are "
-            f"{list(allowed)}")
+            f"{what} declares unknown keys {unknown}; allowed keys are " f"{list(allowed)}"
+        )
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,8 @@ class AssetRef:
 
     @classmethod
     def from_mapping(
-        cls, value: AssetRef | Mapping[str, JsonValue],
+        cls,
+        value: AssetRef | Mapping[str, JsonValue],
         what: str = "model",
     ) -> AssetRef:
         """Normalize an ``AssetRef`` or ``{mjcf|urdf|usd: <path>}`` mapping."""
@@ -142,12 +144,14 @@ class AssetRef:
             return value
         if not isinstance(value, Mapping):
             raise ArticulationError(
-                f"{what} must be a mapping {{mjcf|urdf|usd: <path>}}, "
-                f"got {value!r}")
+                f"{what} must be a mapping {{mjcf|urdf|usd: <path>}}, " f"got {value!r}"
+            )
         _unknown_keys(value, ("mjcf", "urdf", "usd"), what)
-        return cls(mjcf=_optional_str(value.get("mjcf"), f"{what}.mjcf"),
-                   urdf=_optional_str(value.get("urdf"), f"{what}.urdf"),
-                   usd=_optional_str(value.get("usd"), f"{what}.usd"))
+        return cls(
+            mjcf=_optional_str(value.get("mjcf"), f"{what}.mjcf"),
+            urdf=_optional_str(value.get("urdf"), f"{what}.urdf"),
+            usd=_optional_str(value.get("usd"), f"{what}.usd"),
+        )
 
 
 @dataclass(frozen=True)
@@ -171,29 +175,32 @@ class JointSpec:
             raise ArticulationError("joint name must be non-empty")
         object.__setattr__(self, "name", str(self.name))
         for key in ("effort_limit", "damping"):
-            object.__setattr__(self, key, _optional_float(
-                getattr(self, key), f"joint {self.name!r} {key}"))
+            object.__setattr__(
+                self, key, _optional_float(getattr(self, key), f"joint {self.name!r} {key}")
+            )
         rng = self.range
         if rng is not None:
             if len(rng) != 2:
-                raise ArticulationError(
-                    f"joint {self.name!r} range must be [lo, hi], got {rng!r}")
-            rng = (_finite(rng[0], f"joint {self.name!r} range[0]"),
-                   _finite(rng[1], f"joint {self.name!r} range[1]"))
+                raise ArticulationError(f"joint {self.name!r} range must be [lo, hi], got {rng!r}")
+            rng = (
+                _finite(rng[0], f"joint {self.name!r} range[0]"),
+                _finite(rng[1], f"joint {self.name!r} range[1]"),
+            )
             if rng[0] > rng[1]:
-                raise ArticulationError(
-                    f"joint {self.name!r} range {list(rng)} has lo > hi")
+                raise ArticulationError(f"joint {self.name!r} range {list(rng)} has lo > hi")
             object.__setattr__(self, "range", rng)
         init = _finite(self.init, f"joint {self.name!r} init")
         if rng is not None and not (rng[0] <= init <= rng[1]):
             raise ArticulationError(
-                f"joint {self.name!r} init {init!r} is outside the declared "
-                f"range {list(rng)}")
+                f"joint {self.name!r} init {init!r} is outside the declared " f"range {list(rng)}"
+            )
         object.__setattr__(self, "init", init)
 
     @classmethod
     def from_mapping(
-        cls, name: str, params: Mapping[str, JsonValue] | None = None,
+        cls,
+        name: str,
+        params: Mapping[str, JsonValue] | None = None,
     ) -> JointSpec:
         """Normalize one joint declaration (``{init, range, ...}``)."""
         params = params or {}
@@ -203,23 +210,23 @@ class JointSpec:
                 f"are actuated unless listed in the articulation's "
                 f"`passive_joints`, and the drive belongs to a top-level "
                 f"`controls[]` group (drive: position_pd | position_servo | "
-                f"torque | velocity | effort | current)")
+                f"torque | velocity | effort | current)"
+            )
         if "stiffness" in params or "latch" in params:
             raise ArticulationError(
                 f"joint {name!r} declares a removed v104 key "
                 f"({sorted(set(params) & {'stiffness', 'latch'})}); declare "
-                f"gains on the owning top-level `controls[]` group instead")
-        _unknown_keys(params, ("init", "range", "effort_limit", "damping"),
-                      f"joint {name!r}")
+                f"gains on the owning top-level `controls[]` group instead"
+            )
+        _unknown_keys(params, ("init", "range", "effort_limit", "damping"), f"joint {name!r}")
         return cls(
             name=name,
             init=_finite(params.get("init", 0.0), f"joint {name!r} init"),
             range=_range_value(params.get("range"), f"joint {name!r} range"),
             effort_limit=_optional_float(
-                params.get("effort_limit"),
-                f"joint {name!r} effort_limit"),
-            damping=_optional_float(
-                params.get("damping"), f"joint {name!r} damping"),
+                params.get("effort_limit"), f"joint {name!r} effort_limit"
+            ),
+            damping=_optional_float(params.get("damping"), f"joint {name!r} damping"),
         )
 
 
@@ -239,8 +246,7 @@ class ArticulationSpec:
     root: str = "free"
     spawn: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
     joints: tuple[JointSpec, ...] = ()
-    body_parts: Mapping[str, JsonValue] = field(
-        default_factory=_empty_json_map)
+    body_parts: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
     passive_joints: tuple[str, ...] = ()
     params: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
 
@@ -251,41 +257,43 @@ class ArticulationSpec:
         if self.root not in ROOT_MODES:
             raise ArticulationError(
                 f"articulation {self.name!r} root must be one of "
-                f"{ROOT_MODES}, got {self.root!r}")
+                f"{ROOT_MODES}, got {self.root!r}"
+            )
         if self.model is not None:
-            object.__setattr__(self, "model", AssetRef.from_mapping(
-                self.model, f"articulation {self.name!r} model"))
+            object.__setattr__(
+                self,
+                "model",
+                AssetRef.from_mapping(self.model, f"articulation {self.name!r} model"),
+            )
         if not isinstance(self.spawn, Mapping):
-            raise ArticulationError(
-                f"articulation {self.name!r} spawn must be a mapping")
+            raise ArticulationError(f"articulation {self.name!r} spawn must be a mapping")
         object.__setattr__(self, "spawn", dict(self.spawn))
-        object.__setattr__(self, "joints", _joints_tuple(self.name,
-                                                         self.joints))
+        object.__setattr__(self, "joints", _joints_tuple(self.name, self.joints))
         if not isinstance(self.body_parts, Mapping):
-            raise ArticulationError(
-                f"articulation {self.name!r} body_parts must be a mapping")
+            raise ArticulationError(f"articulation {self.name!r} body_parts must be a mapping")
         object.__setattr__(self, "body_parts", dict(self.body_parts))
         passive = tuple(str(name) for name in (self.passive_joints or ()))
         if len(set(passive)) != len(passive):
             raise ArticulationError(
-                f"articulation {self.name!r} passive_joints contains "
-                f"duplicates {passive!r}")
+                f"articulation {self.name!r} passive_joints contains " f"duplicates {passive!r}"
+            )
         declared = {joint.name for joint in self.joints}
         if declared:
             unknown = sorted(set(passive) - declared)
             if unknown:
                 raise ArticulationError(
                     f"articulation {self.name!r} passive_joints {unknown} are "
-                    f"not declared joints")
+                    f"not declared joints"
+                )
         object.__setattr__(self, "passive_joints", passive)
         if not isinstance(self.params, Mapping):
-            raise ArticulationError(
-                f"articulation {self.name!r} params must be a mapping")
+            raise ArticulationError(f"articulation {self.name!r} params must be a mapping")
         object.__setattr__(self, "params", dict(self.params))
 
 
 def _joints_tuple(
-    name: str, joints: JsonValue | Sequence[JointSpec],
+    name: str,
+    joints: JsonValue | Sequence[JointSpec],
 ) -> tuple[JointSpec, ...]:
     if not joints:
         return ()
@@ -294,13 +302,12 @@ def _joints_tuple(
         for jname, params in joints.items():
             if not isinstance(params, Mapping):
                 raise ArticulationError(
-                    f"articulation {name!r} joint {jname!r} must be a "
-                    f"mapping, got {params!r}")
+                    f"articulation {name!r} joint {jname!r} must be a " f"mapping, got {params!r}"
+                )
             entries.append(JointSpec.from_mapping(str(jname), params))
         return tuple(entries)
     if not isinstance(joints, (list, tuple)):
-        raise ArticulationError(
-            f"articulation {name!r} joints must be a list, got {joints!r}")
+        raise ArticulationError(f"articulation {name!r} joints must be a list, got {joints!r}")
     out: list[JointSpec] = []
     for entry in joints:
         if isinstance(entry, JointSpec):
@@ -308,13 +315,12 @@ def _joints_tuple(
             continue
         if not isinstance(entry, Mapping):
             raise ArticulationError(
-                f"articulation {name!r} joints entries must be mappings, "
-                f"got {entry!r}")
+                f"articulation {name!r} joints entries must be mappings, " f"got {entry!r}"
+            )
         entry_map = dict(entry)
         jname = entry_map.pop("name", None)
         if jname is None:
-            raise ArticulationError(
-                f"articulation {name!r} joint entry is missing 'name'")
+            raise ArticulationError(f"articulation {name!r} joint entry is missing 'name'")
         out.append(JointSpec.from_mapping(str(jname), entry_map))
     return tuple(out)
 
@@ -329,8 +335,8 @@ def _articulation_name(entry: Mapping[str, JsonValue]) -> str:
 def _root_value(value: JsonValue, name: str) -> str:
     if not isinstance(value, str) or value not in ROOT_MODES:
         raise ArticulationError(
-            f"articulation {name!r} root must be one of "
-            f"{ROOT_MODES}, got {value!r}")
+            f"articulation {name!r} root must be one of " f"{ROOT_MODES}, got {value!r}"
+        )
     return value
 
 
@@ -344,8 +350,7 @@ def _str_tuple(value: JsonValue, what: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, (list, tuple)):
-        raise ArticulationError(
-            f"{what} must be a list of names, got {value!r}")
+        raise ArticulationError(f"{what} must be a list of names, got {value!r}")
     return tuple(str(item) for item in value)
 
 
@@ -355,7 +360,8 @@ def _model_field(value: JsonValue, name: str) -> AssetRef | None:
     if not isinstance(value, (AssetRef, Mapping)):
         raise ArticulationError(
             f"articulation {name!r} model must be a mapping "
-            f"{{mjcf|urdf|usd: <path>}}, got {value!r}")
+            f"{{mjcf|urdf|usd: <path>}}, got {value!r}"
+        )
     return AssetRef.from_mapping(value, f"articulation {name!r} model")
 
 
@@ -369,8 +375,7 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
     (drives are declared in the run-level ``controls[]``).
     """
     if not isinstance(entry, Mapping):
-        raise ArticulationError(
-            f"articulations entries must be mappings, got {entry!r}")
+        raise ArticulationError(f"articulations entries must be mappings, got {entry!r}")
     if "control" in entry:
         raise ArticulationError(
             f"articulation {entry.get('name')!r} declares the removed v104 "
@@ -378,10 +383,13 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
             f"(policy/named/passive) no longer exist -- declare the drive "
             f"explicitly in the run-level `controls:` list "
             f"(name/adapter/articulation/drive/target) and list undriven "
-            f"joints in `passive_joints`")
-    _unknown_keys(entry, ("name", "model", "root", "spawn", "joints",
-                          "body_parts", "passive_joints", "params"),
-                  "articulation")
+            f"joints in `passive_joints`"
+        )
+    _unknown_keys(
+        entry,
+        ("name", "model", "root", "spawn", "joints", "body_parts", "passive_joints", "params"),
+        "articulation",
+    )
     if "name" not in entry:
         raise ArticulationError("articulation entry is missing 'name'")
     name = _articulation_name(entry)
@@ -389,15 +397,13 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
         name=name,
         model=_model_field(entry.get("model"), name),
         root=_root_value(entry.get("root", "free"), name),
-        spawn=_mapping_field(entry.get("spawn", {}),
-                             f"articulation {name!r} spawn"),
+        spawn=_mapping_field(entry.get("spawn", {}), f"articulation {name!r} spawn"),
         joints=_joints_tuple(name, entry.get("joints")),
-        body_parts=_mapping_field(entry.get("body_parts", {}),
-                                  f"articulation {name!r} body_parts"),
-        passive_joints=_str_tuple(entry.get("passive_joints"),
-                                  f"articulation {name!r} passive_joints"),
-        params=_mapping_field(entry.get("params", {}),
-                              f"articulation {name!r} params"),
+        body_parts=_mapping_field(entry.get("body_parts", {}), f"articulation {name!r} body_parts"),
+        passive_joints=_str_tuple(
+            entry.get("passive_joints"), f"articulation {name!r} passive_joints"
+        ),
+        params=_mapping_field(entry.get("params", {}), f"articulation {name!r} params"),
     )
 
 
@@ -413,19 +419,17 @@ def normalize_articulations(entries: JsonValue) -> tuple[ArticulationSpec, ...]:
             "run config declares no articulations; the v104 shape is "
             "`articulations: [{name: <robot>, params: ..., body_parts: ...}]` "
             "plus a top-level `controls:` list (the old top-level `robot:` "
-            "block was removed -- no alias)")
+            "block was removed -- no alias)"
+        )
     if not isinstance(entries, (list, tuple)) or not entries:
-        raise ArticulationError(
-            "articulations must be a non-empty list of mappings")
+        raise ArticulationError("articulations must be a non-empty list of mappings")
     specs_list: list[ArticulationSpec] = []
     for entry in entries:
         if not isinstance(entry, Mapping):
-            raise ArticulationError(
-                f"articulations entries must be mappings, got {entry!r}")
+            raise ArticulationError(f"articulations entries must be mappings, got {entry!r}")
         specs_list.append(normalize_articulation(entry))
     specs = tuple(specs_list)
     names = [spec.name for spec in specs]
     if len(set(names)) != len(names):
-        raise ArticulationError(
-            f"articulations names must be unique, got {names!r}")
+        raise ArticulationError(f"articulations names must be unique, got {names!r}")
     return specs

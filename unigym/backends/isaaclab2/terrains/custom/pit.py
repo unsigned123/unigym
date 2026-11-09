@@ -3,6 +3,7 @@
 Flat ground with a square pit dug in the middle; the robot must skirt or
 traverse it. Height-field generator decorated with :func:`height_field_to_mesh`.
 """
+
 from __future__ import annotations
 
 import numpy as np

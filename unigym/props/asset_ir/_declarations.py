@@ -7,6 +7,7 @@ the child spec BEFORE the bodies, so the attach pass namespaces them
 here (no IO, no resolution); the renderer expands ``${TOKEN}``
 placeholders at child-spec build time.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

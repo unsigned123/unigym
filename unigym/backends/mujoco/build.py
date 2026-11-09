@@ -3,11 +3,20 @@
 The neutral ``unigym.run.build`` path calls these through the registry's
 lazy factories; the backend-name knowledge lives here, not there.
 """
+
 from __future__ import annotations
 
 
-def env_kwargs(env_cfg: dict, artifacts_dir, world_base, spec=None, *,
-               controls=None, recipes=None, backend_options=None) -> dict:
+def env_kwargs(
+    env_cfg: dict,
+    artifacts_dir,
+    world_base,
+    spec=None,
+    *,
+    controls=None,
+    recipes=None,
+    backend_options=None,
+) -> dict:
     """Builder kwargs ``MujocoEnv`` accepts (the mj-family shape + artifact dir).
 
     ``backend_params`` is the yaml ``env.params`` block and ``world_base``
@@ -18,13 +27,15 @@ def env_kwargs(env_cfg: dict, artifacts_dir, world_base, spec=None, *,
     ``controls`` / ``recipes`` carry the neutral control runtimes and the
     per-articulation RobotRecipes.
     """
-    return {"backend_params": env_cfg.get("params") or {},
-            "world_base": world_base,
-            "artifact_dir": artifacts_dir,
-            "articulations": getattr(spec, "articulations", None),
-            "controls": controls,
-            "recipes": recipes,
-            "backend_options": backend_options}
+    return {
+        "backend_params": env_cfg.get("params") or {},
+        "world_base": world_base,
+        "artifact_dir": artifacts_dir,
+        "articulations": getattr(spec, "articulations", None),
+        "controls": controls,
+        "recipes": recipes,
+        "backend_options": backend_options,
+    }
 
 
 def route_content(spec, env_cfg: dict) -> None:
@@ -33,8 +44,7 @@ def route_content(spec, env_cfg: dict) -> None:
     The mujoco scene build consumes it (robocasa provider scene fill).
     """
     env_cfg.setdefault("params", {})["content"] = spec
-    provider = (spec.get("provider", "robocasa")
-                if isinstance(spec, dict) else spec)
+    provider = spec.get("provider", "robocasa") if isinstance(spec, dict) else spec
     print(f"[collect] content fill: provider={provider}", flush=True)
 
 

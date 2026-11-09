@@ -22,6 +22,7 @@ Contract (docs/contracts/benchmark_contract.md):
 
 This module is intentionally importable without torch/isaaclab.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -34,29 +35,52 @@ import numpy as np
 #: groups, cameras, sites, monitor namespaces).  A robot-state leaf nested
 #: under one of these is still a global key.
 GLOBAL_KEY_PREFIXES = (
-    "object/", "contact/", "cam/", "site/", "contact_ops/",
-    "action_target/", "nav/", "joints/",
+    "object/",
+    "contact/",
+    "cam/",
+    "site/",
+    "contact_ops/",
+    "action_target/",
+    "nav/",
+    "joints/",
 )
 
 #: Bare global keys (episode bookkeeping + adapter raw frames).
-GLOBAL_BARE_KEYS = frozenset({
-    "time_in_episode", "episode_id", "action_raw", "in_recovery", "language",
-})
+GLOBAL_BARE_KEYS = frozenset(
+    {
+        "time_in_episode",
+        "episode_id",
+        "action_raw",
+        "in_recovery",
+        "language",
+    }
+)
 
 #: Per-articulation robot-state leaf names.  v103.5 records every robot
 #: state column under ``articulation/<name>/<leaf>``; both the recorded
 #: leaf names (``base_pos``) and the pre-rename backend names
 #: (``base_pos_w``) resolve to the same namespace.
-ROBOT_STATE_LEAVES = frozenset({
-    "joint_pos", "joint_vel", "applied_torque",
-    "gravity_b",
-    "base_pos", "base_pos_w",
-    "base_quat_w",
-    "base_lin_vel", "base_lin_vel_w", "base_lin_vel_b",
-    "base_ang_vel", "base_ang_vel_w", "base_ang_vel_b",
-    "foot_contact", "foot_contact_force_z", "foot_pos_z",
-    "command",
-})
+ROBOT_STATE_LEAVES = frozenset(
+    {
+        "joint_pos",
+        "joint_vel",
+        "applied_torque",
+        "gravity_b",
+        "base_pos",
+        "base_pos_w",
+        "base_quat_w",
+        "base_lin_vel",
+        "base_lin_vel_w",
+        "base_lin_vel_b",
+        "base_ang_vel",
+        "base_ang_vel_w",
+        "base_ang_vel_b",
+        "foot_contact",
+        "foot_contact_force_z",
+        "foot_pos_z",
+        "command",
+    }
+)
 
 #: Fields whose string values name a recorded key (used to detect a task's
 #: robot-state reads at construction time).
@@ -124,18 +148,19 @@ def resolve_episode_key(data: dict, key: str, articulation: str | None) -> str:
     """
     del data  # resolution is a pure key transformation, never data-driven
     if not isinstance(key, str) or not key:
-        raise ValueError(
-            f"episode key must be a non-empty string, got {key!r}")
+        raise ValueError(f"episode key must be a non-empty string, got {key!r}")
     if key.startswith("articulation/"):
         parts = key.split("/", 2)
         if len(parts) != 3 or not parts[1] or not parts[2]:
             raise ValueError(
                 f"malformed namespaced episode key {key!r} (expected "
-                "'articulation/<name>/<key>')")
+                "'articulation/<name>/<key>')"
+            )
         if articulation is not None and parts[1] != articulation:
             raise ValueError(
                 f"episode key {key!r} names articulation {parts[1]!r} but "
-                f"the task declares articulation {articulation!r}")
+                f"the task declares articulation {articulation!r}"
+            )
         return key
     if any(key.startswith(p) for p in GLOBAL_KEY_PREFIXES):
         return key
@@ -146,7 +171,8 @@ def resolve_episode_key(data: dict, key: str, articulation: str | None) -> str:
             raise ValueError(
                 f"episode key {key!r} is per-articulation robot state; the "
                 "task must declare an explicit `articulation: <name>` "
-                "(no unique-articulation inference)")
+                "(no unique-articulation inference)"
+            )
         return f"articulation/{articulation}/{key}"
     return key
 
@@ -235,7 +261,8 @@ class Task(ABC):
             raise ValueError(
                 f"benchmark task '{self.name}' reads per-articulation robot "
                 "state and requires an explicit `articulation: <name>` "
-                f"(available: {self.available_articulations() or 'none'})")
+                f"(available: {self.available_articulations() or 'none'})"
+            )
 
     def available_articulations(self) -> tuple[str, ...]:
         """Articulation names declared for this run (``meta`` order)."""
@@ -248,13 +275,15 @@ class Task(ABC):
         if not isinstance(raw, str) or not raw.strip():
             raise ValueError(
                 f"benchmark task '{self.name}': articulation must be a "
-                f"non-empty string, got {raw!r}")
+                f"non-empty string, got {raw!r}"
+            )
         name = raw.strip()
         available = self.available_articulations()
         if available and name not in available:
             raise ValueError(
                 f"benchmark task '{self.name}': articulation {name!r} is "
-                f"not one of the run's articulations {list(available)}")
+                f"not one of the run's articulations {list(available)}"
+            )
         return name
 
     def resolve_key(self, data: dict, key: str) -> str:
@@ -286,8 +315,7 @@ class Task(ABC):
                     metric_names.append(k)
         out: dict = {}
         for k in metric_names:
-            vals = np.array([float(r.metrics[k]) for r in results
-                             if k in r.metrics], dtype=float)
+            vals = np.array([float(r.metrics[k]) for r in results if k in r.metrics], dtype=float)
             out[k] = {
                 "mean": float(vals.mean()),
                 "std": float(vals.std()),
@@ -297,7 +325,7 @@ class Task(ABC):
                 "p90": float(np.percentile(vals, 90)),
             }
         judged = [r.success for r in results if r.success is not None]
-        out["success_rate"] = (float(np.mean(judged)) if judged else None)
+        out["success_rate"] = float(np.mean(judged)) if judged else None
         out["n_episodes"] = len(results)
         return out
 
@@ -313,8 +341,7 @@ def register(cls: type[Task]) -> type[Task]:
     return cls
 
 
-def build_tasks(sections: list[dict], meta: dict,
-                packs_cfg: list | None = None) -> list[Task]:
+def build_tasks(sections: list[dict], meta: dict, packs_cfg: list | None = None) -> list[Task]:
     """Instantiate tasks from yaml ``benchmark.tasks`` sections.
 
     Routing (B1.5): a section with ``class: formula`` builds a
@@ -336,6 +363,7 @@ def build_tasks(sections: list[dict], meta: dict,
     task name -- duplicates would silently merge).
     """
     from .packs import discover_packs  # lazy: packs.py imports this module
+
     index = discover_packs(packs_cfg)
     sections = index.expand_wildcards(sections)
     tasks: list[Task] = []
@@ -351,6 +379,7 @@ def build_tasks(sections: list[dict], meta: dict,
                 task.name = def_.canonical  # report key is namespaced
         elif cls_key == "formula":
             from .formula import FormulaTask  # lazy: avoids the import cycle
+
             task = FormulaTask(params=section, meta=meta)
             if name is not None:
                 task.name = str(name)
@@ -358,12 +387,14 @@ def build_tasks(sections: list[dict], meta: dict,
             raise ValueError(
                 f"benchmark task section {name!r}: unknown class "
                 f"{cls_key!r} (only 'formula', a pack reference, or "
-                f"omitted for the named registry {sorted(TASK_REGISTRY)})")
+                f"omitted for the named registry {sorted(TASK_REGISTRY)})"
+            )
         if task.name in seen_names:
             raise ValueError(
                 f"duplicate benchmark task name '{task.name}' (BenchmarkSink "
                 "keys results by task name; give formula tasks unique "
-                "yaml names)")
+                "yaml names)"
+            )
         seen_names.add(task.name)
         tasks.append(task)
     return tasks

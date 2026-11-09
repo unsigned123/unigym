@@ -36,6 +36,7 @@ UI never consumes it.  Backend mechanics live in the backend packages
 the :class:`SceneOps` seam -- the ``director/ops.py`` pattern; this
 module stays engine-free (numpy only inside the shared contact sampler).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -49,8 +50,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.contacts.manager import ContactManager
     from unigym.runtime.bridge import Bridge
 
-__all__ = ["SceneOps", "SceneFace", "build_scene_ops", "attach",
-           "robot_joint_groups", "joint_limit_rows", "contact_groups_state"]
+__all__ = [
+    "SceneOps",
+    "SceneFace",
+    "build_scene_ops",
+    "attach",
+    "robot_joint_groups",
+    "joint_limit_rows",
+    "contact_groups_state",
+]
 
 
 @runtime_checkable
@@ -81,8 +89,12 @@ class SceneOps(Protocol):
         ...
 
 
-def build_scene_ops(env: object, backend: str, robot_name: str | None = None,
-                    camera_names: Iterable[str] | None = None) -> SceneOps:
+def build_scene_ops(
+    env: object,
+    backend: str,
+    robot_name: str | None = None,
+    camera_names: Iterable[str] | None = None,
+) -> SceneOps:
     """Factory: the ops object for *env* (single dispatch point).
 
     The implementations live in the backend packages -- lazy
@@ -93,14 +105,11 @@ def build_scene_ops(env: object, backend: str, robot_name: str | None = None,
     try:
         info = backend_info(backend)
     except BackendSelectionError as e:
-        raise ValueError(f"scene face: unknown backend {backend!r} "
-                         "(mujoco | isaaclab)") from e
+        raise ValueError(f"scene face: unknown backend {backend!r} " "(mujoco | isaaclab)") from e
     if info.scene_ops is None:
-        raise ValueError(f"scene face: backend {backend!r} declares no "
-                         "scene_ops face")
+        raise ValueError(f"scene face: backend {backend!r} declares no " "scene_ops face")
     scene_ops_factory = cast(Callable[..., SceneOps], info.scene_ops)
-    return scene_ops_factory(env, robot_name=robot_name,
-                             camera_names=camera_names)
+    return scene_ops_factory(env, robot_name=robot_name, camera_names=camera_names)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +126,7 @@ def robot_joint_groups(joint_names: Iterable[str]) -> dict[str, list[str]]:
     listing joints it does not have.
     """
     from ..robots.g1_constants import G1_BODY_PARTS, G1_HAND_JOINTS
+
     parts: Mapping[str, object] = G1_BODY_PARTS
     hand_joints: Sequence[str] = G1_HAND_JOINTS
     have = list(joint_names)
@@ -135,8 +145,8 @@ def robot_joint_groups(joint_names: Iterable[str]) -> dict[str, list[str]]:
 
 
 def joint_limit_rows(
-        names: Sequence[str],
-        limits: Mapping[str, tuple[float, float] | None],
+    names: Sequence[str],
+    limits: Mapping[str, tuple[float, float] | None],
 ) -> list[dict[str, JsonValue]]:
     """``tree.robot.joints`` / prop-articulation limit rows.
 
@@ -155,11 +165,14 @@ def joint_limit_rows(
     rows: list[dict[str, JsonValue]] = []
     for n in names:
         lim = limits.get(n)
-        rows.append({"name": n,
-                     "group": gname.get(n),
-                     "range": ([float(lim[0]), float(lim[1])]
-                               if lim is not None else None),
-                     "limited": lim is not None})
+        rows.append(
+            {
+                "name": n,
+                "group": gname.get(n),
+                "range": ([float(lim[0]), float(lim[1])] if lim is not None else None),
+                "limited": lim is not None,
+            }
+        )
     return rows
 
 
@@ -171,6 +184,7 @@ def _to_numpy(x: object) -> NDArray[Any] | None:
     if detach is not None:
         x = detach().cpu().numpy()
     import numpy as np
+
     return np.asarray(x)
 
 
@@ -183,12 +197,13 @@ def _any_truthy(val: object) -> bool:
     if val is None:
         return False
     detach = getattr(val, "detach", None)
-    if detach is not None:              # torch tensor (isaaclab face)
+    if detach is not None:  # torch tensor (isaaclab face)
         return bool(detach().cpu().numpy().any())
     anyfn = getattr(val, "any", None)
     if anyfn is not None:
         return bool(anyfn())
     import numpy as np
+
     return bool(np.asarray(val).any())
 
 
@@ -218,7 +233,7 @@ def contact_groups_state(cm: ContactManager | None) -> dict[str, JsonValue]:
             if raw is not None and raw.size:
                 fz = float(abs(raw[..., 2]).max())
         except (AttributeError, NotImplementedError, RuntimeError):
-            fz = None                      # honest null (contract §1.23)
+            fz = None  # honest null (contract §1.23)
         out[spec_name] = {"on": on, "force_z": fz}
     return out
 
@@ -235,9 +250,13 @@ class SceneFace:
     ``scene`` bridge command -- the console/watchers/director pattern.
     """
 
-    def __init__(self, env: object, backend: str,
-                 robot_name: str | None = None,
-                 camera_names: Iterable[str] | None = None):
+    def __init__(
+        self,
+        env: object,
+        backend: str,
+        robot_name: str | None = None,
+        camera_names: Iterable[str] | None = None,
+    ):
         self._env = env
         self._backend = str(backend)
         self._robot_name = robot_name
@@ -250,9 +269,12 @@ class SceneFace:
     def ops(self) -> SceneOps:
         """The backend SceneOps (built lazily on first access)."""
         if self._ops is None:
-            self._ops = build_scene_ops(self._env, self._backend,
-                                        robot_name=self._robot_name,
-                                        camera_names=self._camera_names)
+            self._ops = build_scene_ops(
+                self._env,
+                self._backend,
+                robot_name=self._robot_name,
+                camera_names=self._camera_names,
+            )
         return self._ops
 
     def tree_face(self) -> dict[str, JsonValue]:
@@ -265,27 +287,25 @@ class SceneFace:
             self._tree = self.ops.tree()
         return self._tree
 
-    def handle(self, rid: int,
-               params: Mapping[str, JsonValue] | None = None
-               ) -> dict[str, JsonValue]:
+    def handle(
+        self, rid: int, params: Mapping[str, JsonValue] | None = None
+    ) -> dict[str, JsonValue]:
         """Cmd-16 handler: curated doc, or ``full`` raw tree on demand."""
         self.n_queries += 1
         if params and params.get("full"):
-            return {"scene": {"backend": self._backend,
-                              "full": self.ops.full_tree()}}
-        return {"scene": {"tree": self.tree_face(),
-                          "state": self.ops.state()}}
+            return {"scene": {"backend": self._backend, "full": self.ops.full_tree()}}
+        return {"scene": {"tree": self.tree_face(), "state": self.ops.state()}}
 
 
-def attach(bridge: Bridge, env: object, backend: str,
-           robot_name: str | None = None) -> SceneFace:
+def attach(bridge: Bridge, env: object, backend: str, robot_name: str | None = None) -> SceneFace:
     """Wire the scene face onto the bridge (collect_cli face).
 
     Registers the cmd-16 handler via the bridge's extension surface
     (``register_command`` -- the console/watchers/director pattern);
     camera names ride from the bridge's own camera manager view.
     """
-    face = SceneFace(env, backend, robot_name=robot_name,
-                     camera_names=getattr(bridge, "camera_names", None))
+    face = SceneFace(
+        env, backend, robot_name=robot_name, camera_names=getattr(bridge, "camera_names", None)
+    )
     bridge.register_command("scene", face.handle)
     return face

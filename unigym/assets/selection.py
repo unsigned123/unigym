@@ -24,6 +24,7 @@ This module is the L0 decision layer: the standard library, :mod:`yaml` and
 :mod:`unigym.assets.catalog` only.  It never scans the filesystem and never
 revises the catalog -- it pins a catalog digest and records what was chosen.
 """
+
 from __future__ import annotations
 
 import random
@@ -78,35 +79,41 @@ def _catalog(catalog: object) -> dict:
         raise _error(
             "",
             f"the catalog must be a mapping, got {type(catalog).__name__}; load "
-            "it with unigym.assets.catalog.load_catalog")
+            "it with unigym.assets.catalog.load_catalog",
+        )
     document = dict(catalog)
     entries = document.get("entries")
     if not isinstance(entries, list):
         raise _error(
             "",
             "'entries' must be a list; rebuild the catalog with "
-            "`python tools/build_asset_catalog.py --out <dir>`")
+            "`python tools/build_asset_catalog.py --out <dir>`",
+        )
     for index, entry in enumerate(entries):
         if not isinstance(entry, Mapping) or not isinstance(entry.get("id"), str):
             raise _error(
                 f"catalog entry #{index}",
                 "must be a mapping with a string 'id'; rebuild the catalog "
-                "instead of editing it")
+                "instead of editing it",
+            )
     return document
 
 
 def _tag_problem(value: object) -> str | None:
     """Return a teaching message when ``value`` is not a namespaced tag (R7)."""
     if not isinstance(value, str) or not value:
-        return (f"must be a non-empty string, got {value!r}; tags are "
-                "'pack:<ns>/tag=<name>', e.g. 'pack:acme/tag=tiles'")
+        return (
+            f"must be a non-empty string, got {value!r}; tags are "
+            "'pack:<ns>/tag=<name>', e.g. 'pack:acme/tag=tiles'"
+        )
     if not value.startswith("pack:"):
-        return (f"{value!r} is a bare tag; R7 requires every tag to be "
-                "namespaced -- write 'pack:<ns>/tag=<name>'")
-    namespace, sep, name = value[len("pack:"):].partition(_TAG_MARKER)
+        return (
+            f"{value!r} is a bare tag; R7 requires every tag to be "
+            "namespaced -- write 'pack:<ns>/tag=<name>'"
+        )
+    namespace, sep, name = value[len("pack:") :].partition(_TAG_MARKER)
     if not sep or _NAMESPACE_RE.fullmatch(namespace) is None or not name:
-        return (f"{value!r} is not a legal namespaced tag; write "
-                "'pack:<ns>/tag=<name>' (R7)")
+        return f"{value!r} is not a legal namespaced tag; write " "'pack:<ns>/tag=<name>' (R7)"
     return None
 
 
@@ -115,78 +122,80 @@ def _validate_selector(selector: object) -> dict:
     if not isinstance(selector, Mapping):
         raise _error(
             "selector",
-            f"must be a mapping with keys {list(SELECTOR_KEYS)}, got "
-            f"{type(selector).__name__}")
+            f"must be a mapping with keys {list(SELECTOR_KEYS)}, got " f"{type(selector).__name__}",
+        )
     unknown = sorted(set(selector) - set(SELECTOR_KEYS))
     if unknown:
         raise _error(
             "selector",
             f"unknown key(s) {unknown}; legal keys are {list(SELECTOR_KEYS)} "
-            "-- a selector has exactly these filters and the choice size")
+            "-- a selector has exactly these filters and the choice size",
+        )
     if "choose" not in selector:
         raise _error(
             "selector",
-            "'choose' is required: the number of ids the selection pins "
-            "(e.g. choose: 1)")
+            "'choose' is required: the number of ids the selection pins " "(e.g. choose: 1)",
+        )
     choose = selector["choose"]
     if isinstance(choose, bool) or not isinstance(choose, int) or choose < 1:
         raise _error(
             "selector",
             f"'choose' must be a positive int, got {choose!r}; it is the "
-            "number of ids the selection pins")
+            "number of ids the selection pins",
+        )
     if "kind" in selector:
         kind = selector["kind"]
         if not isinstance(kind, str) or not kind:
             raise _error(
                 "selector",
                 f"'kind' must be a non-empty manifest kind, got {kind!r}; "
-                "e.g. kind: texture_set")
+                "e.g. kind: texture_set",
+            )
     if "pack" in selector:
         pack = selector["pack"]
         if not isinstance(pack, str) or _NAMESPACE_RE.fullmatch(pack) is None:
             raise _error(
                 "selector",
-                f"'pack' must be a lowercase pack namespace, got {pack!r}; "
-                "e.g. pack: acme")
+                f"'pack' must be a lowercase pack namespace, got {pack!r}; " "e.g. pack: acme",
+            )
     if "tags" in selector:
         tags = selector["tags"]
         if isinstance(tags, (str, bytes)) or not isinstance(tags, (list, tuple)):
             raise _error(
                 "selector",
                 f"'tags' must be a list of namespaced tags, got {tags!r}; "
-                "pass a list even for one tag")
+                "pass a list even for one tag",
+            )
         for tag in tags:
             problem = _tag_problem(tag)
             if problem is not None:
                 raise _error("selector", problem)
         if len(set(tags)) != len(tags):
-            raise _error(
-                "selector",
-                f"'tags' lists a tag twice: {list(tags)!r}; tags are a set")
+            raise _error("selector", f"'tags' lists a tag twice: {list(tags)!r}; tags are a set")
     if "any_tags" in selector:
         any_tags = selector["any_tags"]
-        if isinstance(any_tags, (str, bytes)) or not isinstance(
-                any_tags, (list, tuple)):
+        if isinstance(any_tags, (str, bytes)) or not isinstance(any_tags, (list, tuple)):
             raise _error(
                 "selector",
                 f"'any_tags' must be a list of namespaced tags (the OR "
-                f"form of 'tags'), got {any_tags!r}")
+                f"form of 'tags'), got {any_tags!r}",
+            )
         for tag in any_tags:
             problem = _tag_problem(tag)
             if problem is not None:
                 raise _error("selector", f"'any_tags': {problem}")
         if len(set(any_tags)) != len(any_tags):
             raise _error(
-                "selector",
-                f"'any_tags' lists a tag twice: {list(any_tags)!r}; tags "
-                "are a set")
+                "selector", f"'any_tags' lists a tag twice: {list(any_tags)!r}; tags " "are a set"
+            )
     if "seed" in selector:
         seed = selector["seed"]
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise _error(
                 "selector",
                 f"'seed' must be an int, got {seed!r}; the seed makes a "
-                "random choice reproducible across runs")
+                "random choice reproducible across runs",
+            )
     return cast(dict, selector)
 
 
@@ -205,25 +214,28 @@ def validate_spec(doc: Mapping) -> dict:
         raise _error(
             "",
             f"a selection spec must be a mapping with keys {list(SPEC_KEYS)}, "
-            f"got {type(doc).__name__}")
+            f"got {type(doc).__name__}",
+        )
     unknown = sorted(set(doc) - set(SPEC_KEYS))
     if unknown:
         raise _error(
             "",
             f"unknown spec key(s) {unknown}; legal keys are {list(SPEC_KEYS)} "
-            "-- the spec is the selector's intent, not a scene fragment")
+            "-- the spec is the selector's intent, not a scene fragment",
+        )
     for key in SPEC_KEYS:
         if key not in doc:
             raise _error(
                 "",
                 f"{key!r} is required; a spec is "
-                "{name: <snake_case>, selector: {choose: <int>, ...}}")
+                "{name: <snake_case>, selector: {choose: <int>, ...}}",
+            )
     name = doc["name"]
     if not isinstance(name, str) or _NAME_RE.fullmatch(name) is None:
         raise _error(
             "name",
-            f"must be snake_case ('[a-z][a-z0-9_]*'), got {name!r}; e.g. "
-            "name: my_selection")
+            f"must be snake_case ('[a-z][a-z0-9_]*'), got {name!r}; e.g. " "name: my_selection",
+        )
     _validate_selector(doc["selector"])
     return cast(dict, doc)
 
@@ -248,9 +260,8 @@ def _matches(entry: Mapping, selector: Mapping) -> bool:
 def _stable_order(entries: Iterable[Mapping], selector: Mapping) -> list[str]:
     """Filter the entries and order their ids by ``(pack, id)`` (R7 tie-break)."""
     chosen = sorted(
-        (entry.get("pack"), entry["id"])
-        for entry in entries
-        if _matches(entry, selector))
+        (entry.get("pack"), entry["id"]) for entry in entries if _matches(entry, selector)
+    )
     return [asset_id for _, asset_id in chosen]
 
 
@@ -305,13 +316,15 @@ def resolve_spec(spec: Mapping, catalog: dict) -> list[str]:
             f"selection {name!r}",
             f"matched 0 of {len(entries)} catalog entries for rule {rule!r}; "
             "widen the selector or rebuild the catalog -- an empty selection "
-            "is a broken decision, not an empty one")
+            "is a broken decision, not an empty one",
+        )
     if choose > len(candidates):
         raise _error(
             f"selection {name!r}",
             f"asks for {choose} ids but only {len(candidates)} of "
             f"{len(entries)} catalog entries match rule {rule!r}; lower "
-            "choose or widen the selector")
+            "choose or widen the selector",
+        )
     seed = selector.get("seed")
     if seed is None:
         return candidates[:choose]
@@ -324,43 +337,46 @@ def _validate_lock(lock: object) -> dict:
         raise _error(
             "",
             f"a selection lock must be a mapping with keys {list(LOCK_KEYS)}, "
-            f"got {type(lock).__name__}")
+            f"got {type(lock).__name__}",
+        )
     missing = [key for key in LOCK_KEYS if key not in lock]
     unknown = sorted(set(lock) - set(LOCK_KEYS))
     if missing or unknown:
         raise _error(
             "",
             f"lock keys must be exactly {list(LOCK_KEYS)}; missing {missing}, "
-            f"unknown {unknown}")
+            f"unknown {unknown}",
+        )
     if lock["schema"] != SCHEMA:
         raise _error(
             "schema",
             f"must be {SCHEMA!r} exactly, got {lock['schema']!r}; regenerate "
-            "the lock instead of editing it")
+            "the lock instead of editing it",
+        )
     digest = lock["catalog_digest"]
     if not isinstance(digest, str) or not digest:
         raise _error(
             "catalog_digest",
             f"must be a 'sha256:<hex>' string, got {digest!r}; regenerate "
-            "the lock instead of editing it")
+            "the lock instead of editing it",
+        )
     resolved = lock["resolved"]
     if not isinstance(resolved, (list, tuple)) or not resolved:
         raise _error(
             "resolved",
             f"must be a non-empty list of asset ids, got {resolved!r}; an "
-            "empty lock is a broken decision")
+            "empty lock is a broken decision",
+        )
     for asset_id in resolved:
         if not isinstance(asset_id, str) or not asset_id:
             raise _error(
-                "resolved",
-                f"entries must be non-empty asset id strings, got {asset_id!r}")
+                "resolved", f"entries must be non-empty asset id strings, got {asset_id!r}"
+            )
     if len(set(resolved)) != len(resolved):
-        raise _error(
-            "resolved", f"lists an id twice: {list(resolved)!r}")
+        raise _error("resolved", f"lists an id twice: {list(resolved)!r}")
     rule = lock["rule"]
     if not isinstance(rule, str) or not rule or "\n" in rule:
-        raise _error(
-            "rule", f"must be a single-line string, got {rule!r}")
+        raise _error("rule", f"must be a single-line string, got {rule!r}")
     return cast(dict, lock)
 
 
@@ -392,7 +408,8 @@ def lock_document(spec: Mapping, catalog: dict, resolved: list[str]) -> dict:
         raise _error(
             "resolved",
             f"names ids absent from the catalog: {absent}; resolve the spec "
-            "against this catalog first")
+            "against this catalog first",
+        )
     return lock
 
 
@@ -428,7 +445,8 @@ def check_lock(lock: dict, catalog: dict, spec: Mapping | None = None) -> list[s
             f"records catalog_digest {recorded} but the catalog digests to "
             f"{expected}; the assets behind this decision changed -- "
             "re-resolve and rewrite the lock with --update instead of editing "
-            "the digest")
+            "the digest",
+        )
     resolved = list(document["resolved"])
     known = {entry["id"] for entry in current["entries"]}
     missing = [asset_id for asset_id in resolved if asset_id not in known]
@@ -436,7 +454,8 @@ def check_lock(lock: dict, catalog: dict, spec: Mapping | None = None) -> list[s
         raise _error(
             "selection lock",
             f"names ids absent from the catalog: {missing}; re-resolve and "
-            "rewrite the lock with --update")
+            "rewrite the lock with --update",
+        )
     if spec is not None:
         spec_document = validate_spec(spec)
         fresh = resolve_spec(spec_document, current)
@@ -445,15 +464,16 @@ def check_lock(lock: dict, catalog: dict, spec: Mapping | None = None) -> list[s
                 f"selection {spec_document['name']!r}",
                 f"the lock resolved {resolved} but re-resolution yields "
                 f"{fresh}; the spec or the resolution rule changed -- rewrite "
-                "the lock with --update")
+                "the lock with --update",
+            )
     return resolved
 
 
 def _dump(lock: dict) -> str:
     """Render a lock document as deterministic YAML text (one trailing newline)."""
     text = yaml.safe_dump(
-        lock, sort_keys=True, default_flow_style=False, allow_unicode=True,
-        width=4096)
+        lock, sort_keys=True, default_flow_style=False, allow_unicode=True, width=4096
+    )
     return text if text.endswith("\n") else text + "\n"
 
 
@@ -491,16 +511,19 @@ def load_spec(path: str | Path) -> dict:
     except OSError as exc:
         raise SelectionError(
             f"{location}: cannot read the selection spec ({exc}); a spec is a "
-            "yaml mapping with 'name' and 'selector' (v086 §6)") from exc
+            "yaml mapping with 'name' and 'selector' (v086 §6)"
+        ) from exc
     except yaml.YAMLError as exc:
         raise SelectionError(
             f"{location}: the selection spec is not valid yaml ({exc}); fix "
-            "the file -- one spec is one mapping") from exc
+            "the file -- one spec is one mapping"
+        ) from exc
     if not isinstance(document, Mapping):
         raise SelectionError(
             f"{location}: a selection spec must be a yaml mapping with keys "
             f"{list(SPEC_KEYS)}, got {type(document).__name__}; check the file "
-            "content, not just its name")
+            "content, not just its name"
+        )
     try:
         return validate_spec(document)
     except SelectionError as exc:

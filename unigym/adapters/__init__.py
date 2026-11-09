@@ -1,4 +1,5 @@
 """Adapter registry. Imports must stay torch-only for local unit tests."""
+
 from __future__ import annotations
 
 import inspect
@@ -37,19 +38,25 @@ class AdapterParamsError(ValueError):
         self.doc = doc
 
 
-def _teaching_doc(message: str, *, legal: object, example: object,
-                  hint: str) -> dict[str, object]:
-    return {"ok": False, "error_code": "bad_adapter_params",
-            "error": message, "legal": legal, "example": example,
-            "hint": hint}
+def _teaching_doc(message: str, *, legal: object, example: object, hint: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error_code": "bad_adapter_params",
+        "error": message,
+        "legal": legal,
+        "example": example,
+        "hint": hint,
+    }
 
 
 #: the one scalar-type whitelist for spawn params (JSON-simple values)
 _SCALARS = (bool, int, float, str)
 _SPAWN_EXAMPLE = {"name": "manual", "control_dt": 0.02}
-_SPAWN_HINT = ("spawn params overlay ONLY the yaml 'adapter:' section "
-               "(never env/benchmark/cameras); values are scalars or "
-               "scalar lists")
+_SPAWN_HINT = (
+    "spawn params overlay ONLY the yaml 'adapter:' section "
+    "(never env/benchmark/cameras); values are scalars or "
+    "scalar lists"
+)
 
 
 def validate_spawn_params(params: object) -> dict[str, JsonValue]:
@@ -66,26 +73,29 @@ def validate_spawn_params(params: object) -> dict[str, JsonValue]:
         return {}
     if isinstance(params, str):
         raise AdapterParamsError(
-            f"adapter_params must be an object, got a string: "
-            f"{str(params)[:120]!r}",
+            f"adapter_params must be an object, got a string: " f"{str(params)[:120]!r}",
             _teaching_doc(
-                "send adapter_params as the structured JSON object, never "
-                "as a stringified one",
+                "send adapter_params as the structured JSON object, never " "as a stringified one",
                 legal="object of scalar / scalar-list values",
-                example=_SPAWN_EXAMPLE, hint=_SPAWN_HINT))
+                example=_SPAWN_EXAMPLE,
+                hint=_SPAWN_HINT,
+            ),
+        )
     if not isinstance(params, dict):
         raise AdapterParamsError(
-            f"adapter_params must be an object, got "
-            f"{type(params).__name__}",
-            _teaching_doc("adapter_params must be a JSON object",
-                          legal="object of scalar / scalar-list values",
-                          example=_SPAWN_EXAMPLE, hint=_SPAWN_HINT))
+            f"adapter_params must be an object, got " f"{type(params).__name__}",
+            _teaching_doc(
+                "adapter_params must be a JSON object",
+                legal="object of scalar / scalar-list values",
+                example=_SPAWN_EXAMPLE,
+                hint=_SPAWN_HINT,
+            ),
+        )
     for key, value in params.items():
         if value is None or isinstance(value, _SCALARS):
             continue
         if isinstance(value, (list, tuple)):
-            bad = [v for v in value
-                   if not (v is None or isinstance(v, _SCALARS))]
+            bad = [v for v in value if not (v is None or isinstance(v, _SCALARS))]
             if bad:
                 raise AdapterParamsError(
                     f"adapter_params[{key!r}]: lists must carry scalars "
@@ -93,7 +103,10 @@ def validate_spawn_params(params: object) -> dict[str, JsonValue]:
                     _teaching_doc(
                         f"adapter_params[{key!r}] is not a scalar list",
                         legal="flat list of scalars (bool/int/float/str)",
-                        example={key: [1, 2, 3]}, hint=_SPAWN_HINT))
+                        example={key: [1, 2, 3]},
+                        hint=_SPAWN_HINT,
+                    ),
+                )
             continue
         raise AdapterParamsError(
             f"adapter_params[{key!r}]: nested structures are not "
@@ -102,9 +115,11 @@ def validate_spawn_params(params: object) -> dict[str, JsonValue]:
                 f"adapter_params[{key!r}] must be a scalar or a flat "
                 f"scalar list -- nested dicts are rejected (the channel "
                 f"overlays the adapter section shallowly)",
-                legal="scalar (bool/int/float/str/null) or flat scalar "
-                      "list",
-                example=_SPAWN_EXAMPLE, hint=_SPAWN_HINT))
+                legal="scalar (bool/int/float/str/null) or flat scalar " "list",
+                example=_SPAWN_EXAMPLE,
+                hint=_SPAWN_HINT,
+            ),
+        )
     return dict(params)
 
 
@@ -153,8 +168,7 @@ def apply_spawn_params(
     if not params:
         return dict(section or {}), []
     base = dict(section or {})
-    switching = ("name" in params
-                 and params["name"] != base.get("name"))
+    switching = "name" in params and params["name"] != base.get("name")
     if switching:
         merged = dict(params)
     else:
@@ -163,18 +177,23 @@ def apply_spawn_params(
     if final_name is None:
         raise AdapterParamsError(
             "adapter section has no 'name' (spawn params must carry it)",
-            _teaching_doc("the adapter section carries no 'name'",
-                          legal=f"one of {sorted(ADAPTER_REGISTRY)}",
-                          example=_SPAWN_EXAMPLE,
-                          hint="spawn params may set 'name' to switch the "
-                               "adapter"))
+            _teaching_doc(
+                "the adapter section carries no 'name'",
+                legal=f"one of {sorted(ADAPTER_REGISTRY)}",
+                example=_SPAWN_EXAMPLE,
+                hint="spawn params may set 'name' to switch the " "adapter",
+            ),
+        )
     if final_name not in ADAPTER_REGISTRY:
         raise AdapterParamsError(
             f"unknown adapter name {final_name!r}",
-            _teaching_doc(f"unknown adapter name {final_name!r}",
-                          legal=f"one of {sorted(ADAPTER_REGISTRY)}",
-                          example=_SPAWN_EXAMPLE,
-                          hint="pick a registered adapter name"))
+            _teaching_doc(
+                f"unknown adapter name {final_name!r}",
+                legal=f"one of {sorted(ADAPTER_REGISTRY)}",
+                example=_SPAWN_EXAMPLE,
+                hint="pick a registered adapter name",
+            ),
+        )
     declared = declared_params(ADAPTER_REGISTRY[final_name])
     if declared is not None:
         check_spawn_values(final_name, params)
@@ -191,18 +210,20 @@ def apply_spawn_params(
                     "'body_parts' is not a spawn-param surface",
                     legal=sorted(legal | {"name"}),
                     example=_SPAWN_EXAMPLE,
-                    hint="body parts come from the config robot section"))
+                    hint="body parts come from the config robot section",
+                ),
+            )
         if unknown:
             raise AdapterParamsError(
-                f"unknown adapter_params keys for '{final_name}': "
-                f"{sorted(unknown)}",
+                f"unknown adapter_params keys for '{final_name}': " f"{sorted(unknown)}",
                 _teaching_doc(
-                    f"unknown keys {sorted(unknown)} for adapter "
-                    f"'{final_name}'",
+                    f"unknown keys {sorted(unknown)} for adapter " f"'{final_name}'",
                     legal=sorted(legal | {"name"}),
                     example=_SPAWN_EXAMPLE,
                     hint="check spelling against the legal-key list; "
-                         "config yaml keys stay legal too"))
+                    "config yaml keys stay legal too",
+                ),
+            )
     if switching:
         # the whole section was replaced: every spawn key is an override
         overridden = sorted(params)
@@ -211,8 +232,9 @@ def apply_spawn_params(
     return merged, overridden
 
 
-def build_adapter(section: dict, num_envs: int, device: str,
-                  body_parts: dict | None = None) -> Adapter:
+def build_adapter(
+    section: dict, num_envs: int, device: str, body_parts: dict | None = None
+) -> Adapter:
     """Instantiate an adapter from a config dict entry ``{name: ..., **params}``.
 
     ``body_parts`` (from the yaml ``robot.body_parts`` section) is passed
@@ -230,10 +252,13 @@ def build_adapter(section: dict, num_envs: int, device: str,
     if name not in ADAPTER_REGISTRY:
         raise AdapterParamsError(
             f"unknown adapter name {name!r}",
-            _teaching_doc(f"unknown adapter name {name!r}",
-                          legal=f"one of {sorted(ADAPTER_REGISTRY)}",
-                          example=_SPAWN_EXAMPLE,
-                          hint="pick a registered adapter name"))
+            _teaching_doc(
+                f"unknown adapter name {name!r}",
+                legal=f"one of {sorted(ADAPTER_REGISTRY)}",
+                example=_SPAWN_EXAMPLE,
+                hint="pick a registered adapter name",
+            ),
+        )
     validate_effective_section(name, section)
     params = {k: v for k, v in section.items() if k != "name"}
     if body_parts is not None:

@@ -14,6 +14,7 @@ this small payload instead of engine elements.
 the fields are redeclared here so this module imports nothing from the
 asset-IR package.
 """
+
 from __future__ import annotations
 
 import math
@@ -33,30 +34,27 @@ SHAPE_LAYERS = ("visual", "collision")
 
 
 def _require_vec(
-    owner: str, name: str, value: Sequence[object], lengths: int | tuple[int, ...],
+    owner: str,
+    name: str,
+    value: Sequence[object],
+    lengths: int | tuple[int, ...],
 ) -> tuple[float, ...]:
     """Validate a finite float vector whose length is one of *lengths*."""
     allowed = (lengths,) if isinstance(lengths, int) else lengths
     if not isinstance(value, (list, tuple)):
         wanted = " or ".join(str(n) for n in allowed)
         raise ValueError(
-            f"{owner}: {name} must be a {wanted}-vector of finite numbers, "
-            f"got {value!r}"
+            f"{owner}: {name} must be a {wanted}-vector of finite numbers, " f"got {value!r}"
         )
     if len(value) not in allowed or any(
-        isinstance(v, bool)
-        or not isinstance(v, (int, float))
-        or not math.isfinite(v)
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
         for v in value
     ):
         want = " or ".join(str(n) for n in allowed)
         raise ValueError(
-            f"{owner}: {name} must be a {want}-vector of finite numbers, "
-            f"got {value!r}"
+            f"{owner}: {name} must be a {want}-vector of finite numbers, " f"got {value!r}"
         )
-    return tuple(
-        float(v) for v in value if isinstance(v, (int, float))
-    )
+    return tuple(float(v) for v in value if isinstance(v, (int, float)))
 
 
 def _require_positive(owner: str, name: str, value: object) -> float:
@@ -67,9 +65,7 @@ def _require_positive(owner: str, name: str, value: object) -> float:
         or not math.isfinite(value)
         or value <= 0
     ):
-        raise ValueError(
-            f"{owner}: {name} must be a finite number > 0, got {value!r}"
-        )
+        raise ValueError(f"{owner}: {name} must be a finite number > 0, got {value!r}")
     return float(value)
 
 
@@ -92,20 +88,14 @@ class ContactSpec:
         """Validate every present hint against its closed rule."""
         owner = "contact spec"
         if self.friction is not None:
-            object.__setattr__(
-                self, "friction", _require_vec(owner, "friction", self.friction, 3)
-            )
+            object.__setattr__(self, "friction", _require_vec(owner, "friction", self.friction, 3))
         if self.condim is not None:
             if self.condim not in CONDIMS:
-                raise ValueError(
-                    f"{owner}: condim {self.condim!r} must be one of {CONDIMS}"
-                )
+                raise ValueError(f"{owner}: condim {self.condim!r} must be one of {CONDIMS}")
             object.__setattr__(self, "condim", int(self.condim))
         if self.priority is not None:
             if isinstance(self.priority, bool) or not isinstance(self.priority, int):
-                raise ValueError(
-                    f"{owner}: priority must be an int, got {self.priority!r}"
-                )
+                raise ValueError(f"{owner}: priority must be an int, got {self.priority!r}")
         if self.solver_ref is not None:
             object.__setattr__(
                 self,
@@ -116,16 +106,12 @@ class ContactSpec:
             object.__setattr__(
                 self,
                 "solver_impedance",
-                _require_vec(
-                    owner, "solver_impedance", self.solver_impedance, (3, 5)
-                ),
+                _require_vec(owner, "solver_impedance", self.solver_impedance, (3, 5)),
             )
         for field_name in ("margin", "gap"):
             value = getattr(self, field_name)
             if value is not None:
-                object.__setattr__(
-                    self, field_name, _require_positive(owner, field_name, value)
-                )
+                object.__setattr__(self, field_name, _require_positive(owner, field_name, value))
 
 
 class _ShapeLike(Protocol):
@@ -164,22 +150,18 @@ def _validate_shape_fields(shape: _ShapeLike, kind: str) -> str:
     name = require_neutral_name(f"{kind} shape", shape.name)
     object.__setattr__(shape, "name", name)
     owner = f"{kind} shape {name!r}"
-    object.__setattr__(
-        shape, "material",
-        require_neutral_name(f"{kind} material", shape.material))
+    object.__setattr__(shape, "material", require_neutral_name(f"{kind} material", shape.material))
     object.__setattr__(shape, "pos", _require_vec(owner, "pos", shape.pos, 3))
     quat = _require_vec(owner, "quat_wxyz", shape.quat_wxyz, 4)
     if sum(v * v for v in quat) < 1e-24:
-        raise ValueError(
-            f"{owner}: quat_wxyz must be non-zero, got {shape.quat_wxyz!r}")
+        raise ValueError(f"{owner}: quat_wxyz must be non-zero, got {shape.quat_wxyz!r}")
     object.__setattr__(shape, "quat_wxyz", quat)
     if shape.contact is not None and not isinstance(shape.contact, ContactSpec):
         raise ValueError(
-            f"{owner}: contact must be a ContactSpec, got "
-            f"{type(shape.contact).__name__}")
+            f"{owner}: contact must be a ContactSpec, got " f"{type(shape.contact).__name__}"
+        )
     if shape.layer not in SHAPE_LAYERS:
-        raise ValueError(
-            f"{owner}: layer {shape.layer!r} must be one of {SHAPE_LAYERS}")
+        raise ValueError(f"{owner}: layer {shape.layer!r} must be one of {SHAPE_LAYERS}")
     return owner
 
 
@@ -202,8 +184,7 @@ class SphereShape:
     def __post_init__(self):
         """Validate the radius and the shared shape fields."""
         owner = _validate_shape_fields(self, "sphere")
-        object.__setattr__(
-            self, "radius", _require_positive(owner, "radius", self.radius))
+        object.__setattr__(self, "radius", _require_positive(owner, "radius", self.radius))
 
 
 @dataclass(frozen=True)
@@ -222,11 +203,10 @@ class CylinderShape:
     def __post_init__(self):
         """Validate the radius / half-height and the shared shape fields."""
         owner = _validate_shape_fields(self, "cylinder")
+        object.__setattr__(self, "radius", _require_positive(owner, "radius", self.radius))
         object.__setattr__(
-            self, "radius", _require_positive(owner, "radius", self.radius))
-        object.__setattr__(
-            self, "half_height",
-            _require_positive(owner, "half_height", self.half_height))
+            self, "half_height", _require_positive(owner, "half_height", self.half_height)
+        )
 
 
 @dataclass(frozen=True)
@@ -245,11 +225,10 @@ class CapsuleShape:
     def __post_init__(self):
         """Validate the radius / half-height and the shared shape fields."""
         owner = _validate_shape_fields(self, "capsule")
+        object.__setattr__(self, "radius", _require_positive(owner, "radius", self.radius))
         object.__setattr__(
-            self, "radius", _require_positive(owner, "radius", self.radius))
-        object.__setattr__(
-            self, "half_height",
-            _require_positive(owner, "half_height", self.half_height))
+            self, "half_height", _require_positive(owner, "half_height", self.half_height)
+        )
 
 
 @dataclass(frozen=True)
@@ -273,8 +252,7 @@ class PlaneShape:
         owner = _validate_shape_fields(self, "plane")
         size = _require_vec(owner, "size", self.size, 2)
         if any(side <= 0 for side in size):
-            raise ValueError(
-                f"{owner}: size components must be > 0, got {self.size!r}")
+            raise ValueError(f"{owner}: size components must be > 0, got {self.size!r}")
         object.__setattr__(self, "size", size)
 
 
@@ -301,17 +279,13 @@ class BoxShape:
 
     def __post_init__(self):
         """Validate the name, envelope, material, pose, contact and layer."""
-        object.__setattr__(
-            self, "name", require_neutral_name("box shape", self.name)
-        )
+        object.__setattr__(self, "name", require_neutral_name("box shape", self.name))
         owner = f"box shape {self.name!r}"
         object.__setattr__(self, "size", _require_vec(owner, "size", self.size, 3))
         for side in self.size:
             if side <= 0:
                 raise ValueError(f"{owner}: size components must be > 0, got {self.size!r}")
-        object.__setattr__(
-            self, "material", require_neutral_name("box material", self.material)
-        )
+        object.__setattr__(self, "material", require_neutral_name("box material", self.material))
         object.__setattr__(self, "pos", _require_vec(owner, "pos", self.pos, 3))
         quat = _require_vec(owner, "quat_wxyz", self.quat_wxyz, 4)
         if sum(v * v for v in quat) < 1e-24:
@@ -319,21 +293,16 @@ class BoxShape:
         object.__setattr__(self, "quat_wxyz", quat)
         if self.contact is not None and not isinstance(self.contact, ContactSpec):
             raise ValueError(
-                f"{owner}: contact must be a ContactSpec, got "
-                f"{type(self.contact).__name__}"
+                f"{owner}: contact must be a ContactSpec, got " f"{type(self.contact).__name__}"
             )
         if self.layer not in SHAPE_LAYERS:
-            raise ValueError(
-                f"{owner}: layer {self.layer!r} must be one of {SHAPE_LAYERS}"
-            )
+            raise ValueError(f"{owner}: layer {self.layer!r} must be one of {SHAPE_LAYERS}")
 
 
 #: the closed neutral shape vocabulary carried by a :class:`ShapePayload`.
-SHAPE_CLASSES = (
-    BoxShape, SphereShape, CylinderShape, CapsuleShape, PlaneShape)
+SHAPE_CLASSES = (BoxShape, SphereShape, CylinderShape, CapsuleShape, PlaneShape)
 
-Shape: TypeAlias = (
-    BoxShape | SphereShape | CylinderShape | CapsuleShape | PlaneShape)
+Shape: TypeAlias = BoxShape | SphereShape | CylinderShape | CapsuleShape | PlaneShape
 
 
 @dataclass(frozen=True)

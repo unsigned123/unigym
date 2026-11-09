@@ -8,6 +8,7 @@ The scene Cfg classes are resolved through the neutral props ``_resolve``
 table (G4); isaaclab/torch imports stay function-local so this module is
 import-safe without the kit.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,17 +26,17 @@ def isaaclab_scene_fields(gripper_cfg: dict, classes: dict | None = None) -> dic
     g = gripper_cfg
     if classes is None:
         from unigym.props.base import _resolve as _resolve_classes
+
         classes = _resolve_classes(None)
     if "CuboidCfg" not in classes:
-        from isaaclab.sim.spawners import CuboidCfg     # lazy (isaaclab zone)
+        from isaaclab.sim.spawners import CuboidCfg  # lazy (isaaclab zone)
+
         classes = {**classes, "CuboidCfg": CuboidCfg}
     cfg = classes["RigidObjectCfg"](
-        prim_path=(f"{{ENV_REGEX_NS}}/"
-                   f"{GRIPPER_PRIM_PREFIX}{g['name']}"),
+        prim_path=(f"{{ENV_REGEX_NS}}/" f"{GRIPPER_PRIM_PREFIX}{g['name']}"),
         spawn=classes["CuboidCfg"](
             size=[abs(float(v)) * 2.0 for v in g["size"]],
-            rigid_props=classes["RigidBodyPropertiesCfg"](
-                kinematic_enabled=True),
+            rigid_props=classes["RigidBodyPropertiesCfg"](kinematic_enabled=True),
         ),
         init_state=classes["RigidObjectCfg"].InitialStateCfg(
             pos=tuple(float(v) for v in g["pos"]),
@@ -58,7 +59,8 @@ class IsaacLabGripper:
             raise ValueError(
                 f"director gripper asset {key!r} not in the scene (was the "
                 f"run started with --direct and a director.gripper "
-                f"section?)") from e
+                f"section?)"
+            ) from e
         self.name = name
         self.bid = None
 

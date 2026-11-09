@@ -32,6 +32,7 @@ model.xml line-verified):
   joints (controllers/config/robots/default_gr1.json, software
   computed-torque layer; NOT MJCF gainprm).
 """
+
 from __future__ import annotations
 
 from typing import Dict, List
@@ -41,23 +42,31 @@ from typing import Dict, List
 # within each part the MJ document order -- RUNTIME lines in the audit table)
 # ---------------------------------------------------------------------------
 GR1_RIGHT_ARM_JOINTS: List[str] = [
-    "robot0_r_shoulder_pitch", "robot0_r_shoulder_roll",
-    "robot0_r_shoulder_yaw", "robot0_r_elbow_pitch",
-    "robot0_r_wrist_yaw", "robot0_r_wrist_roll", "robot0_r_wrist_pitch",
+    "robot0_r_shoulder_pitch",
+    "robot0_r_shoulder_roll",
+    "robot0_r_shoulder_yaw",
+    "robot0_r_elbow_pitch",
+    "robot0_r_wrist_yaw",
+    "robot0_r_wrist_roll",
+    "robot0_r_wrist_pitch",
 ]
 GR1_LEFT_ARM_JOINTS: List[str] = [
-    "robot0_l_shoulder_pitch", "robot0_l_shoulder_roll",
-    "robot0_l_shoulder_yaw", "robot0_l_elbow_pitch",
-    "robot0_l_wrist_yaw", "robot0_l_wrist_roll", "robot0_l_wrist_pitch",
+    "robot0_l_shoulder_pitch",
+    "robot0_l_shoulder_roll",
+    "robot0_l_shoulder_yaw",
+    "robot0_l_elbow_pitch",
+    "robot0_l_wrist_yaw",
+    "robot0_l_wrist_roll",
+    "robot0_l_wrist_pitch",
 ]
 GR1_WAIST_JOINTS: List[str] = [
-    "robot0_torso_waist_yaw", "robot0_torso_waist_pitch",
+    "robot0_torso_waist_yaw",
+    "robot0_torso_waist_pitch",
     "robot0_torso_waist_roll",
 ]
 
 #: the 17 policy-facing body joints (NamedAction primary face order).
-GR1_JOINT_ORDER: List[str] = (GR1_RIGHT_ARM_JOINTS + GR1_LEFT_ARM_JOINTS
-                              + GR1_WAIST_JOINTS)
+GR1_JOINT_ORDER: List[str] = GR1_RIGHT_ARM_JOINTS + GR1_LEFT_ARM_JOINTS + GR1_WAIST_JOINTS
 
 # ---------------------------------------------------------------------------
 # Hand joints (audit §5; joint names carry the *_joint suffix, the DRIVING
@@ -65,8 +74,7 @@ GR1_JOINT_ORDER: List[str] = (GR1_RIGHT_ARM_JOINTS + GR1_LEFT_ARM_JOINTS
 # thumb-yaw kp=4, ctrlrange [0, ~1.74])
 # ---------------------------------------------------------------------------
 #: 6-dim hand action semantic order (the audited GR00T/robosuite layout).
-GR1_HAND_ACTION_ORDER: List[str] = [
-    "pinky", "ring", "middle", "index", "thumb_curl", "thumb_rot"]
+GR1_HAND_ACTION_ORDER: List[str] = ["pinky", "ring", "middle", "index", "thumb_curl", "thumb_rot"]
 #: 6 -> 11 index repetition onto the DRIVE order (fourier_hands.py
 #: format_action, audit §5 verbatim: thumb rot a5 is 1:1, the other five
 #: dims each drive an intermediate+proximal pair).
@@ -89,8 +97,7 @@ GR1_RIGHT_HAND_DRIVE_ORDER: List[str] = [
 ]
 #: left-hand twin (RUNTIME drives 1189-1199).
 GR1_LEFT_HAND_DRIVE_ORDER: List[str] = [
-    name.replace("gripper0_right_R_", "gripper0_left_L_")
-    for name in GR1_RIGHT_HAND_DRIVE_ORDER
+    name.replace("gripper0_right_R_", "gripper0_left_L_") for name in GR1_RIGHT_HAND_DRIVE_ORDER
 ]
 
 
@@ -101,10 +108,19 @@ def _hand_doc_order(prefix: str) -> List[str]:
     reverse-symmetric twin of the drive order (obs-side consumers; the
     audit's asymmetry note).
     """
-    parts = ["thumb_proximal_yaw", "thumb_proximal_pitch", "thumb_distal",
-             "index_proximal", "index_intermediate", "middle_proximal",
-             "middle_intermediate", "ring_proximal", "ring_intermediate",
-             "pinky_proximal", "pinky_intermediate"]
+    parts = [
+        "thumb_proximal_yaw",
+        "thumb_proximal_pitch",
+        "thumb_distal",
+        "index_proximal",
+        "index_intermediate",
+        "middle_proximal",
+        "middle_intermediate",
+        "ring_proximal",
+        "ring_intermediate",
+        "pinky_proximal",
+        "pinky_intermediate",
+    ]
     return [f"{prefix}_{joint}_joint" for joint in parts]
 
 
@@ -117,8 +133,12 @@ GR1_LEFT_HAND_JOINTS: List[str] = _hand_doc_order("gripper0_left_L")
 #: right arm 7 + right hand 11 + left arm 7 + left hand 11; no freejoint:
 #: the pelvis is welded to the world through mobilebase0_support).
 GR1_JOINT_ORDER_MJ: List[str] = (
-    GR1_WAIST_JOINTS + GR1_RIGHT_ARM_JOINTS + GR1_RIGHT_HAND_JOINTS
-    + GR1_LEFT_ARM_JOINTS + GR1_LEFT_HAND_JOINTS)
+    GR1_WAIST_JOINTS
+    + GR1_RIGHT_ARM_JOINTS
+    + GR1_RIGHT_HAND_JOINTS
+    + GR1_LEFT_ARM_JOINTS
+    + GR1_LEFT_HAND_JOINTS
+)
 
 # ---------------------------------------------------------------------------
 # Reset poses (audit §7)

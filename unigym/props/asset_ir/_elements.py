@@ -6,6 +6,7 @@ and numeric guards in ``__post_init__`` (frozen dataclasses -- the
 guards can never be bypassed).  The per-geom/joint hint blocks are
 NEUTRALLY named solver intent; the renderer is their sole interpreter.
 """
+
 from __future__ import annotations
 
 import math

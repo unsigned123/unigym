@@ -10,6 +10,7 @@ The module is **torch-only at import time** and imports no backend at
 module level: both :func:`build_rig` and :func:`build_neutral_rig` resolve
 the backend factory lazily through :attr:`BackendInfo.camera_backend`.
 """
+
 from __future__ import annotations
 
 from typing import Callable, cast
@@ -22,8 +23,8 @@ from .base import CameraRig, CameraSpec
 
 # recorder parity defaults for chase/world look-at
 DEFAULT_CHASE_OFFSET: dict = {
-    "pos": [-1.2, -1.8, 1.2],     # trail behind + side, elevated
-    "lookat": [1.0, 0.0, 0.25],   # ahead of robot, body height
+    "pos": [-1.2, -1.8, 1.2],  # trail behind + side, elevated
+    "lookat": [1.0, 0.0, 0.25],  # ahead of robot, body height
 }
 
 
@@ -42,8 +43,7 @@ def yaw_pitch_quat(yaw_rad, pitch_rad) -> np.ndarray:
     return quat.yaw_pitch(yaw_rad, pitch_rad)
 
 
-def _yaw_pitch_quat_batch(yaw: torch.Tensor,
-                          pitch: torch.Tensor) -> torch.Tensor:
+def _yaw_pitch_quat_batch(yaw: torch.Tensor, pitch: torch.Tensor) -> torch.Tensor:
     """Batched :func:`yaw_pitch_quat`: (k,) rad -> (k, 4) wxyz."""
     return quat.yaw_pitch_batch(yaw, pitch)
 
@@ -55,8 +55,9 @@ def yaw_pitch_roll_quat(yaw_rad, pitch_rad, roll_rad) -> np.ndarray:
     return quat.yaw_pitch_roll(yaw_rad, pitch_rad, roll_rad)
 
 
-def _yaw_pitch_roll_quat_batch(yaw: torch.Tensor, pitch: torch.Tensor,
-                               roll: torch.Tensor) -> torch.Tensor:
+def _yaw_pitch_roll_quat_batch(
+    yaw: torch.Tensor, pitch: torch.Tensor, roll: torch.Tensor
+) -> torch.Tensor:
     """Batched :func:`yaw_pitch_roll_quat`: (k,) rad x3 -> (k, 4) wxyz."""
     return quat.yaw_pitch_roll_batch(yaw, pitch, roll)
 
@@ -76,8 +77,7 @@ def build_neutral_rig(spec: CameraSpec, render_groups=None):
     return build_rig(spec, backend="isaaclab", render_groups=render_groups)
 
 
-def build_rig(spec: CameraSpec, backend: str = "isaaclab",
-              render_groups=None) -> CameraRig:
+def build_rig(spec: CameraSpec, backend: str = "isaaclab", render_groups=None) -> CameraRig:
     """Factory: rig instance from the spec's ``rig.type``.
 
     ``backend`` selects the sensor stack through the registry's lazy
@@ -94,7 +94,8 @@ def build_rig(spec: CameraSpec, backend: str = "isaaclab",
     if factory is None:
         raise ValueError(
             f"camera {spec.name!r}: backend {backend!r} has no camera "
-            f"rig factory (hint: use mujoco/mjwarp/isaaclab)")
+            f"rig factory (hint: use mujoco/mjwarp/isaaclab)"
+        )
     rig_factory = cast(Callable[..., object], factory())
     return cast(CameraRig, rig_factory(spec, render_groups=render_groups))
 

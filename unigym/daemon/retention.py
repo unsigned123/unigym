@@ -19,6 +19,7 @@ out under the run).
 Unreadable entries (e.g. root-owned leftovers) are skipped and counted,
 never raised -- a cleanup thread must not kill the daemon.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -27,8 +28,8 @@ from pathlib import Path
 
 from unigym import runtime_dirs
 
-MAX_AGE_S = 7 * 86400.0           # design §6: one week
-INTERVAL_S = 3600.0               # hourly cadence (design §6)
+MAX_AGE_S = 7 * 86400.0  # design §6: one week
+INTERVAL_S = 3600.0  # hourly cadence (design §6)
 FILE_FAMILIES = ("logs", "state", "serve", "deaths")
 WATCH_FAMILY = "watch"
 
@@ -64,12 +65,15 @@ def sweep_service_tree(cfg: dict, view_rows, log=_log) -> dict:
     The removal/skip summary is logged HERE (one log line per pass that
     did anything) so the caller stays branch-free.
     """
-    report = sweep(runtime_dirs.runtime_root(cfg),
-                   protected=protected_paths(view_rows, cfg), log=log)
+    report = sweep(
+        runtime_dirs.runtime_root(cfg), protected=protected_paths(view_rows, cfg), log=log
+    )
     if report.get("removed") or report.get("skipped"):
-        log(f"retention: removed {len(report['removed'])} "
+        log(
+            f"retention: removed {len(report['removed'])} "
             f"aged artifacts, skipped {report['skipped']} protected/"
-            f"unreadable")
+            f"unreadable"
+        )
     return report
 
 
@@ -83,7 +87,7 @@ def service_loop(stop_event, sweep_fn, log=_log) -> None:
     while not stop_event.wait(INTERVAL_S):
         try:
             sweep_fn()
-        except Exception as e:                 # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             log(f"retention sweep failed: {e!r}")
 
 
@@ -101,9 +105,13 @@ def _dir_mtime(d: Path) -> float:
     return newest
 
 
-def sweep(root: str | Path, protected: set[str] | None = None,
-          now: float | None = None, max_age_s: float = MAX_AGE_S,
-          log=_log) -> dict:
+def sweep(
+    root: str | Path,
+    protected: set[str] | None = None,
+    now: float | None = None,
+    max_age_s: float = MAX_AGE_S,
+    log=_log,
+) -> dict:
     """One sweep pass over the runtime tree; returns a report dict.
 
     ``protected`` -- absolute (resolved) paths + watch-home dirs held by
@@ -132,7 +140,7 @@ def sweep(root: str | Path, protected: set[str] | None = None,
                 continue
             try:
                 age = now - p.stat().st_mtime
-            except OSError:                    # root-owned etc: skip+count
+            except OSError:  # root-owned etc: skip+count
                 skipped += 1
                 continue
             if age <= max_age_s:
@@ -158,7 +166,7 @@ def sweep(root: str | Path, protected: set[str] | None = None,
                 continue
             try:
                 newest = _dir_mtime(rd)
-            except OSError:                    # vanished / unreadable
+            except OSError:  # vanished / unreadable
                 skipped += 1
                 continue
             if now - newest <= max_age_s:

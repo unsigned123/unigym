@@ -18,6 +18,7 @@ refreshes on chunk boundaries), then:
 Zero layout/task knowledge in code -- every segment name, dim group and
 stride comes from the map yaml.  Pure numpy/stdlib.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,14 +43,12 @@ def load_map(name: str) -> dict:
     path = MAPS_DIR / f"{name}.yaml"
     if not path.is_file():
         avail = ", ".join(sorted(p.stem for p in MAPS_DIR.glob("*.yaml")))
-        raise DivergeError(f"no trace map {name!r} at {path}",
-                           hint=f"available maps: {avail}")
+        raise DivergeError(f"no trace map {name!r} at {path}", hint=f"available maps: {avail}")
     with open(path) as f:
         doc = yaml.safe_load(f)
     if not isinstance(doc, dict) or "comparisons" not in doc:
         raise DivergeError(f"{path}: not a trace map (comparisons missing)")
     return doc
-
 
 
 def _resolve_segment(reader, segment: str) -> str:
@@ -65,15 +64,13 @@ def _resolve_segment(reader, segment: str) -> str:
     if segment in reader.segments():
         return segment
     if segment == "action/target":
-        matches = [key for key in reader.segments()
-                   if key.startswith("action/target/")]
+        matches = [key for key in reader.segments() if key.startswith("action/target/")]
         if len(matches) == 1:
             return matches[0]
     return segment
 
 
-def _series(reader: TraceReader, segment: str, n_ticks: int,
-            hold_last: bool = False) -> np.ndarray:
+def _series(reader: TraceReader, segment: str, n_ticks: int, hold_last: bool = False) -> np.ndarray:
     """(n_ticks, *shape) float64 matrix of one segment; hold_last repeats
     the last seen row for ticks where the segment is absent (the official
     chunk-refresh convention).  Raises DivergeError when the segment
@@ -91,24 +88,21 @@ def _series(reader: TraceReader, segment: str, n_ticks: int,
                 shape = v.shape
             elif v.shape != shape:
                 raise DivergeError(
-                    f"{reader.root}:{segment} shape drift at tick {idx}: "
-                    f"{v.shape} != {shape}")
+                    f"{reader.root}:{segment} shape drift at tick {idx}: " f"{v.shape} != {shape}"
+                )
             rows[idx] = v
     if shape is None:
-        avail = ", ".join(sorted(
-            k for k in reader.segments() if k != "tick")) or "(none)"
+        avail = ", ".join(sorted(k for k in reader.segments() if k != "tick")) or "(none)"
         raise DivergeError(
-            f"{reader.root}: segment {segment!r} not found",
-            hint=f"available segments: {avail}")
+            f"{reader.root}: segment {segment!r} not found", hint=f"available segments: {avail}"
+        )
     out = np.zeros((n_ticks, shape[0]), dtype=np.float64)
     last = np.zeros(shape[0], dtype=np.float64)
     for t in range(n_ticks):
         if t in rows:
             last = rows[t]
         elif not hold_last:
-            raise DivergeError(
-                f"{reader.root}:{segment} missing at tick {t} "
-                "(hold_last=false)")
+            raise DivergeError(f"{reader.root}:{segment} missing at tick {t} " "(hold_last=false)")
         out[t] = last
     return out
 
@@ -122,32 +116,35 @@ def _first_and_top(diffs: dict[str, np.ndarray], tol: float) -> dict | None:
             break
     if first_t is None:
         return None
-    flat = np.concatenate([np.abs(d[first_t]).reshape(-1)
-                           for d in diffs.values()])
+    flat = np.concatenate([np.abs(d[first_t]).reshape(-1) for d in diffs.values()])
     names = []
     for name, d in diffs.items():
         n = d[first_t].size
         names += [f"{name}[{i}]" for i in range(n)]
     order = np.argsort(flat)[::-1][:TOP_K]
-    top = [{"dim": names[i], "d": float(flat[i])}
-           for i in order if flat[i] > 0][:TOP_K]
+    top = [{"dim": names[i], "d": float(flat[i])} for i in order if flat[i] > 0][:TOP_K]
     return {"tick": first_t, "top_dims": top}
 
 
-def diverge(ref_dir: str | Path, rep_dir: str | Path, map_name: str,
-            parts: list[str] | None = None, group: int = 50,
-            tol: float = 1e-6) -> dict:
+def diverge(
+    ref_dir: str | Path,
+    rep_dir: str | Path,
+    map_name: str,
+    parts: list[str] | None = None,
+    group: int = 50,
+    tol: float = 1e-6,
+) -> dict:
     """Full divergence document (machine shape; the CLI renders tables)."""
     m = load_map(map_name)
-    layout_parts: dict[str, list[int]] = {k: list(v or []) for k, v
-                                          in (m.get("parts") or {}).items()}
-    want = [p.strip() for p in parts] if parts else \
-        [p for p, dims in layout_parts.items() if dims]
+    layout_parts: dict[str, list[int]] = {
+        k: list(v or []) for k, v in (m.get("parts") or {}).items()
+    }
+    want = [p.strip() for p in parts] if parts else [p for p, dims in layout_parts.items() if dims]
     unknown = [p for p in want if p not in layout_parts]
     if unknown:
         raise DivergeError(
-            f"--parts {unknown}: not in map {map_name!r} "
-            f"(declared: {sorted(layout_parts)})")
+            f"--parts {unknown}: not in map {map_name!r} " f"(declared: {sorted(layout_parts)})"
+        )
 
     a, b = TraceReader(ref_dir), TraceReader(rep_dir)
     n = min(len(a.indices), len(b.indices))
@@ -161,63 +158,74 @@ def diverge(ref_dir: str | Path, rep_dir: str | Path, map_name: str,
 
     ach = specs.get("achieved")
     if ach:
-        ref = _series(a, ach["ref"]["segment"], n,
-                      hold_last=bool(ach["ref"].get("hold_last")))
+        ref = _series(a, ach["ref"]["segment"], n, hold_last=bool(ach["ref"].get("hold_last")))
         rep = _series(b, ach["rep"]["segment"], n)
         if ref.shape != rep.shape:
             raise DivergeError(
                 f"achieved: shape mismatch ref {ref.shape} vs rep "
-                f"{rep.shape} (layout drift? map {map_name!r})")
+                f"{rep.shape} (layout drift? map {map_name!r})"
+            )
         gsize = max(1, int(group))
         for part in want:
             dims = layout_parts.get(part) or []
             if not dims:
-                achieved_doc[part] = None          # N/A (finger in IL29)
+                achieved_doc[part] = None  # N/A (finger in IL29)
                 continue
             d = ref[:, dims] - rep[:, dims]
             diffs[f"achieved:{part}"] = d
             buckets = []
             for b0 in range(0, n, gsize):
                 b1 = min(b0 + gsize, n)
-                buckets.append({
-                    "bucket": f"{b0}-{b1 - 1}",
-                    "rms": float(np.sqrt((d[b0:b1] ** 2).mean())),
-                    "max": float(np.abs(d[b0:b1]).max())})
+                buckets.append(
+                    {
+                        "bucket": f"{b0}-{b1 - 1}",
+                        "rms": float(np.sqrt((d[b0:b1] ** 2).mean())),
+                        "max": float(np.abs(d[b0:b1]).max()),
+                    }
+                )
             achieved_doc[part] = buckets
 
     tvp = specs.get("target_vs_plan")
     if tvp:
         ref_spec = tvp["ref"]
-        refresh = int(ref_spec.get("refresh", 1))   # chunk refresh cadence
+        refresh = int(ref_spec.get("refresh", 1))  # chunk refresh cadence
         pitch = int(ref_spec.get("pitch", refresh))  # stored row width
-        width = int(ref_spec.get("width", pitch))    # consumed row width
+        width = int(ref_spec.get("width", pitch))  # consumed row width
         rep_seg = _series(b, tvp["rep"]["segment"], n)
         # hold-last keeps the CURRENT chunk on non-boundary ticks
         ref_seg = _series(a, ref_spec["segment"], n, hold_last=True)
         for part in want:
             g = (tvp.get("groups") or {}).get(part)
             if g is None:
-                target_doc[part] = None            # no declared pairing
+                target_doc[part] = None  # no declared pairing
                 continue
             rd = [int(x) for x in g["rep_dims"]]
             fd = [int(x) for x in g["ref_dims"]]
             if max(fd) >= width:
-                raise DivergeError(f"target_vs_plan:{part}: ref dim "
-                                   f"{max(fd)} outside width {width}")
+                raise DivergeError(
+                    f"target_vs_plan:{part}: ref dim " f"{max(fd)} outside width {width}"
+                )
             plan = np.zeros((n, len(fd)), dtype=np.float64)
             for t in range(n):
                 chunk = ref_seg[t].reshape(refresh, pitch)
                 plan[t] = chunk[t % refresh][:width][fd]
             d = rep_seg[:, rd] - plan
             diffs[f"target:{part}"] = d
-            target_doc[part] = {"rms": float(np.sqrt((d ** 2).mean())),
-                                "max": float(np.abs(d).max())}
+            target_doc[part] = {"rms": float(np.sqrt((d**2).mean())), "max": float(np.abs(d).max())}
 
     worst = max((float(np.abs(d).max()) for d in diffs.values()), default=0.0)
-    verdict = "BITWISE" if worst == 0.0 else ("eps" if worst <= tol
-                                              else "DIVERGED")
-    return {"a": str(a.root), "b": str(b.root), "map": map_name,
-            "tol": tol, "group": int(group), "ticks": n,
-            "parts": want, "achieved": achieved_doc,
-            "target_vs_plan": target_doc, "verdict": verdict,
-            "worst": worst, "first": _first_and_top(diffs, tol)}
+    verdict = "BITWISE" if worst == 0.0 else ("eps" if worst <= tol else "DIVERGED")
+    return {
+        "a": str(a.root),
+        "b": str(b.root),
+        "map": map_name,
+        "tol": tol,
+        "group": int(group),
+        "ticks": n,
+        "parts": want,
+        "achieved": achieved_doc,
+        "target_vs_plan": target_doc,
+        "verdict": verdict,
+        "worst": worst,
+        "first": _first_and_top(diffs, tol),
+    }

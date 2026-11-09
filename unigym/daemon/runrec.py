@@ -40,6 +40,7 @@ verdict (liveness is the SHM heartbeat, never the pid).
 
 Stdlib only; importable without mujoco/isaaclab.
 """
+
 from __future__ import annotations
 
 import json
@@ -85,12 +86,21 @@ def _atomic_write(path: Path, doc: dict) -> None:
     os.replace(tmp, path)
 
 
-def write_spec(output_dir: str | Path, *, run_name: str, config: str,
-               backend: str, overrides: dict, paused: bool,
-               started_ts: float, pid: int, task_face: dict | None,
-               run_id: str | None = None,
-               direct: bool = False,
-               adapter_params: dict | None = None) -> dict:
+def write_spec(
+    output_dir: str | Path,
+    *,
+    run_name: str,
+    config: str,
+    backend: str,
+    overrides: dict,
+    paused: bool,
+    started_ts: float,
+    pid: int,
+    task_face: dict | None,
+    run_id: str | None = None,
+    direct: bool = False,
+    adapter_params: dict | None = None,
+) -> dict:
     """Spawn-side write of the spec segment, as a PENDING file.
 
     The worker adopts it into the final dir; a shared-name dir with a
@@ -100,12 +110,20 @@ def write_spec(output_dir: str | Path, *, run_name: str, config: str,
     verbatim when non-empty -- the ledger is the provenance record of
     which spawn params shaped the run (replay audit chain).
     """
-    doc = {"schema": SCHEMA, "run_id": run_id, "run_name": run_name,
-           "output_dir": str(output_dir), "config": str(config),
-           "backend": backend, "overrides": dict(overrides or {}),
-           "paused": bool(paused), "direct": bool(direct),
-           "started_ts": float(started_ts),
-           "pid": int(pid), "task_face": task_face}
+    doc = {
+        "schema": SCHEMA,
+        "run_id": run_id,
+        "run_name": run_name,
+        "output_dir": str(output_dir),
+        "config": str(config),
+        "backend": backend,
+        "overrides": dict(overrides or {}),
+        "paused": bool(paused),
+        "direct": bool(direct),
+        "started_ts": float(started_ts),
+        "pid": int(pid),
+        "task_face": task_face,
+    }
     if adapter_params:
         doc["adapter_params"] = dict(adapter_params)
     _atomic_write(Path(output_dir) / pending_name(pid), doc)
@@ -167,8 +185,7 @@ def _mutate(path: Path, fn) -> dict | None:
     return doc
 
 
-def attach_run_id(output_dir: str | Path, pid: int,
-                  run_id: str) -> dict | None:
+def attach_run_id(output_dir: str | Path, pid: int, run_id: str) -> dict | None:
     """Backfill run_id once the worker names itself.
 
     A ledger born without one keeps null -- spawn-crash honesty.
@@ -213,12 +230,18 @@ def failure_reason_from_tail(tail_lines: list[str]) -> str:
     return pick[:200]
 
 
-def mark_exit(output_dir: str | Path, *, pid: int, exit_code: int | None,
-              signal_num: int | None = None, wall_time_s: float | None,
-              finished_ts: float | None = None,
-              results: dict | None = None,
-              task_face: dict | None = None,
-              log_tail: list[str] | None = None) -> dict | None:
+def mark_exit(
+    output_dir: str | Path,
+    *,
+    pid: int,
+    exit_code: int | None,
+    signal_num: int | None = None,
+    wall_time_s: float | None,
+    finished_ts: float | None = None,
+    results: dict | None = None,
+    task_face: dict | None = None,
+    log_tail: list[str] | None = None,
+) -> dict | None:
     """Reap-side completion: exit + results (+task_face backfill).
 
     ``code`` is the process exit status; a signal death carries
@@ -237,9 +260,12 @@ def mark_exit(output_dir: str | Path, *, pid: int, exit_code: int | None,
             reason = failure_reason_from_tail(log_tail)
 
     def fn(d: dict) -> None:
-        d["exit"] = {"code": code, "reason": reason,
-                     "wall_time_s": round(float(wall_time_s or 0.0), 3),
-                     "finished_ts": float(finished_ts)}
+        d["exit"] = {
+            "code": code,
+            "reason": reason,
+            "wall_time_s": round(float(wall_time_s or 0.0), 3),
+            "finished_ts": float(finished_ts),
+        }
         if log_tail:
             d["exit"]["log_tail"] = log_tail
         if results is not None:
@@ -250,8 +276,7 @@ def mark_exit(output_dir: str | Path, *, pid: int, exit_code: int | None,
     return _mutate(record_path(output_dir, pid), fn)
 
 
-def set_output_dir(output_dir: str | Path, pid: int,
-                   actual: str | Path) -> dict | None:
+def set_output_dir(output_dir: str | Path, pid: int, actual: str | Path) -> dict | None:
     """Correct the doc's output_dir field after a relocation.
 
     The file moved; the field must follow or the scan/post-mortem
@@ -273,12 +298,13 @@ def results_from_report(output_dir: str | Path) -> dict:
     tolerance: results are a bonus, never a run's identity).
     """
     try:
-        rep = json.loads((Path(output_dir)
-                          / "benchmark_report.json").read_text())
+        rep = json.loads((Path(output_dir) / "benchmark_report.json").read_text())
         tasks = rep.get("tasks") or {}
-        return {name: {"success_rate": t.get("success_rate"),
-                       "n_episodes": t.get("n_episodes")}
-                for name, t in tasks.items() if isinstance(t, dict)}
+        return {
+            name: {"success_rate": t.get("success_rate"), "n_episodes": t.get("n_episodes")}
+            for name, t in tasks.items()
+            if isinstance(t, dict)
+        }
     except (OSError, ValueError, AttributeError):
         return {}
 
@@ -407,30 +433,32 @@ def row_of(rec: dict) -> dict:
         state = "DONE" if exit_seg.get("code") == 0 else "DEAD"
         stale = False
     else:
-        hb = probe_heartbeat(run_id=rec.get("run_id"),
-                             pid=rec.get("pid"))
+        hb = probe_heartbeat(run_id=rec.get("run_id"), pid=rec.get("pid"))
         if hb_alive(hb):
             state, stale = "RUNNING", False
-        elif (hb == 0.0
-              and time.time() - float(rec.get("started_ts") or 0.0)
-              < STARTING_WINDOW_S):
-            state, stale = "STARTING", False   # heartbeat clock never
+        elif hb == 0.0 and time.time() - float(rec.get("started_ts") or 0.0) < STARTING_WINDOW_S:
+            state, stale = "STARTING", False  # heartbeat clock never
             # started: the spawn window before the first bump
         else:
-            state, stale = "RUNNING", True     # RUNNING(stale): no reaper,
+            state, stale = "RUNNING", True  # RUNNING(stale): no reaper,
             # no verdict -- kill -9 keeps the ledger honest (design §4)
-    return {"run_id": rec.get("run_id"), "run_name": rec.get("run_name"),
-            "label": rec.get("label"),
-            "output_dir": rec.get("output_dir"), "config": rec.get("config"),
-            "backend": rec.get("backend"),
-            "overrides": rec.get("overrides") or {},
-            "paused": bool(rec.get("paused")),
-            "started_ts": float(rec.get("started_ts") or 0.0),
-            "pid": rec.get("pid"), "task_face": rec.get("task_face"),
-            "exit": exit_seg if isinstance(exit_seg, dict) else None,
-            "results": rec.get("results") if isinstance(
-                rec.get("results"), dict) else None,
-            "state": state, "stale": stale}
+    return {
+        "run_id": rec.get("run_id"),
+        "run_name": rec.get("run_name"),
+        "label": rec.get("label"),
+        "output_dir": rec.get("output_dir"),
+        "config": rec.get("config"),
+        "backend": rec.get("backend"),
+        "overrides": rec.get("overrides") or {},
+        "paused": bool(rec.get("paused")),
+        "started_ts": float(rec.get("started_ts") or 0.0),
+        "pid": rec.get("pid"),
+        "task_face": rec.get("task_face"),
+        "exit": exit_seg if isinstance(exit_seg, dict) else None,
+        "results": rec.get("results") if isinstance(rec.get("results"), dict) else None,
+        "state": state,
+        "stale": stale,
+    }
 
 
 def scan(output_root: str | Path, limit: int = 50) -> list[dict]:
@@ -450,14 +478,13 @@ def scan(output_root: str | Path, limit: int = 50) -> list[dict]:
     for d in sorted(root.iterdir()):
         if not d.is_dir():
             continue
-        for rec in _read_all(d):               # one row PER ATTEMPT
+        for rec in _read_all(d):  # one row PER ATTEMPT
             rows.append(row_of(rec))
     rows.sort(key=lambda r: r["started_ts"], reverse=True)
-    return rows[:max(1, int(limit))]
+    return rows[: max(1, int(limit))]
 
 
-def find_by_run_id(output_root: str | Path,
-                   run_id: str) -> str | None:
+def find_by_run_id(output_root: str | Path, run_id: str) -> str | None:
     """The directory whose ledger names this run_id.
 
     Post-mortem artifact resolution.  Returns WHERE THE FILE/DATA SITS
@@ -496,8 +523,7 @@ def find_dir_by_pid(output_root: str | Path, pid: int) -> str | None:
     return None
 
 
-def relocate(old_dir: str | Path, new_dir: str | Path,
-             pid: int) -> bool:
+def relocate(old_dir: str | Path, new_dir: str | Path, pid: int) -> bool:
     """Move the ledger file when the run's data home changed.
 
     Atomic rename; content stays daemon-authored -- this is
@@ -510,7 +536,7 @@ def relocate(old_dir: str | Path, new_dir: str | Path,
     try:
         Path(new_dir).mkdir(parents=True, exist_ok=True)
         os.replace(src, dst)
-        set_output_dir(new_dir, pid, new_dir)   # the field follows the file
+        set_output_dir(new_dir, pid, new_dir)  # the field follows the file
         return True
     except OSError:
         return False

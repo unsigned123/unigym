@@ -35,6 +35,7 @@ Rules baked in here:
 * baseline protocol: a config without a ``contacts:`` section produces
   zero code paths (``build_contact_manager(None) -> None``).
 """
+
 from __future__ import annotations
 
 import re
@@ -114,65 +115,77 @@ class ContactGroupSpec:
     history: int = 1
 
     def __post_init__(self):
-        if (not isinstance(self.name, str) or not self.name
-                or self.name.strip() != self.name or "/" in self.name
-                or not re.fullmatch(r"[A-Za-z0-9_-]+", self.name)):
+        if (
+            not isinstance(self.name, str)
+            or not self.name
+            or self.name.strip() != self.name
+            or "/" in self.name
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", self.name)
+        ):
             raise ValueError(
                 f"contact group name {self.name!r} must be non-empty, "
                 f"trimmed, free of '/' and match [A-Za-z0-9_-]+ (it is part "
-                f"of the contact/<name> key and a scene field suffix)")
-        self.sensor_bodies = _str_list(self.sensor_bodies, "sensor_bodies",
-                                       self.name)
+                f"of the contact/<name> key and a scene field suffix)"
+            )
+        self.sensor_bodies = _str_list(self.sensor_bodies, "sensor_bodies", self.name)
         if self.filter_bodies is not None:
-            self.filter_bodies = _str_list(self.filter_bodies,
-                                           "filter_bodies", self.name)
+            self.filter_bodies = _str_list(self.filter_bodies, "filter_bodies", self.name)
         if self.mode is None:
             self.mode = "pairwise" if self.filter_bodies else "general"
         if self.mode not in MODES:
-            raise ValueError(f"contact {self.name!r}: mode must be one of "
-                             f"{MODES}, got {self.mode!r}")
+            raise ValueError(
+                f"contact {self.name!r}: mode must be one of " f"{MODES}, got {self.mode!r}"
+            )
         if (self.mode == "pairwise") != (self.filter_bodies is not None):
             raise ValueError(
                 f"contact {self.name!r}: mode/filter_bodies inconsistent "
-                f"(mode={self.mode!r}, filter_bodies={self.filter_bodies})")
+                f"(mode={self.mode!r}, filter_bodies={self.filter_bodies})"
+            )
         if self.format not in FORMATS:
-            raise ValueError(f"contact {self.name!r}: format must be one of "
-                             f"{FORMATS}, got {self.format!r}")
+            raise ValueError(
+                f"contact {self.name!r}: format must be one of " f"{FORMATS}, got {self.format!r}"
+            )
         if self.frame not in FRAMES:
             raise ValueError(
                 f"contact {self.name!r}: frame is REQUIRED with no default; "
-                f"must be one of {FRAMES}, got {self.frame!r}")
+                f"must be one of {FRAMES}, got {self.frame!r}"
+            )
         if self.component not in COMPONENTS:
-            raise ValueError(f"contact {self.name!r}: component must be one "
-                             f"of {COMPONENTS}, got {self.component!r}")
+            raise ValueError(
+                f"contact {self.name!r}: component must be one "
+                f"of {COMPONENTS}, got {self.component!r}"
+            )
         if self.format == "contact":
             if self.threshold is None:
                 raise ValueError(
-                    f"contact {self.name!r}: format 'contact' requires "
-                    f"threshold (N)")
+                    f"contact {self.name!r}: format 'contact' requires " f"threshold (N)"
+                )
             self.threshold = float(self.threshold)
         elif self.threshold is not None:
             raise ValueError(
                 f"contact {self.name!r}: threshold is only valid with "
                 f"format 'contact' (got {self.threshold!r} with "
-                f"format {self.format!r})")
-        allowed_agg = (AGGREGATE_CONTACT if self.format == "contact"
-                       else AGGREGATE_VALUE)
+                f"format {self.format!r})"
+            )
+        allowed_agg = AGGREGATE_CONTACT if self.format == "contact" else AGGREGATE_VALUE
         if self.aggregate not in allowed_agg:
             raise ValueError(
                 f"contact {self.name!r}: aggregate {self.aggregate!r} not "
-                f"valid for format {self.format!r} (allowed: {allowed_agg})")
+                f"valid for format {self.format!r} (allowed: {allowed_agg})"
+            )
         if self.mode == "general" and self.aggregate != "none":
             raise ValueError(
                 f"contact {self.name!r}: general groups have no filter axis "
-                f"to aggregate; aggregate must be 'none'")
+                f"to aggregate; aggregate must be 'none'"
+            )
         self.history = int(self.history)
         if self.history < 1:
             raise ValueError(f"contact {self.name!r}: history must be >= 1")
         if self.history > 1:
             raise NotImplementedError(
                 f"contact {self.name!r}: history > 1 is not implemented in "
-                f"v1 (plan §6 allowed list); got history={self.history}")
+                f"v1 (plan §6 allowed list); got history={self.history}"
+            )
 
     # ---- parsing -------------------------------------------------------- #
     @classmethod
@@ -183,25 +196,28 @@ class ContactGroupSpec:
         ``sensor_bodies`` and ``frame`` are required (frame has NO default).
         """
         if not isinstance(entry, dict):
-            raise ValueError(f"contact group entry must be a mapping, got "
-                             f"{type(entry).__name__}")
+            raise ValueError(
+                f"contact group entry must be a mapping, got " f"{type(entry).__name__}"
+            )
         allowed = {f.name for f in fields(cls)}
         unknown = set(entry) - allowed
         if unknown:
-            raise ValueError(f"contact spec unknown keys {sorted(unknown)}; "
-                             f"allowed: {sorted(allowed)}")
-        missing = [k for k in ("name", "sensor_bodies", "frame")
-                   if entry.get(k) is None]
+            raise ValueError(
+                f"contact spec unknown keys {sorted(unknown)}; " f"allowed: {sorted(allowed)}"
+            )
+        missing = [k for k in ("name", "sensor_bodies", "frame") if entry.get(k) is None]
         if missing:
-            raise ValueError(f"contact spec missing required keys {missing} "
-                             f"(frame is mandatory)")
+            raise ValueError(
+                f"contact spec missing required keys {missing} " f"(frame is mandatory)"
+            )
         for arg in ("sensor_bodies", "filter_bodies"):
             if isinstance(entry.get(arg), dict):
                 raise ValueError(
                     f"contact {entry['name']!r}: {arg} is still in the "
                     f"reference form {entry[arg]!r} -- resolve reference "
                     f"forms ({{body_parts: ...}} / {{prop: ...}}) via "
-                    f"build_contact_manager/resolve_contact_entries first")
+                    f"build_contact_manager/resolve_contact_entries first"
+                )
         kwargs = dict(entry)
         kwargs["sensor_bodies"] = list(kwargs["sensor_bodies"])
         if kwargs.get("filter_bodies") is not None:
@@ -223,12 +239,13 @@ class ContactGroupSpec:
         """Final ``contact/<name>`` shape AFTER format + aggregate."""
         if self.mode == "general":
             base = {"raw": 3, "norm": 1, "contact": 1}[self.format]
-            shape = (num_envs, B, base) if self.format == "raw" \
-                else (num_envs, B)
+            shape = (num_envs, B, base) if self.format == "raw" else (num_envs, B)
             return shape
-        shape = {"raw": (num_envs, B, int(F), 3),
-                 "norm": (num_envs, B, int(F)),
-                 "contact": (num_envs, B, int(F))}[self.format]
+        shape = {
+            "raw": (num_envs, B, int(F), 3),
+            "norm": (num_envs, B, int(F)),
+            "contact": (num_envs, B, int(F)),
+        }[self.format]
         if self.aggregate != "none":  # drop the F axis (axis=-2), never xyz
             shape = shape[:2] + shape[3:]
         return shape
@@ -239,10 +256,15 @@ class ContactGroupSpec:
 
 
 def _str_list(value, arg: str, name: str) -> list[str]:
-    if (not isinstance(value, (list, tuple)) or len(value) == 0
-            or not all(isinstance(v, str) and v for v in value)):
-        raise ValueError(f"contact {name!r}: {arg} must be a non-empty "
-                         f"list of non-empty strings, got {value!r}")
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) == 0
+        or not all(isinstance(v, str) and v for v in value)
+    ):
+        raise ValueError(
+            f"contact {name!r}: {arg} must be a non-empty "
+            f"list of non-empty strings, got {value!r}"
+        )
     return list(value)
 
 
@@ -254,10 +276,14 @@ BACKENDS = ("mujoco", "isaaclab")
 
 def _body_spec_list(value, where: str) -> list[str]:
     """Validate a resolved sensor/filter list (non-empty, non-empty strs)."""
-    if (not isinstance(value, (list, tuple)) or len(value) == 0
-            or not all(isinstance(v, str) and v for v in value)):
-        raise ValueError(f"{where} must be a non-empty list of non-empty "
-                         f"strings, got {value!r}")
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) == 0
+        or not all(isinstance(v, str) and v for v in value)
+    ):
+        raise ValueError(
+            f"{where} must be a non-empty list of non-empty " f"strings, got {value!r}"
+        )
     return [str(v) for v in value]
 
 
@@ -272,8 +298,7 @@ class _ContactBackendFace(Protocol):
     def group_bodies(cls, value, path: str) -> list[str]: ...
 
     @classmethod
-    def prop_filter_paths(cls, name: str,
-                          articulated: bool) -> list[str]: ...
+    def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]: ...
 
 
 def _contact_face(backend: str) -> type[_ContactBackendFace]:
@@ -284,17 +309,20 @@ def _contact_face(backend: str) -> type[_ContactBackendFace]:
     addresses), so the neutral package carries no backend-name branch.
     """
     from ..backends.registry import BackendSelectionError, backend_info
+
     try:
         info = backend_info(backend)
     except BackendSelectionError as err:
         raise NotImplementedError(
             f"contacts are not implemented for backend {backend!r} "
-            f"(available: {', '.join(BACKENDS)})") from err
+            f"(available: {', '.join(BACKENDS)})"
+        ) from err
     factory = info.contact_backend
     if factory is None:
         raise NotImplementedError(
             f"contacts are not implemented for backend {backend!r} "
-            f"(available: {', '.join(BACKENDS)})")
+            f"(available: {', '.join(BACKENDS)})"
+        )
     return cast("type[_ContactBackendFace]", factory())
 
 
@@ -323,40 +351,44 @@ def resolve_body_part_group(body_parts, path: str, backend: str) -> list[str]:
     """
     face = _contact_face(backend)
     if not isinstance(path, str) or not path:
-        raise ValueError(f"body_parts path must be a non-empty string, "
-                         f"got {path!r}")
+        raise ValueError(f"body_parts path must be a non-empty string, " f"got {path!r}")
     parts = path.split(".")
     if len(parts) > 2:
-        raise ValueError(f"body_parts path {path!r} must be '<key>' or "
-                         f"'<key>.<group>' (at most one '.')")
+        raise ValueError(
+            f"body_parts path {path!r} must be '<key>' or " f"'<key>.<group>' (at most one '.')"
+        )
     if not body_parts or parts[0] not in body_parts:
         raise ValueError(
             f"body_parts path {path!r}: key {parts[0]!r} not in body_parts "
-            f"(available: {sorted(body_parts or {})})")
+            f"(available: {sorted(body_parts or {})})"
+        )
     value = body_parts[parts[0]]
     if len(parts) == 1:
         if isinstance(value, dict):
             raise ValueError(
                 f"body_parts path {path!r}: key {parts[0]!r} holds named "
                 f"groups {sorted(value)} -- address one explicitly "
-                f"({parts[0]}.<group>)")
+                f"({parts[0]}.<group>)"
+            )
         return _body_spec_list(value, f"body_parts[{path!r}]")
     group = parts[1]
     if not isinstance(value, dict) or group not in value:
-        available = sorted(value) if isinstance(value, dict) else \
-            "<flat list -- no named groups>"
+        available = sorted(value) if isinstance(value, dict) else "<flat list -- no named groups>"
         raise ValueError(
             f"body_parts path {path!r}: group {group!r} not in "
-            f"{parts[0]!r} (available: {available})")
+            f"{parts[0]!r} (available: {available})"
+        )
     gval = value[group]
     selected = face.group_bodies(gval, path)
-    where = (f"body_parts[{path!r}][{face.backend_key!r}]"
-             if isinstance(gval, dict) else f"body_parts[{path!r}]")
+    where = (
+        f"body_parts[{path!r}][{face.backend_key!r}]"
+        if isinstance(gval, dict)
+        else f"body_parts[{path!r}]"
+    )
     return _body_spec_list(selected, where)
 
 
-def resolve_prop_filter(name, backend: str, prop_names,
-                        articulated_props=frozenset()) -> list[str]:
+def resolve_prop_filter(name, backend: str, prop_names, articulated_props=frozenset()) -> list[str]:
     """Resolve a ``{prop: <name>}`` filter reference to the prop body.
 
     The address is the backend-native prop body name: MJ body
@@ -370,19 +402,19 @@ def resolve_prop_filter(name, backend: str, prop_names,
     face = _contact_face(backend)
     names = list(prop_names or [])
     if not isinstance(name, str) or not name:
-        raise ValueError(f"prop reference must be a non-empty string, "
-                         f"got {name!r}")
+        raise ValueError(f"prop reference must be a non-empty string, " f"got {name!r}")
     if name not in names:
         raise ValueError(
             f"prop filter reference {name!r}: no such declared prop "
             f"(available: {sorted(names)}); the contacts section may only "
-            f"reference props declared in the same run config")
+            f"reference props declared in the same run config"
+        )
     return face.prop_filter_paths(name, name in articulated_props)
 
 
-def _resolve_ref(value, backend: str, arg: str, group: str,
-                 body_parts, prop_names,
-                 articulated_props=frozenset()) -> list[str]:
+def _resolve_ref(
+    value, backend: str, arg: str, group: str, body_parts, prop_names, articulated_props=frozenset()
+) -> list[str]:
     """One sensor_bodies/filter_bodies field: reference form OR list."""
     if isinstance(value, dict):
         keys = set(value)
@@ -390,21 +422,21 @@ def _resolve_ref(value, backend: str, arg: str, group: str,
             if keys != {"body_parts"}:
                 raise ValueError(
                     f"contact {group!r}: {arg} reference form is "
-                    f"{{body_parts: <key>[.<group>]}}, got keys {sorted(keys)}")
-            return resolve_body_part_group(body_parts, value["body_parts"],
-                                           backend)
+                    f"{{body_parts: <key>[.<group>]}}, got keys {sorted(keys)}"
+                )
+            return resolve_body_part_group(body_parts, value["body_parts"], backend)
         if keys != {"prop"}:
             raise ValueError(
                 f"contact {group!r}: {arg} reference form is "
-                f"{{prop: <name>}}, got keys {sorted(keys)}")
-        return resolve_prop_filter(value["prop"], backend, prop_names,
-                                   articulated_props)
+                f"{{prop: <name>}}, got keys {sorted(keys)}"
+            )
+        return resolve_prop_filter(value["prop"], backend, prop_names, articulated_props)
     return _body_spec_list(value, f"contact {group!r}: {arg}")
 
 
-def resolve_contact_entry(entry: dict, backend: str,
-                          body_parts=None, prop_names=None,
-                          articulated_props=frozenset()) -> dict:
+def resolve_contact_entry(
+    entry: dict, backend: str, body_parts=None, prop_names=None, articulated_props=frozenset()
+) -> dict:
     """Resolve ONE yaml ``contacts:`` entry's reference forms to lists.
 
     ``sensor_bodies`` is either an explicit list of body specs or the
@@ -414,37 +446,47 @@ def resolve_contact_entry(entry: dict, backend: str,
     NEW dict (the input is never mutated).
     """
     if not isinstance(entry, dict):
-        raise ValueError(f"contact group entry must be a mapping, got "
-                         f"{type(entry).__name__}")
+        raise ValueError(f"contact group entry must be a mapping, got " f"{type(entry).__name__}")
     out = dict(entry)
     if "sensor_bodies" in out:
-        out["sensor_bodies"] = _resolve_ref(out["sensor_bodies"], backend,
-                                            "sensor_bodies",
-                                            str(out.get("name", "?")),
-                                            body_parts, prop_names,
-                                            articulated_props)
+        out["sensor_bodies"] = _resolve_ref(
+            out["sensor_bodies"],
+            backend,
+            "sensor_bodies",
+            str(out.get("name", "?")),
+            body_parts,
+            prop_names,
+            articulated_props,
+        )
     if out.get("filter_bodies") is not None:
-        out["filter_bodies"] = _resolve_ref(out["filter_bodies"], backend,
-                                            "filter_bodies",
-                                            str(out.get("name", "?")),
-                                            body_parts, prop_names,
-                                            articulated_props)
+        out["filter_bodies"] = _resolve_ref(
+            out["filter_bodies"],
+            backend,
+            "filter_bodies",
+            str(out.get("name", "?")),
+            body_parts,
+            prop_names,
+            articulated_props,
+        )
     return out
 
 
-def resolve_contact_entries(entries, backend: str,
-                            body_parts=None, prop_names=None,
-                            articulated_props=frozenset()) -> list[dict]:
+def resolve_contact_entries(
+    entries, backend: str, body_parts=None, prop_names=None, articulated_props=frozenset()
+) -> list[dict]:
     """Resolve every entry of a ``contacts:`` list (see
     :func:`resolve_contact_entry`); the list itself must be a list."""
     if entries is None:
         return []
     if not isinstance(entries, (list, tuple)):
-        raise ValueError(f"yaml 'contacts' section must be a list of group "
-                         f"entries, got {type(entries).__name__}")
-    return [resolve_contact_entry(e, backend, body_parts, prop_names,
-                                  articulated_props)
-            for e in entries]
+        raise ValueError(
+            f"yaml 'contacts' section must be a list of group "
+            f"entries, got {type(entries).__name__}"
+        )
+    return [
+        resolve_contact_entry(e, backend, body_parts, prop_names, articulated_props)
+        for e in entries
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -496,8 +538,11 @@ def apply_format(raw, spec: ContactGroupSpec):
         out = raw
         agg = spec.aggregate
         if agg != "none":  # pairwise only (spec validation enforces); F axis
-            out = {"sum": _sum_last, "mean": _mean_last,       # is -2 here
-                   "max": _amax_last}[agg](out, axis=-2)
+            out = {
+                "sum": _sum_last,
+                "mean": _mean_last,  # is -2 here
+                "max": _amax_last,
+            }[agg](out, axis=-2)
         return _cast(out, np.float32 if not _is_torch(out) else torch.float32)
 
     if spec.component == "mag":
@@ -508,10 +553,10 @@ def apply_format(raw, spec: ContactGroupSpec):
     if spec.format == "norm":
         agg = spec.aggregate
         if agg != "none":  # xyz is squeezed -> the F axis is LAST here
-            quantity = {"sum": _sum_last, "mean": _mean_last,
-                        "max": _amax_last}[agg](quantity, axis=-1)
-        return _cast(quantity, np.float32 if not _is_torch(quantity)
-                     else torch.float32)
+            quantity = {"sum": _sum_last, "mean": _mean_last, "max": _amax_last}[agg](
+                quantity, axis=-1
+            )
+        return _cast(quantity, np.float32 if not _is_torch(quantity) else torch.float32)
 
     # format == contact
     mask = quantity > spec.threshold

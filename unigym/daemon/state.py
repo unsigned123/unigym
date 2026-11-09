@@ -10,13 +10,14 @@ clean stop; CLI transport resolves the control API port from it:
 stdlib only; safe to read from any process (missing/corrupt file ->
 None, never an error).
 """
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
 
-import yaml      # api_port()'s yaml fallback layer (YAMLError != ValueError)
+import yaml  # api_port()'s yaml fallback layer (YAMLError != ValueError)
 
 DEFAULT_STATE_PATH = "/tmp/unigym-daemon.json"
 DEFAULT_API_PORT = 8670
@@ -25,8 +26,7 @@ DEFAULT_WEBUI_PORT = 8600
 
 def state_path() -> Path:
     """Discovery-file path (UNIGYM_DAEMON_STATE or the /tmp default)."""
-    return Path(os.environ.get("UNIGYM_DAEMON_STATE",
-                               DEFAULT_STATE_PATH))
+    return Path(os.environ.get("UNIGYM_DAEMON_STATE", DEFAULT_STATE_PATH))
 
 
 def read_state() -> dict | None:
@@ -43,7 +43,7 @@ def write_state(d: dict) -> Path:
     p = state_path()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(d, indent=1))
-    os.replace(tmp, p)                          # atomic publish
+    os.replace(tmp, p)  # atomic publish
     return p
 
 
@@ -68,6 +68,7 @@ def api_port() -> int:
         return int(st["api_port"])
     try:
         from unigym.core.spawn import load_cfg
+
         v = load_cfg().get("daemon_api_port")
         if v:
             return int(v)

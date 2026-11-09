@@ -20,6 +20,7 @@ no scene vocabulary of its own.  The registry fills from the scenes
 package's own provider modules; core stays empty so it imports with no
 content pack mounted.
 """
+
 from __future__ import annotations
 
 import re
@@ -57,12 +58,15 @@ def register_scene(name: str) -> Callable[[SceneProvider], SceneProvider]:
     rejected by the charset rule, duplicates rejected, docstring forced
     (config citations name scenes, never provider paths).
     """
-    if (not isinstance(name, str) or not name
-            or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_"
-                   for c in name)):
+    if (
+        not isinstance(name, str)
+        or not name
+        or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in name)
+    ):
         raise ValueError(
             f"scene name {name!r} must be lowercase snake_case "
-            f"(path-like spellings are rejected)")
+            f"(path-like spellings are rejected)"
+        )
     if name in _SCENES:
         raise ValueError(f"scene {name!r} registered twice")
 
@@ -92,13 +96,12 @@ def build_scene_definition(name: str, slots: Mapping[str, Any]) -> Scene:
     if not isinstance(slots, Mapping):
         raise ValueError(f"scene {name!r}: slots must be a mapping")
     if name not in _SCENES:
-        raise ValueError(
-            f"scene: unknown scene {name!r} (registered: {registered_scenes()})")
+        raise ValueError(f"scene: unknown scene {name!r} (registered: {registered_scenes()})")
     scene = _SCENES[name](dict(slots), SceneContext(name=name))
     if not isinstance(scene, Scene):
         raise ValueError(
-            f"scene {name!r}: provider must return a Scene, "
-            f"got {type(scene).__name__}")
+            f"scene {name!r}: provider must return a Scene, " f"got {type(scene).__name__}"
+        )
     validate_scene(scene)
     return scene
 

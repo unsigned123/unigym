@@ -12,6 +12,7 @@ N=1 scope: the trait table scopes these ops to ``max_envs=1`` (one MjModel /
 one mocap namespace); construction at N>1 is refused by
 ``reject_model_global_unsupported`` before this ops object exists.
 """
+
 from __future__ import annotations
 
 from unigym.backends.shared.mjfamily.director.ops import MujocoDirectorOps

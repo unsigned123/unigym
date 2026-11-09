@@ -13,10 +13,17 @@ The package is numpy/torch-only at import time; every isaaclab import is
 lazy (inside ``backends/isaaclab2/cameras`` / rig scene methods), mirroring the
 ``robots/`` convention.  Contract docs: ``docs/contracts/camera_contract.md``.
 """
+
 from __future__ import annotations
 
 from .base import CameraRig, CameraSpec, depth_key, rgb_key
 from .manager import CameraManager, build_camera_manager
 
-__all__ = ["CameraManager", "CameraRig", "CameraSpec",
-           "build_camera_manager", "depth_key", "rgb_key"]
+__all__ = [
+    "CameraManager",
+    "CameraRig",
+    "CameraSpec",
+    "build_camera_manager",
+    "depth_key",
+    "rgb_key",
+]

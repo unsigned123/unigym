@@ -18,6 +18,7 @@ Both borrow the :class:`~unigym.runner.sync.SyncRunner` tick verbatim:
 termination, sink callbacks, reset chain and RNG order are unchanged; only
 the action plumbing and the Gymnasium return shapes differ.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -89,9 +90,7 @@ class _GymBase(SyncRunner):
             extra = dict(cast("dict[str, Any]", env._extra()))
         else:
             extra = {}
-        extra.setdefault(
-            "reset_env_ids",
-            torch.zeros(0, dtype=torch.int64, device=env.device))
+        extra.setdefault("reset_env_ids", torch.zeros(0, dtype=torch.int64, device=env.device))
         extra.setdefault("should_reset", False)
         return extra
 
@@ -100,21 +99,29 @@ class GymEnvRunner(_GymBase):
     """Classic single-env ``gym.Env`` facade (``num_envs == 1``)."""
 
     @classmethod
-    def from_instance(cls, instance, reward_fn: Callable | None = None,
-                      action_fn: Callable | None = None,
-                      max_steps: int | None = None) -> GymEnvRunner:
+    def from_instance(
+        cls,
+        instance,
+        reward_fn: Callable | None = None,
+        action_fn: Callable | None = None,
+        max_steps: int | None = None,
+    ) -> GymEnvRunner:
         """Build the single-env Gym facade from a live RunInstance."""
-        return cls(instance, reward_fn=reward_fn, max_steps=max_steps,
-                   action_fn=action_fn)
+        return cls(instance, reward_fn=reward_fn, max_steps=max_steps, action_fn=action_fn)
 
-    def __init__(self, instance, reward_fn: Callable | None = None,
-                 max_steps: int | None = None,
-                 action_fn: Callable | None = None):
+    def __init__(
+        self,
+        instance,
+        reward_fn: Callable | None = None,
+        max_steps: int | None = None,
+        action_fn: Callable | None = None,
+    ):
         num_envs = int(getattr(instance.env, "num_envs", 0))
         if num_envs != 1:
             raise ValueError(
                 f"GymEnvRunner requires exactly one env (num_envs=1), got "
-                f"{num_envs}; use GymVectorRunner for batched runs")
+                f"{num_envs}; use GymVectorRunner for batched runs"
+            )
         spec = instance.spec
         runner_cfg = spec.runner or {}
         super().__init__(
@@ -161,19 +168,17 @@ class GymEnvRunner(_GymBase):
         else:
             raise TypeError(
                 "GymEnvRunner.step expects dict[str, NamedAction] (or pass "
-                f"an action_fn); got {type(action).__name__}")
+                f"an action_fn); got {type(action).__name__}"
+            )
 
         result = self.tick(actions_override=actions)
         self._steps += 1
         obs = result.obs
         extra = result.extra
-        reward = (float(self.reward_fn(obs, extra))
-                  if self.reward_fn is not None else 0.0)
-        terminated = (bool(result.terminated.any())
-                      if result.terminated is not None else False)
+        reward = float(self.reward_fn(obs, extra)) if self.reward_fn is not None else 0.0
+        terminated = bool(result.terminated.any()) if result.terminated is not None else False
         due = bool(result.reset_env_ids.numel())
-        step_truncated = (self.max_steps is not None
-                          and self._steps >= self.max_steps)
+        step_truncated = self.max_steps is not None and self._steps >= self.max_steps
         truncated = (due or step_truncated) and not terminated
         self._finished = bool(terminated or truncated)
         return obs, reward, terminated, truncated, dict(extra)
@@ -189,18 +194,18 @@ class GymVectorRunner(_GymBase):
     """
 
     @classmethod
-    def from_instance(cls, instance, reward_fn: Callable | None = None,
-                      action_fn: Callable | None = None
-                      ) -> GymVectorRunner:
+    def from_instance(
+        cls, instance, reward_fn: Callable | None = None, action_fn: Callable | None = None
+    ) -> GymVectorRunner:
         """Build the batched Gym facade from a live RunInstance."""
         return cls(instance, reward_fn=reward_fn, action_fn=action_fn)
 
-    def __init__(self, instance, reward_fn: Callable | None = None,
-                 action_fn: Callable | None = None):
+    def __init__(
+        self, instance, reward_fn: Callable | None = None, action_fn: Callable | None = None
+    ):
         num_envs = int(getattr(instance.env, "num_envs", 0))
         if num_envs < 1:
-            raise ValueError(
-                f"GymVectorRunner requires num_envs >= 1, got {num_envs}")
+            raise ValueError(f"GymVectorRunner requires num_envs >= 1, got {num_envs}")
         spec = instance.spec
         runner_cfg = spec.runner or {}
         super().__init__(
@@ -229,7 +234,8 @@ class GymVectorRunner(_GymBase):
         if self.action_fn is None:
             raise TypeError(
                 "GymVectorRunner.step expects dict[str, NamedAction] (or "
-                f"pass an action_fn); got {type(actions).__name__}")
+                f"pass an action_fn); got {type(actions).__name__}"
+            )
         if isinstance(actions, (list, tuple)) and len(actions) == self.num_envs:
             per_env = [self.action_fn(a) for a in actions]
         else:
@@ -237,8 +243,7 @@ class GymVectorRunner(_GymBase):
         merged: dict = {}
         for key, first in per_env[0].items():
             values = torch.cat([entry[key].values for entry in per_env], dim=0)
-            merged[key] = type(first)(values, list(first.joint_names),
-                                      first.kind)
+            merged[key] = type(first)(values, list(first.joint_names), first.kind)
         return merged
 
     def reset(self, seed=None, options=None):  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -262,8 +267,7 @@ class GymVectorRunner(_GymBase):
             if rewards.size == 1:
                 rewards = np.full(n, rewards.item())
             elif rewards.size != n:
-                raise ValueError(
-                    f"reward_fn returned {rewards.size} rewards for {n} envs")
+                raise ValueError(f"reward_fn returned {rewards.size} rewards for {n} envs")
 
         terminateds = _as_numpy(result.terminated).astype(bool).reshape(-1)
         due = _as_numpy(result.reset_env_ids).astype(np.int64).reshape(-1)
@@ -271,7 +275,7 @@ class GymVectorRunner(_GymBase):
         due_mask[due] = True
         truncateds = (due_mask & ~terminateds).astype(bool)
 
-        obs = dict(self.env.obs_cache)          # post-reset (SameStep)
+        obs = dict(self.env.obs_cache)  # post-reset (SameStep)
         infos = _batch_infos(self._extra_now(), n)
         final_observation = np.empty(n, dtype=object)
         final_info = np.empty(n, dtype=object)

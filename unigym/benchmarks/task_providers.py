@@ -37,6 +37,7 @@ YAGNI note: today the registry carries exactly one documented
 example and zero real consumers; the first real task that cannot be a
 template row registers here and sets the precedent.
 """
+
 from __future__ import annotations
 
 from typing import Callable
@@ -46,8 +47,7 @@ Provider = Callable[[dict, dict], dict]
 PROVIDERS: dict[str, Provider] = {}
 """The closed provider registry: registered name -> pure spec-builder."""
 
-_PROVIDER_NAME_CHARS = set(
-    "abcdefghijklmnopqrstuvwxyz0123456789_")
+_PROVIDER_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 def register(name: str) -> Callable[[Provider], Provider]:
@@ -57,29 +57,33 @@ def register(name: str) -> Callable[[Provider], Provider]:
     references the registry entry, never a file (data cites
     NAMES, never paths).
     """
+
     def deco(fn: Provider) -> Provider:
         if not callable(fn):
             raise ValueError(
-                f"task provider {name!r} must be a callable, got "
-                f"{type(fn).__name__}")
-        if not (isinstance(name, str) and name
-                and set(name) <= _PROVIDER_NAME_CHARS):
+                f"task provider {name!r} must be a callable, got " f"{type(fn).__name__}"
+            )
+        if not (isinstance(name, str) and name and set(name) <= _PROVIDER_NAME_CHARS):
             raise ValueError(
                 f"task provider name {name!r} invalid (lowercase "
                 "snake_case -- rows reference providers BY NAME, never "
                 "by path; a path-shaped value is rejected here so it "
-                "can never look like a legal reference)")
+                "can never look like a legal reference)"
+            )
         if name in PROVIDERS:
             raise ValueError(
                 f"task provider {name!r} registered twice "
-                f"({PROVIDERS[name]!r} and {fn!r}) -- rename one")
+                f"({PROVIDERS[name]!r} and {fn!r}) -- rename one"
+            )
         if not (getattr(fn, "__doc__", "") or "").strip():
             raise ValueError(
                 f"task provider {name!r}: a docstring is required -- it "
                 "must declare the official mechanism the provider "
-                "mirrors and restate the pure-builder contract")
+                "mirrors and restate the pure-builder contract"
+            )
         PROVIDERS[name] = fn
         return fn
+
     return deco
 
 
@@ -97,12 +101,14 @@ def build_provider_spec(name: str, slots: dict, tables: dict) -> dict:
         raise ValueError(
             f"unknown task provider {name!r} (registered: "
             f"{sorted(PROVIDERS)}; rows reference providers by NAME -- "
-            "a path-shaped value is rejected by the row schema)")
+            "a path-shaped value is rejected by the row schema)"
+        )
     spec = PROVIDERS[name](slots, tables)
     if not isinstance(spec, dict):
         raise ValueError(
             f"task provider {name!r} must return a dict (the formula "
-            f"task section), got {type(spec).__name__}")
+            f"task section), got {type(spec).__name__}"
+        )
     return spec
 
 

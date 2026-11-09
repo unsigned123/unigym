@@ -8,6 +8,7 @@ Pure numpy/stdlib.  A trace directory is::
 The manifest is the segment registry (segment == array key); the diff
 engine reads segment shapes from it WITHOUT loading any tick data.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,8 +34,7 @@ def write_manifest(trace_dir: str | Path, manifest: dict) -> Path:
         if key not in manifest:
             raise ValueError(f"manifest missing required key {key!r}")
     if int(manifest.get("schema", 0)) != SCHEMA:
-        raise ValueError(f"manifest schema must be {SCHEMA}, "
-                         f"got {manifest.get('schema')!r}")
+        raise ValueError(f"manifest schema must be {SCHEMA}, " f"got {manifest.get('schema')!r}")
     path = Path(trace_dir) / MANIFEST_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=1, default=str))
@@ -61,14 +61,16 @@ class TraceReader:
         self.indices: list[int] = sorted(
             int(m.group(1))
             for p in self.root.glob("tick_*.npz")
-            if (m := TICK_RE.match(p.name)) is not None)
+            if (m := TICK_RE.match(p.name)) is not None
+        )
         if not self.indices:
             raise ValueError(f"{self.root}: manifest but zero tick shards")
 
     @property
     def transport(self) -> str:
-        return str(self.manifest.get("transport")
-                   or self.manifest.get("source", {}).get("map", "unknown"))
+        return str(
+            self.manifest.get("transport") or self.manifest.get("source", {}).get("map", "unknown")
+        )
 
     def segments(self) -> dict:
         """The manifest segment registry (name -> {shape, dtype})."""

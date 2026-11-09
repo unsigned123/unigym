@@ -8,12 +8,12 @@ the kinematic primitives land on the same qpos/qvel addressing (pin/
 follow = per-tick ``write_slave_pose`` + ``halt``; push = the robot-base
 freejoint qvel).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from unigym.director.ops import (HAND_ALIAS_CANDIDATES, _OpsBase,
-                                 WeldHost, strip_prop_prefix)
+from unigym.director.ops import HAND_ALIAS_CANDIDATES, _OpsBase, WeldHost, strip_prop_prefix
 
 
 def _weld_bid(host: WeldHost) -> int:
@@ -21,8 +21,8 @@ def _weld_bid(host: WeldHost) -> int:
     bid = host.payload
     if not isinstance(bid, int):
         raise TypeError(
-            "mujoco director: weld host payload must be a body id, got "
-            f"{type(bid).__name__}")
+            "mujoco director: weld host payload must be a body id, got " f"{type(bid).__name__}"
+        )
     return bid
 
 
@@ -70,9 +70,10 @@ class MujocoDirectorOps(_OpsBase):
         if gripper_cfg is not None:
             from unigym.backends.registry import backend_info
             from unigym.director.gripper import build_gripper
+
             self.gripper = build_gripper(
-                self.env, gripper_cfg,
-                gripper_backend=backend_info(self.backend).gripper_backend)
+                self.env, gripper_cfg, gripper_backend=backend_info(self.backend).gripper_backend
+            )
         return self.gripper
 
     # ------------------------------------------------------------------ #
@@ -90,8 +91,8 @@ class MujocoDirectorOps(_OpsBase):
         """
         if name not in self._free and name not in self._arts:
             from unigym.director import _fail
-            raise _fail(f"unknown prop {name!r}",
-                        f"declared props: {sorted(self.prop_names())}")
+
+            raise _fail(f"unknown prop {name!r}", f"declared props: {sorted(self.prop_names())}")
         return name
 
     def resolve_weld_host(self, host: str) -> WeldHost:
@@ -108,28 +109,31 @@ class MujocoDirectorOps(_OpsBase):
 
         host = strip_prop_prefix(host)
         m = self.env.mj_model
-        if host == "gripper" or (
-                self.gripper is not None and host == self.gripper.name):
+        if host == "gripper" or (self.gripper is not None and host == self.gripper.name):
             if self.gripper is None:
-                raise _fail("no gripper on this run (declare "
-                            "director.gripper)", "host: gripper needs the "
-                            "director.gripper yaml section")
+                raise _fail(
+                    "no gripper on this run (declare " "director.gripper)",
+                    "host: gripper needs the " "director.gripper yaml section",
+                )
             grip_bid = getattr(self.gripper, "bid", None)
             if not isinstance(grip_bid, int):
-                raise _fail("mujoco gripper exposes no body id",
-                            "the mujoco gripper backend must publish `bid`")
+                raise _fail(
+                    "mujoco gripper exposes no body id",
+                    "the mujoco gripper backend must publish `bid`",
+                )
             return WeldHost(grip_bid)
         if host == "hand":
             for cand in HAND_ALIAS_CANDIDATES:
                 for backend in self._backend_bodies(cand):
-                    bid = mujoco.mj_name2id(
-                        m, mujoco.mjtObj.mjOBJ_BODY, backend)
+                    bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, backend)
                     if bid >= 0:
                         return WeldHost(bid)
-            raise _fail('host alias "hand" resolved to no robot hand body',
-                        "candidates: "
-                        f"{list(HAND_ALIAS_CANDIDATES)}; use an explicit "
-                        "unigym body name")
+            raise _fail(
+                'host alias "hand" resolved to no robot hand body',
+                "candidates: "
+                f"{list(HAND_ALIAS_CANDIDATES)}; use an explicit "
+                "unigym body name",
+            )
         pb = getattr(self.env, "prop_backend", None)
         if pb is not None:
             bid = pb.body_id(host)
@@ -139,9 +143,11 @@ class MujocoDirectorOps(_OpsBase):
             bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, backend)
             if bid >= 0:
                 return WeldHost(bid)
-        raise _fail(f"unknown host {host!r}",
-                    "'gripper', 'hand', a prop name, or a unigym body name "
-                    f"(declared props: {sorted(self.prop_names())})")
+        raise _fail(
+            f"unknown host {host!r}",
+            "'gripper', 'hand', a prop name, or a unigym body name "
+            f"(declared props: {sorted(self.prop_names())})",
+        )
 
     def _backend_bodies(self, name: str) -> list[str]:
         """Neutral body name -> candidate compiled names (identity first)."""
@@ -179,24 +185,25 @@ class MujocoDirectorOps(_OpsBase):
 
         if name in self._free:
             if pos is None and quat is None:
-                raise _fail(f"teleport {name!r} (rigid) needs pos and/or "
-                            f"quat")
+                raise _fail(f"teleport {name!r} (rigid) needs pos and/or " f"quat")
             _, qadr, vadr = self._free[name]
             m, d = self.env.mj_model, self.env.mj_data
             if pos is not None:
-                d.qpos[qadr:qadr + 3] = pos
+                d.qpos[qadr : qadr + 3] = pos
             if quat is not None:
-                d.qpos[qadr + 3:qadr + 7] = quat
+                d.qpos[qadr + 3 : qadr + 7] = quat
             if reset_vel:
-                d.qvel[vadr:vadr + 6] = 0.0
+                d.qvel[vadr : vadr + 6] = 0.0
             mujoco.mj_forward(m, d)
             return {"teleported": name, "pos": pos, "quat": quat}
         art = self._arts.get(name)
         if art is not None:
             unknown = sorted(set(joints) - set(art.joints))
             if unknown:
-                raise _fail(f"prop {name!r}: unknown joint(s) {unknown}",
-                            f"declared joints: {sorted(art.joints)}")
+                raise _fail(
+                    f"prop {name!r}: unknown joint(s) {unknown}",
+                    f"declared joints: {sorted(art.joints)}",
+                )
             m, d = self.env.mj_model, self.env.mj_data
             # anchored root: model-level re-anchor (on_reset pattern);
             # pose keys optional (joints-only writes keep the anchor)
@@ -210,10 +217,13 @@ class MujocoDirectorOps(_OpsBase):
                 if reset_vel:
                     d.qvel[jn["dadr"]] = 0.0
             mujoco.mj_forward(m, d)
-            return {"teleported": name, "pos": pos, "quat": quat,
-                    "joints": {k: float(v) for k, v in joints.items()}}
-        raise _fail(f"unknown prop {name!r}",
-                    f"declared props: {sorted(self.prop_names())}")
+            return {
+                "teleported": name,
+                "pos": pos,
+                "quat": quat,
+                "joints": {k: float(v) for k, v in joints.items()},
+            }
+        raise _fail(f"unknown prop {name!r}", f"declared props: {sorted(self.prop_names())}")
 
     def setvel(self, name, lin, ang) -> dict:
         """Write a free rigid prop's root qvel (director_contract §3.2).
@@ -234,17 +244,16 @@ class MujocoDirectorOps(_OpsBase):
                 raise _fail(
                     f"setvel on articulation prop {name!r}: the anchor root "
                     f"is model-level on mujoco",
-                    "use teleport joints writes for per-joint motion")
-            raise _fail(f"unknown prop {name!r}",
-                        f"declared props: {sorted(self.prop_names())}")
+                    "use teleport joints writes for per-joint motion",
+                )
+            raise _fail(f"unknown prop {name!r}", f"declared props: {sorted(self.prop_names())}")
         _, _, vadr = self._free[name]
         d = self.env.mj_data
-        d.qvel[vadr:vadr + 3] = lin
+        d.qvel[vadr : vadr + 3] = lin
         if ang is not None:
-            d.qvel[vadr + 3:vadr + 6] = ang
+            d.qvel[vadr + 3 : vadr + 6] = ang
         mujoco.mj_forward(self.env.mj_model, self.env.mj_data)
-        return {"setvel": name, "lin": list(lin),
-                "ang": list(ang) if ang else None}
+        return {"setvel": name, "lin": list(lin), "ang": list(ang) if ang else None}
 
     def attach_weld(self, obj: str, host: WeldHost) -> dict:
         """Activate a pre-allocated weld equality slot (contract §3.4).
@@ -257,13 +266,14 @@ class MujocoDirectorOps(_OpsBase):
 
         host_bid = _weld_bid(host)
         m, d = self.env.mj_model, self.env.mj_data
-        eq = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY,
-                               f"director_weld_{obj}")
+        eq = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, f"director_weld_{obj}")
         if eq < 0:
             from unigym.director import _fail
+
             raise _fail(
                 f"no weld slot for prop {obj!r} (spec injection missing)",
-                "start with --direct so director weld slots are allocated")
+                "start with --direct so director weld slots are allocated",
+            )
         bid, _, _ = self._free[obj]
         if bool(d.eq_active[eq]):
             d.eq_active[eq] = 0
@@ -274,13 +284,12 @@ class MujocoDirectorOps(_OpsBase):
         r1 = r1.reshape(3, 3)
         relpos = d.xpos[host_bid] - d.xpos[bid]
         relq = np.zeros(4)
-        mujoco.mju_mat2Quat(relq, (r1.T @ self._host_rotmat(host_bid))
-                            .reshape(9))
+        mujoco.mju_mat2Quat(relq, (r1.T @ self._host_rotmat(host_bid)).reshape(9))
         data = np.zeros(11)
-        data[0:3] = 0.0                    # anchor at the object origin
+        data[0:3] = 0.0  # anchor at the object origin
         data[3:6] = relpos
         data[6:10] = relq
-        data[10] = 1.0                     # torquescale
+        data[10] = 1.0  # torquescale
         m.eq_data[eq] = data
         m.eq_obj2id[eq] = host_bid
         d.eq_active[eq] = 1
@@ -307,20 +316,19 @@ class MujocoDirectorOps(_OpsBase):
             quat: world orientation (wxyz).
         """
         _, qadr, _ = self._free[obj]
-        self.env.mj_data.qpos[qadr:qadr + 3] = pos
-        self.env.mj_data.qpos[qadr + 3:qadr + 7] = quat
+        self.env.mj_data.qpos[qadr : qadr + 3] = pos
+        self.env.mj_data.qpos[qadr + 3 : qadr + 7] = quat
 
     def obj_pose(self, obj: str) -> tuple[np.ndarray, np.ndarray]:
         """Read a free rigid prop's qpos pose (m / wxyz quat)."""
         _, qadr, _ = self._free_prop(obj)
         d = self.env.mj_data
-        return (np.array(d.qpos[qadr:qadr + 3]),
-                np.array(d.qpos[qadr + 3:qadr + 7]))
+        return (np.array(d.qpos[qadr : qadr + 3]), np.array(d.qpos[qadr + 3 : qadr + 7]))
 
     def halt(self, obj: str) -> None:
         """Zero a free rigid prop's qvel (director_contract §3.7 pin)."""
         _, _, vadr = self._free_prop(obj)
-        self.env.mj_data.qvel[vadr:vadr + 6] = 0.0
+        self.env.mj_data.qvel[vadr : vadr + 6] = 0.0
 
     def push_root(self, lin, ang, mode: str) -> dict:
         """Robot-base freejoint qvel write, world axes (set | add).
@@ -336,29 +344,29 @@ class MujocoDirectorOps(_OpsBase):
         m, d = self.env.mj_model, self.env.mj_data
         bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
         if bid < 0:
-            raise _fail("no robot base body 'pelvis' in the MJ model",
-                        "push needs a free-root robot model")
+            raise _fail(
+                "no robot base body 'pelvis' in the MJ model", "push needs a free-root robot model"
+            )
         jadr = int(m.body_jntadr[bid])
-        if (jadr < 0
-                or int(m.jnt_type[jadr]) != int(mujoco.mjtJoint.mjJNT_FREE)):
-            raise _fail("robot base 'pelvis' has no freejoint",
-                        "push writes the root freejoint qvel")
+        if jadr < 0 or int(m.jnt_type[jadr]) != int(mujoco.mjtJoint.mjJNT_FREE):
+            raise _fail(
+                "robot base 'pelvis' has no freejoint", "push writes the root freejoint qvel"
+            )
         vadr = int(m.jnt_dofadr[jadr])
         if mode == "set":
             if lin is not None:
-                d.qvel[vadr:vadr + 3] = lin
+                d.qvel[vadr : vadr + 3] = lin
             if ang is not None:
-                d.qvel[vadr + 3:vadr + 6] = ang
-        else:                                  # add (push = impulse)
+                d.qvel[vadr + 3 : vadr + 6] = ang
+        else:  # add (push = impulse)
             if lin is not None:
-                d.qvel[vadr:vadr + 3] += lin
+                d.qvel[vadr : vadr + 3] += lin
             if ang is not None:
-                d.qvel[vadr + 3:vadr + 6] += ang
+                d.qvel[vadr + 3 : vadr + 6] += ang
         mujoco.mj_forward(m, d)
         return {"pushed": "robot", "lin": lin, "ang": ang, "mode": mode}
 
-    def write_joints(self, joints: dict[str, float],
-                     zero_vel: bool) -> dict:
+    def write_joints(self, joints: dict[str, float], zero_vel: bool) -> dict:
         """Robot-joint qpos write by name (director_contract §3.11).
 
         Pose
@@ -375,13 +383,14 @@ class MujocoDirectorOps(_OpsBase):
 
         from unigym.runtime.controllers import single_articulation_runtime
 
-        have = [j for j in
-                single_articulation_runtime(self.env).joint_names
-                if not j.startswith("Prop_")]
+        have = [
+            j
+            for j in single_articulation_runtime(self.env).joint_names
+            if not j.startswith("Prop_")
+        ]
         unknown = sorted(set(joints) - set(have))
         if unknown:
-            raise _fail(f"unknown robot joint(s) {unknown}",
-                        f"robot joints: {have}")
+            raise _fail(f"unknown robot joint(s) {unknown}", f"robot joints: {have}")
         m, d = self.env.mj_model, self.env.mj_data
         for name, val in joints.items():
             jid = m.joint(name).id
@@ -393,13 +402,13 @@ class MujocoDirectorOps(_OpsBase):
                 raise _fail(
                     f"joint {name!r} value {float(val)} outside model "
                     f"limits [{rng[0]}, {rng[1]}]",
-                    f"valid range for {name!r}: [{rng[0]}, {rng[1]}]")
+                    f"valid range for {name!r}: [{rng[0]}, {rng[1]}]",
+                )
             d.qpos[int(m.jnt_qposadr[jid])] = float(val)
             if zero_vel:
                 d.qvel[int(m.jnt_dofadr[jid])] = 0.0
         mujoco.mj_forward(m, d)
-        return {"joints": {k: float(v) for k, v in joints.items()},
-                "zero_vel": bool(zero_vel)}
+        return {"joints": {k: float(v) for k, v in joints.items()}, "zero_vel": bool(zero_vel)}
 
     def default_attach_mode(self) -> str:
         """Mujoco attach default: ``"kin"`` (weld is the explicit slot form)."""
@@ -424,13 +433,13 @@ class MujocoDirectorOps(_OpsBase):
         free = self._free.get(obj)
         if free is None:
             if obj in self._arts:
-                raise _fail(f"prop {obj!r} is an articulation: its root is "
-                            f"model-anchored -- pin/follow applies to "
-                            f"rigid props",
-                            "articulation props: use teleport joints "
-                            "writes; rigid props: pin/follow")
-            raise _fail(f"unknown prop {obj!r}",
-                        f"declared props: {sorted(self.prop_names())}")
+                raise _fail(
+                    f"prop {obj!r} is an articulation: its root is "
+                    f"model-anchored -- pin/follow applies to "
+                    f"rigid props",
+                    "articulation props: use teleport joints " "writes; rigid props: pin/follow",
+                )
+            raise _fail(f"unknown prop {obj!r}", f"declared props: {sorted(self.prop_names())}")
         return free
 
     # ------------------------------------------------------------------ #
@@ -446,5 +455,4 @@ class MujocoDirectorOps(_OpsBase):
     def _host_name(self, bid: int) -> str:
         import mujoco
 
-        return mujoco.mj_id2name(self.env.mj_model,
-                                 mujoco.mjtObj.mjOBJ_BODY, bid)
+        return mujoco.mj_id2name(self.env.mj_model, mujoco.mjtObj.mjOBJ_BODY, bid)

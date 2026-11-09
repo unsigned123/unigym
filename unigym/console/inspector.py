@@ -24,6 +24,7 @@ thresholds, no fuzzy size judgment):
 * eval results: ndarray / tensor / dict-of-arrays -> the same rule;
   scalars / short strings / small scalar lists -> ``inline``.
 """
+
 from __future__ import annotations
 
 import ast
@@ -35,15 +36,13 @@ import torch
 
 from .stepping import ConsoleError
 
-__all__ = ["Inspector", "INLINE_NUMEL", "PREVIEW_N", "MAX_STR",
-           "EVAL_NAMESPACE"]
+__all__ = ["Inspector", "INLINE_NUMEL", "PREVIEW_N", "MAX_STR", "EVAL_NAMESPACE"]
 
-INLINE_NUMEL = 64       # numel <= 64 -> full inline values; else npz dump
-PREVIEW_N = 8           # the always-present first-8 preview
-MAX_STR = 200           # inline string / repr truncation
+INLINE_NUMEL = 64  # numel <= 64 -> full inline values; else npz dump
+PREVIEW_N = 8  # the always-present first-8 preview
+MAX_STR = 200  # inline string / repr truncation
 
-EVAL_NAMESPACE = ("np", "torch", "obs_cache", "extra", "bundle", "adapter",
-                  "env")
+EVAL_NAMESPACE = ("np", "torch", "obs_cache", "extra", "bundle", "adapter", "env")
 """Names injected into every eval (docs/contracts/console_contract.md §4) --
 convenience injections on top of full builtins, NOT a restriction; the
 tests lock this tuple; add names only together with a contract update."""
@@ -85,8 +84,7 @@ class Inspector:
         bundle_fn: zero-arg callable -> the current step bundle dict.
     """
 
-    def __init__(self, env=None, adapter=None, out_dir=None,
-                 status_fn=None, bundle_fn=None):
+    def __init__(self, env=None, adapter=None, out_dir=None, status_fn=None, bundle_fn=None):
         self.env = env
         self.adapter = adapter
         self.out_dir = out_dir
@@ -106,13 +104,12 @@ class Inspector:
         if target in ("obs", "extra"):
             key = params.get("key")
             if not isinstance(key, str):
-                raise ConsoleError(
-                    f"inspect: {target} key must be a string, got {key!r}")
+                raise ConsoleError(f"inspect: {target} key must be a string, got {key!r}")
             source = self._source(target)
             if key not in source:
                 raise ConsoleError(
-                    f"inspect: unknown {target} key {key!r} "
-                    f"(available: {sorted(source)})")
+                    f"inspect: unknown {target} key {key!r} " f"(available: {sorted(source)})"
+                )
             return self.format_array(key, source[key], rid=rid)
         raise ConsoleError(f"inspect: unknown target {target!r}")
 
@@ -126,7 +123,7 @@ class Inspector:
         if self._status_fn is not None:
             try:
                 st = self._status_fn()
-            except Exception:            # noqa: BLE001 -- summary never fails
+            except Exception:  # noqa: BLE001 -- summary never fails
                 st = {}
             for k in ("phase", "step", "episodes"):
                 out[k] = st.get(k)
@@ -157,12 +154,11 @@ class Inspector:
         """One array -> inline summary (+ values | npz_path) per the rule."""
         a = self._to_numpy(val)
         flat = a.reshape(-1)
-        out: dict = {"key": key, "shape": [int(x) for x in a.shape],
-                     "dtype": str(a.dtype)}
+        out: dict = {"key": key, "shape": [int(x) for x in a.shape], "dtype": str(a.dtype)}
         if flat.size:
             f64 = flat.astype(np.float64)
             out["mean"] = _num(f64.mean())
-            out["std"] = _num(f64.std())     # population std (ddof=0)
+            out["std"] = _num(f64.std())  # population std (ddof=0)
         out["first8"] = [_num(x) for x in flat[:PREVIEW_N]]
         if flat.size and flat.size <= INLINE_NUMEL:
             out["values"] = [_num(x) for x in flat]
@@ -193,9 +189,8 @@ class Inspector:
                 result = self._exec_block(expr, ns)
         except ConsoleError:
             raise
-        except Exception as e:               # noqa: BLE001 -> ack, run lives
-            raise ConsoleError(
-                f"eval failed: {type(e).__name__}: {e}") from None
+        except Exception as e:  # noqa: BLE001 -> ack, run lives
+            raise ConsoleError(f"eval failed: {type(e).__name__}: {e}") from None
         return self.format_result(result)
 
     @staticmethod
@@ -210,10 +205,10 @@ class Inspector:
         ret = "__console_ret__"
         if tree.body and isinstance(tree.body[-1], ast.Expr):
             tree.body[-1] = ast.Assign(
-                targets=[ast.Name(id=ret, ctx=ast.Store())],
-                value=tree.body[-1].value)
+                targets=[ast.Name(id=ret, ctx=ast.Store())], value=tree.body[-1].value
+            )
             ast.fix_missing_locations(tree)
-        exec(compile(tree, "<console>", "exec"), ns)    # noqa: S102
+        exec(compile(tree, "<console>", "exec"), ns)  # noqa: S102
         return ns.pop(ret, None)
 
     def _namespace(self) -> dict:
@@ -233,18 +228,17 @@ class Inspector:
         if isinstance(result, (torch.Tensor, np.ndarray)):
             return self.format_array("result", result)
         if isinstance(result, dict):
-            return {"dict": {str(k): self.format_result(v)
-                             for k, v in result.items()}}
+            return {"dict": {str(k): self.format_result(v) for k, v in result.items()}}
         if isinstance(result, (list, tuple)):
             vals = list(result)
             if len(vals) <= INLINE_NUMEL and all(
-                    v is None or isinstance(v, (int, float, bool, str))
-                    for v in vals):
+                v is None or isinstance(v, (int, float, bool, str)) for v in vals
+            ):
                 return {"inline": [_jsonable(v) for v in vals]}
             return {"inline": repr(result)[:MAX_STR]}
-        if result is None or isinstance(result, (int, float, bool,
-                                                 np.integer, np.floating,
-                                                 np.bool_)):
+        if result is None or isinstance(
+            result, (int, float, bool, np.integer, np.floating, np.bool_)
+        ):
             return {"inline": _jsonable(result)}
         if isinstance(result, str):
             return {"inline": result[:MAX_STR]}
@@ -273,35 +267,30 @@ class Inspector:
                 else:
                     skipped.append(k)
         if keys is not None:
-            available = sorted({k for src in sources.values()
-                                for k in src})
+            available = sorted({k for src in sources.values() for k in src})
             missing = sorted(set(keys) - set(arrays) - set(skipped))
             if missing:
                 raise ConsoleError(
-                    f"save_npz: unknown key(s) {missing} "
-                    f"(available: {available})")
+                    f"save_npz: unknown key(s) {missing} " f"(available: {available})"
+                )
         if not arrays:
-            raise ConsoleError(
-                "save_npz: nothing to dump (no array keys matched)")
+            raise ConsoleError("save_npz: nothing to dump (no array keys matched)")
         target = self._dump_npz(arrays, rid, params.get("path"))
-        return {"npz_path": str(target), "keys": sorted(arrays),
-                "skipped": sorted(set(skipped))}
+        return {"npz_path": str(target), "keys": sorted(arrays), "skipped": sorted(set(skipped))}
 
-    def _dump_npz(self, arrays: dict, rid: int | None,
-                  path: str | None = None) -> Path:
+    def _dump_npz(self, arrays: dict, rid: int | None, path: str | None = None) -> Path:
         target = self._resolve_path(path, rid)
         target.parent.mkdir(parents=True, exist_ok=True)
         np.savez(target, **arrays)
         return target
 
     def _resolve_path(self, path, rid: int | None) -> Path:
-        root = Path(self.out_dir) if self.out_dir \
-            else Path("data_out")
+        root = Path(self.out_dir) if self.out_dir else Path("data_out")
         if path:
             p = Path(path)
             target = p if p.is_absolute() else root / p
         else:
             target = root / "inspect" / f"req_{rid}.npz"
-        if target.suffix != ".npz":          # np.savez would append .npz
+        if target.suffix != ".npz":  # np.savez would append .npz
             target = target.with_name(target.name + ".npz")
         return target

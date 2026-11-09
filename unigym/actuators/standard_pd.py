@@ -23,6 +23,7 @@ ctrlrange from the model on every step instead of the bind-time copy --
 the legacy hand-PD path read it live; the written values are identical
 either way, the switch only preserves the exact legacy read pattern.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -52,25 +53,21 @@ class StandardPdActuator(ActuatorBase):
             # neither an explicit gain nor a legacy entry exists
             fallback = getattr(env, "_actuator_gain_fallback", None)
             if fallback is None:
-                missing = [k for k in ("kp", "kd")
-                           if joint_group.get(k) is None]
+                missing = [k for k in ("kp", "kd") if joint_group.get(k) is None]
                 raise ValueError(
                     f"standard_pd actuator group is missing {missing} | "
                     f"hint: set the group's kp/kd (scalar or joint-name/"
                     f"regex dict); no legacy gain channel is available on "
-                    f"this env")
+                    f"this env"
+                )
             if kp_spec is None:
-                self._kp = self._fallback_vector(fallback, "kp",
-                                                 self._joint_names)
+                self._kp = self._fallback_vector(fallback, "kp", self._joint_names)
             else:
-                self._kp = resolve_gain_vector(kp_spec, "kp",
-                                               self._joint_names)
+                self._kp = resolve_gain_vector(kp_spec, "kp", self._joint_names)
             if kd_spec is None:
-                self._kd = self._fallback_vector(fallback, "kd",
-                                                 self._joint_names)
+                self._kd = self._fallback_vector(fallback, "kd", self._joint_names)
             else:
-                self._kd = resolve_gain_vector(kd_spec, "kd",
-                                               self._joint_names)
+                self._kd = resolve_gain_vector(kd_spec, "kd", self._joint_names)
         else:
             self._kp = resolve_gain_vector(kp_spec, "kp", self._joint_names)
             self._kd = resolve_gain_vector(kd_spec, "kd", self._joint_names)
@@ -80,8 +77,7 @@ class StandardPdActuator(ActuatorBase):
         self._scale_fn = getattr(env, "_damping_stability_scale", None)
 
     @staticmethod
-    def _fallback_vector(fallback, which: str,
-                         names: list) -> np.ndarray:
+    def _fallback_vector(fallback, which: str, names: list) -> np.ndarray:
         vals = []
         for n in names:
             v = fallback(n, which)
@@ -89,7 +85,8 @@ class StandardPdActuator(ActuatorBase):
                 raise ValueError(
                     f"standard_pd gain channel: no legacy {which} gain for "
                     f"joint {n!r} | hint: set the group's {which} "
-                    f"explicitly or extend the env gain tables")
+                    f"explicitly or extend the env gain tables"
+                )
             vals.append(float(v))
         return np.asarray(vals, dtype=np.float64)
 
@@ -107,18 +104,21 @@ class StandardPdActuator(ActuatorBase):
                 written.
         """
         self._require_bound()
-        assert (self._qadr is not None and self._dadr is not None
-                and self._slots is not None and self._targets is not None
-                and self._kp is not None and self._kd is not None
-                and self._ctrlrange is not None)
+        assert (
+            self._qadr is not None
+            and self._dadr is not None
+            and self._slots is not None
+            and self._targets is not None
+            and self._kp is not None
+            and self._kd is not None
+            and self._ctrlrange is not None
+        )
         q = data.qpos[self._qadr]
         dq = data.qvel[self._dadr]
         if self._scale_fn is not None:
-            kd_eff = self._kd * self._scale_fn(
-                data, self._dadr, self._kp, self._kd)
+            kd_eff = self._kd * self._scale_fn(data, self._dadr, self._kp, self._kd)
         else:
             kd_eff = self._kd
         tau = self._kp * (self._targets - q) - kd_eff * dq
-        cr = (model.actuator_ctrlrange[self._slots]
-              if self._live_ctrlrange else self._ctrlrange)
+        cr = model.actuator_ctrlrange[self._slots] if self._live_ctrlrange else self._ctrlrange
         data.ctrl[self._slots] = np.clip(tau, cr[:, 0], cr[:, 1])

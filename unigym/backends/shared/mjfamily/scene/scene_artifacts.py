@@ -11,6 +11,7 @@ The writers themselves live in :mod:`unigym.scenes.artifacts` and stay
 DTO-only; every function here is a pure transformation of the inputs it is
 handed (the model/``MjSpec`` are read, never mutated).
 """
+
 from __future__ import annotations
 
 import random
@@ -88,9 +89,7 @@ def _fill_scene_content(scene, spec):
     if spec is None:
         return scene, None
     if not isinstance(spec, Mapping):
-        raise ValueError(
-            f"content spec must be a mapping, got {type(spec).__name__}"
-        )
+        raise ValueError(f"content spec must be a mapping, got {type(spec).__name__}")
     name = spec.get("provider", "robocasa")
     factory = content_provider(name)
     catalog_ref = getattr(factory, "catalog_ref", None)
@@ -222,8 +221,9 @@ def write_fill_record(out_dir, record) -> str:
     return str(record.write(Path(out_dir) / "fill.json"))
 
 
-def write_scene_artifacts(out_dir, scene, pipeline: str | None, model, slots,
-                          composed_xml=None, fill_record=None) -> dict:
+def write_scene_artifacts(
+    out_dir, scene, pipeline: str | None, model, slots, composed_xml=None, fill_record=None
+) -> dict:
     """Write the six build artifacts (plus ``fill.json`` when content ran).
 
     Args:
@@ -244,10 +244,10 @@ def write_scene_artifacts(out_dir, scene, pipeline: str | None, model, slots,
     if composed_xml is None or out_dir is None:
         return {}
     draw, resolution, payloads = _views_for_scene(scene, pipeline, slots)
-    paths = write_build_artifacts(
-        out_dir, scene, draw, resolution, payloads)
+    paths = write_build_artifacts(out_dir, scene, draw, resolution, payloads)
     paths["compile"] = write_compile_report(
-        out_dir, compile_report(model), composed_xml=composed_xml)
+        out_dir, compile_report(model), composed_xml=composed_xml
+    )
     if fill_record is not None:
         paths["fill"] = write_fill_record(out_dir, fill_record)
     return paths

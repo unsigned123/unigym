@@ -4,6 +4,7 @@ The runner owns the rollout control flow; sinks own everything
 consumer-side (collection recording today, benchmark scoring in B1+).
 See docs/contracts/runner_contract.md.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -18,7 +19,8 @@ if TYPE_CHECKING:
     from unigym.run.instance import RunInstance
 
 _RUNNER_KINDS: dict[
-    str, type[SyncRunner] | type[GymEnvRunner] | type[GymVectorRunner],
+    str,
+    type[SyncRunner] | type[GymEnvRunner] | type[GymVectorRunner],
 ] = {
     "sync": SyncRunner,
     "external": ExternalRunner,
@@ -31,7 +33,9 @@ def make_runner(
     # Driver options are genuinely heterogeneous (each runner kind forwards
     # its own set to a different factory), so the channel is intentionally
     # arbitrary.
-    instance: RunInstance, kind: str = "sync", **kwargs: Any,
+    instance: RunInstance,
+    kind: str = "sync",
+    **kwargs: Any,
 ) -> Runner:
     """Build a :class:`Runner` for one live :class:`RunInstance` (v097).
 
@@ -47,18 +51,23 @@ def make_runner(
         factory = _RUNNER_KINDS[kind]
     except KeyError:
         known = ", ".join(sorted(_RUNNER_KINDS))
-        raise ValueError(
-            f"unknown runner kind {kind!r} (known: {known})") from None
+        raise ValueError(f"unknown runner kind {kind!r} (known: {known})") from None
     if kind in ("external", "gym", "gym_vector"):
         return factory.from_instance(instance, **kwargs)
     if kwargs:
         unknown = ", ".join(sorted(kwargs))
-        raise TypeError(
-            f"runner kind {kind!r} takes no options (got: {unknown})")
+        raise TypeError(f"runner kind {kind!r} takes no options (got: {unknown})")
     return factory.from_instance(instance)
 
 
 __all__ = [
-    "CollectSink", "ExternalRunner", "GymEnvRunner", "GymRunner",
-    "GymVectorRunner", "Runner", "StepResult", "SyncRunner", "make_runner",
+    "CollectSink",
+    "ExternalRunner",
+    "GymEnvRunner",
+    "GymRunner",
+    "GymVectorRunner",
+    "Runner",
+    "StepResult",
+    "SyncRunner",
+    "make_runner",
 ]

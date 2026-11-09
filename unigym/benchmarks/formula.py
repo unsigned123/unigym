@@ -40,12 +40,12 @@ strings are rejected at construction.  Tasks that need anything beyond the
 DSL (cross-episode state, DTW, external judges) must be written as a
 Python Task -- the DSL is the fast path, not the universal path.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from .base import (EpisodeData, EpisodeResult, Task,
-                   robot_state_key_uses)
+from .base import EpisodeData, EpisodeResult, Task, robot_state_key_uses
 from .terms import get_term, metric_frames, validate_term_spec
 
 # reserved metric ids (Task.aggregate output keys)
@@ -64,51 +64,51 @@ _LANGUAGE_KEYS = ("pool", "bindings", "expand")
 # --------------------------------------------------------------------------- #
 # predicate tree: validation + evaluation (separate concerns)
 # --------------------------------------------------------------------------- #
-def _validate_predicate(node, metric_ids: set[str], path: str,
-                        depth: int, errors: list[str]) -> None:
+def _validate_predicate(
+    node, metric_ids: set[str], path: str, depth: int, errors: list[str]
+) -> None:
     """Recursively validate one predicate-tree node (depth = number of
     combinator levels from the root, leaves included at any depth)."""
     if not isinstance(node, dict):
-        errors.append(f"{path}: predicate node must be a dict (combinator "
-                      f"{_COMBINATORS} or leaf {{metric, <comparator>}}), "
-                      f"got {type(node).__name__}")
+        errors.append(
+            f"{path}: predicate node must be a dict (combinator "
+            f"{_COMBINATORS} or leaf {{metric, <comparator>}}), "
+            f"got {type(node).__name__}"
+        )
         return
     combo = [k for k in _COMBINATORS if k in node]
     if combo:
         if len(combo) > 1:
-            errors.append(
-                f"{path}: mixed combinators {combo} (one per node)")
+            errors.append(f"{path}: mixed combinators {combo} (one per node)")
         key = combo[0]
         extra = set(node) - {key}
         if extra:
             errors.append(
-                f"{path}: unexpected keys {sorted(extra)} alongside "
-                f"combinator '{key}'")
+                f"{path}: unexpected keys {sorted(extra)} alongside " f"combinator '{key}'"
+            )
         if depth > _MAX_COMBINATOR_DEPTH:
             errors.append(
                 f"{path}: combinator nesting exceeds {_MAX_COMBINATOR_DEPTH} "
                 "levels (combinator-in-combinator-in-combinator); flatten "
-                "the tree or write a Python Task")
+                "the tree or write a Python Task"
+            )
             return
         children = node[key]
         if key == "not":
             if isinstance(children, list):
                 if len(children) != 1:
                     errors.append(
-                        f"{path}.not: exactly one child required, got "
-                        f"{len(children)}")
+                        f"{path}.not: exactly one child required, got " f"{len(children)}"
+                    )
                 children = children[:1]
             else:
                 children = [children]
             kids = [(f"{path}.not", c) for c in children]
         else:
             if not isinstance(children, list) or not children:
-                errors.append(
-                    f"{path}.{key}: requires a non-empty list of child "
-                    "nodes")
+                errors.append(f"{path}.{key}: requires a non-empty list of child " "nodes")
                 return
-            kids = [(f"{path}.{key}[{i}]", c)
-                    for i, c in enumerate(children)]
+            kids = [(f"{path}.{key}[{i}]", c) for i, c in enumerate(children)]
         for cpath, child in kids:
             _validate_predicate(child, metric_ids, cpath, depth + 1, errors)
         return
@@ -118,42 +118,42 @@ def _validate_predicate(node, metric_ids: set[str], path: str,
         errors.append(
             f"{path}: unknown comparator/keys {sorted(unknown)} (a leaf is "
             "{{metric: <id>, <comparator>: <value>}}; comparators: "
-            f"{', '.join(_COMPARATORS)})")
+            f"{', '.join(_COMPARATORS)})"
+        )
     if "metric" not in node:
-        errors.append(
-            f"{path}: leaf is missing 'metric' (must reference a "
-            "metrics[].id)")
+        errors.append(f"{path}: leaf is missing 'metric' (must reference a " "metrics[].id)")
         return
     mid = node["metric"]
     if not isinstance(mid, str):
-        errors.append(f"{path}.metric: must be a metric id string, got "
-                      f"{mid!r}")
+        errors.append(f"{path}.metric: must be a metric id string, got " f"{mid!r}")
     elif mid not in metric_ids:
         errors.append(
             f"{path}.metric: references undefined metric '{mid}' "
-            f"(defined: {sorted(metric_ids)})")
+            f"(defined: {sorted(metric_ids)})"
+        )
     ops = [k for k in node if k in _COMPARATORS]
     if not ops:
         errors.append(
-            f"{path}: leaf is missing a comparator (available: "
-            f"{', '.join(_COMPARATORS)})")
+            f"{path}: leaf is missing a comparator (available: " f"{', '.join(_COMPARATORS)})"
+        )
     elif len(ops) > 1:
-        errors.append(f"{path}: multiple comparators {ops} (exactly one "
-                      "per leaf)")
+        errors.append(f"{path}: multiple comparators {ops} (exactly one " "per leaf)")
     else:
         arg = node[ops[0]]
         if ops[0] == "between":
-            ok = (isinstance(arg, (list, tuple)) and len(arg) == 2
-                  and all(isinstance(v, (int, float))
-                          and not isinstance(v, bool) for v in arg)
-                  and arg[0] <= arg[1])
+            ok = (
+                isinstance(arg, (list, tuple))
+                and len(arg) == 2
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in arg)
+                and arg[0] <= arg[1]
+            )
             if not ok:
                 errors.append(
                     f"{path}.{ops[0]}: must be [lo, hi] numbers with "
-                    f"lo <= hi (inclusive bounds), got {arg!r}")
+                    f"lo <= hi (inclusive bounds), got {arg!r}"
+                )
         elif isinstance(arg, bool) or not isinstance(arg, (int, float)):
-            errors.append(
-                f"{path}.{ops[0]}: threshold must be a number, got {arg!r}")
+            errors.append(f"{path}.{ops[0]}: threshold must be a number, got {arg!r}")
 
 
 def evaluate_predicate_tree(node, metrics: dict[str, float]) -> bool:
@@ -172,8 +172,7 @@ def evaluate_predicate_tree(node, metrics: dict[str, float]) -> bool:
             child = children[0] if isinstance(children, list) else children
             return not evaluate_predicate_tree(child, metrics)
         if key == "all":
-            return all(evaluate_predicate_tree(c, metrics)
-                       for c in children)
+            return all(evaluate_predicate_tree(c, metrics) for c in children)
         return any(evaluate_predicate_tree(c, metrics) for c in children)
     value = float(metrics[node["metric"]])
     if "gte" in node:
@@ -244,37 +243,45 @@ def _validate_language(lang, errors: list[str]) -> None:
         expand:    seeded (default) | all | single  (design K5 modes)
     """
     if not isinstance(lang, dict):
-        errors.append(f"language: section must be a dict "
-                      f"{{pool, bindings, expand}}, got "
-                      f"{type(lang).__name__}")
+        errors.append(
+            f"language: section must be a dict "
+            f"{{pool, bindings, expand}}, got "
+            f"{type(lang).__name__}"
+        )
         return
     unknown = set(lang) - set(_LANGUAGE_KEYS)
     if unknown:
-        errors.append(f"language: unknown keys {sorted(unknown)} "
-                      f"(allowed: {sorted(_LANGUAGE_KEYS)})")
+        errors.append(
+            f"language: unknown keys {sorted(unknown)} " f"(allowed: {sorted(_LANGUAGE_KEYS)})"
+        )
     pool = lang.get("pool")
     if not isinstance(pool, str) or not pool.strip():
         errors.append(
             f"language.pool: required non-empty string (the pool id in the "
-            f"pack's language/templates.yaml), got {pool!r}")
+            f"pack's language/templates.yaml), got {pool!r}"
+        )
     bindings = lang.get("bindings")
     if not isinstance(bindings, dict) or not bindings:
         errors.append(
-            "language.bindings: required non-empty dict of "
-            "{slot: surface-form} string pairs")
+            "language.bindings: required non-empty dict of " "{slot: surface-form} string pairs"
+        )
     else:
-        bad = {k: v for k, v in bindings.items()
-               if not isinstance(k, str) or not k
-               or not isinstance(v, str) or not v}
+        bad = {
+            k: v
+            for k, v in bindings.items()
+            if not isinstance(k, str) or not k or not isinstance(v, str) or not v
+        }
         if bad:
             errors.append(
                 f"language.bindings: every slot/surface-form pair must be "
-                f"non-empty strings, got {bad}")
+                f"non-empty strings, got {bad}"
+            )
     expand = lang.get("expand", "seeded")
     if expand not in _LANGUAGE_EXPANDS:
         errors.append(
             f"language.expand: must be one of {_LANGUAGE_EXPANDS} "
-            f"(default 'seeded'), got {expand!r}")
+            f"(default 'seeded'), got {expand!r}"
+        )
 
 
 def validate_formula_spec(spec) -> list[str]:
@@ -285,18 +292,16 @@ def validate_formula_spec(spec) -> list[str]:
     reserved metric ids.  Every message names the offending field."""
     errors: list[str] = []
     if not isinstance(spec, dict):
-        return [f"spec: formula task section must be a dict, got "
-                f"{type(spec).__name__}"]
+        return [f"spec: formula task section must be a dict, got " f"{type(spec).__name__}"]
     desc = spec.get("description")
     if not isinstance(desc, str) or not desc.strip():
         errors.append(
             "description: required for formula tasks (it documents the "
-            "task in benchmark_report.json); add a non-empty string")
+            "task in benchmark_report.json); add a non-empty string"
+        )
     metrics = spec.get("metrics")
     if not isinstance(metrics, list) or not metrics:
-        errors.append(
-            "metrics: required non-empty list of "
-            "{id, term, **params} dicts")
+        errors.append("metrics: required non-empty list of " "{id, term, **params} dicts")
         metrics = []
     ids: set[str] = set()
     for i, item in enumerate(metrics):
@@ -305,17 +310,16 @@ def validate_formula_spec(spec) -> list[str]:
             errors.append(
                 f"{path}: metric item must be a dict "
                 "{id, term, **params}, got "
-                f"{type(item).__name__}")
+                f"{type(item).__name__}"
+            )
             continue
         mid = item.get("id")
         if not isinstance(mid, str) or not mid:
-            errors.append(
-                f"{path}.id: required non-empty string metric id, got "
-                f"{mid!r}")
+            errors.append(f"{path}.id: required non-empty string metric id, got " f"{mid!r}")
         elif mid in _RESERVED_METRIC_IDS:
             errors.append(
-                f"{path}.id: '{mid}' is reserved (Task.aggregate output "
-                "key); pick another id")
+                f"{path}.id: '{mid}' is reserved (Task.aggregate output " "key); pick another id"
+            )
         elif mid in ids:
             errors.append(f"{path}.id: duplicate metric id '{mid}'")
         else:
@@ -324,7 +328,8 @@ def validate_formula_spec(spec) -> list[str]:
         if not isinstance(term, str) or not term:
             errors.append(
                 f"{path}.term: required template name string, got {term!r} "
-                f"(whitelist: benchmarks/terms.py TERM_REGISTRY)")
+                f"(whitelist: benchmarks/terms.py TERM_REGISTRY)"
+            )
             continue
         try:
             get_term(term)
@@ -375,7 +380,8 @@ class FormulaTask(Task):
         if errors:
             raise ValueError(
                 f"invalid formula task spec ({len(errors)} error(s)):\n"
-                + "\n".join(f"  - {e}" for e in errors))
+                + "\n".join(f"  - {e}" for e in errors)
+            )
         if self.articulation is None:
             for item in self.params["metrics"]:
                 uses = robot_state_key_uses(item)
@@ -386,27 +392,26 @@ class FormulaTask(Task):
                         f"'{item.get('id')}' reads per-articulation robot "
                         f"state {key!r} (field {field}) but no articulation "
                         "is declared; add a top-level `articulation: <name>` "
-                        f"(available: {self.available_articulations() or 'none'})")
+                        f"(available: {self.available_articulations() or 'none'})"
+                    )
         self._metrics = []
         for item in self.params["metrics"]:
-            params_ = {k: v for k, v in item.items()
-                       if k not in ("id", "term")}
-            self._metrics.append(
-                (item["id"], item["term"], get_term(item["term"]), params_))
+            params_ = {k: v for k, v in item.items() if k not in ("id", "term")}
+            self._metrics.append((item["id"], item["term"], get_term(item["term"]), params_))
         self._success = self.params.get("success")
 
     def score(self, ep: EpisodeData) -> EpisodeResult:
         metrics: dict[str, float] = {}
         for mid, _name, term_fn, spec in self._metrics:
             try:
-                metrics[mid] = float(term_fn(
-                    ep, spec, articulation=self.articulation))
+                metrics[mid] = float(term_fn(ep, spec, articulation=self.articulation))
             except Exception as exc:  # wide on purpose: any metric crash is
                 # a spec bug -> typed fail-fast below (no partial metrics)
                 raise ValueError(
                     f"formula task '{self.name}': metric '{mid}' failed "
                     f"({exc!r}) -- this is a task-definition error, fix "
-                    "the spec (fail-fast: no partial metrics)") from exc
+                    "the spec (fail-fast: no partial metrics)"
+                ) from exc
         success = None
         if self._success is not None:
             success = evaluate_predicate_tree(self._success, metrics)
@@ -415,8 +420,7 @@ class FormulaTask(Task):
     # ------------------------------------------------------------------ #
     # detailed face (results.json; benchmark_contract §results)
     # ------------------------------------------------------------------ #
-    def score_detail(self, ep: EpisodeData,
-                     retain_frames: bool = False) -> tuple:
+    def score_detail(self, ep: EpisodeData, retain_frames: bool = False) -> tuple:
         """``score`` plus the declaration-derived detail face.
 
         Returns ``(EpisodeResult, leaves, frames)`` where
@@ -437,19 +441,17 @@ class FormulaTask(Task):
         frames: dict[str, np.ndarray] = {}
         for mid, term_name, term_fn, spec in self._metrics:
             try:
-                metrics[mid] = float(term_fn(
-                    ep, spec, articulation=self.articulation))
+                metrics[mid] = float(term_fn(ep, spec, articulation=self.articulation))
                 if retain_frames:
-                    series = metric_frames(
-                        term_name, ep, spec,
-                        articulation=self.articulation)
+                    series = metric_frames(term_name, ep, spec, articulation=self.articulation)
                     if series is not None:
                         frames[mid] = np.asarray(series, dtype=np.float64)
             except Exception as exc:
                 raise ValueError(
                     f"formula task '{self.name}': metric '{mid}' failed "
                     f"({exc!r}) -- this is a task-definition error, fix "
-                    "the spec (fail-fast: no partial metrics)") from exc
+                    "the spec (fail-fast: no partial metrics)"
+                ) from exc
         leaves: dict[str, bool] = {}
         if self._success is not None:
             collect_leaves(self._success, metrics, leaves)

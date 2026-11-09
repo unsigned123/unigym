@@ -5,6 +5,7 @@ uniform height noise on top — the canonical "rough slope" used to
 train robust foothold adaptation. Height-field generator decorated with
 :func:`height_field_to_mesh`.
 """
+
 from __future__ import annotations
 
 import numpy as np

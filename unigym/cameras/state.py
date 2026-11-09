@@ -8,11 +8,18 @@ Keeping these tiny helpers here (rather than inside ``manager.py`` /
 ``backends/mujoco/cameras.py``) keeps those already-large files above the
 complexity gate's per-file MI floor.
 """
+
 from __future__ import annotations
 
-__all__ = ["CameraStateRow", "CameraStateTable", "apply_declared_state",
-           "check_single_env", "make_state_table", "read_env_ids",
-           "state_is_shared"]
+__all__ = [
+    "CameraStateRow",
+    "CameraStateTable",
+    "apply_declared_state",
+    "check_single_env",
+    "make_state_table",
+    "read_env_ids",
+    "state_is_shared",
+]
 
 
 class CameraStateRow:
@@ -51,8 +58,8 @@ class CameraStateTable:
         """Register a camera's state mode (``shared|per_instance``)."""
         if state not in ("shared", "per_instance"):
             raise ValueError(
-                f"camera {camera!r}: state must be shared|per_instance, "
-                f"got {state!r}")
+                f"camera {camera!r}: state must be shared|per_instance, " f"got {state!r}"
+            )
         self._modes[str(camera)] = state
 
     def mode(self, camera: str) -> str:
@@ -81,8 +88,8 @@ class CameraStateTable:
         row = self._rows.get(key)
         if row is None:
             raise KeyError(
-                f"camera {camera!r}: no shared row to broadcast "
-                f"(mode={self.mode(camera)!r})")
+                f"camera {camera!r}: no shared row to broadcast " f"(mode={self.mode(camera)!r})"
+            )
         n = 0
         for k in list(self._rows):
             if k[0] == str(camera) and k[1] is not None:
@@ -101,8 +108,7 @@ class CameraStateTable:
 
     def rows(self, camera: str) -> dict:
         """``{env_id|None: row}`` of one camera (insertion order)."""
-        return {env: row for (cam, env), row in self._rows.items()
-                if cam == str(camera)}
+        return {env: row for (cam, env), row in self._rows.items() if cam == str(camera)}
 
     def __len__(self) -> int:
         return len(self._rows)
@@ -134,7 +140,8 @@ def check_single_env(name: str, env_ids) -> None:
     if [int(i) for i in env_ids] != [0]:
         raise ValueError(
             f"camera '{name}': the backend is single-env; env_ids must be "
-            f"None or [0], got {env_ids}")
+            f"None or [0], got {env_ids}"
+        )
 
 
 def make_state_table(name: str, state: str) -> CameraStateTable:

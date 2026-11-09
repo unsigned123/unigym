@@ -3,6 +3,7 @@
 Fed per-step scalar metrics; produces window means (for live progress prints),
 overall means, and p5/p50/p95 distributions for key quantities.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict, deque
@@ -22,12 +23,12 @@ class StatsCollector:
         percentile distributions can be computed at the end.
     """
 
-    def __init__(self, window_size: int = 500,
-                 dist_keys: tuple[str, ...] = ("vx", "base_z", "alive")):
+    def __init__(
+        self, window_size: int = 500, dist_keys: tuple[str, ...] = ("vx", "base_z", "alive")
+    ):
         self._window_size = window_size
         self._dist_keys = set(dist_keys)
-        self._window: dict[str, deque] = defaultdict(
-            lambda: deque(maxlen=window_size))
+        self._window: dict[str, deque] = defaultdict(lambda: deque(maxlen=window_size))
         self._running_sum: dict[str, float] = defaultdict(float)
         self._running_count: dict[str, int] = defaultdict(int)
         self._dist_data: dict[str, list[float]] = defaultdict(list)
@@ -45,14 +46,16 @@ class StatsCollector:
     @property
     def window_means(self) -> dict[str, float]:
         """Mean of the most recent *window_size* steps per key."""
-        return {k: sum(v) / len(v) for k, v in self._window.items()
-                if len(v) > 0}
+        return {k: sum(v) / len(v) for k, v in self._window.items() if len(v) > 0}
 
     @property
     def overall_means(self) -> dict[str, float]:
         """Mean over all recorded steps per key."""
-        return {k: self._running_sum[k] / self._running_count[k]
-                for k in self._running_count if self._running_count[k] > 0}
+        return {
+            k: self._running_sum[k] / self._running_count[k]
+            for k in self._running_count
+            if self._running_count[k] > 0
+        }
 
     @property
     def distributions(self) -> dict[str, dict]:

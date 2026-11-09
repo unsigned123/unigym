@@ -17,6 +17,7 @@ Callers: the collector's config-load point (a run yaml) and
 :func:`unigym.scene_packs.apply_scene_bundle` (a bundle's own block), so a
 run config and its scene bundle both migrate through this function.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -52,7 +53,9 @@ def _label(source: str) -> str:
 
 
 def normalize_content_keys(
-    cfg: dict[str, JsonValue], *, source: str = "",
+    cfg: dict[str, JsonValue],
+    *,
+    source: str = "",
 ) -> dict[str, JsonValue]:
     """Split the ``objects:`` surface block into props and content fill.
 
@@ -85,20 +88,15 @@ def normalize_content_keys(
     legacy = _INTERNAL_KEY in cfg
     surface = _SURFACE_KEY in cfg
     if legacy and surface:
-        warnings.warn(_AMBIGUOUS.format(source=_label(source)),
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn(_AMBIGUOUS.format(source=_label(source)), DeprecationWarning, stacklevel=2)
     elif legacy:
-        warnings.warn(_MIGRATION.format(source=_label(source)),
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn(_MIGRATION.format(source=_label(source)), DeprecationWarning, stacklevel=2)
     if surface:
         block = cfg.pop(_SURFACE_KEY)
         content = None
         if isinstance(block, dict):
             block = dict(block)
-            content = {
-                key: block.pop(key) for key in _CONTENT_SPEC_KEYS
-                if key in block
-            } or None
+            content = {key: block.pop(key) for key in _CONTENT_SPEC_KEYS if key in block} or None
         cfg[_INTERNAL_KEY] = block
         if content is not None:
             cfg[_CONTENT_KEY] = content

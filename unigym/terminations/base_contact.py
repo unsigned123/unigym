@@ -22,6 +22,7 @@ with no code change.
 The geometry approximation judges exactly one articulation
 (``articulation`` is a required param); the global force signal is unchanged.
 """
+
 from __future__ import annotations
 
 import math
@@ -54,21 +55,18 @@ class BaseContactTermination(ArticulationTermination):
         super().__init__(params, name)
         self.body_names = parse_body_names(self.params.get("body_names"))
         self.force_threshold = float(self.params.get("force_threshold", 5.0))
-        self.height_threshold = float(
-            self.params.get("height_threshold", DEFAULT_HEIGHT_THRESHOLD))
+        self.height_threshold = float(self.params.get("height_threshold", DEFAULT_HEIGHT_THRESHOLD))
         tilt = self.params.get("tilt_threshold", DEFAULT_TILT_THRESHOLD)
         self.tilt_threshold = None if tilt is None else float(tilt)
-        self._cos_tilt = (None if self.tilt_threshold is None
-                          else math.cos(self.tilt_threshold))
+        self._cos_tilt = None if self.tilt_threshold is None else math.cos(self.tilt_threshold)
 
     def check(self, state: TerminationState):
         forces, names = state.body_contact_forces, state.body_names
         if forces is not None and names:
-            idx = [i for i, n in enumerate(list(names))
-                   if n in self.body_names]
+            idx = [i for i, n in enumerate(list(names)) if n in self.body_names]
             if idx:
-                f = forces[..., idx, :]                     # (N, k, 3)
-                mag = (f * f).sum(-1) ** 0.5                # (N, k)
+                f = forces[..., idx, :]  # (N, k, 3)
+                mag = (f * f).sum(-1) ** 0.5  # (N, k)
                 return (mag > self.force_threshold).sum(-1) > 0
             # requested bodies absent from the sensor -> no signal; fall
             # through to the geometry approximation rather than never firing
@@ -84,7 +82,8 @@ class BaseContactTermination(ArticulationTermination):
             if ref is None:
                 raise ValueError(
                     f"BaseContactTermination requires {self.articulation!r} "
-                    f"base_pos_w or gravity_b in state")
+                    f"base_pos_w or gravity_b in state"
+                )
             return all_false(ref)
         low = base_pos_w[..., 2] < self.height_threshold
         tilted = body_tilt_exceeded(gravity_b, self._cos_tilt)

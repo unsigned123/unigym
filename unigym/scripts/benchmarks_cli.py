@@ -12,6 +12,7 @@ import, like client/server in launch.py); ``list`` also triggers the full
 discovery (builtin -> benchmark.packs is a RUN-yaml key, so only the
 unigym.yaml packs_root default applies here).
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,7 @@ from pathlib import Path
 
 def _first_line(text: str, limit: int = 96) -> str:
     line = " ".join((text or "").split())
-    return line if len(line) <= limit else line[:limit - 3] + "..."
+    return line if len(line) <= limit else line[: limit - 3] + "..."
 
 
 def _json_exit(msg: str) -> None:
@@ -31,10 +32,10 @@ def _json_exit(msg: str) -> None:
 
 def cmd_list(a, _pt=None) -> int:
     from unigym.benchmarks.packs import discover_packs
+
     index = discover_packs()
     if a.pack is not None and a.pack not in index.packs:
-        msg = (f"unknown pack '{a.pack}' "
-               f"(available: {sorted(index.packs)})")
+        msg = f"unknown pack '{a.pack}' " f"(available: {sorted(index.packs)})"
         if getattr(a, "json", False):
             _json_exit(msg)
         sys.exit(f"[unigym benchmarks] {msg}")
@@ -45,12 +46,15 @@ def cmd_list(a, _pt=None) -> int:
             if a.pack is not None and name != a.pack:
                 continue
             packs[name] = {
-                "origin": (str(pack.root) if pack.root is not None
-                           else "first-party (benchmarks/tasks.py "
-                                "TASK_REGISTRY)"),
-                "tasks": {t: {"canonical": d.canonical, "kind": d.kind,
-                              "description": d.description}
-                          for t, d in sorted(pack.tasks.items())},
+                "origin": (
+                    str(pack.root)
+                    if pack.root is not None
+                    else "first-party (benchmarks/tasks.py " "TASK_REGISTRY)"
+                ),
+                "tasks": {
+                    t: {"canonical": d.canonical, "kind": d.kind, "description": d.description}
+                    for t, d in sorted(pack.tasks.items())
+                },
             }
             total += len(pack.tasks)
         print(json.dumps({"ok": True, "packs": packs, "total": total}))
@@ -61,8 +65,11 @@ def cmd_list(a, _pt=None) -> int:
         if a.pack is not None and name != a.pack:
             continue
         shown += 1
-        origin = str(pack.root) if pack.root is not None \
+        origin = (
+            str(pack.root)
+            if pack.root is not None
             else "first-party (benchmarks/tasks.py TASK_REGISTRY)"
+        )
         print(f"{name}  ({origin})")
         for task in sorted(pack.tasks):
             d = pack.tasks[task]
@@ -74,6 +81,7 @@ def cmd_list(a, _pt=None) -> int:
 
 def cmd_validate(a, _pt=None) -> int:
     from unigym.benchmarks.packs import load_pack
+
     root = Path(a.dir)
     json_mode = getattr(a, "json", False)
     try:
@@ -81,10 +89,16 @@ def cmd_validate(a, _pt=None) -> int:
     except ValueError as exc:
         lines = [ln for ln in str(exc).splitlines() if ln.startswith("  - ")]
         if json_mode:
-            print(json.dumps({"ok": False, "error": str(exc),
-                              "errors": [ln.strip(" -").strip()
-                                         for ln in lines],
-                              "root": str(root)}))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "errors": [ln.strip(" -").strip() for ln in lines],
+                        "root": str(root),
+                    }
+                )
+            )
             sys.exit(1)
         if lines:
             print(f"INVALID pack ({root}) -- {len(lines)} error(s):")
@@ -93,12 +107,19 @@ def cmd_validate(a, _pt=None) -> int:
         print(exc)
         return 1
     if json_mode:
-        print(json.dumps({"ok": True, "pack": pack.name,
-                          "version": pack.version, "root": str(root),
-                          "tasks": len(pack.tasks)}))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "pack": pack.name,
+                    "version": pack.version,
+                    "root": str(root),
+                    "tasks": len(pack.tasks),
+                }
+            )
+        )
         return 0
-    print(f"OK pack '{pack.name}' v{pack.version or '?'} ({root}): "
-          f"{len(pack.tasks)} task(s)")
+    print(f"OK pack '{pack.name}' v{pack.version or '?'} ({root}): " f"{len(pack.tasks)} task(s)")
     for task in sorted(pack.tasks):
         d = pack.tasks[task]
         print(f"  {d.canonical}  [{d.kind}] <- {d.source}")
@@ -109,16 +130,17 @@ def add_benchmarks_subparser(sub) -> None:
     """Register the ``benchmarks`` command group (lazy CLI dispatch)."""
     bm = sub.add_parser("benchmarks", help="list / validate benchmark packs")
     bms = bm.add_subparsers(dest="benchmarks_cmd", required=True)
-    bl = bms.add_parser("list", help="tasks grouped by pack namespace "
-                                     "(builtin + benchmark_packs/*)")
-    bl.add_argument("--pack", default=None,
-                    help="only this pack (default: all)")
-    bl.add_argument("--json", action="store_true",
-                    help="single JSON document on stdout")
+    bl = bms.add_parser(
+        "list", help="tasks grouped by pack namespace " "(builtin + benchmark_packs/*)"
+    )
+    bl.add_argument("--pack", default=None, help="only this pack (default: all)")
+    bl.add_argument("--json", action="store_true", help="single JSON document on stdout")
     bl.set_defaults(fn=cmd_list)
-    bv = bms.add_parser("validate", help="validate one pack directory "
-                                         "(exit 0 = valid, 1 = errors)")
+    bv = bms.add_parser(
+        "validate", help="validate one pack directory " "(exit 0 = valid, 1 = errors)"
+    )
     bv.add_argument("dir", help="pack directory (must contain pack.yaml)")
-    bv.add_argument("--json", action="store_true",
-                    help="single JSON document on stdout (errors too)")
+    bv.add_argument(
+        "--json", action="store_true", help="single JSON document on stdout (errors too)"
+    )
     bv.set_defaults(fn=cmd_validate)

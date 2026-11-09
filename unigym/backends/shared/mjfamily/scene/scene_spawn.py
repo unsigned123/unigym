@@ -21,6 +21,7 @@ Both helpers are pure spec rewrites (no engine state), fail closed on
 bad declarations and are no-ops when the caller does not invoke them --
 the historical model-load path stays byte-identical.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -28,8 +29,9 @@ from collections.abc import Mapping
 import numpy as np
 
 
-def needs_spec(camera_manager=None, prop_manager=None, director_cfg=None,
-               mj_scene=None, spawn_base=None) -> bool:
+def needs_spec(
+    camera_manager=None, prop_manager=None, director_cfg=None, mj_scene=None, spawn_base=None
+) -> bool:
     """True when the base model must be loaded as an editable MjSpec.
 
     The pre-compile injections (camera rigs, props, director bodies) and
@@ -37,8 +39,10 @@ def needs_spec(camera_manager=None, prop_manager=None, director_cfg=None,
     need a spec; without any of them the model loads straight from the
     XML path and the historical code path is byte-identical.
     """
-    return any(item is not None for item in (
-        camera_manager, prop_manager, director_cfg, mj_scene, spawn_base))
+    return any(
+        item is not None
+        for item in (camera_manager, prop_manager, director_cfg, mj_scene, spawn_base)
+    )
 
 
 def compose_declared_scene(mjspec, name: str, slots) -> Mapping[str, object]:
@@ -72,19 +76,19 @@ def apply_spawn_base_pose(mjspec, declaration) -> None:
     body_name = str(declaration.get("body") or "robot0_base")
     body = mjspec.body(body_name)
     if body is None:
-        bodies = [candidate.name for candidate in mjspec.bodies
-                  if candidate.name]
+        bodies = [candidate.name for candidate in mjspec.bodies if candidate.name]
         raise ValueError(
             f"mujoco backend: spawn_base_pose body {body_name!r} not "
-            f"found -- available bodies: {bodies}")
+            f"found -- available bodies: {bodies}"
+        )
     pos = [float(value) for value in (declaration.get("pos") or [])]
     yaw = float(declaration.get("yaw") or 0.0)
-    if (len(pos) != 3 or not np.isfinite(pos).all()
-            or not np.isfinite(yaw)):
+    if len(pos) != 3 or not np.isfinite(pos).all() or not np.isfinite(yaw):
         raise ValueError(
             "mujoco backend: spawn_base_pose.pos must be a finite "
             "3-vector and spawn_base_pose.yaw a finite radians scalar, "
             f"got pos={declaration.get('pos')!r} "
-            f"yaw={declaration.get('yaw')!r}")
+            f"yaw={declaration.get('yaw')!r}"
+        )
     body.pos = pos
     body.quat = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]

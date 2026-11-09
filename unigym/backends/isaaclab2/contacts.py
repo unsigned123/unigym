@@ -34,15 +34,14 @@ Semantics (authoritative local source: Isaac Lab 2.3.2
 * Sensor buffers are recycled in-place by the sensor update — read_raw
   ALWAYS clones (cameras package lesson, annotator-buffer aliasing).
 """
+
 from __future__ import annotations
 
 import re
 from typing import Optional
 
 from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec
-from unigym.contacts.discovery import (resolve_bucket_names,
-                                       resolve_entry_name,
-                                       usd_robot_inventory)
+from unigym.contacts.discovery import resolve_bucket_names, resolve_entry_name, usd_robot_inventory
 
 
 def _is_explicit_prim_path(entry: str) -> bool:
@@ -101,8 +100,11 @@ def general_prim_paths(entries: list[str]) -> list[str]:
     out = []
     for scope in order:
         union = f"({'|'.join(buckets[scope])})"
-        out.append(f"{{ENV_REGEX_NS}}/Robot/{scope}/{union}" if scope
-                   else f"{{ENV_REGEX_NS}}/Robot/{union}")
+        out.append(
+            f"{{ENV_REGEX_NS}}/Robot/{scope}/{union}"
+            if scope
+            else f"{{ENV_REGEX_NS}}/Robot/{union}"
+        )
     return out
 
 
@@ -112,8 +114,7 @@ def general_field_names(name: str, entries: list[str]) -> list[str]:
     return [name if i == 0 else f"{name}__s{i}" for i in range(n)]
 
 
-def sensor_prim_path(spec: ContactGroupSpec,
-                     entries: Optional[list[str]] = None) -> str:
+def sensor_prim_path(spec: ContactGroupSpec, entries: Optional[list[str]] = None) -> str:
     """Robot-anchored ``prim_path`` for a scope-less (union) group.
 
     Also supports flat body sets (feet groups):
@@ -125,7 +126,8 @@ def sensor_prim_path(spec: ContactGroupSpec,
     if any("/" in e for e in alts):
         raise ValueError(
             f"scoped sensor entry {alts} cannot build a flat union path; "
-            f"use entry_prim_path/general_prim_paths")
+            f"use entry_prim_path/general_prim_paths"
+        )
     return f"{{ENV_REGEX_NS}}/Robot/({'|'.join(alts)})"
 
 
@@ -136,8 +138,10 @@ def filter_prim_exprs(spec: ContactGroupSpec) -> list[str]:
     entries starting with ``/`` or ``{ENV_REGEX_NS}`` pass through verbatim
     (props ``{ENV_REGEX_NS}/Prop_*``).
     """
-    return [e if _is_explicit_prim_path(e) else f"{{ENV_REGEX_NS}}/Robot/{e}"
-            for e in spec.filter_bodies]
+    return [
+        e if _is_explicit_prim_path(e) else f"{{ENV_REGEX_NS}}/Robot/{e}"
+        for e in spec.filter_bodies
+    ]
 
 
 class IsaacLabContactBackend:
@@ -158,7 +162,8 @@ class IsaacLabContactBackend:
             group = path.rsplit(".", 1)[-1]
             raise ValueError(
                 f"body_parts path {path!r}: group {group!r} declares no "
-                f"{cls.backend_key!r} bodies (available: {sorted(gval)})")
+                f"{cls.backend_key!r} bodies (available: {sorted(gval)})"
+            )
         return gval[cls.backend_key]
 
     @classmethod
@@ -170,7 +175,7 @@ class IsaacLabContactBackend:
 
     def __init__(self, specs: list[ContactGroupSpec]):
         self.specs = list(specs)
-        self._sensors: dict[str, dict] = {}      # name -> pieces
+        self._sensors: dict[str, dict] = {}  # name -> pieces
         self._perm: dict[str, list[list[int]]] = {}  # name -> per-piece perm
         self._bound = False
 
@@ -192,17 +197,19 @@ class IsaacLabContactBackend:
         for spec in self.specs:
             if spec.mode == "general":
                 paths = general_prim_paths(list(spec.sensor_bodies))
-                fields = general_field_names(spec.name,
-                                             list(spec.sensor_bodies))
+                fields = general_field_names(spec.name, list(spec.sensor_bodies))
                 for field, path in zip(fields, paths):
                     fields_cfg[f"contact_{field}"] = ContactSensorCfg(
-                        prim_path=path, history_length=1)
+                        prim_path=path, history_length=1
+                    )
             else:
                 exprs = filter_prim_exprs(spec)
                 for j, entry in enumerate(spec.sensor_bodies):
                     fields_cfg[f"contact_{spec.name}_{j}"] = ContactSensorCfg(
                         prim_path=entry_prim_path(entry),
-                        filter_prim_paths_expr=exprs, history_length=1)
+                        filter_prim_paths_expr=exprs,
+                        history_length=1,
+                    )
         return fields_cfg
 
     # ---------------------------------------------------------------- #
@@ -222,7 +229,8 @@ class IsaacLabContactBackend:
             raise NotImplementedError(
                 f"contact group {name!r}: isaaclab frame='body' transform "
                 f"is not implemented in v1 (plan §6 allowed list); use "
-                f"frame: world")
+                f"frame: world"
+            )
         robot_bodies = [str(n) for n in env.robot.data.body_names]
 
         def inventory():
@@ -230,39 +238,36 @@ class IsaacLabContactBackend:
 
         for spec in self.specs:
             if spec.mode == "general":
-                fields = general_field_names(spec.name,
-                                             list(spec.sensor_bodies))
+                fields = general_field_names(spec.name, list(spec.sensor_bodies))
                 buckets = _general_buckets(list(spec.sensor_bodies))
                 pieces, perms = [], []
                 for field, expected in zip(fields, buckets):
                     sensor = env.scene[f"contact_{field}"]
-                    names = resolve_bucket_names(expected, robot_bodies,
-                                                 spec,
-                                                 inventory_fn=inventory)
+                    names = resolve_bucket_names(
+                        expected, robot_bodies, spec, inventory_fn=inventory
+                    )
                     perm = [sensor.body_names.index(n) for n in names]
                     if sorted(perm) != list(range(len(names))):
                         raise ValueError(
                             f"contact group {spec.name!r}: body resolution "
                             f"mismatch sensor={sensor.body_names} vs "
-                            f"expected={names}")
+                            f"expected={names}"
+                        )
                     pieces.append(sensor)
                     perms.append(perm)
-                self._sensors[spec.name] = {"mode": "general",
-                                            "sensors": pieces}
+                self._sensors[spec.name] = {"mode": "general", "sensors": pieces}
                 self._perm[spec.name] = perms
             else:
                 pieces, perms = [], []
                 resolved: list[str] = []
                 for j, entry in enumerate(spec.sensor_bodies):
                     sensor = env.scene[f"contact_{spec.name}_{j}"]
-                    name = resolve_entry_name(entry, robot_bodies, spec, j,
-                                              inventory_fn=inventory)
+                    name = resolve_entry_name(entry, robot_bodies, spec, j, inventory_fn=inventory)
                     idx = sensor.body_names.index(name)
                     pieces.append(sensor)
                     perms.append([idx])
                     resolved.append(name)
-                self._sensors[spec.name] = {"mode": "pairwise",
-                                            "sensors": pieces}
+                self._sensors[spec.name] = {"mode": "pairwise", "sensors": pieces}
                 self._perm[spec.name] = perms
         self._bound = True
 
@@ -295,14 +300,12 @@ class IsaacLabContactBackend:
         if entry["mode"] == "general":
             # one (N, B_bucket, 3) slice per scope bucket, concatenated
             # along B (single flat bucket == the classic single sensor)
-            pieces = [s.data.net_forces_w[:, p, :]
-                      for s, p in zip(entry["sensors"], perm)]
+            pieces = [s.data.net_forces_w[:, p, :] for s, p in zip(entry["sensors"], perm)]
             if len(pieces) == 1:
                 return pieces[0].clone()
             return torch.cat(pieces, dim=1).clone()
         # force_matrix_w: (N, 1, F, 3) world per entry (contact_sensor.py:386)
-        pieces = [s.data.force_matrix_w[:, p, :, :]
-                  for s, p in zip(entry["sensors"], perm)]
+        pieces = [s.data.force_matrix_w[:, p, :, :] for s, p in zip(entry["sensors"], perm)]
         return torch.cat(pieces, dim=1).clone()
 
     def close(self) -> None:

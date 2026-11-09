@@ -7,6 +7,7 @@ the freest GPUs.  Pure functions, explicit arguments, no global state
 port = bind-probe over the bridge scan window; GPU = nvidia-smi free
 memory order minus the GPUs occupied by live registry runs.
 """
+
 from __future__ import annotations
 
 import socket
@@ -29,8 +30,7 @@ def _bindable(port: int) -> bool:
             return False
 
 
-def pick_port(preferred: int = 0,
-              exclude: Iterable[int] = ()) -> int | None:
+def pick_port(preferred: int = 0, exclude: Iterable[int] = ()) -> int | None:
     """First bindable port in 8600-8659 (``preferred`` tried first).
 
     Returns None when the window is exhausted (caller decides fail vs
@@ -38,8 +38,7 @@ def pick_port(preferred: int = 0,
     process (in-flight spawns whose bridge has not bound yet).
     """
     ex = {int(p) for p in exclude}
-    cands = ([int(preferred)] if preferred else []) + \
-        list(range(PORT_LO, PORT_HI + 1))
+    cands = ([int(preferred)] if preferred else []) + list(range(PORT_LO, PORT_HI + 1))
     for p in cands:
         if p in ex:
             continue
@@ -59,9 +58,11 @@ def gpu_inventory() -> list[tuple[int, int]]:
         return []
     try:
         r = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index,memory.used",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10)
+            ["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return []
     inv: list[tuple[int, int]] = []

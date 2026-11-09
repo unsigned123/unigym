@@ -22,6 +22,7 @@ Semantics (design §3):
   (re)created -- a daemon restart or a fresh attach must never
   fabricate a gap (design §3 resilience gate).
 """
+
 from __future__ import annotations
 
 import time
@@ -29,8 +30,8 @@ from collections import deque
 
 __all__ = ["FrameTelemetry", "WINDOW_S"]
 
-WINDOW_S = 2.0                 # velocity window (design §3: sliding window)
-MIN_POINTS = 2                 # window needs >= 2 points for a velocity
+WINDOW_S = 2.0  # velocity window (design §3: sliding window)
+MIN_POINTS = 2  # window needs >= 2 points for a velocity
 
 
 class FrameTelemetry:
@@ -43,10 +44,10 @@ class FrameTelemetry:
         self.gap_total = 0
         self.last_gap = 0
         self.last_gap_ts = 0.0
-        self._prev_fid = -1            # -1 = baseline unset (no fake gap)
+        self._prev_fid = -1  # -1 = baseline unset (no fake gap)
         self._prev_t = 0.0
         self._points: deque = deque()  # (t, fid) new-fid observations
-        self._held = (0.0, 0.0)        # last computed (publish, consumed)
+        self._held = (0.0, 0.0)  # last computed (publish, consumed)
 
     def observe(self, fid: int, now: float | None = None) -> int:
         """Record one new-fid observation; returns the observed gap.
@@ -57,7 +58,7 @@ class FrameTelemetry:
         t = time.time() if now is None else now
         gap = 0
         if self._prev_fid >= 0:
-            gap = max(0, fid - self._prev_fid - 1)   # Σ(fid jump − 1)
+            gap = max(0, fid - self._prev_fid - 1)  # Σ(fid jump − 1)
             self.gap_total += gap
             if gap:
                 self.last_gap = gap
@@ -65,8 +66,7 @@ class FrameTelemetry:
         self._prev_fid = fid
         self._prev_t = t
         self._points.append((t, fid))
-        while len(self._points) > MIN_POINTS and \
-                t - self._points[0][0] > self.window:
+        while len(self._points) > MIN_POINTS and t - self._points[0][0] > self.window:
             self._points.popleft()
         return gap
 
@@ -89,8 +89,10 @@ class FrameTelemetry:
         v = self._velocity()
         if v is not None:
             self._held = v
-        return {"publish_rate": round(self._held[0], 2),
-                "consumed_rate": round(self._held[1], 2),
-                "gap_total": self.gap_total,
-                "last_gap": self.last_gap,
-                "last_gap_ts": self.last_gap_ts}
+        return {
+            "publish_rate": round(self._held[0], 2),
+            "consumed_rate": round(self._held[1], 2),
+            "gap_total": self.gap_total,
+            "last_gap": self.last_gap,
+            "last_gap_ts": self.last_gap_ts,
+        }

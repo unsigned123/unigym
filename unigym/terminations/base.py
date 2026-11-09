@@ -16,6 +16,7 @@ termination fires — IsaaclabEnv episodes end by duration only.  The
 termination system is a *detection* layer consumed by progress logging
 (collect.py), summary stats (logger), and episode filtering (filters/).
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -50,8 +51,7 @@ def body_tilt_exceeded(projected_gravity_b, cos_threshold: float):
 _RECORD_ALIASES = {"base_pos": "base_pos_w"}
 
 
-def _articulation_states(values: dict,
-                         renames: Mapping[str, str] | None = None) -> dict:
+def _articulation_states(values: dict, renames: Mapping[str, str] | None = None) -> dict:
     """Group ``articulation/<name>/<key>`` entries by articulation.
 
     The per-articulation inner keys are the canonical live names
@@ -85,19 +85,20 @@ class TerminationState:
     """
 
     articulations: Mapping[str, Mapping[str, object]] = field(
-        default_factory=dict)                     # {name: {key: (N, ...)}}
-    body_contact_forces: Any | None = None        # (N, num_bodies, 3)
-    body_names: Sequence[str] | None = None       # index -> body name (forces)
+        default_factory=dict
+    )  # {name: {key: (N, ...)}}
+    body_contact_forces: Any | None = None  # (N, num_bodies, 3)
+    body_names: Sequence[str] | None = None  # index -> body name (forces)
     joint_pos_limits: Mapping[str, tuple] | None = None  # {name: (lo, hi)}
-    batch: object | None = None                   # (N,)/(T,) per-sample ref
+    batch: object | None = None  # (N,)/(T,) per-sample ref
 
     # ------------------------------------------------------------------ #
     # constructors
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_extra(cls, extra: dict, joint_pos_limits=None,
-                   body_names: Sequence[str] | None = None
-                   ) -> TerminationState:
+    def from_extra(
+        cls, extra: dict, joint_pos_limits=None, body_names: Sequence[str] | None = None
+    ) -> TerminationState:
         """Build from an env's per-step ``extra`` dict (torch tensors).
 
         Robot state is read from ``articulation/<name>/...`` keys only; the
@@ -107,8 +108,7 @@ class TerminationState:
         return cls(
             articulations=_articulation_states(extra, _RECORD_ALIASES),
             body_contact_forces=extra.get("body_contact_forces"),
-            body_names=(extra.get("body_names") if "body_names" in extra
-                        else body_names),
+            body_names=(extra.get("body_names") if "body_names" in extra else body_names),
             joint_pos_limits=joint_pos_limits,
             batch=extra.get("time_in_episode"),
         )
@@ -124,15 +124,13 @@ class TerminationState:
         supplied = episode_data.get("articulations")
         if isinstance(supplied, Mapping):
             articulations = {
-                str(name): {_RECORD_ALIASES.get(k, k): v
-                            for k, v in (inner or {}).items()}
-                for name, inner in supplied.items()}
+                str(name): {_RECORD_ALIASES.get(k, k): v for k, v in (inner or {}).items()}
+                for name, inner in supplied.items()
+            }
         else:
-            articulations = _articulation_states(episode_data,
-                                                 _RECORD_ALIASES)
+            articulations = _articulation_states(episode_data, _RECORD_ALIASES)
         return cls(
-            articulations=cast(
-                "Mapping[str, Mapping[str, object]]", articulations),
+            articulations=cast("Mapping[str, Mapping[str, object]]", articulations),
             body_contact_forces=episode_data.get("body_contact_forces"),
             body_names=episode_data.get("body_names"),
             joint_pos_limits=None,
@@ -149,7 +147,8 @@ class TerminationState:
             label = f"{term}: " if term else ""
             raise ValueError(
                 f"{label}state has no articulation {name!r} keys; "
-                f"available: {sorted(self.articulations or {})}")
+                f"available: {sorted(self.articulations or {})}"
+            )
         return source
 
     def reference(self):
@@ -181,8 +180,7 @@ class Termination(ABC):
     #: collect.py fetch limits from the env only when required
     requires_joint_limits = False
 
-    def __init__(self, params: Mapping | None = None,
-                 name: str | None = None):
+    def __init__(self, params: Mapping | None = None, name: str | None = None):
         self.params = dict(params or {})
         self._cfg_name = name
 

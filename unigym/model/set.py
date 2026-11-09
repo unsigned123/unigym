@@ -11,6 +11,7 @@ The convenience table proxies (``joints`` / ``bodies`` / ...) read the
 ``merged`` IR; when it is absent they raise :class:`ModelSetError` naming
 the per-articulation alternative instead of silently choosing one.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
@@ -83,7 +84,8 @@ class ModelSet:
                 f"(the backend cannot merge its articulations losslessly); "
                 f"read the per-articulation IR instead: "
                 f"model.articulations[name].{face} for name in "
-                f"[{names}]")
+                f"[{names}]"
+            )
         return self.merged
 
     @property

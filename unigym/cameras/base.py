@@ -22,6 +22,7 @@ normalization (crop/clip/normalize) belongs to the adapter — the only
 exception is the ``depth_image`` alias, which reproduces the original
 ``env/depth.py::preprocess_depth`` behavior verbatim.
 """
+
 from __future__ import annotations
 
 import math
@@ -31,6 +32,7 @@ from typing import Literal, Protocol, runtime_checkable
 import torch
 
 from .state import CameraStateRow, CameraStateTable  # noqa: F401 (re-export)
+
 
 # --------------------------------------------------------------------------- #
 # key space helpers
@@ -53,9 +55,14 @@ DEPTH_ALIAS_KEYS = ("depth_image", "depth_image_raw")
 # wall-clock render scheduling (docs/contracts/camera_contract.md §16)
 # --------------------------------------------------------------------------- #
 CAMERA_TIER_FPS = {
-    "ego": 30.0, "wrist": 30.0, "zoom": 30.0,      # close observation tier
-    "closeup": 15.0, "chase": 15.0, "free": 15.0,  # panoramic / debug tier
-    "top": 15.0, "side": 15.0,
+    "ego": 30.0,
+    "wrist": 30.0,
+    "zoom": 30.0,  # close observation tier
+    "closeup": 15.0,
+    "chase": 15.0,
+    "free": 15.0,  # panoramic / debug tier
+    "top": 15.0,
+    "side": 15.0,
 }
 """render fps tiers (design §2.3): 30 fps for the close observation
 surfaces, 15 fps for the panoramic / debug surfaces.  A camera name not in
@@ -67,8 +74,9 @@ def default_target_fps(name: str) -> float:
     return float(CAMERA_TIER_FPS.get(str(name).strip().lower(), 30.0))
 
 
-def render_due(spec, policy_hz: float | None, counter: int,
-               last_read: float | None, now: float) -> bool:
+def render_due(
+    spec, policy_hz: float | None, counter: int, last_read: float | None, now: float
+) -> bool:
     """The wall-clock due check for one read tick (§16.1).
 
     A resolvable fps renders on the wall schedule (``now`` past
@@ -82,8 +90,7 @@ def render_due(spec, policy_hz: float | None, counter: int,
     return last_read is None or (now - last_read) >= (1.0 / fps)
 
 
-def apply_rate_keys(spec, name: str, params: dict,
-                    policy_hz: float | None) -> None:
+def apply_rate_keys(spec, name: str, params: dict, policy_hz: float | None) -> None:
     """The rate keys of one live ``apply_properties`` write (§16).
 
     ``interval`` (DEPRECATED, removed v070) folds to
@@ -96,26 +103,31 @@ def apply_rate_keys(spec, name: str, params: dict,
         try:
             iv = int(params["interval"])
         except (TypeError, ValueError):
-            raise ValueError(f"camera '{name}': interval must be an "
-                             f"integer >= 1, got "
-                             f"{params['interval']!r}") from None
+            raise ValueError(
+                f"camera '{name}': interval must be an "
+                f"integer >= 1, got "
+                f"{params['interval']!r}"
+            ) from None
         if iv < 1:
-            raise ValueError(f"camera '{name}': interval must be >= 1, "
-                             f"got {iv}")
-        spec.interval = iv                # rigs/manager read it live
+            raise ValueError(f"camera '{name}': interval must be >= 1, " f"got {iv}")
+        spec.interval = iv  # rigs/manager read it live
         if policy_hz:
             spec.target_fps = float(policy_hz) / iv
     if "fps" in params:
         v = params["fps"]
-        if isinstance(v, bool) or not isinstance(v, (int, float)) \
-                or not math.isfinite(float(v)) or float(v) <= 0:
-            raise ValueError(f"camera '{name}': fps must be a positive "
-                             f"finite number (fps), got {v!r}")
+        if (
+            isinstance(v, bool)
+            or not isinstance(v, (int, float))
+            or not math.isfinite(float(v))
+            or float(v) <= 0
+        ):
+            raise ValueError(
+                f"camera '{name}': fps must be a positive " f"finite number (fps), got {v!r}"
+            )
         spec.target_fps = float(v)
 
 
-def fold_declared_intervals(cameras_cfg, policy_hz: float | None) \
-        -> list:
+def fold_declared_intervals(cameras_cfg, policy_hz: float | None) -> list:
     """Parse the yaml camera list with the interval migration
     (§16.2): a DECLARED interval folds to ``target_fps = policy_hz/N``
     (same average rate, wall scheduling; v070 removes the key) with the
@@ -123,23 +135,25 @@ def fold_declared_intervals(cameras_cfg, policy_hz: float | None) \
     declared marker is only set when none was given.
     """
     declared = []
-    for entry in (cameras_cfg or []):
+    for entry in cameras_cfg or []:
         spec = CameraSpec.from_yaml(entry)
         if getattr(spec, "_interval_declared", False):
             folded = ""
             if policy_hz:
                 spec.target_fps = float(policy_hz) / max(1, spec.interval)
                 folded = f" -> target_fps {spec.target_fps:.5g} fps"
-            print(f"[cameras] camera '{spec.name}': 'interval' is "
-                  f"DEPRECATED (v069, removed v070) -- interval "
-                  f"{spec.interval}{folded}; declare 'target_fps:' "
-                  f"instead", flush=True)
+            print(
+                f"[cameras] camera '{spec.name}': 'interval' is "
+                f"DEPRECATED (v069, removed v070) -- interval "
+                f"{spec.interval}{folded}; declare 'target_fps:' "
+                f"instead",
+                flush=True,
+            )
         declared.append(spec)
     return declared
 
 
-def effective_target_fps(spec, policy_hz: float | None = None) \
-        -> float | None:
+def effective_target_fps(spec, policy_hz: float | None = None) -> float | None:
     """One camera's effective wall render fps (scheduler).
 
     Resolution order (docs/contracts/camera_contract.md §16.1):
@@ -193,23 +207,24 @@ def rig_hide_geom_groups(rig, name: str) -> tuple[int, ...]:
     if isinstance(val, (str, bytes)) or not isinstance(val, (list, tuple)):
         raise ValueError(
             f"camera {name!r}: rig.hide_geom_groups must be a list of "
-            f"geom-group ints, got {val!r}")
+            f"geom-group ints, got {val!r}"
+        )
     out: list[int] = []
     for g in val:
         if isinstance(g, bool) or not isinstance(g, int):
             kind = "bool" if isinstance(g, bool) else repr(g)
             raise ValueError(
                 f"camera {name!r}: rig.hide_geom_groups entries must be "
-                f"ints ({kind} is not an int here), got {g!r}")
+                f"ints ({kind} is not an int here), got {g!r}"
+            )
         if not 0 <= g <= 4:
             raise ValueError(
                 f"camera {name!r}: rig.hide_geom_groups index {g} out of "
                 f"range 0..4 (group 5 is the reserved visual-only group "
-                f"-- hiding it would blind the plain render)")
+                f"-- hiding it would blind the plain render)"
+            )
         if g in out:
-            raise ValueError(
-                f"camera {name!r}: rig.hide_geom_groups duplicate entry "
-                f"{g}")
+            raise ValueError(f"camera {name!r}: rig.hide_geom_groups duplicate entry " f"{g}")
         out.append(g)
     return tuple(out)
 
@@ -302,59 +317,68 @@ class CameraSpec:
     focus_distance: float = 400.0
     update_latest_camera_pose: bool = True
     instance: str | None = None
-    count: Literal['global', 'per_env'] | None = None
-    state: Literal['shared', 'per_instance'] | None = None
+    count: Literal["global", "per_env"] | None = None
+    state: Literal["shared", "per_instance"] | None = None
     env_poses: list | None = None
 
     def __post_init__(self):
         if not self.name or "/" in self.name or self.name.strip() != self.name:
             raise ValueError(
                 f"camera name {self.name!r} must be non-empty, trimmed and "
-                f"free of '/' (it is part of the cam/<name>/<type> key)")
+                f"free of '/' (it is part of the cam/<name>/<type> key)"
+            )
         rtype = str((self.rig or {}).get("type", "")).strip().lower()
         if rtype == "fixed":
             raise ValueError(
                 f"camera {self.name!r}: rig type 'fixed' was renamed "
                 f"'world' (camera unification) -- update the config; "
-                f"there is no alias (legal: body|world|chase)")
+                f"there is no alias (legal: body|world|chase)"
+            )
         if "body" in (self.rig or {}):
             raise ValueError(
                 f"camera {self.name!r}: rig key 'body' was renamed "
                 f"'attach' (BodyRig link mount) -- update the config; "
-                f"there is no alias")
+                f"there is no alias"
+            )
         if self.kind not in ("standard", "tiled"):
-            raise ValueError(f"camera {self.name!r}: unknown kind "
-                             f"{self.kind!r} (standard|tiled)")
+            raise ValueError(
+                f"camera {self.name!r}: unknown kind " f"{self.kind!r} (standard|tiled)"
+            )
         bad = set(self.types) - {"rgb", "depth"}
         if not self.types or bad:
-            raise ValueError(f"camera {self.name!r}: types must be a "
-                             f"non-empty subset of ['rgb','depth'], got "
-                             f"{self.types}")
-        if self.depth_type not in ("distance_to_camera",
-                                   "distance_to_image_plane"):
-            raise ValueError(f"camera {self.name!r}: depth_type must be "
-                             f"distance_to_camera|distance_to_image_plane, "
-                             f"got {self.depth_type!r}")
+            raise ValueError(
+                f"camera {self.name!r}: types must be a "
+                f"non-empty subset of ['rgb','depth'], got "
+                f"{self.types}"
+            )
+        if self.depth_type not in ("distance_to_camera", "distance_to_image_plane"):
+            raise ValueError(
+                f"camera {self.name!r}: depth_type must be "
+                f"distance_to_camera|distance_to_image_plane, "
+                f"got {self.depth_type!r}"
+            )
         if int(self.width) <= 0 or int(self.height) <= 0:
-            raise ValueError(f"camera {self.name!r}: bad resolution "
-                             f"{self.width}x{self.height}")
+            raise ValueError(f"camera {self.name!r}: bad resolution " f"{self.width}x{self.height}")
         if int(self.interval) < 1:
             raise ValueError(f"camera {self.name!r}: interval must be >= 1")
         if self.target_fps is not None:
-            if isinstance(self.target_fps, bool) or not isinstance(
-                    self.target_fps, (int, float)) \
-                    or not math.isfinite(float(self.target_fps)) \
-                    or float(self.target_fps) <= 0:
+            if (
+                isinstance(self.target_fps, bool)
+                or not isinstance(self.target_fps, (int, float))
+                or not math.isfinite(float(self.target_fps))
+                or float(self.target_fps) <= 0
+            ):
                 raise ValueError(
                     f"camera {self.name!r}: target_fps must be a positive "
-                    f"finite number, got {self.target_fps!r}")
+                    f"finite number, got {self.target_fps!r}"
+                )
             self.target_fps = float(self.target_fps)
         if self.instance is None:
             self.instance = "per_env" if rtype == "body" else "shared"
         if self.instance not in ("per_env", "shared"):
             raise ValueError(
-                f"camera {self.name!r}: instance must be per_env|shared, "
-                f"got {self.instance!r}")
+                f"camera {self.name!r}: instance must be per_env|shared, " f"got {self.instance!r}"
+            )
         self._resolve_request_axes()
         self._validate_env_poses_declaration()
 
@@ -370,38 +394,56 @@ class CameraSpec:
             raise ValueError(
                 f"camera {self.name!r}: env_poses is forbidden when "
                 f"state='shared' (one broadcast pose); declare per-env "
-                f"poses only with state='per_instance'")
+                f"poses only with state='per_instance'"
+            )
         if isinstance(self.env_poses, (str, bytes)) or not isinstance(
-                self.env_poses, (list, tuple)):
+            self.env_poses, (list, tuple)
+        ):
             raise ValueError(
                 f"camera {self.name!r}: env_poses must be a list of "
-                f"{{'pos','quat'}} dicts, got {self.env_poses!r}")
+                f"{{'pos','quat'}} dicts, got {self.env_poses!r}"
+            )
         if len(self.env_poses) == 0:
-            raise ValueError(
-                f"camera {self.name!r}: env_poses must not be empty")
+            raise ValueError(f"camera {self.name!r}: env_poses must not be empty")
         out = []
         for i, row in enumerate(self.env_poses):
             if not isinstance(row, dict) or set(row) != {"pos", "quat"}:
                 raise ValueError(
                     f"camera {self.name!r}: env_poses[{i}] must be a dict "
-                    f"with exactly 'pos' and 'quat', got {row!r}")
+                    f"with exactly 'pos' and 'quat', got {row!r}"
+                )
             p, q = row["pos"], row["quat"]
-            if isinstance(p, (str, bytes)) or not isinstance(
-                    p, (list, tuple)) or len(p) != 3 or not all(
-                    isinstance(x, (int, float)) and not isinstance(x, bool)
-                    and math.isfinite(float(x)) for x in p):
+            if (
+                isinstance(p, (str, bytes))
+                or not isinstance(p, (list, tuple))
+                or len(p) != 3
+                or not all(
+                    isinstance(x, (int, float))
+                    and not isinstance(x, bool)
+                    and math.isfinite(float(x))
+                    for x in p
+                )
+            ):
                 raise ValueError(
                     f"camera {self.name!r}: env_poses[{i}].pos must be "
-                    f"[x, y, z] finite numbers, got {p!r}")
-            if isinstance(q, (str, bytes)) or not isinstance(
-                    q, (list, tuple)) or len(q) != 4 or not all(
-                    isinstance(x, (int, float)) and not isinstance(x, bool)
-                    and math.isfinite(float(x)) for x in q):
+                    f"[x, y, z] finite numbers, got {p!r}"
+                )
+            if (
+                isinstance(q, (str, bytes))
+                or not isinstance(q, (list, tuple))
+                or len(q) != 4
+                or not all(
+                    isinstance(x, (int, float))
+                    and not isinstance(x, bool)
+                    and math.isfinite(float(x))
+                    for x in q
+                )
+            ):
                 raise ValueError(
                     f"camera {self.name!r}: env_poses[{i}].quat must be "
-                    f"[w, x, y, z] finite numbers, got {q!r}")
-            out.append({"pos": [float(x) for x in p],
-                        "quat": [float(x) for x in q]})
+                    f"[w, x, y, z] finite numbers, got {q!r}"
+                )
+            out.append({"pos": [float(x) for x in p], "quat": [float(x) for x in q]})
         self.env_poses = out
 
     def validate_env_poses(self, num_envs: int) -> None:
@@ -412,30 +454,34 @@ class CameraSpec:
         if n not in (1, int(num_envs)):
             raise ValueError(
                 f"camera {self.name!r}: env_poses has {n} row(s); legal "
-                f"lengths are 1 (broadcast) or num_envs={int(num_envs)}")
+                f"lengths are 1 (broadcast) or num_envs={int(num_envs)}"
+            )
 
     def _resolve_request_axes(self) -> None:
         """Derive/validate the ``count × state`` request axes."""
         if self.count is None:
             self.count = "per_env"
         if self.state is None:
-            self.state = ("shared" if self.count == "global"
-                          else ("per_instance"
-                                if self.instance == "per_env" else "shared"))
+            self.state = (
+                "shared"
+                if self.count == "global"
+                else ("per_instance" if self.instance == "per_env" else "shared")
+            )
         if self.count not in ("global", "per_env"):
             raise ValueError(
-                f"camera {self.name!r}: count must be global|per_env, "
-                f"got {self.count!r}")
+                f"camera {self.name!r}: count must be global|per_env, " f"got {self.count!r}"
+            )
         if self.state not in ("shared", "per_instance"):
             raise ValueError(
-                f"camera {self.name!r}: state must be shared|per_instance, "
-                f"got {self.state!r}")
+                f"camera {self.name!r}: state must be shared|per_instance, " f"got {self.state!r}"
+            )
         if self.count == "global" and self.state == "per_instance":
             raise ValueError(
                 f"camera {self.name!r}: count='global' cannot combine with "
                 f"state='per_instance'; legal (count, state) combinations: "
                 f"(global, shared), (per_env, shared), "
-                f"(per_env, per_instance)")
+                f"(per_env, per_instance)"
+            )
 
     # ---- parsing -------------------------------------------------------- #
     @classmethod
@@ -448,12 +494,14 @@ class CameraSpec:
         allowed = {f.name for f in fields(cls)} | {"rig"}
         unknown = set(entry) - allowed
         if unknown:
-            raise ValueError(f"camera spec unknown keys {sorted(unknown)}; "
-                             f"allowed: {sorted(allowed)}")
+            raise ValueError(
+                f"camera spec unknown keys {sorted(unknown)}; " f"allowed: {sorted(allowed)}"
+            )
         rig = dict(entry.get("rig") or {})
         if not rig.get("type"):
-            raise ValueError(f"camera {entry.get('name')!r}: rig.type is "
-                             f"required (body|world|chase)")
+            raise ValueError(
+                f"camera {entry.get('name')!r}: rig.type is " f"required (body|world|chase)"
+            )
         kwargs = {k: v for k, v in entry.items() if k != "rig"}
         if "types" in kwargs:
             kwargs["types"] = tuple(kwargs["types"])
@@ -497,8 +545,7 @@ class CameraSpec:
 
     def focal_length(self) -> float:
         """Pinhole focal length (mm) solved from ``hfov_deg`` + aperture."""
-        return self.horizontal_aperture / (
-            2.0 * math.tan(math.radians(self.hfov_deg) / 2.0))
+        return self.horizontal_aperture / (2.0 * math.tan(math.radians(self.hfov_deg) / 2.0))
 
     def sensor_key(self) -> str:
         """Scene key of the cloned sensor prim (last prim path component)."""
@@ -521,16 +568,18 @@ class CameraSpec:
         """
         spec = cls(
             name="depth",
-            rig={"type": "body",
-                 "pos": [0.33, 0.0, 0.043],
-                 "pitch_down_deg": 5.0,
-                 # env-root mount: the classic default
-                 # "{ENV_REGEX_NS}/Robot/base/depth_camera" assumed a "base"
-                 # link prim which the G1 USD does not have (root body =
-                 # pelvis) and crashed scene cloning; the rig poses the
-                 # render camera explicitly every step anyway, so the prim
-                 # placement carries no frame semantics.
-                 "prim_path": "{ENV_REGEX_NS}/depth_camera"},
+            rig={
+                "type": "body",
+                "pos": [0.33, 0.0, 0.043],
+                "pitch_down_deg": 5.0,
+                # env-root mount: the classic default
+                # "{ENV_REGEX_NS}/Robot/base/depth_camera" assumed a "base"
+                # link prim which the G1 USD does not have (root body =
+                # pelvis) and crashed scene cloning; the rig poses the
+                # render camera explicitly every step anyway, so the prim
+                # placement carries no frame semantics.
+                "prim_path": "{ENV_REGEX_NS}/depth_camera",
+            },
             kind="standard",
             types=("depth",),
             width=106,
@@ -545,11 +594,9 @@ class CameraSpec:
             update_latest_camera_pose=True,
         )
         if overrides:
-            classic_map = {"horizontal_fov_deg": "hfov_deg",
-                          "data_type": "depth_type"}
+            classic_map = {"horizontal_fov_deg": "hfov_deg", "data_type": "depth_type"}
             spec_fields = {f.name for f in fields(cls)}
-            rig_fields = {"pos", "pitch_down_deg", "rot", "prim_path",
-                          "update_latest_camera_pose"}
+            rig_fields = {"pos", "pitch_down_deg", "rot", "prim_path", "update_latest_camera_pose"}
             for k, v in overrides.items():
                 k2 = classic_map.get(k, k)
                 if k2 in rig_fields:
@@ -561,7 +608,8 @@ class CameraSpec:
                         f"camera_depth override {k!r} is not a known camera "
                         f"parameter (classic keys: pos/pitch_down_deg/width/"
                         f"height/horizontal_fov_deg/horizontal_aperture/"
-                        f"far_clip/data_type)")
+                        f"far_clip/data_type)"
+                    )
             spec.__post_init__()
         return spec
 
@@ -632,16 +680,21 @@ class CameraRig(Protocol):
 
     def read(self, env_ids=None) -> dict: ...
 
-    def apply_properties(self, pose_offset=None, yaw_deg=None,
-                         pitch_deg=None, roll_deg=None, target_env=None,
-                         env_ids=None) -> None: ...
+    def apply_properties(
+        self,
+        pose_offset=None,
+        yaw_deg=None,
+        pitch_deg=None,
+        roll_deg=None,
+        target_env=None,
+        env_ids=None,
+    ) -> None: ...
 
     def begin_world_pose(self, pos, quat_wxyz): ...
 
     def end_world_pose(self, saved) -> None: ...
 
-    def set_world_pose(self, pos, quat_wxyz,
-                       env_idx: int | None = None) -> None: ...
+    def set_world_pose(self, pos, quat_wxyz, env_idx: int | None = None) -> None: ...
 
     def get_world_pose(self) -> tuple: ...
 

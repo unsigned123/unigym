@@ -19,6 +19,7 @@ Reads the FIRST shard npz of a contacts-enabled collect run and checks:
 
 Exits non-zero on the first violated check (probe/CI gate semantics).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,9 +37,12 @@ G = 9.81
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("out_dir")
-    ap.add_argument("--mg", type=float, default=G1_TOTAL_MASS * G,
-                    help="robot weight in N (default: g1 %.3f kg * g)"
-                    % G1_TOTAL_MASS)
+    ap.add_argument(
+        "--mg",
+        type=float,
+        default=G1_TOTAL_MASS * G,
+        help="robot weight in N (default: g1 %.3f kg * g)" % G1_TOTAL_MASS,
+    )
     args = ap.parse_args()
     shards = sorted(glob.glob(f"{args.out_dir}/shard_*.npz"))
     if not shards:
@@ -64,7 +68,7 @@ def main() -> int:
 
     raw_key = "contact/feet_ground_raw"
     if raw_key in z.files:
-        raw = z[raw_key]                       # (T, N, B, 3)
+        raw = z[raw_key]  # (T, N, B, 3)
         # post-settling window: skip the spawn-drop impact head (first 12
         # policy steps), then TIME-AVERAGE — the standing policy's vertical
         # COM acceleration averages out, so mean Sigma Fz ~= mg.  (A
@@ -74,9 +78,11 @@ def main() -> int:
         window = raw[head:]
         fz_sum = window[..., 2].sum(axis=(-1, -2)) / max(window.shape[1], 1)
         ratio = float(np.mean(fz_sum)) / args.mg
-        print(f"[probe] P3 SigmaFz(mean steps {head}:{raw.shape[0]}) = "
-              f"{float(np.mean(fz_sum)):.2f} N, mg = {args.mg:.2f} N, "
-              f"ratio = {ratio:.3f}")
+        print(
+            f"[probe] P3 SigmaFz(mean steps {head}:{raw.shape[0]}) = "
+            f"{float(np.mean(fz_sum)):.2f} N, mg = {args.mg:.2f} N, "
+            f"ratio = {ratio:.3f}"
+        )
         if abs(ratio - 1.0) > 0.10:
             print("FAIL: |ratio - 1| > 0.10 (Sigma Fz ~= mg violated)")
             return 1
@@ -92,8 +98,9 @@ def main() -> int:
             # sensor also touches non-filter bodies, e.g. ground)
             viol = int(np.logical_and(p, ~g).sum())
             live = int(p.sum())
-            print(f"[probe] P4 pairwise⊆general violations = {viol}, "
-                  f"live pairwise steps = {live}")
+            print(
+                f"[probe] P4 pairwise⊆general violations = {viol}, " f"live pairwise steps = {live}"
+            )
             if viol:
                 print("FAIL: pairwise contact reported with general off")
                 return 1
@@ -103,15 +110,17 @@ def main() -> int:
 
     rawp_key = "contact/feet_vs_ball_raw"
     if gen_key in z.files and rawp_key in z.files:
-        rawp = z[rawp_key]                          # (T,N,B,F,3)
+        rawp = z[rawp_key]  # (T,N,B,F,3)
         norms = np.linalg.norm(rawp, axis=-1).min(axis=-1)  # (T,N,B)
         mask = norms > 1.0
         g = z[gen_key]
         if mask.shape == g.shape:
             viol = int(np.logical_and(mask, ~g.astype(bool)).sum())
             live = int(mask.sum())
-            print(f"[probe] P5 pair-raw threshold mask: live steps = {live}, "
-                  f"violations vs general = {viol}")
+            print(
+                f"[probe] P5 pair-raw threshold mask: live steps = {live}, "
+                f"violations vs general = {viol}"
+            )
             if viol:
                 print("FAIL: pairwise raw force without general contact")
                 return 1

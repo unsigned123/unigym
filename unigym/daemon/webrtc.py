@@ -32,6 +32,7 @@ daemon):
   slot via unigym.core.session (single-controller discipline applies:
   this is one more writer).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,23 +46,21 @@ import numpy as np
 
 from unigym._optional import require
 from unigym.runtime import bridge as _bridge
-from unigym.stream import ControlError, parse_control_json, \
-    to_bridge_command
+from unigym.stream import ControlError, parse_control_json, to_bridge_command
 
 if TYPE_CHECKING:  # pragma: no cover - optional media extra (lazy at runtime)
     import av
     from aiortc.mediastreams import MediaStreamError, VideoStreamTrack
 else:
     av = require("av", "media", feature="the WebRTC media gateway")
-    _mediastreams = require("aiortc.mediastreams", "media",
-                            feature="the WebRTC media gateway")
+    _mediastreams = require("aiortc.mediastreams", "media", feature="the WebRTC media gateway")
     MediaStreamError = _mediastreams.MediaStreamError
     VideoStreamTrack = _mediastreams.VideoStreamTrack
 
 __all__ = ["FrameRelayTrack", "WebRtcGateway"]
 
 PUMP_HZ = 60.0
-MAX_WIDTH = 1280                 # downscale guard (16-aligned below)
+MAX_WIDTH = 1280  # downscale guard (16-aligned below)
 
 # pts pacing: frame timestamps follow the WALL arrival
 # spacing of the SHM pump, clamped to the pump ceiling (60 fps) -- the
@@ -82,14 +81,14 @@ def snapshot_to_video_frame(frame: dict) -> av.VideoFrame:
     """One SHM frame-slot snapshot -> av.VideoFrame (owned copy)."""
     fmt = frame["format"]
     if fmt == _bridge.FMT_JPEG:
-        codec = av.CodecContext.create("mjpeg", "r")   # stateless per snap
+        codec = av.CodecContext.create("mjpeg", "r")  # stateless per snap
         dec = codec.decode(av.Packet(frame["data"]))
         if not dec:
             raise ValueError("empty mjpeg decode")
         return dec[0].reformat(format="yuv420p")
     dt = np.uint8 if frame["dtype"] == 0 else np.float32
     arr = np.frombuffer(frame["data"], dtype=dt).reshape(frame["shape"])
-    if arr.dtype == np.float32:                        # metric depth -> gray
+    if arr.dtype == np.float32:  # metric depth -> gray
         a = arr.squeeze()
         lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
         if not np.isfinite(a).all() or hi <= lo:
@@ -97,19 +96,17 @@ def snapshot_to_video_frame(frame: dict) -> av.VideoFrame:
         else:
             g = ((a - lo) / (hi - lo) * 255.0).astype(np.uint8)
         return av.VideoFrame.from_ndarray(g, format="gray")
-    if arr.ndim == 2:                                  # single-channel u8
+    if arr.ndim == 2:  # single-channel u8
         return av.VideoFrame.from_ndarray(arr, format="gray")
     return av.VideoFrame.from_ndarray(arr[..., :3], format="rgb24")
 
 
-def downscale(frame: av.VideoFrame, max_width: int = MAX_WIDTH) \
-        -> av.VideoFrame:
+def downscale(frame: av.VideoFrame, max_width: int = MAX_WIDTH) -> av.VideoFrame:
     """Width-guard reformat (camera resolutions above 1280 waste uplink)."""
     if frame.width <= max_width:
         return frame
     h = max(2, int(frame.height * max_width / frame.width) // 2 * 2)
-    return frame.reformat(width=max_width // 2 * 2, height=h,
-                          format="yuv420p")
+    return frame.reformat(width=max_width // 2 * 2, height=h, format="yuv420p")
 
 
 # --------------------------------------------------------------------------- #
@@ -156,7 +153,7 @@ class FrameRelayTrack(asyncio.Event, VideoStreamTrack):
             return
         with self._lock:
             if fid <= self._fid:
-                return                     # duplicate slot read
+                return  # duplicate slot read
             self._latest = downscale(frame)
             self._fid = fid
         self.set()
@@ -228,8 +225,7 @@ class FrameRelayTrack(asyncio.Event, VideoStreamTrack):
             if last is not None:
                 stall = True
             try:
-                await asyncio.wait_for(self.wait(),
-                                       timeout=self.KEEPALIVE_S)
+                await asyncio.wait_for(self.wait(), timeout=self.KEEPALIVE_S)
             except asyncio.TimeoutError:
                 pass
 
@@ -252,17 +248,15 @@ class WebRtcGateway:
     """
 
     def __init__(self, media, stun_urls: tuple = ()):
-        self.media = media                    # MediaGateway (readers mux)
+        self.media = media  # MediaGateway (readers mux)
         self.stun_urls = tuple(stun_urls)
         self.tracks: dict[str, list[FrameRelayTrack]] = {}
         self.pcs: list = []
         self.frames_pumped = 0
         self._stop = threading.Event()
         self.loop = asyncio.new_event_loop()
-        self._loop_thread = threading.Thread(target=self._run_loop,
-                                             name="webrtc-loop", daemon=True)
-        self._pump = threading.Thread(target=self._pump_loop,
-                                      name="webrtc-pump", daemon=True)
+        self._loop_thread = threading.Thread(target=self._run_loop, name="webrtc-loop", daemon=True)
+        self._pump = threading.Thread(target=self._pump_loop, name="webrtc-pump", daemon=True)
 
     # -- lifecycle ---------------------------------------------------------
     def start(self):
@@ -318,12 +312,12 @@ class WebRtcGateway:
                     if frame is None:
                         continue
                     vf = snapshot_to_video_frame(frame)
-                except Exception:          # noqa: BLE001 (skip bad tick --
-                    continue               # never kill the whole pump)
+                except Exception:  # noqa: BLE001 (skip bad tick --
+                    continue  # never kill the whole pump)
                 finally:
                     self.media.release(run_id)
                 fid = frame["frame_id"]
-                for t in list(tracks):         # every connected PC gets it
+                for t in list(tracks):  # every connected PC gets it
                     self.loop.call_soon_threadsafe(t.feed, fid, vf)
                 fed_any = True
             if fed_any:
@@ -339,8 +333,8 @@ class WebRtcGateway:
 
         Raises KeyError when the run has no readable reader.
         """
-        from aiortc import RTCConfiguration, RTCIceServer, \
-            RTCPeerConnection, RTCSessionDescription
+        from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+
         rd = self.media.reader(run_id)
         if rd is None:
             raise KeyError(run_id)
@@ -357,15 +351,14 @@ class WebRtcGateway:
         # unigym.yaml (list of stun:/turn: URLs).
         ice = [RTCIceServer(urls=u) for u in self.stun_urls]
         pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=ice))
-        track = FrameRelayTrack()      # one encoder + one event per PC
+        track = FrameRelayTrack()  # one encoder + one event per PC
         self.tracks.setdefault(run_id, []).append(track)
         self.pcs.append(pc)
         pc.addTrack(track)
 
         @pc.on("datachannel")
         def on_channel(channel):
-            print(f"[webrtc] datachannel '{channel.label}' open "
-                  f"(run {run_id})", flush=True)
+            print(f"[webrtc] datachannel '{channel.label}' open " f"(run {run_id})", flush=True)
 
             @channel.on("message")
             def on_message(message):
@@ -383,8 +376,7 @@ class WebRtcGateway:
                 if pc in self.pcs:
                     self.pcs.remove(pc)
 
-        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp_text,
-                                                            type="offer"))
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp_text, type="offer"))
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
         return pc.localDescription.sdp
@@ -403,26 +395,23 @@ class WebRtcGateway:
             KeyError: Unknown/unreadable run.
             Exception: Propagated from the coroutine (15 s await cap).
         """
-        fut = asyncio.run_coroutine_threadsafe(
-            self.handle_offer(run_id, sdp_text), self.loop)
+        fut = asyncio.run_coroutine_threadsafe(self.handle_offer(run_id, sdp_text), self.loop)
         return fut.result(timeout=15)
 
     def _control(self, run_id: str, message) -> dict:
         """Datachannel JSON -> control schema -> run command slot."""
         from unigym.core.session import attach
+
         try:
-            ctrl = parse_control_json(
-                message if isinstance(message, (bytes, str)) else "")
+            ctrl = parse_control_json(message if isinstance(message, (bytes, str)) else "")
             cmd, payload = to_bridge_command(ctrl)
         except ControlError as e:
             return {"ok": False, "error": str(e)}
         try:
             with attach(run_id, timeout_s=8.0) as s:
                 status, result = s.client.send(cmd, payload, timeout=8.0)
-        except Exception as e:             # noqa: BLE001 (timeout/DONE;
+        except Exception as e:  # noqa: BLE001 (timeout/DONE;
             # audit #14: the error text carries the type so a handler
             # bug shows up in the browser console instead of vanishing)
-            return {"ok": None,
-                    "error": f"{type(e).__name__}: {e}"}
-        return {"ok": status == _bridge.ACK_OK, "result": result,
-                "type": ctrl["type"]}
+            return {"ok": None, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": status == _bridge.ACK_OK, "result": result, "type": ctrl["type"]}

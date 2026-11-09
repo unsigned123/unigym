@@ -19,6 +19,7 @@ manifest discovery.
 Fail closed and teach: every error names the offending id/dir/path and the
 next command that fixes it (``docs/CONVENTIONS.md`` §9).
 """
+
 from __future__ import annotations
 
 import json
@@ -84,10 +85,15 @@ def _run_collector(out_dir: Path) -> subprocess.CompletedProcess:
     if not COLLECTOR.is_file():
         raise AssetCliError(
             f"{COLLECTOR} is missing; the asset catalog is collected by "
-            "tools/build_asset_catalog.py -- run from a complete checkout")
+            "tools/build_asset_catalog.py -- run from a complete checkout"
+        )
     return subprocess.run(
         [sys.executable, str(COLLECTOR), "--out", str(out_dir)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, check=False)
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _fresh_catalog() -> dict:
@@ -104,8 +110,8 @@ def _fresh_catalog() -> dict:
         result = _run_collector(Path(tmp))
         if result.returncode != 0:
             raise AssetCliError(
-                "the asset catalog cannot be rebuilt:\n"
-                + _collector_output(result))
+                "the asset catalog cannot be rebuilt:\n" + _collector_output(result)
+            )
         return asset_catalog.load_catalog(tmp)
 
 
@@ -156,8 +162,12 @@ def cmd_catalog_search(a, _extra=None) -> int:
     try:
         document = _fresh_catalog()
         ids = asset_catalog.find(
-            document, kind=filters["kind"], tags=filters["tags"],
-            pack=filters["pack"], uses=filters["uses"])
+            document,
+            kind=filters["kind"],
+            tags=filters["tags"],
+            pack=filters["pack"],
+            uses=filters["uses"],
+        )
     except (AssetCliError, asset_catalog.CatalogError) as exc:
         if json_mode:
             print(json.dumps({"ok": False, "error": str(exc)}))
@@ -165,8 +175,7 @@ def cmd_catalog_search(a, _extra=None) -> int:
             print(f"[unigym asset] {exc}")
         return 1
     if json_mode:
-        print(json.dumps({"ok": True, "count": len(ids), "ids": ids,
-                          "filters": filters}))
+        print(json.dumps({"ok": True, "count": len(ids), "ids": ids, "filters": filters}))
         return 0
     for asset_id in ids:
         print(asset_id)
@@ -185,18 +194,20 @@ def _find_entry(document: dict, asset_id: str) -> dict:
         raise AssetCliError(
             f"{asset_id!r} is not an asset id; write 'pack:<ns>/<path>' "
             "(e.g. pack:robocasa/assets/generators/objects/x/y) or "
-            "'pack:<ns>/generator/<name>'")
+            "'pack:<ns>/generator/<name>'"
+        )
     for entry in document.get("entries", ()):
         if entry["id"] == asset_id:
             return entry
-    close = get_close_matches(asset_id, _known_ids(document),
-                              n=NEAR_MATCH_LIMIT, cutoff=0.6)
+    close = get_close_matches(asset_id, _known_ids(document), n=NEAR_MATCH_LIMIT, cutoff=0.6)
     lines = [f"unknown asset id {asset_id!r}"]
     if close:
         lines.append("  near matches: " + ", ".join(close))
-    lines.append("  hint: `unigym asset catalog search --json` lists the "
-                 "catalog ids; a renamed asset answers under its current id "
-                 "(an alias is a tombstone, v086 R8)")
+    lines.append(
+        "  hint: `unigym asset catalog search --json` lists the "
+        "catalog ids; a renamed asset answers under its current id "
+        "(an alias is a tombstone, v086 R8)"
+    )
     raise AssetCliError("\n".join(lines))
 
 
@@ -215,12 +226,14 @@ def _pack_root(namespace: str, asset_id: str) -> Path:
         raise AssetCliError(
             f"{asset_id}: no mounted pack owns namespace {namespace!r}; "
             f"mounted packs: {sorted(mounts)} -- mount the pack "
-            "(UNIGYM_PACKS or <deps_root>/unigym_packs) or fix the id")
+            "(UNIGYM_PACKS or <deps_root>/unigym_packs) or fix the id"
+        )
     if pack.faces.get("assets") is None:
         present = sorted(name for name, path in pack.faces.items() if path)
         raise AssetCliError(
             f"{asset_id}: pack {namespace!r} declares no 'assets' face; "
-            f"faces present: {present}")
+            f"faces present: {present}"
+        )
     return Path(pack.root) if pack.root is not None else Path(repo_root())
 
 
@@ -234,14 +247,16 @@ def _payload_role(document: Mapping, asset_id: str) -> str:
             raise AssetCliError(
                 f"{asset_id}: kind {kind!r} declares no files.{role}; the "
                 f"manifest ships roles {sorted(files)} -- a {kind} asset "
-                f"carries its payload under files.{role}")
+                f"carries its payload under files.{role}"
+            )
         return role
     if len(files) == 1:
         return next(iter(files))
     raise AssetCliError(
         f"{asset_id}: kind {kind!r} has no single payload role; the "
         f"manifest ships roles {sorted(files)} -- `asset file` answers "
-        f"file assets of kind {sorted(PAYLOAD_ROLES)}")
+        f"file assets of kind {sorted(PAYLOAD_ROLES)}"
+    )
 
 
 def _payload_base(document: Mapping, asset_dir: Path) -> Path:
@@ -274,19 +289,22 @@ def _payload_path(entry: dict) -> Path:
     except ManifestError as exc:
         raise AssetCliError(
             f"{exc} (the catalog lists {asset_id!r} but its manifest is "
-            "unreadable; check the pack mount and rebuild the catalog)") from exc
+            "unreadable; check the pack mount and rebuild the catalog)"
+        ) from exc
     role = _payload_role(document, asset_id)
     value = document["files"][role]
     if not isinstance(value, str):
         raise AssetCliError(
             f"{asset_id}: files.{role} declares {len(value)} paths; the "
-            f"primary payload must be one path -- fix the manifest")
+            f"primary payload must be one path -- fix the manifest"
+        )
     payload = (_payload_base(document, asset_dir) / value).resolve()
     if not payload.is_file():
         raise AssetCliError(
             f"{asset_id}: declared payload {payload} is missing; the pack "
             "payload is incomplete -- reprovision "
-            "(python tools/pack_asset_closure.py) or run `unigym pack doctor`")
+            "(python tools/pack_asset_closure.py) or run `unigym pack doctor`"
+        )
     return payload
 
 
@@ -307,18 +325,18 @@ def _generator_template(name: str) -> tuple[str, list[str]]:
             f"generator {name!r} is catalogued but no template is "
             f"registered under that name; registered templates: "
             f"{sorted(templates._TEMPLATES)} -- rebuild the catalog after "
-            "fixing the registration")
+            "fixing the registration"
+        )
     schema, builder = templates._TEMPLATES[name]
     module = getattr(builder, "__module__", "?")
-    qualname = getattr(builder, "__qualname__",
-                       getattr(builder, "__name__", "?"))
+    qualname = getattr(builder, "__qualname__", getattr(builder, "__name__", "?"))
     return f"{module}:{qualname}", sorted(schema)
 
 
 def _print_generator(asset_id: str) -> int:
     """Print the registered template behind a generator asset id."""
     _namespace, path = split_asset_id(asset_id)
-    name = path[len("generator/"):]
+    name = path[len("generator/") :]
     try:
         template, params = _generator_template(name)
     except AssetCliError as exc:
@@ -357,12 +375,11 @@ def _load_mapping(path: Path, label: str) -> dict:
     except OSError as exc:
         raise AssetCliError(f"{path}: cannot read the {label} ({exc})") from exc
     except yaml.YAMLError as exc:
-        raise AssetCliError(
-            f"{path}: the {label} is not valid yaml ({exc}); fix the file") from exc
+        raise AssetCliError(f"{path}: the {label} is not valid yaml ({exc}); fix the file") from exc
     if not isinstance(document, Mapping):
         raise AssetCliError(
-            f"{path}: the {label} must be a yaml mapping, got "
-            f"{type(document).__name__}")
+            f"{path}: the {label} must be a yaml mapping, got " f"{type(document).__name__}"
+        )
     return dict(document)
 
 
@@ -388,7 +405,8 @@ def _check_one(document: dict, spec_path: Path) -> tuple[list[str], list[str]]:
     if not lock_path.is_file():
         return [], [
             f"{lock_path} is missing; every selection pins its resolved ids "
-            "in a lock beside the spec (v086 §6)"]
+            "in a lock beside the spec (v086 §6)"
+        ]
     try:
         lock = _load_mapping(lock_path, "selection lock")
         return selection.check_lock(lock, document, spec), []
@@ -415,7 +433,8 @@ def _selection_dirs(explicit: str | None) -> list[Path]:
             raise AssetCliError(
                 f"{directory}: no selection directory; point --dir at the "
                 "pack's selection face (every *.yaml spec sits beside its "
-                "*.lock)")
+                "*.lock)"
+            )
         return [directory]
     from unigym.packs import pack_roots
 
@@ -436,8 +455,10 @@ def cmd_selection_check(a, _extra=None) -> int:
         print(f"[unigym asset] {exc}")
         return 1
     if not directories:
-        print("[unigym asset] selection: no mounted pack carries a 'selection' "
-              "face; nothing to verify (pass --dir DIR to check one)")
+        print(
+            "[unigym asset] selection: no mounted pack carries a 'selection' "
+            "face; nothing to verify (pass --dir DIR to check one)"
+        )
         return 0
     checked = 0
     failing = 0
@@ -464,8 +485,7 @@ def cmd_selection_check(a, _extra=None) -> int:
         print(f"[unigym asset] {exc}")
         return 1
     if failing:
-        print(f"[unigym asset] selection: FAIL ({failing} problem(s) over "
-              f"{checked} spec(s))")
+        print(f"[unigym asset] selection: FAIL ({failing} problem(s) over " f"{checked} spec(s))")
         return 1
     print(f"[unigym asset] selection: OK ({checked} spec(s) pinned)")
     return 0
@@ -473,54 +493,73 @@ def cmd_selection_check(a, _extra=None) -> int:
 
 def add_asset_subparser(sub) -> None:
     """Register the ``asset`` command group on the launcher parser."""
-    asset = sub.add_parser("asset", help="L0 asset primitive: the derived "
-                                        "catalog, payload paths and the "
-                                        "selection locks")
+    asset = sub.add_parser(
+        "asset",
+        help="L0 asset primitive: the derived " "catalog, payload paths and the " "selection locks",
+    )
     asset_sub = asset.add_subparsers(dest="asset_cmd", required=True)
 
-    catalog = asset_sub.add_parser("catalog", help="the derived fact index "
-                                                  "(build / search)")
+    catalog = asset_sub.add_parser("catalog", help="the derived fact index " "(build / search)")
     catalog_sub = catalog.add_subparsers(dest="catalog_cmd", required=True)
     build = catalog_sub.add_parser(
-        "build", help="scan every mounted pack, write catalog.json + "
-                      "catalog.digest, print counts and digest")
-    build.add_argument("--out", default=None,
-                       help="output directory (default: "
-                            "${UNIGYM_DEPS_ROOT}/unigym_asset_catalog)")
+        "build",
+        help="scan every mounted pack, write catalog.json + "
+        "catalog.digest, print counts and digest",
+    )
+    build.add_argument(
+        "--out",
+        default=None,
+        help="output directory (default: " "${UNIGYM_DEPS_ROOT}/unigym_asset_catalog)",
+    )
     build.set_defaults(fn=cmd_catalog_build)
 
     search = catalog_sub.add_parser(
-        "search", help="the sorted asset ids matching every filter (AND)")
-    search.add_argument("--kind", default=None,
-                        help="manifest kind (model | texture_set | mesh | "
-                             "material)")
-    search.add_argument("--tag", action="append", default=None, metavar="TAG",
-                        help="require this namespaced tag (repeatable, AND)")
-    search.add_argument("--pack", default=None,
-                        help="require this pack namespace")
-    search.add_argument("--uses", action="append", default=None, metavar="ID",
-                        help="require this used asset id (repeatable, AND)")
-    search.add_argument("--json", action="store_true",
-                        help="single JSON document on stdout (errors too)")
+        "search", help="the sorted asset ids matching every filter (AND)"
+    )
+    search.add_argument(
+        "--kind", default=None, help="manifest kind (model | texture_set | mesh | " "material)"
+    )
+    search.add_argument(
+        "--tag",
+        action="append",
+        default=None,
+        metavar="TAG",
+        help="require this namespaced tag (repeatable, AND)",
+    )
+    search.add_argument("--pack", default=None, help="require this pack namespace")
+    search.add_argument(
+        "--uses",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="require this used asset id (repeatable, AND)",
+    )
+    search.add_argument(
+        "--json", action="store_true", help="single JSON document on stdout (errors too)"
+    )
     search.set_defaults(fn=cmd_catalog_search)
 
     file_parser = asset_sub.add_parser(
-        "file", help="absolute payload path of a file asset; a generator id "
-                     "prints its registered template")
+        "file",
+        help="absolute payload path of a file asset; a generator id "
+        "prints its registered template",
+    )
     file_parser.add_argument("id", help="asset id (pack:<ns>/<path>)")
     file_parser.set_defaults(fn=cmd_file)
 
-    selection = asset_sub.add_parser("selection", help="the decision layer: "
-                                                      "spec -> lock checks")
-    selection_sub = selection.add_subparsers(dest="selection_cmd",
-                                             required=True)
+    selection = asset_sub.add_parser("selection", help="the decision layer: " "spec -> lock checks")
+    selection_sub = selection.add_subparsers(dest="selection_cmd", required=True)
     check = selection_sub.add_parser(
-        "check", help="resolve every *.yaml spec against the catalog and "
-                      "verify its .lock (digest + resolved ids; exit 1 on "
-                      "drift)")
-    check.add_argument("--dir", default=None,
-                       help="selection face directory (default: every "
-                            "mounted pack's selection/ directory)")
+        "check",
+        help="resolve every *.yaml spec against the catalog and "
+        "verify its .lock (digest + resolved ids; exit 1 on "
+        "drift)",
+    )
+    check.add_argument(
+        "--dir",
+        default=None,
+        help="selection face directory (default: every " "mounted pack's selection/ directory)",
+    )
     check.set_defaults(fn=cmd_selection_check)
 
 
