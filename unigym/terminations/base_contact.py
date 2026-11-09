@@ -19,7 +19,7 @@ contact sensor, feeding ``extra["body_contact_forces"]`` and
 ``extra["body_names"]`` switches this termination to the exact force rule
 with no code change.
 
-v103.6: the geometry approximation judges exactly one articulation
+The geometry approximation judges exactly one articulation
 (``articulation`` is a required param); the global force signal is unchanged.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ class BaseContactTermination(ArticulationTermination):
 
     params:
         articulation: REQUIRED articulation name for the geometry fallback
-            (v103.6, no flat fallback).
+            (no flat fallback).
         body_names: str ``"base|head"`` or list of body names to monitor.
         force_threshold: net contact-force magnitude threshold in N
             (default 5.0; only used with real body forces).

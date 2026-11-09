@@ -1,4 +1,4 @@
-"""RunInstance: the live resource bundle owned by one constructed run (v097).
+"""RunInstance: the live resource bundle owned by one constructed run.
 
 ``build_instance`` returns this object; a Runner borrows it and never
 closes it.  ``close()`` is idempotent and tears down the SHM bridge, any
@@ -137,7 +137,7 @@ class RunInstance:
 
         Raises:
             RuntimeError: The wired env exposes no ``model_set`` (a backend
-                without the v103.4 assembly face).
+                without the assembly face).
         """
         model_set = getattr(self.env, "model_set", None)
         if model_set is None:
@@ -149,7 +149,7 @@ class RunInstance:
         return model_set
 
     def live_for(self, name: str | None = None) -> LiveModel:
-        """Live proxies for one articulation's IR (v103.4).
+        """Live proxies for one articulation's IR.
 
         Args:
             name: An articulation name from ``self.model.names()``.  ``None``
@@ -180,7 +180,7 @@ class RunInstance:
 
     @property
     def live(self) -> LiveModel:
-        """Live, zero-copy proxies over :attr:`model` (v098 N3 / v103.4).
+        """Live, zero-copy proxies over :attr:`model`.
 
         A fresh binding is returned on every access; nothing mutable is
         cached here, and the proxies hold only a weak reference to the

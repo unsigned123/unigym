@@ -5,7 +5,7 @@ Requires this articulation's ``joint_pos`` (``state.articulations[name]``)
 and its ``(lower, upper)`` limits (``state.joint_pos_limits[name]``); without
 limits the termination never fires.
 
-v103.6: limits are keyed by articulation (no first binding); the run layer
+Limits are keyed by articulation (no first binding); the run layer
 supplies a ``{name: (lower, upper)}`` mapping.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ class JointLimitTermination(ArticulationTermination):
     """Fire when any joint exceeds its soft limit by more than *margin*.
 
     params:
-        articulation: REQUIRED articulation name (v103.6, no flat fallback).
+        articulation: REQUIRED articulation name (no flat fallback).
         margin: radial margin inside the soft limits (default 0.05); the
             trigger band is ``joint_pos < lower + margin`` or
             ``joint_pos > upper - margin``.

@@ -1,4 +1,4 @@
-"""ManualAdapter: the "user supplies the actions" Adapter (v097 R3).
+"""ManualAdapter: the "user supplies the actions" Adapter.
 
 This is the ``adapter=None`` path at the session layer: no policy, no obs
 requests, no action postprocessing.  It is used by

@@ -1,9 +1,9 @@
-"""Rewind state providers (v057, design v057-rewind-v2 §1.3).
+"""Rewind state providers (design v057-rewind-v2 §1.3).
 
 The sink facilities whose open-episode state a restored timeline must
 agree with.
 
-The v052 rewind restored the engine + adapter; the SINKS kept marching.
+A rewind that restores only the engine + adapter leaves the SINKS marching.
 On a forked timeline that mixed the abandoned branch's frames into the
 open episode buffers -- Round A's "lift_dz baseline distortion (the
 abandoned and continued fork branches mixing one buffer)"
@@ -16,7 +16,7 @@ Providers (v1 coverage, design §1.3 table):
 
 * ``BenchmarkSinkProvider`` (name ``"benchmark"``) -- the open episode
   buffers (``ep_bufs``) + the per-env rewind marks riding them.  Counter
-  policy (contract §4.1, amended v0581): scored-RESULT bookkeeping
+  policy (contract §4.1): scored-RESULT bookkeeping
   (``results`` / ``episode_docs`` / ``episodes`` / ``steps_total`` / the
   bridge metrics feed) is PROCESS TRUTH and is NOT restored -- it keeps
   marching monotonically, which de-duplicates scored docs on the
@@ -26,7 +26,7 @@ Providers (v1 coverage, design §1.3 table):
   re-earns its episode completions.  Without the restore, the
   abandoned branch's completion stayed counted, the rewound retry
   re-counted the same episode end, and ``min_episodes`` fired a
-  premature run_end mid-strategy (the 2026-10-16 R3 forensics: undo to
+  premature run_end mid-strategy (the 2026-10-16 forensics: undo to
   a tick-1137 checkpoint, replay re-completed episode #1, n_episodes
   1->2, run ended at tick 1199 under the agent).  Scored docs of
   abandoned branches stay in the append-only lists (labelled
@@ -54,7 +54,7 @@ buffers are episode-scoped lists of per-step slice dicts (numpy/tensor
 free after ``slice_step_for_env`` -- cpu clones), so the round trip is a
 deep copy away from byte-exact.
 
-v063 pre-flight (design v063-rewind-preflight, owner ruling batch 1):
+pre-flight (design v063-rewind-preflight, owner ruling batch 1):
 both providers implement ``validate_rewind_state(state)`` -- the SAME
 refusal judgment their ``apply_rewind_state`` enforces, run read-only
 by the controller BEFORE the sidecar dump / safety capture / restore
@@ -148,7 +148,7 @@ class _EpisodeBufferProvider:
         return None
 
     def _fuse(self) -> dict[str, SnapshotValue]:
-        """The facility's episode-fuse counters (v0581).
+        """The facility's episode-fuse counters.
 
         They ride the fork so the restored timeline re-earns its
         episode completions (the premature-run_end forensics).
@@ -190,7 +190,7 @@ class _EpisodeBufferProvider:
                 boundary, refused fail-fast).
         """
         bufs = self._bufs()
-        # the shared refusal judgment (single source with the v063
+        # the shared refusal judgment (single source with the
         # pre-flight validate_rewind_state) -- second line behind the
         # controller's pre-flight
         self._guard_state(bufs, state)
@@ -209,7 +209,7 @@ class _EpisodeBufferProvider:
 
     def _guard_state(self, live_bufs: EpisodeBuffers,
                      state: dict[str, SnapshotValue]) -> None:
-        """The shared refusal judgment (v063 single source).
+        """The shared refusal judgment (single source).
 
         Buffer shape drift + the cross-episode stamp check.  Raises
         :class:`RewindGateError` (a RuntimeError -- historical raise
@@ -261,7 +261,7 @@ class _EpisodeBufferProvider:
         Returns the written paths (meta json is the controller's).  A
         buffer-LESS facility (a plain collect run's ``ep_bufs`` is None
         -- no filter chain, no open episode buffers) holds nothing to
-        dump: the honest empty result, never a TypeError (the R7 undo
+        dump: the honest empty result, never a TypeError (the undo
         blocker -- the dump runs on EVERY rewind before the restore, so
         the unguarded enumerate(None) blocked undo for every plain
         collect run).
@@ -291,10 +291,10 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
 
     def __init__(self, sink):
         super().__init__(sink)
-        # counter policy (contract §4.1, amended v0581): results /
+        # counter policy (contract §4.1): results /
         # episode_docs / episodes / steps_total / _metrics_pending are
         # deliberately OUT of rewind_state -- process truth marches on.
-        # The FUSE counters below ride the fork (v0581): n_episodes is
+        # The FUSE counters below ride the fork: n_episodes is
         # the min_episodes stop gate's counter -- restoring it stops the
         # rewound retry from tripping a premature run_end on a count the
         # abandoned branch already spent.
@@ -313,8 +313,8 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
 class CollectSinkProvider(_EpisodeBufferProvider):
     """The collect writer's episode slicing state (name ``episode_runner``).
 
-    Same buffer machinery; its episode fuse counter rides the fork
-    (v0581).  The undo-aware shard design puts the shard recording
+    Same buffer machinery; its episode fuse counter rides the fork.
+    The undo-aware shard design puts the shard recording
     cursor (``ShardWriter.commit_state``, two integers) on the same
     package; its restore truncates the shard directory back to the
     committed winning timeline (design v0622-undo-aware-shard §2.1).
@@ -382,7 +382,7 @@ class CollectSinkProvider(_EpisodeBufferProvider):
         w = self._writer()
         commit = state.get("shard_commit")
         if w is not None and commit is not None:
-            # v063 pre-flight (F4): the truncation surgery is judged
+            # pre-flight: the truncation surgery is judged
             # READ-ONLY before the controller touches the world -- a
             # corrupt/unreachable commit state can no longer surface
             # mid-apply with the shard files already cut.  The SAME
@@ -435,8 +435,8 @@ def build_rewind_providers(sink: object,
 
     The walk RECURSES into nested fan-outs -- production wraps
     the sink chain (``FanOutSink(FanOutSink(collect, timeline), ...)``
-    etc.), and the one-level walk of v057 saw only the wrappers, so the
-    providers silently never mounted in real runs (the R6 mixed-shard
+    etc.), and the one-level walk saw only the wrappers, so the
+    providers silently never mounted in real runs (the mixed-shard
     undo artifacts are that hole's symptom).  Depth-first in
     construction order; identity-deduped against diamond re-visits.
     """

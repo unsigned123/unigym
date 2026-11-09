@@ -1,4 +1,4 @@
-"""RunSpec: the pure-data construction intent of one run (v097 R1).
+"""RunSpec: the pure-data construction intent of one run.
 
 ``build_spec(cfg, args)`` performs the pre-engine half of the old inline
 ``collect_cli.main`` path -- content-key normalization, scene-bundle
@@ -80,15 +80,15 @@ class RunSpec:
     backend: str
     backend_params: dict[str, JsonValue]
     #: backend-private options selected from ``env.backend_options.<backend>``
-    #: (v105.3; validated against the registry's ``options_schema``).
+    #: and validated against the registry's ``options_schema``.
     backend_options: dict[str, JsonValue]
     #: the run-level world declaration (``{mjcf: <path>}``), kept OUT of
-    #: ``backend_params`` (v101 A1).  Required for mujoco-family backends.
+    #: ``backend_params``.  Required for mujoco-family backends.
     world_base: JsonValue
-    #: the normalized articulation list (v101 A2; the old ``robot:`` block
+    #: the normalized articulation list (the old ``robot:`` block
     #: was removed).  Articulations are pure authoring data (no control mode).
     articulations: tuple[ArticulationSpec, ...]
-    #: the explicit control groups (v104): every driven joint is covered by
+    #: the explicit control groups: every driven joint is covered by
     #: exactly one group; undriven joints are declared in passive_joints.
     controls: tuple[ControlGroup, ...]
     adapter: dict[str, JsonValue]
@@ -223,10 +223,10 @@ def _normalize_articulations(
 ) -> tuple[ArticulationSpec, ...]:
     """Normalize ``cfg['articulations']`` and reject the removed ``robot:``.
 
-    v101 A2 owner ruling: no compatibility alias.  A config still carrying
+    owner ruling: no compatibility alias.  A config still carrying
     the old top-level ``robot:`` block fails fast with the new shape; the
     ``articulations[]`` list is normalized into the frozen neutral IR.  The
-    v104 articulation-level ``control:`` block is rejected by the
+    articulation-level ``control:`` block is rejected by the
     articulation normalizer (drives live in ``controls[]``).
     """
     from unigym.errors import ConfigError
@@ -249,7 +249,7 @@ def _normalize_controls(
 ) -> tuple[ControlGroup, ...]:
     """Normalize/validate ``cfg['controls']`` against the articulations.
 
-    v104: a run that declares articulations must declare controls.  Every
+    A run that declares articulations must declare controls.  Every
     driven joint belongs to exactly one group; undriven joints are listed in
     the owning articulation's ``passive_joints`` (validated here).
     """
@@ -348,7 +348,7 @@ def build_spec(
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec."""
     raw_cfg = copy.deepcopy(cfg)
-    # v091 D-3: the content key surface ('objects:') normalizes onto the
+    # The content key surface ('objects:') normalizes onto the
     # internal name BEFORE the scene merge, so a run config and the bundle
     # it references both migrate through the one function.
     cfg = _require_config(
@@ -435,7 +435,7 @@ def build_spec(
     # torch device follows --device (AppLauncher); the env backend also sets
     # cfg.sim.device so SimulationContext lands on the same GPU.
     device = args.device if getattr(args, "device", "cpu") != "cpu" else "cpu"
-    # v091 content: the run's ``objects:`` content spec (split out by the
+    # The run's ``objects:`` content spec (split out by the
     # normalizer) rides env.params into the mujoco scene build.
     backend_label = str(env_cfg.get("backend", "isaaclab"))
     from unigym.errors import ConfigError

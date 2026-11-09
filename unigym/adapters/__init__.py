@@ -29,7 +29,7 @@ class AdapterParamsError(ValueError):
 
     ``.doc`` carries the structured {error, legal, example, hint} dict the
     faces return verbatim -- the caller corrects itself without reading
-    source (the v0581 teaching-error style).
+    source (the teaching-error style).
     """
 
     def __init__(self, message: str, doc: dict[str, object]):

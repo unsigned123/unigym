@@ -56,7 +56,7 @@ __all__ = ["SceneOps", "SceneFace", "build_scene_ops", "attach",
 
 @runtime_checkable
 class SceneOps(Protocol):
-    """Per-backend scene mechanics (the director-ops seam, M2 style).
+    """Per-backend scene mechanics (the director-ops seam).
 
     Implementations: ``backends/mujoco/scene.MujocoSceneOps`` /
     ``backends/isaaclab2/scene.IsaacLabSceneOps``.  All methods are

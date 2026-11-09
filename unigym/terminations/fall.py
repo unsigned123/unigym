@@ -12,7 +12,7 @@ tilted > ~60 deg from vertical.  The combined rule
 with defaults 0.15 m / 0.8 rad (~46 deg) separates normal locomotion
 (< ~30 deg tilt) from fallen states (> ~60 deg) with margin.
 
-v103.6: a term judges exactly one articulation; ``articulation`` is a
+A term judges exactly one articulation; ``articulation`` is a
 required param and the state is read from ``state.articulations[name]``.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ class FallTermination(ArticulationTermination):
 
     params:
         articulation: REQUIRED articulation name; the term reads
-            ``articulation/<name>/...`` from the state (v103.6, no flat
+            ``articulation/<name>/...`` from the state (no flat
             fallback).
         height_threshold: base-z below which the term fires (default 0.15).
         tilt_threshold: body-tilt threshold in rad (default 0.8);

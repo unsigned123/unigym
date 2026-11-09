@@ -1,4 +1,4 @@
-"""Neutral runtime descriptions of articulations and explicit controls (v104.2).
+"""Neutral runtime descriptions of articulations and explicit controls.
 
 An *articulation* is ``root + model + joints + spawn``; a *control* is one
 explicit drive face over an articulation (the owning adapter, its joints,
@@ -6,7 +6,7 @@ the drive/target pair and the backend-specific addressing/strategy).  There
 is no "policy" runtime type: a policy is just ``position_pd`` (or
 ``position_servo``) plus an adapter.
 
-Owner rulings (v104):
+Owner rulings:
 
 * every engine publishes ``env.articulations`` and ``env.controls`` and
   iterates them -- there is no single/multi mode switch;
@@ -189,7 +189,7 @@ class ArticulationRuntime:
 
 @dataclass
 class ControlRuntime:
-    """One explicit drive face over an articulation (v104 §3.3).
+    """One explicit drive face over an articulation (§3.3).
 
     Attributes:
         name: the control name (the ``env.controls`` key).
@@ -311,7 +311,7 @@ def _control_q0(group: ControlGroup, joint_names: Sequence[str],
 
 def _explicit_joint_set(group: ControlGroup,
                         recipe: RobotRecipe | None) -> tuple[str, ...]:
-    """Resolve ``group.joint_set`` against the articulation's recipe (v105).
+    """Resolve ``group.joint_set`` against the articulation's recipe.
 
     Fail-fast when the articulation has no recipe or the set is unknown; no
     group-name / ``hand`` inference is involved.
@@ -351,7 +351,7 @@ def _declared_control_runtime(
             f"control group {group.name!r} names articulation "
             f"{group.articulation!r}, which is not declared")
     recipe = recipes.get(group.articulation)
-    # v105 explicit resolution: explicit joints win; otherwise the named
+    # explicit resolution: explicit joints win; otherwise the named
     # joint_set is expanded once from the recipe; no group-name inference.
     if group.joints:
         bare = tuple(group.joints)
@@ -390,8 +390,8 @@ def _declared_control_runtime(
 class ResolvedControl:
     """One build-time resolved control face (the read-only plan row).
 
-    Every joint name here is a neutral ``unigym_name`` (v105 §2.4): the
-    backend name map is a V105.3 concern and never appears on this surface.
+    Every joint name here is a neutral ``unigym_name`` (§2.4): the
+    backend name map never appears on this surface.
     """
 
     name: str
@@ -483,7 +483,7 @@ def build_control_plan(
 
 def _actuated_joints(art: ArticulationSpec,
                      recipe: RobotRecipe | None) -> tuple[str, ...]:
-    """The articulation's full actuated joint vocabulary (v105 §4)."""
+    """The articulation's full actuated joint vocabulary (§4)."""
     if recipe is not None:
         sets: Mapping[str, Sequence[str]] = dict(
             getattr(recipe, "joint_sets", None) or {})
@@ -502,7 +502,7 @@ def validate_resolved_coverage(
         recipes: AbcMapping[str, RobotRecipe] | None,
         controls: Iterable[ControlGroup] | None,
         runtimes: Iterable[ControlRuntime] | None) -> None:
-    """Validate the resolved control coverage of every articulation (v105 §4).
+    """Validate the resolved control coverage of every articulation (§4).
 
     For each articulation with declared controls:
 

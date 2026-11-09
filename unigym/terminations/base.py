@@ -6,7 +6,7 @@ per-step ``extra`` dict (live, torch) or an episode's recorded arrays
 (offline, numpy).  Implementations must rely on operator overloading only
 (``< | ~ .sum(-1)``) so the same code path works for both backends.
 
-v103.6: every articulation is a first-class citizen.  :class:`TerminationState`
+Every articulation is a first-class citizen.  :class:`TerminationState`
 carries ONLY the namespaced ``articulations`` mapping (``articulation/<name>/``
 keys), global body-contact data, per-articulation joint limits, and a batch
 reference -- there is no flat single-robot state and no primary binding.
@@ -79,7 +79,7 @@ class TerminationState:
     Populated live from an env's ``extra`` (torch, ``(N, ...)``) via
     :meth:`from_extra`, or offline from an episode's recorded arrays
     (numpy, ``(T, ...)``) via :meth:`from_episode_data`.  Every robot-state
-    field lives under ``articulations[name]`` (v103.6; no flat primary).
+    field lives under ``articulations[name]`` (no flat primary).
     Optional fields may be missing; individual terminations decide how to
     degrade (skip the term or never fire).
     """

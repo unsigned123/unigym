@@ -11,7 +11,7 @@ class InvertedTermination(Termination):
 
     Turns a *fault* detector into a *health* detector, e.g. wrapping
     ``FallTermination`` yields "body upright and high enough" — the
-    exit/health condition of recovery-style switching (P11). Built from
+    exit/health condition of recovery-style switching. Built from
     yaml via the per-entry ``invert: true`` flag (see
     :func:`terminations.build_terminations`).
     """

@@ -1,4 +1,4 @@
-"""Explicit control declarations (v104).
+"""Explicit control declarations.
 
 A run declares *how* each joint is driven in a top-level ``controls:`` list.
 Every entry becomes one :class:`ControlGroup`: the action face (its ``name``),
@@ -7,7 +7,7 @@ explicit ``drive`` / ``target`` pair.
 
 This module is pure data plus validation: it imports only the standard
 library and the neutral articulation IR.  No engine or backend module is
-named here (the runtime/backends consume these declarations in V104.2).
+named here (the runtime/backends consume these declarations).
 
 Drive semantics (owner ruling §3.2):
 
@@ -190,7 +190,7 @@ def _required_text(entry: Mapping[str, JsonValue], key: str) -> str:
 
 @dataclass(frozen=True)
 class ControlGroup:
-    """One explicit drive face over one articulation (v105 §2.2).
+    """One explicit drive face over one articulation (§2.2).
 
     Exactly one of ``joint_set`` / non-empty ``joints`` must be declared.
 
@@ -380,7 +380,7 @@ def validate_controls(
     controls: Iterable[ControlGroup] | None,
     passive_joints_by_articulation: Mapping[str, Iterable[str]] | None = None,
 ) -> None:
-    """Validate the explicit control coverage of one run (v104 §3.2/§5).
+    """Validate the explicit control coverage of one run (§3.2/§5).
 
     Rules:
       * a group's articulation must be declared;
@@ -394,7 +394,7 @@ def validate_controls(
 
     ``joint_set`` groups are resolved by the recipe at build time, so their
     concrete joints are not known here; joint-level checks skip them (the
-    build-time resolution validates the set name and coverage in V105.2).
+    build-time resolution validates the set name and coverage).
     Recipe-derived articulations (no declared ``joints``) cannot be checked
     for coverage here either.
 
@@ -468,7 +468,7 @@ def validate_controls(
                 f"{unknown_passive} are not declared joints")
         if art.name in unresolved:
             # a joint_set group is resolved by the recipe at build time;
-            # coverage is validated there (V105.2), not against a partial
+            # coverage is validated there, not against a partial
             # driven set
             continue
         actuated = declared - art_passive

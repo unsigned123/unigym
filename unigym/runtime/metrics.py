@@ -6,7 +6,7 @@ is docs/contracts/runtime_contract.md §2) so the daemon can answer typed
 control queries (command ids 10-12) without any run-side state of its own:
 
 * tick level   -- timing scalars only (fps EMA / sim_time), one seqlock
-                 cycle per step, microseconds (the B9 budget holds);
+                 cycle per step, microseconds (the budget holds);
 * episode end  -- the typed document: task identity, last episode
                  {reward, success, steps} and the bounded reward/success
                  rings (fixed capacity, head pointer -- never grows with

@@ -1,4 +1,4 @@
-"""Freeze face (v056 freeze paradigm): skill halt -> world freeze.
+"""Freeze face (freeze paradigm): skill halt -> world freeze.
 
 The paradigm (design ``docs/designs/v056-freeze-paradigm.md``): the
 agent thinks while the world stands still -- world time advances only

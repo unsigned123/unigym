@@ -21,7 +21,7 @@ from .velocity import VelocityRangeFilter
 FILTER_REGISTRY = {
     "base_contact": FallenFilter,
     "fallen": FallenFilter,            # alias
-    "termination": TerminationFilter,  # generic (P10, terminations-based)
+    "termination": TerminationFilter,  # generic (terminations-based)
     "velocity": VelocityRangeFilter,
 }
 
@@ -32,7 +32,7 @@ def build_filter_chain(filters_cfg: list | None,
 
     *articulations* is the run's ordered policy-binding names.  When exactly
     one binding exists, filters that accept an ``articulation`` param get it
-    injected (the v103.6 cardinality convenience, not a primary).  Returns an
+    injected (the cardinality convenience, not a primary).  Returns an
     empty list when *filters_cfg* is None or empty (no filtering).
     """
     if not filters_cfg:

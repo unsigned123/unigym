@@ -265,7 +265,7 @@ def _adapter_section(adapter: JsonValue) -> dict[str, JsonValue]:
 
 
 def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
-    """Builder convenience: one ``articulations[]`` entry (v104 shape).
+    """Builder convenience: one ``articulations[]`` entry.
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
     config alias: it emits the same authoring shape a yaml file declares
@@ -290,7 +290,7 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
 def _controls_entries(
     robot: JsonValue, adapter: JsonValue,
 ) -> list[dict[str, JsonValue]]:
-    """Builder convenience: the top-level ``controls:`` groups (v105).
+    """Builder convenience: the top-level ``controls:`` groups.
 
     The body group is named after the articulation (the historical action
     face) and selects ``joint_set: body``; recipe-declared extra faces
@@ -321,7 +321,7 @@ def _controls_entries(
         # Only recipe-declared extra faces (``actuate_hands``) are emitted
         # here: an adapter that emits a face the recipe does not declare
         # (e.g. the G1 ``hand`` face) must get it from its config's
-        # ``controls[]`` -- the v104 partition is the single authority.
+        # ``controls[]`` -- the partition is the single authority.
         terms: Mapping[str, Sequence[str]] = (
             recipe.extra_action_terms or {})
         for face in terms:
@@ -344,7 +344,7 @@ def _minimal_cfg(
     """The programmatic base config (existing schema only; no YAML).
 
     The world asset is NOT injected here: callers pass it explicitly via
-    ``world_base`` / a :class:`~unigym.world.World` declaration (v101 A1).
+    ``world_base`` / a :class:`~unigym.world.World` declaration.
     """
     env_section: dict[str, JsonValue] = {
         "backend": backend,
@@ -418,7 +418,7 @@ def _camera_entries(
 
 
 class Run:
-    """A lazy run builder + session (v097/v098 S1a/S1b).
+    """A lazy run builder + session.
 
     The object is cheap: constructing it only records the config and the
     override knobs.  :meth:`build` (or the first live access) runs the
@@ -458,7 +458,7 @@ class Run:
         robot: A registered robot name (default ``"g1"``).
         backend: Environment backend (default ``"mujoco"``).
         backend_options: Backend-private options mapping
-            (``env.backend_options``; v105.3), e.g.
+            (``env.backend_options``), e.g.
             ``{"mujoco": {"compose": {"auto_prefix": True}}}``.
         num_envs: Environment count (default 1).
         seed: Run seed (default 0).
@@ -903,7 +903,7 @@ class Run:
         return self.build().model
 
     def live_for(self, name: str | None = None) -> LiveModel:
-        """Zero-copy live proxies for one articulation's IR (v103.4).
+        """Zero-copy live proxies for one articulation's IR.
 
         Args:
             name: An articulation name; ``None`` binds the single
@@ -1006,7 +1006,7 @@ class Run:
         """Write the normalized effective config as yaml; return its path.
 
         The world asset serializes as the run-level ``world_base: {mjcf:
-        <path>}`` declaration (v101 A1); it is never an ``env.params`` key.
+        <path>}`` declaration; it is never an ``env.params`` key.
 
         Args:
             path: Destination file (parent directories are created).

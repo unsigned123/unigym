@@ -72,7 +72,7 @@ class RawObsRequest:
             ``None`` for every other key.
         articulation: the articulation name for a bare per-articulation key.
             REQUIRED for every robot-state key (there is no env-side
-            controller inference, v104.3).  Global keys (``cam/``,
+            controller inference).  Global keys (``cam/``,
             ``contact/``, ``object/``, ``site/``, props) keep ``None``.  A
             pre-namespaced key (``articulation/<name>/...``) needs none.
     """
@@ -157,21 +157,21 @@ class Adapter(ABC):
     generates_command: bool = False
     """True when the adapter produces its own command vector every step
     (e.g. hierarchical policies); collect.py then skips the command sampler
-    and records :attr:`last_command` instead (P9d)."""
+    and records :attr:`last_command` instead."""
 
     _unigym_name: str = ""
     """Registry identity stamped by ``build_adapter`` (the controls[]
     partition / group validation resolve ownership by this name)."""
 
     rewindable: bool = False
-    """Rewind superpower declaration (Round B B1, explicit class attribute —
+    """Rewind superpower declaration (explicit class attribute —
     never hasattr).  True means the adapter implements ``on_rewind`` and can
     resync to a restored timeline (the rewind gate fail-fasts otherwise).
     Adapters with internal streaming state should also implement
     ``snapshot_internal``/``restore_internal`` for full determinism."""
 
     def on_rewind(self, restored_tick: int) -> None:
-        """Resync to a restored timeline (rewind face, Round B B1).
+        """Resync to a restored timeline (rewind face).
 
         Called by the rewind controller AFTER ``restore_internal`` (when
         implemented): drop in-flight work -> hold, roll back event seq,

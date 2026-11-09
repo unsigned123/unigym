@@ -1,4 +1,4 @@
-"""Run construction face (v097): spec -> instance.
+"""Run construction face: spec -> instance.
 
 ``RunSpec`` / ``build_spec`` are data-only and import cheaply.  The live
 construction modules (``build`` / ``instance``) are loaded lazily so

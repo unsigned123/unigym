@@ -109,7 +109,7 @@ class NamedAction:
 
 
 # --------------------------------------------------------------------------- #
-# the resolver protocol (backend-traits M2: the typed seam both backends
+# the resolver protocol (backend-traits: the typed seam both backends
 # implement; NamedAction consumers dispatch here, never on engine names)
 # --------------------------------------------------------------------------- #
 @runtime_checkable
@@ -168,7 +168,7 @@ class IsaaclabJointResolver:
             self._cache[key] = idx
         return idx
 
-    # JointResolver protocol name (M2): the isaaclab addressing primitive
+    # JointResolver protocol name: the isaaclab addressing primitive
     # is the gather index; ``gather`` stays the historical caller face.
     resolve = gather
 
@@ -232,9 +232,9 @@ class MujocoJointResolver:
             raise ValueError(
                 f"mujoco action resolver: prop joint names {conflict} "
                 f"collide with robot joint names (namespace conflict)")
-        # name -> (qpos_adr, dof_adr) from the compiled ModelIR (M2); the
+        # name -> (qpos_adr, dof_adr) from the compiled ModelIR; the
         # address table is derived here once and is not a hot-path lookup.
-        # The MjModel fallback is the pre-M2 legacy path for stand-alone
+        # The MjModel fallback is the legacy path for stand-alone
         # callers (tests) that do not assemble an IR: this module stays
         # torch-only and may not import unigym.model (layer contract).
         self.addresses: dict[str, tuple[int, int]]

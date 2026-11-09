@@ -1,6 +1,6 @@
-"""Passive-joint authoring sugar for the programmatic builders (v105).
+"""Passive-joint authoring sugar for the programmatic builders.
 
-A v105 recipe declares its full actuated vocabulary (``joint_sets``) and
+A recipe declares its full actuated vocabulary (``joint_sets``) and
 every control group selects an explicit subset.  The programmatic builders
 (``Run(robot=...)`` / ``World``) are authoring sugar, so the remaining
 recipe joints are written into ``passive_joints`` instead of inventing a
@@ -35,7 +35,7 @@ def declare_passive_joints(
         dict(raw_params) if isinstance(raw_params, dict) else {})
     selector = params.pop("profile", None)
     if selector is not None:
-        # v105: `params.profile` selects the recipe for a renamed
+        # `params.profile` selects the recipe for a renamed
         # articulation (e.g. g1b); it never reaches the recipe factory.
         section["params"] = params
         section["name"] = str(selector)

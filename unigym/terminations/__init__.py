@@ -15,7 +15,7 @@ logging/filtering; nothing actually resets in collection mode)::
         articulation: g1
         params: {margin: 0.05}
 
-v106.1 explicit articulation ownership: every per-articulation term carries an
+Explicit articulation ownership: every per-articulation term carries an
 explicit ``articulation`` (top-level or under ``params``).  There is no
 single-binding injection: a missing ``articulation`` fails fast at
 construction, whether the run has one binding or several.
@@ -62,7 +62,7 @@ def build_terminations(cfg: list | None) -> list[Termination]:
         if explicit is not None:
             params["articulation"] = explicit
         term = TERMINATION_REGISTRY[name](params, name=name)
-        if entry.get("invert", False):  # P11: NOT(term) health conditions
+        if entry.get("invert", False):  # NOT(term) health conditions
             term = InvertedTermination(term, name=name)
         terms.append(term)
     return terms

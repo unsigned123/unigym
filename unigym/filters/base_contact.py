@@ -1,6 +1,6 @@
 """Fallen filter: discard episodes with excessive fall indicators.
 
-P10 refactor: the height/tilt fall logic now lives in the unified
+The height/tilt fall logic now lives in the unified
 termination system (:mod:`unigym.terminations`).  :class:`FallenFilter`
 keeps its yaml interface unchanged (``max_fallen_ratio`` /
 ``height_threshold`` / ``check_tilt`` / ``tilt_threshold`` /
@@ -11,7 +11,7 @@ episode's recorded arrays.  The "all four feet airborne" term has no
 termination counterpart (it is an episode-quality signal, not a state
 fault) and stays as a filter-local OR.
 
-v103.6: recorded state is read from ``articulation/<name>/...`` only.  A
+Recorded state is read from ``articulation/<name>/...`` only.  A
 filter may name its ``articulation`` explicitly; otherwise it resolves the
 unique recorded articulation (a cardinality fact) and fails fast when the
 episode carries several.
