@@ -177,7 +177,7 @@ class ContactGroupSpec:
 
     # ---- parsing -------------------------------------------------------- #
     @classmethod
-    def from_yaml(cls, entry: dict) -> "ContactGroupSpec":
+    def from_yaml(cls, entry: dict) -> ContactGroupSpec:
         """Build a spec from one yaml ``contacts:`` list entry.
 
         Unknown keys raise (fail-fast against typos); ``name``,
@@ -278,7 +278,7 @@ class _ContactBackendFace(Protocol):
                           articulated: bool) -> list[str]: ...
 
 
-def _contact_face(backend: str) -> "type[_ContactBackendFace]":
+def _contact_face(backend: str) -> type[_ContactBackendFace]:
     """Resolve the backend contact face lazily through the registry.
 
     The face class owns BOTH the raw-reading backend object and the
@@ -300,7 +300,7 @@ def _contact_face(backend: str) -> "type[_ContactBackendFace]":
     return cast("type[_ContactBackendFace]", factory())
 
 
-def build_contact_backend(backend: str, specs) -> "_ContactBackendFace":
+def build_contact_backend(backend: str, specs) -> _ContactBackendFace:
     """Construct the backend contact object for *specs* (registry face)."""
     return _contact_face(backend)(specs)
 

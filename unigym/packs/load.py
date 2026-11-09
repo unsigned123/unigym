@@ -30,6 +30,7 @@ import importlib.util
 import sys
 import traceback
 from pathlib import Path
+from typing import TypedDict
 
 from . import MountedPack, PackError
 from .mount import pack_roots
@@ -316,7 +317,16 @@ def load_mounted_code() -> dict[str, tuple[str, ...]]:
     return loaded
 
 
-def registration_report() -> dict[str, object]:
+class RegistrationReport(TypedDict):
+    """The closed-set registry counts summarised for the CLI."""
+
+    packs: dict[str, tuple[str, ...]]
+    scenes: int
+    props: int
+    terminations: int
+
+
+def registration_report() -> RegistrationReport:
     """Summarise what the closed registries currently hold.
 
     Returns:

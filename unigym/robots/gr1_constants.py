@@ -179,7 +179,7 @@ GR1_KD_BODY = 200.0
 # ---------------------------------------------------------------------------
 GR1_BASE_BODY = "robot0_whole_body"
 
-GR1_BODY_PARTS: Dict[str, Dict | List] = {
+GR1_BODY_PARTS: Dict[str, Dict | List | str] = {
     "feet": [],
     "base": GR1_BASE_BODY,
     "joints": list(GR1_JOINT_ORDER),

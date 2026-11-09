@@ -28,7 +28,7 @@ class ExternalRunner(SyncRunner):
 
     @classmethod
     def from_instance(cls, instance, action_fn: Callable | None = None
-                      ) -> "ExternalRunner":
+                      ) -> ExternalRunner:
         """Build from a live RunInstance (mirrors SyncRunner.from_instance)."""
         spec = instance.spec
         runner_cfg = spec.runner or {}

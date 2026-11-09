@@ -59,8 +59,9 @@ class TraceReader:
         self.root = Path(root)
         self.manifest = load_manifest(self.root)
         self.indices: list[int] = sorted(
-            int(TICK_RE.match(p.name).group(1))
-            for p in self.root.glob("tick_*.npz") if TICK_RE.match(p.name))
+            int(m.group(1))
+            for p in self.root.glob("tick_*.npz")
+            if (m := TICK_RE.match(p.name)) is not None)
         if not self.indices:
             raise ValueError(f"{self.root}: manifest but zero tick shards")
 

@@ -93,7 +93,7 @@ class NamedAction:
 
     @classmethod
     def zeros(cls, num_envs: int, joint_names, kind: str, device="cpu",
-              dtype=torch.float32) -> "NamedAction":
+              dtype=torch.float32) -> NamedAction:
         """All-zero action over *joint_names* with an explicit *kind*."""
         names = list(joint_names)
         return cls(torch.zeros(int(num_envs), len(names), dtype=dtype,
@@ -178,9 +178,9 @@ class ResolvedJointTargets:
     value when no entry addresses them).
     """
 
-    pol_idx: "object"   # np.ndarray int64, -1 where not a policy joint
-    hand_idx: "object"  # np.ndarray int64, -1 where not a hand joint
-    prop_adr: "object"  # np.ndarray int64, ctrl adr where a prop joint
+    pol_idx: object   # np.ndarray int64, -1 where not a policy joint
+    hand_idx: object  # np.ndarray int64, -1 where not a hand joint
+    prop_adr: object  # np.ndarray int64, ctrl adr where a prop joint
 
 
 class MujocoJointResolver:

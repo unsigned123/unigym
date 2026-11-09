@@ -40,7 +40,7 @@ def _asset_joint_names(env):
 
 
 
-def sim_joint_limits(data, joint_names) -> "dict[str, tuple[float, float]] | None":
+def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None:
     """An articulation's sim-provided joint limits by name.
 
     Static: parsed from the USD/PhysX schema at articulation init.

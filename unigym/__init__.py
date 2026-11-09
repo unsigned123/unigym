@@ -21,6 +21,8 @@ dynamic proxies and ``run.step`` / ``run.steps`` for the default synchronous
 runner.
 """
 
+from __future__ import annotations
+
 from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING

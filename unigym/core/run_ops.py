@@ -110,7 +110,7 @@ class RunSpec:
         return errs
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RunSpec":
+    def from_dict(cls, d: dict) -> RunSpec:
         known = {f for f in cls.__dataclass_fields__}  # noqa: C416
         unknown = set(d) - known
         if unknown:

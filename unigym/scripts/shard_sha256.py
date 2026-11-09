@@ -8,6 +8,9 @@ Usage:
     python scripts/shard_sha256.py <run_dir>                 # print hashes
     python scripts/shard_sha256.py <dir_a> <dir_b>           # + diff verdict
 """
+
+from __future__ import annotations
+
 import hashlib
 import sys
 from pathlib import Path

@@ -105,6 +105,9 @@ class Inspector:
             return self.summary()
         if target in ("obs", "extra"):
             key = params.get("key")
+            if not isinstance(key, str):
+                raise ConsoleError(
+                    f"inspect: {target} key must be a string, got {key!r}")
             source = self._source(target)
             if key not in source:
                 raise ConsoleError(
@@ -129,11 +132,15 @@ class Inspector:
                 out[k] = st.get(k)
         return out
 
+    def _bundle(self) -> dict:
+        """Current bundle snapshot (empty when no provider is wired)."""
+        return self._bundle_fn() if self._bundle_fn is not None else {}
+
     def _source(self, which: str) -> dict:
         if which == "obs":
             src = getattr(self.env, "obs_cache", None)
             return src if isinstance(src, dict) else {}
-        bundle = self._bundle_fn() or {}
+        bundle = self._bundle() or {}
         src = bundle.get("extra")
         return src if isinstance(src, dict) else {}
 
@@ -210,7 +217,7 @@ class Inspector:
         return ns.pop(ret, None)
 
     def _namespace(self) -> dict:
-        bundle = self._bundle_fn() or {}
+        bundle = self._bundle() or {}
         return {
             "np": np,
             "torch": torch,
@@ -287,7 +294,7 @@ class Inspector:
         np.savez(target, **arrays)
         return target
 
-    def _resolve_path(self, path, rid: int) -> Path:
+    def _resolve_path(self, path, rid: int | None) -> Path:
         root = Path(self.out_dir) if self.out_dir \
             else Path("data_out")
         if path:

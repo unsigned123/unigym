@@ -144,7 +144,7 @@ class Console:
             bundle_fn=lambda: getattr(bridge, "_bundle", None) or {})
         self.attached = False
 
-    def attach(self) -> "Console":
+    def attach(self) -> Console:
         """Register the three handlers into the bridge dispatch table."""
         self.bridge._install_console(self)
         self.attached = True

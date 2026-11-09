@@ -43,7 +43,7 @@ class MujocoDirectorOps(_OpsBase):
     def __init__(self, env):
         self.env = env
         # free props: name -> (body_id, qpos addr, qvel addr)
-        self._free: "dict[str, tuple[int, int, int]]" = {}
+        self._free: dict[str, tuple[int, int, int]] = {}
         # articulation props: name -> handle (joints/qpos/dof/ctrl addrs)
         self._arts: dict = {}
         # the virtual gripper (constructed in bind; None when undeclared)
@@ -52,7 +52,7 @@ class MujocoDirectorOps(_OpsBase):
     # ------------------------------------------------------------------ #
     # binding
     # ------------------------------------------------------------------ #
-    def bind(self, gripper_cfg: "dict | None"):
+    def bind(self, gripper_cfg: dict | None):
         """Load prop address tables and mount the virtual gripper.
 
         Args:
@@ -78,7 +78,7 @@ class MujocoDirectorOps(_OpsBase):
     # ------------------------------------------------------------------ #
     # resolution
     # ------------------------------------------------------------------ #
-    def prop_names(self) -> "list[str]":
+    def prop_names(self) -> list[str]:
         """Sorted declared prop names, free rigid + articulation."""
         return sorted(self._free) + sorted(self._arts)
 
@@ -291,7 +291,7 @@ class MujocoDirectorOps(_OpsBase):
         if att.get("mode") == "weld":
             self.env.mj_data.eq_active[att["eq"]] = 0
 
-    def host_pose(self, host: str) -> "tuple[np.ndarray, np.ndarray]":
+    def host_pose(self, host: str) -> tuple[np.ndarray, np.ndarray]:
         """Read a host's world pose (m / wxyz quat; numpy copies)."""
         bid = _weld_bid(self.resolve_weld_host(host))
         d = self.env.mj_data
@@ -310,7 +310,7 @@ class MujocoDirectorOps(_OpsBase):
         self.env.mj_data.qpos[qadr:qadr + 3] = pos
         self.env.mj_data.qpos[qadr + 3:qadr + 7] = quat
 
-    def obj_pose(self, obj: str) -> "tuple[np.ndarray, np.ndarray]":
+    def obj_pose(self, obj: str) -> tuple[np.ndarray, np.ndarray]:
         """Read a free rigid prop's qpos pose (m / wxyz quat)."""
         _, qadr, _ = self._free_prop(obj)
         d = self.env.mj_data
@@ -357,7 +357,7 @@ class MujocoDirectorOps(_OpsBase):
         mujoco.mj_forward(m, d)
         return {"pushed": "robot", "lin": lin, "ang": ang, "mode": mode}
 
-    def write_joints(self, joints: "dict[str, float]",
+    def write_joints(self, joints: dict[str, float],
                      zero_vel: bool) -> dict:
         """Robot-joint qpos write by name (director_contract §3.11).
 
@@ -414,7 +414,7 @@ class MujocoDirectorOps(_OpsBase):
     # ------------------------------------------------------------------ #
     # internals
     # ------------------------------------------------------------------ #
-    def _free_prop(self, obj: str) -> "tuple[int, int, int]":
+    def _free_prop(self, obj: str) -> tuple[int, int, int]:
         """Free-rigid prop addresses -- the pin/follow feasibility gate.
 
         Articulation roots are model-anchored -- the honest fail-fast.

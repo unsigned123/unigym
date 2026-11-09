@@ -32,7 +32,7 @@ class IsaacLabDirectorOps(_OpsBase):
     # ------------------------------------------------------------------ #
     # binding
     # ------------------------------------------------------------------ #
-    def bind(self, gripper_cfg: "dict | None"):
+    def bind(self, gripper_cfg: dict | None):
         """Grab the prop handler/asset tables and mount the virtual gripper.
 
         Args:
@@ -61,7 +61,7 @@ class IsaacLabDirectorOps(_OpsBase):
     # ------------------------------------------------------------------ #
     # resolution
     # ------------------------------------------------------------------ #
-    def prop_names(self) -> "list[str]":
+    def prop_names(self) -> list[str]:
         """Sorted declared prop names (director target-addressing domain)."""
         return sorted(self._handlers_by_prop)
 
@@ -169,7 +169,7 @@ class IsaacLabDirectorOps(_OpsBase):
         """Detach a kinematic attachment (no backend-side state to clear)."""
         pass  # slave attachments carry no backend-side state
 
-    def host_pose(self, host: str) -> "tuple":
+    def host_pose(self, host: str) -> tuple:
         """Read a host's world pose for pin/follow (director_contract §3.7/3.8).
 
         Args:
@@ -223,7 +223,7 @@ class IsaacLabDirectorOps(_OpsBase):
                                     device=self.env.device)
         asset.write_root_pose_to_sim(pose)
 
-    def obj_pose(self, obj: str) -> "tuple":
+    def obj_pose(self, obj: str) -> tuple:
         """Read a rigid prop's world pose (m / wxyz quat; fail-fast).
 
         Articulation props are rejected (pin/follow is rigid-only;
@@ -286,7 +286,7 @@ class IsaacLabDirectorOps(_OpsBase):
                 "ang": None if ang is None else [float(v) for v in ang],
                 "mode": mode}
 
-    def write_joints(self, joints: "dict[str, float]",
+    def write_joints(self, joints: dict[str, float],
                      zero_vel: bool) -> dict:
         """Robot-joint position write (director_contract §3.11).
 
@@ -348,11 +348,11 @@ class IsaacLabDirectorOps(_OpsBase):
     # internals
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _asset_root_pose(asset) -> "tuple":
+    def _asset_root_pose(asset) -> tuple:
         return (asset.data.root_pos_w[0].detach().cpu().numpy(),
                 asset.data.root_quat_w[0].detach().cpu().numpy())
 
-    def _robot_body_idx(self, robot, host: str) -> "int | None":
+    def _robot_body_idx(self, robot, host: str) -> int | None:
         """Robot body index for a link name (or the ``hand`` alias).
 
         Match order: exact name -> qualified tail (``right_hand/`` scopes

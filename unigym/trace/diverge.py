@@ -155,8 +155,8 @@ def diverge(ref_dir: str | Path, rep_dir: str | Path, map_name: str,
         raise DivergeError("zero common ticks")
 
     diffs: dict[str, np.ndarray] = {}
-    achieved_doc: dict[str, list] = {}
-    target_doc: dict[str, dict] = {}
+    achieved_doc: dict[str, list | None] = {}
+    target_doc: dict[str, dict | None] = {}
     specs = m.get("comparisons") or {}
 
     ach = specs.get("achieved")

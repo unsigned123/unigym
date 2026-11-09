@@ -141,12 +141,14 @@ def _points_in_box(points, r_pos, r_mat, size):
         - size[2] * r_mat[:, 2]
     axes = [p0 + 2 * size[k] * r_mat[:, k] - p0 for k in range(3)]
     dp = points - p0[:, None, :]
-    inside = None
+    terms = []
     for j, ax in enumerate(axes):
         d = np.einsum("bnj,bj->bn", dp, ax)
         bound = np.einsum("bj,bj->b", ax, ax)[:, None]
-        term = (d >= 0.0) & (d <= bound)
-        inside = term if inside is None else (inside & term)
+        terms.append((d >= 0.0) & (d <= bound))
+    inside = terms[0]
+    for term in terms[1:]:
+        inside = inside & term
     return inside
 
 

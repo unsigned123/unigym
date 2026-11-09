@@ -22,3 +22,5 @@ Modules:
               (unigym.scripts.spawn_spec, byte-pinned by L1)
     alloc     pick_port()/pick_gpu() (parallel-run allocation)
 """
+
+from __future__ import annotations

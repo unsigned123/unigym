@@ -22,6 +22,7 @@ import json
 import os
 import time
 from collections import defaultdict
+from typing import Any
 
 import numpy as np
 import torch
@@ -101,7 +102,8 @@ class ShardWriter:
     def _flush(self) -> None:
         if self._steps_in_shard == 0:
             return
-        arrays = {k: np.stack(v, axis=0) for k, v in self._buf.items()}  # (T, N, D)
+        arrays: dict[str, Any] = {
+            k: np.stack(v, axis=0) for k, v in self._buf.items()}  # (T, N, D)
         path = os.path.join(self.out_dir, f"shard_{self._shard_idx:04d}.npz")
         np.savez(path, **arrays)
         if not self._meta_written:
@@ -187,7 +189,7 @@ class ShardWriter:
         return removed
 
 
-def validate_commit_state(state: dict, writer: "ShardWriter") -> tuple:
+def validate_commit_state(state: dict, writer: ShardWriter) -> tuple:
     """Pure-read validation of a commit state against *writer*'s shard
     dir + buffer (v063-rewind-preflight: split out of
     ``ShardWriter.restore_commit`` so the rewind pre-flight can run the

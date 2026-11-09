@@ -79,7 +79,7 @@ class GeomSDF:
 
     @classmethod
     def from_geoms(cls, model, data, geom_ids, box_type: int,
-                   mesh_type: int) -> "GeomSDF":
+                   mesh_type: int) -> GeomSDF:
         tris = geom_tris(model, data, geom_ids, box_type, mesh_type)
         boxes = []
         off = 0

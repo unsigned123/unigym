@@ -26,7 +26,7 @@ import random
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Protocol, overload
 
 from .generators import registered_generators
 from .scene_ir import Instance, Scene, validate_scene
@@ -44,6 +44,14 @@ _CONTENT_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 class SceneBindingError(ValueError):
     """One pipeline/content binding rule failed (fail closed, teaching)."""
+
+
+@overload
+def _jsonify(value: Mapping, path: str = "params") -> dict[str, object]: ...
+
+
+@overload
+def _jsonify(value: object, path: str = "params") -> object: ...
 
 
 def _jsonify(value, path: str = "params"):

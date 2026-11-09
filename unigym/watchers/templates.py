@@ -49,8 +49,7 @@ def _err(params: dict, key: str, expected: str) -> str:
 def _req_num(params: dict, key: str, errors: list, *, positive=False,
              nonneg=False) -> None:
     v = params.get(key)
-    ok = isinstance(v, (int, float)) and not isinstance(v, bool)
-    if not ok:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
         errors.append(_err(params, key, "a number"))
     elif positive and v <= 0:
         errors.append(f"{key}: must be > 0, got {v}")

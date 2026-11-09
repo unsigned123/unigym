@@ -228,7 +228,7 @@ def _payload_role(document: Mapping, asset_id: str) -> str:
     """The ``files`` role that holds this file asset's primary payload."""
     kind = document.get("kind")
     files = document.get("files") or {}
-    role = PAYLOAD_ROLES.get(kind)
+    role = PAYLOAD_ROLES.get(kind) if isinstance(kind, str) else None
     if role is not None:
         if role not in files:
             raise AssetCliError(

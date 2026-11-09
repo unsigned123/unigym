@@ -221,7 +221,7 @@ def _dtype_name(dtype) -> str:
     name = _DTYPE_TO_NAME.get(dtype)
     if name is None:
         raise ValueError(f"unsupported frame dtype {dtype!r} for the "
-                         f"obs catalog (allowed: {sorted(_DTYPE_TO_NAME)})")
+                         f"obs catalog (allowed: {sorted(_DTYPE_TO_NAME, key=str)})")
     return name
 
 

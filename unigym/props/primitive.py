@@ -34,6 +34,7 @@ are unchanged; they share :func:`resolve_mass` for the density vocabulary.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 
 from .base import (
@@ -127,7 +128,8 @@ def resolve_mass(spec: PropSpec, default: float | None = None) -> float:
 def material_colors(spawn: dict) -> tuple[float, float, float]:
     """The cosmetic colour from ``spawn.color`` / ``spawn.rgba``."""
     raw = spawn.get("color", spawn.get("rgba", (0.8, 0.6, 0.2)))
-    return tuple(float(v) for v in list(raw)[:3])
+    return cast("tuple[float, float, float]",
+                tuple(float(v) for v in list(raw)[:3]))
 
 
 def validate_primitive_spec(spec: PropSpec) -> None:

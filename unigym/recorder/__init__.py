@@ -18,6 +18,8 @@ Usage in ``collect.py``::
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from .video import write_mp4
@@ -39,7 +41,7 @@ class Recorder:
     """
 
     def __init__(self, config: dict | None, num_envs: int,
-                 camera_manager=None):
+                 camera_manager: Any = None):
         cfg = dict(config or {})
         self._num_envs = int(num_envs)
         self._enabled = bool(cfg.get("enabled", False))

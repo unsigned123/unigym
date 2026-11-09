@@ -443,7 +443,7 @@ class CameraManager:
         spec, rig = self._spec_and_rig(name)
         self._view_env(spec, rig, env_id)     # env_id discipline (§12.2)
         rspec, label = resolve_render(render)
-        cap_r: "Callable[[dict], dict] | None" = getattr(
+        cap_r: Callable[[dict], dict] | None = getattr(
             rig, "capture_render", None)
         if not callable(cap_r):
             raise ValueError(

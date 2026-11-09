@@ -86,7 +86,7 @@ class Gripper(Protocol):
     def set_pose(self, env, pos=None, quat=None) -> None: ...
 
 
-def build_gripper(env, cfg: dict | None, gripper_backend) -> "Gripper | None":
+def build_gripper(env, cfg: dict | None, gripper_backend) -> Gripper | None:
     """Construct the backend gripper from a NORMALIZED cfg (or None).
 
     ``gripper_backend`` is the :attr:`BackendInfo.gripper_backend`

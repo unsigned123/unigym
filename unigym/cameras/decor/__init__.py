@@ -153,7 +153,7 @@ class DecorContext:
         return self.contact_pos[idx].mean(axis=0)
 
     def target_geoms(self, target: str, *, collision_only: bool = True,
-                     types: "set[int] | None" = None) -> tuple[str, list[int]]:
+                     types: set[int] | None = None) -> tuple[str, list[int]]:
         """Resolve a decor ``target``: case-insensitive body-name prefix
         match -> the body's geoms (collision-class by default -- decor
         annotates physical truth, not visual shells).  Fail-fast with the

@@ -49,6 +49,9 @@ isaaclab note (unchanged): the backend resolves paths INSIDE the
 container -- an alias/deps root must exist under a container-visible
 prefix (unigym.yaml ``host_ro_prefix``) to be usable there.
 """
+
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
@@ -235,6 +238,22 @@ def canonical_asset_path(value: str) -> str:
 
 
 _FILE_ATTR_RE = re.compile(r'(file=")([^"]*)(")')
+
+
+@overload
+def canonical_asset_values(obj: str) -> str: ...
+
+
+@overload
+def canonical_asset_values(obj: dict[Any, Any]) -> dict[Any, Any]: ...
+
+
+@overload
+def canonical_asset_values(obj: list[Any]) -> list[Any]: ...
+
+
+@overload
+def canonical_asset_values(obj: Any) -> Any: ...
 
 
 def canonical_asset_values(obj):

@@ -29,6 +29,7 @@ from __future__ import annotations
 import random
 import re
 from collections.abc import Iterable, Mapping
+from typing import cast
 from pathlib import Path
 
 import yaml
@@ -186,10 +187,10 @@ def _validate_selector(selector: object) -> dict:
                 "selector",
                 f"'seed' must be an int, got {seed!r}; the seed makes a "
                 "random choice reproducible across runs")
-    return selector
+    return cast(dict, selector)
 
 
-def validate_spec(doc: dict) -> dict:
+def validate_spec(doc: Mapping) -> dict:
     """Validate one selection spec; return the document unchanged.
 
     A spec carries exactly ``name`` and ``selector``; the selector carries the
@@ -224,7 +225,7 @@ def validate_spec(doc: dict) -> dict:
             f"must be snake_case ('[a-z][a-z0-9_]*'), got {name!r}; e.g. "
             "name: my_selection")
     _validate_selector(doc["selector"])
-    return doc
+    return cast(dict, doc)
 
 
 def _matches(entry: Mapping, selector: Mapping) -> bool:
@@ -271,7 +272,7 @@ def _rule(selector: Mapping) -> str:
     return "; ".join(parts)
 
 
-def resolve_spec(spec: dict, catalog: dict) -> list[str]:
+def resolve_spec(spec: Mapping, catalog: dict) -> list[str]:
     """Resolve one spec against a catalog into the pinned asset ids.
 
     Candidates are filtered by the selector, ordered by ``(pack, id)`` and
@@ -360,10 +361,10 @@ def _validate_lock(lock: object) -> dict:
     if not isinstance(rule, str) or not rule or "\n" in rule:
         raise _error(
             "rule", f"must be a single-line string, got {rule!r}")
-    return lock
+    return cast(dict, lock)
 
 
-def lock_document(spec: dict, catalog: dict, resolved: list[str]) -> dict:
+def lock_document(spec: Mapping, catalog: dict, resolved: list[str]) -> dict:
     """Build the lock document for one spec, catalog and resolved id list.
 
     The lock pins the catalog digest, the resolved ids and the human-readable
@@ -395,7 +396,7 @@ def lock_document(spec: dict, catalog: dict, resolved: list[str]) -> dict:
     return lock
 
 
-def check_lock(lock: dict, catalog: dict, spec: dict | None = None) -> list[str]:
+def check_lock(lock: dict, catalog: dict, spec: Mapping | None = None) -> list[str]:
     """Verify a lock against a catalog (and, when given, its spec).
 
     The digest gate comes first: a lock resolved against another catalog is

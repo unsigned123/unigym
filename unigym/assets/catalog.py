@@ -21,6 +21,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
+from typing import cast
 from pathlib import Path
 
 from .manifest import KINDS, ManifestError, split_asset_id
@@ -327,4 +328,4 @@ def load_catalog(out_dir: str | Path) -> dict:
         raise CatalogError(
             f"{path}: 'entries' must be a list; rebuild the catalog instead "
             "of editing it")
-    return document
+    return cast(dict, document)

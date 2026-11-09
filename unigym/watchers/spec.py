@@ -49,7 +49,7 @@ class WatchSpec:
     hold: int = 1
     once: bool = False
     cooldown: int = DEFAULT_COOLDOWN
-    every: int = 1
+    every: int | None = 1
     tier: int | None = None         # default from template/kind
     guard: str | None = None        # tier-1 armed-window expr
     note: str = ""
@@ -65,7 +65,7 @@ class WatchSpec:
                 "note": self.note, "allow_direct": self.allow_direct}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "WatchSpec":
+    def from_dict(cls, d: dict) -> WatchSpec:
         if not isinstance(d, dict):
             raise WatchError(f"watch spec must be a mapping, got "
                              f"{type(d).__name__}")
@@ -128,6 +128,22 @@ class WatchSpec:
                 f"allow_direct: true (P2 explicit switch)")
         return spec
 
+    @property
+    def template_name(self) -> str:
+        """The declared template name (kind='template' invariant)."""
+        if self.template is None:
+            raise WatchError(
+                f"watch '{self.name}': kind 'template' requires 'template'")
+        return self.template
+
+    @property
+    def callable_target(self) -> str:
+        """The declared callable path (kind='callable' invariant)."""
+        if self.callable_path is None:
+            raise WatchError(
+                f"watch '{self.name}': kind 'callable' requires 'callable'")
+        return self.callable_path
+
     def effective_tier(self) -> int:
         """The budget tier (§2.2): declared, template-inherent, or the
         expr/callable default 2."""
@@ -135,7 +151,7 @@ class WatchSpec:
             return int(self.tier)
         if self.kind == "template":
             from .templates import get_template
-            return int(get_template(self.template)["tier"])
+            return int(get_template(self.template_name)["tier"])
         return 2
 
 

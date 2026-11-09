@@ -302,8 +302,8 @@ class CameraSpec:
     focus_distance: float = 400.0
     update_latest_camera_pose: bool = True
     instance: str | None = None
-    count: "Literal['global', 'per_env'] | None" = None
-    state: "Literal['shared', 'per_instance'] | None" = None
+    count: Literal['global', 'per_env'] | None = None
+    state: Literal['shared', 'per_instance'] | None = None
     env_poses: list | None = None
 
     def __post_init__(self):
@@ -439,7 +439,7 @@ class CameraSpec:
 
     # ---- parsing -------------------------------------------------------- #
     @classmethod
-    def from_yaml(cls, entry: dict) -> "CameraSpec":
+    def from_yaml(cls, entry: dict) -> CameraSpec:
         """Build a spec from one yaml ``cameras:`` list entry.
 
         Unknown keys raise (fail-fast against typos).  ``rig.type`` is
@@ -505,7 +505,7 @@ class CameraSpec:
         return f"{self.name}_camera"
 
     @classmethod
-    def depth_body_default(cls, overrides: dict | None = None) -> "CameraSpec":
+    def depth_body_default(cls, overrides: dict | None = None) -> CameraSpec:
         """The implicit sugar-shim camera: a verbatim port of the classic
         ``isaaclab2/env.py``'s ``_DEPTH_CAM_DEFAULTS`` + ``_build_depth_camera_cfg``,
         so the depth migration keeps the trained/deployed per-pixel

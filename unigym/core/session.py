@@ -48,7 +48,7 @@ def resolve_run_id(run: str, state_dir: str | None = None) -> str:
 
 
 def attach(run: str, timeout_s: float = 10.0,
-           state_dir: str | None = None) -> "Session":
+           state_dir: str | None = None) -> Session:
     """Attach to a live run (temporary SHM attach; closes via close())."""
     run_id = resolve_run_id(run, state_dir)
     try:

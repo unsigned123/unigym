@@ -125,7 +125,7 @@ class _Primitive:
         self._name = name
         self._pos = _vec3(pos, f"{self.kind} pos")
         self._quat = _quat(quat)
-        self._world: "World | None" = None
+        self._world: World | None = None
         self.material: str | None = None
         self.dynamic = bool(dynamic)
         """Declared as a dynamic free body (content/props path)."""
@@ -157,13 +157,13 @@ class _Primitive:
                 f"placement/rotation mutations are pre-build only (create a "
                 f"new World or rebuild with a fresh Run)")
 
-    def at(self, pos) -> "_Primitive":
+    def at(self, pos) -> _Primitive:
         """Move this primitive to *pos* (world/instance frame metres)."""
         self._check_mutable()
         self._pos = _vec3(pos, f"{self.kind} pos")
         return self
 
-    def rotate(self, quat=None, *, yaw: float | None = None) -> "_Primitive":
+    def rotate(self, quat=None, *, yaw: float | None = None) -> _Primitive:
         """Rotate in place (``quat`` wxyz, or a ``yaw`` in degrees)."""
         self._check_mutable()
         if (quat is None) == (yaw is None):

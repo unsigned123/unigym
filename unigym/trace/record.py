@@ -82,7 +82,7 @@ class RecorderOps:
     def pause(self, run: str) -> dict: ...             # noqa: D102
     def resume(self, run: str) -> dict: ...            # noqa: D102
     def eval(self, run: str, expr: str) -> dict: ...   # noqa: D102
-    def config(self, run: str): ...                    # noqa: D102
+    def config(self, run: str) -> dict | None: ...      # noqa: D102
     def run_view(self, run: str) -> dict: ...          # noqa: D102
 
 
@@ -134,7 +134,7 @@ class DaemonOps(RecorderOps):
                              {"target": "eval", "expr": expr},
                              timeout=self.timeout)
 
-    def config(self, run: str):
+    def config(self, run: str) -> dict | None:
         return self._cli._op(self.resolve_run(run), "config", {},
                              timeout=self.timeout).get("config")
 

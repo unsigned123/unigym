@@ -56,14 +56,14 @@ class Capacity:
     probe_ncon: int = 0
     probe_nefc: int = 0
 
-    def doubled(self) -> "Capacity":
+    def doubled(self) -> Capacity:
         """The next rung of the retry ladder (``RETRY_FACTOR`` growth)."""
         return Capacity(self.nconmax * RETRY_FACTOR,
                         self.njmax * RETRY_FACTOR,
                         self.probe_ncon, self.probe_nefc)
 
 
-def probe_peak(mjm, steps: int = 100) -> "tuple[int, int]":
+def probe_peak(mjm, steps: int = 100) -> tuple[int, int]:
     """Run a CPU rollout and return ``max(ncon), max(nefc)`` over it.
 
     Args:
@@ -92,11 +92,11 @@ def capacity_for(mjm, steps: int = 100) -> Capacity:
 
 
 def build_with_retry(
-        build: "Callable[[Capacity], T]",
+        build: Callable[[Capacity], T],
         capacity: Capacity,
-        saturated: "Callable[[T, Capacity], bool]",
+        saturated: Callable[[T, Capacity], bool],
         max_attempts: int = MAX_ATTEMPTS,
-) -> "tuple[T, Capacity]":
+) -> tuple[T, Capacity]:
     """Build a resource, doubling the capacity until it is not saturated.
 
     Args:

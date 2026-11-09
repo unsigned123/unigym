@@ -41,7 +41,7 @@ _IDENTITY = {
 }
 
 
-def _mix_error(left: "_QuatMixin", right: "_QuatMixin", op: str) -> TypeError:
+def _mix_error(left: _QuatMixin, right: _QuatMixin, op: str) -> TypeError:
     """Build the fail-loud message for an order mismatch."""
     return TypeError(
         f"cannot {op} {type(left).__name__} (order={left.order!r}) with "
@@ -49,14 +49,14 @@ def _mix_error(left: "_QuatMixin", right: "_QuatMixin", op: str) -> TypeError:
         f"differ; convert explicitly with .as_wxyz() / .as_xyzw()")
 
 
-def _require_same_order(left: "_QuatMixin", right: "_QuatMixin",
+def _require_same_order(left: _QuatMixin, right: _QuatMixin,
                         op: str) -> None:
     """Raise :class:`TypeError` unless both operands share a component order."""
     if left.order != right.order:
         raise _mix_error(left, right, op)
 
 
-def _compose(left: "_QuatMixin", right: "_QuatMixin") -> "_QuatMixin":
+def _compose(left: _QuatMixin, right: _QuatMixin) -> _QuatMixin:
     """Hamilton product, order-preserving (canonical wxyz math)."""
     _require_same_order(left, right, "compose")
     if left.order == "wxyz":
@@ -74,6 +74,10 @@ class _QuatMixin:
     _vec: ClassVar[slice]
 
     data: np.ndarray | torch.Tensor
+
+    def __init__(self, data: np.ndarray | torch.Tensor) -> None:
+        """Initialiser (the frozen dataclass subclasses generate their own)."""
+        self.data = data
 
     def __post_init__(self) -> None:
         """Validate the payload kind and its trailing axis (no copy)."""
@@ -115,13 +119,13 @@ class _QuatMixin:
             out = np.tile(out, (int(batch), 1))
         return cls(out)
 
-    def as_wxyz(self) -> "QuatWXYZ":
+    def as_wxyz(self) -> QuatWXYZ:
         """Explicit conversion to the wxyz order (same order -> self)."""
         if self.order == "wxyz":
             return cast("QuatWXYZ", self)
         return QuatWXYZ(_quat.to_wxyz(self.data, _quat.XYZW))
 
-    def as_xyzw(self) -> "QuatXYZW":
+    def as_xyzw(self) -> QuatXYZW:
         """Explicit conversion to the xyzw order (same order -> self)."""
         if self.order == "xyzw":
             return cast("QuatXYZW", self)
@@ -150,10 +154,11 @@ class _QuatMixin:
         data = self.data
         if isinstance(data, torch.Tensor):
             out = data.clone()
-        else:
-            out = np.array(data, copy=True)
-        out[..., self._vec] = -out[..., self._vec]
-        return self._wrap(out)
+            out[..., self._vec] = -out[..., self._vec]
+            return self._wrap(out)
+        arr = np.array(data, copy=True)
+        arr[..., self._vec] = -arr[..., self._vec]
+        return self._wrap(arr)
 
     def inverse(self: _Q) -> _Q:
         """Multiplicative inverse (conjugate / squared norm)."""
@@ -170,18 +175,22 @@ class _QuatMixin:
     def rotate(self, v: np.ndarray | torch.Tensor):
         """Rotate vector(s) *v* (last axis 3) by this quaternion."""
         data = self.data
-        if self.order == "wxyz":
-            w, u = data[..., 0:1], data[..., 1:4]
-        else:
-            u, w = data[..., 0:3], data[..., 3:4]
         if isinstance(data, torch.Tensor):
+            if self.order == "wxyz":
+                w, u = data[..., 0:1], data[..., 1:4]
+            else:
+                u, w = data[..., 0:3], data[..., 3:4]
             vec = v if isinstance(v, torch.Tensor) else torch.as_tensor(
                 v, dtype=data.dtype, device=data.device)
             t = 2.0 * torch.cross(u, vec, dim=-1)
             return vec + w * t + torch.cross(u, t, dim=-1)
+        if self.order == "wxyz":
+            w_np, u_np = data[..., 0:1], data[..., 1:4]
+        else:
+            u_np, w_np = data[..., 0:3], data[..., 3:4]
         vec = np.asarray(v)
-        t = 2.0 * np.cross(u, vec)
-        return vec + w * t + np.cross(u, t)
+        t = 2.0 * np.cross(u_np, vec)
+        return vec + w_np * t + np.cross(u_np, t)
 
     def to_rotmat(self):
         """Rotation matrix (``(..., 3, 3)``, world <- local)."""
@@ -251,7 +260,7 @@ class QuatWXYZ(_QuatMixin):
     order: ClassVar[str] = "wxyz"
     _vec: ClassVar[slice] = slice(1, 4)
 
-    def __matmul__(self, other: "QuatWXYZ") -> "QuatWXYZ":
+    def __matmul__(self, other: QuatWXYZ) -> QuatWXYZ:
         """Compose with another wxyz quaternion (``self (x) other``)."""
         if not isinstance(other, _QuatMixin):
             return NotImplemented  # type: ignore[return-value]
@@ -266,7 +275,7 @@ class QuatXYZW(_QuatMixin):
     order: ClassVar[str] = "xyzw"
     _vec: ClassVar[slice] = slice(0, 3)
 
-    def __matmul__(self, other: "QuatXYZW") -> "QuatXYZW":
+    def __matmul__(self, other: QuatXYZW) -> QuatXYZW:
         """Compose with another xyzw quaternion (``self (x) other``)."""
         if not isinstance(other, _QuatMixin):
             return NotImplemented  # type: ignore[return-value]

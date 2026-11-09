@@ -61,7 +61,7 @@ def _record_key(key: str) -> str:
     return key
 
 
-def action_face_contract(targets: "dict[str, NamedAction]") -> list:
+def action_face_contract(targets: dict[str, NamedAction]) -> list:
     """The action-face contract (playback v3) as data.
 
     One ``{key, column, joint_names}`` entry per NamedAction face,
@@ -134,9 +134,8 @@ class CollectSink:
         # (lands in meta.json with the first flush); None until then
         self._action_faces: list | None = None
         # per-env episode buffer (only when filters active)
-        self.ep_bufs: list[list[dict]] | None = None
-        if self.filter_active:
-            self.ep_bufs = [[] for _ in range(self.num_envs)]
+        self.ep_bufs: list[list[dict]] = (
+            [[] for _ in range(self.num_envs)] if self.filter_active else [])
         # recorder frame buffer (per-episode, for env record_env only)
         self.rec_frames: list[np.ndarray] = []
         self.rec_ep_id = 0

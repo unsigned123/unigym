@@ -162,7 +162,7 @@ class CameraSet(MutableMapping):
         self._entries[cam_name] = value
         return copy.deepcopy(value)
 
-    def lock(self) -> "CameraSet":
+    def lock(self) -> CameraSet:
         """Validate every entry against CameraSpec, then freeze the set."""
         if not self._locked:
             from unigym.cameras.base import CameraSpec

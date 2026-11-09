@@ -215,7 +215,7 @@ class _EpisodeBufferProvider:
         return int(getattr(self.sink, "n_episodes", 0))
 
     # -- internals ------------------------------------------------------ #
-    def _live_stamp(self, bufs) -> "int | None":
+    def _live_stamp(self, bufs) -> int | None:
         """Episode id of the open buffer's last frame (None otherwise).
 
         None when the buffer is empty -- episode boundaries carry no

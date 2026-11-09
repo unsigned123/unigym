@@ -79,7 +79,7 @@ def add_articulation_body(mjspec, handler) -> None:
                     f"articulation prop {spec.name!r}: asset joint "
                     f"{j.name!r} is a freejoint -- anchored semantics "
                     f"forbid free joints in the fragment")
-    asset_joints: dict[str, "mujoco.MjsJoint"] = {
+    asset_joints: dict[str, mujoco.MjsJoint] = {
         j.name: j for b in subtree for j in b.joints}
     missing = [n for n in declared if n not in asset_joints]
     if missing:
@@ -170,7 +170,7 @@ def add_free_articulation_body(mjspec, handler) -> None:
             f"{free[0].name!r} is the prop's live dof -- it is not a "
             f"declarable joint (declare the INTERNAL joints only)")
     subtree = list(_iter_bodies(root))
-    asset_joints: dict[str, "mujoco.MjsJoint"] = {
+    asset_joints: dict[str, mujoco.MjsJoint] = {
         j.name: j for b in subtree
         for j in b.joints
         if int(j.type) != int(mujoco.mjtJoint.mjJNT_FREE)}

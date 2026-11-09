@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -69,7 +70,7 @@ def import_shard(run_dir: str | Path, out: str | Path,
                 if max_ticks is not None and total >= int(max_ticks):
                     capped_at = total
                     break
-                arrs: dict[str, np.ndarray] = {"tick": np.int64(total)}
+                arrs: dict[str, Any] = {"tick": np.int64(total)}
                 for k in z.files:
                     if k in ("tick",):
                         continue

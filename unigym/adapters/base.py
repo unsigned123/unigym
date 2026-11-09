@@ -115,7 +115,7 @@ class ImageObsRequest(NamedTuple):
 
     key: str
     shape: tuple
-    dtype: "torch.dtype"
+    dtype: torch.dtype
     source: str
     camera: str
 

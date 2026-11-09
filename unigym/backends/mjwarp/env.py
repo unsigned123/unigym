@@ -318,25 +318,25 @@ class MjwarpEnv(WarpBatchMixin):
 
     # Backend-private runtime tables (built by ``init_tables``, not in
     # ``__init__``: declared here so the step/obs faces see the contract).
-    articulations: dict[str, "ArticulationRuntime"]
-    controls: dict[str, "ControlRuntime"]
-    _articulation_order: list["ArticulationRuntime"]
-    _control_order: list["ControlRuntime"]
-    _mj_bindings: dict[str, "MjControlBinding"]
-    _mj_articulation_bindings: dict[str, "MjArticulationBinding"]
+    articulations: dict[str, ArticulationRuntime]
+    controls: dict[str, ControlRuntime]
+    _articulation_order: list[ArticulationRuntime]
+    _control_order: list[ControlRuntime]
+    _mj_bindings: dict[str, MjControlBinding]
+    _mj_articulation_bindings: dict[str, MjArticulationBinding]
     _act_of_joint: dict[str, int]
     _prop_actuators: dict[str, dict[str, int]]
     _prop_ctrl_mask: np.ndarray
     _prop_targets: np.ndarray
-    _joint_limits: "tuple[torch.Tensor, torch.Tensor] | None"
-    _joint_limits_by_articulation: "dict[str, tuple[torch.Tensor, torch.Tensor]]"
+    _joint_limits: tuple[torch.Tensor, torch.Tensor] | None
+    _joint_limits_by_articulation: dict[str, tuple[torch.Tensor, torch.Tensor]]
 
     # Live sim handles: always bound by ``__init__``; deliberately nulled at
     # the explicit ``close()`` teardown boundary (see ``close``).
-    _model: "mujoco.MjModel"
-    _data: "mujoco.MjData"
-    _active_data: "mujoco.MjData"
-    _capacity: "Capacity"
+    _model: mujoco.MjModel
+    _data: mujoco.MjData
+    _active_data: mujoco.MjData
+    _capacity: Capacity
 
     def __init__(self, robot_profile, adapter, num_envs: int = 1,
                  episode_length_s: float = 10.0,

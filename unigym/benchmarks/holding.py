@@ -241,10 +241,10 @@ def _group_series(ep, sub: dict, what: str,
         raise ValueError(
             f"{what}: 'all' must be a non-empty list of predicate "
             f"declarations, got {kids!r}")
-    out = None
-    for i, kid in enumerate(kids):
+    out = hold_predicate_series(ep, kids[0], f"{what}.all[0]", articulation)
+    for i, kid in enumerate(kids[1:], start=1):
         s = hold_predicate_series(ep, kid, f"{what}.all[{i}]", articulation)
-        out = s if out is None else (out & s)
+        out = out & s
     return out
 
 

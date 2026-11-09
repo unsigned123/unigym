@@ -160,8 +160,12 @@ def check_structure(facts: StructureFacts) -> None:
             and facts.reference_exists is None:
         raise ConformanceError(
             "structural references declared without an existence probe")
+    probe = facts.reference_exists
     for reference in facts.references:
-        if not facts.reference_exists(reference):
+        if probe is None:
+            raise ConformanceError(
+                "structural references declared without an existence probe")
+        if not probe(reference):
             raise ConformanceError(
                 f"structural reference missing: {reference!r}")
     if (facts.attributes or facts.expected_attributes) and (

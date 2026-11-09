@@ -110,8 +110,14 @@ class PackTaskDef:
     def instantiate(self, params: dict, meta: dict) -> Task:
         """Build the run instance; the report key is set by the caller."""
         if self.kind == "class":
+            if self.cls is None:
+                raise ValueError(
+                    f"task {self.canonical!r}: class definition has no cls")
             merged = {**self.default_params, **(params or {})}
             return self.cls(params=merged, meta=meta)
+        if self.spec is None:
+            raise ValueError(
+                f"task {self.canonical!r}: formula definition has no spec")
         merged = {**self.spec, **(params or {})}
         from .formula import FormulaTask  # lazy: avoids the import cycle
         return FormulaTask(params=merged, meta=meta)
@@ -137,7 +143,7 @@ class Pack:
         (load-time resolve -> consumers), the runtime never writes back."""
         return {task: copy.deepcopy(d.spec)
                 for task, d in sorted(self.tasks.items())
-                if d.kind == "formula"}
+                if d.kind == "formula" and d.spec is not None}
 
 
 class PackIndex:
@@ -293,6 +299,8 @@ def _plugin_defs(path: Path, pack: str) -> list[tuple[str, PackTaskDef]]:
     modname = _MODULE_PREFIX + _MODULE_NAME_SAFE.sub("_", pack) \
         + "_" + _MODULE_NAME_SAFE.sub("_", stem)
     spec = importlib.util.spec_from_file_location(modname, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"{path}: cannot load plugin (no module loader)")
     module = importlib.util.module_from_spec(spec)
     sys.modules[modname] = module  # register BEFORE exec (dataclasses etc.)
     try:
@@ -394,23 +402,24 @@ def load_pack(root: Path) -> Pack:
                 source=str(path), description=desc)
         except ValueError as exc:
             errors.append(str(exc))
-    for local in sorted(rows):
-        spec, row_errors = resolve_row(
-            local, rows[local], templates, references_dir, rows_path,
-            tables)
-        errors.extend(row_errors)
-        if spec is None:
-            continue
-        if local in tasks:
-            errors.append(
-                f"{rows_path}#{local}: duplicate task name '{local}' in "
-                f"pack '{name}' (already defined by "
-                f"{tasks[local].source})")
-            continue
-        desc = " ".join(str(spec.get("description", "")).split())
-        tasks[local] = PackTaskDef(
-            pack=name, task=local, kind="formula", spec=spec,
-            source=f"{rows_path}#{local}", description=desc)
+    if rows_path is not None:
+        for local in sorted(rows):
+            spec, row_errors = resolve_row(
+                local, rows[local], templates, references_dir, rows_path,
+                tables)
+            errors.extend(row_errors)
+            if spec is None:
+                continue
+            if local in tasks:
+                errors.append(
+                    f"{rows_path}#{local}: duplicate task name '{local}' in "
+                    f"pack '{name}' (already defined by "
+                    f"{tasks[local].source})")
+                continue
+            desc = " ".join(str(spec.get("description", "")).split())
+            tasks[local] = PackTaskDef(
+                pack=name, task=local, kind="formula", spec=spec,
+                source=f"{rows_path}#{local}", description=desc)
     for path in py_files:
         try:
             for local, d in _plugin_defs(path, name):

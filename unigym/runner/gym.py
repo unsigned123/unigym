@@ -21,6 +21,7 @@ the action plumbing and the Gymnasium return shapes differ.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -79,11 +80,13 @@ class _GymBase(SyncRunner):
         """
         env = self.env
         build = getattr(env, "_build_extra", None)
+        extra: dict[str, Any]
         if callable(build):
             read = getattr(env, "_read_state", None)
-            extra = dict(build(read()) if callable(read) else build())
+            raw = build(read()) if callable(read) else build()
+            extra = dict(cast("dict[str, Any]", raw))
         elif callable(getattr(env, "_extra", None)):
-            extra = dict(env._extra())
+            extra = dict(cast("dict[str, Any]", env._extra()))
         else:
             extra = {}
         extra.setdefault(
@@ -99,7 +102,7 @@ class GymEnvRunner(_GymBase):
     @classmethod
     def from_instance(cls, instance, reward_fn: Callable | None = None,
                       action_fn: Callable | None = None,
-                      max_steps: int | None = None) -> "GymEnvRunner":
+                      max_steps: int | None = None) -> GymEnvRunner:
         """Build the single-env Gym facade from a live RunInstance."""
         return cls(instance, reward_fn=reward_fn, max_steps=max_steps,
                    action_fn=action_fn)
@@ -135,7 +138,7 @@ class GymEnvRunner(_GymBase):
         self._steps = 0
         self._finished = False
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Reset all envs; return ``(post_reset_obs, 17_key_info)``."""
         super().reset(None)
         self._steps = 0
@@ -188,7 +191,7 @@ class GymVectorRunner(_GymBase):
     @classmethod
     def from_instance(cls, instance, reward_fn: Callable | None = None,
                       action_fn: Callable | None = None
-                      ) -> "GymVectorRunner":
+                      ) -> GymVectorRunner:
         """Build the batched Gym facade from a live RunInstance."""
         return cls(instance, reward_fn=reward_fn, action_fn=action_fn)
 
@@ -238,7 +241,7 @@ class GymVectorRunner(_GymBase):
                                       first.kind)
         return merged
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Reset all envs; return ``(post_reset_obs, batched_infos)``."""
         super().reset(None)
         obs = dict(self.env.obs_cache)

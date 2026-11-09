@@ -27,8 +27,8 @@ class StepResult:
     t: int
     obs: dict
     extra: dict
-    reset_env_ids: "torch.Tensor"
-    terminated: "torch.Tensor | None"
+    reset_env_ids: torch.Tensor
+    terminated: torch.Tensor | None
 
 
 @runtime_checkable
@@ -42,7 +42,7 @@ class Runner(Protocol):
 
     def tick(
         self,
-        actions_override: "dict[str, NamedAction] | None" = None,
+        actions_override: dict[str, NamedAction] | None = None,
     ) -> StepResult:
         """Advance exactly one policy tick.
 

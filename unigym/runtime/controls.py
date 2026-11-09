@@ -209,7 +209,7 @@ class ControlGroup:
             object.__setattr__(self, "control_dt", dt)
 
     @classmethod
-    def from_mapping(cls, entry: Mapping) -> "ControlGroup":
+    def from_mapping(cls, entry: Mapping) -> ControlGroup:
         """Normalize one ``controls[]`` entry."""
         if isinstance(entry, cls):
             return entry

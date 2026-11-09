@@ -103,11 +103,12 @@ def _announce_artifacts(path) -> None:
 
 def _per_articulation_fall_group(articulations):
     """OR-combine one default fall term per articulation."""
-    from unigym.terminations import FallTermination, TerminationGroup
+    from unigym.terminations import (FallTermination, Termination,
+                                     TerminationGroup)
 
-    terms = [FallTermination({"articulation": art.name},
-                             name=f"fall_{art.name}")
-             for art in articulations]
+    terms: list[Termination] = [
+        FallTermination({"articulation": art.name}, name=f"fall_{art.name}")
+        for art in articulations]
     return TerminationGroup(terms)
 
 

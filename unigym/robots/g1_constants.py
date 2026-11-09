@@ -140,7 +140,7 @@ G1_GRASP_GROUPS["both"] = {
 # (upper/lower/legs/waist/arms; no framework code reads those yet)
 # + "grasp" (named per-hand groups addressed by DECLARED contact
 # groups via {body_parts: grasp.<group>}; see G1_GRASP_GROUPS).
-G1_BODY_PARTS: Dict[str, Dict | List] = {
+G1_BODY_PARTS: Dict[str, Dict | List | str] = {
     "feet": list(G1_FOOT_BODIES),
     "base": G1_BASE_BODY,
     "joints": list(G1_JOINT_ORDER_IL),            # full policy order (29)

@@ -139,7 +139,7 @@ class TimelineSink:
             else np.asarray(val)
         if arr.ndim > 1:
             arr = arr.any(axis=-1)
-        return {int(i) for i in arr.nonzero()[0].tolist()}
+        return {int(i) for i in np.asarray(arr).nonzero()[0].tolist()}
 
     def on_episode_end(self, env_ids, bundle) -> None:
         if self.event_log is None:

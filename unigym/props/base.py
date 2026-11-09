@@ -236,7 +236,7 @@ def _build_actuators(spec: PropSpec, c: dict) -> dict:
     return _spawn_module()._build_actuators(spec, c)
 
 
-def _prop_backend(backend: str | None = None) -> "PropBackendCap":
+def _prop_backend(backend: str | None = None) -> PropBackendCap:
     """Resolve a backend's prop face through the registry (v100 G4).
 
     ``backend=None`` resolves the historical isaaclab build face (the
@@ -498,7 +498,7 @@ class PropBackendCap(Protocol):
         """Instantiate the declared handler for one spec."""
         ...
 
-    def handler_for(self, spec: PropSpec) -> "type[PropHandler]":
+    def handler_for(self, spec: PropSpec) -> type[PropHandler]:
         """Return the handler class declared for ``spec.type`` (fail fast)."""
         ...
 

@@ -61,9 +61,10 @@ def _venv_globs() -> tuple[str, ...]:
     """
     globs = ["~/.venv*/bin/python", "~/venv*/bin/python",
              "~/*/venv*/bin/python"]
+    from unigym.errors import ConfigError
+
     try:
         from unigym.core.asset_root import deps_root
-        from unigym.errors import ConfigError
 
         root = deps_root()
     except ConfigError:

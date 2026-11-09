@@ -160,10 +160,10 @@ class _MjRigBase:
     # ``close``); every live path resolves them through the ``_require_*``
     # helpers so the Optional never leaks into the render code.
     _env: Any
-    _renderer: "mujoco.Renderer | None"
+    _renderer: mujoco.Renderer | None
     _cam_id: int | None
-    _plain_opt: "mujoco.MjvOption | None"
-    _render_buf: "mujoco.MjData | None"
+    _plain_opt: mujoco.MjvOption | None
+    _render_buf: mujoco.MjData | None
 
     def _require_env(self) -> Any:
         if self._env is None:
@@ -171,7 +171,7 @@ class _MjRigBase:
                                "(bind_env)")
         return self._env
 
-    def _require_renderer(self) -> "mujoco.Renderer":
+    def _require_renderer(self) -> mujoco.Renderer:
         if self._renderer is None:
             raise RuntimeError(f"mujoco camera {self.name!r}: no renderer "
                                "(bind_env)")

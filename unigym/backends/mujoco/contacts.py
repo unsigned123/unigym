@@ -130,8 +130,8 @@ class MujocoContactBackend:
         self._resolved: dict[str, dict] = {}
 
     # typed internal handles: bound by ``bind_env`` before any read.
-    _model: "mujoco.MjModel"
-    _data: "mujoco.MjData"
+    _model: mujoco.MjModel
+    _data: mujoco.MjData
     _env: Any
 
     # ---------------------------------------------------------------- #

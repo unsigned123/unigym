@@ -451,7 +451,7 @@ class RewindBoundary(Exception):
     ``bridge.rewind_log``) fanned out to sinks via ``on_rewind``.
     """
 
-    def __init__(self, next_tick: int, info: "dict | None" = None):
+    def __init__(self, next_tick: int, info: dict | None = None):
         super().__init__(next_tick)
         self.next_tick = int(next_tick)
         self.info = dict(info or {})
@@ -860,8 +860,8 @@ class Bridge:
         # RewindBoundary raise at the end of the tick that applied a
         # rewind; rewind_log is the process-truth record of rewinds
         # (monotonic append-only — the counter dichotomy's ledger).
-        self._rewind_next_tick: "int | None" = None
-        self._rewind_info: "dict | None" = None
+        self._rewind_next_tick: int | None = None
+        self._rewind_info: dict | None = None
         self.rewind_log: list[dict] = []
 
         self._cmd_lock = threading.Lock()   # serializes in-process writers

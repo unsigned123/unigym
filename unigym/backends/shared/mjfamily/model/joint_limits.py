@@ -8,7 +8,7 @@ a backend -> backend import.
 from __future__ import annotations
 
 
-def _jnt_limit(m, jid: int) -> "tuple[float, float] | None":
+def _jnt_limit(m, jid: int) -> tuple[float, float] | None:
     """The MJ model limit of joint *jid*.
 
     ``((lo, hi))`` when the engine

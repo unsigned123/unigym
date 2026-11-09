@@ -137,16 +137,21 @@ class TraceReplay:
         if self.mode != "action":
             self._compare(t, raw_live)
             return None
+        raw_key = self.raw_key
+        if raw_key is None:
+            raise ReplayError(
+                f"tick {t}: no raw key configured",
+                hint="action mode needs a raw segment")
         shard = self._shard_for(t)
         if shard is None:
             return None
-        raw = shard.get(self.raw_key)
+        raw = shard.get(raw_key)
         if raw is None:
             raise ReplayError(
-                f"tick {t}: {self.raw_key} missing in shard",
+                f"tick {t}: {raw_key} missing in shard",
                 hint="trace is inconsistent with its manifest")
         self.injected += 1
-        return self._as_live(raw, raw_live, self.raw_key, t)
+        return self._as_live(raw, raw_live, raw_key, t)
 
     # ------------------------------------------------------------------ #
     # rng freeze (opt-in, §7.4: adapter RNG is OUTSIDE the guarantee face)

@@ -15,7 +15,7 @@ _LEGAL_COMBINATIONS = (
 )
 
 
-def required_traits(spec) -> "tuple[Trait, ...]":
+def required_traits(spec) -> tuple[Trait, ...]:
     """Traits a ``CameraSpec`` requests, in the doc §3 order."""
     if spec.count == "global":
         return (Trait.CAMERAS_GLOBAL,)
@@ -25,7 +25,7 @@ def required_traits(spec) -> "tuple[Trait, ...]":
     return tuple(traits)
 
 
-def check_backend(backend_label: str, specs, num_envs: "int | None" = None) -> None:
+def check_backend(backend_label: str, specs, num_envs: int | None = None) -> None:
     """Resolve the backend's ``BackendInfo`` and gate every spec.
 
     The manager calls this (rather than importing the registry itself):
@@ -39,7 +39,7 @@ def check_backend(backend_label: str, specs, num_envs: "int | None" = None) -> N
         check(info, spec, num_envs)
 
 
-def check(backend_info: BackendInfo, spec, num_envs: "int | None" = None) -> None:
+def check(backend_info: BackendInfo, spec, num_envs: int | None = None) -> None:
     """Fail fast when *backend_info* cannot serve *spec*'s request.
 
     Reuses ``BackendInfo.missing`` / ``BackendInfo.blocked`` and the

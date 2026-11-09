@@ -196,7 +196,7 @@ def build_reset_primitives(env) -> ResetPrimitives:
 
 def wire_reset_face(env, params: dict, profile
                     ) -> Tuple[Optional[InitializerBase],
-                               Optional["Gr1ResetSpec"]]:
+                               Optional[Gr1ResetSpec]]:
     """Dispatch the declared reset face (the six-step contract).
 
     read the segment (``initializer`` or the legacy ``reset`` sugar in

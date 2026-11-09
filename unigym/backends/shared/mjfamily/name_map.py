@@ -132,7 +132,7 @@ class MjNameMap:
             for art in self.prefixes)
 
     @classmethod
-    def identity(cls) -> "MjNameMap":
+    def identity(cls) -> MjNameMap:
         """The empty identity map (fused/single-asset historical path)."""
         return cls()
 
@@ -141,7 +141,7 @@ class MjNameMap:
 class MjComposition:
     """One composed ``MjSpec`` plus its backend-private name map."""
 
-    spec: "mujoco.MjSpec"
+    spec: mujoco.MjSpec
     name_map: MjNameMap
     applied_prefixes: Mapping[str, str | None] = field(default_factory=dict)
 

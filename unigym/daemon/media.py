@@ -704,7 +704,7 @@ _INFO_CONTROL_BODY = {
 }
 
 
-def run_info_document(run_id: str, gateway: "MediaGateway | None" = None) \
+def run_info_document(run_id: str, gateway: MediaGateway | None = None) \
         -> dict:
     """One run's self-description from SHM + registry v2 (design §3)."""
     entry = core_registry.read_entry(run_id)

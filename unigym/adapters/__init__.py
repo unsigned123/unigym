@@ -104,7 +104,7 @@ def validate_spawn_params(params) -> dict:
     return dict(params)
 
 
-def _legal_keys(name: str) -> "set[str] | None":
+def _legal_keys(name: str) -> set[str] | None:
     """Constructor keyword set of one registry adapter (None = **kwargs
     present, nothing to check against)."""
     sig = inspect.signature(ADAPTER_REGISTRY[name].__init__)

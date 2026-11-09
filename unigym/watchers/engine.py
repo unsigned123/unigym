@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 from . import templates as _tpl
 from .base import (CAPTURE, DIRECT, DUMP, Level, PAUSE, WatchContext,
@@ -55,7 +56,7 @@ class WatchState:
         self.disabled_reason = ""
         self.last_tick: int | None = None
         self.last_result: WatchResult | None = None
-        self.instance = None          # callable watcher instance (§8.3)
+        self.instance: Any | None = None    # callable watcher instance (§8.3)
         self.setup_done = False
         self.last_degrade_tick = -10 ** 9
 
@@ -112,7 +113,7 @@ class WatcherEngine:
         spec = WatchSpec.from_dict(spec_dict)
         if spec.kind == "template":
             errors = _tpl.validate_template_params(
-                spec.template, spec.params, self._keys())
+                spec.template_name, spec.params, self._keys())
             if errors:
                 raise WatchError(
                     f"watch '{spec.name}': template '{spec.template}' "
@@ -140,7 +141,7 @@ class WatcherEngine:
             spec.every = 5 if tier == 2 else 1
         # template-suggested trigger defaults (log/timeout), user wins
         if spec.kind == "template":
-            for k, v in _tpl.get_template(spec.template)["suggest"].items():
+            for k, v in _tpl.get_template(spec.template_name)["suggest"].items():
                 if k == "once":
                     spec.once = spec.once or bool(v)
                 elif k == "mode" and spec.mode == "edge" and \
@@ -263,7 +264,7 @@ class WatcherEngine:
         spec = WatchSpec.from_dict(spec_dict)
         if spec.kind == "template":
             errors = _tpl.validate_template_params(
-                spec.template, spec.params, self._keys())
+                spec.template_name, spec.params, self._keys())
             if errors:
                 raise WatchError(
                     f"watch test: template '{spec.template}' invalid:\n"
@@ -286,18 +287,19 @@ class WatcherEngine:
     # ------------------------------------------------------------------ #
     def handle(self, rid: int, params: dict) -> dict:
         op = params.get("watch_op")
-        simple = {"list": lambda: {"ok": True, "watchers": self.list()},
-                  "clear": lambda: self.clear(params.get("name")),
-                  "update": lambda: self.update(params.get("name"),
-                                                params.get("patch") or {})}
         if op == "add":
             return self.add(params.get("spec") or {})
         if op == "test":
             return self.test(params.get("spec") or {})
-        if op in simple:
-            if op == "update" and not params.get("name"):
+        if op == "list":
+            return {"ok": True, "watchers": self.list()}
+        if op == "clear":
+            return self.clear(params.get("name"))
+        if op == "update":
+            name = params.get("name")
+            if not isinstance(name, str) or not name:
                 raise WatchError("watch update: 'name' is required")
-            return simple[op]()
+            return self.update(name, params.get("patch") or {})
         raise WatchError(
             f"unknown watch op {op!r} (add|list|clear|update|test)")
 
@@ -316,7 +318,7 @@ class WatcherEngine:
             spec, st = self._specs[name], self._states[name]
             if st.disabled:
                 continue
-            if int(t) % max(1, spec.every) != 0:
+            if int(t) % max(1, spec.every or 1) != 0:
                 continue
             if spec.guard and not self._eval_guard(spec, st):
                 continue
@@ -348,8 +350,10 @@ class WatcherEngine:
     def _evaluate(self, spec: WatchSpec, st: WatchState, dry: bool) \
             -> WatchResult:
         ctx = self._last_ctx
+        if ctx is None:
+            raise WatchError("no tick evaluated yet")
         if spec.kind == "template":
-            return _tpl.get_template(spec.template)["check"](
+            return _tpl.get_template(spec.template_name)["check"](
                 ctx, spec.params)
         if spec.kind == "expr":
             code, is_exec = self._expr_code.get(spec.name) \
@@ -363,6 +367,9 @@ class WatcherEngine:
                 return value
             return WatchResult.quiet(bool(value))
         inst = st.instance
+        if inst is None:
+            raise WatchError(
+                f"callable watcher '{spec.name}' is not instantiated")
         if not st.setup_done and hasattr(inst, "setup"):
             inst.setup(ctx)
             st.setup_done = True                      # dry-run counts
@@ -377,7 +384,10 @@ class WatcherEngine:
         try:
             code, is_exec = self._guard_code.get(spec.name) \
                 or compile_expr(spec.guard)
-            ns = self._last_ctx.eval_namespace()
+            ctx = self._last_ctx
+            if ctx is None:
+                return False
+            ns = ctx.eval_namespace()
             value = exec_block(code, ns) if is_exec else eval(code, ns)
             return bool(value)
         except Exception:                             # noqa: BLE001
@@ -427,7 +437,9 @@ class WatcherEngine:
             st.disabled_reason = "once: auto-disarmed (add/update rearms)"
         if self.event_log is not None:
             self.event_log.append(
-                "watcher", spec.name, tick=t, env=self._last_ctx.env_id,
+                "watcher", spec.name, tick=t,
+                env=(self._last_ctx.env_id
+                     if self._last_ctx is not None else None),
                 level=result.level.value,
                 data={**data, "actions": list(actions), "paused": paused,
                       "fired_count": st.fired})
@@ -471,6 +483,8 @@ class WatcherEngine:
     # ------------------------------------------------------------------ #
     def _capture(self, spec: WatchSpec, result: WatchResult, t: int) \
             -> dict:
+        if self.out_dir is None:
+            return {"skipped": "no output dir"}
         if self.captures >= _CAPTURE_BUDGET:
             return {"skipped": f"capture budget {_CAPTURE_BUDGET} "
                                "exhausted (degraded to mark+notify)"}
@@ -497,11 +511,15 @@ class WatcherEngine:
 
     def _dump(self, spec: WatchSpec, t: int) -> dict:
         """One npz on the trace key face (obs/... extra/... + tick)."""
+        if self.out_dir is None:
+            return {"skipped": "no output dir"}
         if self.dumps >= _DUMP_BUDGET:
             return {"skipped": f"dump budget {_DUMP_BUDGET} exhausted"}
         import numpy as np
         from .base import _to_numpy
         ctx = self._last_ctx
+        if ctx is None:
+            return {"skipped": "no tick evaluated yet"}
         arrays: dict = {"tick": np.asarray(int(t))}
         for prefix, src in (("obs/", ctx.obs_cache), ("extra/", ctx.extra)):
             for k in sorted(src):
@@ -545,8 +563,10 @@ class WatcherEngine:
             _, name = max(fired_names)
             st = self._states[name]
             last = {"name": name, "tick": st.last_tick,
-                    "level": st.last_result.level.value,
-                    "message": st.last_result.message}
+                    "level": (st.last_result.level.value
+                              if st.last_result is not None else None),
+                    "message": (st.last_result.message
+                                if st.last_result is not None else "")}
         return {"armed": len(self._specs) - len(disabled),
                 "total": len(self._specs),
                 "disabled": disabled,
@@ -587,8 +607,8 @@ class WatcherEngine:
             print(f"[watcher] persist failed: {e}", flush=True)
 
     # ------------------------------------------------------------------ #
-    def _instantiate(self, spec: WatchSpec) -> object:
-        return load_callable(spec.callable_path)()
+    def _instantiate(self, spec: WatchSpec) -> Any:
+        return load_callable(spec.callable_target)()
 
     def _episodes(self) -> int:
         return int(getattr(self.bridge, "_episodes", 0) or 0) \

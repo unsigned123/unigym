@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from typing import cast
 from pathlib import Path
 
 import yaml
@@ -94,7 +95,7 @@ def _require_asset_id(value: object, where: str, key: str, rule: str) -> str:
     problem = _asset_id_problem(value)
     if problem is not None:
         raise _error(where, key, f"{value!r} {problem} ({rule})")
-    return value
+    return cast(str, value)
 
 
 def _path_problem(value: object) -> str | None:
@@ -286,7 +287,7 @@ def _validate(doc: object, where: str = "") -> dict:
         _validate_aliases(doc["aliases"], asset_id, where)
     if doc.get("uses") is not None:
         _validate_uses(doc["uses"], where)
-    return doc
+    return cast(dict, doc)
 
 
 def validate_manifest(doc: dict) -> dict:

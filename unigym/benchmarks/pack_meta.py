@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import cast
 
 from .formula import validate_formula_spec
 from .task_providers import build_provider_spec
@@ -443,7 +444,7 @@ def resolve_row(name: str, row: dict, templates: dict,
                 f"list or scalar, got {value!r}")
     if errors:
         return None, errors
-    spec = _substitute(skeleton, values, where, errors)
+    spec = cast(dict, _substitute(skeleton, values, where, errors))
     if errors or spec is None:
         return None, errors
     rewrite_pack_references(spec, references_dir, str(rows_path))

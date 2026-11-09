@@ -93,7 +93,7 @@ class ExtraKeySpec:
     """
 
     dims: tuple
-    dtype: "torch.dtype | str"
+    dtype: torch.dtype | str
     batch: bool = True
 
 
@@ -160,7 +160,7 @@ class BackendCapabilities:
                                     # for now, isaaclab maps ActuatorBase later)
 
     @classmethod
-    def full(cls) -> "BackendCapabilities":
+    def full(cls) -> BackendCapabilities:
         """All capabilities enabled (the isaaclab backend).
 
         ``snapshot`` is deliberately excluded: the rewind superpower is
@@ -171,7 +171,7 @@ class BackendCapabilities:
                    depth_camera=True, init_pose=True, cameras=True,
                    contacts=True, multi_env=True)
 
-    def traits(self) -> "frozenset":
+    def traits(self) -> frozenset:
         """Trait view of the capability bits (unigym.backends.registry).
 
         The booleans are the low-bit projection of the central Trait
@@ -221,15 +221,15 @@ class EnvBackend(Protocol):
 
     # attributes (populated by the backend implementation)
     num_envs: int
-    device: "str | torch.device"
+    device: str | torch.device
     obs_cache: dict
     controls: dict
     articulations: dict
     perm_il2pol: torch.Tensor
     perm_pol2il: torch.Tensor
-    policy_joint_pos_limits: "tuple[torch.Tensor, torch.Tensor] | None"
+    policy_joint_pos_limits: tuple[torch.Tensor, torch.Tensor] | None
 
-    def step(self, actions: "dict[str, NamedAction]",
+    def step(self, actions: dict[str, NamedAction],
              raw_action: torch.Tensor | None = None,
              cmd: torch.Tensor | None = None) -> tuple[dict, dict]: ...
 
@@ -548,7 +548,7 @@ def requested_features(kwargs: dict) -> dict[str, bool]:
 
 
 def gate_capabilities(backend_label: str, caps, kwargs: dict,
-                      num_envs: "int | None" = None) -> None:
+                      num_envs: int | None = None) -> None:
     """Raise ``NotImplementedError`` when a request exceeds the backend.
 
     ``caps`` is a :class:`BackendCapabilities` (or anything exposing a

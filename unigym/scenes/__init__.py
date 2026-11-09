@@ -19,6 +19,9 @@ The production registry stays empty here: content providers ship with
 the robocasa pack's code face (v081 P5b) and self-register when that
 pack is imported, so this package is importable with no pack mounted.
 """
+
+from __future__ import annotations
+
 from .articulation import (
     ArticulationError,
     ArticulationSpec,

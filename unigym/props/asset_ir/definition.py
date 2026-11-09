@@ -175,7 +175,7 @@ class AssetDefinition:
                     )
         validate_asset_definition(self)
 
-    def to_model_ir(self, name: str | None = None) -> "ModelIR":
+    def to_model_ir(self, name: str | None = None) -> ModelIR:
         """Expand this asset payload into the unified :class:`ModelIR`.
 
         The result is declaration-only (``compiled=False``): an asset

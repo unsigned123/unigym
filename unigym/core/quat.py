@@ -217,8 +217,8 @@ def yaw_pitch_roll(yaw_rad, pitch_rad, roll_rad) -> np.ndarray:
     :func:`yaw_pitch` exactly and (0, 0, 0) is the identity.
     """
     r = 0.5 * float(roll_rad)
-    return mul(yaw_pitch(yaw_rad, pitch_rad),
-               np.array([math.cos(r), math.sin(r), 0.0, 0.0]))
+    return cast(np.ndarray, mul(yaw_pitch(yaw_rad, pitch_rad),
+                                np.array([math.cos(r), math.sin(r), 0.0, 0.0])))
 
 
 def yaw_pitch_roll_batch(yaw: torch.Tensor, pitch: torch.Tensor,
@@ -226,8 +226,8 @@ def yaw_pitch_roll_batch(yaw: torch.Tensor, pitch: torch.Tensor,
     """Batched :func:`yaw_pitch_roll`: (k,) rad x3 -> (k, 4) wxyz."""
     cr, sr = torch.cos(0.5 * roll), torch.sin(0.5 * roll)
     zero = torch.zeros_like(sr)
-    return mul(yaw_pitch_batch(yaw, pitch),
-               torch.stack([cr, sr, zero, zero], dim=-1))
+    return cast(torch.Tensor, mul(yaw_pitch_batch(yaw, pitch),
+                                  torch.stack([cr, sr, zero, zero], dim=-1)))
 
 
 def lookat(pos, lookat) -> np.ndarray:

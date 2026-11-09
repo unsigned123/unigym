@@ -43,7 +43,7 @@ __all__ = [
 #: type name -> actuator class (populated by ``@register``; the built-in
 #: modules self-register on import and ``unigym/actuators/__init__.py``
 #: imports them all).
-ACTUATOR_REGISTRY: "dict[str, type]" = {}
+ACTUATOR_REGISTRY: dict[str, type] = {}
 
 
 def register(name: str):
@@ -61,7 +61,7 @@ def register(name: str):
     return deco
 
 
-def build_actuator(cfg: dict) -> "ActuatorBase":
+def build_actuator(cfg: dict) -> ActuatorBase:
     """Instantiate the law named by ``cfg["type"]`` (unbound).
 
     Fail-fast with the registered-type list when the name is unknown (the

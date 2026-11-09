@@ -53,7 +53,7 @@ class ContactBackend(Protocol):
 
     def read_raw(self, spec: ContactGroupSpec): ...
 
-    def group_axes(self, spec: ContactGroupSpec) -> "tuple[int, int]":
+    def group_axes(self, spec: ContactGroupSpec) -> tuple[int, int]:
         """Resolved (B, F) counts post bind_env (obs catalog shapes)."""
         ...
 

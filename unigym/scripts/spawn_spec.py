@@ -328,11 +328,11 @@ def build_spawn(cfg: dict, config_path: Path, *, backend: str | None = None,
                          bg=bg,
                          env_delta={"MUJOCO_GL": "egl"}, env_setdefault=True)
 
-    if bg:
+    if bg and log_path is not None:
         spec.log_path = log_path
         if track_state:
             spec.state_path = write_state(cfg, spec.backend, spec.container,
-                                          spec.log_path, config_path,
+                                          log_path, config_path,
                                           spec.out_dir, paused=paused,
                                           direct=direct)
     return spec

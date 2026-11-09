@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 
 def all_false(x):
@@ -86,7 +86,7 @@ class TerminationState:
 
     articulations: Mapping[str, Mapping[str, object]] = field(
         default_factory=dict)                     # {name: {key: (N, ...)}}
-    body_contact_forces: object | None = None     # (N, num_bodies, 3)
+    body_contact_forces: Any | None = None        # (N, num_bodies, 3)
     body_names: Sequence[str] | None = None       # index -> body name (forces)
     joint_pos_limits: Mapping[str, tuple] | None = None  # {name: (lo, hi)}
     batch: object | None = None                   # (N,)/(T,) per-sample ref
@@ -97,7 +97,7 @@ class TerminationState:
     @classmethod
     def from_extra(cls, extra: dict, joint_pos_limits=None,
                    body_names: Sequence[str] | None = None
-                   ) -> "TerminationState":
+                   ) -> TerminationState:
         """Build from an env's per-step ``extra`` dict (torch tensors).
 
         Robot state is read from ``articulation/<name>/...`` keys only; the
@@ -114,7 +114,7 @@ class TerminationState:
         )
 
     @classmethod
-    def from_episode_data(cls, episode_data: dict) -> "TerminationState":
+    def from_episode_data(cls, episode_data: dict) -> TerminationState:
         """Build from an assembled episode dict (numpy arrays, leading T).
 
         Recorded state keys are namespaced (``articulation/<name>/...``) and
@@ -131,7 +131,8 @@ class TerminationState:
             articulations = _articulation_states(episode_data,
                                                  _RECORD_ALIASES)
         return cls(
-            articulations=articulations,
+            articulations=cast(
+                "Mapping[str, Mapping[str, object]]", articulations),
             body_contact_forces=episode_data.get("body_contact_forces"),
             body_names=episode_data.get("body_names"),
             joint_pos_limits=None,
@@ -181,7 +182,7 @@ class Termination(ABC):
         self._cfg_name = name
 
     @abstractmethod
-    def check(self, state: TerminationState):
+    def check(self, state: TerminationState) -> Any:
         """Return an (N,) bool mask: True = the condition fires for that env."""
 
     @property

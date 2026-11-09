@@ -67,7 +67,7 @@ class _TerrainBuilder:
     terrain is the ground.
     """
 
-    def __init__(self, world: "World"):
+    def __init__(self, world: World):
         self._world = world
 
     def _check(self) -> None:
@@ -84,7 +84,7 @@ class _TerrainBuilder:
                 "ground")
         world._ensure_inline()
 
-    def _set(self, terrain) -> "World":
+    def _set(self, terrain) -> World:
         """Store *terrain* (None = flat) and return the world."""
         self._world._terrain = terrain
         self._world._terrain_explicit = True
@@ -99,20 +99,20 @@ class _TerrainBuilder:
     def replace_floor(self, value: bool) -> None:
         self._world._terrain_replace_floor = bool(value)
 
-    def flat(self) -> "World":
+    def flat(self) -> World:
         """Remove any declared terrain (the ground falls back to the base)."""
         self._check()
         return self._set(None)
 
     def heightmap(self, heights, size=None, base_z=0.0, name="terrain",
-                  meta=None) -> "World":
+                  meta=None) -> World:
         """Use an explicit ``(ny, nx)`` elevation matrix."""
         self._check()
         return self._set(Terrain.heightmap(
             heights, size=size, base_z=base_z, name=name, meta=meta))
 
     def stairs(self, steps, rise, run, width, base_z=0.0, margin=None,
-               resolution=None, name="terrain") -> "World":
+               resolution=None, name="terrain") -> World:
         """Use a staircase climbing +x (see :meth:`Terrain.stairs`)."""
         self._check()
         return self._set(Terrain.stairs(
@@ -120,7 +120,7 @@ class _TerrainBuilder:
             resolution=resolution, name=name))
 
     def slope(self, angle_deg, size=(4.0, 4.0), base_z=0.0, resolution=None,
-              name="terrain") -> "World":
+              name="terrain") -> World:
         """Use a linear ramp along +x (see :meth:`Terrain.slope`)."""
         self._check()
         return self._set(Terrain.slope(
@@ -161,7 +161,7 @@ class World:
     # factories
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_pack(cls, ref, *, root=None) -> "World":
+    def from_pack(cls, ref, *, root=None) -> World:
         """Use a scene-bundle reference (``"<family>/<name>"``)."""
         from unigym.scene_packs import load_scene_bundle
 
@@ -171,7 +171,7 @@ class World:
         return world
 
     @classmethod
-    def base(cls, *, mjcf) -> "World":
+    def base(cls, *, mjcf) -> World:
         """Declare an explicit world asset (emits top-level ``world_base``).
 
         Args:
@@ -187,7 +187,7 @@ class World:
         return world
 
     @classmethod
-    def from_config(cls, source, *, root=None) -> "World":
+    def from_config(cls, source, *, root=None) -> World:
         """Extract the world half of a run config or scene-bundle path.
 
         Args:
@@ -216,7 +216,7 @@ class World:
         return cls.from_pack(str(source), root=root)
 
     @classmethod
-    def _from_run_cfg(cls, cfg: dict, root=None) -> "World":
+    def _from_run_cfg(cls, cfg: dict, root=None) -> World:
         """Extract a world declaration from a run-config mapping."""
         from unigym.scene_packs import load_scene_bundle
 
@@ -249,7 +249,7 @@ class World:
         return world
 
     @classmethod
-    def from_generator(cls, name: str, **params) -> "World":
+    def from_generator(cls, name: str, **params) -> World:
         """Use a registered scene provider with its slot params."""
         world = cls()
         world._mj_scene = str(name)
@@ -257,7 +257,7 @@ class World:
         return world
 
     @classmethod
-    def inline(cls, scene: Scene) -> "World":
+    def inline(cls, scene: Scene) -> World:
         """Use an in-process :class:`Scene` (prototype-only registry)."""
         validate_scene(scene)
         world = cls()
@@ -272,7 +272,7 @@ class World:
             self._terrain_builder = _TerrainBuilder(self)
         return self._terrain_builder
 
-    def terrain_value(self) -> "Terrain | None":
+    def terrain_value(self) -> Terrain | None:
         """The effective terrain IR this world declares (``None`` = flat).
 
         An inline world returns its declared (or inherited) ``Terrain``;
@@ -477,7 +477,7 @@ class World:
     def articulation(self, name: str, *, model=None, control=None,
                      root=None, spawn=None, joints=None, body_parts=None,
                      passive_joints=None, params=None, adapter="manual",
-                     drive="position_pd", target="position") -> "World":
+                     drive="position_pd", target="position") -> World:
         """Declare one articulation on this world (emits ``articulations[]``).
 
         The declaration is the v104 neutral shape: an articulation is
@@ -560,7 +560,7 @@ class World:
         self._controls.append(group)
         return self
 
-    def flat_ground(self) -> "World":
+    def flat_ground(self) -> World:
         """Add a ground slab to an inline world (no-op for bundle worlds).
 
         The common in-repo ``scene_43dof*.xml`` world assets already carry

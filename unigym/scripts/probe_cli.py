@@ -65,7 +65,7 @@ def _resolve_output_dir(pid: int) -> str | None:
     """
     from unigym import runtime_dirs
     paths = runtime_dirs.serve_registry_paths()
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[str, int]] = {}
     for p in paths:
         try:
             st = json.loads(Path(p).read_text())

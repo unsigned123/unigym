@@ -50,7 +50,7 @@ _JSON_TYPES = {str: "string", float: "number", int: "integer",
 _INJECTED = {"num_envs", "device", "body_parts", "name"}
 
 
-def declared_params(cls) -> "dict | None":
+def declared_params(cls) -> dict | None:
     """The adapter's PARAMS declaration, or None (= legacy signature
     inference)."""
     params = getattr(cls, "PARAMS", None)

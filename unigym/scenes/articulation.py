@@ -103,7 +103,7 @@ class AssetRef:
                 if getattr(self, key) is not None}
 
     @classmethod
-    def from_mapping(cls, value: Any, what: str = "model") -> "AssetRef":
+    def from_mapping(cls, value: Any, what: str = "model") -> AssetRef:
         """Normalize an ``AssetRef`` or ``{mjcf|urdf|usd: <path>}`` mapping."""
         if isinstance(value, cls):
             return value
@@ -159,7 +159,7 @@ class JointSpec:
 
     @classmethod
     def from_mapping(cls, name: str, params: Mapping | None = None
-                     ) -> "JointSpec":
+                     ) -> JointSpec:
         """Normalize one joint declaration (``{init, range, ...}``)."""
         params = dict(params or {})
         if "mode" in params:

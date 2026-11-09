@@ -5,6 +5,9 @@ force ON THE SPHERE must be +9.81 N along world +z. We print geom1/geom2,
 their body ids, the raw contact-frame force, and the world-rotated force so
 the backend convention (force on geom1 vs geom2 side) is measured, not guessed.
 """
+
+from __future__ import annotations
+
 import numpy as np
 import mujoco
 

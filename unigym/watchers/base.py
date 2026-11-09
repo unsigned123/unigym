@@ -90,23 +90,23 @@ class WatchResult:
     actions: tuple = ()
 
     @classmethod
-    def info(cls, message: str, data: dict | None = None) -> "WatchResult":
+    def info(cls, message: str, data: dict | None = None) -> WatchResult:
         return cls(fired=True, level=Level.INFO, message=message,
                    data=data or {})
 
     @classmethod
-    def warn(cls, message: str, data: dict | None = None) -> "WatchResult":
+    def warn(cls, message: str, data: dict | None = None) -> WatchResult:
         return cls(fired=True, level=Level.WARN, message=message,
                    data=data or {})
 
     @classmethod
     def trigger(cls, message: str, actions: tuple = (),
-                data: dict | None = None) -> "WatchResult":
+                data: dict | None = None) -> WatchResult:
         return cls(fired=True, level=Level.WARN, message=message,
                    data=data or {}, actions=tuple(actions))
 
     @classmethod
-    def quiet(cls, value: bool = False) -> "WatchResult":
+    def quiet(cls, value: bool = False) -> WatchResult:
         """No-fire result (the plainFalse path of expr predicates)."""
         return cls(fired=bool(value))
 

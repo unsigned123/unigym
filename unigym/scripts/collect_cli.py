@@ -334,6 +334,8 @@ def main():
     # The pid tag means a shared-name spawn can never clobber the previous
     # run's ledger.
     out_dir = spec.output.out_dir
+    if out_dir is None:
+        raise SystemExit("[collect] error: run output dir is unresolved")
     spawn_dir = out_dir
     own_pending = f"run.json.pending-{os.getpid()}"
     if os.path.exists(out_dir) and \

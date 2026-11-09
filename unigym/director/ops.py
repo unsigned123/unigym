@@ -88,7 +88,7 @@ def quat_rot(q, v) -> np.ndarray:
     return t[1:4]
 
 
-def pose_rel(obj_pos, obj_quat, host_pos, host_quat) -> "tuple[np.ndarray, np.ndarray]":
+def pose_rel(obj_pos, obj_quat, host_pos, host_quat) -> tuple[np.ndarray, np.ndarray]:
     """host<-obj relative pose ``(rel_pos, rel_quat)``: obj = host * rel."""
     dq = quat_conj(host_quat)
     rel_pos = quat_rot(dq, np.asarray(obj_pos, dtype=np.float64)
@@ -96,7 +96,7 @@ def pose_rel(obj_pos, obj_quat, host_pos, host_quat) -> "tuple[np.ndarray, np.nd
     return rel_pos, quat_mul(dq, obj_quat)
 
 
-def pose_compose(host_pos, host_quat, rel_pos, rel_quat) -> "tuple[np.ndarray, np.ndarray]":
+def pose_compose(host_pos, host_quat, rel_pos, rel_quat) -> tuple[np.ndarray, np.ndarray]:
     """obj = host * rel (the per-tick follow write)."""
     pos = (np.asarray(host_pos, dtype=np.float64)
            + quat_rot(host_quat, rel_pos))
@@ -117,12 +117,12 @@ class DirectorPropOps(Protocol):
 
     backend: str
 
-    def bind(self, gripper_cfg: "dict | None") -> "object | None":
+    def bind(self, gripper_cfg: dict | None) -> object | None:
         """Resolve prop tables + construct the virtual gripper.
         Returns the gripper (or None when undeclared)."""
         ...
 
-    def prop_names(self) -> "list[str]":
+    def prop_names(self) -> list[str]:
         """Declared prop names (error-hint face)."""
         ...
 
@@ -151,7 +151,7 @@ class DirectorPropOps(Protocol):
         """Deactivate one attachment's backend side (weld eq slot)."""
         ...
 
-    def host_pose(self, host: str) -> "tuple":
+    def host_pose(self, host: str) -> tuple:
         """``(pos (3,), quat (4,) wxyz)`` of a follow/weld host:
         gripper | ``hand`` alias | ``prop:name`` | prop name | robot body
         link (contract §2)."""
@@ -159,7 +159,7 @@ class DirectorPropOps(Protocol):
 
     def write_slave_pose(self, obj: str, pos, quat) -> None: ...
 
-    def obj_pose(self, obj: str) -> "tuple":
+    def obj_pose(self, obj: str) -> tuple:
         """``(pos (3,), quat (4,) wxyz)`` of a prop ROOT (pin/follow
         capture face; rigid free props only -- articulation roots are
         anchored and fail-fast with the honest hint)."""
@@ -175,7 +175,7 @@ class DirectorPropOps(Protocol):
         """Robot root velocity write: ``mode`` set|add (the push op)."""
         ...
 
-    def write_joints(self, joints: "dict[str, float]",
+    def write_joints(self, joints: dict[str, float],
                      zero_vel: bool) -> dict:
         """Robot joint-angle write by name (the joints op).
 

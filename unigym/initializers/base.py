@@ -149,7 +149,7 @@ class InitializerBase(ABC):
 
     def snapshot_state(self) -> dict:
         """Capture state needed to continue a restored initializer timeline."""
-        return {"rng": self.rng.bit_generator.state.copy()}
+        return {"rng": dict(self.rng.bit_generator.state)}
 
     def restore_state(self, state: dict) -> None:
         """Restore state captured by :meth:`snapshot_state`."""

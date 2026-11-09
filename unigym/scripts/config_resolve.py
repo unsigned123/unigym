@@ -66,11 +66,12 @@ def _runs_names() -> list[str]:
     that tree (the ``runs`` face enumeration cannot see it).
     """
     packs = pack_roots()
-    mounted = {pack.faces["runs"].resolve() for pack in packs
-               if pack.faces.get("runs") is not None}
+    mounted = {runs.resolve() for pack in packs
+               if (runs := pack.faces.get("runs")) is not None}
     if CONFIG_DIR.resolve() in mounted:
-        return sorted(str(path.relative_to(pack.faces["runs"]))
-                      for pack, path in find("runs", suffix=".yaml"))
+        return sorted(str(path.relative_to(runs))
+                      for pack, path in find("runs", suffix=".yaml")
+                      if (runs := pack.faces.get("runs")) is not None)
     return sorted(str(p.relative_to(CONFIG_DIR))
                   for p in CONFIG_DIR.rglob("*.yaml"))
 

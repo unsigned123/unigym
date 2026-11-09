@@ -101,7 +101,7 @@ class BenchmarkSet:
         if self._on_add is not None:
             self._on_add(task)
 
-    def lock(self) -> "BenchmarkSet":
+    def lock(self) -> BenchmarkSet:
         """Freeze the declared list after build."""
         self._locked = True
         return self
@@ -420,7 +420,7 @@ class Run:
             on_add=self._on_benchmark_add)
         self._spec: RunSpec | None = None
         self._instance = None
-        self._runner: "Runner | None" = None
+        self._runner: Runner | None = None
         self._runner_kind: str | None = None
         self._stepped = False
         self._closed = False
@@ -457,7 +457,7 @@ class Run:
         return raw
 
     @classmethod
-    def minimal(cls, **kwargs) -> "Run":
+    def minimal(cls, **kwargs) -> Run:
         """Same as ``Run(**kwargs)``; a world/base is required (no default)."""
         return cls(None, **kwargs)
 
@@ -466,7 +466,7 @@ class Run:
                     device=None, steps=None, episode_length_s=None,
                     output_dir=None, label=None, set=(),
                     adapter_params=None, no_artifacts=False,
-                    inspect=False) -> "Run":
+                    inspect=False) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
         Args:
@@ -629,7 +629,7 @@ class Run:
         if self._instance is not None:
             self._instance.close()
 
-    def __enter__(self) -> "Run":
+    def __enter__(self) -> Run:
         """Enter the session (the run builds on first live access)."""
         return self
 
@@ -841,7 +841,7 @@ class Run:
     # ------------------------------------------------------------------ #
     # live faces
     # ------------------------------------------------------------------ #
-    def runner(self, kind: str | None = None, **kwargs) -> "Runner":
+    def runner(self, kind: str | None = None, **kwargs) -> Runner:
         """Build or return this run's active :class:`Runner`.
 
         Args:
@@ -887,7 +887,7 @@ class Run:
         """Convenience alias for ``runner("external", **kwargs)``."""
         return self.runner("external", **kwargs)
 
-    def _default_runner(self) -> "Runner":
+    def _default_runner(self) -> Runner:
         """Return the cached active runner, creating sync on first use."""
         runner = self._runner
         if runner is None:

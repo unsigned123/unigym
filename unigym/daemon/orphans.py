@@ -80,7 +80,7 @@ def _header(path: str) -> tuple[float, int]:
 def sweep_orphans(shm_dir: str = "/dev/shm",
                   now: float | None = None,
                   min_age_s: float = MIN_AGE_S,
-                  registered: "set[str] | None" = None,
+                  registered: set[str] | None = None,
                   pid_alive=None,
                   log=_log, kill: bool = True,
                   term_grace_s: float = TERM_GRACE_S) -> list[dict]:

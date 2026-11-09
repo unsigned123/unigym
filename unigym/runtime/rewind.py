@@ -160,7 +160,7 @@ class RewindController:
         names = [p.name for p in self.providers]
         if len(set(names)) != len(names):
             raise ValueError(f"duplicate rewind provider names: {names}")
-        self._snaps: "collections.OrderedDict[int, dict]" = \
+        self._snaps: collections.OrderedDict[int, dict] = \
             collections.OrderedDict()
         self._next_id = 1
         bridge.register_command("snapshot", self.cmd_snapshot)
@@ -570,7 +570,7 @@ def attach(bridge, env, adapter, engine, backend_label: str,
 # --------------------------------------------------------------------------- #
 # helpers (torch kept lazy so the stdlib-only bridge import path stays clean)
 # --------------------------------------------------------------------------- #
-def _episode_stamp(bundle) -> "int | None":
+def _episode_stamp(bundle) -> int | None:
     """The bundle's backend episode counter, env 0 (v063 pre-flight face).
 
     ``episode_id`` is process truth (contract §4.1 -- never rewinds),

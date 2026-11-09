@@ -67,7 +67,7 @@ class DriveStrategy:
     strategy: str
 
 
-DRIVE_STRATEGIES: "dict[str, DriveStrategy]" = {
+DRIVE_STRATEGIES: dict[str, DriveStrategy] = {
     drive: DriveStrategy(drive=drive, target=target, strategy=drive)
     for drive, target in DRIVE_TARGET.items()
 }
@@ -146,7 +146,7 @@ class ArticulationRuntime:
     free_dof_adr: int | None = None
     foot_body_ids: list[int] = field(default_factory=list)
     foot_geom_sets: list[set[int]] = field(default_factory=list)
-    catalog: "ObsCatalog | None" = None
+    catalog: ObsCatalog | None = None
 
     def __post_init__(self):
         if not self.name:
@@ -427,8 +427,8 @@ class ResolvedControlPlan:
 
 
 def build_control_plan(
-        controls: "Sequence | None" = None,
-        runtimes: "Sequence[ControlRuntime] | None" = None,
+        controls: Sequence | None = None,
+        runtimes: Sequence[ControlRuntime] | None = None,
 ) -> ResolvedControlPlan:
     """Freeze the resolved-control result into a read-only plan.
 
@@ -470,10 +470,10 @@ def _actuated_joints(art, recipe) -> tuple[str, ...]:
 
 
 def validate_resolved_coverage(
-        articulations: "Iterable[Any] | None",
-        recipes: "AbcMapping[str, Any] | None",
-        controls: "Iterable[Any] | None",
-        runtimes: "Iterable[ControlRuntime] | None") -> None:
+        articulations: Iterable[Any] | None,
+        recipes: AbcMapping[str, Any] | None,
+        controls: Iterable[Any] | None,
+        runtimes: Iterable[ControlRuntime] | None) -> None:
     """Validate the resolved control coverage of every articulation (v105 §4).
 
     For each articulation with declared controls:

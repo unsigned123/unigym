@@ -43,10 +43,14 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 from .ops import (build_ops, pose_compose, pose_rel, strip_prop_prefix)
+
+if TYPE_CHECKING:
+    from .gripper import Gripper
 
 __all__ = ["Director", "DirectorError", "OPS", "REJECT_ERROR",
            "REJECT_HINT", "Rejector"]
@@ -147,7 +151,7 @@ class Director:
         #                       "kind": pin|follow (kin), pose|rel}
         self._attachments: dict[str, dict] = {}
         # resolved at bind_env
-        self._gripper = None
+        self._gripper: Gripper | None = None
         self._bind()
 
     # ------------------------------------------------------------------ #
@@ -156,7 +160,7 @@ class Director:
     def _bind(self) -> None:
         from .gripper import normalize_gripper_cfg
         gcfg = normalize_gripper_cfg(self.cfg.get("gripper"))
-        self._gripper = self._ops.bind(gcfg)
+        self._gripper = cast("Gripper | None", self._ops.bind(gcfg))
 
     # ------------------------------------------------------------------ #
     # sink protocol (kinematic followers + directed flags)
@@ -494,7 +498,7 @@ class Director:
     def _resolve_obj(self, name: str):
         return self._ops.resolve_obj(name)
 
-    def _host_pose(self, host: str) -> "tuple[np.ndarray, np.ndarray]":
+    def _host_pose(self, host: str) -> tuple[np.ndarray, np.ndarray]:
         return self._ops.host_pose(host)
 
     def _write_slave_pose(self, obj, pos, quat) -> None:

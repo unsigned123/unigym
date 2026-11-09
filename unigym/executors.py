@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import time
+from typing import NoReturn
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -260,7 +261,7 @@ _DOCKER_KEYS = frozenset((
     "gpus", "network", "headless", "device"))
 
 
-def _fail(field: str, msg: str) -> None:
+def _fail(field: str, msg: str) -> NoReturn:
     raise ValueError(f"{field}: {msg}")
 
 

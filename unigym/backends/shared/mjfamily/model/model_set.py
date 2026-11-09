@@ -144,7 +144,7 @@ def translate_model_ir(ir: ModelIR, name_map) -> ModelIR:
 
 def build_model_set(merged, *, runtimes=(), single_name=None,
                     meta=None, name_map=None,
-                    allow_merge=True) -> tuple[ModelSet, "ModelIR | None"]:
+                    allow_merge=True) -> tuple[ModelSet, ModelIR | None]:
     """Build ``(ModelSet, translated_merged_ir)`` from the compiled IR.
 
     Args:

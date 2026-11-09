@@ -21,6 +21,7 @@ import importlib
 import importlib.metadata
 import re
 from collections.abc import Callable, Mapping
+from typing import Any
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
@@ -121,7 +122,7 @@ class TraitScope:
     environments cannot use it.  ``max_envs=None`` means "any num_envs".
     """
 
-    max_envs: "int | None" = None
+    max_envs: int | None = None
     note: str = ""
 
 
@@ -133,30 +134,30 @@ class BackendInfo:
     """Identity + capability set of one registered backend."""
 
     name: str                    # canonical: "mujoco" | "isaaclab2" | "isaaclab3"
-    version: "tuple[int, int]"   # engine version (probe; (0, 0) when absent)
-    traits: "frozenset[Trait]"   # capability set (registration declares it)
-    options_schema: "Mapping[str, object]" = field(default_factory=dict)
+    version: tuple[int, int]   # engine version (probe; (0, 0) when absent)
+    traits: frozenset[Trait]   # capability set (registration declares it)
+    options_schema: Mapping[str, object] = field(default_factory=dict)
     """Backend-private ``env.backend_options.<backend>`` schema (v105.3).
 
     Nested mappings declare option groups; a non-mapping leaf is the default
     and its type is validated (bool leaves require a bool).  An empty schema
     means the backend declares no options and any supplied block fails fast.
     """
-    scene_engine: "Callable[[], object] | None" = None
+    scene_engine: Callable[[], object] | None = None
     """Optional zero-argument factory for the backend's scene engine.
 
     Set only by backends that consume the neutral scene IR; the factory is
     called lazily so this module stays stdlib-only at import time.
     """
-    scopes: "Mapping[Trait, TraitScope]" = field(default_factory=dict)
+    scopes: Mapping[Trait, TraitScope] = field(default_factory=dict)
     """Per-trait availability narrowing (v096); keys must be declared traits."""
-    env_class: "Callable[[], type] | None" = None
+    env_class: Callable[[], type] | None = None
     """Optional zero-argument factory for the backend env class.
 
     The factory performs the engine import lazily, so importing this module
     (or ``unigym.env.backends``) never loads an engine.
     """
-    live_provider: "Callable[[], object] | None" = None
+    live_provider: Callable[[], type] | None = None
     """Optional zero-argument factory for the backend live-model binder.
 
     Returns the binder class used by :class:`unigym.model.live.LiveModel`;
@@ -165,8 +166,8 @@ class BackendInfo:
     ``MjModel``/``MjData`` binder.
     """
     # v100 face placeholders (G0 reserves them; later phases fill the bodies).
-    model_provider: "Callable[[], object] | None" = None
-    model_handle: "Callable[[object], object | None] | None" = None
+    model_provider: Callable[[], Callable[[], Any]] | None = None
+    model_handle: Callable[[], Callable[[object], object | None]] | None = None
     """Optional factory for the backend's compiled-model handle resolver.
 
     Returns a callable ``handle(env) -> model-or-None``.  The neutral
@@ -174,55 +175,55 @@ class BackendInfo:
     sniffing env attributes (v101 A1.5); ``None`` means the backend
     exposes no compiled model handle.
     """
-    prop_backend: "Callable[[], object] | None" = None
-    camera_backend: "Callable[[], object] | None" = None
+    prop_backend: Callable[[], object] | None = None
+    camera_backend: Callable[[], object] | None = None
     """Optional zero-argument factory for the backend camera rig builder.
 
     Returns the callable ``build(spec, render_groups=None)`` used by
     :func:`unigym.cameras.rigs.build_rig`; the backend module import stays
     inside the factory.
     """
-    director_ops: "Callable[[], object] | None" = None
-    contact_backend: "Callable[[], object] | None" = None
-    gripper_backend: "Callable[[], object] | None" = None
+    director_ops: Callable[[], object] | None = None
+    contact_backend: Callable[[], object] | None = None
+    gripper_backend: Callable[[], object] | None = None
     """Optional zero-argument factory for the backend director gripper.
 
     Returns the runtime gripper class (``MujocoGripper`` /
     ``IsaacLabGripper``); the backend module import stays inside the
     factory so the neutral director layer imports no engine.
     """
-    terrain_presets: "Callable[[], object] | None" = None
+    terrain_presets: Callable[[], object] | None = None
     # --- v101 A2b neutral construction faces (lazy factories) ---
     # The neutral run/camera/scene layers ask these faces instead of
     # comparing ``backend`` strings; every engine import stays inside the
     # backend package.
-    env_kwargs: "Callable[[], object] | None" = None
+    env_kwargs: Callable[[], object] | None = None
     """Factory -> ``env_kwargs(env_cfg, artifacts_dir, world_base, spec)``.
 
     Returns the backend-specific builder kwargs for the env constructor.
     """
-    build_terrain: "Callable[[], object] | None" = None
+    build_terrain: Callable[[], object] | None = None
     """Factory -> ``build_terrain(cfg, num_envs, env_spacing, spec_terrain)``.
 
     Returns the terrain object (or None for the native-IR pass-through);
     ``None`` on the info means the backend declares no terrain face.
     """
-    build_actuator_override: "Callable[[], object] | None" = None
+    build_actuator_override: Callable[[], object] | None = None
     """Factory -> ``apply_actuator_override(profile, section)``.
 
     ``None`` means the backend has no yaml top-level ``actuator:`` face.
     """
-    build_events: "Callable[[], object] | None" = None
+    build_events: Callable[[], object] | None = None
     """Factory -> ``build_events(section)`` (DR events; None = unsupported)."""
-    content_router: "Callable[[], object] | None" = None
+    content_router: Callable[[], Callable[..., object]] | None = None
     """Factory -> ``route_content(spec, env_cfg)`` for the ``objects:`` fill."""
-    scene_ops: "Callable[[], object] | None" = None
+    scene_ops: Callable[[], object] | None = None
     """Factory -> the backend's ``SceneOps`` class (typed scene query)."""
-    kit_launcher: "Callable[[], object] | None" = None
+    kit_launcher: Callable[[], Callable[..., tuple[Any, Any]]] | None = None
     """Factory -> ``kit_launcher(parser, warn=None)`` (kit launch before build)."""
     recipe_with_isaaclab: bool = False
     """Build the ``ArticulationCfg`` on the robot recipe (kit-bound)."""
-    default_lighting: "Mapping[str, float] | None" = None
+    default_lighting: Mapping[str, float] | None = None
     """Default lights for a textured usd prop when the config declares none."""
     camera_enable_required: bool = False
     """Cameras require the kit ``--enable_cameras`` pipeline."""
@@ -236,7 +237,7 @@ class BackendInfo:
     """Consumes the inline world scene as ``env.params.mj_scene`` (mujoco)."""
     probe_in_host: bool = False
     """``unigym probe`` runs in the host venv (vs the container lane)."""
-    probe_env: "tuple[tuple[str, str], ...]" = ()
+    probe_env: tuple[tuple[str, str], ...] = ()
     """Environment defaults injected into a host-lane probe subprocess."""
 
     def has(self, *traits: Trait) -> bool:
@@ -247,12 +248,12 @@ class BackendInfo:
         """At least one listed trait present?"""
         return bool(set(traits) & set(self.traits))
 
-    def missing(self, *traits: Trait) -> "tuple[Trait, ...]":
+    def missing(self, *traits: Trait) -> tuple[Trait, ...]:
         """The listed traits this backend lacks (stable declaration order)."""
         want = [t for t in Trait if t in set(traits)]
         return tuple(t for t in want if t not in self.traits)
 
-    def available(self, trait: Trait, num_envs: "int | None" = None) -> bool:
+    def available(self, trait: Trait, num_envs: int | None = None) -> bool:
         """Is *trait* present AND usable at *num_envs* (``None`` = any)?"""
         if trait not in self.traits:
             return False
@@ -262,7 +263,7 @@ class BackendInfo:
         return scope is None or scope.max_envs is None or \
             num_envs <= scope.max_envs
 
-    def blocked(self, traits, num_envs: "int | None" = None):
+    def blocked(self, traits, num_envs: int | None = None):
         """Present-but-scope-blocked ``(trait, scope)`` pairs (enum order).
 
         Missing traits are not reported here (use :meth:`missing`); a
@@ -348,7 +349,7 @@ _OPTION_NAMESPACES = {
 
 
 def validate_backend_options(backend: str,
-                             options: "Mapping | None") -> dict:
+                             options: Mapping | None) -> dict:
     """Validate ``env.backend_options`` and return only *backend*'s options.
 
     Args:
@@ -402,11 +403,11 @@ def validate_backend_options(backend: str,
 class TraitRule:
     """Declarative relations of one trait to the rest of the set."""
 
-    requires: "tuple[Trait, ...]" = ()
-    exclusive_with: "tuple[Trait, ...]" = ()
+    requires: tuple[Trait, ...] = ()
+    exclusive_with: tuple[Trait, ...] = ()
 
 
-TRAIT_RULES: "dict[Trait, TraitRule]" = {
+TRAIT_RULES: dict[Trait, TraitRule] = {
     Trait.ENV_LAYOUT_TILED: TraitRule(
         exclusive_with=(Trait.ENV_LAYOUT_COINCIDENT,)),
     Trait.ENV_LAYOUT_COINCIDENT: TraitRule(
@@ -563,14 +564,14 @@ ISAACLAB3_TRAITS = frozenset()
 _MODEL_GLOBAL = "model-global writes (one MjModel): no per-env face"
 _MJWARP_MODEL_GLOBAL = ("model-global writes (one MjModel); mirror-only "
                         "at N>1")
-MUJOCO_SCOPES: "dict[Trait, TraitScope]" = {
+MUJOCO_SCOPES: dict[Trait, TraitScope] = {
     Trait.DIRECTOR_TELEPORT: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
     Trait.DIRECTOR_SETVEL: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
     Trait.DIRECTOR_ATTACH_WELD: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
     Trait.DIRECTOR_GRIPPER: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
     Trait.MOCAP: TraitScope(max_envs=1, note=_MODEL_GLOBAL),
 }
-MJWARP_SCOPES: "dict[Trait, TraitScope]" = {
+MJWARP_SCOPES: dict[Trait, TraitScope] = {
     Trait.DIRECTOR_TELEPORT: TraitScope(max_envs=1,
                                         note=_MJWARP_MODEL_GLOBAL),
     Trait.DIRECTOR_SETVEL: TraitScope(max_envs=1,
@@ -627,35 +628,35 @@ def _mujoco_live() -> type:
     return MujocoLiveBackend
 
 
-def _mujoco_model_provider() -> object:
+def _mujoco_model_provider() -> Callable[[], Any]:
     """Load the MuJoCo model provider class lazily."""
     from unigym.backends.shared.mjfamily.model.provider import MujocoModelProvider
 
     return MujocoModelProvider
 
 
-def _mjwarp_model_provider() -> object:
+def _mjwarp_model_provider() -> Callable[[], Any]:
     """Load the mjwarp-labelled model provider class lazily."""
     from unigym.backends.mjwarp.model import MjwarpModelProvider
 
     return MjwarpModelProvider
 
 
-def _isaaclab2_model_provider() -> object:
+def _isaaclab2_model_provider() -> Callable[[], Any]:
     """Load the IsaacLab model provider class lazily."""
     from unigym.backends.isaaclab2.model import IsaacLabModelProvider
 
     return IsaacLabModelProvider
 
 
-def _mujoco_model_handle() -> object:
+def _mujoco_model_handle() -> Callable[[object], object | None]:
     """Load the MuJoCo compiled-model handle resolver lazily."""
     from unigym.backends.mujoco.model_handle import model_handle
 
     return model_handle
 
 
-def _mjwarp_model_handle() -> object:
+def _mjwarp_model_handle() -> Callable[[object], object | None]:
     """Load the mjwarp compiled-model handle resolver lazily."""
     from unigym.backends.mjwarp.model_handle import model_handle
 
@@ -761,7 +762,7 @@ def _mjwarp_env_kwargs() -> object:
     return env_kwargs
 
 
-def _mujoco_content_router() -> object:
+def _mujoco_content_router() -> Callable[..., object]:
     from unigym.backends.mujoco.build import route_content
 
     return route_content
@@ -803,13 +804,13 @@ def _isaaclab2_scene_ops() -> object:
     return IsaacLabSceneOps
 
 
-def _isaaclab2_kit_launcher() -> object:
+def _isaaclab2_kit_launcher() -> Callable[..., tuple[Any, Any]]:
     from unigym.backends.isaaclab2.launcher import kit_launcher
 
     return kit_launcher
 
 
-_STATIC_INFO: "dict[str, BackendInfo]" = {
+_STATIC_INFO: dict[str, BackendInfo] = {
     "mujoco": BackendInfo("mujoco", (0, 0), MUJOCO_TRAITS,
                           options_schema=_MJ_COMPOSE_OPTIONS,
                           scene_engine=_mujoco_scene_engine,
@@ -883,7 +884,7 @@ _STATIC_INFO: "dict[str, BackendInfo]" = {
                              camera_enable_required=True),
 }
 
-CANONICAL_BACKENDS: "tuple[str, ...]" = tuple(_STATIC_INFO)
+CANONICAL_BACKENDS: tuple[str, ...] = tuple(_STATIC_INFO)
 
 #: canonical name of the MuJoCo-Warp backend (the single truth callers key
 #: config/CLI binding tables on; never hand-write the literal elsewhere).
@@ -894,17 +895,17 @@ validate_trait_rules()
 
 # config-facing aliases -> canonical family.  "isaaclab" is the historical
 # default name; it resolves to isaaclab2/isaaclab3 by version probe.
-BACKEND_ALIASES: "dict[str, str]" = {"isaaclab": "isaaclab:auto"}
+BACKEND_ALIASES: dict[str, str] = {"isaaclab": "isaaclab:auto"}
 
 # build-name aliases (v100 G0): the single truth for the env factory table.
 # "isaaclab" is the historical build spelling of the 2.3-series module.
-_BUILD_ALIASES: "dict[str, str]" = {"isaaclab": "isaaclab2"}
+_BUILD_ALIASES: dict[str, str] = {"isaaclab": "isaaclab2"}
 
 
 # --------------------------------------------------------------------------- #
 # version probing (lazy, side-effect free)
 # --------------------------------------------------------------------------- #
-def _dist_version(dist: str) -> "tuple[int, int] | None":
+def _dist_version(dist: str) -> tuple[int, int] | None:
     """(major, minor) of an installed distribution, else None."""
     try:
         raw = importlib.metadata.version(dist)
@@ -918,7 +919,7 @@ def _dist_version(dist: str) -> "tuple[int, int] | None":
     return None
 
 
-def _import_version(module: str) -> "tuple[int, int] | None":
+def _import_version(module: str) -> tuple[int, int] | None:
     """Fallback probe: guarded import + ``__version__``.
 
     Post-AppLauncher
@@ -938,7 +939,7 @@ def _import_version(module: str) -> "tuple[int, int] | None":
     return None
 
 
-def isaaclab_version() -> "tuple[int, int] | None":
+def isaaclab_version() -> tuple[int, int] | None:
     """Return the IsaacLab (major, minor) version probe.
 
     Metadata first, guarded import second.
@@ -946,22 +947,22 @@ def isaaclab_version() -> "tuple[int, int] | None":
     return _dist_version("isaaclab") or _import_version("isaaclab")
 
 
-def mujoco_version() -> "tuple[int, int] | None":
+def mujoco_version() -> tuple[int, int] | None:
     """Return the MuJoCo (major, minor) version probe."""
     return _dist_version("mujoco") or _import_version("mujoco")
 
 
-def mujoco_warp_version() -> "tuple[int, int] | None":
+def mujoco_warp_version() -> tuple[int, int] | None:
     """Return the ``mujoco-warp`` (major, minor) version probe."""
     return _dist_version("mujoco-warp") or _import_version("mujoco_warp")
 
 
-def known_backends() -> "list[str]":
+def known_backends() -> list[str]:
     """Canonical backend names (registry order, no probing)."""
     return list(CANONICAL_BACKENDS)
 
 
-def build_name(name: "str | None" = None) -> str:
+def build_name(name: str | None = None) -> str:
     """Resolve a build spelling to a canonical backend name (no probing).
 
     The historical ``"isaaclab"`` build name pins ``isaaclab2`` (the 2.3

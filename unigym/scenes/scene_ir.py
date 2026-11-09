@@ -349,7 +349,7 @@ class Scene:
     slots: tuple = ()
     materials: tuple = ()
     engine_hints: Mapping = field(default_factory=dict)
-    terrain: "Terrain | None" = None
+    terrain: Terrain | None = None
 
     def __post_init__(self):
         """Validate the name, the typed sequences, hints, terrain and uniqueness."""

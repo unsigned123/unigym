@@ -101,7 +101,7 @@ def discover_scene_packs(root: Optional[Path] = None) -> dict:
     literal ``rglob`` semantics; ``root=None`` enumerates the mounted
     packs' ``scenes`` faces through the resolver.
     """
-    index: "ScenePackIndex" = ScenePackIndex()
+    index: ScenePackIndex = ScenePackIndex()
     origin: dict = {}
     for base, path in _scene_hits(root):
         rel = path.relative_to(base)

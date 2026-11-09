@@ -30,7 +30,7 @@ Pure-data constants live in :mod:`unigym.robots.g1_constants`
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ..core import quat
 from .base import RobotRecipe
@@ -188,7 +188,8 @@ def make_g1_profile(spawn_height: float = G1_SPAWN_HEIGHT,
         from isaaclab.assets import ArticulationCfg
         from isaaclab_assets.robots.unitree import G1_29DOF_CFG
 
-        spawn_kwargs = {"activate_contact_sensors": True}  # asset ships OFF
+        spawn_kwargs: dict[str, Any] = {
+            "activate_contact_sensors": True}  # asset ships OFF
         if usd_path:
             spawn_kwargs["usd_path"] = usd_path
         cfg = G1_29DOF_CFG.replace(

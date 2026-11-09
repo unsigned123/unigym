@@ -17,6 +17,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -132,7 +133,7 @@ def _heat_lut() -> np.ndarray:
     return _LUT
 
 
-def render_heatmap(d: np.ndarray) -> Image.Image:
+def render_heatmap(d: np.ndarray) -> Any:
     """abs-diff (H,W) -> LUT-colored heatmap image."""
     g = d.mean(axis=2) if d.ndim == 3 else d.astype(np.float64)
     peak = float(g.max())
@@ -141,7 +142,7 @@ def render_heatmap(d: np.ndarray) -> Image.Image:
     return Image.fromarray(_heat_lut()[idx])
 
 
-def render_hists(a: np.ndarray, b: np.ndarray) -> Image.Image:
+def render_hists(a: np.ndarray, b: np.ndarray) -> Any:
     """Two normalized gray histograms side by side (256x120 each)."""
     panels = []
     for img in (a, b):

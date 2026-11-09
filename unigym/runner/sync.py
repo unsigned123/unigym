@@ -135,7 +135,7 @@ class SyncRunner:
     """
 
     @classmethod
-    def from_instance(cls, instance) -> "SyncRunner":
+    def from_instance(cls, instance) -> SyncRunner:
         """Build a SyncRunner from a live :class:`RunInstance` (v097 R2).
 
         The constructor arguments are exactly the ones ``collect_cli`` used
@@ -191,7 +191,7 @@ class SyncRunner:
         # rewind seam: the resumable loop counter + the snapshot's
         # iteration state, both written only by the rewind controller
         self._tick = 0
-        self._rewind_state: "dict | None" = None
+        self._rewind_state: dict | None = None
         # per-tick iteration state that must survive across tick() calls
         # (the former run()-local ``cmd`` / ``obs_frame`` pair)
         self._started = False

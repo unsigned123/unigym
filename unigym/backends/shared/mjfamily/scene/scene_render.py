@@ -83,7 +83,7 @@ class RegionAttachment:
 class ComposedScene:
     """A spec-delegating result with an immutable region metadata table."""
 
-    spec: "mujoco.MjSpec"
+    spec: mujoco.MjSpec
     regions: Mapping[str, object]
     terrain: object = None
 

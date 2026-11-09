@@ -35,6 +35,7 @@ hand-computed synthetic episodes.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -732,7 +733,7 @@ def _frames_range_check(ep, spec, articulation=None):
 
 # term -> per-frame series (the sequence its reduction consumed); None
 # entries = no natural per-frame face (delta is an endpoint pair)
-TERM_FRAMES: dict[str, object] = {
+TERM_FRAMES: dict[str, Callable[..., object]] = {
     "frame_fraction": _frames_fraction,
     "frame_mean": lambda ep, spec, a=None: _post_series(
         ep, spec, "frame_mean", a),
@@ -908,7 +909,8 @@ def validate_term_spec(term, spec: dict) -> list[str]:
             if not ok:
                 errors.append(
                     f"{where}.{p}: must be [x, y, z] numbers, got {v!r}")
-            elif p == "half_extents" and any(x < 0 for x in v):
+            elif (p == "half_extents" and isinstance(v, (list, tuple))
+                  and any(isinstance(x, (int, float)) and x < 0 for x in v)):
                 errors.append(
                     f"{where}.{p}: all half lengths must be >= 0, got {v!r}")
     elif term == "reference_mpjpe":

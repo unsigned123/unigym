@@ -29,9 +29,9 @@ class WarpBatchMixin:
 
     # Host ``MjwarpEnv`` attributes the mixin touches (declared so the mixin
     # is analyzable on its own, without importing the env module).
-    _model: "mujoco.MjModel"
-    _datas: list["mujoco.MjData"]
-    _capacity: "Capacity"
+    _model: mujoco.MjModel
+    _datas: list[mujoco.MjData]
+    _capacity: Capacity
     num_envs: int
     # warp ``Model`` / batched device ``Data`` / opaque warp arrays.
     _wm: Any

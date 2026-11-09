@@ -8,3 +8,5 @@ pure python, unit-testable locally:
     from unigym.backends.isaaclab2.dr_events import build_event_terms
     from unigym.backends.isaaclab2.env import IsaaclabEnv  # server side
 """
+
+from __future__ import annotations

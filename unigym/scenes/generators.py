@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
+from typing import cast
 
 from .primitives import (
     SHAPE_LAYERS,
@@ -78,7 +79,7 @@ def _shape_schema(*dim_rules: tuple[str, Mapping]) -> MappingProxyType:
     Returns:
         The read-only schema mapping.
     """
-    schema = {"name": {"type": "name", "required": True}}
+    schema: dict[str, object] = {"name": {"type": "name", "required": True}}
     for key, rule in dim_rules:
         schema[key] = rule
     schema.update({
@@ -132,7 +133,7 @@ def _coerce(gen_name: str, key: str, rule: Mapping, value):
     if kind == "name":
         if value is None and rule.get("nullable"):
             return None
-        return require_neutral_name(where, value)
+        return require_neutral_name(where, cast(str, value))
     if kind == "positive":
         if (
             isinstance(value, bool)

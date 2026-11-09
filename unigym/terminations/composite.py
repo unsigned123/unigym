@@ -1,6 +1,8 @@
 """Composite termination group (OR / AND combination) + inversion wrapper."""
 from __future__ import annotations
 
+from typing import Any
+
 from .base import Termination, TerminationState, all_false
 
 
@@ -55,7 +57,7 @@ class TerminationGroup:
         """Per-termination masks ``{name: (N,) bool}`` (diagnostics)."""
         return {t.name: t.check(state) for t in self.terminations}
 
-    def combine(self, detail: dict):
+    def combine(self, detail: dict) -> Any:
         """Reduce per-termination masks (from :meth:`check_detail`)."""
         if not detail:
             return None
@@ -65,7 +67,7 @@ class TerminationGroup:
             out = (out | m) if self.mode == "or" else (out & m)
         return out
 
-    def check(self, state: TerminationState):
+    def check(self, state: TerminationState) -> Any:
         """Combined (N,) bool mask (True = the group fires)."""
         ref = state.reference()
         if ref is None:
