@@ -6,7 +6,7 @@ the drive/target pair and the backend-specific addressing/strategy).  There
 is no "policy" runtime type: a policy is just ``position_pd`` (or
 ``position_servo``) plus an adapter.
 
-Owner rulings:
+Rules:
 
 * every engine publishes ``env.articulations`` and ``env.controls`` and
   iterates them -- there is no single/multi mode switch;

@@ -6,7 +6,7 @@ recording them.  The data path is:
     SyncRunner --callbacks--> BenchmarkSink --EpisodeData--> Task.score
         --EpisodeResult--> Task.aggregate --> benchmark_report.json
 
-Contract (owner-confirmed 2026-09-03, docs/contracts/benchmark_contract.md):
+Contract (docs/contracts/benchmark_contract.md):
 
 * two-phase scoring: ``score(ep) -> EpisodeResult`` per episode (pure
   function of the episode data -- tasks never touch the environment) and
@@ -106,7 +106,7 @@ def robot_state_key_uses(spec, _path: str = "") -> list[tuple[str, str]]:
 def resolve_episode_key(data: dict, key: str, articulation: str | None) -> str:
     """Recorded key for *key* under the task's explicit *articulation*.
 
-    Owner ruling (v103.6b): there is no primary binding and no
+    There is no primary binding and no
     "unique articulation" inference for robot-state keys.
 
     * a key already named ``articulation/<name>/...`` passes through; when
@@ -210,7 +210,7 @@ class Task(ABC):
             robot state (``base_pos`` / ``gravity_b`` / ``joint_pos`` /
             ``base_lin_vel`` / ``command`` / ...).  Those tasks MUST name
             their articulation in params -- there is no primary binding
-            and no unique-articulation inference (owner ruling v103.6b).
+            and no unique-articulation inference.
 
     Args:
         params: task parameters from the yaml section (already stripped of

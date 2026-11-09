@@ -53,7 +53,7 @@ Foreground/backstage decoupling for long collection runs
   read of the latest frame) / pause / resume / camera / snapshot (a
   req_id-keyed command->ack native RPC, polling + timeout).
 
-Three disciplines (owner-approved, blueprint §1):
+Three disciplines (blueprint §1):
 
 1. **sim on the main thread only** -- camera frame reads all happen in the
    main-loop tick; readers only read SHM.
@@ -1134,7 +1134,7 @@ class Bridge:
         self._enter_paused()
 
     def pause_for_rewind(self) -> None:
-        """Rewind auto-pause (owner ruling §5-③).
+        """Rewind auto-pause.
 
         Same state as CMD_PAUSE -- the world parks restored,
         resume/step drive it.
@@ -1567,7 +1567,7 @@ class Bridge:
             raise BridgeError(
                 "no broadcast camera in this run; pass an explicit camera")
         if "flags" in params:
-            # owner ruling: the flags key is GONE at the bridge
+            # The flags key is GONE at the bridge
             # layer (no deprecation window; the CLI's --flags is the
             # only surviving alias and it expands BEFORE the wire).  The
             # RenderSpec key is `render`; both keys together fail-fast

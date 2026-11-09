@@ -9,7 +9,7 @@ This module is pure data plus validation: it imports only the standard
 library and the neutral articulation IR.  No engine or backend module is
 named here (the runtime/backends consume these declarations).
 
-Drive semantics (owner ruling §3.2):
+Drive semantics:
 
 * ``position_pd``      -- software PD; ``target = position`` (absolute angle)
 * ``position_servo``   -- engine position actuator; ``target = position``

@@ -54,7 +54,7 @@ buffers are episode-scoped lists of per-step slice dicts (numpy/tensor
 free after ``slice_step_for_env`` -- cpu clones), so the round trip is a
 deep copy away from byte-exact.
 
-pre-flight (design v063-rewind-preflight, owner ruling batch 1):
+pre-flight (design v063-rewind-preflight):
 both providers implement ``validate_rewind_state(state)`` -- the SAME
 refusal judgment their ``apply_rewind_state`` enforces, run read-only
 by the controller BEFORE the sidecar dump / safety capture / restore
@@ -172,7 +172,7 @@ class _EpisodeBufferProvider:
         return state
 
     def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
-        """Pre-flight (v063-rewind-preflight, owner ruling batch 1).
+        """Pre-flight (v063-rewind-preflight).
 
         The SAME refusal judgment :meth:`apply_rewind_state` enforces,
         run read-only BEFORE the controller touches the world -- a

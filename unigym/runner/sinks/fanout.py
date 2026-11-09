@@ -2,7 +2,7 @@
 
 Used for ``mode: both`` (collect + benchmark in one rollout).  Sinks are
 called synchronously in construction order -- CollectSink first, then
-BenchmarkSink (owner decision 2026-09-03) -- and each sees the identical
+BenchmarkSink -- and each sees the identical
 bundle objects, so recording and scoring cannot diverge.
 """
 from __future__ import annotations

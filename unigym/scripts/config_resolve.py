@@ -3,7 +3,7 @@
 ONE helper shared by ``unigym run|submit|debug|probe``:
 
 - absolute path: used VERBATIM (must exist);
-- RELATIVE SPELLINGS ARE NEVER CWD-RESOLVED (owner ruling): they
+- RELATIVE SPELLINGS ARE NEVER CWD-RESOLVED: they
   always anchor at ``config/`` in the current checkout (= the package
   root, worktree-safe);
 - glob metachars (``*?[``) -> ``sorted(CONFIG_DIR.glob(rel))``
@@ -13,7 +13,7 @@ ONE helper shared by ``unigym run|submit|debug|probe``:
 - exact name relative to ``config/`` (``x.yaml`` or ``sub/x.yaml``,
   a leading ``config/`` consumed) -> used if that exact file exists;
   everything else -- bare stems, slash prefixes, wrong names -- is a
-  hard ``config not found`` (per owner: no short names, no
+  hard ``config not found`` (no short names, no
   prefix matching, explicit only).
 
 Discipline: glob requires its explicit trigger; name resolution is

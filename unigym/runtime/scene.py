@@ -142,7 +142,7 @@ def joint_limit_rows(
     """``tree.robot.joints`` / prop-articulation limit rows.
 
     ``names``: ordered joint names -- ALL ACTUATED robot joints for the
-    robot face (owner ruling: the full articulation table, hands
+    robot face (the full articulation table, hands
     included -- the 29-joint policy table is a subset the action face
     carries; contract §1.23).
     ``limits``: ``{name: (lo, hi) | None}`` from the backend's model

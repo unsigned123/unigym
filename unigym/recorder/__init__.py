@@ -1,6 +1,6 @@
 """Visualization recorder: MP4 video from an EXPLICIT in-scene camera.
 
-The recorder owns **no sensors** (owner ruling: the self-built
+The recorder owns **no sensors** (the self-built
 ``camera:`` path is removed — there is no provision/sugar fallback).  It
 binds a rig declared under the yaml ``cameras:`` section (CameraManager) via
 the REQUIRED ``camera_ref`` key and reads that rig's cached RGB frames: the

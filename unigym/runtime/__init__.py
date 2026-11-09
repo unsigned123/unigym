@@ -1,7 +1,7 @@
 """Runtime layer: foreground/backstage decoupling (SHM bridge).
 
 ``bridge.py`` is deliberately the single module owning every shared-memory
-layout constant and sync primitive (owner discipline #3).  It only needs
+layout constant and sync primitive.  It only needs
 stdlib + numpy (lazy), so CLI tooling can import it without torch /
 mujoco / isaaclab.
 

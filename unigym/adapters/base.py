@@ -125,7 +125,7 @@ class ImageObsRequest(NamedTuple):
         key: cache key, e.g. "cam/ego/rgb" or "cam/ego/depth".
         shape: per-env frame shape WITHOUT the batch axis, e.g. (3, 224, 224)
             for RGB or (1, 60, 106) for metric depth (channel axis included).
-        dtype: expected torch dtype. Raw-value caching (owner ruling): uint8
+        dtype: expected torch dtype. Raw-value caching: uint8
             for RGB, float32 metric depth in meters; normalization stays with
             the adapter.
         source: documentation string, typically "camera".

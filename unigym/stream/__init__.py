@@ -8,7 +8,7 @@ parse/validate/normalize + the mapping onto the SHM bridge command set
 (docs/contracts/runtime_contract.md §4 command ids); it never touches SHM, sockets
 or torch, so it is unit-testable offline.
 
-Instruction types (owner blueprint §2)::
+Instruction types::
 
     {type: camera_set_properties, camera, pose_offset?[3], yaw_deg?,
      pitch_deg?, target_env?, interval?, env_id?}      # env_id: per_env addressing extension

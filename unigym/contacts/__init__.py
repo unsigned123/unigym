@@ -10,7 +10,7 @@ Public surface:
   record keys through the SHARED format/component/aggregate unified layer
   (``contacts.base.apply_format``); backends only produce raw arrays.
 * :class:`contacts.base.ContactGroupSpec` — yaml-declarable group spec
-  (frame REQUIRED, no default — owner ruling ①).
+  (frame REQUIRED, no default).
 * Declarative references : ``sensor_bodies: {body_parts:
   grasp.left}`` and ``filter_bodies: {prop: cracker}`` resolve against the
   robot profile body-parts groups and the run's declared props

@@ -1,6 +1,6 @@
 """CameraManager: multi-rig combination with request-driven instantiation.
 
-Responsibilities (design doc §1.1, owner rulings ①②③):
+Responsibilities (design doc §1.1):
 
 * **Key space** — ``cam/<name>/<rgb|depth>`` obs keys plus the optional depth
   aliases (``depth_image`` / ``depth_image_raw`` sugar shim, docs/
@@ -12,7 +12,7 @@ Responsibilities (design doc §1.1, owner rulings ①②③):
   cameras cost nothing until rendered) and splits the obs tick: only
   requested rigs render per tick, the rest stay addressable by the
   camera faces (declared-camera availability, camera unification).
-* **Raw-value caching** — uint8 RGB / metric depth (owner ruling ②);
+* **Raw-value caching** — uint8 RGB / metric depth;
   normalization stays with the adapter except the depth-alias
   ``depth_image`` alias which reuses ``env/depth.py::preprocess_depth``
   verbatim.
@@ -69,14 +69,14 @@ it."""
 _PREPROCESS_SIZE = (60, 106)
 
 POSE_INLINE_RIG_TYPES = ("world",)
-"""ux-7 (owner-narrowed S2): rigs eligible for the transient pose-inline
+"""ux-7: rigs eligible for the transient pose-inline
 snapshot.  ``world`` only -- body/chase rigs are re-posed from the robot
 at every step, so a world-pose override there would be misleading (the
 free debug fly camera is a world rig by the console convention)."""
 
 LIVE_PROPERTY_KEYS = ("fps", "interval", "pitch_deg", "pose_offset",
                       "render", "roll_deg", "target_env", "yaw_deg")
-"""camera_set_properties live whitelist (owner ruling): pose offset,
+"""camera_set_properties live whitelist: pose offset,
 yaw-pitch, target_env, interval -- plus the ``render`` live key
 (the publish loop's ONLY render state: ``{"view": name}`` or a RenderSpec
 fragment, resolved to a COMPLETE spec on write -- full-write semantics)
@@ -464,7 +464,7 @@ class CameraManager:
         return doc
 
     # ------------------------------------------------------------------ #
-    # transient world pose (ux-7, owner-narrowed S2)
+    # transient world pose (ux-7)
     # ------------------------------------------------------------------ #
     @contextmanager
     def transient_world_pose(self, name: str, pos, lookat):

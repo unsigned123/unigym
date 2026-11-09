@@ -14,7 +14,7 @@ gate:
         pause always wins over an in-flight step budget)
     DONE run: request_step is refused by the console handler ("run finished")
 
-``step`` semantics (owner ruling 2026-09-16): one step = one full policy
+``step`` semantics: one step = one full policy
 iteration (act -> env.step -> obs -> record -> reset chain) driven by the
 engine itself, so recording and episode clocks behave exactly like a
 running rollout.  The physics-step concept is DELETED -- the wire contract

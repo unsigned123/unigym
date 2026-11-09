@@ -224,7 +224,7 @@ class Session:
     def rewind(self, snap_id: int, timeout_s: float | None = None) -> dict:
         """Restore a snapshot -> {"restored_tick", "snap_id", "paused"}.
 
-        The world auto-pauses on the ack (owner ruling §5-③); resume or
+        The world auto-pauses on the ack; resume or
         step continues on the forked timeline."""
         return self._send("rewind", {"snap_id": int(snap_id)},
                           timeout_s=timeout_s)

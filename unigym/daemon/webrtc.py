@@ -1,6 +1,6 @@
 """daemon.webrtc -- aiortc WebRTC face of the media gateway .
 
-Owner requirement: this file is deliberately SELF-CONTAINED (together
+This file is deliberately SELF-CONTAINED (together
 with media.py) so the whole WebRTC service can be lifted out later
 without touching anything else.  It is the only module importing aiortc;
 the daemon loads it LAZILY (on the first ``/run/<id>/offer`` request) --

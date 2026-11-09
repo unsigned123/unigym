@@ -4,7 +4,7 @@ A code pack carries a plain Python package at ``<pack_root>/python/``; its
 ``__init__.py`` decides the submodule import order.  Loading is a standard
 package import under the unique module name ``unigym_packs_<name>`` -- there
 is no entry declaration, no per-pack authorization and no content hash
-(internal trust, owner decision).  Pack code may import the standard library
+(internal trust).  Pack code may import the standard library
 and third-party packages freely, but reaches UniGym only through an explicit
 allowlist of core import roots; every executed pack file passes an AST guard
 that fails closed with :class:`~unigym.packs.PackError` naming file, line and

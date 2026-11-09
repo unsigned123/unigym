@@ -5,7 +5,7 @@ spec parsing are unit-testable offline; isaaclab imports live exclusively in
 ``backends/isaaclab2/cameras.py`` (and inside rig methods that touch the scene,
 lazy-imported), mirroring the ``robots/`` package convention.
 
-Key space (owner ruling 2026-09-03)
+Key space
 ===================================
 Every camera *rig* named ``<name>`` serves up to two obs keys::
 
@@ -17,7 +17,7 @@ The manager additionally maps the ``depth_image`` /
 ``depth_image_raw`` keys onto an implicitly provisioned ``depth`` body rig
 (sugar shim, docs/contracts/camera_contract.md §depth migration).
 
-Caching stores RAW values (owner ruling ②): uint8 RGB / metric depth; any
+Caching stores RAW values: uint8 RGB / metric depth; any
 normalization (crop/clip/normalize) belongs to the adapter — the only
 exception is the ``depth_image`` alias, which reproduces the original
 ``env/depth.py::preprocess_depth`` behavior verbatim.

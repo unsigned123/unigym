@@ -1,6 +1,6 @@
 """daemon.media -- the unigymd media gateway (design §3).
 
-The run-side HTTP face moved WHOLESALE here (owner requirement: this
+The run-side HTTP face moved WHOLESALE here (this
 file -- together with webrtc.py -- is deliberately self-contained so the
 whole media service can be lifted out later without touching anything
 else).  The daemon terminates all browser traffic; runs are pure SHM

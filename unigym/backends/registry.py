@@ -6,7 +6,7 @@ optional feature a yaml/adapter/director-op can request maps to a trait, and
 a backend missing that trait fails fast at build time (``{error, hint}``) —
 never a silent degradation.
 
-Backends are *equal citizens* (owner ruling §R): ``mujoco`` / ``isaaclab2``
+Backends are *equal citizens*: ``mujoco`` / ``isaaclab2``
 / ``isaaclab3``.  ``isaaclab2`` (IsaacLab 2.3 series) and ``isaaclab3``
 (3.0+ series) are two different backends, selected by import probing at
 construction time; a config ``backend:`` key overrides the probe.

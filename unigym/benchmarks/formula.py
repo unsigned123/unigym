@@ -55,7 +55,7 @@ _COMPARATORS = ("gte", "lte", "gt", "lt", "between", "eq")
 _COMBINATORS = ("all", "any", "not")
 _MAX_COMBINATOR_DEPTH = 2
 
-# language section (owner ruling: instruction templates live in the
+# language section (instruction templates live in the
 # task spec; K5 expansion modes from the g1pick design §4.2)
 _LANGUAGE_EXPANDS = ("seeded", "all", "single")
 _LANGUAGE_KEYS = ("pool", "bindings", "expand")

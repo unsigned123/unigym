@@ -839,7 +839,7 @@ def _build_sinks(
     if mode == "benchmark":
         sink = bench_sink
     elif mode == "both":
-        # CollectSink first, BenchmarkSink second (owner decision 2026-09-03)
+        # CollectSink first, BenchmarkSink second
         sink = FanOutSink(collect_sink, bench_sink)
     else:
         sink = collect_sink

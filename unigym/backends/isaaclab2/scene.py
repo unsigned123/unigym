@@ -95,8 +95,8 @@ class IsaacLabSceneOps:
     def tree(self) -> dict:
         """Curated read-only scene tree per daemon_api_contract §1.23.
 
-        Lazy-cached by the face; limit rows over all actuated joints
-        (owner ruling), prop joint limits via ``sim_joint_limits``.
+        Lazy-cached by the face; limit rows over all actuated joints,
+        prop joint limits via ``sim_joint_limits``.
         """
         from unigym.runtime.scene import joint_limit_rows, robot_joint_groups
 
@@ -104,7 +104,7 @@ class IsaacLabSceneOps:
         robot = env.robot
         base = str(robot.data.body_names[0])    # root link
         joints = list(_asset_joint_names(env))
-        # (owner ruling): limit rows over ALL actuated joints
+        # limit rows over ALL actuated joints
         # (the policy controller's asset_joint_names == the articulation
         # table, hands included)
         # -- the sim-provided limits cover the same full (N, J, 2) face;

@@ -1,12 +1,12 @@
 """Runtime debug console : stepping + inspector + save_npz.
 
-Package layout (owner blueprint §2 -- logic lives here, the bridge only hosts
+Package layout (logic lives here, the bridge only hosts
 hooks; docs/contracts/console_contract.md is the contract twin):
 
 * ``stepping.py``   StepGate state machine (pause / request_step / wait
   park loop) -- replaces the bridge's inline freeze loop.
 * ``inspector.py``  Inspector: fixed queries (summary/obs/extra), the
-  pass-through eval (owner ruling: direct eval/exec, full
+  pass-through eval (direct eval/exec, full
   builtins -- module docstring for the rationale), the deterministic
   inline/npz formatting rule and the npz dump
   (data_out/<run>/inspect/req_<id>.npz).

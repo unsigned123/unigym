@@ -1,6 +1,6 @@
 """Central backend registry package (backend-traits architecture).
 
-Layout (docs/designs/backend-traits.md §R.2, owner ruling):
+Layout (docs/designs/backend-traits.md §R.2):
 
 * ``unigym/backends/registry.py`` — the Trait enum, ``BackendInfo``,
   the per-backend trait tables and the import-probe backend selection

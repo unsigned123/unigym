@@ -137,7 +137,7 @@ class IsaaclabJointResolver:
 
     The term must be configured with ``preserve_order=True`` and an explicit
     joint-name list, so its flat input dim ``i`` corresponds to
-    ``term_joint_names[i]`` (owner ruling 2026-09-14, plan §1).  The gather
+    ``term_joint_names[i]`` (plan §1).  The gather
     index is cached per name-tuple (first resolve, then reuse).
 
     Unknown names fail fast listing the accepted names.

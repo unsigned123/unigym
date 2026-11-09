@@ -1,6 +1,6 @@
 """Inspector: fixed queries + pass-through eval + npz dump.
 
-(owner ruling 2026-09-17): eval is DIRECT -- no restricted
+eval is DIRECT -- no restricted
 namespace, no builtin whitelist.  The original sandbox-ish namespace was a
 foot-guard, not a security sandbox, and in practice it rejected most real
 diagnostics (assignments, imports, multi-line snippets, ``print``),
@@ -12,7 +12,7 @@ expression's value is returned.  The inspector can therefore mutate run
 state (assignments, method calls) -- that is a documented capability now,
 not an accident; exceptions still never escape (ConsoleError -> ack).
 
-Response formatting is a deterministic rule (owner ruling: explicit
+Response formatting is a deterministic rule (explicit
 thresholds, no fuzzy size judgment):
 
 * inline summary ALWAYS: ``key / shape / dtype / mean / std / first8``
@@ -68,7 +68,7 @@ def _jsonable(v):
 class Inspector:
     """Runtime inspector (engine-thread query face).
 
-    eval is DIRECT (owner ruling, module docstring): statements,
+    eval is DIRECT (module docstring): statements,
     assignments, imports and arbitrary attribute access all execute
     against the live run objects; the last expression's value is
     returned.  ``env``/``adapter`` may be None (``obs`` queries /
@@ -171,7 +171,7 @@ class Inspector:
         return out
 
     # ------------------------------------------------------------------ #
-    # pass-through eval (owner ruling -- module docstring)
+    # pass-through eval
     # ------------------------------------------------------------------ #
     def eval_expr(self, expr) -> dict:
         """Direct eval/exec of *expr* in the run namespace.

@@ -9,7 +9,7 @@ unigym/runtime/bridge.py):
 
 The port/auth/webui_url/curl_base/tunnel_hint fields are RETIRED (runs have
 no HTTP port and no token -- the daemon media gateway terminates all
-browser traffic; breaking change, owner-authorized).  This module builds
+browser traffic; breaking change).  This module builds
 the merged, heartbeat-verified view on demand:
 
     SHM scan (/dev/shm/unigym_*)  x  serve registries  ->  [RunInfo]

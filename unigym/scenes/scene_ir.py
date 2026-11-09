@@ -60,7 +60,7 @@ _EngineHints: TypeAlias = Mapping[str, Any]
 INSTANCE_ROLES = ("rigid", "articulated", "terrain", "sensor")
 
 CORE_SLOT_TAGS = ("support", "interior", "opening")
-"""The slot tags the CORE itself understands (owner decision, v091 #2).
+"""The slot tags the CORE itself understands (v091 #2).
 
 Tags stay FREE by design: a Slot may carry any string, and a pack adds its
 own vocabulary (``front``, ``shelf`` ...) without registering anything --

@@ -1,6 +1,6 @@
 """watchers.base -- typed data face for programmable observers.
 
-Design: docs/designs/watchers.md §8 (owner ruling).  Three pieces live
+Design: docs/designs/watchers.md §8.  Three pieces live
 here:
 
 * :class:`WatchResult` -- the behavior interface.  A watcher decides

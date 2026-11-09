@@ -12,7 +12,7 @@ docs/designs/v068-runtime-layout.md §2):
     <runtime_dir>/watch/<run_id>/     watcher artifacts (watch/ + watchers.json)
 
 Readers see ONLY the dedicated subdirectories -- there is NO /tmp-root
-fallback (owner ruling: debt over compat; pre-layout files age out
+fallback (debt over compat; pre-layout files age out
 naturally, the /tmp-root archive lives in /tmp/unigym-archive/).
 Existing files of live runs are never migrated (their paths are held in
 the run's own spec/state).

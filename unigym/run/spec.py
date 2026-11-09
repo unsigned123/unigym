@@ -223,7 +223,7 @@ def _normalize_articulations(
 ) -> tuple[ArticulationSpec, ...]:
     """Normalize ``cfg['articulations']`` and reject the removed ``robot:``.
 
-    owner ruling: no compatibility alias.  A config still carrying
+    No compatibility alias.  A config still carrying
     the old top-level ``robot:`` block fails fast with the new shape; the
     ``articulations[]`` list is normalized into the frozen neutral IR.  The
     articulation-level ``control:`` block is rejected by the

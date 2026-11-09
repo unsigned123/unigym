@@ -1,6 +1,6 @@
 """watchers.templates -- the built-in predicate template registry (tier 1).
 
-Design docs/designs/watchers.md §8.1 (owner ruling): system templates
+Design docs/designs/watchers.md §8.1: system templates
 are the FIRST-CLASS predicate tier -- typed parameters + a contract
 entry + validation, FormulaTask-style (benchmarks/formula.py: validate
 returns a list of field-naming errors, check is strict).  Adding a

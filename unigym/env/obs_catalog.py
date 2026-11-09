@@ -44,8 +44,8 @@ What the catalog locks
   articulation keeps the bare keys.  A4 ships the helper + rule; A5 wires
   the multi-controller catalog.
 
-Request validation (subset semantics — owner-approved)
-======================================================
+Request validation (subset semantics)
+=====================================
 ``ObsCatalog.validate_request`` runs at env construction over every
 ``adapter.get_obs_requests()`` entry:
 

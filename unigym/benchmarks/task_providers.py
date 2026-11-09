@@ -1,14 +1,14 @@
 """Task providers: the fifth registry (v071 §3).
 
 The scripted fallback seam for pack tasks -- a task provider is a PURE
-FUNCTION from data to a FormulaTask spec dict.  It is the owner-approved
-escape hatch for pack tasks whose spec COMBINATION cannot be spelled as
+FUNCTION from data to a FormulaTask spec dict.  It is the escape
+hatch for pack tasks whose spec COMBINATION cannot be spelled as
 a template x parameter row (v071 §2) -- the same role the terms
 whitelist plays for judge terms and the Python plugin seam plays for
 whole Task classes, one axis per seam:
 
 A task provider is a PURE FUNCTION from data to a FormulaTask spec dict:
-``provider(slots, tables) -> spec``.  It is the owner-approved escape
+``provider(slots, tables) -> spec``.  It is the escape
 hatch for pack tasks whose spec COMBINATION cannot be spelled as a
 template x parameter row (v071 §2) -- the same role the terms whitelist
 plays for judge terms and the Python plugin seam plays for whole Task

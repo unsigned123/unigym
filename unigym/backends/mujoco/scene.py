@@ -59,7 +59,7 @@ class MujocoSceneOps:
             j: (int(m.jnt_qposadr[m.joint(b).id]),
                 int(m.jnt_dofadr[m.joint(b).id]))
             for j, b in zip(joints, backend_joints)}
-        # (owner ruling): limit rows over ALL actuated robot
+        # Limit rows over ALL actuated robot
         # joints -- the model is the source (``jnt_range`` by name; the
         # 29-joint policy table stays an action-face concern), computed
         # in the same lazy batch as the joint addressing (model-static,

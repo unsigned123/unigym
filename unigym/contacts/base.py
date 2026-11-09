@@ -6,7 +6,7 @@ unit-testable offline; both backend modules import lazily (mirroring the
 ``cameras/`` package convention: isaaclab imports live exclusively in
 ``backends/isaaclab2/contacts.py``, mujoco access in ``backends/mujoco/contacts.py``).
 
-Key space (plan UniGym-contacts contact-manager plan, owner ruling 2026-09-14)
+Key space (plan UniGym-contacts contact-manager plan)
 =======================================================================
 Every contact *group* named ``<name>`` serves exactly one record key::
 
@@ -23,7 +23,7 @@ norm          (N, B)          (N, B, F)
 contact       (N, B) bool     (N, B, F) bool
 ============  ==============  ==============
 
-Owner rulings baked in here:
+Rules baked in here:
 
 * ``frame`` is **required with no default** (world|body) — no silent
   world-frame semantics;
@@ -78,7 +78,7 @@ class ContactGroupSpec:
         sensor_bodies: body-name regex list matched (fullmatch) against the
             robot's body names; the resolved set defines axis B (backend
             asset order).
-        frame: ``world`` or ``body`` — REQUIRED, no default (owner ruling ①).
+        frame: ``world`` or ``body`` — REQUIRED, no default.
             ``body`` forces the per-sensor-body frame (isaaclab: v1
             NotImplementedError; mujoco: rotates by the sensor body
             orientation).
@@ -104,7 +104,7 @@ class ContactGroupSpec:
 
     name: str
     sensor_bodies: Sequence[str]
-    frame: str  # REQUIRED, no default (owner ruling ①)
+    frame: str  # REQUIRED, no default
     filter_bodies: Optional[Sequence[str]] = None
     mode: Optional[str] = None
     format: str = "raw"
@@ -181,8 +181,7 @@ class ContactGroupSpec:
         """Build a spec from one yaml ``contacts:`` list entry.
 
         Unknown keys raise (fail-fast against typos); ``name``,
-        ``sensor_bodies`` and ``frame`` are required (frame has NO default,
-        owner ruling ①).
+        ``sensor_bodies`` and ``frame`` are required (frame has NO default).
         """
         if not isinstance(entry, dict):
             raise ValueError(f"contact group entry must be a mapping, got "
@@ -484,7 +483,7 @@ def apply_format(raw, spec: ContactGroupSpec):
     (N, B, 3) for general groups, (N, B, F, 3) for pairwise groups, forces
     already expressed in ``spec.frame``.  Steps:
 
-    1. ``raw``   -> passthrough (``component`` ignored, owner ruling ②);
+    1. ``raw``   -> passthrough (``component`` ignored);
     2. ``norm``  -> component projection: ``mag`` = |F| (2-norm over xyz),
        ``x|y|z`` = SIGNED projection on that axis;
     3. ``contact``-> (component quantity > threshold) boolean;

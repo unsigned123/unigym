@@ -22,8 +22,8 @@ back to it.  Everything the next ``adapter.act`` consumes is covered:
   back).  The abandoned branch's provider buffers are dumped under
   ``<out_dir>/attempts/`` BEFORE the restore (dump, don't discard).
 
-Pre-flight two-phase (design v063-rewind-preflight, owner ruling
-batch 1): the whole refusal surface -- the controller-level cross-episode
+Pre-flight two-phase (design v063-rewind-preflight): the whole refusal
+surface -- the controller-level cross-episode
 guard, per-provider state presence, per-provider ``validate_rewind_state``
 (the SAME judgment its apply enforces) -- runs READ-ONLY before the
 sidecar dump / safety capture / restore, so a rejected rewind is a
@@ -32,7 +32,7 @@ too (env -> adapter -> providers), and its per-provider rollbacks are
 individually guarded so a rollback failure can never mask the original
 error.
 
-Counter dichotomy (contract §4, owner ruling): engine tick / TimeAccount /
+Counter dichotomy (contract §4): engine tick / TimeAccount /
 event seq ROLL BACK with the rewind; hb_seq / frame fid / episode_id are
 process truth and NEVER rewind (the bridge heartbeat keeps bumping through
 the park, frames keep their counter, the backend's episode_id sits outside
@@ -51,7 +51,7 @@ each snapshot lands one append-only ``checkpoint`` line in the adapter
 ledger (the undo anchor trail).
 
 Commands land on the engine thread through the bridge command slot
-(req-ack, pause/step family); a rewind auto-pauses (owner ruling §5-③).
+(req-ack, pause/step family); a rewind auto-pauses.
 Threading: everything here runs on the engine thread (command dispatch or
 the parked service loop) — the same single-thread discipline as the rest
 of the bridge.
@@ -153,7 +153,7 @@ class RewindStateProvider(Protocol):
     def validate_rewind_state(self, state: SnapshotValue) -> None:
         """Pre-flight half of the two-phase rewind.
 
-        Design v063-rewind-preflight, owner ruling batch 1: refuse a
+        Design v063-rewind-preflight: refuse a
         rewind this provider could not apply, READ-ONLY, before the
         controller touches the world -- a refusal here is a zero-change
         rejection (no sidecar dump, no safety capture, no restore).
@@ -369,7 +369,7 @@ class RewindController:
 
         Dumps the abandoned branch's provider buffers first, restores
         engine -> adapter -> providers (any failure rolls the pre-rewind
-        state back and re-raises), then auto-pauses (owner ruling §5-③).
+        state back and re-raises), then auto-pauses.
 
         Raises:
             RewindGateError: Gate failure / bad snap_id / unknown or
@@ -393,8 +393,8 @@ class RewindController:
         payload = rec["payload"]
         restored_tick = int(payload["tick"])
 
-        # pre-flight two-phase (design v063-rewind-preflight, owner
-        # ruling batch 1): the WHOLE refusal surface runs read-only
+        # pre-flight two-phase (design v063-rewind-preflight): the WHOLE
+        # refusal surface runs read-only
         # BEFORE the sidecar dump, the safety capture or any restore --
         # a rejected rewind is a ZERO-CHANGE rejection.  F4's root was
         # structural: the guards lived on the provider apply face, so
@@ -532,7 +532,7 @@ class RewindController:
 
     # ---------------------------------------------------------------- #
     # pre-flight two-phase: zero-change rejection (design
-    # v063-rewind-preflight, owner ruling batch 1)
+    # v063-rewind-preflight)
     # ---------------------------------------------------------------- #
     def _preflight_rewind(self, sid: int, payload: RewindPayload) -> None:
         """The refusal surface, READ-ONLY, before dump/capture/restore.
