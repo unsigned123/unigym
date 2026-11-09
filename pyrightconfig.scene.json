@@ -1,0 +1,14 @@
+{
+  "extends": "./pyrightconfig.json",
+  "include": [
+    "unigym/scenes",
+    "unigym/world.py",
+    "unigym/world_primitives.py"
+  ],
+  "reportUnknownParameterType": "error",
+  "reportUnknownArgumentType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownMemberType": "warning",
+  "reportUnknownLambdaType": "error",
+  "reportUnnecessaryCast": "error"
+}
