@@ -16,6 +16,7 @@ permissions:
 env:
   PYTHONUNBUFFERED: "1"
   PYRIGHT_PYTHON_GLOBAL_NODE: "false"
+  MUJOCO_GL: egl
   UV_LINK_MODE: copy
 
 jobs:
@@ -82,6 +83,10 @@ jobs:
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v6
+      - name: Install headless GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
       - name: Install dev environment
         run: uv sync --frozen --extra dev
       - name: Run tests

@@ -90,6 +90,10 @@ ignore_imports = [
     "unigym.core.** -> unigym.scripts.**",
     "unigym.core.asset_root -> unigym.packs.refs",
     "unigym.core.asset_root -> unigym.errors",
+    # repo_root() resolves the checkout root through the package object.
+    "unigym.core.asset_root -> unigym",
+    # Shared JSON/typing alias is a root-level leaf, not a higher layer.
+    "unigym.core.asset_root -> unigym._typing",
 ]
 
 [[tool.importlinter.contracts]]
@@ -106,6 +110,11 @@ forbidden_modules = ["unigym.backends.**"]
 ignore_imports = [
     "unigym.props.base -> unigym.backends.registry",
     "unigym.props.base -> unigym.core.quat",
+    # TYPE_CHECKING-only request type; import-linter cannot distinguish it
+    # from a runtime edge.
+    "unigym.props.base -> unigym.adapters.base",
+    # Function-local config expansion through the neutral asset-root leaf.
+    "unigym.props.templates -> unigym.core.asset_root",
     "unigym.props.asset_ir.definition -> unigym.model",
 ]
 
