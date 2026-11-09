@@ -17,45 +17,107 @@ backend fails fast with ``NotImplementedError``.
 """
 from __future__ import annotations
 
-import numpy as np
+import re
+from collections.abc import Callable, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Protocol,
+    TypeVar,
+    overload,
+    runtime_checkable,
+)
 
+import numpy as np
+from numpy.typing import NDArray
+
+from ._serialize import JsonValue, row_dict
+from .ir import Body, Joint, ModelIR
 from .table import Table
 
+if TYPE_CHECKING:
+    from unigym.core.quat_types import QuatWXYZ
+
 __all__ = ["LiveBody", "LiveJoint", "LiveModel", "LiveTable"]
+
+_LiveT = TypeVar("_LiveT")
 
 _QPOS_SIZE = {"hinge": 1, "slide": 1, "ball": 4, "free": 7}
 _QVEL_SIZE = {"hinge": 1, "slide": 1, "ball": 3, "free": 6}
 
+_Floats = NDArray[np.float64]
 
-def _readonly(array):
+
+class _MjData(Protocol):
+    """The ``MjData`` mirror fields the live proxies read."""
+
+    qpos: _Floats
+    qvel: _Floats
+    xpos: _Floats
+    xquat: _Floats
+
+
+@runtime_checkable
+class _LiveBinder(Protocol):
+    """The backend half of a live binding (implemented by the engine layer)."""
+
+    def select(
+        self, env: int | None,
+    ) -> tuple[object, Sequence[_MjData], Sequence[int]]:
+        """Return ``(native_env, datas, indices)`` for an env selector."""
+        ...
+
+    def joint_addresses(
+        self, native: object, info: Joint,
+    ) -> tuple[int, int]:
+        """Return ``(qpos_adr, dof_adr)`` for one joint."""
+        ...
+
+    def body_id(self, native: object, info: Body) -> int:
+        """Return the compiled body id for one body."""
+        ...
+
+
+def _readonly(array: _Floats) -> _Floats:
     """Return *array* with its write flag cleared (a view stays a view)."""
     array.flags.writeable = False
     return array
 
 
-def _row_dict(info):
-    """Return one static dataclass row as a plain dictionary."""
-    from dataclasses import fields
-
-    return {field.name: getattr(info, field.name) for field in fields(info)}
-
-
-class LiveTable(Table):
+class LiveTable(Table[_LiveT], Generic[_LiveT]):
     """A ``Table`` whose slicing/filtering keeps the live row type."""
 
     __slots__ = ()
 
-    def __getitem__(self, key):
+    @overload
+    def __getitem__(self, key: int) -> _LiveT:
+        ...
+
+    @overload
+    def __getitem__(self, key: str) -> _LiveT:
+        ...
+
+    @overload
+    def __getitem__(self, key: slice) -> LiveTable[_LiveT]:
+        ...
+
+    def __getitem__(
+        self, key: int | str | slice,
+    ) -> _LiveT | LiveTable[_LiveT]:
         """Slice into a ``LiveTable``; int/name lookup stays Table-like."""
         if isinstance(key, slice):
             return LiveTable(self.values()[key])
         return super().__getitem__(key)
 
-    def matching(self, regex):
+    def matching(self, regex: str | re.Pattern[str]) -> LiveTable[_LiveT]:
         """Return a ``LiveTable`` of rows matching *regex*."""
         return LiveTable(super().matching(regex))
 
-    def filter(self, pred=None, **fields):
+    def filter(
+        self, pred: Callable[[_LiveT], bool] | None = None,
+        **fields: JsonValue,
+    ) -> LiveTable[_LiveT]:
         """Return a ``LiveTable`` satisfying *pred* and equality fields."""
         return LiveTable(super().filter(pred, **fields))
 
@@ -65,26 +127,31 @@ class LiveJoint:
 
     __slots__ = ("_model", "_info")
 
-    def __init__(self, model, info):
+    def __init__(self, model: LiveModel, info: Joint) -> None:
         """Bind the static joint *info* to *model* (no data is copied)."""
         self._model = model
         self._info = info
 
     @property
-    def info(self):
+    def info(self) -> Joint:
         """The static :class:`~unigym.model.ir.Joint` row."""
         return self._info
 
     @property
-    def name(self):
+    def name(self) -> str:
         """The joint's compiled global name."""
         return self._info.name
 
-    def __getattr__(self, name):
-        """Delegate every static field (``type``, ``range``, ...) to the IR."""
+    def __getattr__(self, name: str) -> Any:
+        """Delegate every static field (``type``, ``range``, ...) to the IR.
+
+        The IR row is the source of truth and carries dozens of stable
+        dataclass fields; reflecting them here is the intended dynamic
+        surface, so the return type is genuinely open.
+        """
         return getattr(self._info, name)
 
-    def qpos(self, env=None):
+    def qpos(self, env: int | None = None) -> _Floats:
         """Return this joint's ``qpos`` as a read-only numpy array.
 
         Args:
@@ -104,7 +171,7 @@ class LiveJoint:
         rows = [datas[e].qpos[adr:adr + size] for e in indices]
         return _readonly(np.stack(rows))
 
-    def qvel(self, env=None):
+    def qvel(self, env: int | None = None) -> _Floats:
         """Return this joint's ``qvel`` as a read-only numpy array.
 
         Args:
@@ -124,11 +191,11 @@ class LiveJoint:
         rows = [datas[e].qvel[dof_adr:dof_adr + size] for e in indices]
         return _readonly(np.stack(rows))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, JsonValue]:
         """Return the static joint row as a plain dictionary."""
-        return _row_dict(self._info)
+        return row_dict(self._info)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a compact proxy description."""
         return f"LiveJoint(name={self.name!r}, info={self._info!r})"
 
@@ -138,26 +205,35 @@ class LiveBody:
 
     __slots__ = ("_model", "_info")
 
-    def __init__(self, model, info):
+    def __init__(self, model: LiveModel, info: Body) -> None:
         """Bind the static body *info* to *model* (no data is copied)."""
         self._model = model
         self._info = info
 
     @property
-    def info(self):
+    def info(self) -> Body:
         """The static :class:`~unigym.model.ir.Body` row."""
         return self._info
 
     @property
-    def name(self):
+    def name(self) -> str:
         """The body's compiled global name."""
         return self._info.name
 
-    def __getattr__(self, name):
-        """Delegate every static field (``parent``, ``mass``, ...) to the IR."""
+    def __getattr__(self, name: str) -> Any:
+        """Delegate every static field (``parent``, ``mass``, ...) to the IR.
+
+        As with :class:`LiveJoint`, the dataclass row is the source of
+        truth and this dynamic delegation is the intended surface.
+        """
         return getattr(self._info, name)
 
-    def world_pose(self, env=None):
+    def world_pose(
+        self, env: int | None = None,
+    ) -> (
+        tuple[_Floats, QuatWXYZ]
+        | tuple[_Floats, list[QuatWXYZ]]
+    ):
         """Return ``(pos, quat)`` in the world frame, read-only.
 
         Args:
@@ -183,16 +259,16 @@ class LiveBody:
                  for e in indices]
         return _readonly(positions), quats
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, JsonValue]:
         """Return the static body row as a plain dictionary."""
-        return _row_dict(self._info)
+        return row_dict(self._info)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a compact proxy description."""
         return f"LiveBody(name={self.name!r}, info={self._info!r})"
 
 
-def _qpos_size(info):
+def _qpos_size(info: Joint) -> int:
     """Return the qpos width for one joint row or fail loudly."""
     size = _QPOS_SIZE.get(info.type)
     if size is None:
@@ -202,7 +278,7 @@ def _qpos_size(info):
     return size
 
 
-def _qvel_size(info):
+def _qvel_size(info: Joint) -> int:
     """Return the qvel width for one joint row or fail loudly."""
     size = _QVEL_SIZE.get(info.type)
     if size is None:
@@ -212,18 +288,20 @@ def _qvel_size(info):
     return size
 
 
-def _backend_label(ir, env):
+def _backend_label(ir: ModelIR, env: object) -> str:
     """Return the backend name used in errors (IR first, env fallback)."""
-    return getattr(ir, "backend", None) or type(env).__name__
+    return ir.backend or type(env).__name__
 
 
-def _resolve_live_binder(ir, env, label):
+def _resolve_live_binder(
+    ir: ModelIR, env: object, label: str,
+) -> _LiveBinder:
     """Resolve the backend's ``live_provider`` face (registry, lazy).
 
     The neutral layer names no engine: the binder class is imported only
     when a ``BackendInfo.live_provider`` factory is actually invoked.
     """
-    provider = None
+    provider: Callable[[], type] | None = None
     try:
         from unigym.backends.registry import backend_info, build_name
 
@@ -234,7 +312,11 @@ def _resolve_live_binder(ir, env, label):
         raise NotImplementedError(
             f"live proxies: backend {label!r} has no live model binding "
             f"(hint: live proxies: mujoco/mjwarp today)")
-    return provider()(ir, env)
+    binder = provider()(ir, env)
+    if not isinstance(binder, _LiveBinder):
+        raise NotImplementedError(
+            f"live proxies: backend {label!r} returned an invalid binder")
+    return binder
 
 
 class LiveModel:
@@ -242,7 +324,7 @@ class LiveModel:
 
     __slots__ = ("_ir", "_backend", "_binder", "_joints", "_bodies")
 
-    def __init__(self, ir, env):
+    def __init__(self, ir: ModelIR, env: object) -> None:
         """Bind *ir* to *env* without copying any static row.
 
         Args:
@@ -255,44 +337,48 @@ class LiveModel:
         self._ir = ir
         self._backend = _backend_label(ir, env)
         self._binder = _resolve_live_binder(ir, env, self._backend)
-        self._joints = LiveTable(
+        self._joints = LiveTable[LiveJoint](
             [LiveJoint(self, row) for row in ir.joints])
-        self._bodies = LiveTable(
+        self._bodies = LiveTable[LiveBody](
             [LiveBody(self, row) for row in ir.bodies])
 
     @property
-    def ir(self):
+    def ir(self) -> ModelIR:
         """The bound static model IR (never a copy)."""
         return self._ir
 
     @property
-    def backend(self):
+    def backend(self) -> str:
         """The backend label used by this binding."""
         return self._backend
 
     @property
-    def joints(self):
+    def joints(self) -> LiveTable[LiveJoint]:
         """The live joint table (same lookup surface as the static Table)."""
         return self._joints
 
     @property
-    def bodies(self):
+    def bodies(self) -> LiveTable[LiveBody]:
         """The live body table (same lookup surface as the static Table)."""
         return self._bodies
 
-    def _select(self, env):
+    def _select(
+        self, env: int | None,
+    ) -> tuple[object, Sequence[_MjData], Sequence[int]]:
         """Return ``(native_env, datas, indices)`` for an env selector."""
         return self._binder.select(env)
 
-    def _joint_addresses(self, native, info):
+    def _joint_addresses(
+        self, native: object, info: Joint,
+    ) -> tuple[int, int]:
         """Return and cache ``(qpos_adr, dof_adr)`` for one joint."""
         return self._binder.joint_addresses(native, info)
 
-    def _body_id(self, native, info):
+    def _body_id(self, native: object, info: Body) -> int:
         """Return and cache the compiled body id for one body."""
         return self._binder.body_id(native, info)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a compact binding summary."""
         return (f"LiveModel(backend={self._backend!r}, "
                 f"joints={len(self._joints)}, bodies={len(self._bodies)})")

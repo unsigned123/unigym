@@ -15,10 +15,12 @@ the same object answers both "the third joint" and "the elbow joint".
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from html import escape
-from typing import Generic, TypeVar, cast
+from typing import Generic, TypeVar, overload
+
+from ._serialize import JsonValue, _is_mapping
 
 __all__ = ["Table"]
 
@@ -27,19 +29,21 @@ T = TypeVar("T")
 _MAX_REPR_ROWS = 20
 
 
-def _row_dict(row: object) -> dict:
+def _row_dict(row: object) -> dict[str, JsonValue]:
     """Return one row as a plain ``dict`` (no recursive float rewriting)."""
-    if isinstance(row, Mapping):
-        return dict(row)
+    if _is_mapping(row):
+        return {str(name): value for name, value in row.items()}
     if is_dataclass(row) and not isinstance(row, type):
         return {field.name: getattr(row, field.name) for field in fields(row)}
     to_dict = getattr(row, "to_dict", None)
     if callable(to_dict):
-        return dict(cast(Mapping, to_dict()))
-    return dict(vars(row))
+        result = to_dict()
+        if _is_mapping(result):
+            return {str(name): value for name, value in result.items()}
+    return {str(name): value for name, value in vars(row).items()}
 
 
-def _markdown_cell(value):
+def _markdown_cell(value: object) -> str:
     """Escape one cell for a GitHub-flavoured Markdown table."""
     return (str(value).replace("\\", "\\\\").replace("|", "\\|")
             .replace("\n", "<br>"))
@@ -55,7 +59,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
 
     __slots__ = ("_rows", "_by_name", "_by_qualname")
 
-    def __init__(self, rows: Iterable[T] = ()):
+    def __init__(self, rows: Iterable[T] = ()) -> None:
         """Build a table from *rows*, rejecting duplicate names.
 
         Args:
@@ -89,10 +93,22 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         self._by_name = by_name
         self._by_qualname = by_qualname
 
-    def __getitem__(self, key) -> T:
+    @overload
+    def __getitem__(self, key: int) -> T:
+        ...
+
+    @overload
+    def __getitem__(self, key: str) -> T:
+        ...
+
+    @overload
+    def __getitem__(self, key: slice) -> Table[T]:
+        ...
+
+    def __getitem__(self, key: int | str | slice) -> T | Table[T]:
         """Return a row by position/slice, or by name/qualname string."""
         if isinstance(key, slice):
-            return cast(T, Table(self._rows[key]))
+            return Table(self._rows[key])
         if isinstance(key, int):
             return self._rows[key]
         if isinstance(key, str):
@@ -114,7 +130,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         """Return the number of rows."""
         return len(self._rows)
 
-    def __contains__(self, key):
+    def __contains__(self, key: object) -> bool:
         """Membership test for a name, qualname or row object."""
         if isinstance(key, str):
             return key in self._by_name or key in self._by_qualname
@@ -132,7 +148,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         """Return ``(name, row)`` pairs in insertion order."""
         return tuple(self._by_name.items())
 
-    def get(self, key, default=None) -> T | None:
+    def get(self, key: str, default: T | None = None) -> T | None:
         """Return the named row, or *default* when absent."""
         try:
             return self[key]
@@ -143,24 +159,25 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         """Return every row name in insertion order."""
         return list(self._by_name)
 
-    def matching(self, regex):
+    def matching(self, regex: str | re.Pattern[str]) -> Table[T]:
         """Return a new table of rows whose name/qualname matches *regex*."""
         pattern = re.compile(regex) if isinstance(regex, str) else regex
         selected = [
             row for row in self._rows
-            if pattern.search(getattr(row, "name"))
-            or pattern.search(getattr(row, "qualname", "") or "")
+            if pattern.search(str(getattr(row, "name", "")))
+            or pattern.search(str(getattr(row, "qualname", "") or ""))
         ]
         return Table(selected)
 
-    def filter(self, pred=None, **fields):
+    def filter(self, pred: Callable[[T], bool] | None = None,
+               **fields: JsonValue) -> Table[T]:
         """Return the rows satisfying *pred* and every equality field.
 
         Args:
             pred: Optional callable receiving one row.
             **fields: Row attribute names compared by equality.
         """
-        selected = []
+        selected: list[T] = []
         for row in self._rows:
             if pred is not None and not pred(row):
                 continue
@@ -169,15 +186,16 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
                 selected.append(row)
         return Table(selected)
 
-    def to_rows(self):
+    def to_rows(self) -> list[dict[str, JsonValue]]:
         """Return the rows as plain dictionaries."""
         return [_row_dict(row) for row in self._rows]
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, dict[str, JsonValue]]:
         """Return ``{name: row dict}`` in insertion order."""
-        return {getattr(row, "name"): _row_dict(row) for row in self._rows}
+        return {str(getattr(row, "name")): _row_dict(row)
+                for row in self._rows}
 
-    def to_pandas(self):
+    def to_pandas(self) -> object:
         """Return a pandas ``DataFrame`` (pandas is an optional dependency).
 
         Raises:
@@ -189,9 +207,10 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             raise ImportError(
                 "Table.to_pandas() requires pandas; install it or use "
                 "to_rows()/to_dict()") from err
-        return pandas.DataFrame(self.to_rows(), index=self.names())
+        frame = getattr(pandas, "DataFrame")
+        return frame(self.to_rows(), index=self.names())
 
-    def _repr_html_(self):
+    def _repr_html_(self) -> str:
         """Return an escaped HTML table (first 20 rows, then a count row)."""
         rows = self.to_rows()
         if not rows:
@@ -216,7 +235,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
         lines.extend(["</tbody>", "</table>"])
         return "\n".join(lines)
 
-    def to_markdown(self):
+    def to_markdown(self) -> str:
         """Return a GitHub-flavoured Markdown table (all rows, no deps)."""
         rows = self.to_rows()
         if not rows:
@@ -234,7 +253,7 @@ class Table(Sequence[T], Mapping[str, T], Generic[T]):
             for row in rows)
         return "\n".join(lines)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return an aligned text table (first 20 rows, then a count line)."""
         rows = self.to_rows()
         if not rows:

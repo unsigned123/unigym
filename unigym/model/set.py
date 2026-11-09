@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING
 from .errors import ModelSetError
 
 if TYPE_CHECKING:
-    from .ir import ModelIR
+    from .ir import Actuator, Body, Camera, Geom, Joint, Material, ModelIR, Site
+    from .table import Table
 
 __all__ = ["ModelSet"]
 
@@ -49,7 +50,7 @@ class ModelSet:
     articulations: Mapping[str, ModelIR]
     merged: ModelIR | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Freeze the articulation mapping into a plain dictionary."""
         object.__setattr__(self, "articulations", dict(self.articulations))
 
@@ -65,7 +66,7 @@ class ModelSet:
         """Return the number of articulations."""
         return len(self.articulations)
 
-    def __contains__(self, name) -> bool:
+    def __contains__(self, name: object) -> bool:
         """Membership test for an articulation name."""
         return name in self.articulations
 
@@ -73,8 +74,8 @@ class ModelSet:
         """Return every articulation name in declaration order."""
         return list(self.articulations)
 
-    def _whole(self, face: str):
-        """Return one merged face or raise honestly when there is no merge."""
+    def _require_merged(self, face: str) -> ModelIR:
+        """Return the merged IR or raise honestly when there is no merge."""
         if self.merged is None:
             names = ", ".join(self.articulations) or "<none>"
             raise ModelSetError(
@@ -83,47 +84,47 @@ class ModelSet:
                 f"read the per-articulation IR instead: "
                 f"model.articulations[name].{face} for name in "
                 f"[{names}]")
-        return getattr(self.merged, face)
+        return self.merged
 
     @property
-    def bodies(self):
+    def bodies(self) -> Table[Body]:
         """The merged body table (per-articulation alternative when absent)."""
-        return self._whole("bodies")
+        return self._require_merged("bodies").bodies
 
     @property
-    def joints(self):
+    def joints(self) -> Table[Joint]:
         """The merged joint table (per-articulation alternative when absent)."""
-        return self._whole("joints")
+        return self._require_merged("joints").joints
 
     @property
-    def geoms(self):
+    def geoms(self) -> Table[Geom]:
         """The merged geom table (per-articulation alternative when absent)."""
-        return self._whole("geoms")
+        return self._require_merged("geoms").geoms
 
     @property
-    def sites(self):
+    def sites(self) -> Table[Site]:
         """The merged site table (per-articulation alternative when absent)."""
-        return self._whole("sites")
+        return self._require_merged("sites").sites
 
     @property
-    def cameras(self):
+    def cameras(self) -> Table[Camera]:
         """The merged camera table (per-articulation alternative when absent)."""
-        return self._whole("cameras")
+        return self._require_merged("cameras").cameras
 
     @property
-    def actuators(self):
+    def actuators(self) -> Table[Actuator]:
         """The merged actuator table (per-articulation alternative)."""
-        return self._whole("actuators")
+        return self._require_merged("actuators").actuators
 
     @property
-    def materials(self):
+    def materials(self) -> Table[Material]:
         """The merged material table (per-articulation alternative)."""
-        return self._whole("materials")
+        return self._require_merged("materials").materials
 
     @property
-    def meta(self):
+    def meta(self) -> Mapping[str, object]:
         """The merged IR meta (per-articulation alternative when absent)."""
-        return self._whole("meta")
+        return self._require_merged("meta").meta
 
     def __repr__(self) -> str:
         """``ModelSet(names=[...], merged=<bool>)``."""

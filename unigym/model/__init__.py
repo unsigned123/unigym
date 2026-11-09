@@ -36,14 +36,24 @@ from .table import Table
 from .set import ModelSet
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from .live import LiveBody, LiveJoint, LiveModel, LiveTable
 
-    MujocoModelProvider: Any
+    class MujocoModelProvider:
+        """Typing stub for the lazily imported MuJoCo model provider."""
+
+        def __init__(self, backend: str | None = None) -> None:
+            ...
+
+        def build(self, mjspec: object) -> ModelIR:
+            """Build the declared IR from a native spec."""
+            ...
+
+        def describe(self, mjmodel: object) -> ModelIR:
+            """Fill the compiled IR from a native model."""
+            ...
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> object:
     """Resolve the MuJoCo provider lazily (keeps this import engine-free).
 
     Args:

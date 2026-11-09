@@ -8,19 +8,32 @@ compiled yet", exactly as design v098 section 9.4 requires.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, TypeVar
 
 import numpy as np
 
-from ._serialize import decode, encode, from_row, row_dict
+from ._serialize import (
+    JsonValue,
+    _is_mapping,
+    decode,
+    encode,
+    from_row,
+    row_dict,
+)
 from .errors import (
     ModelIRError,
     StaleModelError,
     UnknownExtensionError,
 )
 from .table import Table
+
+if TYPE_CHECKING:
+    from unigym.backends.registry import Trait
+    from unigym.core.quat_types import QuatWXYZ
+
+    from .diff import ModelDiff
 
 __all__ = [
     "Actuator",
@@ -34,6 +47,7 @@ __all__ = [
     "Material",
     "MjExt",
     "ModelExt",
+    "ModelExtension",
     "ModelIR",
     "ModelIRError",
     "Site",
@@ -45,7 +59,59 @@ __all__ = [
 ]
 
 
-def _quat_wxyz(values):
+class _NamedRow(Protocol):
+    """A table row carrying its compiled global name."""
+
+    @property
+    def name(self) -> str:
+        """The row's compiled global name."""
+        ...
+
+
+_RowT = TypeVar("_RowT")
+
+
+class ModelExtension(Protocol):
+    """One backend namespace payload that ``ModelIR.ext`` can carry."""
+
+    def validate(self) -> ModelExtension:
+        """Validate this extension and return it."""
+        ...
+
+    def to_dict(self) -> Mapping[str, JsonValue]:
+        """Return the extension's canonical dictionary form."""
+        ...
+
+
+def _empty_json_map() -> dict[str, JsonValue]:
+    """An empty JSON mapping with concrete key/value types."""
+    return {}
+
+
+def _empty_str_map() -> dict[str, str]:
+    """An empty string mapping with concrete key/value types."""
+    return {}
+
+
+def _empty_object_map() -> dict[str, object]:
+    """An empty map of opaque metadata values."""
+    return {}
+
+
+def _empty_ext_map() -> dict[str, ModelExtension]:
+    """An empty extension-namespace mapping."""
+    return {}
+
+
+class _PrettyPrinter(Protocol):
+    """The slice of the IPython pretty-printer protocol this module uses."""
+
+    def text(self, text: str) -> None:
+        """Append one plain-text chunk."""
+        ...
+
+
+def _quat_wxyz(values: Iterable[float]) -> QuatWXYZ:
     """Return a read-only ``QuatWXYZ`` over a fresh array of *values*.
 
     The stored ``quat`` tuple stays the wire form; this typed view is
@@ -77,7 +143,7 @@ class Body:
     iquat: tuple[float, float, float, float] | None = None
 
     @property
-    def quat_wxyz(self):
+    def quat_wxyz(self) -> QuatWXYZ:
         """The body's ``(w, x, y, z)`` orientation as a typed view."""
         return _quat_wxyz(self.quat)
 
@@ -140,7 +206,7 @@ class Site:
     qualname: str = ""
 
     @property
-    def quat_wxyz(self):
+    def quat_wxyz(self) -> QuatWXYZ:
         """The site's ``(w, x, y, z)`` orientation as a typed view."""
         return _quat_wxyz(self.quat)
 
@@ -151,8 +217,8 @@ class Camera:
 
     name: str
     body: str
-    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    pos: tuple[float, ...] = (0.0, 0.0, 0.0)
+    quat: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0)
     fovy: float | None = None
     mode: str = "fixed"
     targetbody: str | None = None
@@ -161,7 +227,7 @@ class Camera:
     qualname: str = ""
 
     @property
-    def quat_wxyz(self):
+    def quat_wxyz(self) -> QuatWXYZ:
         """The camera's ``(w, x, y, z)`` orientation as a typed view."""
         return _quat_wxyz(self.quat)
 
@@ -262,11 +328,11 @@ class ModelExt:
 
     namespace: ClassVar[str] = ""
 
-    def validate(self):
+    def validate(self) -> Self:
         """Validate this extension (the base namespace has no references)."""
         return self
 
-    def to_dict(self):
+    def to_dict(self) -> Mapping[str, JsonValue]:
         """Return the extension's canonical dictionary form."""
         return {}
 
@@ -276,33 +342,41 @@ class MjExt(ModelExt):
     """MuJoCo-specific model facts (namespace ``mj``)."""
 
     namespace: ClassVar[str] = "mj"
-    opt: Mapping = field(default_factory=dict)
-    geom_groups: Table = field(default_factory=Table)
-    eq_slots: Table = field(default_factory=Table)
-    mocap_bodies: Table = field(default_factory=Table)
-    textures: Table = field(default_factory=Table)
-    geom_contact: Table = field(default_factory=Table)
+    opt: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
+    geom_groups: Table[GeomGroup] = field(
+        default_factory=lambda: Table[GeomGroup]())
+    eq_slots: Table[EqSlot] = field(default_factory=lambda: Table[EqSlot]())
+    mocap_bodies: Table[Body] = field(default_factory=lambda: Table[Body]())
+    textures: Table[Texture] = field(default_factory=lambda: Table[Texture]())
+    geom_contact: Table[GeomContact] = field(
+        default_factory=lambda: Table[GeomContact]())
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: Mapping[str, JsonValue]) -> Self:
         """Rebuild an ``MjExt`` from a canonical mapping."""
         decoded = decode(dict(data))
+        if not _is_mapping(decoded):
+            raise ModelIRError("mj extension: descriptor must be a mapping")
         return cls(
-            opt=dict(decoded.get("opt") or {}),
+            opt=dict(_mapping_value(decoded.get("opt"))),
             geom_groups=_table_from_dict(
-                GeomGroup, decoded.get("geom_groups") or {}, _TUPLE_FIELDS),
+                GeomGroup, _mapping_value(decoded.get("geom_groups")),
+                _TUPLE_FIELDS),
             eq_slots=_table_from_dict(
-                EqSlot, decoded.get("eq_slots") or {}, _TUPLE_FIELDS),
+                EqSlot, _mapping_value(decoded.get("eq_slots")),
+                _TUPLE_FIELDS),
             mocap_bodies=_table_from_dict(
-                Body, decoded.get("mocap_bodies") or {}, _TUPLE_FIELDS),
+                Body, _mapping_value(decoded.get("mocap_bodies")),
+                _TUPLE_FIELDS),
             textures=_table_from_dict(
-                Texture, decoded.get("textures") or {}, _TUPLE_FIELDS),
+                Texture, _mapping_value(decoded.get("textures")),
+                _TUPLE_FIELDS),
             geom_contact=_table_from_dict(
-                GeomContact, decoded.get("geom_contact") or {},
+                GeomContact, _mapping_value(decoded.get("geom_contact")),
                 _TUPLE_FIELDS),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> Mapping[str, JsonValue]:
         """Return the canonical ``mj`` extension dictionary."""
         return {
             "opt": dict(self.opt),
@@ -327,21 +401,31 @@ class UsdExt(ModelExt):
     """
 
     namespace: ClassVar[str] = "usd"
-    prim_paths: Mapping = field(default_factory=dict)
+    prim_paths: Mapping[str, str] = field(default_factory=_empty_str_map)
     articulation: str | None = None
-    attrs: Mapping = field(default_factory=dict)
+    attrs: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: Mapping[str, JsonValue]) -> Self:
         """Rebuild a ``UsdExt`` from a canonical mapping."""
         decoded = decode(dict(data))
+        if not _is_mapping(decoded):
+            raise ModelIRError("usd extension: descriptor must be a mapping")
+        prim_paths = {
+            name: value
+            for name, value in _mapping_value(
+                decoded.get("prim_paths")).items()
+            if isinstance(value, str)
+        }
+        articulation = decoded.get("articulation")
         return cls(
-            prim_paths=dict(decoded.get("prim_paths") or {}),
-            articulation=decoded.get("articulation"),
-            attrs=dict(decoded.get("attrs") or {}),
+            prim_paths=prim_paths,
+            articulation=(
+                articulation if isinstance(articulation, str) else None),
+            attrs=dict(_mapping_value(decoded.get("attrs"))),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> Mapping[str, JsonValue]:
         """Return the canonical ``usd`` extension dictionary."""
         return {
             "prim_paths": dict(self.prim_paths),
@@ -355,18 +439,18 @@ class UnparsedExt:
     """An unknown extension preserved verbatim for forward compatibility."""
 
     namespace: str
-    data: Mapping = field(default_factory=dict)
+    data: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
 
-    def validate(self):
+    def validate(self) -> Self:
         """Unknown payloads are opaque: nothing can be validated."""
         return self
 
-    def to_dict(self):
+    def to_dict(self) -> Mapping[str, JsonValue]:
         """Return the preserved payload unchanged."""
         return dict(self.data)
 
 
-_TUPLE_FIELDS = {
+_TUPLE_FIELDS: Mapping[object, frozenset[str]] = {
     Body: frozenset({"path", "pos", "quat", "inertia", "ipos", "iquat"}),
     Joint: frozenset({"axis", "range", "pos", "path"}),
     Geom: frozenset({"pos", "quat", "size", "path"}),
@@ -381,39 +465,73 @@ _TUPLE_FIELDS = {
     GeomContact: frozenset({"friction", "solref", "solimp"}),
 }
 
-_TABLES = (
-    ("bodies", Body),
-    ("joints", Joint),
-    ("geoms", Geom),
-    ("sites", Site),
-    ("cameras", Camera),
-    ("actuators", Actuator),
-    ("materials", Material),
+_TABLES: tuple[str, ...] = (
+    "bodies",
+    "joints",
+    "geoms",
+    "sites",
+    "cameras",
+    "actuators",
+    "materials",
 )
 
 
-def _table_payload(table):
+def _mapping_value(value: JsonValue) -> dict[str, JsonValue]:
+    """Return *value* when it is a string-keyed mapping, else an empty one."""
+    return dict(value) if _is_mapping(value) else {}
+
+
+def _table_payload(
+    table: Iterable[_NamedRow],
+) -> dict[str, dict[str, JsonValue]]:
     """Return ``{name: row dict}`` for one table."""
     return {row.name: row_dict(row) for row in table}
 
 
-def _table_from_dict(cls, mapping, tuple_fields):
+def _table_from_dict(
+    cls: Callable[..., _RowT],
+    mapping: Mapping[str, JsonValue],
+    tuple_fields: Mapping[object, frozenset[str]],
+) -> Table[_RowT]:
     """Build a table from a name-keyed mapping, sorted by name."""
     rows = [
-        from_row(cls, mapping[name], tuple_fields.get(cls, ()))
+        from_row(
+            cls, _mapping_value(mapping[name]),
+            tuple_fields.get(cls, frozenset()))
         for name in sorted(mapping)
     ]
     return Table(rows)
 
 
-def _check_unique(kind, table):
+def _keep_rows(
+    table: Table[_RowT], selected: Iterable[str] | None,
+) -> Table[_RowT]:
+    """Return *table* unchanged for ``None``, else the named rows."""
+    if selected is None:
+        return table
+    keep = set(selected)
+    return Table(
+        row for row in table if getattr(row, "name", None) in keep)
+
+
+def _check_unique(kind: str, table: Iterable[_NamedRow]) -> None:
     """Reject duplicate names even if a table was tampered with."""
-    seen = set()
+    seen: set[str] = set()
     for row in table:
         if row.name in seen:
             raise ModelIRError(
                 f"model IR: duplicate {kind} name {row.name!r}")
         seen.add(row.name)
+
+
+def _string_value(value: JsonValue, default: str = "") -> str:
+    """Return *value* when it is a string, else *default*."""
+    return value if isinstance(value, str) else default
+
+
+def _optional_string(value: JsonValue) -> str | None:
+    """Return *value* when it is a string, else ``None``."""
+    return value if isinstance(value, str) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,34 +541,40 @@ class ModelIR:
     name: str
     backend: str | None
     compiled: bool
-    bodies: Table = field(default_factory=Table)
+    bodies: Table[Body] = field(default_factory=lambda: Table[Body]())
     joints: Table[Joint] = field(default_factory=lambda: Table[Joint]())
-    geoms: Table = field(default_factory=Table)
-    sites: Table = field(default_factory=Table)
-    cameras: Table = field(default_factory=Table)
-    actuators: Table[Actuator] = field(default_factory=lambda: Table[Actuator]())
-    materials: Table = field(default_factory=Table)
-    meta: Mapping = field(default_factory=dict)
-    ext: Mapping = field(default_factory=dict)
+    geoms: Table[Geom] = field(default_factory=lambda: Table[Geom]())
+    sites: Table[Site] = field(default_factory=lambda: Table[Site]())
+    cameras: Table[Camera] = field(default_factory=lambda: Table[Camera]())
+    actuators: Table[Actuator] = field(
+        default_factory=lambda: Table[Actuator]())
+    materials: Table[Material] = field(
+        default_factory=lambda: Table[Material]())
+    # ``meta`` values are opaque: ``builder`` is the backend's native MjSpec
+    # (never serialized), the rest are plain scalar descriptors.
+    meta: Mapping[str, object] = field(default_factory=_empty_object_map)
+    ext: Mapping[str, ModelExtension] = field(default_factory=_empty_ext_map)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Freeze the two mutable mappings into plain dictionaries."""
         object.__setattr__(self, "meta", dict(self.meta))
         object.__setattr__(self, "ext", dict(self.ext))
 
     @property
-    def mj(self):
+    def mj(self) -> MjExt | None:
         """Return the ``mj`` extension when present, else ``None``."""
         ext = self.ext.get("mj")
         return ext if isinstance(ext, MjExt) else None
 
     @property
-    def usd(self):
+    def usd(self) -> UsdExt | None:
         """Return the ``usd`` extension when present, else ``None``."""
         ext = self.ext.get("usd")
         return ext if isinstance(ext, UsdExt) else None
 
-    def pose(self, name, *, camera=False):
+    def pose(
+        self, name: str, *, camera: bool = False,
+    ) -> tuple[tuple[float, ...], QuatWXYZ]:
         """Return ``(pos, quat_wxyz)`` for one body or camera.
 
         Args:
@@ -473,21 +597,33 @@ class ModelIR:
                 f"model IR: {face} {name!r} is not in this model") from None
         return row.pos, row.quat_wxyz
 
-    def to_dict(self, include_ext=False, include_meta=False):
+    def to_dict(
+        self, include_ext: bool = False, include_meta: bool = False,
+    ) -> dict[str, Any]:
         """Return the canonical dictionary (stable keys, hex floats).
+
+        The canonical document is a heterogeneous, wire-stable JSON tree
+        whose optional sections are read dynamically by external consumers
+        (``describe --json``, scene digests), so its exact value type is
+        intentionally ``Any`` at this boundary.
 
         Args:
             include_ext: Also export the backend namespace extensions.
             include_meta: Also export ``meta`` (the opaque native builder
                 is never serialized).
         """
-        data = {
+        data: dict[str, Any] = {
             "name": self.name,
             "backend": self.backend,
             "compiled": self.compiled,
         }
-        for key, _ in _TABLES:
-            data[key] = _table_payload(getattr(self, key))
+        data["bodies"] = _table_payload(self.bodies)
+        data["joints"] = _table_payload(self.joints)
+        data["geoms"] = _table_payload(self.geoms)
+        data["sites"] = _table_payload(self.sites)
+        data["cameras"] = _table_payload(self.cameras)
+        data["actuators"] = _table_payload(self.actuators)
+        data["materials"] = _table_payload(self.materials)
         if include_meta:
             data["meta"] = {
                 key: value for key, value in self.meta.items()
@@ -498,10 +634,16 @@ class ModelIR:
                 namespace: extension.to_dict()
                 for namespace, extension in self.ext.items()
             }
-        return encode(data)
+        encoded = encode(data)
+        if not isinstance(encoded, dict):
+            raise ModelIRError(
+                "model IR: canonical document is not a mapping")
+        return encoded
 
     @classmethod
-    def from_dict(cls, data, strict=True):
+    def from_dict(
+        cls, data: Mapping[str, JsonValue], strict: bool = True,
+    ) -> Self:
         """Rebuild a model IR from :meth:`to_dict` output.
 
         Args:
@@ -510,40 +652,63 @@ class ModelIR:
                 preserving them as :class:`UnparsedExt`.
         """
         decoded = decode(dict(data))
-        kwargs = {key: _table_from_dict(
-            entity, decoded.get(key) or {}, _TUPLE_FIELDS)
-            for key, entity in _TABLES}
-        meta = dict(decoded.get("meta") or {})
-        ext = {}
-        for namespace, payload in (decoded.get("ext") or {}).items():
-            if namespace == "mj":
-                ext[namespace] = MjExt.from_dict(payload)
-            elif namespace == "usd":
-                ext[namespace] = UsdExt.from_dict(payload)
-            elif strict:
-                raise UnknownExtensionError(
-                    f"model IR: unknown extension namespace {namespace!r} "
-                    f"(pass strict=False to preserve it as UnparsedExt)")
-            else:
-                ext[namespace] = UnparsedExt(namespace, dict(payload))
+        if not _is_mapping(decoded):
+            raise ModelIRError("model IR: descriptor must be a mapping")
+        ext: dict[str, ModelExtension] = {}
+        ext_value = decoded.get("ext")
+        if _is_mapping(ext_value):
+            for namespace, payload in ext_value.items():
+                decoded_payload = _mapping_value(payload)
+                if namespace == "mj":
+                    ext[namespace] = MjExt.from_dict(decoded_payload)
+                elif namespace == "usd":
+                    ext[namespace] = UsdExt.from_dict(decoded_payload)
+                elif strict:
+                    raise UnknownExtensionError(
+                        f"model IR: unknown extension namespace {namespace!r} "
+                        f"(pass strict=False to preserve it as UnparsedExt)")
+                else:
+                    ext[namespace] = UnparsedExt(
+                        namespace, dict(decoded_payload))
         return cls(
-            name=decoded.get("name", ""),
-            backend=decoded.get("backend"),
+            name=_string_value(decoded.get("name", "")),
+            backend=_optional_string(decoded.get("backend")),
             compiled=bool(decoded.get("compiled", False)),
-            meta=meta,
+            bodies=_table_from_dict(
+                Body, _mapping_value(decoded.get("bodies")), _TUPLE_FIELDS),
+            joints=_table_from_dict(
+                Joint, _mapping_value(decoded.get("joints")), _TUPLE_FIELDS),
+            geoms=_table_from_dict(
+                Geom, _mapping_value(decoded.get("geoms")), _TUPLE_FIELDS),
+            sites=_table_from_dict(
+                Site, _mapping_value(decoded.get("sites")), _TUPLE_FIELDS),
+            cameras=_table_from_dict(
+                Camera, _mapping_value(decoded.get("cameras")),
+                _TUPLE_FIELDS),
+            actuators=_table_from_dict(
+                Actuator, _mapping_value(decoded.get("actuators")),
+                _TUPLE_FIELDS),
+            materials=_table_from_dict(
+                Material, _mapping_value(decoded.get("materials")),
+                _TUPLE_FIELDS),
+            meta=dict(_mapping_value(decoded.get("meta"))),
             ext=ext,
-            **kwargs,
         )
 
-    def validate(self):
+    def validate(self) -> Self:
         """Check names and cross-table references; return ``self``.
 
         Raises:
             ModelIRError: A duplicate name, dangling body reference or
                 reversed joint range.
         """
-        for kind, _ in _TABLES:
-            _check_unique(kind, getattr(self, kind))
+        _check_unique("bodies", self.bodies)
+        _check_unique("joints", self.joints)
+        _check_unique("geoms", self.geoms)
+        _check_unique("sites", self.sites)
+        _check_unique("cameras", self.cameras)
+        _check_unique("actuators", self.actuators)
+        _check_unique("materials", self.materials)
         bodies = set(self.bodies.names())
         for body in self.bodies:
             if body.parent is not None and body.parent not in bodies:
@@ -569,7 +734,7 @@ class ModelIR:
             extension.validate()
         return self
 
-    def _validate_actuators(self, bodies):
+    def _validate_actuators(self, bodies: set[str]) -> None:
         """Check that every actuator target names a declared entity."""
         joints = set(self.joints.names())
         sites = set(self.sites.names())
@@ -582,8 +747,16 @@ class ModelIR:
                     f"model IR: actuator {actuator.name!r} targets missing "
                     f"{actuator.trntype} {actuator.target!r}")
 
-    def subset(self, *, bodies=None, joints=None, geoms=None, sites=None,
-               cameras=None, actuators=None, materials=None, name=None):
+    def subset(
+        self, *, bodies: Iterable[str] | None = None,
+        joints: Iterable[str] | None = None,
+        geoms: Iterable[str] | None = None,
+        sites: Iterable[str] | None = None,
+        cameras: Iterable[str] | None = None,
+        actuators: Iterable[str] | None = None,
+        materials: Iterable[str] | None = None,
+        name: str | None = None,
+    ) -> ModelIR:
         """Return a filtered view of this IR (v103.4).
 
         Every argument is an optional iterable of row names; ``None`` keeps
@@ -607,30 +780,22 @@ class ModelIR:
                 materials).
             name: Optional IR name override (default: this model's name).
         """
-        selections = {
-            "bodies": bodies, "joints": joints, "geoms": geoms,
-            "sites": sites, "cameras": cameras, "actuators": actuators,
-            "materials": materials,
-        }
-        tables = {}
-        for key, selected in selections.items():
-            table = getattr(self, key)
-            if selected is None:
-                tables[key] = table
-                continue
-            keep = set(selected)
-            tables[key] = Table(
-                row for row in table if row.name in keep)
         return ModelIR(
             name=self.name if name is None else name,
             backend=self.backend,
             compiled=self.compiled,
+            bodies=_keep_rows(self.bodies, bodies),
+            joints=_keep_rows(self.joints, joints),
+            geoms=_keep_rows(self.geoms, geoms),
+            sites=_keep_rows(self.sites, sites),
+            cameras=_keep_rows(self.cameras, cameras),
+            actuators=_keep_rows(self.actuators, actuators),
+            materials=_keep_rows(self.materials, materials),
             meta=dict(self.meta),
             ext=dict(self.ext),
-            **tables,
         )
 
-    def subtree(self, root):
+    def subtree(self, root: str) -> Table[Body]:
         """Return the bodies under *root* (the root itself included).
 
         Args:
@@ -647,7 +812,7 @@ class ModelIR:
             raise ModelIRError(
                 f"model IR: subtree root {root!r} is not a body")
         root_path = tuple(self.bodies[root].path)
-        rows = []
+        rows: list[Body] = []
         for body in self.bodies:
             path = tuple(body.path)
             if body.name == root:
@@ -656,7 +821,7 @@ class ModelIR:
                 rows.append(body)
         return Table(rows)
 
-    def supports(self, *traits):
+    def supports(self, *traits: Trait) -> bool:
         """Return True when *self.backend* declares every requested trait."""
         if self.backend is None:
             return False
@@ -664,7 +829,7 @@ class ModelIR:
 
         return backend_info(self.backend).has(*traits)
 
-    def explain_missing(self, *traits):
+    def explain_missing(self, *traits: Trait) -> str:
         """Return a one-line explanation of missing traits (empty if none)."""
         if self.backend is None:
             return "model IR has no backend: capabilities cannot be resolved"
@@ -676,7 +841,10 @@ class ModelIR:
         names = ", ".join(trait.name for trait in missing)
         return f"backend {self.backend!r} lacks {names}"
 
-    def diff(self, other, *, include_ext=False, ignore_compiled=False):
+    def diff(
+        self, other: ModelIR, *, include_ext: bool = False,
+        ignore_compiled: bool = False,
+    ) -> ModelDiff:
         """Return the face-by-face difference to *other* (design v098 N5).
 
         Comparing a declared IR with a compiled one is allowed but noisy:
@@ -698,15 +866,15 @@ class ModelIR:
             self, other, include_ext=include_ext,
             ignore_compiled=ignore_compiled)
 
-    def _repr_html_(self):
+    def _repr_html_(self) -> str:
         """Return an HTML summary with one small table per non-empty face."""
         from html import escape
 
         counts = ", ".join(
-            f"{name}={len(getattr(self, name))}" for name, _ in _TABLES)
+            f"{name}={len(getattr(self, name))}" for name in _TABLES)
         links = " | ".join(
             f"<a href='#{name}'>{name}</a> ({len(getattr(self, name))})"
-            for name, _ in _TABLES if len(getattr(self, name)))
+            for name in _TABLES if len(getattr(self, name)))
         parts = [
             "<div class='unigym-model-ir'>",
             f"<h3>ModelIR <code>{escape(self.name)}</code></h3>",
@@ -715,7 +883,7 @@ class ModelIR:
             f"<p>{escape(counts)}</p>",
             f"<p>{links}</p>",
         ]
-        for name, _ in _TABLES:
+        for name in _TABLES:
             table = getattr(self, name)
             if not len(table):
                 continue
@@ -724,14 +892,14 @@ class ModelIR:
         parts.append("</div>")
         return "\n".join(parts)
 
-    def _repr_pretty_(self, p, cycle):
+    def _repr_pretty_(self, p: _PrettyPrinter, cycle: bool) -> None:
         """Render through the IPython pretty protocol (no IPython import)."""
         if cycle:
             p.text("ModelIR(...)")
             return
         p.text(repr(self))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a compact count summary of the model tables."""
         return (
             f"ModelIR(name={self.name!r}, backend={self.backend!r}, "

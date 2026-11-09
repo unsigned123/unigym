@@ -8,46 +8,96 @@ while leaving ordinary strings untouched.
 from __future__ import annotations
 
 import re
-from dataclasses import fields, is_dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import Field, fields, is_dataclass
 from enum import Enum
-from typing import Any, Iterable, Mapping, cast
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Protocol,
+    SupportsInt,
+    TypeAlias,
+    TypeGuard,
+    TypeVar,
+)
 
-__all__ = ["decode", "encode", "from_row", "row_dict"]
+__all__ = ["JsonValue", "decode", "encode", "from_row", "row_dict"]
+
+# The JSON wire shape: tuples are accepted as list-like input and encode to
+# lists, so every raw row value is a member of this recursive type.
+JsonValue: TypeAlias = (
+    bool | int | float | str | None
+    | list["JsonValue"] | tuple["JsonValue", ...]
+    | Mapping[str, "JsonValue"]
+)
 
 _HEX_RE = re.compile(r"^[+-]?0x[0-9a-fA-F]+(?:\.[0-9a-fA-F]+)?p[+-]?\d+$")
 
-# JSON codec boundary: the wire form is recursive and heterogeneous
-# (str/float/int/list/dict/dataclass/Enum/numpy scalar), so ``Any`` is the
-# honest type for the two directions.  Callers keep their own concrete types;
-# only this module crosses the erase boundary.
-_JSONValue = Any
+_T = TypeVar("_T")
 
 
-def encode(value: _JSONValue) -> _JSONValue:
-    """Return a JSON-safe, deterministic representation of *value*."""
+class _DataclassInstance(Protocol):
+    """Structural view of a dataclass instance (typeshed-internal protocol)."""
+
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+
+
+def _is_mapping(value: object) -> TypeGuard[Mapping[str, JsonValue]]:
+    """Narrow *value* to a string-keyed JSON mapping."""
+    return isinstance(value, Mapping)
+
+
+def _is_dict(value: object) -> TypeGuard[dict[str, JsonValue]]:
+    """Narrow *value* to a plain dictionary (the encoder's mapping branch)."""
+    return isinstance(value, dict)
+
+
+def _is_dataclass_instance(value: object) -> TypeGuard[_DataclassInstance]:
+    """Narrow to dataclass *instances* (never the dataclass type itself)."""
+    return is_dataclass(value) and not isinstance(value, type)
+
+
+def _is_sequence(
+    value: object,
+) -> TypeGuard[list[JsonValue] | tuple[JsonValue, ...]]:
+    """Narrow *value* to a JSON sequence (lists encode; tuples are accepted)."""
+    return isinstance(value, (list, tuple))
+
+
+def encode(value: Any) -> JsonValue:
+    """Return a JSON-safe, deterministic representation of *value*.
+
+    *value* is the codec input boundary: it accepts arbitrary runtime trees
+    (scalars, Enums, numpy scalars, tuples, dataclasses).  This is the one
+    genuine erase boundary -- callers keep their own concrete types.
+    """
     if value is None or isinstance(value, (bool, str)):
         return value
     if isinstance(value, Enum):
-        return encode(int(cast(Any, value)))
+        if isinstance(value, SupportsInt):
+            return encode(int(value))
+        raise TypeError(
+            f"encode: cannot convert {type(value).__name__} enum to int")
     if isinstance(value, float):
         return float.hex(value)
     if isinstance(value, int):
         return value
-    if isinstance(value, dict):
+    if _is_dict(value):
         return {
             str(key): encode(item)
             for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))
         }
-    if isinstance(value, (list, tuple)):
+    if _is_sequence(value):
         return [encode(item) for item in value]
-    if is_dataclass(value) and not isinstance(value, type):
-        return encode(row_dict(value))
     if type(value).__module__.split(".")[0] == "numpy":
-        return encode(cast(Any, value).item())
+        return encode(getattr(value, "item")())
+    if _is_dataclass_instance(value):
+        return encode(row_dict(value))
     return value
 
 
-def decode(value: _JSONValue) -> _JSONValue:
+def decode(value: JsonValue) -> JsonValue:
     """Reverse :func:`encode` (hex strings back to floats)."""
     if isinstance(value, str):
         if value in ("nan", "inf", "-inf"):
@@ -62,24 +112,30 @@ def decode(value: _JSONValue) -> _JSONValue:
     return value
 
 
-def row_dict(row: Any) -> dict[str, Any]:
+def row_dict(row: object) -> dict[str, JsonValue]:
     """Return one dataclass/mapping row as a plain attribute dictionary."""
-    if isinstance(row, dict):
-        return dict(row)
-    if is_dataclass(row) and not isinstance(row, type):
+    if _is_mapping(row):
+        return {str(name): value for name, value in row.items()}
+    if _is_dataclass_instance(row):
         return {field.name: getattr(row, field.name) for field in fields(row)}
-    return dict(vars(row))
+    to_dict = getattr(row, "to_dict", None)
+    if callable(to_dict):
+        result = to_dict()
+        if _is_mapping(result):
+            return {str(name): value for name, value in result.items()}
+    return {str(name): value for name, value in vars(row).items()}
 
 
-def from_row(cls: type, row: Mapping[str, Any],
-             tuple_fields: Iterable[str] = ()) -> Any:
+def from_row(cls: Callable[..., _T], row: Mapping[str, JsonValue],
+             tuple_fields: Iterable[str] = ()) -> _T:
     """Build a frozen dataclass *cls* from one mapping row."""
-    kwargs = {}
-    for name in cls.__dataclass_fields__:
+    dataclass_fields = getattr(cls, "__dataclass_fields__", {})
+    kwargs: dict[str, object] = {}
+    for name in dataclass_fields:
         if name not in row:
             continue
         value = row[name]
         if name in tuple_fields and value is not None:
-            value = tuple(value)
+            value = tuple(value) if isinstance(value, (list, tuple)) else value
         kwargs[name] = value
     return cls(**kwargs)
