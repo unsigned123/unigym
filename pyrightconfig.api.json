@@ -1,0 +1,18 @@
+{
+  "extends": "./pyrightconfig.json",
+  "include": [
+    "unigym/run/api.py",
+    "unigym/run/spec.py",
+    "unigym/runtime/controls.py",
+    "unigym/runtime/actions.py",
+    "unigym/adapters/base.py",
+    "unigym/scenes/articulation.py",
+    "unigym/env/backends/base.py"
+  ],
+  "reportUnknownParameterType": "error",
+  "reportUnknownArgumentType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownMemberType": "warning",
+  "reportUnknownLambdaType": "error",
+  "reportUnnecessaryCast": "error"
+}
