@@ -104,6 +104,8 @@ def _as_q0(values: torch.Tensor | Sequence[float] | None, count: int, what: str)
             raise ControlError(f"{what} q0 must be numeric") from None
     if tuple(q0.shape) != (count,):
         raise ControlError(f"{what} q0 has {tuple(q0.shape)} entries for {count} joints")
+    if not bool(torch.isfinite(q0).all().item()):
+        raise ControlError(f"{what} q0 must be finite, got {q0}")
     return q0
 
 

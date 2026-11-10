@@ -317,12 +317,25 @@ def _require_str(value: object, what: str) -> str:
 
 
 def _as_int(value: object, what: str) -> int:
-    """Coerce a config scalar to an int (bool/int/float/str only)."""
+    """Coerce a config scalar to an int (bool is rejected)."""
     from unigym.errors import ConfigError
 
-    if isinstance(value, bool) or isinstance(value, (int, float, str)):
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ConfigError(f"{what} must be an integer, got {value!r}")
+    try:
         return int(value)
-    raise ConfigError(f"{what} must be an integer, got {value!r}")
+    except (TypeError, ValueError, OverflowError):
+        raise ConfigError(f"{what} must be an integer, got {value!r}") from None
+
+
+def _as_positive_int(value: object, what: str) -> int:
+    """Coerce a config scalar to a strictly positive integer."""
+    from unigym.errors import ConfigError
+
+    number = _as_int(value, what)
+    if number <= 0:
+        raise ConfigError(f"{what} must be positive, got {number}")
+    return number
 
 
 def _override_result(
@@ -428,8 +441,8 @@ def build_spec(
             f"mode '{mode_value}' is not implemented " "(one of: collect | benchmark | both)"
         )
     mode = mode_value
-    env_cfg = _require_config(cfg["env"], "env")
-    col_cfg = _require_config(cfg["collect"], "collect")
+    env_cfg = _require_config(cfg.get("env"), "env")
+    col_cfg = _require_config(cfg.get("collect"), "collect")
     adapter_cfg = _require_config(cfg.get("adapter") or {}, "adapter")
     if getattr(args, "num_envs", None) is not None:
         env_cfg["num_envs"] = args.num_envs
@@ -468,15 +481,15 @@ def build_spec(
     world_base = _validate_world_base(cfg, env_cfg, backend_label)
     articulations = _normalize_articulations(cfg, args.config)
     controls = _normalize_controls(cfg, articulations, args.config)
-    num_envs = _as_int(env_cfg["num_envs"], "env.num_envs")
-    total_steps = _as_int(col_cfg["steps"], "collect.steps")
+    num_envs = _as_positive_int(env_cfg.get("num_envs"), "env.num_envs")
+    total_steps = _as_positive_int(col_cfg.get("steps"), "collect.steps")
     # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
     # reset_on_termination merges terminated rows.  runner.reset_mask_fn is
     # a reserved key (not deserialized here; inject via SyncRunner).
     runner_cfg = _require_config(cfg.get("runner") or {}, "runner")
     output_root_value = cfg.get("output_root", "data_out")
     output_root = output_root_value if isinstance(output_root_value, str) else "data_out"
-    run_name = _require_str(cfg["run_name"], "run_name")
+    run_name = _require_str(cfg.get("run_name"), "run_name")
     requested_out = getattr(args, "output_dir", None)
     if requested_out is None:
         requested_out = os.path.join(output_root, run_name)

@@ -95,3 +95,107 @@ def test_build_spec_requires_valid_world_base_for_mujoco(world_base, match):
 
     with pytest.raises(ConfigError, match=match):
         build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize("section", ["env", "collect", "run_name"])
+def test_build_spec_rejects_missing_required_section(section):
+    """A missing env/collect/run_name is a teaching ConfigError, not a KeyError."""
+    cfg = _cfg()
+    del cfg[section]
+
+    with pytest.raises(ConfigError, match=rf"{section} must be"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize(
+    ("section", "value"),
+    [("env", ["isaaclab2"]), ("collect", "100")],
+    ids=["env-list", "collect-string"],
+)
+def test_build_spec_rejects_non_mapping_section(section, value):
+    """env and collect must be mappings, not arbitrary JSON values."""
+    cfg = _cfg()
+    cfg[section] = value
+
+    with pytest.raises(ConfigError, match=rf"{section} must be a mapping"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [("env", "num_envs"), ("collect", "steps")],
+)
+def test_build_spec_rejects_missing_required_count(section, field):
+    """Missing env.num_envs / collect.steps names the field instead of KeyError."""
+    cfg = _cfg()
+    del cfg[section][field]
+
+    with pytest.raises(ConfigError, match=rf"{section}\.{field} must be an integer"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [("env", "num_envs"), ("collect", "steps")],
+)
+def test_build_spec_rejects_non_numeric_required_count(section, field):
+    """A non-numeric env.num_envs / collect.steps is a ConfigError naming the field."""
+    cfg = _cfg()
+    cfg[section][field] = "many"
+
+    with pytest.raises(ConfigError, match=rf"{section}\.{field} must be an integer"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_non_string_run_name():
+    """run_name must be a string; a non-string value fails fast with ConfigError."""
+    cfg = _cfg()
+    cfg["run_name"] = 123
+
+    with pytest.raises(ConfigError, match="run_name must be a string"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_empty_config_with_teaching_error():
+    """An empty config fails on the required env section, not a KeyError."""
+    with pytest.raises(ConfigError, match="env must be a mapping"):
+        build_spec({}, _args())
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("env", "num_envs", True),
+        ("env", "num_envs", float("inf")),
+        ("env", "num_envs", float("nan")),
+        ("collect", "steps", "5.5"),
+    ],
+    ids=["bool", "inf", "nan", "fractional-string"],
+)
+def test_build_spec_rejects_non_integer_required_count(section, field, value):
+    """Required counts reject bool, non-finite and non-integral values."""
+    cfg = _cfg()
+    cfg[section][field] = value
+
+    with pytest.raises(ConfigError, match=rf"{section}\.{field} must be an integer"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize("value", [0, -2], ids=["zero", "negative"])
+def test_build_spec_rejects_non_positive_num_envs(value):
+    """A run must have at least one environment."""
+    cfg = _cfg()
+    cfg["env"]["num_envs"] = value
+
+    with pytest.raises(ConfigError, match=r"env\.num_envs must be positive"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize("value", [0, -5], ids=["zero", "negative"])
+def test_build_spec_rejects_non_positive_collect_steps(value):
+    """A run must collect at least one step."""
+    cfg = _cfg()
+    cfg["collect"]["steps"] = value
+
+    with pytest.raises(ConfigError, match=r"collect\.steps must be positive"):
+        build_spec(cfg, _args())

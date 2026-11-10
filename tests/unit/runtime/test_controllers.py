@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from unigym.robots.base import RobotRecipe
 from unigym.runtime.controllers import (
+    ArticulationRuntime,
     ControlRuntime,
     build_control_runtimes,
     validate_resolved_coverage,
@@ -209,3 +211,70 @@ def test_validate_resolved_coverage_rejects_incomplete_or_conflicting(kind):
 
     with pytest.raises(ControlError, match=match):
         validate_resolved_coverage(arts, {}, controls, runtimes)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "inf", "-inf"],
+)
+def test_control_runtime_rejects_non_finite_q0(bad):
+    """A control runtime rejects NaN/inf q0 naming the runtime and q0 field."""
+    with pytest.raises(ControlError, match=r"control 'body' q0 must be finite"):
+        ControlRuntime(
+            name="body",
+            action_face="body",
+            adapter="manual",
+            articulation="arm",
+            joint_names=("shoulder", "elbow"),
+            q0=(0.0, bad),
+        )
+
+
+def test_articulation_runtime_rejects_non_finite_q0():
+    """An articulation runtime uses the same non-finite q0 rejection."""
+    with pytest.raises(ControlError, match=r"articulation 'arm' q0 must be finite"):
+        ArticulationRuntime(
+            name="arm",
+            joint_names=("shoulder",),
+            q0=(float("nan"),),
+        )
+
+
+def test_control_runtime_rejects_non_numeric_q0():
+    """A non-numeric q0 entry fails as a ControlError, not a raw TypeError."""
+    with pytest.raises(ControlError, match=r"control 'body' q0 must be numeric"):
+        ControlRuntime(
+            name="body",
+            action_face="body",
+            adapter="manual",
+            articulation="arm",
+            joint_names=("shoulder",),
+            q0=("not-a-number",),
+        )
+
+
+def test_control_runtime_rejects_non_finite_tensor_q0():
+    """The tensor q0 path applies the same finiteness check."""
+    with pytest.raises(ControlError, match=r"control 'body' q0 must be finite"):
+        ControlRuntime(
+            name="body",
+            action_face="body",
+            adapter="manual",
+            articulation="arm",
+            joint_names=("shoulder", "elbow"),
+            q0=torch.tensor([0.0, float("nan")]),
+        )
+
+
+def test_control_runtime_checks_q0_shape_before_finiteness():
+    """A wrong q0 shape reports shape, not a downstream finite error."""
+    with pytest.raises(ControlError, match=r"q0 has \(1,\) entries"):
+        ControlRuntime(
+            name="body",
+            action_face="body",
+            adapter="manual",
+            articulation="arm",
+            joint_names=("shoulder", "elbow"),
+            q0=(float("nan"),),
+        )
