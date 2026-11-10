@@ -11,7 +11,7 @@ from unigym.terminations import FallTermination, TerminationGroup, TerminationSt
 def _state() -> TerminationState:
     return TerminationState(
         articulations={
-            "g1": {
+            "robot": {
                 "base_pos_w": np.array([[0.0, 0.0, 0.1], [0.0, 0.0, 0.5]]),
                 "gravity_b": np.array([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]),
             }
@@ -29,11 +29,11 @@ def _state() -> TerminationState:
 def test_composite_group_combines_masks_with_its_declared_mode(mode, expected):
     """OR fires when any term fires; AND fires only when every term fires."""
     low_only = FallTermination(
-        {"articulation": "g1", "height_threshold": 0.15, "tilt_threshold": None},
+        {"articulation": "robot", "height_threshold": 0.15, "tilt_threshold": None},
         name="low_only",
     )
     wide_height = FallTermination(
-        {"articulation": "g1", "height_threshold": 0.6, "tilt_threshold": None},
+        {"articulation": "robot", "height_threshold": 0.6, "tilt_threshold": None},
         name="wide_height",
     )
     group = TerminationGroup([low_only, wide_height], mode=mode)

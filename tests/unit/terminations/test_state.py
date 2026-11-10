@@ -13,16 +13,16 @@ def test_from_extra_groups_articulation_keys_and_aliases_recorded_base_pos():
     batch = np.array([3])
     state = TerminationState.from_extra(
         {
-            "articulation/g1/base_pos": base,
-            "articulation/g1/joint_pos": np.zeros((1, 2)),
+            "articulation/robot/base_pos": base,
+            "articulation/robot/joint_pos": np.zeros((1, 2)),
             "body_contact_forces": np.zeros((1, 1, 3)),
             "body_names": ["base"],
             "time_in_episode": batch,
         }
     )
 
-    assert state.articulations["g1"]["base_pos_w"] is base
-    assert "base_pos" not in state.articulations["g1"]
+    assert state.articulations["robot"]["base_pos_w"] is base
+    assert "base_pos" not in state.articulations["robot"]
     assert state.body_names == ["base"]
     assert state.batch is batch
 
@@ -32,19 +32,19 @@ def test_from_episode_data_aliases_flat_recorded_base_pos():
     base = np.array([[0.0, 0.0, 0.5]])
     state = TerminationState.from_episode_data(
         {
-            "articulation/g1/base_pos": base,
-            "articulation/g1/gravity_b": np.array([[0.0, 0.0, -1.0]]),
+            "articulation/robot/base_pos": base,
+            "articulation/robot/gravity_b": np.array([[0.0, 0.0, -1.0]]),
         }
     )
 
-    assert state.articulations["g1"]["base_pos_w"] is base
-    assert "base_pos" not in state.articulations["g1"]
+    assert state.articulations["robot"]["base_pos_w"] is base
+    assert "base_pos" not in state.articulations["robot"]
 
 
 def test_from_episode_data_aliases_supplied_articulation_mapping():
     """A supplied ``articulations`` mapping applies the same base_pos alias."""
     base = np.array([[0.0, 0.0, 0.5]])
-    state = TerminationState.from_episode_data({"articulations": {"g1": {"base_pos": base}}})
+    state = TerminationState.from_episode_data({"articulations": {"robot": {"base_pos": base}}})
 
-    assert state.articulations["g1"]["base_pos_w"] is base
-    assert "base_pos" not in state.articulations["g1"]
+    assert state.articulations["robot"]["base_pos_w"] is base
+    assert "base_pos" not in state.articulations["robot"]

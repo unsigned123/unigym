@@ -14,7 +14,7 @@ from unigym.terminations import (
 
 
 def _state(inner: dict, **extra) -> TerminationState:
-    return TerminationState(articulations={"g1": inner}, **extra)
+    return TerminationState(articulations={"robot": inner}, **extra)
 
 
 @pytest.mark.parametrize(
@@ -31,17 +31,17 @@ def test_fall_fires_below_height_or_past_tilt_threshold(base_z, gravity, expecte
     inner = {"base_pos_w": np.array([[0.0, 0.0, base_z]])}
     if gravity is not None:
         inner["gravity_b"] = np.array([gravity], dtype=float)
-    term = FallTermination({"articulation": "g1"})
+    term = FallTermination({"articulation": "robot"})
 
     assert term.check(_state(inner)).tolist() == [expected]
 
 
 def test_fall_missing_base_position_fails_fast():
     """A fall check without base position names the articulation and field."""
-    term = FallTermination({"articulation": "g1"})
+    term = FallTermination({"articulation": "robot"})
     state = _state({"gravity_b": np.array([[0.0, 0.0, -1.0]])})
 
-    with pytest.raises(ValueError, match="requires 'g1' base_pos_w"):
+    with pytest.raises(ValueError, match="requires 'robot' base_pos_w"):
         term.check(state)
 
 
@@ -59,10 +59,10 @@ def test_fall_missing_base_position_fails_fast():
 )
 def test_joint_limit_margin_boundaries_and_missing_limits(joint_pos, limits, expected):
     """The margin band is strict at its inner edge and no limits means no fire."""
-    term = JointLimitTermination({"articulation": "g1"})
+    term = JointLimitTermination({"articulation": "robot"})
     state = _state(
         {"joint_pos": np.array(joint_pos)},
-        joint_pos_limits={"g1": limits} if limits is not None else None,
+        joint_pos_limits={"robot": limits} if limits is not None else None,
     )
 
     assert term.check(state).tolist() == expected
@@ -78,7 +78,7 @@ def test_joint_limit_margin_boundaries_and_missing_limits(joint_pos, limits, exp
 )
 def test_base_contact_approximation_requires_low_and_tilted(base_z, gravity_z, expected):
     """The geometry fallback fires only for the low-base AND tilted conjunction."""
-    term = BaseContactTermination({"articulation": "g1"})
+    term = BaseContactTermination({"articulation": "robot"})
     state = _state(
         {
             "base_pos_w": np.array([[0.0, 0.0, base_z]]),
@@ -99,7 +99,7 @@ def test_base_contact_approximation_requires_low_and_tilted(base_z, gravity_z, e
 )
 def test_base_contact_force_threshold_is_strict(force, expected):
     """The force path fires only for a net magnitude strictly above the threshold."""
-    term = BaseContactTermination({"articulation": "g1", "body_names": ["base"]})
+    term = BaseContactTermination({"articulation": "robot", "body_names": ["base"]})
     state = _state(
         {
             "base_pos_w": np.array([[0.0, 0.0, 0.5]]),
@@ -114,7 +114,7 @@ def test_base_contact_force_threshold_is_strict(force, expected):
 
 def test_base_contact_absent_requested_body_falls_back_to_geometry():
     """When no monitored body reaches the force sensor, the geometry fallback decides."""
-    term = BaseContactTermination({"articulation": "g1", "body_names": ["base"]})
+    term = BaseContactTermination({"articulation": "robot", "body_names": ["base"]})
     state = _state(
         {
             "base_pos_w": np.array([[0.0, 0.0, 0.05]]),
@@ -129,15 +129,15 @@ def test_base_contact_absent_requested_body_falls_back_to_geometry():
 
 def test_joint_limit_missing_joint_position_fails_fast():
     """A joint-limit check without joint positions names the articulation and field."""
-    term = JointLimitTermination({"articulation": "g1"})
+    term = JointLimitTermination({"articulation": "robot"})
 
-    with pytest.raises(ValueError, match="requires 'g1' joint_pos"):
+    with pytest.raises(ValueError, match="requires 'robot' joint_pos"):
         term.check(_state({}))
 
 
 def test_base_contact_without_any_state_fails_fast():
     """A base-contact check with neither signal names the articulation and fields."""
-    term = BaseContactTermination({"articulation": "g1"})
+    term = BaseContactTermination({"articulation": "robot"})
 
-    with pytest.raises(ValueError, match="requires 'g1' base_pos_w or gravity_b"):
+    with pytest.raises(ValueError, match="requires 'robot' base_pos_w or gravity_b"):
         term.check(_state({}))

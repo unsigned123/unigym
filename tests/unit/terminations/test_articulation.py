@@ -28,10 +28,10 @@ def test_articulation_termination_requires_explicit_articulation(term_type):
 )
 def test_articulation_termination_missing_state_fails_fast(term_type):
     """A term fails with its own name when the requested articulation is absent."""
-    term = term_type({"articulation": "g1"})
+    term = term_type({"articulation": "robot"})
 
     with pytest.raises(
         ValueError,
-        match=rf"{term_type.__name__}: state has no articulation 'g1' keys; available: \[\]",
+        match=rf"{term_type.__name__}: state has no articulation 'robot' keys; available: \[\]",
     ):
         term.check(TerminationState())

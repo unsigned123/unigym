@@ -20,15 +20,15 @@ def _ir(name: str) -> ModelIR:
 
 def test_model_set_lookup_and_iteration_has_no_primary_articulation():
     """Articulations are looked up by name and iterated in declaration order."""
-    g1 = _ir("g1")
-    g2 = _ir("g2")
-    model_set = ModelSet({"g1": g1, "g2": g2})
+    robot_ir = _ir("robot")
+    arm_ir = _ir("arm")
+    model_set = ModelSet({"robot": robot_ir, "arm": arm_ir})
 
-    assert model_set["g1"] is g1
-    assert model_set.names() == ["g1", "g2"]
-    assert list(model_set) == ["g1", "g2"]
+    assert model_set["robot"] is robot_ir
+    assert model_set.names() == ["robot", "arm"]
+    assert list(model_set) == ["robot", "arm"]
     assert len(model_set) == 2
-    assert "g2" in model_set
+    assert "arm" in model_set
     with pytest.raises(KeyError, match="missing"):
         model_set["missing"]
 
@@ -40,9 +40,9 @@ def test_model_set_lookup_and_iteration_has_no_primary_articulation():
 @pytest.mark.parametrize("face", _FACES)
 def test_model_set_table_face_reads_the_merged_ir(face):
     """An available merge answers every whole-scene face identically."""
-    per_articulation = _ir("g1")
+    per_articulation = _ir("robot")
     merged = _ir("scene")
-    model_set = ModelSet({"g1": per_articulation}, merged=merged)
+    model_set = ModelSet({"robot": per_articulation}, merged=merged)
 
     assert getattr(model_set, face) is getattr(merged, face)
 
@@ -50,10 +50,10 @@ def test_model_set_table_face_reads_the_merged_ir(face):
 @pytest.mark.parametrize("face", _FACES)
 def test_model_set_table_face_fails_when_no_honest_merge_exists(face):
     """Without a merge, a whole-scene face fails and names the per-articulation path."""
-    model_set = ModelSet({"g1": _ir("g1")})
+    model_set = ModelSet({"robot": _ir("robot")})
 
     with pytest.raises(ModelSetError, match=face) as excinfo:
         getattr(model_set, face)
     message = str(excinfo.value)
     assert "per-articulation" in message
-    assert "g1" in message
+    assert "robot" in message
