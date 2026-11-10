@@ -84,8 +84,8 @@ def test_joint_permutation_maps_il_and_policy_order_both_ways(tiny_env):
 
 
 def test_close_is_idempotent_and_post_close_step_fails(tiny_env):
-    """Closing twice is a no-op; stepping a closed env never succeeds silently."""
+    """Closing twice is a no-op; stepping a closed env raises the closed error."""
     tiny_env.close()
     tiny_env.close()
-    with pytest.raises((RuntimeError, TypeError)):
+    with pytest.raises(RuntimeError, match="environment is closed"):
         tiny_env.step({"tiny": _zero_action(tiny_env)})

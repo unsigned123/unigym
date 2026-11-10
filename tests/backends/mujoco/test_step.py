@@ -47,6 +47,44 @@ def test_step_rejects_unknown_face_with_nonmatching_joints(tiny_env):
         tiny_env.step({"wrist": entry})
 
 
+def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
+    """An unknown face is rejected even when its joints exactly match a control."""
+    control = tiny_env.controls["tiny"]
+    entry = NamedAction.zeros(tiny_env.num_envs, list(control.joint_names), control.target)
+
+    with pytest.raises(ValueError) as excinfo:
+        tiny_env.step({"wrist": entry})
+
+    message = str(excinfo.value)
+    assert "action entry 'wrist' is not a declared control face" in message
+    assert "accepted faces: ['tiny']" in message
+
+
+@pytest.mark.parametrize(
+    ("drive", "target", "kind"),
+    [
+        ("position_pd", "position", "torque"),
+        ("position_pd", "position", "velocity"),
+        ("torque", "torque", "position"),
+    ],
+)
+def test_step_rejects_an_action_kind_that_differs_from_the_control_target(
+    tiny_env_factory, drive, target, kind
+):
+    """A mismatched NamedAction.kind is rejected against the control's target."""
+    env = tiny_env_factory(drive=drive, target=target)
+    control = env.controls["tiny"]
+    entry = NamedAction.zeros(env.num_envs, list(control.joint_names), kind)
+
+    with pytest.raises(ValueError) as excinfo:
+        env.step({"tiny": entry})
+
+    message = str(excinfo.value)
+    assert "action entry 'tiny'" in message
+    assert f"kind '{kind}'" in message
+    assert f"control 'tiny' expects target '{target}'" in message
+
+
 def test_step_rejects_a_missing_control_joint(tiny_env):
     """A required control whose joint is left unaddressed fails fast."""
     action = {"tiny": NamedAction(torch.zeros(tiny_env.num_envs, 1), ["elbow"], "position")}

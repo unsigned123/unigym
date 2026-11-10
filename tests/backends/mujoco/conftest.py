@@ -14,7 +14,13 @@ KP = 20.0
 KD = 1.0
 
 
-def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
+def build_tiny_env(
+    mjcf: Path,
+    *,
+    num_envs: int = 1,
+    drive: str = "position_pd",
+    target: str = "position",
+):
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mujoco.env import MujocoEnv
@@ -41,9 +47,9 @@ def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
             "adapter": "manual",
             "articulation": ARTICULATION,
             "joints": list(JOINT_ORDER),
-            "drive": "position_pd",
-            "target": "position",
-            "gains": {"kp": KP, "kd": KD},
+            "drive": drive,
+            "target": target,
+            "gains": {"kp": KP, "kd": KD} if drive == "position_pd" else {},
         }
     )
     controls = build_control_runtimes((group,), (articulation,), {ARTICULATION: profile})
@@ -68,8 +74,13 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
     """Build real backends and close every one of them at teardown."""
     created = []
 
-    def make(num_envs: int = 1):
-        env = build_tiny_env(tiny_mjcf, num_envs=num_envs)
+    def make(
+        num_envs: int = 1,
+        *,
+        drive: str = "position_pd",
+        target: str = "position",
+    ):
+        env = build_tiny_env(tiny_mjcf, num_envs=num_envs, drive=drive, target=target)
         created.append(env)
         return env
 
