@@ -424,6 +424,7 @@ class MujocoEnv:
     _data: mujoco.MjData
     _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
+    _closed: bool
 
     def __init__(
         self,
@@ -485,6 +486,7 @@ class MujocoEnv:
         self.artifact_dir = None if artifact_dir is None else os.fspath(artifact_dir)
         self.artifact_paths: dict = {}
         self._fill_record = None
+        self._closed = False
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
         # (same injection point as the camera rigs)
@@ -1296,6 +1298,8 @@ class MujocoEnv:
         ``env.params.actuators`` map with a non-standard law runs the
         mj_step1/step2 phase split.
         """
+        if self._closed:
+            raise RuntimeError("mujoco backend: environment is closed")
         targets = route_actions(self, actions, label="mujoco backend")
         for e, d in enumerate(self._datas):
             # prop position servos: ctrl IS the position target ;
@@ -1541,7 +1545,10 @@ class MujocoEnv:
     # teardown
     # ------------------------------------------------------------------ #
     def close(self) -> None:
-        """Release sim state + per-rig render resources."""
+        """Release sim state + per-rig render resources (idempotent)."""
+        if self._closed:
+            return
+        self._closed = True
         if self.camera_manager is not None:
             self.camera_manager.close()
         if self.prop_backend is not None:

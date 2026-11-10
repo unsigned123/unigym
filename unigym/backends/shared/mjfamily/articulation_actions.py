@@ -33,19 +33,13 @@ def _initial_targets(env, order) -> dict:
     return targets
 
 
-def _locate_control(order, by_face, by_name, key, entry):
-    """Resolve one action entry to its control (face, name, joint-set)."""
-    control = by_face.get(key) or by_name.get(key)
-    if control is not None:
-        return control
-    for candidate in order:
-        if tuple(entry.joint_names) == candidate.joint_names:
-            return candidate
-    return None
-
-
 def _apply_entry(env, control, key, entry, targets, covered, label) -> None:
     """Scatter one NamedAction entry into its control target row."""
+    if entry.kind != control.target:
+        raise ValueError(
+            f"{label}: action entry {key!r} has kind {entry.kind!r} but "
+            f"control {control.name!r} expects target {control.target!r}"
+        )
     names = list(entry.joint_names or ())
     index = {n: i for i, n in enumerate(control.joint_names)}
     unknown = sorted(set(names) - set(index))
@@ -86,11 +80,10 @@ def route_actions(env, actions: dict, label=None) -> dict:
     targets = _initial_targets(env, order)
     covered = {c.name: np.zeros(len(c.joint_names), dtype=bool) for c in order if not c.prop}
     by_face = {c.action_face: c for c in order}
-    by_name = {c.name: c for c in order}
     seen = set()
     accepted = sorted(by_face)
     for key, entry in actions.items():
-        control = _locate_control(order, by_face, by_name, key, entry)
+        control = by_face.get(key)
         if control is None:
             raise ValueError(
                 f"{label}: action entry {key!r} is not a declared control "
