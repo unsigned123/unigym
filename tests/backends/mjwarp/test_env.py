@@ -9,6 +9,8 @@ from tests._support.fakes.closing import FailingClose, RecordingClose
 from unigym.env.backends.base import assert_backend_contract
 from unigym.runtime.actions import NamedAction
 
+pytestmark = pytest.mark.sim
+
 
 def _zero_action(env):
     control = env.controls["tiny"]

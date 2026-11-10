@@ -8,6 +8,8 @@ import torch
 from unigym.env.backends.base import check_extra_info, check_obs_cache
 from unigym.runtime.actions import NamedAction
 
+pytestmark = pytest.mark.sim
+
 
 def _action(env, values):
     control = env.controls["tiny"]
