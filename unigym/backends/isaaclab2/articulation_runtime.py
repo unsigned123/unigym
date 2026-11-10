@@ -398,6 +398,11 @@ def route_actions(env, actions: dict) -> torch.Tensor:
             buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
             chunks.append(buf)
             continue
+        if na.kind != control.target:
+            raise ValueError(
+                f"{_LABEL}: action entry {face!r} has kind {na.kind!r} but "
+                f"control {control.name!r} expects target {control.target!r}"
+            )
         if na.num_envs != n:
             raise ValueError(f"action entry {face!r} has {na.num_envs} env rows, " f"expected {n}")
         if na.dim != dim:

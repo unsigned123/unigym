@@ -130,6 +130,19 @@ def test_missing_action_entry_fails_fast(cartpole_env):
     assert f"['{ARTICULATION}']" in message
 
 
+def test_action_kind_mismatch_fails_fast(cartpole_env):
+    """A legal action kind that disagrees with the control target is rejected."""
+    entry = NamedAction.zeros(cartpole_env.num_envs, list(CART_JOINTS), "torque")
+
+    with pytest.raises(ValueError) as excinfo:
+        cartpole_env.step({ARTICULATION: entry})
+
+    message = str(excinfo.value)
+    assert f"action entry '{ARTICULATION}'" in message
+    assert "kind 'torque'" in message
+    assert f"control '{ARTICULATION}' expects target 'position'" in message
+
+
 def test_wrong_env_row_count_fails_fast(cartpole_env):
     """An entry with the wrong batch height is rejected against num_envs."""
     entry = NamedAction.zeros(cartpole_env.num_envs + 1, list(CART_JOINTS), "position")
