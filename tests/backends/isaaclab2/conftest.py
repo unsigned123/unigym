@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -65,7 +65,7 @@ def _cartpole_articulation_cfg(usd: Path):
     )
 
 
-def _build_env(usd: Path):
+def _build_env(usd: Path, *, num_envs: int = 1):
     """Construct the single-articulation backend over the Cartpole asset."""
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
@@ -104,7 +104,7 @@ def _build_env(usd: Path):
         robot_profile=profile,
         adapter=ManualAdapter(),
         terrain_cfg=terrain_cfg,
-        num_envs=1,
+        num_envs=num_envs,
         episode_length_s=100.0,
         decimation=4,
         sim_dt=0.005,
@@ -123,8 +123,28 @@ def cartpole_usd() -> Path:
 
 
 @pytest.fixture
-def cartpole_env(cartpole_usd, simulation_app) -> Iterator[object]:
+def env_factory(cartpole_usd: Path, simulation_app: object) -> Callable[..., object]:
+    """Build real backends and close every one of them at teardown."""
+    created = []
+
+    def make(num_envs: int = 1):
+        env = _build_env(cartpole_usd, num_envs=num_envs)
+        created.append(env)
+        return env
+
+    yield make
+
+    for env in reversed(created):
+        env.close()
+
+
+@pytest.fixture
+def cartpole_env(env_factory: Callable[..., object]):
     """One constructed IsaacLab 2 Cartpole env, closed at teardown."""
-    env = _build_env(cartpole_usd)
-    yield env
-    env.close()
+    return env_factory(1)
+
+
+@pytest.fixture
+def two_env(env_factory: Callable[..., object]):
+    """Two constructed IsaacLab 2 Cartpole envs, closed at teardown."""
+    return env_factory(2)
