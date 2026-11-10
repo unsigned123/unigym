@@ -334,8 +334,11 @@ class MjwarpEnv(WarpBatchMixin):
     # the explicit ``close()`` teardown boundary (see ``close``).
     _model: mujoco.MjModel
     _data: mujoco.MjData
+    _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
     _capacity: Capacity
+    _closed: bool
+    _closing: bool
 
     def __init__(
         self,
@@ -404,6 +407,8 @@ class MjwarpEnv(WarpBatchMixin):
         self.artifact_dir = None if artifact_dir is None else os.fspath(artifact_dir)
         self.artifact_paths: dict = {}
         self._fill_record = None
+        self._closed = False
+        self._closing = False
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
         # (same injection point as the camera rigs)
@@ -1299,6 +1304,8 @@ class MjwarpEnv(WarpBatchMixin):
         ``env.params.actuators`` map with a non-standard law runs the
         mj_step1/step2 phase split.
         """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
         targets = route_actions(self, actions, label="mjwarp backend")
         for e, d in enumerate(self._datas):
             # prop position servos: ctrl IS the position target ;
@@ -1357,6 +1364,8 @@ class MjwarpEnv(WarpBatchMixin):
         Returns:
             The reset ids (int64).
         """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
         if not isinstance(env_ids, torch.Tensor):
             env_ids = torch.as_tensor(env_ids)
         if env_ids.numel() == 0:
@@ -1422,6 +1431,8 @@ class MjwarpEnv(WarpBatchMixin):
 
     def reset_all(self) -> torch.Tensor:
         """Reset every env (``reset_envs(arange(num_envs))``)."""
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
         return self.reset_envs(torch.arange(self.num_envs, dtype=torch.int64))
 
     # ------------------------------------------------------------------ #
@@ -1584,7 +1595,17 @@ class MjwarpEnv(WarpBatchMixin):
     # teardown
     # ------------------------------------------------------------------ #
     def close(self) -> None:
-        """Release sim state + per-rig render resources."""
+        """Release sim state + per-rig render resources (idempotent).
+
+        Teardown is retryable: ``_closing`` guards the window between the
+        first manager release and the final handle invalidation.  A manager
+        exception makes the backend unusable but retryable: managers may have
+        partially released, the handles stay live, and ``step``/``reset_*``
+        keep rejecting until a later ``close()`` finishes the teardown.
+        """
+        if self._closed:
+            return
+        self._closing = True
         if self.camera_manager is not None:
             self.camera_manager.close()
         if self.prop_backend is not None:
@@ -1595,3 +1616,7 @@ class MjwarpEnv(WarpBatchMixin):
         # records the released state without re-typing the class.
         for handle in ("_wdata", "_wm", "_data", "_model", "_datas", "_active_data"):
             self.__dict__[handle] = None
+        # Mark closed only after every manager released successfully: a
+        # manager failure leaves the backend retryable, not half-closed.
+        self._closed = True
+        self._closing = False
