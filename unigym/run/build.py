@@ -1016,6 +1016,11 @@ def _build_bridge_and_wiring(
     from unigym.runtime.scene import attach as attach_scene
 
     robot_name = next(iter(getattr(env, "articulations", {}) or {}), None)
+    if robot_name is None:
+        raise RuntimeError(
+            "scene face: the env exposes no articulation name; the run must "
+            "declare at least one articulation (no implicit robot name)"
+        )
     attach_scene(bridge, env, backend_label, robot_name=robot_name)
     # watchers: cmd-15 handler + per-tick hook (before the step gate);
     # born-armed specs came from --watch (fail-fast parsed above).

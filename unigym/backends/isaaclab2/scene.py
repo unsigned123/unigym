@@ -27,6 +27,7 @@ schema, honest differences declared.  The declared ones:
 from __future__ import annotations
 
 from unigym.props.base import _prop_shape
+from unigym.runtime.scene import require_robot_name
 
 # PhysX/USD bucket unbounded joints with huge finite values; anything
 # past this magnitude faces as "not limited" (contract §1.23 -- no
@@ -83,9 +84,9 @@ class IsaacLabSceneOps:
 
     backend = "isaaclab"
 
-    def __init__(self, env, robot_name: str | None = None, camera_names=None):
+    def __init__(self, env, robot_name: str, camera_names=None):
         self.env = env
-        self.robot_name = robot_name or "g1"
+        self.robot_name = require_robot_name(robot_name)
         self.camera_names = list(camera_names or [])
 
     # ------------------------------------------------------------------ #

@@ -22,6 +22,7 @@ from unigym.backends.shared.mjfamily.model.joint_limits import (  # noqa: F401
     model_joint_limits,
 )
 from unigym.props.base import _prop_shape
+from unigym.runtime.scene import require_robot_name
 
 
 class MujocoSceneOps:
@@ -29,9 +30,9 @@ class MujocoSceneOps:
 
     backend = "mujoco"
 
-    def __init__(self, env, robot_name: str | None = None, camera_names=None):
+    def __init__(self, env, robot_name: str, camera_names=None):
         self.env = env
-        self.robot_name = robot_name or "g1"
+        self.robot_name = require_robot_name(robot_name)
         self.camera_names = list(camera_names or [])
         # static per-run joint addressing (model-level, never changes)
         self._jadr: dict[str, tuple[int, int]] | None = None

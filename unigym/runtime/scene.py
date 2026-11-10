@@ -61,6 +61,25 @@ __all__ = [
 ]
 
 
+def require_robot_name(robot_name: object) -> str:
+    """Validate the explicit, caller-owned SceneOps robot name.
+
+    There is no backend fallback or environment inference: the caller (the run
+    build) owns the articulation name, and an empty/missing name is a boundary
+    error.
+    """
+    if (
+        not isinstance(robot_name, str)
+        or not robot_name.strip()
+        or robot_name != robot_name.strip()
+    ):
+        raise ValueError(
+            "scene face: robot_name must be an explicit non-empty string "
+            f"without surrounding whitespace, got {robot_name!r}"
+        )
+    return robot_name
+
+
 @runtime_checkable
 class SceneOps(Protocol):
     """Per-backend scene mechanics (the director-ops seam).
@@ -92,24 +111,32 @@ class SceneOps(Protocol):
 def build_scene_ops(
     env: object,
     backend: str,
-    robot_name: str | None = None,
+    robot_name: str,
     camera_names: Iterable[str] | None = None,
 ) -> SceneOps:
     """Factory: the ops object for *env* (single dispatch point).
 
-    The implementations live in the backend packages -- lazy
-    function-body imports keep this module engine-free.
+    ``robot_name`` is the caller-owned articulation name; it is required and
+    validated here before any backend import.  The implementations live in the
+    backend packages -- lazy function-body imports keep this module engine-free.
     """
     from ..backends.registry import BackendSelectionError, backend_info
 
+    name = require_robot_name(robot_name)
     try:
         info = backend_info(backend)
     except BackendSelectionError as e:
         raise ValueError(f"scene face: unknown backend {backend!r} " "(mujoco | isaaclab)") from e
     if info.scene_ops is None:
         raise ValueError(f"scene face: backend {backend!r} declares no " "scene_ops face")
-    scene_ops_factory = cast(Callable[..., SceneOps], info.scene_ops)
-    return scene_ops_factory(env, robot_name=robot_name, camera_names=camera_names)
+    # The registry entry is a no-arg factory returning the backend's SceneOps
+    # class; the runtime check establishes the callable invariant the type
+    # system cannot express across the registry's opaque factory boundary.
+    loaded = info.scene_ops()
+    if not callable(loaded):
+        raise TypeError(f"scene face: backend {backend!r} scene_ops factory is not callable")
+    scene_ops_factory = cast(Callable[..., SceneOps], loaded)
+    return scene_ops_factory(env, robot_name=name, camera_names=camera_names)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,12 +281,12 @@ class SceneFace:
         self,
         env: object,
         backend: str,
-        robot_name: str | None = None,
+        robot_name: str,
         camera_names: Iterable[str] | None = None,
     ):
         self._env = env
         self._backend = str(backend)
-        self._robot_name = robot_name
+        self._robot_name = require_robot_name(robot_name)
         self._camera_names = list(camera_names or [])
         self._ops: SceneOps | None = None
         self._tree: dict[str, JsonValue] | None = None
@@ -297,12 +324,13 @@ class SceneFace:
         return {"scene": {"tree": self.tree_face(), "state": self.ops.state()}}
 
 
-def attach(bridge: Bridge, env: object, backend: str, robot_name: str | None = None) -> SceneFace:
+def attach(bridge: Bridge, env: object, backend: str, robot_name: str) -> SceneFace:
     """Wire the scene face onto the bridge (collect_cli face).
 
-    Registers the cmd-16 handler via the bridge's extension surface
-    (``register_command`` -- the console/watchers/director pattern);
-    camera names ride from the bridge's own camera manager view.
+    ``robot_name`` is the explicit articulation name (no fallback).  Registers
+    the cmd-16 handler via the bridge's extension surface (``register_command``
+    -- the console/watchers/director pattern); camera names ride from the
+    bridge's own camera manager view.
     """
     face = SceneFace(
         env, backend, robot_name=robot_name, camera_names=getattr(bridge, "camera_names", None)
