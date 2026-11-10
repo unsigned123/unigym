@@ -269,6 +269,12 @@ class ArticulationSpec:
             raise ArticulationError(f"articulation {self.name!r} spawn must be a mapping")
         object.__setattr__(self, "spawn", dict(self.spawn))
         object.__setattr__(self, "joints", _joints_tuple(self.name, self.joints))
+        joint_names = [joint.name for joint in self.joints]
+        duplicated = sorted({name for name in joint_names if joint_names.count(name) > 1})
+        if duplicated:
+            raise ArticulationError(
+                f"articulation {self.name!r} declares duplicate joint names {duplicated!r}"
+            )
         if not isinstance(self.body_parts, Mapping):
             raise ArticulationError(f"articulation {self.name!r} body_parts must be a mapping")
         object.__setattr__(self, "body_parts", dict(self.body_parts))

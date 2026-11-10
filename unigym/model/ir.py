@@ -477,6 +477,62 @@ def _mapping_value(value: JsonValue) -> dict[str, JsonValue]:
     return dict(value) if _is_mapping(value) else {}
 
 
+def _required_string(decoded: Mapping[str, JsonValue], key: str) -> str:
+    """Return a required string field, naming the key and expected type."""
+    if key not in decoded:
+        raise ModelIRError(f"model IR: missing required string key {key!r}")
+    value = decoded[key]
+    if not isinstance(value, str):
+        raise ModelIRError(f"model IR: {key!r} must be a string, got {type(value).__name__}")
+    return value
+
+
+def _required_table(decoded: Mapping[str, JsonValue], key: str) -> Mapping[str, JsonValue]:
+    """Return a required table section, never coercing a malformed one."""
+    if key not in decoded:
+        raise ModelIRError(f"model IR: missing required table {key!r} (expected a mapping)")
+    value = decoded[key]
+    if not _is_mapping(value):
+        raise ModelIRError(f"model IR: table {key!r} must be a mapping, got {type(value).__name__}")
+    if not all(isinstance(name, str) for name in value):
+        raise ModelIRError(f"model IR: table {key!r} must be a string-keyed mapping")
+    return value
+
+
+def _optional_mapping(decoded: Mapping[str, JsonValue], key: str) -> Mapping[str, JsonValue] | None:
+    """Return an optional string-keyed mapping, rejecting a malformed one."""
+    if key not in decoded:
+        return None
+    value = decoded[key]
+    if not _is_mapping(value):
+        raise ModelIRError(f"model IR: {key!r} must be a mapping, got {type(value).__name__}")
+    if not all(isinstance(name, str) for name in value):
+        raise ModelIRError(f"model IR: {key!r} must be a string-keyed mapping")
+    return value
+
+
+def _optional_backend(decoded: Mapping[str, JsonValue]) -> str | None:
+    """Return an optional backend name, rejecting a non-string value."""
+    if "backend" not in decoded:
+        return None
+    value = decoded["backend"]
+    if value is not None and not isinstance(value, str):
+        raise ModelIRError(
+            f"model IR: 'backend' must be a string or None, got {type(value).__name__}"
+        )
+    return value
+
+
+def _optional_compiled(decoded: Mapping[str, JsonValue]) -> bool:
+    """Return an optional ``compiled`` flag, rejecting a non-boolean value."""
+    if "compiled" not in decoded:
+        return False
+    value = decoded["compiled"]
+    if not isinstance(value, bool):
+        raise ModelIRError(f"model IR: 'compiled' must be a boolean, got {type(value).__name__}")
+    return value
+
+
 def _table_payload(
     table: Iterable[_NamedRow],
 ) -> dict[str, dict[str, JsonValue]]:
@@ -488,12 +544,35 @@ def _table_from_dict(
     cls: Callable[..., _RowT],
     mapping: Mapping[str, JsonValue],
     tuple_fields: Mapping[object, frozenset[str]],
+    table_name: str | None = None,
 ) -> Table[_RowT]:
-    """Build a table from a name-keyed mapping, sorted by name."""
-    rows = [
-        from_row(cls, _mapping_value(mapping[name]), tuple_fields.get(cls, frozenset()))
-        for name in sorted(mapping)
-    ]
+    """Build a table from a name-keyed mapping, sorted by name.
+
+    When ``table_name`` is provided, row payloads are validated as mappings
+    whose explicit ``name`` matches the table key.  Nested extension tables
+    keep their existing parsing behavior because they are owned by the
+    extension parser.
+    """
+    rows: list[_RowT] = []
+    for name in sorted(mapping):
+        payload = mapping[name]
+        if table_name is not None:
+            if not _is_mapping(payload):
+                raise ModelIRError(
+                    f"model IR: table {table_name!r} row {name!r} must be a "
+                    f"mapping, got {type(payload).__name__}"
+                )
+            row_name = payload.get("name")
+            if not isinstance(row_name, str):
+                raise ModelIRError(
+                    f"model IR: table {table_name!r} row {name!r} must declare " "a string 'name'"
+                )
+            if row_name != name:
+                raise ModelIRError(
+                    f"model IR: table {table_name!r} row {name!r} declares "
+                    f"mismatched name {row_name!r}"
+                )
+        rows.append(from_row(cls, _mapping_value(payload), tuple_fields.get(cls, frozenset())))
     return Table(rows)
 
 
@@ -515,16 +594,6 @@ def _check_unique(kind: str, table: Iterable[_NamedRow]) -> None:
         if row.name in seen:
             raise ModelIRError(f"model IR: duplicate {kind} name {row.name!r}")
         seen.add(row.name)
-
-
-def _string_value(value: JsonValue, default: str = "") -> str:
-    """Return *value* when it is a string, else *default*."""
-    return value if isinstance(value, str) else default
-
-
-def _optional_string(value: JsonValue) -> str | None:
-    """Return *value* when it is a string, else ``None``."""
-    return value if isinstance(value, str) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -638,19 +707,38 @@ class ModelIR:
     ) -> Self:
         """Rebuild a model IR from :meth:`to_dict` output.
 
+        Canonical documents always carry ``name`` and the seven table sections
+        (``bodies``, ``joints``, ``geoms``, ``sites``, ``cameras``,
+        ``actuators``, ``materials``); those sections are required here.
+        ``backend`` and ``compiled`` remain optional, and ``meta`` / ``ext``
+        are optional typed mappings.
+
         Args:
             data: The canonical mapping.
             strict: Reject unknown extension namespaces instead of
                 preserving them as :class:`UnparsedExt`.
+
+        Raises:
+            ModelIRError: A required string/table section is missing or
+                malformed, or an optional section has the wrong shape.
+            UnknownExtensionError: A strict unknown extension namespace was
+                present.
         """
         decoded = decode(dict(data))
         if not _is_mapping(decoded):
             raise ModelIRError("model IR: descriptor must be a mapping")
+        name = _required_string(decoded, "name")
+        tables = {key: _required_table(decoded, key) for key in _TABLES}
         ext: dict[str, ModelExtension] = {}
-        ext_value = decoded.get("ext")
-        if _is_mapping(ext_value):
+        ext_value = _optional_mapping(decoded, "ext")
+        if ext_value is not None:
             for namespace, payload in ext_value.items():
-                decoded_payload = _mapping_value(payload)
+                if not _is_mapping(payload):
+                    raise ModelIRError(
+                        f"model IR: extension {namespace!r} payload must be a "
+                        f"mapping, got {type(payload).__name__}"
+                    )
+                decoded_payload = dict(payload)
                 if namespace == "mj":
                     ext[namespace] = MjExt.from_dict(decoded_payload)
                 elif namespace == "usd":
@@ -662,22 +750,25 @@ class ModelIR:
                     )
                 else:
                     ext[namespace] = UnparsedExt(namespace, dict(decoded_payload))
+        meta = _optional_mapping(decoded, "meta")
         return cls(
-            name=_string_value(decoded.get("name", "")),
-            backend=_optional_string(decoded.get("backend")),
-            compiled=bool(decoded.get("compiled", False)),
-            bodies=_table_from_dict(Body, _mapping_value(decoded.get("bodies")), _TUPLE_FIELDS),
-            joints=_table_from_dict(Joint, _mapping_value(decoded.get("joints")), _TUPLE_FIELDS),
-            geoms=_table_from_dict(Geom, _mapping_value(decoded.get("geoms")), _TUPLE_FIELDS),
-            sites=_table_from_dict(Site, _mapping_value(decoded.get("sites")), _TUPLE_FIELDS),
-            cameras=_table_from_dict(Camera, _mapping_value(decoded.get("cameras")), _TUPLE_FIELDS),
+            name=name,
+            backend=_optional_backend(decoded),
+            compiled=_optional_compiled(decoded),
+            bodies=_table_from_dict(Body, tables["bodies"], _TUPLE_FIELDS, table_name="bodies"),
+            joints=_table_from_dict(Joint, tables["joints"], _TUPLE_FIELDS, table_name="joints"),
+            geoms=_table_from_dict(Geom, tables["geoms"], _TUPLE_FIELDS, table_name="geoms"),
+            sites=_table_from_dict(Site, tables["sites"], _TUPLE_FIELDS, table_name="sites"),
+            cameras=_table_from_dict(
+                Camera, tables["cameras"], _TUPLE_FIELDS, table_name="cameras"
+            ),
             actuators=_table_from_dict(
-                Actuator, _mapping_value(decoded.get("actuators")), _TUPLE_FIELDS
+                Actuator, tables["actuators"], _TUPLE_FIELDS, table_name="actuators"
             ),
             materials=_table_from_dict(
-                Material, _mapping_value(decoded.get("materials")), _TUPLE_FIELDS
+                Material, tables["materials"], _TUPLE_FIELDS, table_name="materials"
             ),
-            meta=dict(_mapping_value(decoded.get("meta"))),
+            meta=dict(meta or {}),
             ext=ext,
         )
 
@@ -710,6 +801,16 @@ class ModelIR:
                 raise ModelIRError(
                     f"model IR: joint {joint.name!r} has reversed range "
                     f"{joint.range!r} (lo must be <= hi)"
+                )
+        for geom in self.geoms:
+            if geom.body not in bodies:
+                raise ModelIRError(
+                    f"model IR: geom {geom.name!r} references missing " f"body {geom.body!r}"
+                )
+        for site in self.sites:
+            if site.body not in bodies:
+                raise ModelIRError(
+                    f"model IR: site {site.name!r} references missing " f"body {site.body!r}"
                 )
         for camera in self.cameras:
             if camera.body not in bodies:
