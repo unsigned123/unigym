@@ -15,6 +15,16 @@ from tests._support.markers import (
 )
 
 _TESTS_ROOT = Path(__file__).resolve().parent
+_DATA_ROOT = _TESTS_ROOT / "_support" / "data"
+
+
+@pytest.fixture
+def tiny_mjcf(tmp_path: Path) -> Path:
+    """Copy the shared primitives-only MJCF into an isolated tmp directory."""
+    source = _DATA_ROOT / "tiny_arm.xml"
+    target = tmp_path / "tiny_arm.xml"
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
 
 
 def _relative_parts(path: Path) -> tuple[str, ...] | None:
