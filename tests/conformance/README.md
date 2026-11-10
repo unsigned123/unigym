@@ -1,6 +1,9 @@
 # tests/conformance
 
-Cross-backend behavior that must agree through a shared contract. Real backends
-are selected by CI lanes; the backend-agnostic fake arrives in a later phase.
+Cross-backend behavior that must agree through the shared `EnvBackend`
+contract. The suite uses the deterministic pure-torch fake in
+`tests/_support/fakes/backend.py`; conformance tests import it only from
+`tests._support.fakes.backend`.
 
-Phase 0 creates the directory only.
+Real backends are selected by CI lanes. No real simulator, GPU or external
+asset belongs in this directory.
