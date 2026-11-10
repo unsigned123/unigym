@@ -117,7 +117,8 @@ def _build_env(usd: Path):
 
 @pytest.fixture(scope="session")
 def cartpole_usd() -> Path:
-    """Resolve the cached Cartpole USD before Kit is launched."""
+    """Resolve the optional lane and cached USD before Kit is launched."""
+    require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     return _cartpole_usd()
 
 
