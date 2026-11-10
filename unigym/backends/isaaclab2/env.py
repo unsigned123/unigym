@@ -425,6 +425,10 @@ class IsaaclabEnv(ManagerBasedEnv):
             backend_options: backend-private options; isaaclab declares none
                 (``env.backend_options.isaaclab`` fails fast before build).
         """
+        # teardown state is initialised before the parent constructor so a
+        # failure there still leaves close()/the guards well-defined
+        self._closed = False
+        self._closing = False
         self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
         self._contact_force_threshold = float(contact_force_threshold)
         self._init_pose = build_init_pose_cfg(init_pose)
@@ -959,6 +963,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             ``extra["should_reset"]`` (bool) part of the stable extra face.
         """
         # also applies mode="interval" DR events (pushes)
+        self._raise_if_closed()
         super().step(self._route_named_actions(actions))
         self._time_in_episode += self.step_dt
         self._refresh_obs_cache(raw_action, cmd)
@@ -1065,6 +1070,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             write methods, which bypass the corrupted ``root_state_w``
             buffer and write directly to PhysX.  See IsaacLab issue #7311.
         """
+        self._raise_if_closed()
         if not isinstance(env_ids, torch.Tensor):
             env_ids = torch.as_tensor(env_ids, device=self.device)
         if env_ids.numel() == 0:
@@ -1144,7 +1150,34 @@ class IsaaclabEnv(ManagerBasedEnv):
 
     def reset_all(self) -> torch.Tensor:
         """Batch-synchronous episode reset (the shorthand)."""
+        self._raise_if_closed()
         return self.reset_envs(torch.arange(self.num_envs, device=self.device))
+
+    # ------------------------------------------------------------------ #
+    # teardown
+    # ------------------------------------------------------------------ #
+    def _raise_if_closed(self) -> None:
+        """Reject use during or after teardown with the backend closed error."""
+        if self._closed or self._closing:
+            raise RuntimeError("isaaclab2 backend: environment is closed")
+
+    def close(self) -> None:
+        """Release the inherited managers/sim (idempotent, not retryable).
+
+        The inherited ``ManagerBasedEnv.close()`` deletes managers and clears
+        the singleton; a teardown failure therefore leaves the environment
+        unusable and is propagated unchanged.  ``_closed`` is set in
+        ``finally`` so a failed close cannot be retried as if nothing had
+        been released.
+        """
+        if self._closed:
+            return
+        self._closing = True
+        try:
+            super().close()
+        finally:
+            self._closed = True
+            self._closing = False
 
     # ------------------------------------------------------------------ #
     # snapshot / restore (Round B rewind): DECLARED ABSENT
