@@ -7,11 +7,25 @@ These tests run only in the clean dog lane:
 ```text
 UNIGYM_ISAACLAB2_ENV=unigym-isaaclab232
 UNIGYM_TEST_ENV_STRICT=1
+UNIGYM_ISAACLAB2_ASSET_CACHE=<provisioned directory>
 ```
 
 The directory is outside default `testpaths`; run it explicitly with the
 IsaacLab 2 environment. The clean lane is recorded in
 `plans/artifacts/isaaclab-2.3.2-env.md` in the planning repository.
+
+## Asset cache
+
+The Cartpole fixture reads its USD from `UNIGYM_ISAACLAB2_ASSET_CACHE`; the
+directory must contain `cartpole.usd`. Tests never download assets. A missing
+or empty cache fails the lane (strict); it is not skipped.
+
+```bash
+UNIGYM_ISAACLAB2_ASSET_CACHE=<provisioned directory> \
+UNIGYM_TEST_ENV_STRICT=1 \
+conda run --no-capture-output -n unigym-isaaclab232 \
+  python -m pytest tests/backends/isaaclab2 -q
+```
 
 Planned coverage:
 

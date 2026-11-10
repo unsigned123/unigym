@@ -160,13 +160,53 @@ def _configure_robot_scene(
     cfg.scene.contact_forces.prim_path = contact_sensor_prim_path(
         (robot_profile.body_parts or {}).get("feet")
     )
-    # G1: the Nucleus g1.usd carries 14 finger DOFs beyond the 29
-    # policy joints, so the action term must target exactly the profile's
-    # declared joints instead of all asset DOFs.  When joint_order covers
-    # the full asset set, the resolved joint ids (and thus the behavior) are
-    # identical to the [".*"] default.
-    if robot_profile.joint_order:
-        cfg.actions.g1.joint_names = list(robot_profile.joint_order)
+    # The body action term name is the body control's action face, which the
+    # contract already requires to equal its articulation name.  Resolve it
+    # from the neutral control runtimes instead of hard-coding a robot name:
+    # the articulation name is the single source of truth for the action entry.
+    single_name = ars[0].name if ars else None
+    body_controls = [
+        control
+        for control in tuple(controls or ())
+        if not control.prop
+        and control.action_face == control.articulation
+        and (single_name is None or control.articulation == single_name)
+    ]
+    if len(body_controls) != 1:
+        accepted = [
+            (control.name, control.articulation, control.action_face)
+            for control in tuple(controls or ())
+        ]
+        raise ValueError(
+            "isaaclab2 backend: the single-articulation path needs exactly "
+            "one non-prop body control (action_face == articulation), got "
+            f"{len(body_controls)}; accepted controls (name, articulation, "
+            f"action_face): {accepted}"
+        )
+    body_control = body_controls[0]
+    term_name = str(body_control.action_face)
+    if not term_name.isidentifier():
+        raise ValueError(
+            f"isaaclab2 backend: action face {term_name!r} of articulation "
+            f"{body_control.articulation!r} is not a valid action-term name"
+        )
+    # Keep the joint list source unchanged: the profile's declared body order
+    # (falling back to the asset default when the profile declares none).  The
+    # G1 Nucleus asset carries 14 finger DOFs beyond the 29 policy joints, so
+    # the term targets exactly the profile's declared joints instead of all
+    # asset DOFs.
+    joint_names = list(robot_profile.joint_order) if robot_profile.joint_order else [".*"]
+    setattr(
+        cfg.actions,
+        term_name,
+        JointPositionActionCfg(
+            asset_name="robot",
+            joint_names=joint_names,
+            scale=1.0,
+            use_default_offset=False,
+            preserve_order=True,
+        ),
+    )
     # actuated prop joints join the action surface AUTOMATICALLY
     # (declaration IS capability): one preserve_order JointPositionAction term per
     # articulation prop, field name == prop name == the NamedAction
@@ -240,21 +280,15 @@ class _IsaaclabSceneCfg(InteractiveSceneCfg):
 
 @configclass
 class _IsaaclabActionsCfg:
-    # named action faces.  The field name IS the entry key adapters
-    # use in their postprocess_action dict ("g1" = the G1 body face).
-    # preserve_order=True keeps the term input dim i == joint_names[i], which
-    # is what makes the NamedAction name addressing trivially correct
-    # (IsaaclabJointResolver contract); explicit name lists are set from the
-    # profile at construction.  With the full profile joint_order the
-    # resolved joint ids (and thus the behavior) are identical to the reference
-    # [".*"] term.
-    g1: JointPositionActionCfg = JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=[".*"],
-        scale=1.0,
-        use_default_offset=False,
-        preserve_order=True,
-    )
+    """Action faces created dynamically from the run's controls.
+
+    The single-articulation path creates the body term under the body
+    control's action face; the partitioned path creates one term per control
+    face in :mod:`articulation_runtime`.  Extra faces (hands, articulated
+    props) are added the same way.  ``preserve_order=True`` keeps the term
+    input dim ``i == joint_names[i]``, which is what makes the NamedAction
+    name addressing trivially correct (IsaaclabJointResolver contract).
+    """
 
 
 @configclass

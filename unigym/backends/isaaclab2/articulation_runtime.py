@@ -102,8 +102,6 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
         raise ValueError(
             f"{_LABEL}: partitioned scene needs >= 2 articulations, got " f"{len(articulations)}"
         )
-    if hasattr(cfg.actions, "g1"):
-        delattr(cfg.actions, "g1")
     controls = tuple(controls or ())
     fields: dict[str, str] = {}
     for index, spec in enumerate(articulations):
