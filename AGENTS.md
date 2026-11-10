@@ -431,7 +431,7 @@ design change. Do not ship a shortcut and call the task complete.
 Run the checks relevant to the change. For the current bootstrap state:
 
 ```bash
-.venv/bin/python -m pytest tests -q
+.venv/bin/python -m pytest -q
 .venv/bin/python -m ruff check unigym examples tests
 PYRIGHT_PYTHON_GLOBAL_NODE=false .venv/bin/pyright
 PYRIGHT_PYTHON_GLOBAL_NODE=false .venv/bin/pyright -p pyrightconfig.api.json

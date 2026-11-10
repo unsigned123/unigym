@@ -214,7 +214,52 @@ include = ["unigym*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["tests"]
+testpaths = [
+    "tests/smoke",
+    "tests/unit",
+    "tests/contract",
+    "tests/conformance",
+    "tests/meta",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+]
+markers = [
+    "layer_smoke: install, import and public-name smoke tests",
+    "layer_unit: pure logic and basic correctness tests",
+    "layer_contract: public API, protocol and config contract tests",
+    "layer_conformance: cross-backend conformance tests",
+    "layer_backend: one real backend's implementation tests",
+    "layer_integration: CLI, daemon, subprocess and heavy-path tests",
+    "layer_meta: test-system and repository-rule tests",
+    "domain_core: core domain tests",
+    "domain_model: model domain tests",
+    "domain_scene: scene domain tests",
+    "domain_runtime: runtime domain tests",
+    "domain_run: run domain tests",
+    "domain_terminations: termination domain tests",
+    "domain_filters: filter domain tests",
+    "domain_robots: robot domain tests",
+    "domain_adapters: adapter domain tests",
+    "domain_backends: framework-level backend registry tests",
+    "backend_agnostic: tests that do not target one specific backend",
+    "backend_mujoco: MuJoCo backend tests",
+    "backend_mjwarp: MuJoCo Warp backend tests",
+    "backend_isaaclab2: IsaacLab 2 backend tests",
+    "backend_isaaclab3: IsaacLab 3 backend tests",
+    "fast: quick smoke, unit, contract and meta tests",
+    "slow: explicitly slow tests",
+    "gpu: requires an explicitly assigned GPU",
+    "sim: requires a real heavy simulator or runtime",
+    "subprocess: starts real subprocesses",
+    "network: uses the network",
+    "serial: cannot run concurrently",
+    "requires_capabilities: conformance capability requirement",
+    "known_deviation: documented backend deviation",
+]
 
 [tool.ruff]
 line-length = 100

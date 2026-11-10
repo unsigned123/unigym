@@ -77,7 +77,7 @@ English and Chinese versions will live under `docs/en/` and `docs/zh/`.
 ## Tests
 
 ```bash
-PYTHONPATH=. python -m pytest tests -q
+PYTHONPATH=. python -m pytest -q
 PYTHONPATH=. python -m ruff check unigym examples tests
 ```
 

@@ -163,6 +163,7 @@ tests/
 ├── conftest.py                  # single auto-tagging entry point
 ├── _support/                    # not collected
 │   ├── data/tiny_arm.xml
+│   ├── markers.py               # directory-to-marker policy
 │   ├── envs.py                  # backend environment resolution
 │   ├── factories.py
 │   ├── assertions.py
@@ -204,11 +205,16 @@ unigym/backends/mujoco/env.py    -> tests/backends/mujoco/test_env.py
 Mirror the product domain tree to a useful depth. Do not create a test file for
 a module that has no independently testable behavior.
 
+Unit tests must live under a domain directory. Files placed directly in
+`tests/unit/` are rejected by the harness; add a documented domain instead of
+creating a cross-domain dumping ground.
+
 ## 5. Markers
 
 ### 5.1 Automatic markers
 
-Applied once by `tests/conftest.py` from a central directory-to-marker mapping:
+Applied once by `tests/_support/markers.py`, called from the root
+`tests/conftest.py` hook, from one central directory-to-marker mapping:
 
 | Marker | Source |
 | --- | --- |
@@ -331,9 +337,9 @@ conda run --no-capture-output -n "$UNIGYM_ISAACLAB2_ENV" \
 Use the environment that owns the lane. For the primary `.venv`:
 
 ```bash
-.venv/bin/python -m pytest tests -q
-.venv/bin/python -m pytest tests/test_control_contract.py -vv
-.venv/bin/python -m pytest tests/test_control_contract.py::test_name -vv
+.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest tests/contract/test_control_contract.py -vv
+.venv/bin/python -m pytest tests/contract/test_control_contract.py::test_name -vv
 ```
 
 Do not run the full backend matrix locally unless you are working on that

@@ -90,7 +90,7 @@ jobs:
       - name: Install dev environment
         run: uv sync --frozen --extra dev
       - name: Run tests
-        run: .venv/bin/python -m pytest tests -q -p no:cacheprovider
+        run: .venv/bin/python -m pytest -q -p no:cacheprovider
 
   imports:
     name: import contracts
