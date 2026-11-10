@@ -100,6 +100,7 @@ def _build_env(usd: Path, *, num_envs: int = 1):
     terrain_cfg = {
         "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
     }
+    sim_utils.create_new_stage()
     return IsaaclabEnv(
         robot_profile=profile,
         adapter=ManualAdapter(),
