@@ -425,6 +425,7 @@ class MujocoEnv:
     _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
     _closed: bool
+    _closing: bool
 
     def __init__(
         self,
@@ -487,6 +488,7 @@ class MujocoEnv:
         self.artifact_paths: dict = {}
         self._fill_record = None
         self._closed = False
+        self._closing = False
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
         # (same injection point as the camera rigs)
@@ -1298,7 +1300,7 @@ class MujocoEnv:
         ``env.params.actuators`` map with a non-standard law runs the
         mj_step1/step2 phase split.
         """
-        if self._closed:
+        if self._closed or self._closing:
             raise RuntimeError("mujoco backend: environment is closed")
         targets = route_actions(self, actions, label="mujoco backend")
         for e, d in enumerate(self._datas):
@@ -1352,6 +1354,8 @@ class MujocoEnv:
         Returns:
             The reset ids (int64).
         """
+        if self._closed or self._closing:
+            raise RuntimeError("mujoco backend: environment is closed")
         if not isinstance(env_ids, torch.Tensor):
             env_ids = torch.as_tensor(env_ids)
         if env_ids.numel() == 0:
@@ -1402,6 +1406,8 @@ class MujocoEnv:
 
     def reset_all(self) -> torch.Tensor:
         """Reset every env (``reset_envs(arange(num_envs))``)."""
+        if self._closed or self._closing:
+            raise RuntimeError("mujoco backend: environment is closed")
         return self.reset_envs(torch.arange(self.num_envs, dtype=torch.int64))
 
     # ------------------------------------------------------------------ #
@@ -1545,10 +1551,17 @@ class MujocoEnv:
     # teardown
     # ------------------------------------------------------------------ #
     def close(self) -> None:
-        """Release sim state + per-rig render resources (idempotent)."""
+        """Release sim state + per-rig render resources (idempotent).
+
+        Teardown is retryable: ``_closing`` guards the window between the
+        first manager release and the final handle invalidation.  A manager
+        exception makes the backend unusable but retryable: managers may have
+        partially released, the handles stay live, and ``step``/``reset_*``
+        keep rejecting until a later ``close()`` finishes the teardown.
+        """
         if self._closed:
             return
-        self._closed = True
+        self._closing = True
         if self.camera_manager is not None:
             self.camera_manager.close()
         if self.prop_backend is not None:
@@ -1559,3 +1572,7 @@ class MujocoEnv:
         # records the released state without re-typing the class.
         for handle in ("_data", "_model", "_datas", "_active_data"):
             self.__dict__[handle] = None
+        # Mark closed only after every manager released successfully: a
+        # manager failure leaves the backend retryable, not half-closed.
+        self._closed = True
+        self._closing = False
