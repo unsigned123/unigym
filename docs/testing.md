@@ -116,6 +116,44 @@ Layer rules:
 - `tests/meta` tests the test system and repository rules, not product physics.
 - `tests/regression` does not exist until the golden policy is activated.
 
+### 3.1 Layer contract for agents
+
+This is the decision rule, not a suggestion:
+
+| Layer | What belongs there | What does not belong there |
+| --- | --- | --- |
+| unit | basic correctness of one module/domain, pure logic, validation, state transitions, boundary and failure cases | real engines, subprocesses, cross-backend agreement, process wiring |
+| contract | public API shape, protocols, typed config contracts, fail-fast boundary behavior | a second copy of unit behavior, backend-specific behavior |
+| conformance | behavior that must agree across backends, capability semantics, known deviations | one backend's private implementation details |
+| backend | one real backend's implementation, lifecycle and engine-specific behavior | cross-backend cases, pure data logic |
+| integration | composition, CLI, daemon, subprocesses, real run wiring | correctness that can be proven with a pure object |
+| meta | markers, catalog, stubs, env provider, repository/test-system rules | product physics or backend behavior |
+
+Rules for placement:
+
+- Write **basic correctness tests in `tests/unit`**. If a behavior can be proven
+  with pure objects, it belongs there.
+- The other layers contain **specialized tests only**. Do not duplicate a unit
+  invariant in contract, conformance or integration.
+- If a test needs a real simulator, process, GPU or external environment, it is
+  not a unit test.
+- Choose the layer by the behavior being proven, not by the module name.
+- When two layers could prove the same behavior, choose the lower one and make
+  the higher test prove only the additional boundary.
+
+### 3.2 Test placement decision
+
+Ask in order:
+
+1. Is this pure logic or validation with no real engine/process? -> `unit`.
+2. Is this the public boundary or a cross-module contract? -> `contract`.
+3. Must multiple backends agree? -> `conformance`.
+4. Is this one backend's engine-specific behavior? -> `backends/<name>`.
+5. Does it require real composition, CLI, daemon or subprocess? -> `integration`.
+6. Is it a rule about the test system or repository? -> `meta`.
+
+If none of these fits, stop and ask; do not create a new ad-hoc layer.
+
 ## 4. Directory layout
 
 Target layout:
@@ -380,6 +418,74 @@ def test_termination_requires_explicit_articulation():
   contract change and needs justification.
 - Do not compare full large objects when a focused invariant is enough.
 
+### 8.5 Boundary-first test design
+
+Boundary testing is not "write as many tests as possible". Cover the failure
+modes that are most likely to break the contract:
+
+- empty, missing, `None`;
+- duplicate, overlapping or unknown keys;
+- wrong type, wrong range, negative values, zero;
+- NaN, infinity, very large values;
+- exactly at a boundary and just past it;
+- one articulation versus many articulations;
+- N=1 versus N>1;
+- reset, rewind, close and reopen;
+- malformed JSON, missing fields, version mismatch;
+- missing optional dependency;
+- unsupported backend capability;
+- units, frames, quaternion order and sign;
+- error type, field name and expected/actual values;
+- order independence and no leaked global state.
+
+Use `pytest.mark.parametrize` for table-like cases. Do not copy the same test
+body for each variant.
+
+The goal is a failure-mode inventory, not an input-space explosion. Test the
+cases that can plausibly produce a bug; do not test every permutation.
+
+### 8.6 Test value filter
+
+Before writing a test, answer:
+
+1. Can a realistic bug make this test fail?
+2. Is this behavior already proven in another layer?
+3. Does this assert a contract or an implementation detail?
+
+If the answers are "no", "yes" or "implementation detail", do not write the
+test. A test that cannot fail for a real bug is maintenance cost without
+protection.
+
+### 8.7 Sizing and old-test migration
+
+Use these as guides, not hard gates:
+
+- first rebuild milestone: 100-150 meaningful tests;
+- mature public-core suite: 250-400 tests;
+- backend/GPU/Isaac lanes grow separately.
+
+Distribution guide:
+
+```text
+unit          45%
+contract      20%
+conformance   10%
+backends      15%
+integration    5%
+meta           5%
+```
+
+Do not target a test count. Do not add tests to hit a coverage number.
+
+Old unigym tests are a **behavior checklist**, not a migration target:
+
+- do not copy the old suite wholesale;
+- do not port tests for removed features;
+- do not port private-helper or call-order tests;
+- do not port duplicate meta checks already covered by tools;
+- do not port low-signal parametrization;
+- reuse only the behavior, boundary and failure mode, rewritten for this suite.
+
 ## 9. Where to add a test
 
 | Change | Test location |
@@ -401,22 +507,97 @@ agreement between backends.
 
 The goal is a small number of high-value test doubles, not a fake ecosystem.
 
-Rules:
+### 10.1 Terms
+
+Use the words consistently:
+
+- **static stub**: a `.pyi` file for an external package;
+- **fake / test double**: a Python object implementing a boundary protocol for
+  tests;
+- **real object**: the production implementation or a small real fixture;
+- **fixture**: pytest setup, not necessarily a stub.
+
+Static stubs are limited to external packages. Do not hand-write `.pyi` files
+for internal `unigym` modules. Use the real source and pyright.
+
+### 10.2 Runtime fake rules
 
 1. Prefer real core objects and a real tiny MJCF over faking them.
 2. One fake per external protocol.
-3. Fakes live in `tests/_support/fakes/`; no ad-hoc fakes in test files.
-4. No `MagicMock` for core data. Use typed factories.
-5. `monkeypatch` is for environment variables, missing optional dependencies or
+3. Fakes live in `tests/_support/fakes/`; no ad-hoc fakes in test files or
+   individual test directories.
+4. Only fake a real boundary: simulator, subprocess, network, transport, clock
+   or an unavailable optional dependency. Do not fake pure data logic.
+5. Use dependency injection, factories and Protocol implementations. Do not
+   replace internal functions with `monkeypatch`.
+6. No `MagicMock` for core data. Use typed factories or an explicit spy.
+7. `monkeypatch` is for environment variables, missing optional dependencies or
    fault injection, not for replacing the function under test.
-6. Fakes are deterministic, sleep-free, asset-free and network-free.
-7. Unsupported capabilities raise explicitly; never return `None`.
-8. Every fake is listed in `_support/fakes/README.md` with protocol, boundary,
-   limitations and reset semantics.
-9. `tests/meta/test_stub_policy.py` enforces the location and mock policy.
-10. An editable install in an external environment is optional; use
+8. Fakes are deterministic, sleep-free, asset-free and network-free.
+9. Fakes are typed against the boundary Protocol and expose explicit reset
+   semantics if they hold state.
+10. Unsupported capabilities raise explicitly; never return `None` and never
+    silently pass.
+11. No fake hierarchy and no "universal fake". One small fake is easier to
+    audit than a configurable framework.
+12. No test-only hooks in production code. If a fake needs a production hook,
+    the design is wrong.
+13. An editable install in an external environment is optional; use
     `pip install -e . --no-deps` only when entry points or packaging behavior
     are under test.
+
+### 10.3 Stub budget and manifest
+
+Initial budget:
+
+```text
+tests/_support/fakes/backend.py     # one fake backend for conformance
+tests/_support/fakes/clock.py       # only if time is a boundary
+tests/_support/fakes/transport.py   # only if a transport boundary appears
+```
+
+A new fake requires:
+
+- a named external boundary that cannot be exercised with a real object;
+- a Protocol/type it implements;
+- a documented limitation;
+- a reason a real object or `tmp_path` is not enough.
+
+Every fake is listed in `_support/fakes/README.md` with protocol, boundary,
+limitations and reset semantics. Remove a fake when its boundary or test is
+gone; do not keep unused doubles.
+
+`tests/meta/test_stub_policy.py` enforces:
+
+- fakes live only under `_support/fakes/`;
+- every fake has a manifest entry;
+- no `MagicMock` outside an allowlist;
+- no `monkeypatch` of internal product functions;
+- no new fake without a manifest update.
+
+### 10.4 Absolute prohibitions
+
+The following are absolute prohibitions, not style preferences. If a test
+needs one of these, stop and ask; do not add an exception:
+
+- fake MuJoCo, IsaacLab, MuJoCo Warp or the core data model;
+- create a fake per test, per branch or per parametrized case;
+- create a fake hierarchy or a configurable "universal fake";
+- use `SimpleNamespace` as a production object;
+- mock the function under test;
+- mock an internal product function just to assert it was called;
+- patch `sys.modules` to simulate an optional dependency;
+- use a fake filesystem when `tmp_path` works;
+- use a sleep/retry loop instead of a fake clock;
+- let a fake return a generic success for every capability;
+- use `MagicMock` for core data, model objects or control objects;
+- add a production seam only for a test;
+- add a fake without a manifest entry;
+- keep an unused fake "for later";
+- make a test pass by replacing the boundary under test with a fake.
+
+A fake that makes the test easier but hides the real boundary is a maintenance
+trap. The old suite's stub sprawl is exactly what this section prevents.
 
 ## 11. Red-test protocol
 
@@ -571,12 +752,17 @@ Golden/regression tests are deliberately deferred.
 
 ### While writing tests
 
+- Put basic correctness in `unit`; put only specialized behavior in the other
+  layers.
 - Put the test in the lowest layer that can prove the behavior.
+- Record the boundary/failure modes considered; do not test only the happy path.
 - Add the narrowest markers.
 - Keep module import lightweight.
 - Use factories, `tmp_path` and explicit assertions.
 - Do not duplicate behavior across layers.
 - Do not add a new fake unless a real external boundary requires it.
+- Register every fake in `_support/fakes/README.md` and keep it typed and
+  deterministic.
 
 ### Before reporting completion
 
@@ -589,12 +775,20 @@ Golden/regression tests are deliberately deferred.
 ## 15. Review checklist
 
 - [ ] Test is in the correct layer.
+- [ ] Basic correctness lives in `unit`; higher layers contain only specialized
+  behavior.
+- [ ] A realistic bug could make this test fail.
+- [ ] Relevant boundary/failure cases were considered, not just the happy path.
+- [ ] The behavior is not duplicated in another layer.
 - [ ] Test name and first docstring line state the protected behavior.
 - [ ] Markers are minimal and correct.
 - [ ] No heavy import at module import time.
 - [ ] No absolute path, machine path or ambient GPU selection.
 - [ ] No sleep, network or order dependence.
 - [ ] No mock of internal product logic.
+- [ ] Any fake is in `_support/fakes/`, typed, documented and registered.
+- [ ] No absolute prohibition from section 10.4 is present.
+- [ ] No `MagicMock` for core data and no per-test fake.
 - [ ] No new test dependency without review.
 - [ ] Failure message identifies the field/value under test.
 - [ ] No hidden skip/xfail and no weakened tolerance.
@@ -610,19 +804,27 @@ Golden/regression tests are deliberately deferred.
 - Mocking the function under test.
 - Testing private attributes instead of the contract.
 - Using a real simulator to test pure data logic.
+- Writing a unit test that needs a real backend or subprocess.
 - Duplicating one behavior in unit, contract and conformance.
 - Adding a version tag instead of a lane.
+- Creating a fake per test instead of one boundary fake.
+- Faking core data or a simulator instead of using a real tiny fixture.
+- Letting a fake silently succeed for unsupported capabilities.
 - Making a red test green by changing its expected value.
 - Adding a permanent skip because an external environment is inconvenient.
+- Porting old tests wholesale instead of using them as a behavior checklist.
 - Treating a generated catalog as the source of truth.
 
 ## 17. Definition of done for a test change
 
 - The change has a test at the lowest layer that proves the behavior.
+- Basic correctness is in `unit`; higher layers add only specialized behavior.
+- The relevant boundary/failure modes are covered.
 - The targeted test passes.
 - The fast suite passes.
 - The relevant backend/integration lane is run or explicitly reported as not
   run.
 - Markers, docstring and layer are correct.
+- Any fake is typed, documented, registered and in `_support/fakes/`.
 - No hidden skip, weakened assertion or baseline update was introduced.
 - The final report includes commands, results and unverified lanes.
