@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
+from tests._support.fakes.closing import FailingClose, RecordingClose
 from unigym.env.backends.base import assert_backend_contract
+from unigym.runtime.actions import NamedAction
+
+
+def _zero_action(env):
+    control = env.controls["tiny"]
+    return NamedAction.zeros(env.num_envs, list(control.joint_names), control.target)
 
 
 def test_env_constructs_from_tiny_mjcf_and_satisfies_backend_contract(tiny_env):
@@ -79,3 +87,70 @@ def test_close_is_idempotent_and_releases_the_sim_handles(tiny_env):
     assert tiny_env.mj_model is None
     assert tiny_env.mj_data is None
     assert tiny_env.mj_datas is None
+
+
+def test_step_after_close_raises_the_closed_error(tiny_env):
+    """Stepping a closed env reports the closed backend, not a handle crash."""
+    tiny_env.close()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        tiny_env.step({"tiny": _zero_action(tiny_env)})
+
+    assert str(excinfo.value) == "mjwarp backend: environment is closed"
+
+
+def test_reset_envs_after_close_raises_the_closed_error(tiny_env):
+    """A subset reset on a closed env reports the closed backend, not a handle crash."""
+    tiny_env.close()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        tiny_env.reset_envs(torch.tensor([0], dtype=torch.int64))
+
+    assert str(excinfo.value) == "mjwarp backend: environment is closed"
+
+
+def test_reset_all_after_close_raises_the_closed_error(tiny_env):
+    """A full reset on a closed env reports the closed backend, not a handle crash."""
+    tiny_env.close()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        tiny_env.reset_all()
+
+    assert str(excinfo.value) == "mjwarp backend: environment is closed"
+
+
+def test_close_failure_leaves_backend_guarded_and_retryable(tiny_env, monkeypatch):
+    """A manager teardown failure blocks use but keeps the backend retryable."""
+    camera = RecordingClose()
+    failing_prop = FailingClose()
+    monkeypatch.setattr(tiny_env, "camera_manager", camera)
+    monkeypatch.setattr(tiny_env, "prop_backend", failing_prop)
+
+    with pytest.raises(RuntimeError, match="prop backend teardown failed"):
+        tiny_env.close()
+
+    assert camera.close_calls == 1
+    assert tiny_env.mj_datas is not None
+    assert tiny_env.mj_data is not None
+    assert tiny_env.mj_model is not None
+
+    action = {"tiny": _zero_action(tiny_env)}
+
+    def _step():
+        return tiny_env.step(action)
+
+    def _reset_subset():
+        return tiny_env.reset_envs(torch.tensor([0], dtype=torch.int64))
+
+    for call in (_step, _reset_subset, tiny_env.reset_all):
+        with pytest.raises(RuntimeError) as excinfo:
+            call()
+        assert str(excinfo.value) == "mjwarp backend: environment is closed"
+
+    monkeypatch.setattr(failing_prop, "close", lambda: None)
+    tiny_env.close()
+
+    assert camera.close_calls == 2
+    assert tiny_env.mj_datas is None
+    assert tiny_env.mj_data is None
+    assert tiny_env.mj_model is None

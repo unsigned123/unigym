@@ -7,19 +7,23 @@ from pathlib import Path
 
 import pytest
 
+from tests._support.envs import require_optional_module
+
 ARTICULATION = "tiny"
 CONTROL = "tiny"
 JOINT_ORDER = ("elbow", "shoulder")
 KP = 20.0
 KD = 1.0
+_WARP_REASON = (
+    "MuJoCo Warp is an optional extra (unigym[warp]); install it or run this "
+    "lane in the warp environment"
+)
 
 
 def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
     """Construct the real warp backend from the fixture MJCF (CPU, no managers)."""
-    pytest.importorskip(
-        "mujoco_warp",
-        reason="MuJoCo Warp is an optional extra (unigym[warp]) and is not installed",
-    )
+    for module_name in ("mujoco_warp", "warp"):
+        require_optional_module(module_name, reason=_WARP_REASON)
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mjwarp.env import MjwarpEnv
