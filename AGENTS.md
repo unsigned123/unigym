@@ -319,21 +319,23 @@ it green by guesswork.
 
 ## 9. Development workflow
 
+The normative workflow is `docs/development.md`. This file keeps only the hard
+constraints.
+
 For any non-trivial change:
 
-1. Read `AGENTS.md`, `docs/testing.md`, and the relevant design/contract.
-2. Clarify the goal, non-goals, constraints and failure modes.
-3. Write a design brief (see section 10).
-4. Grill the brief with the user/owner: alternatives, edge cases, invariants,
-   ownership, migration, tests and rollback.
-5. Decompose into bounded tasks only after the brief is accepted.
-6. Implement the smallest coherent slice.
-7. Run targeted tests, then the fast suite.
-8. Review the diff for architecture and style, not only passing tests.
-9. Update design/docs/plan if the contract changed.
-10. Report commands, results and unverified lanes.
+1. read `AGENTS.md`, `docs/testing.md` and the relevant design/contract;
+2. resolve goal, non-goals, constraints and failure modes;
+3. write the design brief (`docs/templates/design-brief.md`);
+4. grill the brief before implementation or delegation;
+5. implement the smallest coherent slice;
+6. verify targeted tests, fast suite and relevant lanes;
+7. obtain independent review (`docs/templates/review-report.md`);
+8. fix blocking findings and re-review;
+9. update docs/design/plan if the contract changed;
+10. report results and unverified lanes.
 
-If new information invalidates the design, stop and return to step 2. Do not
+If new information invalidates the design, stop and return to the brief. Do not
 silently replan during implementation.
 
 Do not perform unrelated refactors in the same change. Do not reformat files
@@ -344,40 +346,25 @@ you did not need to touch. Do not leave dead code or temporary debugging state.
 The main agent owns architecture and task decomposition. A subagent executes a
 bounded brief; it does not make architectural decisions.
 
-Before writing code or dispatching a subagent, the brief must state:
+Use `docs/templates/design-brief.md` and the gates in `docs/development.md`.
+Before writing code or dispatching a subagent, the brief must at least state:
 
-- goal and non-goals;
-- files to add or modify, with ownership;
-- new or changed classes, protocols, registries and their responsibilities;
-- how new facilities interact with existing modules and where data flows;
-- invariants, error behavior and failure modes;
-- compatibility and migration impact;
-- test layers, markers and lanes;
-- risks, open questions and rollback path.
+- goal, non-goals and owned files;
+- new/changed classes, protocols and registries;
+- interactions, invariants and failure modes;
+- compatibility, tests, lanes and rollback.
 
 If any of these are materially unclear, **do not delegate**. Ask the user.
-
-The plan must survive an adversarial review:
-
-- Why this abstraction rather than a simpler one?
-- What existing concept does this duplicate?
-- Which module owns the invariant?
-- What fails, and where does the error surface?
-- Is the change reversible?
-- What tests prove it at the lowest layer?
-- Does this expand scope or public API unnecessarily?
-- Is this a current need or speculative generality?
-
-Unresolved questions block implementation. Do not use "we will figure it out
-while coding" for structural decisions.
+Unresolved structural questions block implementation; do not use "we will
+figure it out while coding" for architecture.
 
 For a trivial local fix, an abbreviated brief in the task prompt is acceptable,
 but architectural decisions remain with the main agent.
 
 ## 11. Subagent protocol and stop conditions
 
-All subagents are bound by this file. A subagent brief may add stricter rules,
-but may not relax these rules.
+All subagents are bound by this file and `docs/development.md`. A subagent brief
+may add stricter rules, but may not relax these rules.
 
 A subagent must **stop immediately and report `BLOCKED`** when:
 
@@ -462,31 +449,15 @@ A change is complete only when:
 - relevant tests exist at the lowest useful layer;
 - targeted tests and the fast suite pass;
 - relevant lanes were run or explicitly reported as not run;
+- independent review returned `APPROVE`;
 - docs/design/plan are updated when the contract changed;
 - no prohibited shortcut was introduced.
 
-Report:
+Use:
 
-```text
-Changed:
-Behavior:
-Design/contract impact:
-Tests run:
-Lanes run:
-Lanes not run:
-Known risks or open questions:
-```
-
-If you are blocked, report:
-
-```text
-BLOCKED:
-Question:
-Why it blocks:
-Options considered:
-Recommendation:
-Files touched so far:
-```
+- `docs/templates/completion-report.md` for completed work;
+- `docs/templates/review-report.md` for review results;
+- `docs/templates/blocked-report.md` when blocked.
 
 Do not report success for partial work. Do not omit unverified lanes. Do not
 commit or push unless the user explicitly asks.
