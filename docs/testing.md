@@ -11,7 +11,7 @@ Reading order:
 
 1. `AGENTS.md` — type, optional-dependency and code-quality rules.
 2. This document — test design, test operations and red-test policy.
-3. `ci/compat.toml` — supported environment lanes, once it exists.
+3. `ci/compat.toml` — the lane registry: supported environments and test selectors.
 4. The design/plan record for the change you are making.
 
 If this document and an existing test disagree, stop and investigate. Do not
@@ -289,9 +289,54 @@ Do not assume every backend exists in the self-contained `.venv`.
 | I3 | external IsaacLab 3 environment | IsaacLab 3 CI |
 
 The supported set is the union of these validated lanes. It is not a promise
-that every Python × MuJoCo × NumPy × backend combination works.
+that every Python × MuJoCo × NumPy × backend combination works. This table is
+the long-term/CI compatibility direction; `ci/compat.toml` is authoritative for
+the lanes currently registered and runnable.
 
-### 6.1 Environment resolution
+### 6.1 Lane registry
+
+`ci/compat.toml` is the single machine-readable source for supported test
+lanes. A lane names one environment and the test selectors that belong to it.
+A test belongs to a lane through a selector, not through a new `lane_*` marker;
+markers remain resource and capability markers.
+
+| Lane | Environment | Provisioner | Selectors |
+| --- | --- | --- | --- |
+| `d0` | `base` | uv (`dev`) | `tests/smoke`, `tests/unit`, `tests/contract`, `tests/conformance`, `tests/meta` |
+| `integration` | `base` | uv (`dev`) | `tests/integration/test_cli_smoke.py` |
+| `mujoco` | `base` | uv (`dev`) | `tests/backends/mujoco` |
+| `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
+| `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
+
+Selector ownership rules:
+
+- A uv environment declares the `extras` its lane installs. The runner uses
+  `uv run --frozen --extra ...` in the project environment. It does not create
+  an independent uv environment for now; that is an explicit trade-off, not
+  lane isolation.
+- A conda environment declares `env_var`, a tracked version `manifest` under
+  `ci/envs/`, and `strict`. The variable and the manifest anchor the
+  environment; no machine path is stored. A strict lane fails when the variable
+  is missing.
+- Every `tests/**/test_*.py` file must match exactly one lane selector.
+  `tests/meta/test_lane_registry.py` enforces this and also requires the
+  default `pyproject.toml` `testpaths` to equal the `d0` selectors.
+- Moving or adding a test changes lane ownership: update `ci/compat.toml` in
+  the same change. A test outside every selector fails the meta test.
+
+Run a lane through the registry:
+
+```bash
+python tools/ci/run_lane.py --list
+python tools/ci/run_lane.py --lane d0
+python tools/ci/run_lane.py --lane isaaclab2 --dry-run
+```
+
+`--dry-run` prints the exact command without executing it. When
+`UNIGYM_CONDA_EXE` is set it selects the conda executable; otherwise the runner
+uses `conda` from `PATH`.
+
+### 6.2 Environment resolution
 
 `tests/_support/envs.py` is tracked test infrastructure. It contains no machine
 paths, credentials or version defaults. It resolves:
@@ -315,7 +360,7 @@ Resolution order:
 No tracked file may contain `/home/...`, `/data...`, a conda prefix, or a
 machine-specific interpreter path.
 
-### 6.2 Local and CI semantics
+### 6.3 Local and CI semantics
 
 - Local missing optional environment: explicit skip with a teaching message.
 - Required CI lane missing: fail, never skip.

@@ -1,0 +1,43 @@
+# Supported test lanes and the environments that provision them.
+# One lane owns one environment; selectors are the test-to-lane contract.
+version = 1
+
+[environments.base]
+provision = "uv"
+extras = ["dev"]
+
+[environments.mjwarp]
+provision = "uv"
+extras = ["dev", "warp"]
+
+[environments.isaaclab2]
+provision = "conda"
+env_var = "UNIGYM_ISAACLAB2_ENV"
+manifest = "ci/envs/isaaclab2.toml"
+strict = true
+
+[lanes.d0]
+environment = "base"
+selectors = [
+  "tests/smoke",
+  "tests/unit",
+  "tests/contract",
+  "tests/conformance",
+  "tests/meta",
+]
+
+[lanes.integration]
+environment = "base"
+selectors = ["tests/integration/test_cli_smoke.py"]
+
+[lanes.mujoco]
+environment = "base"
+selectors = ["tests/backends/mujoco"]
+
+[lanes.mjwarp]
+environment = "mjwarp"
+selectors = ["tests/backends/mjwarp"]
+
+[lanes.isaaclab2]
+environment = "isaaclab2"
+selectors = ["tests/backends/isaaclab2"]

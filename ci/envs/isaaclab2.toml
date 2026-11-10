@@ -1,0 +1,11 @@
+# Clean IsaacLab 2.3.2 lane versions. No machine paths.
+python = "3.11.15"
+isaacsim = "5.1.0.0"
+isaaclab = "0.54.2"
+isaaclab_assets = "0.2.4"
+isaaclab_contrib = "0.0.2"
+isaaclab_mimic = "1.0.16"
+isaaclab_rl = "0.4.7"
+isaaclab_tasks = "0.11.12"
+tag = "v2.3.2"
+commit = "37ddf626871758333d6ed89cf64ad702aef127d0"
