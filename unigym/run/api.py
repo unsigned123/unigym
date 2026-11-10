@@ -14,7 +14,7 @@ path (no second config parser):
 * ``Run(world=..., world_base=..., cameras=[...], adapter=..., robot=...,
   ...)`` -- a programmatic assembly whose pieces are builder objects that
   emit the existing config schema (see :mod:`unigym.world` /
-  :mod:`unigym.camera`);
+  :mod:`unigym.camera`); ``robot`` is required here;
 * ``Run()`` / ``Run.minimal()`` with neither a cfg nor a world/base raise
   :class:`~unigym.errors.ConfigError`: there is no zero-argument default
   model: ``DEFAULT_MJ_MODEL`` and ``env.params.mj_model`` were removed.
@@ -284,8 +284,8 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
         raise NotImplementedError(
             "a RobotRecipe INSTANCE is not representable in the current "
             "config schema (robot is a {name, params, body_parts} "
-            "declaration built by build_robot_recipe). Pass robot='g1' "
-            "(or another registered name) with params/body_parts in the "
+            "declaration built by build_robot_recipe). Pass "
+            'robot="<registered robot>" with params/body_parts in the '
             "config instead"
         )
     return entry
@@ -440,11 +440,11 @@ class Run:
 
     * ``Run(cfg_dict)`` / ``Run.from_config(path)`` -- existing configs;
     * ``Run(world=..., world_base=..., cameras=..., adapter=..., robot=...)``
-      -- assemble the config from programmatic builders;
+      -- assemble the config from programmatic builders (``robot`` required);
     * ``Run()`` / ``Run.minimal()`` with no cfg/world/base raise
       :class:`~unigym.errors.ConfigError` -- the removal of
       ``DEFAULT_MJ_MODEL`` / ``env.params.mj_model`` leaves no implicit
-      world.
+      world, and there is no implicit default robot.
 
     Static reads (``spec``, ``cfg``, ``model``) do not need a runner.  Live
     reads (``step``, ``steps``, ``reset``) create the default synchronous
@@ -464,7 +464,10 @@ class Run:
             string) merged into the run config top level.
         cameras: Camera-spec dicts (``unigym.Camera.*``) or a ``CameraSet``.
         adapter: ``None`` (ManualAdapter) / a registered adapter name.
-        robot: A registered robot name (default ``"g1"``).
+        robot: A registered robot name.  Required for world/minimal
+            construction; optional when *cfg* already declares articulations.
+            An explicitly provided robot replaces the first articulation and
+            its controls in *cfg*.
         backend: Environment backend (default ``"mujoco"``).
         backend_options: Backend-private options mapping
             (``env.backend_options``), e.g.
@@ -484,7 +487,7 @@ class Run:
         world_base: JsonValue = None,
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
-        robot: JsonValue = "g1",
+        robot: JsonValue | None = None,
         backend: str | None = None,
         backend_options: dict[str, JsonValue] | None = None,
         num_envs: int | None = None,
@@ -512,6 +515,15 @@ class Run:
                 "(Run(world=World.base(mjcf=...))), or world_base=...; "
                 "v101 A1 removed the zero-argument default and "
                 "env.params.mj_model"
+            )
+        if cfg is None and robot is None:
+            from unigym.errors import ConfigError
+
+            raise ConfigError(
+                "Run(world=...) / Run.minimal(...) needs an explicit robot: "
+                'pass robot="<registered robot>" (or a robot declaration '
+                "{name, params?, body_parts?}); there is no implicit default "
+                "robot"
             )
         self._world = world
         self._backend_options = (
@@ -549,7 +561,7 @@ class Run:
                 raw["cameras"] = _json_list(_camera_entries(cameras))
             if adapter is not None:
                 raw["adapter"] = _adapter_section(adapter)
-            if robot != "g1":
+            if robot is not None:
                 entry = _articulation_entry(robot)
                 cfg_controls = _controls_entries(
                     robot, adapter if adapter is not None else raw.get("adapter")
@@ -560,14 +572,6 @@ class Run:
                     arts[0] = entry
                 else:
                     arts.append(entry)
-                raw["controls"] = _json_list(cfg_controls)
-            elif "articulations" not in raw:
-                entry: dict[str, JsonValue] = {"name": "g1"}
-                cfg_controls = _controls_entries(
-                    "g1", adapter if adapter is not None else raw.get("adapter")
-                )
-                _declare_passive_joints(entry, cfg_controls)
-                raw["articulations"] = _json_list([entry])
                 raw["controls"] = _json_list(cfg_controls)
         for key, value in overrides.items():
             raw[key] = copy.deepcopy(value)
@@ -645,7 +649,7 @@ class Run:
         world_base: JsonValue = None,
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
-        robot: JsonValue = "g1",
+        robot: JsonValue | None = None,
         backend: str | None = None,
         backend_options: dict[str, JsonValue] | None = None,
         num_envs: int | None = None,
@@ -660,7 +664,7 @@ class Run:
         no_artifacts: bool = False,
         inspect: bool = False,
     ) -> Run:
-        """Same as ``Run(**kwargs)``; a world/base is required (no default)."""
+        """Same as ``Run(**kwargs)``; a world/base and an explicit robot are required."""
         return cls(
             None,
             world=world,
