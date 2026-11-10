@@ -65,7 +65,10 @@ def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
     [
         ("position_pd", "position", "torque"),
         ("position_pd", "position", "velocity"),
+        ("position_pd", "position", "effort"),
+        ("position_pd", "position", "current"),
         ("torque", "torque", "position"),
+        ("effort", "effort", "position"),
     ],
 )
 def test_step_rejects_an_action_kind_that_differs_from_the_control_target(
@@ -83,6 +86,12 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(
     assert "action entry 'tiny'" in message
     assert f"kind '{kind}'" in message
     assert f"control 'tiny' expects target '{target}'" in message
+
+
+def test_mujoco_rejects_a_current_drive_before_routing_can_run(tiny_env_factory):
+    """No MuJoCo actuator law represents current, so a current control never builds."""
+    with pytest.raises(NotImplementedError, match=r"requests drive 'current'"):
+        tiny_env_factory(drive="current", target="current")
 
 
 def test_step_rejects_a_missing_control_joint(tiny_env):

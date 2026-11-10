@@ -8,6 +8,7 @@ objects. This directory is not collected and contains no tests.
 | Module | Protocol / boundary | Reset semantics |
 | --- | --- | --- |
 | `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row |
+| `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
 
 Every Python module in this directory (except the package marker) must appear
 in the manifest table; `tests/meta/test_stub_policy.py` enforces this.
@@ -55,6 +56,7 @@ Limitations (deliberate, no production seam is added for them):
 - one articulation, one joint, CPU only, fixed identity joint order;
 - episode time advances by one second per step and carries no sim-time meaning.
 
-One fake only: do not add per-test fakes, a fake hierarchy or a configurable
-universal fake. Add a new manifest row only when a new external boundary
-appears.
+One fake per external boundary: do not add per-test fakes, a fake hierarchy or
+a configurable universal fake. `backend.py` is the conformance reference;
+`closing.py` is the close-boundary fault injector. Add a new manifest row only
+when a new external boundary appears.
