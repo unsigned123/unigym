@@ -10,5 +10,7 @@ build/
 dist/
 data_out/
 runs/
+!tests/_support/packs/**/runs/
+!tests/_support/packs/**/runs/**
 *.log
 .DS_Store

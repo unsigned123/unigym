@@ -1,0 +1,16 @@
+schema: unigym.pack/1
+name: acme_content
+version: 1.0.0
+api: 1
+trust: content
+provides:
+  runs:
+    - id: acme_content.demo
+      resource: runs/demo.yaml
+  scenes:
+    - id: acme_content.tabletop
+      resource: scenes/tabletop.yaml
+  assets:
+    - id: acme_content.cup
+      resource: assets/cup/asset.yaml
+shadow: false

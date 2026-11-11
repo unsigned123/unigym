@@ -1,0 +1,12 @@
+schema: unigym.pack/1
+name: acme_code
+version: 1.0.0
+api: 1
+trust: code
+entrypoint: acme_pack:register
+provides:
+  providers:
+    - id: acme_code.dynamic_assets
+      kind: asset_generator
+      entrypoint: acme_pack:register
+shadow: false
