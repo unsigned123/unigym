@@ -1,14 +1,15 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phase 1 and Phase 3 contracts are implemented. The runtime is a
-parallel path: the legacy `unigym.packs` discovery and loader remain the active
-runtime, and nothing in this document switches discovery, mounts domain
-providers or migrates scene/run/asset loading.
+Status: Phase 1, Phase 3 and Phase 3b contracts are implemented. The runtime is
+a parallel path: the legacy `unigym.packs` discovery and loader remain the
+active runtime, and nothing in this document switches the legacy loader, mounts
+domain providers or migrates scene/run/asset loading.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase1-contract.md`,
-`plans/drafts/pack-api-phase3-discovery.md`).
+`plans/drafts/pack-api-phase3-discovery.md`,
+`plans/drafts/pack-api-phase3b-sources.md`).
 
 ## Public imports
 
@@ -165,10 +166,11 @@ Catalog rules:
 
 ## Runtime
 
-`discover` builds a runtime from explicit, ordered roots:
+`discover` builds a runtime from explicit roots or from the configured pack
+sources:
 
 ```text
-discover(roots) -> PackCatalog + root_by_pack
+discover(roots=None) -> PackCatalog + root_by_pack
   -> runtime.catalog          enumerate packs and provided items
   -> runtime.resource(...)    resolve one pack-relative resource
   -> runtime.activate(...)    import a code pack's entrypoint once
@@ -177,22 +179,48 @@ discover(roots) -> PackCatalog + root_by_pack
 ```python
 from unigym.pack_api import discover
 
-runtime = discover(["/packs/acme_code", "/packs/acme_content"])
-runtime.catalog.packs()                 # ("acme_code", "acme_content")
-runtime.resource("acme_content", "runs/demo.yaml")
-runtime.activate("acme_code")           # ActivationHandle
+runtime = discover(["/packs/acme_code", "/packs/acme_content"])  # explicit
+configured = discover()                                         # configured
 ```
 
-Discovery rules:
+### Explicit roots
 
-- only the roots the caller passes are read; there is no implicit environment,
-  repository, YAML or entry-point lookup in this phase;
+Passing a non-`None` iterable reads only those roots, in order. Configured
+sources are ignored, so `discover([])` is an explicit empty discovery. Every
+root must contain `unigym.pack.yaml`, validated by `load_manifest_v1`; duplicate
+pack names fail.
+
+### Configured sources
+
+`discover()` and `discover(None)` collect roots from these sources, in order:
+
+1. `UNIGYM_PACKS`, an `os.pathsep`-separated list of pack roots;
+2. `packs:` in the local overlay, `<repo>/unigym.local.yaml`;
+3. every directory under `<UNIGYM_DEPS_ROOT>/unigym_packs`, sorted by name.
+
+Rules:
+
 - root order is preserved and canonical duplicate roots are visited once;
 - every root must contain `unigym.pack.yaml`, validated by
-  `load_manifest_v1`;
+  `load_manifest_v1`; a malformed or missing manifest in a configured root
+  fails;
 - duplicate pack names fail;
+- an empty `UNIGYM_PACKS` entry, including a trailing or doubled separator, is
+  a teaching error naming the variable and entry index;
+- a missing local overlay is not an error; a malformed one fails instead of
+  disabling discovery. `packs:` must be a list of non-empty strings, and
+  relative entries resolve against the overlay's directory;
+- an unset or empty `UNIGYM_DEPS_ROOT`, a missing deps directory, or a missing
+  `unigym_packs` directory yields no roots and is not an error. A directory
+  that exists under `unigym_packs` is a configured root and must carry a
+  manifest;
+- there is no installed entry-point or wheel discovery in this phase;
 - discovery reads manifests and checks resource paths only. It never imports
   pack Python.
+
+`discover(..., config_path=...)` is an optional keyword-only override for the
+local-overlay path, for embedding and tests. It only affects configured
+discovery; explicit roots ignore it. `None` keeps `<repo>/unigym.local.yaml`.
 
 `PackRuntime` is an immutable catalog plus a `pack -> root` mapping. The
 constructor rejects a mapping that does not name exactly the catalog's packs.
@@ -230,8 +258,8 @@ it needs to.
 
 The current phases deliberately do not implement:
 
-- legacy discovery migration, root scanning by the old loader, or an
-  environment/YAML/entry-point discovery switch;
+- switching the legacy `unigym.packs` loader onto this runtime; the legacy
+  loader remains the active discovery path;
 - installed-PyPI `unigym.packs` entry-point or wheel discovery;
 - a compatibility shim between the runtime and legacy mounts;
 - requirement or `requires` resolution;

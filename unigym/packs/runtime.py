@@ -1,12 +1,12 @@
-"""Explicit static-root pack runtime: discover, resolve resources, activate.
+"""Static-root pack runtime: discover, resolve resources, activate.
 
 The runtime is a Phase 3 contract over ``unigym.pack/1``.  :func:`discover`
-reads only the explicit roots a caller names, loads their manifests without
-importing pack Python, and returns an immutable catalog plus each pack's root.
-Resources resolve under their own pack root.  A code pack activates through
-normal Python: its ``python/`` directory is the explicit import boundary, the
-manifest entrypoint is imported and called with no arguments, and the handle
-is cached per runtime.
+reads explicit roots, or the configured sources when the caller names none,
+loads their manifests without importing pack Python, and returns an immutable
+catalog plus each pack's root.  Resources resolve under their own pack root.
+A code pack activates through normal Python: its ``python/`` directory is the
+explicit import boundary, the manifest entrypoint is imported and called with
+no arguments, and the handle is cached per runtime.
 
 This is a parallel runtime.  The legacy ``unigym.packs`` mount/load path stays
 the active runtime until a later migration phase.
@@ -15,15 +15,26 @@ the active runtime until a later migration phase.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+import yaml
+
+from unigym.core.asset_root import repo_root
+
 from . import PackError
 from .catalog import PackCatalog
 from .schema import PackManifestV1, load_manifest_v1
+
+_PACKS_ENV_VAR = "UNIGYM_PACKS"
+_DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
+_PACKS_YAML_KEY = "packs"
+_PACKS_TOP_DIR = "unigym_packs"
+_LOCAL_YAML_NAME = "unigym.local.yaml"
 
 
 @dataclass(frozen=True)
@@ -183,17 +194,112 @@ class PackRuntime:
         return handle
 
 
-def discover(roots: Iterable[str | Path]) -> PackRuntime:
-    """Discover packs from explicit, ordered roots.
+def _env_pack_roots() -> list[Path]:
+    """Roots named by ``UNIGYM_PACKS``, in declaration order.
 
-    Canonical duplicate roots are visited once.  Every root must carry a
-    valid ``unigym.pack.yaml``; duplicate pack names fail.  Discovery reads
-    manifests only and never imports pack Python.
+    The variable is an ``os.pathsep``-separated list.  An empty entry is a
+    declaration error, not a silent skip: it usually means a stray separator
+    or an unset shell variable was substituted into the list.
     """
+    value = os.environ.get(_PACKS_ENV_VAR)
+    if value is None:
+        return []
+    roots: list[Path] = []
+    for index, entry in enumerate(value.split(os.pathsep)):
+        if not entry.strip():
+            raise PackError(
+                f"{_PACKS_ENV_VAR} entry {index} is empty; expected a "
+                f"{os.pathsep!r}-separated list of pack roots"
+            )
+        roots.append(Path(entry))
+    return roots
+
+
+def _local_yaml_roots(path: Path) -> list[Path]:
+    """Roots listed under ``packs:`` in one local overlay (or none).
+
+    A missing file means the overlay declares nothing.  A file that exists but
+    cannot be read, parsed or shaped fails: a malformed declaration must not
+    silently disable configured discovery.  Relative entries resolve against
+    the overlay's own directory.
+    """
+    if not path.is_file():
+        return []
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError, yaml.YAMLError) as err:
+        raise PackError(f"unreadable local pack config {path}: {err}") from err
+    if not isinstance(document, Mapping):
+        raise PackError(f"local pack config {path} must be a mapping")
+    value = document.get(_PACKS_YAML_KEY)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PackError(f"{path}: 'packs' must be a list of pack roots")
+    roots: list[Path] = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, str) or not entry.strip():
+            raise PackError(f"{path}: 'packs' entry {index} must be a non-empty path")
+        candidate = Path(entry).expanduser()
+        roots.append(candidate if candidate.is_absolute() else path.parent / candidate)
+    return roots
+
+
+def _deps_pack_roots() -> list[Path]:
+    """Every directory under ``<UNIGYM_DEPS_ROOT>/unigym_packs``, sorted.
+
+    An unset or empty ``UNIGYM_DEPS_ROOT``, or a missing deps/top directory,
+    declares no packs.  A directory that does exist is a root and therefore
+    still has to carry a manifest; that check belongs to :func:`discover`.
+    """
+    value = os.environ.get(_DEPS_ENV_VAR)
+    if value is None or not value.strip():
+        return []
+    top = Path(value).expanduser() / _PACKS_TOP_DIR
+    if not top.is_dir():
+        return []
+    return [child for child in sorted(top.iterdir()) if child.is_dir()]
+
+
+def _configured_roots(config_path: str | Path | None) -> list[Path]:
+    """Configured pack roots in source order: env, local overlay, deps."""
+    local_yaml = (
+        Path(config_path) if config_path is not None else Path(repo_root()) / _LOCAL_YAML_NAME
+    )
+    return [*_env_pack_roots(), *_local_yaml_roots(local_yaml), *_deps_pack_roots()]
+
+
+def discover(
+    roots: Iterable[str | Path] | None = None,
+    *,
+    config_path: str | Path | None = None,
+) -> PackRuntime:
+    """Discover packs from explicit roots or the configured sources.
+
+    A non-``None`` *roots* iterable is authoritative: only those roots are
+    read, in order, and configured sources are ignored.  ``discover([])`` is
+    therefore an explicit empty discovery.
+
+    ``roots=None`` reads, in order, the ``UNIGYM_PACKS`` entries, the
+    ``packs:`` entries of the local overlay (``<repo>/unigym.local.yaml`` by
+    default) and the sorted ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
+
+    *config_path* overrides the local-overlay path for embedding and tests;
+    ``None`` keeps the repository overlay.
+
+    Canonical duplicate roots are visited once.  Every root must carry a valid
+    ``unigym.pack.yaml``; duplicate pack names fail.  Discovery reads manifests
+    only and never imports pack Python.
+
+    Raises:
+        PackError: A configured declaration is malformed, a root has no valid
+            manifest, or two roots name the same pack.
+    """
+    selected = _configured_roots(config_path) if roots is None else roots
     manifests: list[PackManifestV1] = []
     root_by_pack: dict[str, Path] = {}
     seen: set[Path] = set()
-    for raw in roots:
+    for raw in selected:
         root = Path(raw).resolve()
         if root in seen:
             continue
