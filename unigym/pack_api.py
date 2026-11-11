@@ -4,6 +4,9 @@ Pack Python modules resolve content and register providers through this
 module.  It stays thin: resolution is delegated to :mod:`unigym.packs`
 and registration to the existing closed registries, which this module
 does not modify.
+
+The ``unigym.pack/1`` manifest schema, its loaded types and the read-only
+pack catalog are exported here as the public Phase 1 contract.
 """
 
 from __future__ import annotations
@@ -14,7 +17,9 @@ from pathlib import Path
 import yaml
 
 from unigym.packs import find, resolve
+from unigym.packs.catalog import CatalogEntry, PackCatalog
 from unigym.packs.load import PACK_MODULE_PREFIX
+from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
 
 
 def code_pack_root() -> Path | None:
@@ -97,10 +102,15 @@ def register_termination(name: str, cls):
 
 
 __all__ = [
+    "CatalogEntry",
+    "PackCatalog",
+    "PackManifestV1",
+    "ProvidedItem",
     "asset_path",
     "code_pack_root",
     "find",
     "load_asset_manifest",
+    "load_manifest_v1",
     "load_table",
     "register_content_provider",
     "register_prop_template",
