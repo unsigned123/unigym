@@ -303,7 +303,8 @@ markers remain resource and capability markers.
 | Lane | Environment | Provisioner | Selectors |
 | --- | --- | --- | --- |
 | `d0` | `base` | uv (`dev`) | `tests/smoke`, `tests/unit`, `tests/contract`, `tests/conformance`, `tests/meta` |
-| `integration` | `base` | uv (`dev`) | `tests/integration/test_cli_smoke.py` |
+| `integration` | `base` | uv (`dev`) | `tests/integration/test_cli_smoke.py`, `tests/integration/test_daemon_cli.py` |
+| `daemon` | `daemon` | uv (`dev`, `daemon`) | `tests/integration/test_daemon_lifecycle.py` |
 | `mujoco` | `base` | uv (`dev`) | `tests/backends/mujoco` |
 | `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
 | `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
@@ -317,7 +318,8 @@ Selector ownership rules:
 - A conda environment declares `env_var`, a tracked version `manifest` under
   `ci/envs/`, and `strict`. The variable and the manifest anchor the
   environment; no machine path is stored. A strict lane fails when the variable
-  is missing.
+  is missing. The lane runner exports `UNIGYM_TEST_ENV_STRICT=1` for strict
+  conda lanes so a missing environment fails instead of skipping.
 - Every `tests/**/test_*.py` file must match exactly one lane selector.
   `tests/meta/test_lane_registry.py` enforces this and also requires the
   default `pyproject.toml` `testpaths` to equal the `d0` selectors.

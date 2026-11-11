@@ -6,6 +6,10 @@ version = 1
 provision = "uv"
 extras = ["dev"]
 
+[environments.daemon]
+provision = "uv"
+extras = ["dev", "daemon"]
+
 [environments.mjwarp]
 provision = "uv"
 extras = ["dev", "warp"]
@@ -28,7 +32,14 @@ selectors = [
 
 [lanes.integration]
 environment = "base"
-selectors = ["tests/integration/test_cli_smoke.py"]
+selectors = [
+  "tests/integration/test_cli_smoke.py",
+  "tests/integration/test_daemon_cli.py",
+]
+
+[lanes.daemon]
+environment = "daemon"
+selectors = ["tests/integration/test_daemon_lifecycle.py"]
 
 [lanes.mujoco]
 environment = "base"
