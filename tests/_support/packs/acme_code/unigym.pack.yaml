@@ -9,4 +9,3 @@ provides:
     - id: acme_code.dynamic_assets
       kind: asset_generator
       entrypoint: acme_pack:register
-shadow: false

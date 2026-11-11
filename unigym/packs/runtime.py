@@ -6,7 +6,7 @@ loads their manifests without importing pack Python, and returns an immutable
 catalog plus each pack's root.  Resources resolve under their own pack root.
 A code pack activates through normal Python: its ``python/`` directory is the
 explicit import boundary, the manifest entrypoint is imported and called with
-no arguments, and the handle is cached per runtime.
+one :class:`PackContext`, and the handle is cached per runtime.
 
 This is a parallel runtime.  The legacy ``unigym.packs`` mount/load path stays
 the active runtime until a later migration phase.
@@ -15,6 +15,7 @@ the active runtime until a later migration phase.
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 import os
 import sys
 from collections.abc import Iterable, Mapping
@@ -35,6 +36,26 @@ _DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
 _PACKS_YAML_KEY = "packs"
 _PACKS_TOP_DIR = "unigym_packs"
 _LOCAL_YAML_NAME = "unigym.local.yaml"
+_ENTRY_POINT_GROUP = "unigym.packs"
+
+
+@dataclass(frozen=True)
+class PackContext:
+    """The explicit handle a pack entrypoint receives on activation.
+
+    It names the activated pack, its root and the runtime that owns the
+    catalog, so pack code never infers ambient state.  :meth:`resource`
+    delegates to :meth:`PackRuntime.resource` and therefore applies the same
+    inside-root path rules.
+    """
+
+    pack: str
+    root: Path
+    runtime: PackRuntime
+
+    def resource(self, rel: str) -> Path:
+        """Resolve *rel* inside this pack's root through the owning runtime."""
+        return self.runtime.resource(self.pack, rel)
 
 
 @dataclass(frozen=True)
@@ -183,8 +204,9 @@ class PackRuntime:
         """Activate *pack* once and return the cached handle.
 
         Content packs and code packs without a manifest entrypoint are no-ops.
-        A code pack's entrypoint is imported normally and called with no
-        arguments; failures are wrapped with the pack and entrypoint named.
+        A code pack's entrypoint is imported normally and called with exactly
+        one :class:`PackContext` argument; there is no zero-argument fallback.
+        Failures are wrapped with the pack and entrypoint named.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -200,11 +222,12 @@ class PackRuntime:
             self._handles[pack] = handle
             return handle
 
+        context = PackContext(pack=pack, root=manifest.root, runtime=self)
         try:
             python_dir = _import_boundary(manifest)
             _add_to_sys_path(python_dir)
             target = _resolve_entrypoint(entrypoint)
-            target()
+            target(context)
         except Exception as err:
             raise PackError(
                 f"pack {pack!r} entrypoint {entrypoint!r} failed to activate: {err}"
@@ -213,6 +236,17 @@ class PackRuntime:
         handle = ActivationHandle(pack=pack, entrypoint=entrypoint)
         self._handles[pack] = handle
         return handle
+
+    def activate_all(self) -> tuple[ActivationHandle, ...]:
+        """Activate every catalog pack in catalog order and return the handles.
+
+        Repeated calls return the same cached handles because each pack is
+        activated at most once per runtime.
+
+        Raises:
+            PackError: Any pack fails to activate.
+        """
+        return tuple(self.activate(pack) for pack in self.catalog.packs())
 
 
 def _env_pack_roots() -> list[Path]:
@@ -282,18 +316,73 @@ def _deps_pack_roots() -> list[Path]:
     return [child for child in sorted(top.iterdir()) if child.is_dir()]
 
 
-def _configured_roots(config_path: str | Path | None) -> list[Path]:
-    """Configured pack roots in source order: env, local overlay, deps."""
+def _entry_point_target(entry: importlib.metadata.EntryPoint) -> Path:
+    """Resolve one entry point to the pack root it declares.
+
+    The target is either a path string (``str`` or ``os.PathLike``) or a
+    zero-argument callable returning one.  A load failure, a raising callable
+    or a wrong type fails naming the entry point.
+    """
+    name = entry.name
+    try:
+        target = entry.load()
+    except Exception as err:
+        raise PackError(f"pack entry point {name!r} failed to load its target: {err}") from err
+    if callable(target):
+        try:
+            target = target()
+        except Exception as err:
+            raise PackError(f"pack entry point {name!r} callable target failed: {err}") from err
+    if not isinstance(target, (str, os.PathLike)):
+        raise PackError(
+            f"pack entry point {name!r} target must be a path string or a "
+            f"zero-argument callable returning one, got {type(target).__name__}"
+        )
+    return Path(target)
+
+
+def _entry_point_roots() -> list[tuple[Path, str]]:
+    """Installed ``unigym.packs`` entry-point roots, sorted by entry-point name.
+
+    Resolving an entry point loads and may import its declared target, so this
+    helper is only called for opt-in configured discovery.  Default discovery
+    never reads installed entry points.
+    """
+    selected = importlib.metadata.entry_points().select(group=_ENTRY_POINT_GROUP)
+    roots: list[tuple[Path, str]] = []
+    for entry in sorted(selected, key=lambda candidate: candidate.name):
+        roots.append((_entry_point_target(entry), entry.name))
+    return roots
+
+
+def _configured_roots(
+    config_path: str | Path | None, *, entry_points: bool
+) -> tuple[list[Path], dict[Path, str]]:
+    """Configured roots in source order, plus each entry-point root's origin.
+
+    Order: ``UNIGYM_PACKS``, the local overlay, installed ``unigym.packs``
+    entry points (name-sorted) when opted in, then ``<UNIGYM_DEPS_ROOT>``
+    packs.  The origin map keys canonical roots to their entry-point name so a
+    manifest failure can name the entry point.
+    """
     local_yaml = (
         Path(config_path) if config_path is not None else Path(repo_root()) / _LOCAL_YAML_NAME
     )
-    return [*_env_pack_roots(), *_local_yaml_roots(local_yaml), *_deps_pack_roots()]
+    roots = [*_env_pack_roots(), *_local_yaml_roots(local_yaml)]
+    origins: dict[Path, str] = {}
+    if entry_points:
+        for root, name in _entry_point_roots():
+            origins.setdefault(root.resolve(), name)
+            roots.append(root)
+    roots.extend(_deps_pack_roots())
+    return roots, origins
 
 
 def discover(
     roots: Iterable[str | Path] | None = None,
     *,
     config_path: str | Path | None = None,
+    entry_points: bool = False,
 ) -> PackRuntime:
     """Discover packs from explicit roots or the configured sources.
 
@@ -303,20 +392,37 @@ def discover(
 
     ``roots=None`` reads, in order, the ``UNIGYM_PACKS`` entries, the
     ``packs:`` entries of the local overlay (``<repo>/unigym.local.yaml`` by
-    default) and the sorted ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
+    default), installed ``unigym.packs`` entry points when *entry_points* is
+    true, and the sorted ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
 
     *config_path* overrides the local-overlay path for embedding and tests;
     ``None`` keeps the repository overlay.
 
+    *entry_points* is an explicit opt-in that only affects configured
+    discovery.  Passing it with explicit roots is a teaching error rather than
+    a silent ignore.  Resolving an entry point loads and may import the target;
+    default discovery never reads installed entry points.
+
     Canonical duplicate roots are visited once.  Every root must carry a valid
-    ``unigym.pack.yaml``; duplicate pack names fail.  Discovery reads manifests
-    only and never imports pack Python.
+    ``unigym.pack.yaml``; duplicate pack names fail.  Default discovery reads
+    manifests only and never imports pack Python.
 
     Raises:
         PackError: A configured declaration is malformed, a root has no valid
-            manifest, or two roots name the same pack.
+            manifest, two roots name the same pack, or *entry_points* is
+            combined with explicit roots.
     """
-    selected = _configured_roots(config_path) if roots is None else roots
+    if roots is not None and entry_points:
+        raise PackError(
+            "discover(entry_points=True) only extends configured discovery; "
+            "explicit roots must already name every pack root"
+        )
+
+    if roots is None:
+        selected, origins = _configured_roots(config_path, entry_points=entry_points)
+    else:
+        selected, origins = roots, {}
+
     manifests: list[PackManifestV1] = []
     root_by_pack: dict[str, Path] = {}
     seen: set[Path] = set()
@@ -325,7 +431,13 @@ def discover(
         if root in seen:
             continue
         seen.add(root)
-        manifest = load_manifest_v1(root)
+        try:
+            manifest = load_manifest_v1(root)
+        except PackError as err:
+            origin = origins.get(root)
+            if origin is None:
+                raise
+            raise PackError(f"pack entry point {origin!r} resolved to {root}: {err}") from err
         owner = root_by_pack.get(manifest.name)
         if owner is not None:
             raise PackError(
@@ -337,4 +449,4 @@ def discover(
     return PackRuntime(catalog=PackCatalog(tuple(manifests)), root_by_pack=root_by_pack)
 
 
-__all__ = ["ActivationHandle", "PackRuntime", "discover"]
+__all__ = ["ActivationHandle", "PackContext", "PackRuntime", "discover"]

@@ -8,6 +8,7 @@ patched.
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import shutil
 import sys
@@ -41,6 +42,36 @@ def _copy_pack(source: Path, target: Path, name: str) -> Path:
         text.replace("acme_content", name).replace("acme_code", name), encoding="utf-8"
     )
     return target
+
+
+class _EntryPoint:
+    """Minimal installed entry point double at the importlib.metadata boundary."""
+
+    def __init__(self, name: str, target: object, *, error: BaseException | None = None) -> None:
+        self.name = name
+        self.group = "unigym.packs"
+        self._target = target
+        self._error = error
+
+    def load(self) -> object:
+        if self._error is not None:
+            raise self._error
+        return self._target
+
+
+class _EntryPoints:
+    """Minimal ``EntryPoints.select`` container for the same boundary."""
+
+    def __init__(self, entries: tuple[_EntryPoint, ...]) -> None:
+        self._entries = entries
+
+    def select(self, *, group: str) -> tuple[_EntryPoint, ...]:
+        return tuple(entry for entry in self._entries if entry.group == group)
+
+
+def _install_entry_points(monkeypatch: pytest.MonkeyPatch, *entries: _EntryPoint) -> None:
+    """Install *entries* as the process-level installed entry points."""
+    monkeypatch.setattr(importlib.metadata, "entry_points", lambda: _EntryPoints(tuple(entries)))
 
 
 @pytest.fixture(autouse=True)
@@ -251,3 +282,116 @@ def test_empty_explicit_roots_do_not_fall_back_to_config(
 
     assert runtime.catalog.packs() == ()
     assert dict(runtime.root_by_pack) == {}
+
+
+def test_default_discovery_ignores_installed_entry_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def target() -> str:
+        calls.append("loaded")
+        return str(CONTENT_ROOT)
+
+    _install_entry_points(monkeypatch, _EntryPoint("acme_content", target))
+
+    runtime = discover(config_path=tmp_path / "unigym.local.yaml")
+
+    assert runtime.catalog.packs() == ()
+    assert calls == []
+
+
+def test_entry_point_opt_in_joins_the_configured_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_root = _copy_pack(CONTENT_ROOT, tmp_path / "env_pack", "env_pack")
+    yaml_root = _copy_pack(CONTENT_ROOT, tmp_path / "yaml_pack", "yaml_pack")
+    zeta_root = _copy_pack(CONTENT_ROOT, tmp_path / "zeta_pack", "zeta_pack")
+    alpha_root = _copy_pack(CONTENT_ROOT, tmp_path / "alpha_pack", "alpha_pack")
+    deps = tmp_path / "deps"
+    _copy_pack(CODE_ROOT, deps / "unigym_packs" / "deps_pack", "deps_pack")
+    overlay = tmp_path / "unigym.local.yaml"
+    overlay.write_text("packs:\n  - yaml_pack\n", encoding="utf-8")
+    monkeypatch.setenv("UNIGYM_PACKS", str(env_root))
+    monkeypatch.setenv("UNIGYM_DEPS_ROOT", str(deps))
+    _install_entry_points(
+        monkeypatch,
+        _EntryPoint("zeta_pack", str(zeta_root)),
+        _EntryPoint("alpha_pack", alpha_root),
+    )
+
+    runtime = discover(config_path=overlay, entry_points=True)
+
+    assert runtime.catalog.packs() == (
+        "env_pack",
+        "yaml_pack",
+        "alpha_pack",
+        "zeta_pack",
+        "deps_pack",
+    )
+    assert runtime.root_by_pack["yaml_pack"] == yaml_root.resolve()
+    assert runtime.root_by_pack["alpha_pack"] == alpha_root.resolve()
+
+
+def test_explicit_roots_reject_entry_point_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_entry_points(monkeypatch, _EntryPoint("acme_content", str(CONTENT_ROOT)))
+
+    with pytest.raises(PackError) as info:
+        discover([CONTENT_ROOT], entry_points=True)
+
+    message = str(info.value)
+    assert "entry_points=True" in message
+    assert "explicit roots" in message
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("load", "failed to load its target"),
+        ("callable", "callable target failed"),
+        ("type", "must be a path string"),
+        ("manifest", "missing pack manifest"),
+    ],
+)
+def test_broken_entry_point_fails_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, reason: str
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    if kind == "load":
+        entry = _EntryPoint("broken_pack", None, error=RuntimeError("boom"))
+    elif kind == "callable":
+
+        def target() -> object:
+            raise RuntimeError("boom")
+
+        entry = _EntryPoint("broken_pack", target)
+    elif kind == "type":
+        entry = _EntryPoint("broken_pack", 123)
+    else:
+        entry = _EntryPoint("broken_pack", str(empty))
+    _install_entry_points(monkeypatch, entry)
+
+    with pytest.raises(PackError) as info:
+        discover(config_path=tmp_path / "unigym.local.yaml", entry_points=True)
+
+    message = str(info.value)
+    assert "broken_pack" in message
+    assert reason in message
+
+
+def test_duplicate_entry_point_roots_are_canonically_deduped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_entry_points(
+        monkeypatch,
+        _EntryPoint("first_pack", str(CONTENT_ROOT)),
+        _EntryPoint("second_pack", f"{CONTENT_ROOT}/."),
+    )
+
+    runtime = discover(config_path=tmp_path / "unigym.local.yaml", entry_points=True)
+
+    assert runtime.catalog.packs() == ("acme_content",)
+    assert len(runtime.catalog.manifests) == 1

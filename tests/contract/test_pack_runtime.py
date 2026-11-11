@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.pack_api import ActivationHandle, PackRuntime, discover
+from unigym.pack_api import ActivationHandle, PackContext, PackRuntime, discover
 from unigym.packs import PackError
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -42,21 +42,21 @@ def _isolate_pack_modules() -> None:
     _drop_pack_modules()
 
 
-def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Import the real fixture module and replace its entrypoint with a spy.
+def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Import the real fixture module and spy on its context-aware entrypoint.
 
-    The fixture declares the Phase 3 no-argument ``register()`` entrypoint.
-    The spy records the activation call while proving the runtime imports the
-    entrypoint from the fixture's ``python/`` boundary.
+    The fixture declares a one-argument ``register(context)`` entrypoint.  The
+    spy records the activation call and the received context while proving the
+    runtime imports the entrypoint from the fixture's ``python/`` boundary.
     """
     monkeypatch.syspath_prepend(str(CODE_PYTHON_ROOT))
     module = importlib.import_module("acme_pack")
     module_file = Path(module.__file__).resolve()
     assert module_file.is_relative_to(CODE_PYTHON_ROOT)
-    calls: list[str] = []
+    calls: list[object] = []
 
-    def record() -> None:
-        calls.append("register")
+    def record(context: object) -> None:
+        calls.append(context)
 
     monkeypatch.setattr(module, "register", record)
     return calls
@@ -166,17 +166,37 @@ def test_discovered_roots_are_fixture_relative() -> None:
 def test_code_activation_imports_and_calls_entrypoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _spy_entrypoint(monkeypatch)
+    contexts = _spy_entrypoint(monkeypatch)
     runtime = discover([CODE_ROOT])
 
     handle = runtime.activate("acme_code")
 
     assert handle == ActivationHandle(pack="acme_code", entrypoint="acme_pack:register")
-    assert calls == ["register"]
+    assert len(contexts) == 1
+    context = contexts[0]
+    assert isinstance(context, PackContext)
+    assert context.pack == "acme_code"
+    assert context.root == CODE_ROOT.resolve()
+    assert context.runtime is runtime
     assert str(CODE_PYTHON_ROOT) in sys.path
 
 
-def test_fixture_code_entrypoint_accepts_no_arguments() -> None:
+def test_activation_context_resolves_resources_inside_the_pack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contexts = _spy_entrypoint(monkeypatch)
+    runtime = discover([CODE_ROOT])
+
+    runtime.activate("acme_code")
+
+    context = contexts[0]
+    assert isinstance(context, PackContext)
+    assert context.resource("unigym.pack.yaml") == (CODE_ROOT / "unigym.pack.yaml").resolve()
+    with pytest.raises(PackError, match="acme_code"):
+        context.resource("../outside.yaml")
+
+
+def test_fixture_code_entrypoint_accepts_a_pack_context() -> None:
     runtime = discover([CODE_ROOT])
 
     handle = runtime.activate("acme_code")
@@ -199,7 +219,7 @@ def test_activation_failure_wraps_pack_and_entrypoint(tmp_path: Path) -> None:
     (root / "python" / "acme_pack" / "__init__.py").write_text(
         '"""Broken fixture entrypoint."""\n\n'
         "from __future__ import annotations\n\n\n"
-        "def register() -> None:\n"
+        "def register(context: object) -> None:\n"
         '    raise RuntimeError("boom")\n',
         encoding="utf-8",
     )
@@ -225,7 +245,43 @@ def test_repeated_activation_returns_the_cached_handle(
     second = runtime.activate("acme_code")
 
     assert first is second
-    assert calls == ["register"]
+    assert len(calls) == 1
+
+
+def test_activate_all_activates_catalog_order_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_entrypoint(monkeypatch)
+    runtime = discover([CONTENT_ROOT, CODE_ROOT])
+
+    first = runtime.activate_all()
+    second = runtime.activate_all()
+
+    assert [handle.pack for handle in first] == ["acme_content", "acme_code"]
+    assert first == second
+    assert all(earlier is later for earlier, later in zip(first, second, strict=True))
+    assert len(calls) == 1
+
+
+def test_activation_does_not_fall_back_to_a_zero_argument_entrypoint(tmp_path: Path) -> None:
+    root = tmp_path / "acme_code"
+    shutil.copytree(CODE_ROOT, root)
+    (root / "python" / "acme_pack" / "__init__.py").write_text(
+        '"""Zero-argument fixture entrypoint."""\n\n'
+        "from __future__ import annotations\n\n\n"
+        "def register() -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("acme_code")
+
+    message = str(info.value)
+    assert "acme_code" in message
+    assert "acme_pack:register" in message
+    assert isinstance(info.value.__cause__, TypeError)
 
 
 def test_runtime_module_has_no_legacy_loader_bindings() -> None:

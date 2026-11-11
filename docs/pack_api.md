@@ -1,9 +1,9 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phase 1, Phase 3 and Phase 3b contracts are implemented, with the
-additive Phase 4 `(face, id)` lookup. The runtime is a parallel path: the legacy
-`unigym.packs` discovery and loader remain the active runtime, and nothing in
-this document switches the legacy loader, mounts domain providers or migrates
+Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup
+and Phase 5 runtime parity are implemented. The runtime is a parallel path: the
+legacy `unigym.packs` discovery and loader remain the active runtime, and nothing
+in this document switches the legacy loader, mounts domain providers or migrates
 scene/run/asset loading.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
@@ -11,7 +11,8 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase1-contract.md`,
 `plans/drafts/pack-api-phase3-discovery.md`,
 `plans/drafts/pack-api-phase3b-sources.md`,
-`plans/drafts/pack-api-phase4-resource-lookup.md`).
+`plans/drafts/pack-api-phase4-resource-lookup.md`,
+`plans/drafts/pack-api-phase5-runtime-parity.md`).
 
 ## Public imports
 
@@ -22,6 +23,7 @@ from unigym.pack_api import (
     ActivationHandle,
     CatalogEntry,
     PackCatalog,
+    PackContext,
     PackManifestV1,
     PackRuntime,
     ProvidedItem,
@@ -66,8 +68,6 @@ provides:
     - id: acme.dynamic_assets
       kind: asset_generator
       entrypoint: acme_unigym.assets:register
-
-shadow: false
 ```
 
 ### Required fields
@@ -91,7 +91,9 @@ with the offending field and the expected form.
 | --- | --- |
 | `entrypoint` | `module:attribute`, allowed only with `trust: code` |
 | `requires` | string to string mapping; stored, not evaluated |
-| `shadow` | boolean, default `false` |
+
+There is no `shadow` key in `unigym.pack/1`. A manifest that declares it is
+rejected as an unknown top-level key; duplicate pack names are always an error.
 
 `requires` records the compatibility range a pack intends. Requirement
 resolution belongs to a later loader phase and is not part of the runtime.
@@ -181,18 +183,20 @@ Catalog rules:
 sources:
 
 ```text
-discover(roots=None) -> PackCatalog + root_by_pack
+discover(roots=None, entry_points=False) -> PackCatalog + root_by_pack
   -> runtime.catalog           enumerate packs and provided items
   -> runtime.resource(...)     resolve one pack-relative resource
   -> runtime.resource_for(...) resolve a catalog item's declared resource
   -> runtime.activate(...)     import a code pack's entrypoint once
+  -> runtime.activate_all()    activate every catalog pack in catalog order
 ```
 
 ```python
 from unigym.pack_api import discover
 
 runtime = discover(["/packs/acme_code", "/packs/acme_content"])  # explicit
-configured = discover()                                         # configured
+configured = discover()                                          # configured
+installed = discover(entry_points=True)                          # opt-in entry points
 ```
 
 ### Explicit roots
@@ -208,11 +212,14 @@ pack names fail.
 
 1. `UNIGYM_PACKS`, an `os.pathsep`-separated list of pack roots;
 2. `packs:` in the local overlay, `<repo>/unigym.local.yaml`;
-3. every directory under `<UNIGYM_DEPS_ROOT>/unigym_packs`, sorted by name.
+3. installed `unigym.packs` entry points, name-sorted, only with
+   `discover(entry_points=True)`;
+4. every directory under `<UNIGYM_DEPS_ROOT>/unigym_packs`, sorted by name.
 
 Rules:
 
-- root order is preserved and canonical duplicate roots are visited once;
+- root order is preserved and canonical duplicate roots are visited once,
+  including entry-point roots that repeat another source;
 - every root must contain `unigym.pack.yaml`, validated by
   `load_manifest_v1`; a malformed or missing manifest in a configured root
   fails;
@@ -226,9 +233,27 @@ Rules:
   `unigym_packs` directory yields no roots and is not an error. A directory
   that exists under `unigym_packs` is a configured root and must carry a
   manifest;
-- there is no installed entry-point or wheel discovery in this phase;
-- discovery reads manifests and checks resource paths only. It never imports
-  pack Python.
+- default discovery reads manifests and checks resource paths only. It never
+  reads installed entry points and never imports pack Python.
+
+#### Entry-point sources
+
+`entry_points=True` is an explicit opt-in for configured discovery:
+
+- an entry point in the `unigym.packs` group resolves to a path string
+  (`str` or `os.PathLike`) or to a zero-argument callable returning one;
+- resolving an entry point loads its target and may import it. This is why the
+  opt-in exists: default manifest enumeration stays import-free;
+- the name is the `EntryPoint` name; roots are ordered by that name;
+- a broken entry point fails naming the entry point and the reason: a load
+  error, a raising callable, a wrong target type or a target without a valid
+  `unigym.pack.yaml`;
+- `entry_points=True` with explicit roots is a teaching `PackError`, not a
+  silently ignored keyword.
+
+There is no implicit repository mount in this runtime. A resource is addressed
+through an explicit pack root or an absolute path outside the catalog; the
+checkout itself is not added as a hidden fallback pack.
 
 `discover(..., config_path=...)` is an optional keyword-only override for the
 local-overlay path, for embedding and tests. It only affects configured
@@ -254,6 +279,25 @@ entrypoint-only item has no resource path, so it raises `PackError` naming the
 pack, face, id and entrypoint and pointing the caller at
 `runtime.activate(pack)`.
 
+### Pack context
+
+A pack entrypoint receives exactly one explicit `PackContext`:
+
+```python
+@dataclass(frozen=True)
+class PackContext:
+    pack: str
+    root: Path
+    runtime: PackRuntime
+
+    def resource(self, rel: str) -> Path: ...
+```
+
+`resource(rel)` delegates to `runtime.resource(pack, rel)`, so it applies the
+same pack-relative rules and names the owning pack in errors. The context is
+the pack's explicit handle to its own resources; it is not a global registry
+and it does not inspect the caller's frame.
+
 ### Activation
 
 `runtime.activate(pack)` is explicit and cached per runtime:
@@ -261,7 +305,9 @@ pack, face, id and entrypoint and pointing the caller at
 - a content pack, or a code pack with no manifest entrypoint, returns a
   no-op `ActivationHandle(pack=..., entrypoint=None)`;
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
-  normal `importlib`, and called with no arguments;
+  normal `importlib`, and called with one `PackContext` argument;
+- there is no zero-argument fallback: a legacy `register()` entrypoint fails
+  to activate and is not supported;
 - the pack root's `python/` directory is the explicit import boundary. It is
   added to `sys.path` once before the import and kept there because the pack
   may import its own submodules later;
@@ -271,6 +317,11 @@ pack, face, id and entrypoint and pointing the caller at
   the entrypoint;
 - an activation failure raises `PackError` naming the pack and entrypoint,
   with the original exception as its cause.
+
+`runtime.activate_all()` activates every catalog pack in catalog order and
+returns a `tuple[ActivationHandle, ...]`. It uses the same per-runtime cache,
+so a repeated call returns the same handles without re-running an entrypoint.
+Content packs remain no-ops.
 
 Activation does not register providers or mutate a registry in this phase; a
 pack entrypoint may use the existing public registration helpers directly if
@@ -284,11 +335,10 @@ The current phases deliberately do not implement:
   loader remains the active discovery path;
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and no legacy loader is switched by this phase;
-- installed-PyPI `unigym.packs` entry-point or wheel discovery;
 - a compatibility shim between the runtime and legacy mounts;
 - requirement or `requires` resolution;
-- provider registration orchestration, shadow/conflict policy or activation
-  ordering;
+- provider registration orchestration; `activate_all` only calls entrypoints
+  in catalog order and does not register providers;
 - migration of scene, run, task, asset, benchmark or termination loaders onto
   pack resources;
 - a sandbox for trusted code packs.

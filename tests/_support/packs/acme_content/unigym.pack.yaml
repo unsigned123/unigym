@@ -13,4 +13,3 @@ provides:
   assets:
     - id: acme_content.cup
       resource: assets/cup/asset.yaml
-shadow: false

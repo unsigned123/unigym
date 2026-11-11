@@ -66,7 +66,6 @@ def test_content_fixture_loads_with_exact_entries() -> None:
     assert manifest.trust == "content"
     assert manifest.entrypoint is None
     assert dict(manifest.requires) == {}
-    assert manifest.shadow is False
     assert manifest.root == CONTENT_ROOT.resolve()
     assert dict(manifest.provides) == {
         "runs": (

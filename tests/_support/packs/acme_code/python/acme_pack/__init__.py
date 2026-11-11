@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from unigym.pack_api import PackContext
 
-def register() -> None:
-    """Do nothing; the fixture exists only to prove code loading is lazy."""
+
+def register(context: PackContext) -> None:
+    """Do nothing; the fixture exists only to prove context-aware code loading."""
     return None

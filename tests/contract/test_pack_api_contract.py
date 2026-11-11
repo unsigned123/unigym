@@ -88,7 +88,6 @@ def test_content_manifest_loads(tmp_path: Path) -> None:
             kind=None,
         ),
     )
-    assert manifest.shadow is False
     assert manifest.root == root.resolve()
 
 
@@ -137,14 +136,13 @@ def test_requires_is_stored_not_evaluated(tmp_path: Path) -> None:
     assert dict(manifest.requires) == {"unigym": ">=99.0,<100.0"}
 
 
-def test_shadow_is_an_explicit_boolean_field(tmp_path: Path) -> None:
+@pytest.mark.parametrize("value", [False, True])
+def test_shadow_is_rejected_as_an_unknown_key(tmp_path: Path, value: bool) -> None:
     root = tmp_path / "acme"
-    _write(root, _document(shadow=True))
+    _write(root, _document(shadow=value))
 
-    assert load_manifest_v1(root).shadow is True
-
-    _write(root, _document())
-    assert load_manifest_v1(root).shadow is False
+    with pytest.raises(PackError, match="unknown pack manifest key"):
+        load_manifest_v1(root)
 
 
 def test_content_pack_rejects_manifest_entrypoint(tmp_path: Path) -> None:
@@ -238,8 +236,6 @@ def test_unknown_schema_rejected(tmp_path: Path, schema: object) -> None:
         ("api", True),
         ("api", "1"),
         ("trust", "trusted"),
-        ("shadow", 1),
-        ("shadow", "false"),
     ],
 )
 def test_invalid_manifest_field_rejected(tmp_path: Path, field: str, value: object) -> None:
@@ -418,6 +414,7 @@ def test_public_pack_api_exports() -> None:
     expected = {
         "CatalogEntry",
         "PackCatalog",
+        "PackContext",
         "PackManifestV1",
         "ProvidedItem",
         "load_manifest_v1",

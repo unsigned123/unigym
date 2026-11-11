@@ -52,7 +52,6 @@ _TOP_LEVEL_KEYS = frozenset(
         "entrypoint",
         "requires",
         "provides",
-        "shadow",
     }
 )
 _ITEM_KEYS = frozenset({"id", "resource", "entrypoint", "kind"})
@@ -89,7 +88,6 @@ class PackManifestV1:
     entrypoint: str | None
     requires: Mapping[str, str]
     provides: Mapping[str, tuple[ProvidedItem, ...]]
-    shadow: bool
     root: Path
 
     def __post_init__(self) -> None:
@@ -294,10 +292,6 @@ def load_manifest_v1(root: str | Path) -> PackManifestV1:
                 )
             requires[key] = value
 
-    raw_shadow = document.get("shadow", False)
-    if not isinstance(raw_shadow, bool):
-        raise PackError(f"pack {name!r} shadow {raw_shadow!r} must be a boolean ({path})")
-
     raw_provides = document.get("provides")
     if raw_provides is None:
         raise PackError(f"pack {name!r} must declare a provides mapping ({path})")
@@ -312,7 +306,6 @@ def load_manifest_v1(root: str | Path) -> PackManifestV1:
         entrypoint=entrypoint,
         requires=requires,
         provides=provides,
-        shadow=raw_shadow,
         root=root,
     )
 

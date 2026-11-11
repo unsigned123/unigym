@@ -20,7 +20,7 @@ import yaml
 
 from unigym.packs import find, resolve
 from unigym.packs.catalog import CatalogEntry, PackCatalog
-from unigym.packs.runtime import ActivationHandle, PackRuntime, discover
+from unigym.packs.runtime import ActivationHandle, PackContext, PackRuntime, discover
 from unigym.packs.load import PACK_MODULE_PREFIX
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
 
@@ -108,6 +108,7 @@ __all__ = [
     "ActivationHandle",
     "CatalogEntry",
     "PackCatalog",
+    "PackContext",
     "PackManifestV1",
     "PackRuntime",
     "ProvidedItem",
