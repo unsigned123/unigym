@@ -30,7 +30,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from unigym.scripts.config_resolve import ConfigResolveError, resolve_config
+from unigym.packs import PackError
+from unigym.run.config_ref import RunConfigRefError, resolve_run_config
 
 
 def _post(api_port: int, path: str, body: dict, timeout: float) -> dict:
@@ -160,26 +161,19 @@ def cmd_probe(a: argparse.Namespace, extra: list[str]) -> int:
             hint="start it paused with: unigym run CONFIG --pause "
             "(then: unigym resume latest / step latest N)",
         )
-    try:  # glob / short-name resolution
-        resolved = resolve_config(a.config)
-    except ConfigResolveError as e:
+    runtime = None
+    try:
+        if not Path(a.config).expanduser().is_absolute():
+            from unigym.pack_api import discover
+
+            runtime = discover(entry_points=True)
+        cfg_path = resolve_run_config(a.config, runtime)
+    except (PackError, RunConfigRefError) as error:
         print(
-            json.dumps({"ok": False, "error": str(e)}) if a.json else f"[unigym probe] {e}",
+            json.dumps({"ok": False, "error": str(error)}) if a.json else f"[unigym probe] {error}",
             file=None if a.json else sys.stderr,
         )
         return 1
-    if len(resolved) != 1:
-        msg = (
-            f"config spec {a.config!r} resolved to {len(resolved)} "
-            f"configs; probe takes exactly one (use `unigym run` for "
-            f"many): " + ", ".join(str(p) for p in resolved[:8])
-        )
-        print(
-            json.dumps({"ok": False, "error": msg}) if a.json else f"[unigym probe] {msg}",
-            file=None if a.json else sys.stderr,
-        )
-        return 1
-    cfg_path = resolved[0]
     if a.gpu_preflight:
         fatal, warns = gpu_preflight()
         for w in warns:

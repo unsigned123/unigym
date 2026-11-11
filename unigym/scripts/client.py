@@ -34,7 +34,8 @@ import urllib.request
 from pathlib import Path
 from typing import NoReturn
 
-from unigym.scripts.config_resolve import ConfigResolveError, resolve_config
+from unigym.packs import PackError
+from unigym.run.config_ref import RunConfigRefError, resolve_run_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1543,56 +1544,66 @@ def cmd_run(a, passthrough: list[str]) -> int:
     passthrough = list(passthrough)
     if getattr(a, "watch", None):  # born-armed watcher pack
         passthrough += ["--watch", str(a.watch)]
+
+    def _config_error(error: Exception) -> NoReturn:
+        msg = str(error)
+        if json_mode:
+            print(json.dumps({"ok": False, "error": msg, "launched": launched}))
+            sys.exit(1)
+        sys.exit(f"[unigym run] {msg}")
+
+    runtime = None
+    try:
+        if any(not Path(c).expanduser().is_absolute() for c in a.config):
+            from unigym.pack_api import discover
+
+            runtime = discover(entry_points=True)
+    except PackError as error:
+        _config_error(error)
     for c in a.config:
-        try:  # glob / short-name resolution
-            resolved = resolve_config(c)
-        except ConfigResolveError as e:
-            msg = str(e)
+        try:
+            cfg_path = resolve_run_config(c, runtime)
+        except (PackError, RunConfigRefError) as error:
+            _config_error(error)
+        payload = {
+            "spec": {
+                "config": str(cfg_path),
+                "backend": a.backend,
+                "passthrough": list(passthrough),
+                "serve_camera": a.serve_camera,
+                "multi": len(a.config) > 1,
+                "paused": bool(getattr(a, "pause", False)),
+            }
+        }
+        doc = (
+            _api_json(a, "POST", "/api/start", payload, timeout=60)
+            if json_mode
+            else _api("POST", "/api/start", payload, timeout=60)
+        )
+        if not doc.get("ok"):
+            msg = str(doc.get("error", doc))
             if json_mode:
                 print(json.dumps({"ok": False, "error": msg, "launched": launched}))
                 sys.exit(1)
             sys.exit(f"[unigym run] {msg}")
-        for cfg_path in resolved:
-            payload = {
-                "spec": {
-                    "config": str(cfg_path),
-                    "backend": a.backend,
-                    "passthrough": list(passthrough),
-                    "serve_camera": a.serve_camera,
-                    "multi": len(a.config) > 1,
-                    "paused": bool(getattr(a, "pause", False)),
-                }
-            }
-            doc = (
-                _api_json(a, "POST", "/api/start", payload, timeout=60)
-                if json_mode
-                else _api("POST", "/api/start", payload, timeout=60)
-            )
-            if not doc.get("ok"):
-                msg = str(doc.get("error", doc))
-                if json_mode:
-                    print(json.dumps({"ok": False, "error": msg, "launched": launched}))
-                    sys.exit(1)
-                sys.exit(f"[unigym run] {msg}")
-            h = doc["handle"]
-            if json_mode:
-                launched.append(h)
-                continue
-            where = (
-                f"container={h['container']} backend={h['backend']}"
-                if h.get("container")
-                else f"backend={h['backend']}"
-            )
-            print(
-                f"LAUNCHED pid={h['pid']} {where} log={h['log_path']} "
-                f"state={h.get('state_path')}"
-            )
-            if h.get("container"):
-                print(f"then: unigym wait --state {h.get('state_path')}")
-            if not a.bg:
-                codes.append(_run_wait_handle(h))
-            else:
-                codes.append(0)
+        h = doc["handle"]
+        if json_mode:
+            launched.append(h)
+            continue
+        where = (
+            f"container={h['container']} backend={h['backend']}"
+            if h.get("container")
+            else f"backend={h['backend']}"
+        )
+        print(
+            f"LAUNCHED pid={h['pid']} {where} log={h['log_path']} " f"state={h.get('state_path')}"
+        )
+        if h.get("container"):
+            print(f"then: unigym wait --state {h.get('state_path')}")
+        if not a.bg:
+            codes.append(_run_wait_handle(h))
+        else:
+            codes.append(0)
     if json_mode:
         print(json.dumps({"ok": True, "launched": launched}))
         return 0
@@ -1697,19 +1708,15 @@ def cmd_debug(a, extra: list[str]) -> int:
 
     from unigym.scripts import spawn_spec as ss
 
-    try:  # glob / short-name resolution
-        resolved = resolve_config(a.config)
-    except ConfigResolveError as e:
-        sys.exit(f"[unigym debug] {e}")
-    if len(resolved) != 1:
-        sys.exit(
-            f"[unigym debug] config spec {a.config!r} resolved to "
-            f"{len(resolved)} configs; debug takes exactly one "
-            f"(use `unigym run` for many): " + ", ".join(str(p) for p in resolved[:8])
-        )
-    cfg_path = resolved[0]
-    if not cfg_path.exists():
-        sys.exit(f"[unigym debug] config not found: {cfg_path}")
+    runtime = None
+    try:
+        if not Path(a.config).expanduser().is_absolute():
+            from unigym.pack_api import discover
+
+            runtime = discover(entry_points=True)
+        cfg_path = resolve_run_config(a.config, runtime)
+    except (PackError, RunConfigRefError) as error:
+        sys.exit(f"[unigym debug] {error}")
     try:
         cfg = yaml.safe_load(cfg_path.read_text()) or {}
     except (OSError, ValueError) as e:

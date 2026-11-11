@@ -1,12 +1,13 @@
 # Pack API: manifest schema, catalog and runtime
 
 Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
-Phase 5 runtime parity and the Phase 6a scene consumer cutover are implemented.
-Scene references resolve only through the runtime `scenes` face. The runtime is
-still a parallel path for run, task, asset, benchmark and termination loading:
-the legacy `unigym.packs` discovery and loader remain the active runtime there,
-and nothing in this document switches that legacy loader or migrates those
-domain loaders.
+Phase 5 runtime parity, the Phase 6a scene consumer cutover and the Phase 6b
+run consumer cutover are implemented. Scene references resolve only through the
+runtime `scenes` face; run config references resolve only as absolute file
+paths or exact runtime `runs` catalog ids. The runtime is still a parallel path
+for task, asset, benchmark and termination loading: the legacy `unigym.packs`
+discovery and loader remain the active runtime there, and nothing in this
+document switches that legacy loader or migrates those domain loaders.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -16,6 +17,7 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase4-resource-lookup.md`,
 `plans/drafts/pack-api-phase5-runtime-parity.md`,
 `plans/drafts/pack-api-phase6a-scene-cutover.md`,
+`plans/drafts/pack-api-phase6b-run-cutover.md`,
 `plans/drafts/legacy-loader-cutover.md`).
 
 ## Public imports
@@ -314,6 +316,45 @@ runtime=...)` follow the same boundary. `Run`, `collect_cli` and `describe_cli`
 build `discover(entry_points=True)` at their composition boundary only when the
 config declares `scene:`; there is no module-level default runtime or cache.
 
+### Run resources
+
+A run config reference has exactly two accepted forms:
+
+```text
+/absolute/path/to/run.yaml     -> used verbatim (must be a file)
+acme.demo                      -> exact PackRuntime "runs" catalog id
+```
+
+`unigym.run.config_ref.resolve_run_config(spec, runtime=None)` is the one
+shared resolver for the CLI and the daemon. Its rules:
+
+- an absolute path or a `~` path is expanded, resolved and must be a file;
+- an exact `runs` catalog id resolves through
+  `runtime.resource_for("runs", <id>)` and must be a file;
+- a catalog id requires a runtime; without one the error names the spec and
+  the accepted forms;
+- relative filesystem paths and globs are teaching errors naming only the two
+  accepted forms;
+- there is no implicit `config/` directory, no CWD-relative resolution, no glob
+  expansion and no repository fallback;
+- an unknown id raises the catalog `PackError` naming the id and the known ids.
+
+All failures are `RunConfigRefError` (a `ValueError`) or `PackError`, surfaced
+as CLI teaching errors rather than tracebacks.
+
+`client.cmd_run` builds `discover(entry_points=True)` once, only when at least
+one spec is non-absolute. `cmd_debug` and `probe_cli.cmd_probe` build it only
+for a non-absolute spec. Absolute paths work without constructing a runtime.
+
+The daemon owns one explicit `pack_runtime` built at `DaemonService`
+construction. `GET /api/configs` enumerates `runtime.catalog.entries("runs")`:
+resource-backed items carry `{id, path, relative: <id>, ...summary}`;
+entrypoint-only run items are reported in `unsupported` instead of being
+listed or silently dropped. `benchmark_packs` listing remains the legacy
+`pack_roots` scan until the benchmark cutover. `POST /api/start` calls the same
+shared `resolve_run_config` with the daemon runtime, so it accepts an absolute
+path or an exact `runs` catalog id and rejects relative paths and globs.
+
 ### Pack context
 
 A pack entrypoint receives exactly one explicit `PackContext`:
@@ -366,18 +407,21 @@ it needs to.
 
 The current phases deliberately do not implement:
 
-- switching the legacy `unigym.packs` loader onto this runtime for run, task,
-  asset, benchmark or termination loading; the legacy loader remains the active
-  discovery path there (scene references are already cut over);
+- switching the legacy `unigym.packs` loader onto this runtime for task, asset,
+  benchmark or termination loading; the legacy loader remains the active
+  discovery path there (scene references and run config references are already
+  cut over);
 - migration of existing runs and packs: old run configs and old pack manifests
-  are not migrated, and no legacy loader is switched by this phase;
+  are not migrated, and the legacy loader modules are not deleted by this
+  phase;
 - a compatibility shim between the runtime and legacy mounts;
 - requirement or `requires` resolution;
 - provider registration orchestration; `activate_all` only calls entrypoints
   in catalog order and does not register providers;
-- migration of run, task, asset, benchmark or termination loaders onto pack
+- migration of task, asset, benchmark or termination loaders onto pack
   resources;
 - a sandbox for trusted code packs.
 
-The legacy loader stays active for run, task, asset, benchmark and termination
-loading until their later cutover phases.
+The legacy loader stays active for task, asset, benchmark and termination
+loading until their later cutover phases. Benchmark pack listing in the daemon
+also stays on the legacy `pack_roots` scan until the benchmark cutover.

@@ -1,9 +1,9 @@
-"""daemon.queries -- typed control queries + config whitelist .
+"""daemon.queries -- typed control queries + catalog run config listing.
 
 ONE implementation shared by the control API (8670) and the portal (8600
 -- the browser's single source, design §4/§7d): the structured run
-queries (metrics / config / report / log), the whitelisted config
-listing, and the relative-config start resolution.  Both HTTP faces stay
+queries (metrics / config / report / log), the pack-runtime run config
+listing, and the run config reference resolution.  Both HTTP faces stay
 thin route tables; the business logic lives here (and in unigym.core
 below it).  Every function returns ``(code, doc)``; errors keep the
 API-wide ``{"ok": false, "error": ..., "hint": ...}`` shape.
@@ -27,8 +27,9 @@ import yaml
 from unigym.core import registry as core_registry
 from unigym.core import run_ops
 from unigym.core.session import SessionError, SessionOpError, attach
-from unigym.packs import find, pack_roots, repo_pack
+from unigym.packs import pack_roots
 from unigym.runtime.bridge import hb_alive, probe_heartbeat
+from unigym.run.config_ref import resolve_run_config
 
 from . import runrec
 
@@ -80,16 +81,6 @@ def delete_run(svc, body) -> tuple[int, dict]:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 KINDS = ("metrics", "config", "report", "scene", "snapshots")
-
-
-def _repo_face(face: str, fallback: str) -> Path:
-    """One face of the implicit repo mount (``fallback`` when absent)."""
-    path = repo_pack().faces.get(face)
-    return path if path is not None else REPO_ROOT / fallback
-
-
-CONFIG_DIR = _repo_face("runs", "config")
-PACKS_DIR = _repo_face("benchmarks", "benchmark_packs")
 
 DEFAULT_LOG_TAIL = 4000  # characters (spawn_spec.log_tail semantic)
 
@@ -283,7 +274,7 @@ def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) -> tuple[int, dict
 
 
 # --------------------------------------------------------------------------- #
-# GET /api/configs: whitelisted spawn choices + summaries
+# GET /api/configs: catalog run spawn choices + summaries
 # --------------------------------------------------------------------------- #
 def _config_summary(path: Path) -> dict:
     """Parse one config for the wizard summary (guarded; errors are data)."""
@@ -314,56 +305,49 @@ def _config_summary(path: Path) -> dict:
 
 
 def list_configs(svc) -> tuple[int, dict]:
-    """Whitelisted spawn choices + summaries (contract §1.8).
+    """Catalog run spawn choices + summaries (contract §1.8).
 
-    The ``runs`` face of every mounted pack, enumerated through the pack
-    resolver (external packs first, the implicit repo mount last), plus
-    the ``benchmarks`` face of every mount.  Same posture as the
-    artifact whitelist -- only files the daemon already knows by
-    construction (the mounted packs' own faces), resolved against
-    realpath; request paths can never escape (nothing user-supplied here
-    at all: the listing IS the whitelist).  ``relative`` is the subpath
-    under the owning pack's face root (top-level entries keep the bare
-    file name); the boundary check is unchanged.
+    The ``runs`` catalog of the daemon's explicit pack runtime, plus the
+    legacy ``benchmarks`` face scan (unchanged until the benchmark
+    cutover).  Catalog ids are unique by construction, so there is no
+    ``run_name`` shadowing or duplicate resolution here.
 
-    When an external pack and the repository both provide a run config
-    with the same ``run_name`` (yaml ``run_name`` else the file stem),
-    the external entry wins and the repository copy is dropped.  The
-    dropped count rides the payload as ``shadowed``.
+    Only resource-backed run items that resolve to a file are listable.
+    An entrypoint-only item or a directory resource has no config file to
+    hand out, so it is reported in ``unsupported`` instead of being
+    silently dropped or advertised as spawnable.
     """
+    runtime = svc.pack_runtime
     configs: list[dict] = []
-    origins: list[str] = []
-    seen: dict[str, int] = {}
-    shadowed = 0
-    for pack, p in find("runs", suffix=".yaml"):
-        face = pack.faces.get("runs")
-        if face is None:
+    unsupported: list[dict] = []
+    for catalog_entry in runtime.catalog.entries("runs"):
+        if catalog_entry.resource is None:
+            unsupported.append(
+                {
+                    "id": catalog_entry.id,
+                    "pack": catalog_entry.pack,
+                    "reason": "entrypoint-only runs items are not supported",
+                }
+            )
             continue
-        real = p.resolve()
-        if face.resolve() not in real.parents:
+        path = runtime.resource_for("runs", catalog_entry.id)
+        if not path.is_file():
+            unsupported.append(
+                {
+                    "id": catalog_entry.id,
+                    "pack": catalog_entry.pack,
+                    "reason": "run resource is not a file",
+                }
+            )
             continue
-        summary = _config_summary(real)
-        run_name = str(summary.get("run_name") or p.stem)
-        entry = {"path": str(real), "relative": str(p.relative_to(face)), **summary}
-        index = seen.get(run_name)
-        if index is None:
-            seen[run_name] = len(configs)
-            configs.append(entry)
-            origins.append(pack.origin)
-            continue
-        if origins[index] == "pack" and pack.origin == "repo":
-            shadowed += 1
-            continue
-        if origins[index] == "repo" and pack.origin == "pack":
-            configs[index] = entry
-            origins[index] = pack.origin
-            seen[run_name] = index
-            shadowed += 1
-            continue
-        # duplicates inside one mount (e.g. seed variants sharing a
-        # run_name) are distinct spawn choices: keep both, change nothing.
-        configs.append(entry)
-        origins.append(pack.origin)
+        configs.append(
+            {
+                "id": catalog_entry.id,
+                "path": str(path),
+                "relative": catalog_entry.id,
+                **_config_summary(path),
+            }
+        )
     packs = []
     for pack in pack_roots():
         face = pack.faces.get("benchmarks")
@@ -390,41 +374,26 @@ def list_configs(svc) -> tuple[int, dict]:
                     "tasks": tasks,
                 }
             )
-    return 200, {"ok": True, "configs": configs, "benchmark_packs": packs, "shadowed": shadowed}
+    return 200, {
+        "ok": True,
+        "configs": configs,
+        "benchmark_packs": packs,
+        "unsupported": unsupported,
+    }
 
 
 # --------------------------------------------------------------------------- #
-# POST /api/start: structured spec body + whitelisted relative config
+# POST /api/start: structured spec body + run config reference
 # --------------------------------------------------------------------------- #
-def resolve_whitelisted_config(config: str) -> Path:
-    """Relative config paths must resolve inside the repo ``runs`` face.
-
-    Absolute paths keep the established semantics (resolved + existence-checked
-    by start_run -- GET /api/configs hands out exactly such real paths).
-    Returns the resolved path; raises ValueError on relative escapes
-    (``..``, symlinks out of the whitelist).
-    """
-    p = Path(config).expanduser()
-    if p.is_absolute():
-        return p.resolve()
-    real = (CONFIG_DIR / p).resolve()
-    if CONFIG_DIR.resolve() not in real.parents:
-        raise ValueError(
-            f"config {config!r} resolves outside the whitelist "
-            f"({CONFIG_DIR}); pick one from GET /api/configs"
-        )
-    return real
-
-
 def start_from_body(svc, body: dict) -> tuple[int, dict]:
     """POST /api/start core (design §3).
 
     Two body shapes:
     * ``{"spec": {...}}`` -- the RunSpec face (unchanged);
-    * ``{"config": <path>, "overrides": {backend, gpu, steps, instruction},
-      "debug": bool, ...}`` -- the wizard face: relative paths are
-    whitelist-resolved, overrides map onto RunSpec fields + collect_cli
-    passthrough flags.
+    * ``{"config": <ref>, "overrides": {backend, gpu, steps, instruction},
+      "debug": bool, ...}`` -- the wizard face: an absolute path or exact
+    ``runs`` catalog id, with overrides mapping onto RunSpec fields +
+    collect_cli passthrough flags.
     """
     if "spec" not in body:
         config = (body.get("config") or "").strip()
@@ -480,9 +449,9 @@ def start_from_body(svc, body: dict) -> tuple[int, dict]:
             str(e), hint="POST /api/start {'spec': {...}} or " "{'config': ..., 'overrides': {...}}"
         )
     try:
-        spec.config = str(resolve_whitelisted_config(spec.config))
+        spec.config = str(resolve_run_config(spec.config, svc.pack_runtime))
     except ValueError as e:
-        return _err(str(e), hint="GET /api/configs lists the whitelisted " "configs")
+        return _err(str(e), hint="GET /api/configs lists the catalog run " "configs")
     warnings: list[str] = []
     if body.get("debug"):
         code, doc = _preflight(spec, warnings)

@@ -1,8 +1,10 @@
 """daemon.service -- DaemonService: the unigymd process body .
 
-Owns four pieces:
+Owns five pieces:
 
 * control API server   (127.0.0.1:<api_port>, routes in api.py)
+* pack runtime         (explicit configured discovery at construction,
+                        owns the ``runs`` catalog used by /api/configs)
 * webui portal server  (127.0.0.1:<webui_port>, pages in portal.py)
 * instance table       (periodic rebuild via core.registry.list_runs --
                         kill -9 safe: the next start rebuilds from
@@ -103,6 +105,9 @@ class DaemonService:
         handshake_timeout_s: float = SPAWN_HANDSHAKE_TIMEOUT_S,
         reap_in_loop: bool = True,
     ):
+        from unigym.pack_api import discover
+
+        self.pack_runtime = discover(entry_points=True)
         self.poll = float(poll)
         self.rebuild_s = float(rebuild_s)
         self.handshake_timeout_s = float(handshake_timeout_s)
