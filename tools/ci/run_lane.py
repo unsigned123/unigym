@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import NoReturn, TypedDict
+from typing import NoReturn, NotRequired, TypedDict
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path("ci/compat.toml")
@@ -23,21 +23,27 @@ SUPPORTED_VERSION = 1
 
 
 class Lane(TypedDict):
-    """One lane entry: the owning environment plus its test selectors."""
+    """One lane entry: the owning environment plus its test selectors.
+
+    ``variant_of`` marks a versioned lane that reuses another lane's test
+    ownership in a different environment; it is not a second owner.
+    """
 
     environment: str
     selectors: list[str]
+    variant_of: NotRequired[str]
 
 
 class Environment(TypedDict, total=False):
     """One environment entry from the registry.
 
-    ``uv`` environments carry ``extras``.  ``conda`` environments carry
-    ``env_var``, ``manifest`` and ``strict``.
+    ``uv`` environments carry ``extras`` and an optional ``python`` version.
+    ``conda`` environments carry ``env_var``, ``manifest`` and ``strict``.
     """
 
     provision: str
     extras: list[str]
+    python: str
     env_var: str
     manifest: str
     strict: bool
@@ -88,6 +94,11 @@ def _parse_environment(name: str, table: dict[str, object]) -> Environment:
     environment: Environment = {"provision": provision}
     if provision == "uv":
         environment["extras"] = _str_list(table.get("extras"), field=f"environments.{name}.extras")
+        python = table.get("python")
+        if python is not None:
+            if not isinstance(python, str) or not python:
+                _fail(f"{REGISTRY_PATH}: environments.{name}.python must be a non-empty string")
+            environment["python"] = python
         return environment
 
     env_var = table.get("env_var")
@@ -119,7 +130,13 @@ def _parse_lane(name: str, table: dict[str, object]) -> Lane:
     if not isinstance(environment, str) or not environment:
         _fail(f"{REGISTRY_PATH}: lanes.{name}.environment must be a non-empty string")
     selectors = _str_list(table.get("selectors"), field=f"lanes.{name}.selectors")
-    return {"environment": environment, "selectors": selectors}
+    lane: Lane = {"environment": environment, "selectors": selectors}
+    variant_of = table.get("variant_of")
+    if variant_of is not None:
+        if not isinstance(variant_of, str) or not variant_of:
+            _fail(f"{REGISTRY_PATH}: lanes.{name}.variant_of must be a non-empty string")
+        lane["variant_of"] = variant_of
+    return lane
 
 
 def _load_registry() -> Registry:
@@ -170,7 +187,11 @@ def _build_command(
     """Build the exact argument vector for one lane."""
     provision = environment["provision"]
     if provision == "uv":
-        command = ["uv", "run", "--frozen"]
+        command = ["uv", "run"]
+        python = environment.get("python")
+        if python is not None:
+            command.extend(("--python", python))
+        command.append("--frozen")
         for extra in environment["extras"]:
             command.extend(("--extra", extra))
         command.extend(("python", "-m", "pytest"))
@@ -215,9 +236,14 @@ def _print_lanes(registry: Registry) -> None:
         environment_name = lane["environment"]
         environment = registry["environments"][environment_name]
         selectors = " ".join(lane["selectors"])
+        details = ""
+        if "python" in environment:
+            details += f" python={environment['python']}"
+        if "variant_of" in lane:
+            details += f" variant_of={lane['variant_of']}"
         print(
             f"{name:<12} environment={environment_name} "
-            f"provision={environment['provision']} selectors={selectors}"
+            f"provision={environment['provision']}{details} selectors={selectors}"
         )
 
 

@@ -6,6 +6,11 @@ version = 1
 provision = "uv"
 extras = ["dev"]
 
+[environments.base-py312]
+provision = "uv"
+extras = ["dev"]
+python = "3.12"
+
 [environments.daemon]
 provision = "uv"
 extras = ["dev", "daemon"]
@@ -30,6 +35,18 @@ selectors = [
   "tests/meta",
 ]
 
+# Versioned nightly lane: reuses d0's test ownership in a Python 3.12 environment.
+[lanes.d0-py312]
+environment = "base-py312"
+variant_of = "d0"
+selectors = [
+  "tests/smoke",
+  "tests/unit",
+  "tests/contract",
+  "tests/conformance",
+  "tests/meta",
+]
+
 [lanes.integration]
 environment = "base"
 selectors = [
@@ -45,6 +62,13 @@ selectors = ["tests/integration/test_daemon_lifecycle.py"]
 environment = "base"
 selectors = ["tests/backends/mujoco"]
 
+# Versioned nightly lane: reuses mujoco's test ownership in a Python 3.12
+# environment.
+[lanes.mujoco-py312]
+environment = "base-py312"
+variant_of = "mujoco"
+selectors = ["tests/backends/mujoco"]
+
 [lanes.mjwarp]
 environment = "mjwarp"
 selectors = ["tests/backends/mjwarp"]
@@ -52,3 +76,8 @@ selectors = ["tests/backends/mjwarp"]
 [lanes.isaaclab2]
 environment = "isaaclab2"
 selectors = ["tests/backends/isaaclab2"]
+
+# Lanes the nightly workflow runs. C1 (oldest MuJoCo/NumPy pair) is deferred
+# until an empirically verified combination exists.
+[nightly]
+lanes = ["d0-py312", "mujoco-py312", "mjwarp", "isaaclab2"]

@@ -281,19 +281,42 @@ Do not assume every backend exists in the self-contained `.venv`.
 | --- | --- | --- |
 | D0 | primary `.venv`, Python 3.11 + MuJoCo 4.x | daily base iteration |
 | D2 | external `UNIGYM_ISAACLAB2_ENV` | daily IsaacLab 2 iteration |
-| C1 | Python 3.11 + oldest supported MuJoCo/NumPy pair | compatibility |
-| C2 | Python 3.11 + latest MuJoCo/NumPy | primary CI |
-| C3 | Python 3.12 + latest MuJoCo | nightly |
+| C1 | Python 3.11 + oldest supported MuJoCo/NumPy pair | deferred until empirically verified |
+| C2 | Python 3.11 + latest MuJoCo/NumPy | current base / primary CI |
+| C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | IsaacLab 3 CI |
+| I3 | external IsaacLab 3 environment | IsaacLab 3 CI (not registered) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is
 the long-term/CI compatibility direction; `ci/compat.toml` is authoritative for
 the lanes currently registered and runnable.
 
-### 6.1 Lane registry
+Python 3.12 is a nightly-only dimension. It is not part of the PR gate, and the
+oldest MuJoCo/NumPy pair (C1) is not advertised until a passing combination has
+been verified empirically.
+
+### 6.1 Nightly version matrix
+
+The nightly workflow adds the Python 3.12 version dimension on top of PR CI:
+
+| Lane | Python | Environment | Purpose |
+| --- | --- | --- | --- |
+| C2 | 3.11 | `base` | current base, primary CI |
+| C3 | 3.12 | `base-py312` | nightly Python dimension |
+| W1 | 3.11 | `mjwarp` | MuJoCo Warp lane |
+| I2 | 3.11 | external IsaacLab 2 (`isaaclab2`) | external IsaacLab 2 |
+
+C1 (oldest MuJoCo/NumPy pair) remains deferred until an empirical passing
+combination exists; no unverified minimum version is advertised.
+
+The nightly workflow uses the same lane registry and runner as PR CI. It runs
+the registry lanes named in `[nightly]`; it does not copy pytest paths. The
+`isaaclab2` job is default-skipped through the same repository-variable
+condition as PR CI.
+
+### 6.2 Lane registry
 
 `ci/compat.toml` is the single machine-readable source for supported test
 lanes. A lane names one environment and the test selectors that belong to it.
@@ -303,24 +326,37 @@ markers remain resource and capability markers.
 | Lane | Environment | Provisioner | Selectors |
 | --- | --- | --- | --- |
 | `d0` | `base` | uv (`dev`) | `tests/smoke`, `tests/unit`, `tests/contract`, `tests/conformance`, `tests/meta` |
+| `d0-py312` | `base-py312` | uv (`dev`), Python 3.12, `variant_of = "d0"` | same as `d0` |
 | `integration` | `base` | uv (`dev`) | `tests/integration/test_cli_smoke.py`, `tests/integration/test_daemon_cli.py` |
 | `daemon` | `daemon` | uv (`dev`, `daemon`) | `tests/integration/test_daemon_lifecycle.py` |
 | `mujoco` | `base` | uv (`dev`) | `tests/backends/mujoco` |
+| `mujoco-py312` | `base-py312` | uv (`dev`), Python 3.12, `variant_of = "mujoco"` | `tests/backends/mujoco` |
 | `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
 | `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
+
+The `[nightly]` table names the lanes the nightly workflow runs
+(`d0-py312`, `mujoco-py312`, `mjwarp`, `isaaclab2`).
 
 Selector ownership rules:
 
 - A uv environment declares the `extras` its lane installs. The runner uses
   `uv run --frozen --extra ...` in the project environment. It does not create
   an independent uv environment for now; that is an explicit trade-off, not
-  lane isolation.
+  lane isolation. A uv environment may also declare `python`; the runner then
+  emits `uv run --python <version> --frozen --extra ...`. Without `python` the
+  command is unchanged.
+- A `variant_of` lane reuses another lane's test ownership but executes it in a
+  different environment. It is not a second owner: overlap and
+  exactly-one-lane checks count only primary lanes (lanes without
+  `variant_of`), and a variant must name an existing primary lane with exactly
+  the same selectors.
 - A conda environment declares `env_var`, a tracked version `manifest` under
   `ci/envs/`, and `strict`. The variable and the manifest anchor the
   environment; no machine path is stored. A strict lane fails when the variable
   is missing. The lane runner exports `UNIGYM_TEST_ENV_STRICT=1` for strict
   conda lanes so a missing environment fails instead of skipping.
-- Every `tests/**/test_*.py` file must match exactly one lane selector.
+- Every `tests/**/test_*.py` file must match exactly one **primary** lane
+  selector; `variant_of` lanes reuse that ownership in another environment.
   `tests/meta/test_lane_registry.py` enforces this and also requires the
   default `pyproject.toml` `testpaths` to equal the `d0` selectors.
 - Moving or adding a test changes lane ownership: update `ci/compat.toml` in
@@ -338,7 +374,7 @@ python tools/ci/run_lane.py --lane isaaclab2 --dry-run
 `UNIGYM_CONDA_EXE` is set it selects the conda executable; otherwise the runner
 uses `conda` from `PATH`.
 
-### 6.2 Environment resolution
+### 6.3 Environment resolution
 
 `tests/_support/envs.py` is tracked test infrastructure. It contains no machine
 paths, credentials or version defaults. It resolves:
@@ -362,7 +398,7 @@ Resolution order:
 No tracked file may contain `/home/...`, `/data...`, a conda prefix, or a
 machine-specific interpreter path.
 
-### 6.3 Local and CI semantics
+### 6.4 Local and CI semantics
 
 - Local missing optional environment: explicit skip with a teaching message.
 - Required CI lane missing: fail, never skip.
@@ -457,6 +493,14 @@ the daemon CLI missing-`zmq` teaching error in
 hosted backend jobs cover `mujoco` and CPU `mjwarp`; the `isaaclab2` lane stays
 default-skipped until a provisioned self-hosted runner and repository variables
 exist. No backend job substitutes a fake pass for a missing environment.
+
+The scheduled `nightly` workflow runs the lanes named in the registry's
+`[nightly]` table through the same runner: `d0-py312` and `mujoco-py312` on
+Python 3.12, `mjwarp` on CPU Python 3.11, and the default-skipped `isaaclab2`
+lane on its self-hosted runner. Nightly is a discovery lane for the Python 3.12
+dimension and the external backend, not a PR gate; it does not install Isaac
+dependencies itself and does not fake a pass for a skipped job. C1 remains
+deferred until a passing oldest-pair combination is empirically verified.
 
 ### 7.3 Target commands
 

@@ -61,9 +61,13 @@ def _looks_like_machine_path(value: str) -> bool:
     )
 
 
-def _lane_selectors(registry: dict[str, object]) -> dict[str, list[str]]:
+def _lane_selectors(
+    registry: dict[str, object], *, primary_only: bool = False
+) -> dict[str, list[str]]:
     selectors: dict[str, list[str]] = {}
     for name, lane in _tables(registry, "lanes").items():
+        if primary_only and "variant_of" in lane:
+            continue
         value = lane.get("selectors")
         selectors[name] = (
             [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
@@ -138,6 +142,18 @@ def test_uv_environments_declare_extras(environments):
     assert not offenders, f"uv environments without a non-empty extras list: {offenders}"
 
 
+def test_uv_environment_python_is_a_non_empty_string_when_present(environments):
+    """An optional uv ``python`` pin is a non-empty string."""
+    offenders = []
+    for name, environment in environments.items():
+        if environment.get("provision") != "uv" or "python" not in environment:
+            continue
+        python = environment.get("python")
+        if not isinstance(python, str) or not python:
+            offenders.append((name, python))
+    assert not offenders, f"uv environments with an invalid python pin: {offenders}"
+
+
 def test_conda_environments_declare_env_var_manifest_and_strict(environments):
     """A conda environment is anchored by a variable, a manifest and strictness."""
     offenders = []
@@ -174,9 +190,41 @@ def test_every_lane_declares_repo_relative_existing_selectors(registry):
     assert not offenders, f"lane selectors that are missing or not repo-relative: {offenders}"
 
 
+def test_variant_lanes_reference_a_primary_lane_with_identical_selectors(registry):
+    """A variant lane reuses one primary lane's ownership, not a second copy."""
+    lanes = _tables(registry, "lanes")
+    offenders = []
+    for name, lane in lanes.items():
+        variant_of = lane.get("variant_of")
+        if variant_of is None:
+            continue
+        if not isinstance(variant_of, str) or not variant_of:
+            offenders.append((name, "variant_of", variant_of))
+            continue
+        primary = lanes.get(variant_of)
+        if primary is None:
+            offenders.append((name, "unknown primary", variant_of))
+            continue
+        if "variant_of" in primary:
+            offenders.append((name, "primary is itself a variant", variant_of))
+        if lane.get("selectors") != primary.get("selectors"):
+            offenders.append((name, "selectors differ from primary", variant_of))
+    assert not offenders, f"invalid variant lanes: {offenders}"
+
+
+def test_nightly_lanes_reference_declared_lanes(registry):
+    """The nightly table lists only lanes the registry declares."""
+    nightly = _nested_table(registry, "nightly")
+    lanes = _tables(registry, "lanes")
+    value = nightly.get("lanes")
+    assert isinstance(value, list) and value, "nightly.lanes must be a non-empty list"
+    offenders = [item for item in value if not isinstance(item, str) or item not in lanes]
+    assert not offenders, f"nightly lanes missing or undeclared: {offenders}"
+
+
 def test_lane_selectors_do_not_overlap(registry):
-    """No two lanes own the same path or a nested path."""
-    selectors = _lane_selectors(registry)
+    """No two primary lanes own the same path or a nested path."""
+    selectors = _lane_selectors(registry, primary_only=True)
     names = list(selectors)
     overlaps = []
     for index, left in enumerate(names):
@@ -191,8 +239,8 @@ def test_lane_selectors_do_not_overlap(registry):
 
 
 def test_every_test_file_belongs_to_exactly_one_lane(registry):
-    """Path enumeration assigns every test file to exactly one lane selector."""
-    selectors = _lane_selectors(registry)
+    """Path enumeration assigns every test file to exactly one primary lane."""
+    selectors = _lane_selectors(registry, primary_only=True)
     unassigned = []
     ambiguous = []
     for test_file in _test_files():
