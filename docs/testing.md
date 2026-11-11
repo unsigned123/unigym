@@ -802,25 +802,42 @@ markers + docstrings = metadata
 catalog = generated view
 ```
 
-Target tool:
+Generate it with:
 
-```text
-tools/ci/test_catalog.py
+```bash
+.venv/bin/python tools/ci/test_catalog.py --out /tmp/test-catalog.json
+.venv/bin/python tools/ci/test_catalog.py --out /tmp/catalog.json tests/contract
 ```
 
-Rules:
+`--out PATH` is required. Trailing arguments are pytest selectors; when omitted,
+the default `testpaths` are collected. The tool runs `pytest --collect-only`
+through a small collection plugin: it imports test modules as pytest collection
+requires, but it does not execute test functions, fixtures or backend setup. It
+imports no `torch`, `mujoco`, `isaaclab` or `omni` module directly. Collection
+errors and an empty collection fail the tool with a non-zero exit.
 
-- Runs `pytest --collect-only`; does not execute tests.
-- Uses a small collection hook/plugin to read collected items.
-- Imports no torch, mujoco, isaaclab or omni directly.
-- Records node id, file, line, layer, domain, backend, markers, fixtures and
-  first docstring line.
-- Does not record dependency versions; those belong to `ci/compat.toml`.
-- Default scope follows default `testpaths`; backend catalogs are generated in
-  their own lanes.
-- CI publishes `test-catalog.json` as an artifact.
-- If a catalog file is committed, CI regenerates and diffs it. Hand editing is
-  forbidden.
+The JSON document contains:
+
+- `schema_version` (`1`) and `test_count` (`test_count == len(tests)`);
+- one sorted `tests` row per collected test, ordered by `nodeid`;
+- row fields: repo-relative `path`, 1-based `line`, `layer`, `domain`,
+  `backend`, sorted declared `markers`, sorted `fixtures` and the first
+  non-empty `docstring` line.
+
+`layer`, `domain`, `backend` and `markers` are derived from collected pytest
+markers, not by parsing paths in the tool. `domain` is `null` for non-unit
+tests, and `docstring` is `null` when the test has no docstring. The document
+contains no timestamps, run ids or machine paths, so repeated collection of the
+same tree produces identical JSON.
+
+CI runs the tool in the `tests` job after the D0 lane and uploads
+`test-catalog.json` as the `test-catalog` artifact. The catalog is never
+committed to the repository; collection is separate from test execution and
+adds no second test run.
+
+Backend lane catalogs (MuJoCo, MuJoCo Warp, IsaacLab) are future, separate
+artifacts generated in their own environments; this artifact covers only the
+default D0 scope.
 
 ## 13. Golden policy
 

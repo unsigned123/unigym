@@ -92,6 +92,15 @@ jobs:
       - name: Run d0 lane
         run: .venv/bin/python tools/ci/run_lane.py --lane d0
 
+      - name: Generate test catalog
+        run: .venv/bin/python tools/ci/test_catalog.py --out /tmp/test-catalog.json
+
+      - name: Upload test catalog
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-catalog
+          path: /tmp/test-catalog.json
+
   integration:
     name: integration lane
     runs-on: ubuntu-latest
