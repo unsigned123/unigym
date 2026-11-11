@@ -25,11 +25,13 @@ from types import MappingProxyType
 
 import yaml
 
-from unigym.core.asset_root import repo_root
+from unigym.core.asset_root import canonical_asset_path, repo_root
 
 from . import PackError
 from .catalog import PackCatalog
 from .schema import PackManifestV1, load_manifest_v1
+
+_ASSET_PACK_PREFIX = "pack:"
 
 _PACKS_ENV_VAR = "UNIGYM_PACKS"
 _DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
@@ -179,6 +181,51 @@ class PackRuntime:
             raise PackError(f"{where} does not exist under {root}")
         return candidate
 
+    def asset_path(self, value: str) -> Path:
+        """Resolve one declared asset reference to an absolute path.
+
+        Accepted forms are a pack-qualified ``pack:<pack>/<rel>`` reference and
+        an absolute or ``~`` filesystem path:
+
+        - a pack reference is canonicalized with the pure texture-leaf rule
+          (:func:`unigym.core.asset_root.canonical_asset_path`) and then
+          resolved through :meth:`resource`, inheriting the inside-root path
+          checks and the existence requirement;
+        - an absolute or ``~`` path is the run config's own asset: it is
+          expanded and returned without an existence check, matching the legacy
+          absolute pass-through;
+        - a bare relative reference is rejected because it has no owning pack.
+
+        Raises:
+            PackError: The value is empty or not a string, the reference is a
+                bare relative path, the pack is unknown, the path is illegal or
+                the resource is absent.  Pack and reference are both named.
+        """
+        if not isinstance(value, str) or not value:
+            raise PackError(f"asset reference {value!r} must be a non-empty string")
+
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return path
+        if not value.startswith(_ASSET_PACK_PREFIX):
+            raise PackError(
+                f"asset reference {value!r} is not pack-qualified or absolute: "
+                "write 'pack:<pack>/<rel>' or an absolute filesystem path; "
+                "a bare relative asset reference has no owning pack"
+            )
+
+        canonical = canonical_asset_path(value)
+        pack, separator, rel = canonical[len(_ASSET_PACK_PREFIX) :].partition("/")
+        if not separator or not pack or not rel:
+            raise PackError(
+                f"asset reference {value!r} must be 'pack:<pack>/<rel>'; "
+                "the pack name or relative resource path is missing"
+            )
+        try:
+            return self.resource(pack, rel)
+        except PackError as err:
+            raise PackError(f"asset reference {value!r}: {err}") from err
+
     def resource_for(self, face: str, id: str) -> Path:
         """Resolve the declared resource of the ``(face, id)`` catalog item.
 
@@ -247,6 +294,22 @@ class PackRuntime:
             PackError: Any pack fails to activate.
         """
         return tuple(self.activate(pack) for pack in self.catalog.packs())
+
+
+@dataclass(frozen=True)
+class AssetContext:
+    """The explicit asset-path handle render and template code receives.
+
+    It carries the runtime that owns asset resolution, so a consumer never
+    infers a global asset face.  :meth:`resolve` delegates to
+    :meth:`PackRuntime.asset_path` and owns no second resolution rule.
+    """
+
+    runtime: PackRuntime
+
+    def resolve(self, value: str) -> str:
+        """Resolve *value* to an absolute asset path string."""
+        return str(self.runtime.asset_path(value))
 
 
 def _env_pack_roots() -> list[Path]:
@@ -449,4 +512,4 @@ def discover(
     return PackRuntime(catalog=PackCatalog(tuple(manifests)), root_by_pack=root_by_pack)
 
 
-__all__ = ["ActivationHandle", "PackContext", "PackRuntime", "discover"]
+__all__ = ["ActivationHandle", "AssetContext", "PackContext", "PackRuntime", "discover"]

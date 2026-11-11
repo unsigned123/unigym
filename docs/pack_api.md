@@ -2,14 +2,18 @@
 
 Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
 Phase 5 runtime parity, the Phase 6a scene consumer cutover, the Phase 6b run
-consumer cutover and the Phase 7a benchmark consumer cutover are implemented.
-Scene references resolve only through the runtime `scenes` face; run config
-references resolve only as absolute file paths or exact runtime `runs` catalog
-ids; benchmark pack discovery reads only resource-backed entries of the runtime
-`benchmarks` face. The runtime is still a parallel path for task, asset and
-termination loading: the legacy `unigym.packs` discovery and loader remain the
-active runtime there, and nothing in this document switches that legacy loader
-or migrates those domain loaders.
+consumer cutover, the Phase 7a benchmark consumer cutover and the Phase 7b-1
+asset-resolver foundation are implemented. Scene references resolve only
+through the runtime `scenes` face; run config references resolve only as
+absolute file paths or exact runtime `runs` catalog ids; benchmark pack
+discovery reads only resource-backed entries of the runtime `benchmarks` face.
+`PackRuntime.asset_path` and `AssetContext` exist as the Phase 7b-1 resolver
+foundation only: production asset consumers are not switched yet, and the old
+`UNIGYM_ASSET_ROOT` / `UNIGYM_ASSET_PACK` tokens remain in force until Phase
+7b-2. The runtime is still a parallel path for task, asset and termination
+loading: the legacy `unigym.packs` discovery and loader remain the active
+runtime there, and nothing in this document switches that legacy loader or
+migrates those domain loaders.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -21,6 +25,7 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase6a-scene-cutover.md`,
 `plans/drafts/pack-api-phase6b-run-cutover.md`,
 `plans/drafts/pack-api-phase7a-benchmark-cutover.md`,
+`plans/drafts/pack-api-phase7b-asset-cutover.md`,
 `plans/drafts/legacy-loader-cutover.md`).
 
 ## Public imports
@@ -30,6 +35,7 @@ The pack contract is exported from `unigym.pack_api`:
 ```python
 from unigym.pack_api import (
     ActivationHandle,
+    AssetContext,
     CatalogEntry,
     PackCatalog,
     PackContext,
@@ -288,6 +294,55 @@ entrypoint-only item has no resource path, so it raises `PackError` naming the
 pack, face, id and entrypoint and pointing the caller at
 `runtime.activate(pack)`.
 
+### Asset references (Phase 7b-1 foundation)
+
+`runtime.asset_path(value)` resolves one declared asset reference to an absolute
+`Path`:
+
+```text
+pack:<pack>/<rel>        -> <pack root>/<rel>, texture leaves canonicalized
+/absolute/path           -> expanded absolute path, no existence check
+~/path                   -> expanded absolute path, no existence check
+bare relative reference  -> teaching PackError
+```
+
+Rules:
+
+- only a non-empty string is accepted;
+- an absolute or `~` path is a run config's own asset: it is expanded and
+  returned as an absolute `Path` without a pack lookup or an existence check,
+  matching the legacy absolute pass-through;
+- a `pack:<pack>/<rel>` reference is canonicalized first with the existing pure
+  `unigym.core.asset_root.canonical_asset_path` rule, so a texture leaf such as
+  `assets/generators/tex/a/wood.png` names
+  `assets/generators/tex/a/wood/wood.png` before the lookup;
+- the canonicalized reference then resolves through `runtime.resource(pack,
+  rel)`, inheriting the non-empty, relative-only, `..`, inside-root, symlink
+  escape and existence checks;
+- a bare relative reference is rejected because it has no owning pack; the
+  teaching error names the two accepted forms;
+- an unknown pack, illegal path or absent resource is a `PackError` that names
+  both the pack and the original reference.
+
+`AssetContext` is the frozen handle for render and template code:
+
+```python
+@dataclass(frozen=True)
+class AssetContext:
+    runtime: PackRuntime
+
+    def resolve(self, value: str) -> str: ...
+```
+
+`AssetContext.resolve` delegates to `runtime.asset_path` and returns the path as
+a string. It owns no second resolution rule and carries no module-level or
+ambient state.
+
+This phase adds the resolver only. `expand_placeholders`, `resolve_asset_path`,
+backend scene rendering, prop templates and the asset CLI/selection still use
+the legacy path-anchor layer; `UNIGYM_ASSET_ROOT` and `UNIGYM_ASSET_PACK`
+remain supported tokens until the Phase 7b-2 consumer cutover.
+
 ### Scene resources
 
 A run config's `scene:` value is an exact `scenes` catalog id, not a directory
@@ -462,6 +517,10 @@ The current phases deliberately do not implement:
   or termination loading; the legacy loader remains the active discovery path
   there (scene references, run config references and benchmark pack discovery
   are already cut over);
+- switching production asset consumers onto the Phase 7b-1 resolver: placeholder
+  expansion, `resolve_asset_path`, backend scene rendering, prop templates and
+  the asset CLI/selection are unchanged, and `UNIGYM_ASSET_ROOT` /
+  `UNIGYM_ASSET_PACK` remain supported until the Phase 7b-2 cutover;
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and the legacy loader modules are not deleted by this
   phase;
