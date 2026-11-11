@@ -207,3 +207,16 @@ def test_build_spec_rejects_non_positive_collect_steps(value):
 
     with pytest.raises(ConfigError, match=r"collect\.steps must be positive"):
         build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_benchmark_packs():
+    """benchmark.packs is removed; packs come from the runtime benchmarks face."""
+    cfg = _cfg(benchmark={"packs": ["benchmark_packs/acme"]})
+
+    with pytest.raises(ConfigError) as info:
+        build_spec(cfg, _args())
+
+    message = str(info.value)
+    assert "benchmark.packs" in message
+    assert "benchmarks" in message
+    assert "runtime" in message

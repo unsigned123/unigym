@@ -23,8 +23,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from unigym.benchmarks.packs import PackIndex
+    from unigym.packs.runtime import PackRuntime
 
 RESULTS_JSON = "results.json"
 METRICS_NPZ = "metrics.npz"
@@ -87,18 +92,23 @@ def load_results(run_dir: str | Path) -> dict | None:
     return doc
 
 
-def resolve_task_specs(config: dict | None) -> list[tuple[str, dict | None]]:
+def resolve_task_specs(
+    config: dict | None,
+    runtime: PackRuntime,
+) -> list[tuple[str, dict | None]]:
     """(task_name, formula_spec|None) per declared benchmark task.
 
     Inline formula sections pass through verbatim; ``<pack>/<task>`` names
-    resolve through the SAME pack index the engine used (build_tasks).
-    Python-registry tasks resolve to None (no declarative rows).
+    resolve through the SAME pack index the engine used (build_tasks), built
+    from the caller's *runtime* ``benchmarks`` face.  Python-registry tasks
+    resolve to None (no declarative rows).
     """
     bench = (config or {}).get("benchmark") or {}
     out: list[tuple[str, dict | None]] = []
     sections = bench.get("tasks") or []
     if sections and all(isinstance(s, str) for s in sections):
         sections = [{"name": s} for s in sections]
+    index: PackIndex | None = None
     for section in sections:
         if not isinstance(section, dict):
             continue
@@ -107,9 +117,10 @@ def resolve_task_specs(config: dict | None) -> list[tuple[str, dict | None]]:
             out.append((name, section))
             continue
         try:
-            from unigym.benchmarks.packs import discover_packs
+            if index is None:
+                from unigym.benchmarks.packs import discover_packs
 
-            index = discover_packs(bench.get("packs"))
+                index = discover_packs(runtime)
             def_, _pack = index.resolve_task(name)
             spec = def_.spec if getattr(def_, "kind", "") == "formula" else None
         except Exception:  # noqa: BLE001
@@ -155,11 +166,18 @@ def _leaf_rows(spec: dict | None) -> list[dict]:
     return rows
 
 
-def gate_doc(run_dir: str | Path, config: dict | None = None) -> dict:
+def gate_doc(
+    run_dir: str | Path,
+    config: dict | None = None,
+    runtime: PackRuntime | None = None,
+) -> dict:
     """The gate section: rows = config declarations, values = results.json.
 
     Degradation is honest: no results.json -> ``available=False`` with
     reason ``na`` (missing results); corrupt -> ``na`` (corrupt results).
+    When no *runtime* is supplied, this analysis boundary builds
+    ``discover(entry_points=True)`` from the configured sources so declared
+    pack tasks resolve through the same ``benchmarks`` face the run used.
     """
     meta = {}
     try:
@@ -197,7 +215,11 @@ def gate_doc(run_dir: str | Path, config: dict | None = None) -> dict:
     doc["summary"] = (
         f"n={len(eps)} success={n_ok}/{len(eps)}" f" gate={doc['gate']}" if eps else "n=0"
     )
-    specs = dict(resolve_task_specs(cfg))
+    if runtime is None:
+        from unigym.pack_api import discover
+
+        runtime = discover(entry_points=True)
+    specs = dict(resolve_task_specs(cfg, runtime))
     rows: list[dict] = []
     for task_name, spec in specs.items():
         for m in (spec or {}).get("metrics") or []:

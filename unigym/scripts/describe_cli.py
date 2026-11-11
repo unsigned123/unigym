@@ -169,13 +169,16 @@ def cmd_describe(a: argparse.Namespace, extra: list[str]) -> int:
     load_mounted_code()
     with open(a.config) as f:
         cfg = yaml.safe_load(f)
-    # a scene-bearing run resolves its exact `scenes` catalog id through an
-    # explicit runtime built at this composition boundary (no module global)
+    # a scene-bearing run resolves its exact `scenes` catalog id, and a
+    # benchmark/both run resolves benchmark packs, through an explicit runtime
+    # built at this composition boundary (no module global)
     runtime = None
-    if isinstance(cfg, dict) and cfg.get("scene") is not None:
-        from unigym.pack_api import discover
+    if isinstance(cfg, dict):
+        mode = cfg.get("mode", "collect")
+        if cfg.get("scene") is not None or mode in ("benchmark", "both"):
+            from unigym.pack_api import discover
 
-        runtime = discover(entry_points=True)
+            runtime = discover(entry_points=True)
     tmp_dir = tempfile.mkdtemp(prefix="unigym_describe_")
     instance = None
     try:

@@ -27,7 +27,6 @@ import yaml
 from unigym.core import registry as core_registry
 from unigym.core import run_ops
 from unigym.core.session import SessionError, SessionOpError, attach
-from unigym.packs import pack_roots
 from unigym.runtime.bridge import hb_alive, probe_heartbeat
 from unigym.run.config_ref import resolve_run_config
 
@@ -308,9 +307,9 @@ def list_configs(svc) -> tuple[int, dict]:
     """Catalog run spawn choices + summaries (contract §1.8).
 
     The ``runs`` catalog of the daemon's explicit pack runtime, plus the
-    legacy ``benchmarks`` face scan (unchanged until the benchmark
-    cutover).  Catalog ids are unique by construction, so there is no
-    ``run_name`` shadowing or duplicate resolution here.
+    benchmark packs discovered from the same runtime's ``benchmarks`` face.
+    Catalog ids are unique by construction, so there is no ``run_name``
+    shadowing or duplicate resolution here.
 
     Only resource-backed run items that resolve to a file are listable.
     An entrypoint-only item or a directory resource has no config file to
@@ -349,31 +348,19 @@ def list_configs(svc) -> tuple[int, dict]:
             }
         )
     packs = []
-    for pack in pack_roots():
-        face = pack.faces.get("benchmarks")
-        if face is None or not face.is_dir():
+    from unigym.benchmarks.packs import discover_packs
+
+    for name, pack in discover_packs(runtime).packs.items():
+        if pack.root is None:  # builtin namespace, not a discovered pack dir
             continue
-        for p in sorted(face.iterdir()):
-            meta = p / "pack.yaml"
-            if not p.is_dir() or not meta.is_file():
-                continue
-            try:
-                doc = yaml.load(meta.read_text(), Loader=_YAML_LOADER) or {}
-            except (OSError, ValueError):
-                doc = {}
-            tasks = (
-                sorted(x.stem for x in (p / "tasks").glob("*.yaml"))
-                if (p / "tasks").is_dir()
-                else []
-            )
-            packs.append(
-                {
-                    "name": doc.get("name") or p.name,
-                    "version": doc.get("version"),
-                    "relative": str(p.relative_to(face)),
-                    "tasks": tasks,
-                }
-            )
+        packs.append(
+            {
+                "name": name,
+                "version": pack.version,
+                "relative": pack.root.name,
+                "tasks": sorted(pack.tasks),
+            }
+        )
     return 200, {
         "ok": True,
         "configs": configs,

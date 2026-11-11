@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from unigym.filters.base import EpisodeFilter
     from unigym.io.writer import ShardWriter
     from unigym.language.base import LanguageGenerator
+    from unigym.packs.runtime import PackRuntime
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
     from unigym.robots.base import RobotRecipe
@@ -850,6 +851,7 @@ def _build_sinks(
     bench_cfg: dict[str, JsonValue],
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
+    pack_runtime: PackRuntime | None,
 ) -> _SinkBundle:
     """Step 5: director + timeline + mode sink composition."""
     from unigym.runner.sinks import BenchmarkSink, CollectSink, FanOutSink
@@ -914,12 +916,14 @@ def _build_sinks(
     if mode in ("benchmark", "both"):
         if task_meta is None:
             raise RuntimeError("benchmark mode requires task metadata")
-        # benchmark.packs: extra pack dirs (docs/contracts/benchmark_contract.md §10);
-        # builtin registry + <repo>/benchmark_packs are always discovered
+        if pack_runtime is None:
+            raise RuntimeError("benchmark mode requires a pack runtime")
+        # benchmark tasks resolve through the runtime ``benchmarks`` catalog
+        # face (no run-config pack list, no repository scan)
         bench_tasks = build_tasks(
             _config_dict_list(bench_cfg.get("tasks")),
             dict(task_meta),
-            packs_cfg=_config_list(bench_cfg.get("packs")),
+            pack_runtime,
         )
         bench_sink = BenchmarkSink(
             tasks=bench_tasks,
@@ -1098,6 +1102,14 @@ def build_instance(spec: RunSpec) -> RunInstance:
     backend_label = spec.backend
     info = backend_info(backend_label)
     mode = spec.mode
+    pack_runtime = spec.pack_runtime
+    if mode in ("benchmark", "both") and pack_runtime is None:
+        raise ValueError(
+            f"run mode {mode!r} requires a pack runtime: benchmark packs are "
+            "declared on the PackRuntime 'benchmarks' face | hint: build "
+            "discover(entry_points=True) at the composition boundary and "
+            "pass it to build_spec"
+        )
     seed = spec.seed
     import torch
 
@@ -1314,6 +1326,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         bench_cfg,
         task_meta,
         sensing["contact_manager"],
+        pack_runtime,
     )
     wiring = _build_bridge_and_wiring(
         spec,

@@ -27,8 +27,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
 
 
 #: Key prefixes that stay GLOBAL in the recorded data (objects, contact
@@ -341,7 +345,7 @@ def register(cls: type[Task]) -> type[Task]:
     return cls
 
 
-def build_tasks(sections: list[dict], meta: dict, packs_cfg: list | None = None) -> list[Task]:
+def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[Task]:
     """Instantiate tasks from yaml ``benchmark.tasks`` sections.
 
     Routing (B1.5): a section with ``class: formula`` builds a
@@ -354,9 +358,10 @@ def build_tasks(sections: list[dict], meta: dict, packs_cfg: list | None = None)
     becomes the canonical ``<pack>/<task>``.  Any other ``class`` value
     raises ValueError.
 
-    ``packs_cfg`` is the run yaml's ``benchmark.packs`` list of pack
-    directories (see packs.discover_packs for the full scan order).
-    ``<pack>/*`` wildcard sections expand to the whole pack (sorted).
+    ``runtime`` is the caller's :class:`~unigym.packs.runtime.PackRuntime`;
+    pack discovery reads only its ``benchmarks`` catalog entries
+    (benchmarks/packs.discover_packs).  ``<pack>/*`` wildcard sections
+    expand to the whole pack (sorted).
 
     Unknown task names raise ValueError (mirrors the adapter registry).
     Duplicate task names raise ValueError (BenchmarkSink keys results by
@@ -364,7 +369,7 @@ def build_tasks(sections: list[dict], meta: dict, packs_cfg: list | None = None)
     """
     from .packs import discover_packs  # lazy: packs.py imports this module
 
-    index = discover_packs(packs_cfg)
+    index = discover_packs(runtime)
     sections = index.expand_wildcards(sections)
     tasks: list[Task] = []
     seen_names: set[str] = set()

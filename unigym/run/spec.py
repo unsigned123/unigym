@@ -126,6 +126,9 @@ class RunSpec:
     #: isaaclab backend maps to native static colliders; empty for
     #: config-backed runs.  Not serialized into the yaml config today.
     static_shapes: tuple[JsonValue, ...] = ()
+    #: the caller's pack runtime (non-serialized): benchmark pack discovery
+    #: reads its ``benchmarks`` catalog face.  Never written to cfg/ledger.
+    pack_runtime: PackRuntime | None = None
 
 
 def _route_content(
@@ -379,7 +382,10 @@ def build_spec(
     """Validate/normalize one run config + CLI overrides into a RunSpec.
 
     A config declaring ``scene:`` resolves that exact catalog id through
-    *runtime*; configs without one need no runtime.
+    *runtime*; configs without one need no runtime there.  A ``benchmark`` /
+    ``both`` run stores *runtime* on the spec for benchmark pack discovery.
+    A legacy ``benchmark.packs`` list is rejected: packs are declared on the
+    runtime ``benchmarks`` face.
     """
     raw_cfg = copy.deepcopy(cfg)
     # The content key surface ('objects:') normalizes onto the
@@ -448,6 +454,16 @@ def build_spec(
             f"mode '{mode_value}' is not implemented " "(one of: collect | benchmark | both)"
         )
     mode = mode_value
+    from unigym.errors import ConfigError
+
+    benchmark_cfg = _require_config(cfg.get("benchmark") or {}, "benchmark")
+    if "packs" in benchmark_cfg:
+        raise ConfigError(
+            f"{args.config}: benchmark.packs is removed; benchmark packs are "
+            "declared on the PackRuntime 'benchmarks' face "
+            "(provides: benchmarks: [{id: <id>, resource: <pack dir>}]) "
+            "-- build the runtime and pass it to build_spec instead"
+        )
     env_cfg = _require_config(cfg.get("env"), "env")
     col_cfg = _require_config(cfg.get("collect"), "collect")
     adapter_cfg = _require_config(cfg.get("adapter") or {}, "adapter")
@@ -472,7 +488,6 @@ def build_spec(
     # The run's ``objects:`` content spec (split out by the
     # normalizer) rides env.params into the mujoco scene build.
     backend_label = str(env_cfg.get("backend", "isaaclab"))
-    from unigym.errors import ConfigError
 
     raw_backend_options = env_cfg.get("backend_options")
     if raw_backend_options is not None and not is_json_object(raw_backend_options):
@@ -536,7 +551,7 @@ def build_spec(
             "run_log": getattr(args, "run_log", None),
             "serve_pause": bool(getattr(args, "serve_pause", False)),
         },
-        benchmark=_require_config(cfg.get("benchmark") or {}, "benchmark"),
+        benchmark=benchmark_cfg,
         terminations=cfg.get("terminations"),
         runner=runner_cfg,
         output=OutputSpec(
@@ -561,4 +576,5 @@ def build_spec(
         num_envs=num_envs,
         total_steps=total_steps,
         device=device,
+        pack_runtime=runtime,
     )

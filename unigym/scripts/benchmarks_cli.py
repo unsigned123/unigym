@@ -8,9 +8,9 @@ Both accept ``--json``: one JSON document on stdout, success AND failure
 alike ({"ok": false, "error": ...} + exit 1; repo --json discipline).
 
 Both commands import unigym.benchmarks.packs lazily (stdlib-only module
-import, like client/server in launch.py); ``list`` also triggers the full
-discovery (builtin -> benchmark.packs is a RUN-yaml key, so only the
-unigym.yaml packs_root default applies here).
+import, like client/server in launch.py).  ``list`` builds the configured
+pack runtime and discovers the builtin namespace plus every resource-backed
+``benchmarks`` catalog entry; ``validate`` loads one explicit directory.
 """
 
 from __future__ import annotations
@@ -32,8 +32,9 @@ def _json_exit(msg: str) -> None:
 
 def cmd_list(a, _pt=None) -> int:
     from unigym.benchmarks.packs import discover_packs
+    from unigym.pack_api import discover
 
-    index = discover_packs()
+    index = discover_packs(discover(entry_points=True))
     if a.pack is not None and a.pack not in index.packs:
         msg = f"unknown pack '{a.pack}' " f"(available: {sorted(index.packs)})"
         if getattr(a, "json", False):
@@ -131,7 +132,7 @@ def add_benchmarks_subparser(sub) -> None:
     bm = sub.add_parser("benchmarks", help="list / validate benchmark packs")
     bms = bm.add_subparsers(dest="benchmarks_cmd", required=True)
     bl = bms.add_parser(
-        "list", help="tasks grouped by pack namespace " "(builtin + benchmark_packs/*)"
+        "list", help="tasks grouped by pack namespace " "(builtin + runtime benchmarks resources)"
     )
     bl.add_argument("--pack", default=None, help="only this pack (default: all)")
     bl.add_argument("--json", action="store_true", help="single JSON document on stdout")

@@ -437,13 +437,16 @@ def main():
     load_mounted_code()
     with open(args_cli.config) as f:
         cfg = yaml.safe_load(f)
-    # a scene-bearing run resolves its exact `scenes` catalog id through an
-    # explicit runtime built at this composition boundary (no module global)
+    # a scene-bearing run resolves its exact `scenes` catalog id, and a
+    # benchmark/both run resolves benchmark packs, through an explicit runtime
+    # built at this composition boundary (no module global)
     runtime = None
-    if isinstance(cfg, dict) and cfg.get("scene") is not None:
-        from unigym.pack_api import discover
+    if isinstance(cfg, dict):
+        mode = cfg.get("mode", "collect")
+        if cfg.get("scene") is not None or mode in ("benchmark", "both"):
+            from unigym.pack_api import discover
 
-        runtime = discover(entry_points=True)
+            runtime = discover(entry_points=True)
     # v068 runtime layout: the worker ensures the artifact tree too
     # (idempotent; design §2 -- the daemon side also mkdir -p's at
     # start, this covers direct `collect_cli` invocations)

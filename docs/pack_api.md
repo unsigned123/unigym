@@ -1,13 +1,15 @@
 # Pack API: manifest schema, catalog and runtime
 
 Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
-Phase 5 runtime parity, the Phase 6a scene consumer cutover and the Phase 6b
-run consumer cutover are implemented. Scene references resolve only through the
-runtime `scenes` face; run config references resolve only as absolute file
-paths or exact runtime `runs` catalog ids. The runtime is still a parallel path
-for task, asset, benchmark and termination loading: the legacy `unigym.packs`
-discovery and loader remain the active runtime there, and nothing in this
-document switches that legacy loader or migrates those domain loaders.
+Phase 5 runtime parity, the Phase 6a scene consumer cutover, the Phase 6b run
+consumer cutover and the Phase 7a benchmark consumer cutover are implemented.
+Scene references resolve only through the runtime `scenes` face; run config
+references resolve only as absolute file paths or exact runtime `runs` catalog
+ids; benchmark pack discovery reads only resource-backed entries of the runtime
+`benchmarks` face. The runtime is still a parallel path for task, asset and
+termination loading: the legacy `unigym.packs` discovery and loader remain the
+active runtime there, and nothing in this document switches that legacy loader
+or migrates those domain loaders.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -18,6 +20,7 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase5-runtime-parity.md`,
 `plans/drafts/pack-api-phase6a-scene-cutover.md`,
 `plans/drafts/pack-api-phase6b-run-cutover.md`,
+`plans/drafts/pack-api-phase7a-benchmark-cutover.md`,
 `plans/drafts/legacy-loader-cutover.md`).
 
 ## Public imports
@@ -314,7 +317,8 @@ The runtime is required at the boundary:
 runtime=...)` and a scene-bearing `World.from_config(source, *,
 runtime=...)` follow the same boundary. `Run`, `collect_cli` and `describe_cli`
 build `discover(entry_points=True)` at their composition boundary only when the
-config declares `scene:`; there is no module-level default runtime or cache.
+config declares `scene:` or its mode is `benchmark`/`both`; there is no
+module-level default runtime or cache.
 
 ### Run resources
 
@@ -350,10 +354,57 @@ The daemon owns one explicit `pack_runtime` built at `DaemonService`
 construction. `GET /api/configs` enumerates `runtime.catalog.entries("runs")`:
 resource-backed items carry `{id, path, relative: <id>, ...summary}`;
 entrypoint-only run items are reported in `unsupported` instead of being
-listed or silently dropped. `benchmark_packs` listing remains the legacy
-`pack_roots` scan until the benchmark cutover. `POST /api/start` calls the same
+listed or silently dropped. `benchmark_packs` is listed with
+`discover_packs(runtime)`, so the daemon reports the same runtime `benchmarks`
+resources the run uses. `POST /api/start` calls the same
 shared `resolve_run_config` with the daemon runtime, so it accepts an absolute
 path or an exact `runs` catalog id and rejects relative paths and globs.
+
+### Benchmark resources
+
+A benchmark pack is the existing directory (`pack.yaml`, `tasks/`,
+`references/`, optional `templates/`) declared as one runtime resource:
+
+```yaml
+provides:
+  benchmarks:
+    - id: acme.bench
+      resource: benchmarks/acme
+```
+
+Discovery is `builtin` first, then every resource-backed `benchmarks` catalog
+entry in catalog order:
+
+```text
+PackRuntime.catalog.entries("benchmarks")
+  -> runtime.resource_for("benchmarks", <id>)
+  -> load_pack(<resource directory>)      # unchanged domain parser
+  -> PackIndex(builtin + catalog packs)
+```
+
+`unigym.benchmarks.packs.discover_packs(runtime)` requires the runtime and never
+scans the repository, dependencies or `benchmark_packs/` directories. The
+resource must be a benchmark-pack directory: an entrypoint-only item, a file
+resource or a missing resource fails with a `PackError` naming the catalog id.
+Duplicate pack names still fail in `PackIndex`.
+
+`unigym.benchmarks.base.build_tasks(sections, meta, runtime)` requires the
+runtime; `<pack>/<task>` resolution, unique-bare names and `<pack>/*` wildcard
+expansion are unchanged. `RunSpec.pack_runtime` carries the runtime to
+`build_instance` and is never serialized into the config or ledger. A
+benchmark/both run without a runtime fails at build; `Run`, `collect_cli` and
+`describe_cli` build `discover(entry_points=True)` when the config declares
+`scene:` or its mode is `benchmark`/`both`.
+
+`benchmark.packs` in a run config is rejected with a teaching `ConfigError`:
+packs are declared on the runtime `benchmarks` face. `benchmark.tasks`
+resolution and wildcards are unchanged.
+
+Analysis follows the same runtime: `analysis.gate.resolve_task_specs(config,
+runtime)` requires it, `gate_doc` builds the configured runtime at its analysis
+boundary when none is supplied, and `analyze --metric` does the same.
+`unigym benchmarks list` builds the runtime; `unigym benchmarks validate <dir>`
+keeps loading one explicit directory through `load_pack`.
 
 ### Pack context
 
@@ -407,10 +458,10 @@ it needs to.
 
 The current phases deliberately do not implement:
 
-- switching the legacy `unigym.packs` loader onto this runtime for task, asset,
-  benchmark or termination loading; the legacy loader remains the active
-  discovery path there (scene references and run config references are already
-  cut over);
+- switching the legacy `unigym.packs` loader onto this runtime for task, asset
+  or termination loading; the legacy loader remains the active discovery path
+  there (scene references, run config references and benchmark pack discovery
+  are already cut over);
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and the legacy loader modules are not deleted by this
   phase;
@@ -418,10 +469,9 @@ The current phases deliberately do not implement:
 - requirement or `requires` resolution;
 - provider registration orchestration; `activate_all` only calls entrypoints
   in catalog order and does not register providers;
-- migration of task, asset, benchmark or termination loaders onto pack
-  resources;
+- migration of task, asset or termination loaders onto pack resources;
 - a sandbox for trusted code packs.
 
-The legacy loader stays active for task, asset, benchmark and termination
-loading until their later cutover phases. Benchmark pack listing in the daemon
-also stays on the legacy `pack_roots` scan until the benchmark cutover.
+The legacy loader stays active for task, asset and termination loading until
+their later cutover phases. Benchmark pack discovery and the daemon
+`benchmark_packs` listing use the runtime `benchmarks` face.

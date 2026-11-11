@@ -132,8 +132,11 @@ def _metric_chart(a: argparse.Namespace, run_dir: Path, out: Path) -> int:
         meta = json.loads((run_dir / "meta.json").read_text())
     except (OSError, ValueError):
         meta = {}
+    from unigym.pack_api import discover
+
+    runtime = discover(entry_points=True)
     thresholds: list[dict] = []
-    for _name, spec in gate.resolve_task_specs(meta.get("config")):
+    for _name, spec in gate.resolve_task_specs(meta.get("config"), runtime):
         thresholds += gate.thresholds_for(spec, a.metric)
     series = [(k, v) for k, v in sorted(frames.items())]
     hlines = [(t["value"], t["label"]) for t in thresholds]

@@ -23,9 +23,13 @@ Discovery order (later sources see earlier ones for ambiguity reporting;
 nothing is ever silently overwritten):
 
     1. builtin   -- the first-party TASK_REGISTRY as namespace "builtin"
-    2. benchmark.packs: [paths...]   from the run yaml's benchmark section
-    3. packs_root -- unigym.yaml ``packs_root`` key, default <repo>/benchmark_packs
-                     (each immediate subdir owning a pack.yaml is a pack)
+    2. every resource-backed ``benchmarks`` entry of the caller's
+       :class:`~unigym.packs.runtime.PackRuntime` catalog, in catalog order;
+       the declared resource IS the existing benchmark-pack directory
+
+There is no run-config pack list and no repository/dependency scan: a
+benchmark pack is discovered only when a manifest declares it on the runtime
+``benchmarks`` face.
 
 Canonical task name is ``<pack>/<task>`` (the report key).  A bare name
 ("stand") resolves only when unique across ALL namespaces; an ambiguous
@@ -68,6 +72,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .base import TASK_REGISTRY, EpisodeData, Task  # noqa: F401 (EpisodeData: docs)
 from .formula import validate_formula_spec
@@ -76,6 +81,9 @@ from .pack_meta import (
     resolve_row,  # noqa: F401
     rewrite_pack_references,
 )
+
+if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
 
 _BUILTIN_NS = "builtin"
 _MODULE_PREFIX = "unigym_pack_"
@@ -517,65 +525,35 @@ def builtin_pack() -> Pack:
     )
 
 
-def default_packs_root() -> Path:
-    """unigym.yaml ``packs_root`` if set, else the repo ``benchmarks`` face."""
-    from unigym.core.asset_root import repo_root
-    from unigym.packs import repo_pack
+def discover_packs(runtime: PackRuntime) -> PackIndex:
+    """Discover the builtin namespace plus every runtime ``benchmarks`` resource.
 
-    repo = Path(repo_root())
-    dc = repo / "unigym.yaml"
-    if dc.is_file():
-        import yaml  # lazy
+    The runtime catalog is the only discovery source: the builtin pack comes
+    first, then every ``benchmarks`` catalog entry in catalog order, resolved
+    through ``runtime.resource_for("benchmarks", id)`` and loaded by the
+    existing :func:`load_pack`.  A resource must be a benchmark-pack directory
+    (``pack.yaml`` + ``tasks/``); an entrypoint-only item, a file resource or
+    a missing resource fails naming the catalog id.  There is no run-config
+    pack list and no repository/dependency scan.
 
-        try:
-            cfg = yaml.safe_load(dc.read_text()) or {}
-        except yaml.YAMLError:
-            cfg = {}
-        root = cfg.get("packs_root")
-        if root:
-            return Path(root)
-    face = repo_pack().faces.get("benchmarks")
-    return face if face is not None else repo / "benchmark_packs"
-
-
-def discover_packs(packs_cfg: list | None = None, packs_root=None) -> PackIndex:
-    """Full discovery: builtin -> explicit benchmark.packs paths ->
-    packs_root subdirs (sorted; a subdir counts when it owns pack.yaml).
-
-    ``packs_cfg`` is the run yaml's ``benchmark.packs`` list -- every entry
-    must BE a pack directory (missing pack.yaml is an error there, unlike
-    the packs_root scan where non-pack subdirs are simply not packs).
     Each pack is loaded eagerly, so definition errors surface at discovery
     (aggregated per pack), not mid-run.
     """
-    packs = [builtin_pack()]
-    for raw in packs_cfg or []:
-        root = Path(raw)
-        if not root.is_dir():
-            raise ValueError(f"benchmark.packs entry not found: {root}")
-        packs.append(load_pack(root))
-    if packs_root is not None:
-        root = Path(packs_root)
-        if root.is_dir():
-            for child in sorted(root.iterdir()):
-                if (child / "pack.yaml").is_file():
-                    packs.append(load_pack(child))
-        return PackIndex(packs)
-    # v081: span the mounted packs' benchmarks faces, external first;
-    # a pack name is shadowed by the earlier mount (the repo copy is the
-    # last one, exactly like the runs/scenes faces).
-    from unigym.packs import pack_roots
+    from unigym.packs import PackError
 
-    seen = {pack.name for pack in packs}
-    for mounted in pack_roots():
-        face = mounted.faces.get("benchmarks")
-        if face is None or not face.is_dir():
-            continue
-        for child in sorted(face.iterdir()):
-            if not (child / "pack.yaml").is_file():
-                continue
-            if child.name in seen:
-                continue
-            packs.append(load_pack(child))
-            seen.add(child.name)
+    packs = [builtin_pack()]
+    for entry in runtime.catalog.entries("benchmarks"):
+        try:
+            path = runtime.resource_for("benchmarks", entry.id)
+        except PackError as exc:
+            raise PackError(
+                f"benchmarks catalog id {entry.id!r} (pack {entry.pack!r}) "
+                f"cannot be used as a benchmark pack: {exc}"
+            ) from exc
+        if not path.is_dir():
+            raise PackError(
+                f"benchmarks catalog id {entry.id!r} (pack {entry.pack!r}) "
+                f"must declare a benchmark-pack directory, got file {path}"
+            )
+        packs.append(load_pack(path))
     return PackIndex(packs)
