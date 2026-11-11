@@ -422,8 +422,9 @@ GitHub PR CI runs the lane registry, not hand-copied pytest paths:
 Every backend job still selects tests through the `ci/compat.toml` lane
 registry; no job copies a backend pytest path directly. The `mujoco` job needs
 a headless GL install on the hosted runner. The `mjwarp` job runs on CPU: it
-sets an empty `CUDA_VISIBLE_DEVICES` and installs the `dev` and `warp` extras,
-so no GL install is required. The `isaaclab2` job is default-skipped through a
+sets an empty `CUDA_VISIBLE_DEVICES` and installs the `dev` and `warp` extras;
+it also installs headless GL because importing `mujoco` loads the EGL path even
+when no renderer is created. The `isaaclab2` job is default-skipped through a
 job-level `if:` condition on the repository variable
 `UNIGYM_RUN_ISAACLAB2 == 'true'`; enabling it requires a self-hosted runner
 with the `isaaclab2` label, the `UNIGYM_ISAACLAB2_ENV` repository variable
@@ -440,7 +441,9 @@ dependency itself — the external conda environment owns them.
 The `package` job proves the installed wheel, not the source tree. It runs
 `tests/smoke` with the test working directory outside the checkout, supplies no
 `PYTHONPATH` or source-tree import path, and installs only the built wheel plus
-pytest into the temporary environment. The smoke tests are copied rather than
+pytest into the temporary environment. It installs headless GL because the
+smoke manual-driver test imports `mujoco`, whose EGL path loads even without a
+renderer. The smoke tests are copied rather than
 imported from the source tree, so a missing package or install-time dependency
 surfaces as a failure. This job still excludes the backend, daemon and heavy
 integration lanes; it is an install/import/tiny end-to-end check, not a second

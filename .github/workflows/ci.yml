@@ -147,6 +147,10 @@ jobs:
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v6
+      - name: Install headless GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
       - name: Install dev + warp environment
         run: uv sync --frozen --extra dev --extra warp
       - name: Run mjwarp lane
@@ -193,6 +197,10 @@ jobs:
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v6
+      - name: Install headless GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
       - name: Build wheel
         run: uv build
       - name: Install wheel in a clean environment
