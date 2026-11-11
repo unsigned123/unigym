@@ -17,7 +17,7 @@ documents in later phases.
 A `trust: code` pack with a manifest `entrypoint` (`acme_pack:register`) and a
 `providers` item (`acme_code.dynamic_assets`, kind `asset_generator`) that uses
 the same entrypoint. `python/acme_pack/__init__.py` holds a harmless
-`register(api)` callable.
+no-argument `register()` callable.
 
 Manifest and catalog loading must never import `acme_pack`: the module is
 deliberately outside the import path, and `tests/contract/test_pack_fixtures.py`
@@ -27,7 +27,7 @@ asserts it stays absent from `sys.modules` after both fixtures load.
 
 - Fixtures are self-contained: no external assets, downloads or machine-local
   paths. Resource references stay pack-relative and must not use `..`.
-- The code fixture is trust-`code` data only. Phase 1 does not activate code
-  packs; activation, discovery and wheel/entry-point tests arrive in later
-  phases and may reuse these fixtures.
+- The code fixture is trust-`code` data. Phase 3 uses it for explicit static-root
+  discovery and no-argument activation; wheel/entry-point tests arrive in a
+  later phase and may reuse it.
 - Keep the fixtures small. Do not copy real asset or benchmark packs here.

@@ -3,6 +3,6 @@
 from __future__ import annotations
 
 
-def register(api: object) -> None:
+def register() -> None:
     """Do nothing; the fixture exists only to prove code loading is lazy."""
     return None

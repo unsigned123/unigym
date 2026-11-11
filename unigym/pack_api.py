@@ -5,8 +5,10 @@ module.  It stays thin: resolution is delegated to :mod:`unigym.packs`
 and registration to the existing closed registries, which this module
 does not modify.
 
-The ``unigym.pack/1`` manifest schema, its loaded types and the read-only
-pack catalog are exported here as the public Phase 1 contract.
+The ``unigym.pack/1`` manifest schema, its loaded types, the read-only pack
+catalog and the explicit static-root runtime are exported here as the public
+pack contract.  Discovery and activation stay lazy: importing this module never
+imports pack Python.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import yaml
 
 from unigym.packs import find, resolve
 from unigym.packs.catalog import CatalogEntry, PackCatalog
+from unigym.packs.runtime import ActivationHandle, PackRuntime, discover
 from unigym.packs.load import PACK_MODULE_PREFIX
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
 
@@ -102,12 +105,15 @@ def register_termination(name: str, cls):
 
 
 __all__ = [
+    "ActivationHandle",
     "CatalogEntry",
     "PackCatalog",
     "PackManifestV1",
+    "PackRuntime",
     "ProvidedItem",
     "asset_path",
     "code_pack_root",
+    "discover",
     "find",
     "load_asset_manifest",
     "load_manifest_v1",
