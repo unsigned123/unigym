@@ -379,12 +379,23 @@ conda run --no-capture-output -n "$UNIGYM_ISAACLAB2_ENV" \
 
 ## 7. Running tests
 
-### 7.1 Current bootstrap commands
+### 7.1 Running a lane
 
-Use the environment that owns the lane. For the primary `.venv`:
+`ci/compat.toml` owns each lane's environment and selectors. Run a lane through
+the registry instead of copying pytest paths:
 
 ```bash
-.venv/bin/python -m pytest -q
+.venv/bin/python tools/ci/run_lane.py --list
+.venv/bin/python tools/ci/run_lane.py --lane d0           # default base suite
+.venv/bin/python tools/ci/run_lane.py --lane integration  # CLI and daemon-extra paths
+.venv/bin/python tools/ci/run_lane.py --lane isaaclab2 --dry-run
+```
+
+`--dry-run` prints the exact command the lane would execute without running it.
+
+For a single file or test while iterating, call pytest directly:
+
+```bash
 .venv/bin/python -m pytest tests/contract/test_control_contract.py -vv
 .venv/bin/python -m pytest tests/contract/test_control_contract.py::test_name -vv
 ```
@@ -392,7 +403,23 @@ Use the environment that owns the lane. For the primary `.venv`:
 Do not run the full backend matrix locally unless you are working on that
 backend or preparing a release.
 
-### 7.2 Target commands
+### 7.2 CI lanes
+
+GitHub PR CI runs the lane registry, not hand-copied pytest paths:
+
+- the `tests` job runs `tools/ci/run_lane.py --lane d0`;
+- the `integration` job runs `tools/ci/run_lane.py --lane integration` in a
+  clean base environment with no daemon extra and no headless GL.
+
+Because the `integration` job installs only the base `dev` extra, it exercises
+the daemon CLI missing-`zmq` teaching error in
+`tests/integration/test_daemon_cli.py`, not the daemon lifecycle lane. The
+`daemon` lane starts real daemon processes and stays out of GitHub PR CI.
+Backend lanes (`mujoco`, `mjwarp`, `isaaclab2`) do not run in GitHub PR CI
+either; they need provisioned or GPU environments and belong to separate or
+nightly runs.
+
+### 7.3 Target commands
 
 Once the test Makefile exists:
 
@@ -411,7 +438,7 @@ pytest -m "layer_conformance and not sim"
 pytest -m "backend_mujoco and not slow"
 ```
 
-### 7.3 Before commit
+### 7.4 Before commit
 
 At minimum:
 
@@ -422,7 +449,7 @@ pytest -m fast -x -q
 If the change touches a backend, public API, or dependency boundary, run the
 relevant targeted lane/tests as well.
 
-### 7.4 Before merge/release
+### 7.5 Before merge/release
 
 The full required matrix is a CI responsibility. Do not claim a lane passed
 unless you actually ran it. Report unrun lanes explicitly.

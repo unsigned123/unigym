@@ -89,8 +89,23 @@ jobs:
           sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
       - name: Install dev environment
         run: uv sync --frozen --extra dev
-      - name: Run tests
-        run: .venv/bin/python -m pytest -q -p no:cacheprovider
+      - name: Run d0 lane
+        run: .venv/bin/python tools/ci/run_lane.py --lane d0
+
+  integration:
+    name: integration lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Run integration lane
+        run: .venv/bin/python tools/ci/run_lane.py --lane integration
 
   imports:
     name: import contracts
