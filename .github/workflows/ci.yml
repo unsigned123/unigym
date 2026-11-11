@@ -116,6 +116,58 @@ jobs:
       - name: Run integration lane
         run: .venv/bin/python tools/ci/run_lane.py --lane integration
 
+  backend-mujoco:
+    name: backend mujoco
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install headless GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
+      - name: Install dev environment
+        run: uv sync --frozen --extra dev
+      - name: Run mujoco lane
+        run: .venv/bin/python tools/ci/run_lane.py --lane mujoco
+
+  backend-mjwarp:
+    name: backend mjwarp (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev + warp environment
+        run: uv sync --frozen --extra dev --extra warp
+      - name: Run mjwarp lane
+        run: .venv/bin/python tools/ci/run_lane.py --lane mjwarp
+
+  isaaclab2:
+    name: backend isaaclab2 (self-hosted)
+    if: ${{ vars.UNIGYM_RUN_ISAACLAB2 == 'true' }}
+    runs-on: [self-hosted, isaaclab2]
+    timeout-minutes: 60
+    env:
+      UNIGYM_ISAACLAB2_ENV: ${{ vars.UNIGYM_ISAACLAB2_ENV }}
+      UNIGYM_ISAACLAB2_ASSET_CACHE: ${{ vars.UNIGYM_ISAACLAB2_ASSET_CACHE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run isaaclab2 lane
+        run: python3 tools/ci/run_lane.py --lane isaaclab2
+
   imports:
     name: import contracts
     runs-on: ubuntu-latest

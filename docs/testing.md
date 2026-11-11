@@ -410,8 +410,32 @@ GitHub PR CI runs the lane registry, not hand-copied pytest paths:
 - the `tests` job runs `tools/ci/run_lane.py --lane d0`;
 - the `integration` job runs `tools/ci/run_lane.py --lane integration` in a
   clean base environment with no daemon extra and no headless GL;
+- the `backend-mujoco` job installs headless GL and runs
+  `tools/ci/run_lane.py --lane mujoco` on a hosted Ubuntu runner;
+- the `backend-mjwarp` job installs the `dev` and `warp` extras and runs
+  `tools/ci/run_lane.py --lane mjwarp` on a hosted Ubuntu runner;
+- the `isaaclab2` job runs `tools/ci/run_lane.py --lane isaaclab2` on a
+  self-hosted runner and is skipped unless explicitly enabled;
 - the `package` job builds the wheel, installs it into a clean temporary
   environment, copies `tests/smoke` outside the checkout, and runs it there.
+
+Every backend job still selects tests through the `ci/compat.toml` lane
+registry; no job copies a backend pytest path directly. The `mujoco` job needs
+a headless GL install on the hosted runner. The `mjwarp` job runs on CPU: it
+sets an empty `CUDA_VISIBLE_DEVICES` and installs the `dev` and `warp` extras,
+so no GL install is required. The `isaaclab2` job is default-skipped through a
+job-level `if:` condition on the repository variable
+`UNIGYM_RUN_ISAACLAB2 == 'true'`; enabling it requires a self-hosted runner
+with the `isaaclab2` label, the `UNIGYM_ISAACLAB2_ENV` repository variable
+naming the clean conda environment, the `UNIGYM_ISAACLAB2_ASSET_CACHE`
+repository variable pointing at the provisioned Cartpole cache, and a `conda`
+executable visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the
+runner). The cache directory must contain `cartpole.usd` and its `Props/`
+dependency; a missing cache fails the strict lane rather than skipping. A
+skipped `isaaclab2`
+job is a visible skip, not a green pass: the job uses neither
+`continue-on-error` nor an echo/`exit 0` stub, and it installs no Isaac
+dependency itself — the external conda environment owns them.
 
 The `package` job proves the installed wheel, not the source tree. It runs
 `tests/smoke` with the test working directory outside the checkout, supplies no
@@ -426,10 +450,10 @@ lives only in the throwaway wheel environment.
 Because the `integration` job installs only the base `dev` extra, it exercises
 the daemon CLI missing-`zmq` teaching error in
 `tests/integration/test_daemon_cli.py`, not the daemon lifecycle lane. The
-`daemon` lane starts real daemon processes and stays out of GitHub PR CI.
-Backend lanes (`mujoco`, `mjwarp`, `isaaclab2`) do not run in GitHub PR CI
-either; they need provisioned or GPU environments and belong to separate or
-nightly runs.
+`daemon` lane starts real daemon processes and stays out of GitHub PR CI. The
+hosted backend jobs cover `mujoco` and CPU `mjwarp`; the `isaaclab2` lane stays
+default-skipped until a provisioned self-hosted runner and repository variables
+exist. No backend job substitutes a fake pass for a missing environment.
 
 ### 7.3 Target commands
 
