@@ -158,6 +158,27 @@ class PackRuntime:
             raise PackError(f"{where} does not exist under {root}")
         return candidate
 
+    def resource_for(self, face: str, id: str) -> Path:
+        """Resolve the declared resource of the ``(face, id)`` catalog item.
+
+        The lookup is catalog-only: it never activates or imports pack code.
+        An entrypoint-only item has no resource path, so it raises a teaching
+        error that points at :meth:`activate` instead.
+
+        Raises:
+            PackError: The face/id is unknown, the item declares an entrypoint
+                rather than a resource, or the declared resource fails the
+                existing path checks.
+        """
+        entry = self.catalog.entry(face, id)
+        if entry.resource is None:
+            raise PackError(
+                f"pack {entry.pack!r} face {entry.face!r} id {entry.id!r} "
+                f"declares entrypoint {entry.entrypoint!r}, not a resource; "
+                f"use runtime.activate({entry.pack!r}) to activate the pack"
+            )
+        return self.resource(entry.pack, entry.resource)
+
     def activate(self, pack: str) -> ActivationHandle:
         """Activate *pack* once and return the cached handle.
 

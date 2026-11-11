@@ -1,15 +1,17 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phase 1, Phase 3 and Phase 3b contracts are implemented. The runtime is
-a parallel path: the legacy `unigym.packs` discovery and loader remain the
-active runtime, and nothing in this document switches the legacy loader, mounts
-domain providers or migrates scene/run/asset loading.
+Status: Phase 1, Phase 3 and Phase 3b contracts are implemented, with the
+additive Phase 4 `(face, id)` lookup. The runtime is a parallel path: the legacy
+`unigym.packs` discovery and loader remain the active runtime, and nothing in
+this document switches the legacy loader, mounts domain providers or migrates
+scene/run/asset loading.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase1-contract.md`,
 `plans/drafts/pack-api-phase3-discovery.md`,
-`plans/drafts/pack-api-phase3b-sources.md`).
+`plans/drafts/pack-api-phase3b-sources.md`,
+`plans/drafts/pack-api-phase4-resource-lookup.md`).
 
 ## Public imports
 
@@ -150,10 +152,18 @@ catalog.packs()               # ("alpha", "beta"), declaration order
 catalog.get("alpha")          # PackManifestV1
 catalog.entries()             # every CatalogEntry, declaration order
 catalog.entries(face="scenes")  # filtered by face
+catalog.entry("scenes", "alpha.tabletop")  # one CatalogEntry by exact id
 ```
 
 `CatalogEntry` carries `pack`, `face`, `id`, `resource`, `entrypoint` and
 `kind`.
+
+`catalog.entry(face, id)` is an exact lookup of one already-loaded item. It
+validates `face` against the declared vocabulary, then matches `id` on that
+face. An unknown face raises `PackError` with the known faces; an unknown id
+raises `PackError` naming the face, the requested id and the known ids on that
+face. The lookup is catalog-only: it never discovers, scans, parses or imports
+a pack.
 
 Catalog rules:
 
@@ -161,7 +171,8 @@ Catalog rules:
 - pack names must be unique;
 - a `(face, id)` pair must be unique across the whole catalog;
 - manifests and returned tuples are immutable from the caller's perspective;
-- `get` and an unknown `entries(face=...)` raise `unigym.packs.PackError`;
+- `get`, an unknown `entries(face=...)` and an unknown `entry(face, id)` raise
+  `unigym.packs.PackError`;
 - the catalog never discovers, scans or imports packs.
 
 ## Runtime
@@ -171,9 +182,10 @@ sources:
 
 ```text
 discover(roots=None) -> PackCatalog + root_by_pack
-  -> runtime.catalog          enumerate packs and provided items
-  -> runtime.resource(...)    resolve one pack-relative resource
-  -> runtime.activate(...)    import a code pack's entrypoint once
+  -> runtime.catalog           enumerate packs and provided items
+  -> runtime.resource(...)     resolve one pack-relative resource
+  -> runtime.resource_for(...) resolve a catalog item's declared resource
+  -> runtime.activate(...)     import a code pack's entrypoint once
 ```
 
 ```python
@@ -232,6 +244,16 @@ root. It applies the same rules as the schema: `rel` must be non-empty and
 relative, must not contain `..`, must resolve inside the root and must exist.
 Errors name both the pack and the path.
 
+`runtime.resource_for(face, id)` looks up the catalog item through
+`catalog.entry(face, id)` and resolves its declared `resource` through
+`runtime.resource(entry.pack, entry.resource)`, preserving the same path and
+existence checks. It returns the absolute resource `Path`.
+
+Lookup is catalog-only: `resource_for` never activates or imports pack code. An
+entrypoint-only item has no resource path, so it raises `PackError` naming the
+pack, face, id and entrypoint and pointing the caller at
+`runtime.activate(pack)`.
+
 ### Activation
 
 `runtime.activate(pack)` is explicit and cached per runtime:
@@ -260,6 +282,8 @@ The current phases deliberately do not implement:
 
 - switching the legacy `unigym.packs` loader onto this runtime; the legacy
   loader remains the active discovery path;
+- migration of existing runs and packs: old run configs and old pack manifests
+  are not migrated, and no legacy loader is switched by this phase;
 - installed-PyPI `unigym.packs` entry-point or wheel discovery;
 - a compatibility shim between the runtime and legacy mounts;
 - requirement or `requires` resolution;
