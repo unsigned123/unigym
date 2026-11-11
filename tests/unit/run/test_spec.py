@@ -63,6 +63,14 @@ def test_build_spec_applies_cli_overrides_without_mutating_input():
     assert cfg == before
 
 
+def test_build_spec_scene_without_runtime_fails_fast():
+    """A scene-bearing config without a pack runtime is a teaching error."""
+    cfg = _cfg(scene="acme_scene.tabletop")
+
+    with pytest.raises(ValueError, match="acme_scene.tabletop.*requires a pack runtime"):
+        build_spec(cfg, _args())
+
+
 @pytest.mark.parametrize("mode", ["train", "", 1], ids=["unknown", "empty", "integer"])
 def test_build_spec_rejects_unsupported_mode(mode):
     """Only collect / benchmark / both are implemented run modes."""

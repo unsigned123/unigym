@@ -1,10 +1,12 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup
-and Phase 5 runtime parity are implemented. The runtime is a parallel path: the
-legacy `unigym.packs` discovery and loader remain the active runtime, and nothing
-in this document switches the legacy loader, mounts domain providers or migrates
-scene/run/asset loading.
+Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
+Phase 5 runtime parity and the Phase 6a scene consumer cutover are implemented.
+Scene references resolve only through the runtime `scenes` face. The runtime is
+still a parallel path for run, task, asset, benchmark and termination loading:
+the legacy `unigym.packs` discovery and loader remain the active runtime there,
+and nothing in this document switches that legacy loader or migrates those
+domain loaders.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -12,7 +14,9 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase3-discovery.md`,
 `plans/drafts/pack-api-phase3b-sources.md`,
 `plans/drafts/pack-api-phase4-resource-lookup.md`,
-`plans/drafts/pack-api-phase5-runtime-parity.md`).
+`plans/drafts/pack-api-phase5-runtime-parity.md`,
+`plans/drafts/pack-api-phase6a-scene-cutover.md`,
+`plans/drafts/legacy-loader-cutover.md`).
 
 ## Public imports
 
@@ -279,6 +283,37 @@ entrypoint-only item has no resource path, so it raises `PackError` naming the
 pack, face, id and entrypoint and pointing the caller at
 `runtime.activate(pack)`.
 
+### Scene resources
+
+A run config's `scene:` value is an exact `scenes` catalog id, not a directory
+scan:
+
+```yaml
+scene: acme.tabletop
+```
+
+Resolution goes through `runtime.resource_for("scenes", <id>)`, parses the
+declared YAML mapping and keeps the existing content-key normalization and
+three-layer merge (`scene defaults -> task overrides -> run overrides`). The
+consumed `scene:` ref is removed after the merge, so `RunSpec.scene` is not a
+leftover catalog-id string. The legacy `<family>/<name>` form and a direct
+`scene.yaml` file are not scene references; both fail instead of falling back.
+
+The runtime is required at the boundary:
+
+- `apply_scene_bundle(cfg, runtime=None)` returns a config without a `scene:`
+  key (or with `scene: null`) unchanged and needs no runtime;
+- a present `scene:` ref without a runtime raises a teaching `ValueError`
+  naming the ref;
+- an unknown id raises the catalog `PackError` with the face and known ids;
+- a resource that is not valid YAML or not a mapping fails at resolution.
+
+`build_spec(cfg, args, *, runtime=None)`, `World.from_pack(ref, *,
+runtime=...)` and a scene-bearing `World.from_config(source, *,
+runtime=...)` follow the same boundary. `Run`, `collect_cli` and `describe_cli`
+build `discover(entry_points=True)` at their composition boundary only when the
+config declares `scene:`; there is no module-level default runtime or cache.
+
 ### Pack context
 
 A pack entrypoint receives exactly one explicit `PackContext`:
@@ -331,16 +366,18 @@ it needs to.
 
 The current phases deliberately do not implement:
 
-- switching the legacy `unigym.packs` loader onto this runtime; the legacy
-  loader remains the active discovery path;
+- switching the legacy `unigym.packs` loader onto this runtime for run, task,
+  asset, benchmark or termination loading; the legacy loader remains the active
+  discovery path there (scene references are already cut over);
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and no legacy loader is switched by this phase;
 - a compatibility shim between the runtime and legacy mounts;
 - requirement or `requires` resolution;
 - provider registration orchestration; `activate_all` only calls entrypoints
   in catalog order and does not register providers;
-- migration of scene, run, task, asset, benchmark or termination loaders onto
-  pack resources;
+- migration of run, task, asset, benchmark or termination loaders onto pack
+  resources;
 - a sandbox for trusted code packs.
 
-The legacy loader stays active until a later discovery/catalog migration.
+The legacy loader stays active for run, task, asset, benchmark and termination
+loading until their later cutover phases.

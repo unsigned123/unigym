@@ -1,16 +1,18 @@
-"""Scene packs: discovery + the run-config ``scene:`` reference merge.
+"""Scene bundle resolution through the pack runtime ``scenes`` face.
 
-A scene bundle answers "what is this world": the MJ model, the base joint semantics,
-the dynamic props and the reset initializer.  Run configs reference one
-by name (``scene: <family>/<name>``) and the merge routes the bundle's
-blocks into the run config's existing consumption points BEFORE
-placeholder expansion (the pack's ``${UNIGYM_REPO}`` tokens ride the
-same single expansion point as the run yaml).  The actuator laws are
-part of the world declaration: a bundle WITHOUT its ``backend.mujoco.actuators``
-block leaves the seam on its legacy default path, and a run config
-that dropped its ``env.params.actuators`` block on the migration
-intent must therefore fall through to the scene declaration, never
-silently to ``standard_pd``.
+A scene bundle answers "what is this world": the MJ model, the base joint
+semantics, the dynamic props and the reset initializer.  A run config
+references one by its exact ``scenes`` catalog id (``scene:
+acme.tabletop``); :func:`apply_scene_bundle` resolves that id through
+:meth:`unigym.packs.runtime.PackRuntime.resource_for`, parses the declared
+YAML document and routes the bundle's blocks into the run config's existing
+consumption points BEFORE placeholder expansion (the pack's
+``${UNIGYM_REPO}`` tokens ride the same single expansion point as the run
+yaml).  The actuator laws are part of the world declaration: a bundle
+WITHOUT its ``backend.mujoco.actuators`` block leaves the seam on its legacy
+default path, and a run config that dropped its ``env.params.actuators``
+block on the migration intent must therefore fall through to the scene
+declaration, never silently to ``standard_pd``.
 
 =======================  =============================================
 ``backend.mujoco``       routed: ``world_base`` -> the run config TOP
@@ -28,124 +30,65 @@ silently to ``standard_pd``.
 ``initializer``          routed into ``env.params.initializer``
 =======================  =============================================
 
-Discovery mirrors the benchmark_packs mechanism: the ``scenes`` face of
-the mounted packs (the checkout's own ``scene_packs/`` is the implicit
-``repo`` mount's face) is enumerated for ``scene.yaml``; the
-reference's family is the bundle directory, the name the yaml's
-top-level ``name:`` key.  Merge precedence is the three-layer rule (scene defaults -> task
-overrides -> run overrides): a run-level value always wins; mappings
-merge key-wise (so a run can override a single initializer param, e.g.
-the per-seed stream seed, without restating the table).
+Scene refs are exact catalog ids, never directory scans: a reference without
+a runtime is a teaching error and an unknown id fails with the catalog's
+known-id list.  Merge precedence is the three-layer rule (scene defaults ->
+task overrides -> run overrides): a run-level value always wins; mappings
+merge key-wise (so a run can override a single initializer param, e.g. the
+per-seed stream seed, without restating the table).
 """
 
 from __future__ import annotations
 
 import copy
-from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import yaml
 
 from unigym._typing import JsonValue, is_json_object
-from unigym.core.asset_root import repo_root
-from unigym.packs import find, repo_pack
 from unigym.scenes.recipe import normalize_content_keys
 
-SCENES_DIR = "scene_packs"
-"""Repo-mount face directory holding the scene bundle families."""
-SCENE_FILE = "scene.yaml"
-"""The bundle definition file every discovered family owns."""
-
-
-def scenes_root() -> Path:
-    """The repo mount's ``scenes`` face (this checkout's ``scene_packs/``)."""
-    face = repo_pack().faces.get("scenes")
-    return face if face is not None else Path(repo_root()) / SCENES_DIR
-
-
-def _scene_hits(root: Optional[Path]) -> list[tuple[Path, Path]]:
-    """``(face_root, scene.yaml)`` pairs for *root* or the mounted faces."""
-    if root is not None:
-        base = Path(root)
-        return [(base, path) for path in sorted(base.rglob(SCENE_FILE))]
-    hits: list[tuple[Path, Path]] = []
-    for pack, path in find("scenes", suffix=SCENE_FILE):
-        face = pack.faces.get("scenes")
-        if face is not None:
-            hits.append((face, path))
-    return hits
-
-
-class ScenePackIndex(dict):
-    """The scene index plus the cross-mount shadow records.
-
-    ``shadowed`` holds ``(key, shadowing_base, kept_path, dropped_path)``
-    tuples: during the v081 transition an external pack and the repo can
-    both carry the same bundle, and the pack wins (the same rule the run
-    configs follow).
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.shadowed: list = []
-
-
-def discover_scene_packs(root: Optional[Path] = None) -> dict:
-    """``{"<family>/<name>": path}`` over the recursive whitelist scan.
-
-    A ``scene.yaml`` counts when it sits inside a family directory (at
-    least one level below the root); the index key joins the family
-    directory name with the yaml's top-level ``name:``.  Duplicate keys
-    and name-less bundles fail fast (a scene without a declared name is
-    a typo, not a scene).  With ``root`` given the scan keeps its
-    literal ``rglob`` semantics; ``root=None`` enumerates the mounted
-    packs' ``scenes`` faces through the resolver.
-    """
-    index: ScenePackIndex = ScenePackIndex()
-    origin: dict = {}
-    for base, path in _scene_hits(root):
-        rel = path.relative_to(base)
-        if len(rel.parts) < 2:
-            continue  # a bare root-level scene.yaml: no family
-        family = rel.parts[0]
-        doc = yaml.safe_load(path.read_text()) or {}
-        name = str(doc.get("name") or "").strip()
-        if not name:
-            raise ValueError(
-                f"{path}: scene bundle must declare a top-level 'name' "
-                f"(referenced as '{family}/<name>')"
-            )
-        key = f"{family}/{name}"
-        if key in index:
-            if origin[key] == base:
-                raise ValueError(f"duplicate scene bundle {key!r}: {index[key]} and " f"{path}")
-            # cross-mount duplicate: the earlier mount (external pack)
-            # wins; the repo copy is shadowed during the transition
-            index.shadowed.append((key, base, index[key], path))
-            continue
-        index[key] = path
-        origin[key] = base
-    return index
+if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
 
 
 def load_scene_bundle(
     ref: str,
-    root: Optional[Path] = None,
+    runtime: PackRuntime,
 ) -> dict[str, JsonValue]:
-    """Resolve one ``<family>/<name>`` reference to its parsed bundle."""
-    index = discover_scene_packs(root)
-    ref = str(ref)
-    path = index.get(ref)
-    if path is None:
+    """Resolve one exact ``scenes`` catalog id to its parsed bundle.
+
+    Args:
+        ref: The catalog id declared by the run config's ``scene:`` key.
+        runtime: The pack runtime owning the ``scenes`` catalog.
+
+    Returns:
+        The parsed YAML document (a string-keyed mapping).
+
+    Raises:
+        ValueError: The ref is not a non-empty string, or the declared
+            resource is not valid YAML or not a mapping.
+        unigym.packs.PackError: The id is unknown on the ``scenes`` face.
+    """
+    if not isinstance(ref, str) or not ref:
+        raise ValueError(f"scene ref must be a non-empty pack catalog id string, got {ref!r}")
+    if runtime is None:
         raise ValueError(
-            f"unknown scene bundle {ref!r} | available: {sorted(index)} "
-            f"| hint: scene refs resolve against <repo>/"
-            f"{SCENES_DIR}/<family>/{SCENE_FILE} (the yaml's top-level "
-            f"'name:' key is the second reference component)"
+            f"scene ref {ref!r} requires a pack runtime: pass runtime=... | "
+            f"hint: scene refs are exact PackRuntime 'scenes' catalog ids"
         )
-    doc = yaml.safe_load(path.read_text()) or {}
+    path = runtime.resource_for("scenes", ref)
+    try:
+        raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as err:
+        raise ValueError(f"scene resource {ref!r} at {path} is not readable: {err}") from err
+    except yaml.YAMLError as err:
+        raise ValueError(f"scene resource {ref!r} at {path} is not valid YAML: {err}") from err
+    doc: object = {} if raw_doc is None else raw_doc
     if not is_json_object(doc):
-        raise ValueError(f"{path}: scene bundle must be a mapping")
+        raise ValueError(
+            f"scene resource {ref!r} at {path} must be a mapping, got {type(doc).__name__}"
+        )
     return doc
 
 
@@ -167,23 +110,30 @@ def _merge(scene, run):
 
 def apply_scene_bundle(
     cfg: dict[str, JsonValue],
-    root: Optional[Path] = None,
+    runtime: PackRuntime | None = None,
 ) -> dict[str, JsonValue]:
-    """Resolve the run config's ``scene:`` reference (deep-copy merge).
+    """Resolve the run config's ``scene:`` catalog id (deep-copy merge).
 
-    Returns the config with the bundle's blocks routed in; configs
-    without a ``scene:`` key pass through untouched (the legacy face,
-    zero behavior difference).  Run-level values win at every layer;
-    mapping sections (``initializer.params``, ``base``, ``actuators``)
-    merge key-wise so a run can carry a single param override (e.g. the
-    per-seed stream seed) or one actuator group override without
-    restating the table.  Only ``backend.mujoco`` blocks route this
-    phase; other backend blocks are left for their backends.
+    Returns the config with the bundle's blocks routed in and the consumed
+    ``scene:`` ref removed; configs without a ``scene:`` key pass through
+    untouched and need no runtime.  Run-level values win at every layer;
+    mapping sections (``initializer.params``, ``base``, ``actuators``) merge
+    key-wise so a run can carry a single param override (e.g. the per-seed
+    stream seed) or one actuator group override without restating the table.
+    Only ``backend.mujoco`` blocks route this phase; other backend blocks are
+    left for their backends.
     """
     ref = cfg.get("scene")
     if ref is None:
         return cfg
-    doc = normalize_content_keys(load_scene_bundle(str(ref), root), source=f"scene bundle {ref!r}")
+    if not isinstance(ref, str) or not ref:
+        raise ValueError(f"scene ref must be a non-empty pack catalog id string, got {ref!r}")
+    if runtime is None:
+        raise ValueError(
+            f"scene ref {ref!r} requires a pack runtime: pass runtime=... | "
+            f"hint: scene refs are exact PackRuntime 'scenes' catalog ids"
+        )
+    doc = normalize_content_keys(load_scene_bundle(ref, runtime), source=f"scene bundle {ref!r}")
     cfg = copy.deepcopy(cfg)
     # A direct caller (tests, the API) may hand us an un-normalized run
     # config; the collector's single load point already migrated its own
@@ -225,4 +175,7 @@ def apply_scene_bundle(
         cfg["props"] = _merge(doc["props"], cfg.get("props"))
     if "initializer" in doc:
         params["initializer"] = _merge(doc["initializer"], params.get("initializer"))
+    # The ref is a resolution directive, not a RunSpec.scene mapping.  Consume
+    # it once the bundle has been merged so build_spec sees no leftover string.
+    cfg.pop("scene", None)
     return cfg

@@ -4,8 +4,9 @@ A :class:`World` is a *declaration* of the world half of a run, not a live
 engine object.  It produces only the existing config schema consumed by
 :func:`unigym.run.spec.build_spec`:
 
-* a scene-bundle reference (``scene: <family>/<name>``) for
-  :meth:`World.from_pack` / :meth:`World.from_config`;
+* a scene reference (``scene: <catalog id>``) for
+  :meth:`World.from_pack` / :meth:`World.from_config`, resolved through a
+  :class:`~unigym.packs.runtime.PackRuntime`;
 * the ``env.params.mj_scene`` + ``mj_scene_params`` pair for
   :meth:`World.from_generator`;
 * a unique runtime scene provider for :meth:`World.inline`;
@@ -33,7 +34,7 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import yaml
 
@@ -57,6 +58,9 @@ from unigym.world_primitives import (
     _SHAPE_TYPES,
     _validate_dynamic_entry,
 )
+
+if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
 
@@ -223,14 +227,20 @@ class World:
         cls,
         ref: str,
         *,
-        root: Path | None = None,
+        runtime: PackRuntime,
     ) -> World:
-        """Use a scene-bundle reference (``"<family>/<name>"``)."""
+        """Use a scene reference by its exact ``scenes`` catalog id.
+
+        Args:
+            ref: The catalog id declared on the runtime's ``scenes`` face.
+            runtime: The pack runtime owning the catalog; there is no
+                fallback scan when it is absent.
+        """
         from unigym.scene_packs import load_scene_bundle
 
-        load_scene_bundle(str(ref), root)
+        load_scene_bundle(ref, runtime)
         world = cls()
-        world._scene_ref = str(ref)
+        world._scene_ref = ref
         return world
 
     @classmethod
@@ -254,19 +264,26 @@ class World:
         cls,
         source: dict[str, JsonValue] | str | Path,
         *,
-        root: Path | None = None,
+        runtime: PackRuntime | None = None,
     ) -> World:
-        """Extract the world half of a run config or scene-bundle path.
+        """Extract the world half of a run config or scene catalog id.
 
         Args:
-            source: A parsed run-config mapping, a path to a run yaml, a
-                path to a ``scene.yaml`` bundle file, or a bare bundle
-                reference (``"<family>/<name>"``).
-            root: Optional scene-pack discovery root (default: the mounted
-                pack faces / the checkout's ``scene_packs/``).
+            source: A parsed run-config mapping, a path to a run yaml, or a
+                bare scene catalog id (``"acme.tabletop"``).
+            runtime: The pack runtime resolving a declared ``scene:``
+                reference; required when *source* declares one.
+
+        Raises:
+            ValueError: A ``scene.yaml`` bundle file is passed directly.
+                Scene refs are exact catalog ids, so a direct bundle file is
+                no longer a reference.
+
+        A path to a scene bundle file fails with a teaching error: the file's
+        family directory name and ``name:`` key are not a catalog id.
         """
         if isinstance(source, dict):
-            return cls._from_run_cfg(source, root)
+            return cls._from_run_cfg(source, runtime)
         path = Path(source)
         if path.is_dir() and (path / "scene.yaml").is_file():
             path = path / "scene.yaml"
@@ -280,27 +297,48 @@ class World:
                 )
             doc = loaded
             if "run_name" in doc or "env" in doc:
-                return cls._from_run_cfg(doc, root)
-            if doc.get("name") and "backend" in doc:
-                ref = f"{path.parent.name}/{doc['name']}"
-                return cls.from_pack(ref, root=root)
-            return cls._from_run_cfg(doc, root)
-        return cls.from_pack(str(source), root=root)
+                return cls._from_run_cfg(doc, runtime)
+            if path.name == "scene.yaml" or (doc.get("name") and "backend" in doc):
+                raise ValueError(
+                    f"World.from_config: {str(source)!r} is a scene bundle "
+                    f"file, not a scene reference; scene refs are exact "
+                    f"PackRuntime 'scenes' catalog ids (e.g. "
+                    f"'acme.tabletop') resolved with runtime=..."
+                )
+            return cls._from_run_cfg(doc, runtime)
+        if runtime is None:
+            raise ValueError(
+                f"World.from_config: scene ref {str(source)!r} requires a pack "
+                f"runtime | hint: scene refs are exact PackRuntime 'scenes' "
+                f"catalog ids"
+            )
+        return cls.from_pack(str(source), runtime=runtime)
 
     @classmethod
     def _from_run_cfg(
         cls,
         cfg: dict[str, JsonValue],
-        root: Path | None = None,
+        runtime: PackRuntime | None = None,
     ) -> World:
         """Extract a world declaration from a run-config mapping."""
         from unigym.scene_packs import load_scene_bundle
 
         ref = cfg.get("scene")
         if ref is not None:
-            load_scene_bundle(str(ref), root)
+            if not isinstance(ref, str) or not ref:
+                raise ValueError(
+                    f"World.from_config: scene ref must be a non-empty pack "
+                    f"catalog id string, got {ref!r}"
+                )
+            if runtime is None:
+                raise ValueError(
+                    f"World.from_config: scene ref {ref!r} requires a pack "
+                    f"runtime | hint: scene refs are exact PackRuntime "
+                    f"'scenes' catalog ids"
+                )
+            load_scene_bundle(ref, runtime)
             world = cls()
-            world._scene_ref = str(ref)
+            world._scene_ref = ref
             return world
         env = cfg.get("env")
         params: Mapping[str, JsonValue] = {}
@@ -751,7 +789,7 @@ class World:
     def fragment(self) -> WorldFragment:
         """The run-config fragment this world contributes.
 
-        Returns either ``{"scene": "<family>/<name>"}``,
+        Returns either ``{"scene": "<catalog id>"}``,
         ``{"world_base": {"mjcf": ...}}``, or
         ``{"params": {"mj_scene": ..., "mj_scene_params": ...}}``, plus an
         ``objects:`` block when the world declared dynamic free bodies and

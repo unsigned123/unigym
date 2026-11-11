@@ -169,6 +169,13 @@ def cmd_describe(a: argparse.Namespace, extra: list[str]) -> int:
     load_mounted_code()
     with open(a.config) as f:
         cfg = yaml.safe_load(f)
+    # a scene-bearing run resolves its exact `scenes` catalog id through an
+    # explicit runtime built at this composition boundary (no module global)
+    runtime = None
+    if isinstance(cfg, dict) and cfg.get("scene") is not None:
+        from unigym.pack_api import discover
+
+        runtime = discover(entry_points=True)
     tmp_dir = tempfile.mkdtemp(prefix="unigym_describe_")
     instance = None
     try:
@@ -176,7 +183,7 @@ def cmd_describe(a: argparse.Namespace, extra: list[str]) -> int:
         from unigym.run.spec import build_spec
 
         with contextlib.redirect_stdout(sys.stderr):
-            spec = build_spec(cfg, _spec_args(a.config, tmp_dir))
+            spec = build_spec(cfg, _spec_args(a.config, tmp_dir), runtime=runtime)
             instance = build_instance(spec)
         if a.compiled:
             model = _compiled_model(instance)

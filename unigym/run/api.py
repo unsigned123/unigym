@@ -810,7 +810,12 @@ class Run:
                     params = _section(_section(cfg, "env"), "params")
                     params.pop("mj_scene", None)
                     params.pop("mj_scene_params", None)
-        spec = build_spec(cfg, self._args())
+        runtime = None
+        if cfg.get("scene") is not None:
+            from unigym.pack_api import discover
+
+            runtime = discover(entry_points=True)
+        spec = build_spec(cfg, self._args(), runtime=runtime)
         if self._world is not None:
             terrain = self._world.terrain_value()
             if terrain is not None:

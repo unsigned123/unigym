@@ -437,6 +437,13 @@ def main():
     load_mounted_code()
     with open(args_cli.config) as f:
         cfg = yaml.safe_load(f)
+    # a scene-bearing run resolves its exact `scenes` catalog id through an
+    # explicit runtime built at this composition boundary (no module global)
+    runtime = None
+    if isinstance(cfg, dict) and cfg.get("scene") is not None:
+        from unigym.pack_api import discover
+
+        runtime = discover(entry_points=True)
     # v068 runtime layout: the worker ensures the artifact tree too
     # (idempotent; design §2 -- the daemon side also mkdir -p's at
     # start, this covers direct `collect_cli` invocations)
@@ -448,7 +455,7 @@ def main():
     # the pure-data half of the old inline path (unigym/run/spec.py).
     from unigym.run.spec import build_spec
 
-    spec = build_spec(cfg, args_cli)
+    spec = build_spec(cfg, args_cli, runtime=runtime)
 
     # the run output dir resolves BEFORE the backend build: the recorded
     # scene artifacts are written during env construction

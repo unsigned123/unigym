@@ -45,6 +45,7 @@ from unigym.scenes.articulation import (
 from unigym.scenes.recipe import normalize_content_keys
 
 if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
     from unigym.scenes.terrain import Terrain
 
 
@@ -372,8 +373,14 @@ def _adapter_params_result(
 def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
+    *,
+    runtime: PackRuntime | None = None,
 ) -> RunSpec:
-    """Validate/normalize one run config + CLI overrides into a RunSpec."""
+    """Validate/normalize one run config + CLI overrides into a RunSpec.
+
+    A config declaring ``scene:`` resolves that exact catalog id through
+    *runtime*; configs without one need no runtime.
+    """
     raw_cfg = copy.deepcopy(cfg)
     # The content key surface ('objects:') normalizes onto the
     # internal name BEFORE the scene merge, so a run config and the bundle
@@ -382,7 +389,7 @@ def build_spec(
     # scene bundle: the `scene:` reference resolves BEFORE placeholder expansion
     # so the pack's ${UNIGYM_REPO} tokens ride the same single
     # expansion point as the run yaml
-    cfg = _require_config(apply_scene_bundle(cfg), "scene bundle")
+    cfg = _require_config(apply_scene_bundle(cfg, runtime=runtime), "scene bundle")
     cfg = _require_config(expand_placeholders(cfg), "placeholders")
     # run label (display metadata): fail-fast teaching gate BEFORE any
     # build work -- same rule the daemon's RunSpec.validate enforces.
