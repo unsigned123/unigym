@@ -409,7 +409,19 @@ GitHub PR CI runs the lane registry, not hand-copied pytest paths:
 
 - the `tests` job runs `tools/ci/run_lane.py --lane d0`;
 - the `integration` job runs `tools/ci/run_lane.py --lane integration` in a
-  clean base environment with no daemon extra and no headless GL.
+  clean base environment with no daemon extra and no headless GL;
+- the `package` job builds the wheel, installs it into a clean temporary
+  environment, copies `tests/smoke` outside the checkout, and runs it there.
+
+The `package` job proves the installed wheel, not the source tree. It runs
+`tests/smoke` with the test working directory outside the checkout, supplies no
+`PYTHONPATH` or source-tree import path, and installs only the built wheel plus
+pytest into the temporary environment. The smoke tests are copied rather than
+imported from the source tree, so a missing package or install-time dependency
+surfaces as a failure. This job still excludes the backend, daemon and heavy
+integration lanes; it is an install/import/tiny end-to-end check, not a second
+full suite. No project dependency, extra or lock change is added for it: pytest
+lives only in the throwaway wheel environment.
 
 Because the `integration` job installs only the base `dev` extra, it exercises
 the daemon CLI missing-`zmq` teaching error in

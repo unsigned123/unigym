@@ -137,8 +137,13 @@ jobs:
       - name: Install wheel in a clean environment
         run: |
           uv venv --python 3.11 /tmp/unigym-wheel-test
-          uv pip install --python /tmp/unigym-wheel-test/bin/python dist/*.whl
-      - name: Import wheel outside the checkout
+          uv pip install --python /tmp/unigym-wheel-test/bin/python dist/*.whl "pytest>=8.0,<10.0"
+      - name: Copy smoke tests outside the checkout
         run: |
-          cd /tmp
-          /tmp/unigym-wheel-test/bin/python -c "import unigym; print(unigym.__version__)"
+          rm -rf /tmp/unigym-wheel-tests
+          mkdir -p /tmp/unigym-wheel-tests
+          cp -R tests/smoke /tmp/unigym-wheel-tests/smoke
+      - name: Run wheel smoke tests outside the checkout
+        run: |
+          cd /tmp/unigym-wheel-tests
+          env -u PYTHONPATH /tmp/unigym-wheel-test/bin/python -m pytest smoke -q
