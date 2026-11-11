@@ -2,7 +2,8 @@
 
 The registry owns lane selectors and the environment that provisions them.
 This runner turns one lane entry into its declared command and executes it with
-``shell=False``.  It installs nothing beyond the uv extras the registry names.
+``shell=False``.  It installs nothing; a ``no-sync`` uv environment is
+provisioned out of band from its pinned manifest.
 """
 
 from __future__ import annotations
@@ -38,12 +39,15 @@ class Environment(TypedDict, total=False):
     """One environment entry from the registry.
 
     ``uv`` environments carry ``extras`` and an optional ``python`` version.
-    ``conda`` environments carry ``env_var``, ``manifest`` and ``strict``.
+    A pre-provisioned uv environment sets ``no_sync`` instead of ``extras`` and
+    may name a repo-relative pinned ``manifest``.  ``conda`` environments
+    carry ``env_var``, ``manifest`` and ``strict``.
     """
 
     provision: str
     extras: list[str]
     python: str
+    no_sync: bool
     env_var: str
     manifest: str
     strict: bool
@@ -93,12 +97,39 @@ def _parse_environment(name: str, table: dict[str, object]) -> Environment:
 
     environment: Environment = {"provision": provision}
     if provision == "uv":
-        environment["extras"] = _str_list(table.get("extras"), field=f"environments.{name}.extras")
+        no_sync = table.get("no_sync")
+        if no_sync is not None and not isinstance(no_sync, bool):
+            _fail(f"{REGISTRY_PATH}: environments.{name}.no_sync must be a boolean")
+        if no_sync:
+            if "extras" in table:
+                _fail(
+                    f"{REGISTRY_PATH}: environments.{name} cannot declare extras "
+                    "together with no_sync"
+                )
+            environment["no_sync"] = True
+        else:
+            environment["extras"] = _str_list(
+                table.get("extras"), field=f"environments.{name}.extras"
+            )
+
         python = table.get("python")
         if python is not None:
             if not isinstance(python, str) or not python:
                 _fail(f"{REGISTRY_PATH}: environments.{name}.python must be a non-empty string")
             environment["python"] = python
+
+        manifest = table.get("manifest")
+        if manifest is not None:
+            if (
+                not isinstance(manifest, str)
+                or not manifest
+                or Path(manifest).is_absolute()
+                or ".." in Path(manifest).parts
+            ):
+                _fail(f"{REGISTRY_PATH}: environments.{name}.manifest must be a repo-relative path")
+            if not (ROOT / manifest).is_file():
+                _fail(f"{REGISTRY_PATH}: environments.{name}.manifest does not exist: {manifest}")
+            environment["manifest"] = manifest
         return environment
 
     env_var = table.get("env_var")
@@ -188,13 +219,18 @@ def _build_command(
     provision = environment["provision"]
     if provision == "uv":
         command = ["uv", "run"]
+        if environment.get("no_sync"):
+            command.append("--no-sync")
         python = environment.get("python")
         if python is not None:
             command.extend(("--python", python))
-        command.append("--frozen")
-        for extra in environment["extras"]:
-            command.extend(("--extra", extra))
-        command.extend(("python", "-m", "pytest"))
+        if environment.get("no_sync"):
+            command.extend(("python", "-m", "pytest"))
+        else:
+            command.append("--frozen")
+            for extra in environment["extras"]:
+                command.extend(("--extra", extra))
+            command.extend(("python", "-m", "pytest"))
     else:
         env_var = environment["env_var"]
         env_name = os.environ.get(env_var, "")
@@ -239,6 +275,10 @@ def _print_lanes(registry: Registry) -> None:
         details = ""
         if "python" in environment:
             details += f" python={environment['python']}"
+        if environment.get("no_sync"):
+            details += " no_sync=true"
+        if "manifest" in environment:
+            details += f" manifest={environment['manifest']}"
         if "variant_of" in lane:
             details += f" variant_of={lane['variant_of']}"
         print(

@@ -11,6 +11,14 @@ provision = "uv"
 extras = ["dev"]
 python = "3.12"
 
+# Clean C1 environment: a separate clean venv provisioned from the pinned
+# manifest.  ``no_sync`` keeps ``uv run`` from resyncing it to the 4.0 lock.
+[environments.base-c1]
+provision = "uv"
+python = "3.11"
+no_sync = true
+manifest = "ci/envs/c1.toml"
+
 [environments.daemon]
 provision = "uv"
 extras = ["dev", "daemon"]
@@ -47,6 +55,18 @@ selectors = [
   "tests/meta",
 ]
 
+# C1 nightly lane: reuses d0's test ownership in the pinned C1 environment.
+[lanes.d0-c1]
+environment = "base-c1"
+variant_of = "d0"
+selectors = [
+  "tests/smoke",
+  "tests/unit",
+  "tests/contract",
+  "tests/conformance",
+  "tests/meta",
+]
+
 [lanes.integration]
 environment = "base"
 selectors = [
@@ -69,6 +89,12 @@ environment = "base-py312"
 variant_of = "mujoco"
 selectors = ["tests/backends/mujoco"]
 
+# C1 nightly lane: reuses mujoco's test ownership in the pinned C1 environment.
+[lanes.mujoco-c1]
+environment = "base-c1"
+variant_of = "mujoco"
+selectors = ["tests/backends/mujoco"]
+
 [lanes.mjwarp]
 environment = "mjwarp"
 selectors = ["tests/backends/mjwarp"]
@@ -77,7 +103,8 @@ selectors = ["tests/backends/mjwarp"]
 environment = "isaaclab2"
 selectors = ["tests/backends/isaaclab2"]
 
-# Lanes the nightly workflow runs. C1 (oldest MuJoCo/NumPy pair) is deferred
-# until an empirically verified combination exists.
+# Lanes the nightly workflow runs.  C1 is the empirically verified oldest
+# MuJoCo/NumPy pair (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4); it is nightly
+# only and is not a PR gate.
 [nightly]
-lanes = ["d0-py312", "mujoco-py312", "mjwarp", "isaaclab2"]
+lanes = ["d0-py312", "mujoco-py312", "d0-c1", "mujoco-c1", "mjwarp", "isaaclab2"]

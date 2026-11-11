@@ -127,10 +127,18 @@ def test_every_environment_declares_a_known_provisioner(environments):
 
 
 def test_uv_environments_declare_extras(environments):
-    """A uv environment lists the non-empty extras its lane installs."""
+    """A uv environment lists the non-empty extras its lane installs.
+
+    A ``no_sync`` environment is provisioned out of band, so it declares no
+    extras: the runner must not resync it through ``uv``.
+    """
     offenders = []
     for name, environment in environments.items():
         if environment.get("provision") != "uv":
+            continue
+        if environment.get("no_sync"):
+            if "extras" in environment:
+                offenders.append((name, "extras with no_sync"))
             continue
         extras = environment.get("extras")
         if (
@@ -152,6 +160,33 @@ def test_uv_environment_python_is_a_non_empty_string_when_present(environments):
         if not isinstance(python, str) or not python:
             offenders.append((name, python))
     assert not offenders, f"uv environments with an invalid python pin: {offenders}"
+
+
+def test_uv_environment_no_sync_is_a_boolean_when_present(environments):
+    """An optional uv ``no_sync`` flag is a boolean."""
+    offenders = []
+    for name, environment in environments.items():
+        if environment.get("provision") != "uv" or "no_sync" not in environment:
+            continue
+        no_sync = environment.get("no_sync")
+        if not isinstance(no_sync, bool):
+            offenders.append((name, no_sync))
+    assert not offenders, f"uv environments with a non-boolean no_sync: {offenders}"
+
+
+def test_uv_manifests_are_repo_relative_and_exist(environments):
+    """An optional uv manifest is a repo-relative file that exists on disk."""
+    offenders = []
+    for name, environment in environments.items():
+        if environment.get("provision") != "uv" or "manifest" not in environment:
+            continue
+        manifest = environment.get("manifest")
+        if not isinstance(manifest, str) or not _is_repo_relative(manifest):
+            offenders.append((name, manifest))
+            continue
+        if not (ROOT / manifest).is_file():
+            offenders.append((name, manifest))
+    assert not offenders, f"uv manifests missing or not repo-relative: {offenders}"
 
 
 def test_conda_environments_declare_env_var_manifest_and_strict(environments):
@@ -220,6 +255,15 @@ def test_nightly_lanes_reference_declared_lanes(registry):
     assert isinstance(value, list) and value, "nightly.lanes must be a non-empty list"
     offenders = [item for item in value if not isinstance(item, str) or item not in lanes]
     assert not offenders, f"nightly lanes missing or undeclared: {offenders}"
+
+
+def test_nightly_includes_c1_variant_lanes(registry):
+    """The nightly matrix runs both empirically verified C1 variants."""
+    nightly = _nested_table(registry, "nightly")
+    value = nightly.get("lanes")
+    assert isinstance(value, list), "nightly.lanes must be a list"
+    missing = {"d0-c1", "mujoco-c1"} - set(value)
+    assert not missing, f"nightly lanes missing C1 variants: {sorted(missing)}"
 
 
 def test_lane_selectors_do_not_overlap(registry):

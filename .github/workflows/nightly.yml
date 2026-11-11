@@ -52,6 +52,34 @@ jobs:
       - name: Run mujoco-py312 lane
         run: .venv/bin/python tools/ci/run_lane.py --lane mujoco-py312
 
+  c1:
+    name: c1 lane (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install headless GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgles2 libosmesa6-dev libgl1
+      - name: Provision clean C1 environment
+        run: |
+          uv venv --python 3.11
+          uv pip install --python .venv/bin/python -e . --no-deps
+          uv pip install --python .venv/bin/python \
+            --index-url https://download.pytorch.org/whl/cpu 'torch==2.15.0+cpu'
+          uv pip install --python .venv/bin/python \
+            'PyYAML>=6.0,<7.0' 'pytest>=8.0,<10.0' \
+            mujoco==3.1.1 numpy==1.26.4
+      - name: Run C1 lanes
+        run: |
+          .venv/bin/python tools/ci/run_lane.py --lane d0-c1
+          .venv/bin/python tools/ci/run_lane.py --lane mujoco-c1
+
   mjwarp:
     name: mjwarp lane (CPU)
     runs-on: ubuntu-latest

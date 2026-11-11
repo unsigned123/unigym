@@ -281,7 +281,7 @@ Do not assume every backend exists in the self-contained `.venv`.
 | --- | --- | --- |
 | D0 | primary `.venv`, Python 3.11 + MuJoCo 4.x | daily base iteration |
 | D2 | external `UNIGYM_ISAACLAB2_ENV` | daily IsaacLab 2 iteration |
-| C1 | Python 3.11 + oldest supported MuJoCo/NumPy pair | deferred until empirically verified |
+| C1 | Python 3.11 + MuJoCo 3.1.1 / NumPy 1.26.4 | nightly oldest-pair lane |
 | C2 | Python 3.11 + latest MuJoCo/NumPy | current base / primary CI |
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
@@ -293,9 +293,10 @@ that every Python × MuJoCo × NumPy × backend combination works. This table is
 the long-term/CI compatibility direction; `ci/compat.toml` is authoritative for
 the lanes currently registered and runnable.
 
-Python 3.12 is a nightly-only dimension. It is not part of the PR gate, and the
-oldest MuJoCo/NumPy pair (C1) is not advertised until a passing combination has
-been verified empirically.
+Python 3.12 is a nightly-only dimension. It is not part of the PR gate. C1 is
+an active nightly lane with exact pins (Python 3.11 / MuJoCo 3.1.1 / NumPy
+1.26.4); it is not a PR gate and does not claim support for MuJoCo 3.x in
+general.
 
 ### 6.1 Nightly version matrix
 
@@ -305,11 +306,13 @@ The nightly workflow adds the Python 3.12 version dimension on top of PR CI:
 | --- | --- | --- | --- |
 | C2 | 3.11 | `base` | current base, primary CI |
 | C3 | 3.12 | `base-py312` | nightly Python dimension |
+| C1 | 3.11 | `base-c1` | nightly MuJoCo 3.1.1 / NumPy 1.26.4 pair |
 | W1 | 3.11 | `mjwarp` | MuJoCo Warp lane |
 | I2 | 3.11 | external IsaacLab 2 (`isaaclab2`) | external IsaacLab 2 |
 
-C1 (oldest MuJoCo/NumPy pair) remains deferred until an empirical passing
-combination exists; no unverified minimum version is advertised.
+C1 is empirically verified at exactly Python 3.11 / MuJoCo 3.1.1 / NumPy
+1.26.4. It is one verified pair, not a general MuJoCo 3.x support claim. It
+runs nightly only and is not a PR gate.
 
 The nightly workflow uses the same lane registry and runner as PR CI. It runs
 the registry lanes named in `[nightly]`; it does not copy pytest paths. The
@@ -327,15 +330,17 @@ markers remain resource and capability markers.
 | --- | --- | --- | --- |
 | `d0` | `base` | uv (`dev`) | `tests/smoke`, `tests/unit`, `tests/contract`, `tests/conformance`, `tests/meta` |
 | `d0-py312` | `base-py312` | uv (`dev`), Python 3.12, `variant_of = "d0"` | same as `d0` |
+| `d0-c1` | `base-c1` | uv (`--no-sync`), Python 3.11, C1 pins, `variant_of = "d0"` | same as `d0` |
 | `integration` | `base` | uv (`dev`) | `tests/integration/test_cli_smoke.py`, `tests/integration/test_daemon_cli.py` |
 | `daemon` | `daemon` | uv (`dev`, `daemon`) | `tests/integration/test_daemon_lifecycle.py` |
 | `mujoco` | `base` | uv (`dev`) | `tests/backends/mujoco` |
 | `mujoco-py312` | `base-py312` | uv (`dev`), Python 3.12, `variant_of = "mujoco"` | `tests/backends/mujoco` |
+| `mujoco-c1` | `base-c1` | uv (`--no-sync`), Python 3.11, C1 pins, `variant_of = "mujoco"` | `tests/backends/mujoco` |
 | `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
 | `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
 
 The `[nightly]` table names the lanes the nightly workflow runs
-(`d0-py312`, `mujoco-py312`, `mjwarp`, `isaaclab2`).
+(`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`).
 
 Selector ownership rules:
 
@@ -345,6 +350,11 @@ Selector ownership rules:
   lane isolation. A uv environment may also declare `python`; the runner then
   emits `uv run --python <version> --frozen --extra ...`. Without `python` the
   command is unchanged.
+- A pre-provisioned uv environment instead declares `no_sync = true` and may
+  name a repo-relative pinned `manifest` under `ci/envs/`. The runner then
+  emits `uv run --no-sync --python <version> python -m pytest ...` and never
+  `--frozen`, so it cannot resync the clean C1 venv to the primary 4.0 lock.
+  `extras` must not be combined with `no_sync`; the runner installs nothing.
 - A `variant_of` lane reuses another lane's test ownership but executes it in a
   different environment. It is not a second owner: overlap and
   exactly-one-lane checks count only primary lanes (lanes without
@@ -496,11 +506,21 @@ exist. No backend job substitutes a fake pass for a missing environment.
 
 The scheduled `nightly` workflow runs the lanes named in the registry's
 `[nightly]` table through the same runner: `d0-py312` and `mujoco-py312` on
-Python 3.12, `mjwarp` on CPU Python 3.11, and the default-skipped `isaaclab2`
-lane on its self-hosted runner. Nightly is a discovery lane for the Python 3.12
-dimension and the external backend, not a PR gate; it does not install Isaac
-dependencies itself and does not fake a pass for a skipped job. C1 remains
-deferred until a passing oldest-pair combination is empirically verified.
+Python 3.12, `d0-c1` and `mujoco-c1` on the pinned C1 environment, `mjwarp` on
+CPU Python 3.11, and the default-skipped `isaaclab2` lane on its self-hosted
+runner. Nightly is a discovery lane for the Python 3.12 and C1 dimensions and
+the external backend, not a PR gate; it does not install Isaac dependencies
+itself and does not fake a pass for a skipped job.
+
+The `c1` job provisions a clean venv instead of running the project
+`uv sync`: it creates `.venv` with Python 3.11, installs the project editable
+with `--no-deps`, installs CPU `torch==2.15.0+cpu` from the PyTorch CPU index,
+and then installs `PyYAML`, `pytest`, `mujoco==3.1.1` and `numpy==1.26.4`.
+No MuJoCo 4.0 wheel may enter that venv. A post-hoc downgrade of an existing
+4.0 environment is unsafe because the stale `libmujoco.so.4.0.0` breaks
+import; that is why C1 is provisioned clean and why its lanes run through the
+runner's `--no-sync` mode rather than `--frozen`, which would resync the
+environment back to the 4.0 lock.
 
 ### 7.3 Target commands
 
