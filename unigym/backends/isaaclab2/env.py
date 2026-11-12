@@ -349,6 +349,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         controls=None,
         recipes=None,
         backend_options=None,
+        asset_plan=None,
     ):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
@@ -424,6 +425,9 @@ class IsaaclabEnv(ManagerBasedEnv):
                 articulation's ArticulationCfg.
             backend_options: backend-private options; isaaclab declares none
                 (``env.backend_options.isaaclab`` fails fast before build).
+            asset_plan: accepted for the shared build face; the isaaclab
+                backend has no scene-IR asset composer, so scene assets do
+                not reach it.
         """
         # teardown state is initialised before the parent constructor so a
         # failure there still leaves close()/the guards well-defined

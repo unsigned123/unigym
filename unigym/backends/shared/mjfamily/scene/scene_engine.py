@@ -14,12 +14,16 @@ a backend.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ..model import MujocoModelProvider
 from unigym.scenes.engine import register_scene_engine
 from unigym.scenes.scene_ir import Scene
 
 from .scene_render import ComposedScene, attach_composed, compose_scene
+
+if TYPE_CHECKING:
+    from unigym.assets.plan import AssetPlan
 
 NAME = "mujoco"
 
@@ -43,9 +47,9 @@ class MujocoSceneEngine:
 
     name = NAME
 
-    def compose(self, scene: Scene) -> ComposedScene:
+    def compose(self, scene: Scene, asset_plan: AssetPlan) -> ComposedScene:
         """Build the composed scene product (pre-compile spec + regions)."""
-        return compose_scene(scene)
+        return compose_scene(scene, asset_plan)
 
     def attach(self, base: object, composed: ComposedScene, *, frame: str) -> Mapping[str, object]:
         """Join an already composed product into *base* at *frame*."""
@@ -112,15 +116,17 @@ def resolve_scene_engine(name: str = NAME) -> MujocoSceneEngine:
 
 
 def compose_and_attach(
-    base: object, scene: Scene, frame: str | None = None
+    base: object, scene: Scene, asset_plan: AssetPlan, frame: str | None = None
 ) -> Mapping[str, object]:
     """Compose *scene* through the engine and attach it at one frame.
 
-    The historical frame spelling is preserved when *frame* is omitted, so
-    every existing caller keeps its exact composed bytes.
+    *asset_plan* is the composition boundary; every scene asset resolves
+    through it before the engine builds elements.  The historical frame
+    spelling is preserved when *frame* is omitted, so every existing caller
+    keeps its exact composed bytes.
     """
     engine = resolve_scene_engine()
-    composed = engine.compose(scene)
+    composed = engine.compose(scene, asset_plan)
     return engine.attach(base, composed, frame=frame or f"Scene_{scene.name}_attach")
 
 

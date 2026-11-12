@@ -207,6 +207,8 @@ class MjwarpEnv(WarpBatchMixin):
             the world base before the scene/props/camera injections;
             ``None``/no declared asset keeps the historical fused load
             path byte-identically.
+        asset_plan: the composition boundary that resolves the declared
+            scene's assets; the backend never resolves asset references.
         backend_params: yaml ``env.params`` dict.  Keys:
             mj_scene_params: optional slot dict passed through to the
                 registered ``mj_scene`` provider's dispatch verbatim
@@ -367,6 +369,7 @@ class MjwarpEnv(WarpBatchMixin):
         controls=None,
         recipes=None,
         backend_options=None,
+        asset_plan=None,
     ):
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -455,7 +458,7 @@ class MjwarpEnv(WarpBatchMixin):
                 # dispatch verbatim; absent -> the provider's own gates
                 scene = build_scene_definition(str(self.mj_scene), self._mj_scene_params)
                 scene, self._fill_record = _fill_scene_content(scene, self._content_spec)
-                self._placement_regions = compose_and_attach(mjspec, scene)
+                self._placement_regions = compose_and_attach(mjspec, scene, asset_plan)
             # the fixed-base spawn declaration (None -> XML-baked pose)
             apply_spawn_base_pose(mjspec, spawn_base)
             # the scene artifact face serializes the SAME chain the A/B

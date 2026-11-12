@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     import torch
 
     from ..adapters.base import RawObsRequest
+    from unigym.assets.plan import AssetPlan
 
 from .asset_ir import AssetDefinition, iter_asset_bodies, joint_names
 
@@ -714,6 +715,7 @@ class PropManager:
         device: str = "cpu",
         base_dir: str | None = None,
         backend: str | None = None,
+        asset_plan: AssetPlan | None = None,
     ):
         self.backend = backend
         self._prop_backend: PropBackendCap = _prop_backend(backend)
@@ -726,7 +728,7 @@ class PropManager:
         """Generated payloads by prop name (empty = all-static)."""
         from .templates import resolve_prop_entries
 
-        for entry, asset in resolve_prop_entries(config):
+        for entry, asset in resolve_prop_entries(config, asset_plan):
             spec = PropSpec(**entry)
             _resolve_spec_paths(spec, base_dir, asset=asset)
             self.specs.append(spec)

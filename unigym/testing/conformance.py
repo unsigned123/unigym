@@ -294,7 +294,7 @@ def canonical_digest(description: Mapping[str, object]) -> dict:
     return _canonicalise(description)
 
 
-def scene_digest(engine, scene) -> dict:
+def scene_digest(engine, scene, asset_plan) -> dict:
     """Describe one composed scene and return its structural digest.
 
     The digest crosses the engine's coarse ``compose`` -> ``describe``
@@ -307,6 +307,7 @@ def scene_digest(engine, scene) -> dict:
     Args:
         engine: A :class:`~unigym.scenes.engine.SceneEngine`.
         scene: The neutral scene to compose.
+        asset_plan: The composition boundary resolving the scene's assets.
 
     Returns:
         A JSON-ready structural digest.
@@ -315,7 +316,7 @@ def scene_digest(engine, scene) -> dict:
         ConformanceError: The description is malformed (see
             :func:`canonical_digest`).
     """
-    return canonical_digest(engine.describe(engine.compose(scene)))
+    return canonical_digest(engine.describe(engine.compose(scene, asset_plan)))
 
 
 def run_conformance(provider_name: str, manifest: ConformanceManifest) -> dict:

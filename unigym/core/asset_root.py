@@ -11,11 +11,6 @@ expanded absolute paths.
 Tokens:
 
 ======================  ==============================================
-``${UNIGYM_ASSET_ROOT}``  shared asset root (audit 2026-10 P1-7): env
-                          ``UNIGYM_ASSET_ROOT`` > yaml
-                          ``unigym_asset_root`` (local overlay then
-                          unigym.yaml) -- unset fails fast (no implicit
-                          machine default)
 ``${UNIGYM_REPO}``        this checkout's repo root -- COMPUTED from
                           ``unigym.__file__`` (follows the worktree /
                           checkout automatically)
@@ -24,18 +19,14 @@ Tokens:
                           key in unigym.local.yaml (machine overlay)
                           then unigym.yaml -- unset fails fast (no
                           implicit machine default)
-``${UNIGYM_ASSET_PACK}``  the unified content pack's ``assets`` face:
-                          env ``UNIGYM_ASSET_PACK`` > yaml
-                          ``unigym_asset_pack_root`` (local overlay then
-                          unigym.yaml) > the mounted pack's ``assets``
-                          directory
 ======================  ==============================================
 
-The asset-pack loader resolves generator leaves against that ONE face
-(:func:`resolve_asset_path`): the retired standalone asset pack and the
-upstream store are no longer rungs, so a leaf the face does not carry is
-an error naming ``tools/pack_asset_closure.py`` rather than a silent
-second lookup.
+``${UNIGYM_ASSET_ROOT}`` and ``${UNIGYM_ASSET_PACK}`` were removed from
+the known-token vocabulary: an asset is addressed by a ``pack:`` reference
+or an absolute path, resolved once at the composition boundary through an
+:class:`unigym.packs.runtime.AssetContext`.  A ``pack:`` reference without
+a context is a :class:`PlaceholderError`; there is no bare-relative or
+legacy-token fallback.
 
 Semantics: deep expansion over the whole parsed yaml document
 (dict/list/str tree -- non-strings pass through); a string whose
@@ -55,12 +46,15 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, overload
+from typing import TYPE_CHECKING, overload
 
 import yaml
 
 from unigym._typing import JsonValue
 from unigym.errors import ConfigError
+
+if TYPE_CHECKING:
+    from unigym.packs.runtime import AssetContext
 
 ENV_VAR = "UNIGYM_ASSET_ROOT"
 PLACEHOLDER = "${" + ENV_VAR + "}"  # the original token spelling
@@ -99,7 +93,7 @@ class PlaceholderError(ValueError):
 
 
 class AssetPathError(FileNotFoundError):
-    """A generator asset is absent from the content pack's asset face."""
+    """A content-pack asset anchor is undeclared or unusable."""
 
 
 def asset_root(repo: str | None = None) -> str:
@@ -201,7 +195,7 @@ def asset_pack_root(repo: str | None = None) -> str:
     for name in _YAML_FILES:
         value = _yaml_key(base, name, PACK_YAML_KEY)
         if value:
-            return _expand_str(str(value), known_tokens())
+            return _expand_str(str(value), known_tokens(), None)
     raise AssetPathError(
         "no asset-face anchor: set UNIGYM_ASSET_PACK, or declare "
         f"`{PACK_YAML_KEY}` (the content pack's assets directory, e.g. "
@@ -252,116 +246,43 @@ def canonical_asset_path(value: str) -> str:
     return head + sep + texture_payload_rel(Path(tail)).as_posix()
 
 
-_FILE_ATTR_RE = re.compile(r'(file=")([^"]*)(")')
-
-
-@overload
-def canonical_asset_values(obj: str) -> str: ...
-
-
-@overload
-def canonical_asset_values(obj: dict[Any, Any]) -> dict[Any, Any]: ...
-
-
-@overload
-def canonical_asset_values(obj: list[Any]) -> list[Any]: ...
-
-
-@overload
-def canonical_asset_values(obj: Any) -> Any: ...
-
-
-def canonical_asset_values(obj):
-    """Deep-walk a parsed document: canonicalize every asset-face string.
-
-    The dict/list twin of :func:`canonical_asset_text` for template
-    entries (``{"texture": {"file": "${UNIGYM_ASSET_PACK}/generators/...``).
-    Non-strings and strings without the face marker pass through.
-    """
-    if isinstance(obj, str):
-        return canonical_asset_path(obj)
-    if isinstance(obj, dict):
-        return {key: canonical_asset_values(value) for key, value in obj.items()}
-    if isinstance(obj, list):
-        return [canonical_asset_values(value) for value in obj]
-    return obj
-
-
-def canonical_asset_text(text: str) -> str:
-    """Apply :func:`canonical_asset_path` to every ``file=`` of a document.
-
-    MJCF documents spell asset leaves in ``file=`` attributes; a fragment
-    or a retired anchor XML written before the texture relocation must
-    still compile against the real payload, so the document door maps
-    those attributes and nothing else (comments, names, values untouched).
-    """
-    return _FILE_ATTR_RE.sub(
-        lambda match: match.group(1) + canonical_asset_path(match.group(2)) + match.group(3), text
-    )
-
-
-def resolve_asset_path(value: str, repo: str | None = None) -> str:
-    """Resolve one generator asset string to the unified pack's asset face.
-
-    Accepted input spellings: the ``${UNIGYM_ASSET_PACK}/generators/<rel>``
-    token, the unified face itself, the retired repo literal
-    ``<repo>/assets/robocasa/generators/<rel>``, and a bare ``<rel>``.  The
-    output is always ``<asset_pack_root>/generators/<rel>`` -- one root, no
-    ladder.  A leaf the face does not carry fails closed and names the
-    closure tool that measures the gap.
-
-    Texture images get one extra, mandatory mapping: a leaf under ``tex/``
-    that names an image resolves into its own directory (``rel`` ->
-    ``tex/<a>/<stem>/<stem>.<ext>``, see :func:`texture_payload_rel`).  That
-    is the ONLY mapping for texture leaves -- the canonical path is
-    computed, never discovered, and an absent canonical file fails closed
-    exactly like any other missing leaf (no flat-sibling fallback).
-
-    A path that is absolute and outside every generator root is not a
-    generator reference at all (a run config's own texture, say): it passes
-    through unchanged, exactly as before.
-    """
-    expanded = expand_placeholders(value)
-    base = Path(repo) if repo else Path(repo_root())
-    face = Path(asset_pack_root(repo))
-    rel = None
-    for root in (face / "generators", base / "assets" / "robocasa" / "generators"):
-        try:
-            rel = Path(expanded).relative_to(root)
-            break
-        except ValueError:
-            continue
-    if rel is None:
-        if Path(expanded).is_absolute():
-            return expanded
-        rel = Path(expanded)
-    candidate = face / "generators" / texture_payload_rel(rel)
-    if not candidate.exists():
-        raise AssetPathError(
-            f"generator asset absent from the unified pack asset face: "
-            f"{candidate} -- run `python tools/pack_asset_closure.py` to "
-            f"measure the gap and fold it (v091 B-0), or fix the reference "
-            f"{value!r}"
-        )
-    return str(candidate)
-
-
 def known_tokens() -> dict:
     """Token name -> resolver (also the known-token list for errors)."""
     return {
-        "UNIGYM_ASSET_ROOT": asset_root,
-        "UNIGYM_ASSET_PACK": asset_pack_root,
         "UNIGYM_REPO": repo_root,
         "UNIGYM_DEPS_ROOT": deps_root,
     }
 
 
-def _expand_str(s: str, tokens: dict) -> str:
+#: Asset path anchors removed from the placeholder vocabulary by the asset
+#: cutover.  They stay a teaching error instead of silently becoming an
+#: unknown-token typo.
+_REMOVED_ASSET_TOKENS = frozenset({"UNIGYM_ASSET_ROOT", "UNIGYM_ASSET_PACK"})
+
+
+def _resolve_pack_ref(value: str, context: AssetContext | None) -> str:
+    """Resolve one whole-string ``pack:`` reference through *context*."""
+    if context is None:
+        raise PlaceholderError(
+            f"asset reference {value!r} requires an explicit asset context: "
+            "build a pack runtime at the composition boundary and pass its "
+            "AssetContext to expansion; there is no ambient or global runtime"
+        )
+    return context.resolve(value)
+
+
+def _expand_str(s: str, tokens: dict, context: AssetContext | None) -> str:
     for _ in range(_MAX_PASSES):
         m = _PLACEHOLDER_RE.search(s)
         if m is None:
-            return s
+            return _resolve_pack_ref(s, context) if s.startswith("pack:") else s
         name = m.group(1)
+        if name in _REMOVED_ASSET_TOKENS:
+            raise PlaceholderError(
+                f"path placeholder ${{{name}}} was removed by the asset "
+                "cutover; address the asset with a 'pack:<pack>/<rel>' "
+                "reference or an absolute filesystem path"
+            )
         if name not in tokens:
             raise PlaceholderError(
                 f"unknown path placeholder ${{{name}}} in run config "
@@ -375,43 +296,43 @@ def _expand_str(s: str, tokens: dict) -> str:
 
 
 @overload
-def expand_placeholders(obj: str) -> str: ...
+def expand_placeholders(obj: str, context: AssetContext | None = None) -> str: ...
 
 
 @overload
-def expand_placeholders(obj: dict[str, JsonValue]) -> dict[str, JsonValue]: ...
+def expand_placeholders(
+    obj: dict[str, JsonValue], context: AssetContext | None = None
+) -> dict[str, JsonValue]: ...
 
 
 @overload
-def expand_placeholders(obj: list[JsonValue]) -> list[JsonValue]: ...
+def expand_placeholders(
+    obj: list[JsonValue], context: AssetContext | None = None
+) -> list[JsonValue]: ...
 
 
 @overload
-def expand_placeholders(obj: JsonValue) -> JsonValue: ...
+def expand_placeholders(obj: JsonValue, context: AssetContext | None = None) -> JsonValue: ...
 
 
-def expand_placeholders(obj: JsonValue) -> JsonValue:
+def expand_placeholders(obj: JsonValue, context: AssetContext | None = None) -> JsonValue:
     """Deep-expand every ``${TOKEN}`` in a parsed yaml document
     (dict/list/str tree).  Non-strings pass through; unknown tokens
     raise :class:`PlaceholderError`.
 
-    The overloads keep the shape: a ``str`` input stays ``str`` (the
-    generator-asset ladder in :func:`resolve_asset_path` depends on
-    that), a mapping stays a mapping, a list stays a list.
+    A whole-string ``pack:<pack>/<rel>`` reference resolves through
+    *context*; without a context it is a teaching :class:`PlaceholderError`.
+    The removed ``${UNIGYM_ASSET_ROOT}`` / ``${UNIGYM_ASSET_PACK}`` anchors
+    are teaching errors too -- there is no legacy or bare-relative fallback.
+
+    The overloads keep the shape: a ``str`` input stays ``str`` (a caller
+    that spells a whole reference depends on that), a mapping stays a
+    mapping, a list stays a list.
     """
     if isinstance(obj, str):
-        expanded = _expand_str(obj, known_tokens())
-        if expanded.startswith("pack:"):
-            # External-pack references resolve at this same point.
-            # Lazy import: unigym.packs sits above unigym.core (it reads
-            # the deps/repo anchors from here), so a module-level import
-            # would close the cycle.
-            from unigym.packs.refs import resolve_ref
-
-            return resolve_ref(expanded)
-        return expanded
+        return _expand_str(obj, known_tokens(), context)
     if isinstance(obj, dict):
-        return {k: expand_placeholders(v) for k, v in obj.items()}
+        return {k: expand_placeholders(v, context) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [expand_placeholders(v) for v in obj]
+        return [expand_placeholders(v, context) for v in obj]
     return obj

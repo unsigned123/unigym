@@ -30,7 +30,6 @@ from unigym._typing import (
 )
 from unigym.backends.registry import backend_info, validate_backend_options
 from unigym.core.asset_root import expand_placeholders
-from unigym.scene_packs import apply_scene_bundle
 from unigym.runtime.controls import (
     ControlError,
     ControlGroup,
@@ -43,6 +42,12 @@ from unigym.scenes.articulation import (
     normalize_articulations,
 )
 from unigym.scenes.recipe import normalize_content_keys
+from unigym.scene_packs import apply_scene_bundle
+
+#: Placeholder spellings that make a config an asset-bearing document.  They
+#: are resolved (or rejected as removed) by ``expand_placeholders``; the
+#: composition boundary must supply an explicit runtime/context for them.
+_ASSET_REF_MARKERS = ("${UNIGYM_ASSET_ROOT}", "${UNIGYM_ASSET_PACK}")
 
 if TYPE_CHECKING:
     from unigym.packs.runtime import PackRuntime
@@ -302,6 +307,67 @@ def _normalize_controls(
     return controls
 
 
+def _contains_asset_ref(value: JsonValue) -> bool:
+    """True when *value* carries a pack reference or a removed asset token."""
+    if isinstance(value, str):
+        return value.startswith("pack:") or any(marker in value for marker in _ASSET_REF_MARKERS)
+    if isinstance(value, dict):
+        return any(_contains_asset_ref(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_asset_ref(item) for item in value)
+    return False
+
+
+def _declares_prop_template(value: JsonValue) -> bool:
+    """True when a content block selects a registered prop template."""
+    if isinstance(value, dict):
+        if isinstance(value.get("template"), str) and value["template"]:
+            return True
+        return any(_declares_prop_template(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_declares_prop_template(item) for item in value)
+    return False
+
+
+def _declares_mj_scene(cfg: dict[str, JsonValue]) -> bool:
+    """True when the config declares a registered or inline ``mj_scene``.
+
+    ``World.from_generator`` / ``World.inline`` route the scene through
+    ``env.params.mj_scene`` (and ``mj_scene_params``), not the catalog
+    ``scene:`` key; composing it still resolves assets at the boundary.
+    """
+    env = cfg.get("env")
+    if not isinstance(env, dict):
+        return False
+    params = env.get("params")
+    if not isinstance(params, dict):
+        return False
+    return params.get("mj_scene") is not None
+
+
+def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) -> bool:
+    """True when a run config needs an explicit runtime at its boundary.
+
+    A scene reference, an ``env.params.mj_scene`` declaration, a
+    benchmark/both run, any pack/asset reference string or a prop-template
+    selection needs the runtime.  The helper is the one composition-boundary
+    decision shared by ``Run``, ``collect_cli`` and ``describe_cli``; it does
+    not build or cache a runtime.
+    """
+    if cfg.get("scene") is not None:
+        return True
+    run_mode = cfg.get("mode", "collect") if mode is None else mode
+    if run_mode in ("benchmark", "both"):
+        return True
+    if _declares_mj_scene(cfg):
+        return True
+    for section in ("objects", "props"):
+        block = cfg.get(section)
+        if isinstance(block, dict) and _declares_prop_template(block.get("types")):
+            return True
+    return _contains_asset_ref(cfg)
+
+
 def _require_config(value: object, what: str) -> dict[str, JsonValue]:
     """Narrow a config boundary to a string-keyed JSON mapping."""
     from unigym.errors import ConfigError
@@ -382,10 +448,11 @@ def build_spec(
     """Validate/normalize one run config + CLI overrides into a RunSpec.
 
     A config declaring ``scene:`` resolves that exact catalog id through
-    *runtime*; configs without one need no runtime there.  A ``benchmark`` /
-    ``both`` run stores *runtime* on the spec for benchmark pack discovery.
-    A legacy ``benchmark.packs`` list is rejected: packs are declared on the
-    runtime ``benchmarks`` face.
+    *runtime*, and a ``pack:`` / asset reference expands through an
+    :class:`~unigym.packs.runtime.AssetContext` built from the same runtime.
+    A ``benchmark`` / ``both`` run stores *runtime* on the spec for benchmark
+    pack discovery.  A legacy ``benchmark.packs`` list is rejected: packs are
+    declared on the runtime ``benchmarks`` face.
     """
     raw_cfg = copy.deepcopy(cfg)
     # The content key surface ('objects:') normalizes onto the
@@ -396,7 +463,12 @@ def build_spec(
     # so the pack's ${UNIGYM_REPO} tokens ride the same single
     # expansion point as the run yaml
     cfg = _require_config(apply_scene_bundle(cfg, runtime=runtime), "scene bundle")
-    cfg = _require_config(expand_placeholders(cfg), "placeholders")
+    context = None
+    if runtime is not None:
+        from unigym.packs.runtime import AssetContext
+
+        context = AssetContext(runtime)
+    cfg = _require_config(expand_placeholders(cfg, context), "placeholders")
     # run label (display metadata): fail-fast teaching gate BEFORE any
     # build work -- same rule the daemon's RunSpec.validate enforces.
     from unigym.core.run_ops import check_label

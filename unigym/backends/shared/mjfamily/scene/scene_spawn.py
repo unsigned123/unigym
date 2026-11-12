@@ -45,21 +45,22 @@ def needs_spec(
     )
 
 
-def compose_declared_scene(mjspec, name: str, slots) -> Mapping[str, object]:
+def compose_declared_scene(mjspec, name: str, slots, asset_plan) -> Mapping[str, object]:
     """Compose + attach one registered scene definition into *mjspec*.
 
     The provider dispatch is the registry's closed face
     (:func:`unigym.scenes.registry.build_scene_definition`); ``slots`` is
     the run's ``mj_scene_params`` mapping, passed through verbatim
     (``None`` -> ``{}`` so the provider's own required-slot gates stay
-    the single truth).  The scene engine is resolved through the backend
-    registry, then composes and attaches at the conventional frame.
-    Returns the composed placement-region table.
+    the single truth).  ``asset_plan`` is the composition boundary for every
+    scene asset.  The scene engine is resolved through the backend registry,
+    then composes and attaches at the conventional frame.  Returns the
+    composed placement-region table.
     """
     from unigym.scenes.registry import build_scene_definition
     from .scene_engine import compose_and_attach
 
-    return compose_and_attach(mjspec, build_scene_definition(name, slots or {}))
+    return compose_and_attach(mjspec, build_scene_definition(name, slots or {}), asset_plan)
 
 
 def apply_spawn_base_pose(mjspec, declaration) -> None:

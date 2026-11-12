@@ -39,9 +39,10 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco optional runtime)
     import mujoco
+
+    from unigym.assets.plan import AssetPlan
     from unigym.props.asset_ir import AssetDefinition
 
-from unigym.core.asset_root import resolve_asset_path
 from unigym.core.region import RegionDefinition
 from unigym.scenes.generators import (
     build_payload,
@@ -324,16 +325,20 @@ def _remove_base_floor(spec) -> None:
             spec.delete(geom)
 
 
-def compose_scene(scene):
+def compose_scene(scene, asset_plan: AssetPlan):
     """Build one neutral scene into a fresh MjSpec (pre-compile).
 
     Accepts the closed IR :class:`~unigym.scenes.scene_ir.Scene` only.
     ONE loop over the instances: registered primitive generators render
     their neutral payload, everything else resolves through the props
-    path.  The caller owns ``compile()`` (and the env model-load seam).
+    path.  Every asset reference (scene material texture, instance payload
+    file) resolves through *asset_plan* at this boundary -- the composed spec
+    carries absolute paths only.  The caller owns ``compile()`` (and the env
+    model-load seam).
 
     Args:
         scene: A :class:`~unigym.scenes.scene_ir.Scene`.
+        asset_plan: The composition boundary that resolves scene assets.
 
     Returns:
         The compiled-ready :class:`ComposedScene`.
@@ -346,10 +351,15 @@ def compose_scene(scene):
 
     if not isinstance(scene, Scene):
         raise ValueError(f"scene expected, got {type(scene).__name__}")
+    if asset_plan is None:
+        raise ValueError(
+            "scene composition requires an asset plan: build a pack runtime "
+            "at the composition boundary and pass its AssetPlan"
+        )
     validate_scene(scene)
     spec = mujoco.MjSpec.from_string(_SCENE_MODEL.format(name=scene.name))
     _apply_options(mujoco, spec, scene.engine_hints)
-    _add_scene_materials(mujoco, spec, scene.materials)
+    _add_scene_materials(mujoco, spec, scene.materials, asset_plan)
     shape_generators = set(registered_generators())
     terrain = _add_terrain(spec, scene.terrain) if scene.terrain is not None else None
     asset_regions = {}
@@ -370,7 +380,7 @@ def compose_scene(scene):
                 params.setdefault("quat", tuple(instance.pose.quat_wxyz))
             _add_shape_payload(spec, instance, build_payload(instance.generator, params))
         else:
-            asset_regions.update(_add_prop_instance(spec, scene.name, instance))
+            asset_regions.update(_add_prop_instance(spec, scene.name, instance, asset_plan))
     regions = _scene_regions(scene)
     for key, region in asset_regions.items():
         if key in regions:
@@ -444,13 +454,14 @@ def _apply_options(mujoco, spec, hints) -> None:
         opt.noslip_iterations = int(hints["noslip_iterations"])
 
 
-def _add_scene_materials(mujoco, spec, materials) -> None:
+def _add_scene_materials(mujoco, spec, materials, asset_plan: AssetPlan) -> None:
     """Declare the scene's textures + materials (declaration order).
 
     The material texture reference is declared at the MJCF ``texture=``
     slot through the shared full-width binding (the asset-IR renderer's
     ``material_textures`` discipline); texture ``file`` strings resolve
-    through the shared repo-first -> pack ladder at spec-build time.
+    through *asset_plan* at this boundary, so the spec carries absolute
+    paths only.
 
     WHY: the closed IR :class:`~unigym.scenes.scene_ir.Material` carries
     an opaque binding table (``Material.slots``) instead of typed
@@ -469,7 +480,7 @@ def _add_scene_materials(mujoco, spec, materials) -> None:
         spec.add_texture(
             name=material.name,
             type=kind_enum[slots["kind"]],
-            file=resolve_asset_path(slots["texture_file"]),
+            file=asset_plan.resolve(str(slots["texture_file"])),
         )
     for material in materials:
         slots = material.slots
@@ -570,7 +581,7 @@ def _add_shape_payload(spec, instance, payload) -> None:
         body.add_geom(**kwargs)
 
 
-def _add_prop_instance(spec, scene_name, instance) -> dict:
+def _add_prop_instance(spec, scene_name, instance, asset_plan: AssetPlan) -> dict:
     """Resolve + attach one non-primitive generator instance at its pose.
 
     The EXISTING props path does the assembly (resolve -> IR payload ->
@@ -584,6 +595,7 @@ def _add_prop_instance(spec, scene_name, instance) -> dict:
         spec: The compiled-ready MjSpec being composed.
         scene_name: The owning scene name (provenance in errors).
         instance: The IR instance to resolve and attach.
+        asset_plan: The composition boundary that resolves payload files.
 
     Returns:
         The provider region attachments resolved into the composed name
@@ -595,7 +607,9 @@ def _add_prop_instance(spec, scene_name, instance) -> dict:
     params = dict(instance.params)
     verbatim = bool(params.pop("verbatim", False))
     where = f"scene:{scene_name}/instances/{instance.id}"
-    entry, asset = resolve_prop_template(instance.generator, instance.id, params, where=where)
+    entry, asset = resolve_prop_template(
+        instance.generator, instance.id, params, where=where, asset_plan=asset_plan
+    )
     if verbatim:
         _add_verbatim_instance(spec, where, instance, entry, asset)
         return _asset_regions(instance, asset, "")
@@ -703,15 +717,16 @@ def attach_composed(spec, composed, frame: str) -> Mapping[str, object]:
     return composed.regions
 
 
-def attach_scene_definition(spec, scene: Scene) -> object:
+def attach_scene_definition(spec, scene: Scene, asset_plan: AssetPlan) -> object:
     """Compose + attach one scene INTO a base spec (compatibility wrapper).
 
     The historical seam keeps its exact bytes: compose then attach at the
     conventional ``Scene_<name>_attach`` frame.  New callers use the
     scene-engine seam (:func:`attach_composed`); this wrapper stays for
-    callers that only have the neutral scene.
+    callers that only have the neutral scene.  Assets resolve through
+    *asset_plan* at this boundary.
     """
-    return attach_composed(spec, compose_scene(scene), f"Scene_{scene.name}_attach")
+    return attach_composed(spec, compose_scene(scene, asset_plan), f"Scene_{scene.name}_attach")
 
 
 def _all_frames(spec) -> list:

@@ -20,11 +20,12 @@ S2.1 additions (cabinet pilot): joint anchor ``pos``; per-geom
 ``density`` / ``rgba`` / ``group`` / ``collidable``; per-site ``size`` /
 ``rgba``; and the texture/material declaration tables
 (:class:`TextureDef` / :class:`MaterialDef`).  A texture ``file`` is the
-ONE path-like string in the IR: it is opaque data (no IO, no resolution
-here) that may carry ``${UNIGYM_REPO}``-style placeholders, expanded by
-the renderer at child-spec build time; material/texture references stay
-logical names (MatRef) that the attach pass namespaces like every other
-element name.
+ONE path-like string in the IR: it is opaque data here (no IO, no
+resolution) and is resolved to an absolute path by the composition
+boundary (:class:`unigym.assets.plan.AssetPlan`) before a renderer sees
+it; the renderer performs no placeholder or ``pack:`` resolution.
+Material/texture references stay logical names (MatRef) that the attach
+pass namespaces like every other element name.
 
 S2.2 additions (drawer/microwave rollout): the mesh declaration table
 (:class:`MeshDef`, the TextureDef pattern for engine meshes) and the

@@ -23,12 +23,11 @@ textures (:class:`~unigym.props.asset_ir.TextureDef`, S2.1)
 and materials (:class:`~unigym.props.asset_ir.MaterialDef`) INTO the child
 spec -- the attach pass namespaces them (and every geom's logical
 material/mesh reference) with the same ``Prop_<prop>_`` prefix as the
-tree.  A mesh or texture ``file`` may carry ``${TOKEN}`` placeholders;
-they are expanded here (child-spec build time) through the sanctioned
-:func:`unigym.core.asset_root.resolve_asset_path` ladder (placeholder
-expansion + repo-first -> pack fallback for the tracked generator tree),
-because a generated payload has no file anchor to resolve relative
-paths against.
+tree.  A mesh or texture ``file`` is already an ABSOLUTE path: the
+composition boundary (:class:`unigym.assets.plan.AssetPlan`) resolves every
+declaration file before the payload reaches this renderer, so no
+placeholder, ``pack:`` reference or relative path is resolved here.  A
+non-absolute file fails fast with a teaching error.
 
 Runtime is the REUSED ``MujocoPropArticulation``: the compiled ``Prop_``
 subtree this renderer produces is exactly what the shared bind/reset/
@@ -47,10 +46,10 @@ are also rendered.
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 
 import numpy as np
 
-from unigym.core.asset_root import resolve_asset_path
 from unigym.props.asset_ir import (
     AssetDefinition,
     ContactHints,
@@ -218,13 +217,32 @@ def _build_child(handler, asset: AssetDefinition):
     return child, joints
 
 
+def _absolute_asset_file(kind: str, name: str, file: str) -> str:
+    """Return one declaration ``file`` after the boundary resolved it.
+
+    The renderer accepts absolute paths only: a relative path, a ``pack:``
+    reference or a ``${TOKEN}`` here means the payload skipped the
+    composition boundary, and silently resolving it would recreate the
+    legacy loader inside the backend.
+    """
+    if not Path(file).is_absolute():
+        raise ValueError(
+            f"{kind} {name!r}: asset file {file!r} is not absolute -- asset "
+            "declarations are resolved at the composition boundary "
+            "(unigym.assets.plan.AssetPlan); the backend renders resolved "
+            "paths only"
+        )
+    return file
+
+
 def _add_declarations(mujoco, child, asset: AssetDefinition) -> None:
     """Render the payload's mesh/texture/material tables into the child spec.
 
     Meshes first (S2.2), then textures (materials reference them), then
     materials; declaration order is preserved because the compiled asset
-    arrays follow it.  A mesh ``file`` is placeholder-expanded exactly
-    like a texture ``file``.  The material texture reference is declared
+    arrays follow it.  Every mesh/texture ``file`` must already be
+    absolute -- the boundary plan resolved it.  The material texture
+    reference is declared
     as ``["", <name>]``: the engine binds
     the reference at the same material slot the MJCF ``texture=``
     attribute lands in, regardless of the texture's projection kind
@@ -236,7 +254,7 @@ def _add_declarations(mujoco, child, asset: AssetDefinition) -> None:
         "cube": mujoco.mjtTexture.mjTEXTURE_CUBE,
     }
     for mesh in asset.meshes:
-        kwargs = {"name": mesh.name, "file": resolve_asset_path(mesh.file)}
+        kwargs = {"name": mesh.name, "file": _absolute_asset_file("mesh", mesh.name, mesh.file)}
         if mesh.scale is not None:
             kwargs["scale"] = [float(v) for v in mesh.scale]
         obj = child.add_mesh(**kwargs)
@@ -247,7 +265,9 @@ def _add_declarations(mujoco, child, asset: AssetDefinition) -> None:
             obj.refquat = [float(v) for v in mesh.refquat]
     for tex in asset.textures:
         child.add_texture(
-            name=tex.name, type=kind_enum[tex.kind], file=resolve_asset_path(tex.file)
+            name=tex.name,
+            type=kind_enum[tex.kind],
+            file=_absolute_asset_file("texture", tex.name, tex.file),
         )
     for mat in asset.materials:
         kwargs = {}

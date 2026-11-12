@@ -4,8 +4,9 @@ Declaration rows ride beside the body tree: the renderer adds them to
 the child spec BEFORE the bodies, so the attach pass namespaces them
 (and every logical reference to them) together with the tree.  A
 ``file`` field is the ONE path-like string in the IR -- opaque data
-here (no IO, no resolution); the renderer expands ``${TOKEN}``
-placeholders at child-spec build time.
+here (no IO, no resolution); the composition boundary resolves it to an
+absolute path, and the renderer performs no placeholder or ``pack:``
+resolution.
 """
 
 from __future__ import annotations
@@ -34,10 +35,11 @@ class TextureDef:
     """One texture declaration of a generated payload.
 
     ``file`` is an opaque path string -- the ONE path-like field in the
-    IR.  It is never touched here (no IO, no resolution): the renderer
-    expands ``${TOKEN}`` placeholders at child-spec build time and hands
-    it to the engine's loader.  ``kind`` is the closed projection
-    vocabulary (:data:`TEXTURE_KINDS`).
+    IR.  It is never touched here (no IO, no resolution): the composition
+    boundary resolves it to an absolute path before the renderer hands it
+    to the engine's loader, and the renderer performs no placeholder or
+    ``pack:`` resolution.  ``kind`` is the closed projection vocabulary
+    (:data:`TEXTURE_KINDS`).
 
     The name gate is the CONSTRUCTOR NAMESPACE face, not the element
     guard: a texture's compiled identity is the source constructor's
@@ -77,9 +79,10 @@ class MeshDef:
     """One mesh declaration of a generated payload (S2.2; TextureDef form).
 
     ``file`` is an opaque path string like :attr:`TextureDef.file` (no
-    IO, no resolution here; the renderer expands ``${TOKEN}``
-    placeholders at child-spec build time and hands it to the engine's
-    OBJ loader).  ``scale`` is the optional per-axis mesh scale (the
+    IO, no resolution here; the composition boundary resolves it to an
+    absolute path before the renderer hands it to the engine's OBJ
+    loader, and the renderer performs no placeholder or ``pack:``
+    resolution).  ``scale`` is the optional per-axis mesh scale (the
     engine bakes it into the compiled vertices); a silent scale keeps
     the engine default.  ``refquat`` is the optional mesh orientation
     fact (§13 step 3, the robocasa data-object meshes): a non-zero

@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from .scene_ir import Scene
+
+if TYPE_CHECKING:
+    from unigym.assets.plan import AssetPlan
 
 _ENGINE_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
@@ -47,8 +50,12 @@ class SceneEngine(Protocol):
 
     name: str
 
-    def compose(self, scene: Scene) -> object:
-        """Return the backend's composed product for *scene*."""
+    def compose(self, scene: Scene, asset_plan: AssetPlan) -> object:
+        """Return the backend's composed product for *scene*.
+
+        *asset_plan* is the composition boundary that resolves every asset
+        reference before the backend builds engine elements.
+        """
         ...
 
     def attach(self, base: object, composed: object, *, frame: str) -> Mapping[str, object]:

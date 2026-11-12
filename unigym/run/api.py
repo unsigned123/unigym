@@ -811,8 +811,9 @@ class Run:
                     params.pop("mj_scene", None)
                     params.pop("mj_scene_params", None)
         runtime = None
-        mode = cfg.get("mode", "collect")
-        if cfg.get("scene") is not None or mode in ("benchmark", "both"):
+        from unigym.run.spec import requires_pack_runtime
+
+        if requires_pack_runtime(cfg):
             from unigym.pack_api import discover
 
             runtime = discover(entry_points=True)

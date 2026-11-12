@@ -17,10 +17,13 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..assets.manifest import SCHEMA, validate_manifest
 from .asset_ir import AssetDefinition, validate_asset_definition
+
+if TYPE_CHECKING:
+    from unigym.assets.plan import AssetPlan
 
 PropTemplate = Callable[[str, Mapping[str, Any]], "Mapping[str, Any] | PropTemplateResult"]
 _TEMPLATES: dict[str, tuple[dict[str, dict], PropTemplate]] = {}
@@ -263,11 +266,19 @@ def _validate_params(name: str, params: Mapping[str, Any], schema: dict, where: 
 
 
 def resolve_prop_template(
-    name: str, prop_name: str, params: Mapping[str, Any], *, where: str
+    name: str,
+    prop_name: str,
+    params: Mapping[str, Any],
+    *,
+    where: str,
+    asset_plan: AssetPlan | None = None,
 ) -> tuple[dict, AssetDefinition | None]:
     """Resolve a registered template to (PropSpec mapping, generated asset).
 
-    The generated asset is ``None`` for the legacy plain-mapping form.
+    The generated asset is ``None`` for the legacy plain-mapping form.  A
+    present asset is resolved through *asset_plan* at this boundary, so
+    every mesh and texture file it carries is absolute before it reaches a
+    backend renderer.
     """
     if name not in _TEMPLATES:
         raise ValueError(
@@ -293,6 +304,13 @@ def resolve_prop_template(
                 f"asset path and an AssetDefinition (mutually exclusive)"
             )
         validate_asset_definition(asset)
+        if asset_plan is None:
+            raise ValueError(
+                f"{where}/template {name!r}: the generated asset payload "
+                f"requires an asset plan (pack runtime) to resolve its mesh "
+                f"and texture files at the composition boundary"
+            )
+        asset = asset_plan.resolve_definition(asset)
     if entry.get("name") != prop_name:
         raise ValueError(
             f"{where}/template {name!r}: provider changed prop identity "
@@ -306,17 +324,22 @@ def resolve_prop_template(
     return entry, asset
 
 
-def resolve_prop_entries(config: Mapping[str, Any]) -> list[tuple[dict, AssetDefinition | None]]:
+def resolve_prop_entries(
+    config: Mapping[str, Any], asset_plan: AssetPlan | None = None
+) -> list[tuple[dict, AssetDefinition | None]]:
     """Resolve static and templated entries to ``(entry, asset)`` pairs.
 
-    The provider output is placeholder-expanded through the sanctioned
-    :func:`unigym.core.asset_root.expand_placeholders`: providers spell
-    host paths with ``${UNIGYM_REPO}`` (the closed asset table), while
-    the collect_cli order expands the config BEFORE PropManager runs --
-    without this expansion the provider-emitted placeholder would never
-    resolve.  Static entries keep their exact pass-through (and never
-    carry a payload).
+    Entries are placeholder-expanded with the plan's context: providers may
+    spell host paths with ``${UNIGYM_REPO}`` and asset references with
+    ``pack:``, and the plan's context is the one resolver.  A generated
+    payload's mesh/texture files are resolved to absolute paths through
+    :meth:`unigym.assets.plan.AssetPlan.resolve_definition`.  A static entry
+    without references passes through unchanged (and never carries a
+    payload).
     """
+    from ..core.asset_root import expand_placeholders
+
+    context = asset_plan.context if asset_plan is not None else None
     raw_types = config.get("types", [])
     if not isinstance(raw_types, list):
         raise ValueError("props/types must be a list")
@@ -338,11 +361,13 @@ def resolve_prop_entries(config: Mapping[str, Any]) -> list[tuple[dict, AssetDef
                     f"missing={missing}, unknown={extra}"
                 )
             entry, asset = resolve_prop_template(
-                raw["template"], raw["name"], raw["params"], where=where
+                raw["template"],
+                raw["name"],
+                raw["params"],
+                where=where,
+                asset_plan=asset_plan,
             )
-            from ..core.asset_root import canonical_asset_values, expand_placeholders
-
-            entry = canonical_asset_values(expand_placeholders(entry))
+        entry = expand_placeholders(entry, context)
         prop_name = entry.get("name")
         if not isinstance(prop_name, str) or not prop_name:
             raise ValueError(f"{where}/name must be a non-empty string")
@@ -353,11 +378,13 @@ def resolve_prop_entries(config: Mapping[str, Any]) -> list[tuple[dict, AssetDef
     return resolved
 
 
-def resolve_prop_declarations(config: Mapping[str, Any]) -> list[dict]:
+def resolve_prop_declarations(
+    config: Mapping[str, Any], asset_plan: AssetPlan | None = None
+) -> list[dict]:
     """Static and templated entries as plain PropSpec mappings.
 
     Thin wrapper over :func:`resolve_prop_entries` (the stage-2 face);
     PropManager takes the pairs so generated payloads reach
     ``asset_definitions``.
     """
-    return [entry for entry, _ in resolve_prop_entries(config)]
+    return [entry for entry, _ in resolve_prop_entries(config, asset_plan)]

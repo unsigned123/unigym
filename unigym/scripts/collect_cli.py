@@ -442,8 +442,9 @@ def main():
     # built at this composition boundary (no module global)
     runtime = None
     if isinstance(cfg, dict):
-        mode = cfg.get("mode", "collect")
-        if cfg.get("scene") is not None or mode in ("benchmark", "both"):
+        from unigym.run.spec import requires_pack_runtime
+
+        if requires_pack_runtime(cfg):
             from unigym.pack_api import discover
 
             runtime = discover(entry_points=True)

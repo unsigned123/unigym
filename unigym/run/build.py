@@ -44,6 +44,7 @@ from .spec import ReplaySpec, RunSpec
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
+    from unigym.assets.plan import AssetPlan
     from unigym.cameras.manager import CameraManager
     from unigym.commands.base import CommandSampler
     from unigym.contacts.manager import ContactManager
@@ -443,6 +444,7 @@ def _build_robot_and_props(
     num_envs: int,
     env_spacing: float,
     config_dir: str,
+    asset_plan: AssetPlan | None,
 ) -> _RobotBundle:
     """Step 1: policy profile(s) + actuator/terrain/prop + adapter."""
     backend_label = info.name
@@ -498,6 +500,7 @@ def _build_robot_and_props(
         device=device,
         base_dir=config_dir,
         backend=backend_label,
+        asset_plan=asset_plan,
     )
     if prop_manager is not None:
         print(f"[collect] props enabled: " f"{[s.name for s in prop_manager.specs]}", flush=True)
@@ -677,6 +680,7 @@ def _build_env_and_sampler(
     episode_length_s: JsonValue,
     controls: Sequence[ControlRuntime] | None = None,
     recipes: Mapping[str, RobotRecipe] | None = None,
+    asset_plan: AssetPlan | None = None,
 ) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
     # the run output dir resolves BEFORE the backend build: the recorded
@@ -729,6 +733,7 @@ def _build_env_and_sampler(
         contact_manager=contact_manager,
         director_cfg=director_cfg,
         device=device,
+        asset_plan=asset_plan,
         # backend-specific params (yaml env.params; mujoco: spawn_height /
         # contact_force_threshold / kp / kd).  The run-level world_base is
         # an explicit kwarg, never an env.params key.  isaaclab's
@@ -1129,8 +1134,14 @@ def build_instance(spec: RunSpec) -> RunInstance:
     reset_on_termination = bool(spec.runner.get("reset_on_termination", False))
     env_spacing = _config_float(env_cfg.get("env_spacing", 4.0))
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
+    from unigym.assets.plan import AssetPlan
+    from unigym.packs.runtime import AssetContext
 
-    robot = _build_robot_and_props(spec, cfg, info, device, num_envs, env_spacing, config_dir)
+    asset_plan = AssetPlan(AssetContext(pack_runtime)) if pack_runtime is not None else None
+
+    robot = _build_robot_and_props(
+        spec, cfg, info, device, num_envs, env_spacing, config_dir, asset_plan
+    )
     profile = robot["profile"]
     profiles = robot["profiles"]
     adapter = robot["adapter"]
@@ -1163,6 +1174,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sensing["episode_length_s"],
         controls=control_runtimes,
         recipes=profiles,
+        asset_plan=asset_plan,
     )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)

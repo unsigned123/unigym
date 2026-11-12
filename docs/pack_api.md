@@ -2,18 +2,20 @@
 
 Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
 Phase 5 runtime parity, the Phase 6a scene consumer cutover, the Phase 6b run
-consumer cutover, the Phase 7a benchmark consumer cutover and the Phase 7b-1
-asset-resolver foundation are implemented. Scene references resolve only
-through the runtime `scenes` face; run config references resolve only as
-absolute file paths or exact runtime `runs` catalog ids; benchmark pack
-discovery reads only resource-backed entries of the runtime `benchmarks` face.
-`PackRuntime.asset_path` and `AssetContext` exist as the Phase 7b-1 resolver
-foundation only: production asset consumers are not switched yet, and the old
-`UNIGYM_ASSET_ROOT` / `UNIGYM_ASSET_PACK` tokens remain in force until Phase
-7b-2. The runtime is still a parallel path for task, asset and termination
-loading: the legacy `unigym.packs` discovery and loader remain the active
-runtime there, and nothing in this document switches that legacy loader or
-migrates those domain loaders.
+consumer cutover, the Phase 7a benchmark consumer cutover, the Phase 7b-1
+asset-resolver foundation and the Phase 7b-2 boundary-resolved asset cutover
+are implemented. Scene references resolve only through the runtime `scenes`
+face; run config references resolve only as absolute file paths or exact
+runtime `runs` catalog ids; benchmark pack discovery reads only
+resource-backed entries of the runtime `benchmarks` face. Asset references
+resolve once at the composition/domain boundary into an
+`unigym.assets.plan.AssetPlan`: prop templates, generated `AssetDefinition`
+files, scene assets and MJCF documents reach backend code with absolute paths
+only. `UNIGYM_ASSET_ROOT` / `UNIGYM_ASSET_PACK` were removed from the known
+placeholder vocabulary. The runtime is still a parallel path for task, asset
+and termination loading: the legacy `unigym.packs` discovery and loader remain
+the active runtime there, and asset CLI/selection cutover (Phase 7b-3) is not
+part of this change.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -324,7 +326,7 @@ Rules:
 - an unknown pack, illegal path or absent resource is a `PackError` that names
   both the pack and the original reference.
 
-`AssetContext` is the frozen handle for render and template code:
+`AssetContext` is the frozen low-level path resolver:
 
 ```python
 @dataclass(frozen=True)
@@ -338,10 +340,42 @@ class AssetContext:
 a string. It owns no second resolution rule and carries no module-level or
 ambient state.
 
-This phase adds the resolver only. `expand_placeholders`, `resolve_asset_path`,
-backend scene rendering, prop templates and the asset CLI/selection still use
-the legacy path-anchor layer; `UNIGYM_ASSET_ROOT` and `UNIGYM_ASSET_PACK`
-remain supported tokens until the Phase 7b-2 consumer cutover.
+### Boundary-resolved assets (Phase 7b-2)
+
+`unigym.assets.plan.AssetPlan` is the one asset boundary:
+
+```python
+plan = AssetPlan(AssetContext(runtime))
+plan.resolve("pack:acme/assets/meshes/cup.stl")
+plan.resolve_definition(asset)   # all mesh/texture files absolute
+plan.resolve_document(mjcf_text) # placeholders + pack: file leaves resolved
+```
+
+Rules:
+
+- `RunSpec.pack_runtime` carries the runtime without serialization;
+  `build_instance` builds the plan from it and hands it to `PropManager` and
+  the env backend;
+- `build_spec(..., runtime=...)` builds an `AssetContext` and passes it to
+  `expand_placeholders`; `Run`, `collect_cli` and `describe_cli` build
+  `discover(entry_points=True)` at their composition boundary when the config
+  declares a scene, runs in `benchmark`/`both` mode, or carries any `pack:` /
+  asset-reference string;
+- `expand_placeholders(obj, context=None)` keeps `${UNIGYM_REPO}` and
+  `${UNIGYM_DEPS_ROOT}`; `${UNIGYM_ASSET_ROOT}` and `${UNIGYM_ASSET_PACK}`
+  are teaching `PlaceholderError`s, and a `pack:` reference without a context
+  is one too;
+- `PropManager` resolves template entries and generated payload files at
+  construction; backend `add_ir_body` / `_add_declarations` accept absolute
+  `mesh.file` / `tex.file` only and perform no resolution;
+- the scene engine's `compose(scene, asset_plan)` resolves scene material
+  textures and instance payload files at the scene boundary;
+- `load_spec` parses a resolved MJCF document only and rejects one that still
+  carries `${...}` or a `pack:` reference (old content is not migrated);
+- no backend module imports `unigym.core.asset_root`; the legacy
+  `unigym.packs.refs` resolver was deleted.
+
+Asset CLI and selection still use the legacy asset face; that is Phase 7b-3.
 
 ### Scene resources
 
@@ -371,9 +405,10 @@ The runtime is required at the boundary:
 `build_spec(cfg, args, *, runtime=None)`, `World.from_pack(ref, *,
 runtime=...)` and a scene-bearing `World.from_config(source, *,
 runtime=...)` follow the same boundary. `Run`, `collect_cli` and `describe_cli`
-build `discover(entry_points=True)` at their composition boundary only when the
-config declares `scene:` or its mode is `benchmark`/`both`; there is no
-module-level default runtime or cache.
+build `discover(entry_points=True)` at their composition boundary when the
+config declares `scene:`, its mode is `benchmark`/`both`, or it carries a
+`pack:`/asset reference string; there is no module-level default runtime or
+cache.
 
 ### Run resources
 
@@ -517,10 +552,8 @@ The current phases deliberately do not implement:
   or termination loading; the legacy loader remains the active discovery path
   there (scene references, run config references and benchmark pack discovery
   are already cut over);
-- switching production asset consumers onto the Phase 7b-1 resolver: placeholder
-  expansion, `resolve_asset_path`, backend scene rendering, prop templates and
-  the asset CLI/selection are unchanged, and `UNIGYM_ASSET_ROOT` /
-  `UNIGYM_ASSET_PACK` remain supported until the Phase 7b-2 cutover;
+- switching the asset CLI and selection onto the runtime catalog (Phase
+  7b-3); their legacy asset-face use remains;
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and the legacy loader modules are not deleted by this
   phase;

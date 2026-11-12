@@ -8,7 +8,7 @@ from argparse import Namespace
 import pytest
 
 from unigym.errors import ConfigError
-from unigym.run.spec import build_spec
+from unigym.run.spec import build_spec, requires_pack_runtime
 
 
 def _cfg(**overrides):
@@ -220,3 +220,48 @@ def test_build_spec_rejects_benchmark_packs():
     assert "benchmark.packs" in message
     assert "benchmarks" in message
     assert "runtime" in message
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({}, False),
+        ({"scene": "acme.tabletop"}, True),
+        ({"mode": "benchmark"}, True),
+        ({"mode": "both"}, True),
+        ({"props": {"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]}}, True),
+        ({"props": {"types": [{"name": "cup", "asset": "${UNIGYM_ASSET_PACK}/cup.urdf"}]}}, True),
+        ({"objects": {"types": [{"name": "cup", "template": "acme.cup"}]}}, True),
+    ],
+    ids=["plain", "scene", "benchmark", "both", "pack", "removed-anchor", "template"],
+)
+def test_requires_pack_runtime_boundary_decision(overrides, expected):
+    """The composition helper detects scenes, benchmark modes and asset refs."""
+    assert requires_pack_runtime(_cfg(**overrides)) is expected
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"mj_scene": "acme.tabletop"},
+        {"mj_scene": "acme.tabletop", "mj_scene_params": {"seed": 1}},
+    ],
+    ids=["mj_scene", "mj_scene_params"],
+)
+def test_requires_pack_runtime_detects_env_params_mj_scene(params):
+    """A provider/inline world routed through env.params.mj_scene needs a runtime."""
+    cfg = _cfg()
+    cfg["env"]["params"] = params
+
+    assert requires_pack_runtime(cfg) is True
+
+
+def test_requires_pack_runtime_detects_world_from_generator_fragment():
+    """A World.from_generator fragment lands env.params.mj_scene and is detected."""
+    from unigym.world import World
+
+    cfg = _cfg()
+    World.from_generator("acme.tabletop", seed=1).apply(cfg)
+
+    assert cfg["env"]["params"]["mj_scene"] == "acme.tabletop"
+    assert requires_pack_runtime(cfg) is True

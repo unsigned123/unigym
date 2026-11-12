@@ -46,6 +46,8 @@ _COMPAT_NAMES = frozenset(
 if TYPE_CHECKING:
     from typing import Any
 
+    from unigym.assets.plan import AssetPlan
+
     BallProp: Any
     BoxProp: Any
     FreeArticulationProp: Any
@@ -78,13 +80,15 @@ def build_prop_manager(
     device: str = "cpu",
     base_dir: str | None = None,
     backend: str | None = None,
+    asset_plan: AssetPlan | None = None,
 ) -> PropManager | None:
     """Build a :class:`PropManager` from a yaml ``props:`` section.
 
     Returns ``None`` when the section is missing, ``enabled`` is false, or
     it declares no types -- so callers can treat the result uniformly.
     ``backend`` selects the handler registry (default: the isaaclab face,
-    preserving the historical direct-construction behaviour).
+    preserving the historical direct-construction behaviour).  ``asset_plan``
+    is the composition boundary that resolves template-emitted asset files.
     """
     if not config:
         return None
@@ -99,6 +103,7 @@ def build_prop_manager(
         device=device,
         base_dir=base_dir,
         backend=backend,
+        asset_plan=asset_plan,
     )
 
 

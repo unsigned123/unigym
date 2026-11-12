@@ -1,17 +1,17 @@
-"""MJCF loading with path-token expansion.
+"""MJCF loading for already-resolved documents.
 
-Prop fragments are MJCF documents.  Runtime fragments (``mjcf_file``)
-and the sealed test references spell asset leaves with
-``${UNIGYM_ASSET_PACK}`` / other path tokens; MuJoCo itself has no
-placeholder syntax, so the single load door here expands the document
-text through :func:`unigym.core.asset_root.expand_placeholders` and
-parses the result in memory.  Documents without a placeholder keep the
-in-place :meth:`mujoco.MjSpec.from_file` path (relative includes and
-file-relative resolution unchanged).
+Prop fragments and sealed test references are MJCF documents.  Asset leaves
+inside them (``<mesh file=...>`` / ``<texture file=...>``) are resolved by
+the composition boundary (:class:`unigym.assets.plan.AssetPlan`) before the
+document reaches this loader; this module never expands placeholders and
+never resolves a ``pack:`` reference or a legacy asset anchor.
 
-The expansion is document-wide: a fragment that spells a token in a
-``<mesh file=...>`` / ``<texture file=...>`` attribute compiles with the
-absolute resolved leaf.
+Documents without an asset reference keep the in-place
+:meth:`mujoco.MjSpec.from_file` path (relative includes and file-relative
+resolution unchanged).  A document that still carries a ``${TOKEN}`` or a
+``pack:`` reference fails fast with a teaching error: old content is not
+migrated, and silently resolving it here would rebuild the legacy loader
+inside the backend.
 """
 
 from __future__ import annotations
@@ -19,30 +19,47 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _document_text(path) -> str:
-    return Path(path).read_text(encoding="utf-8")
+def _document_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
-def has_placeholders(path) -> bool:
-    """True when the MJCF document carries any ``${TOKEN}``."""
-    return "${" in _document_text(path)
+def _unresolved_reference(text: str) -> str | None:
+    """The first unresolved placeholder or ``pack:`` marker in *text*."""
+    if "${" in text:
+        start = text.find("${")
+        return text[start : start + 40]
+    if "pack:" in text:
+        start = text.find("pack:")
+        return text[start : start + 40]
+    return None
 
 
 def load_spec(path):
-    """Load one MJCF document as a :class:`mujoco.MjSpec` (tokens expanded)."""
+    """Load one resolved MJCF document as a :class:`mujoco.MjSpec`.
+
+    Args:
+        path: An absolute path to a resolved MJCF document.
+
+    Raises:
+        ValueError: The document still carries a ``${TOKEN}`` placeholder or
+            a ``pack:`` reference.  Asset resolution belongs to the
+            composition boundary, not to this loader.
+    """
     import mujoco
 
-    text = _document_text(path)
-    if "${" not in text:
-        return mujoco.MjSpec.from_file(str(path))
-    from unigym.core.asset_root import canonical_asset_text, expand_placeholders
-
-    # tokens resolve to absolute leaves, then the asset-face texture rule
-    # makes a flat leaf written by an older fragment compile against the
-    # payload that now owns its own directory
-    return mujoco.MjSpec.from_string(canonical_asset_text(expand_placeholders(text)))
+    resolved = Path(path)
+    text = _document_text(resolved)
+    unresolved = _unresolved_reference(text)
+    if unresolved is not None:
+        raise ValueError(
+            f"MJCF document {resolved} still carries an unresolved asset "
+            f"reference {unresolved!r}; resolve it at the composition "
+            "boundary (unigym.assets.plan.AssetPlan) -- old token and pack "
+            "content is not migrated"
+        )
+    return mujoco.MjSpec.from_file(str(resolved))
 
 
 def load_model(path):
-    """Compile one MJCF document to a :class:`mujoco.MjModel`."""
+    """Compile one resolved MJCF document to a :class:`mujoco.MjModel`."""
     return load_spec(path).compile()

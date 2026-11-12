@@ -88,13 +88,22 @@ ignore_imports = [
     "unigym.core.** -> unigym.backends.**",
     "unigym.core.** -> unigym.adapters",
     "unigym.core.** -> unigym.scripts.**",
-    "unigym.core.asset_root -> unigym.packs.refs",
+    # TYPE_CHECKING-only asset context handle; the expansion function owns no
+    # runtime dependency on the pack layer.
+    "unigym.core.asset_root -> unigym.packs.runtime",
     "unigym.core.asset_root -> unigym.errors",
     # repo_root() resolves the checkout root through the package object.
     "unigym.core.asset_root -> unigym",
     # Shared JSON/typing alias is a root-level leaf, not a higher layer.
     "unigym.core.asset_root -> unigym._typing",
 ]
+
+[[tool.importlinter.contracts]]
+name = "backends never resolve legacy asset anchors"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.backends"]
+forbidden_modules = ["unigym.core.asset_root"]
 
 [[tool.importlinter.contracts]]
 name = "task providers import nothing above themselves (pure spec-builders)"
@@ -115,6 +124,10 @@ ignore_imports = [
     "unigym.props.base -> unigym.adapters.base",
     # Function-local config expansion through the neutral asset-root leaf.
     "unigym.props.templates -> unigym.core.asset_root",
+    # TYPE_CHECKING-only asset-plan handles.
+    "unigym.props -> unigym.assets.plan",
+    "unigym.props.templates -> unigym.assets.plan",
+    "unigym.props.base -> unigym.assets.plan",
     "unigym.props.asset_ir.definition -> unigym.model",
 ]
 
@@ -123,6 +136,11 @@ name = "scenes vocabulary never imports backends (design §3/§4)"
 type = "forbidden"
 source_modules = ["unigym.scenes"]
 forbidden_modules = ["unigym.backends.**"]
+ignore_imports = [
+    # TYPE_CHECKING-only asset-plan handle; import-linter cannot distinguish it
+    # from a runtime edge.
+    "unigym.scenes.engine -> unigym.assets.plan",
+]
 
 [[tool.importlinter.contracts]]
 name = "neutral layers never import backends"
