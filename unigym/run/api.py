@@ -73,6 +73,7 @@ if TYPE_CHECKING:
         ResolvedControl,
         ResolvedControlPlan,
     )
+    from unigym.packs.runtime import PackRuntime
     from unigym.robots.base import RobotRecipe
     from unigym.run.instance import RunInstance
     from unigym.runner.base import Runner, StepResult
@@ -593,6 +594,7 @@ class Run:
             self._benchmark_tasks(raw), on_add=self._on_benchmark_add
         )
         self._spec: RunSpec | None = None
+        self._pack_runtime: PackRuntime | None = None
         self._instance: RunInstance | None = None
         self._runner: Runner | None = None
         self._runner_kind: str | None = None
@@ -810,13 +812,17 @@ class Run:
                     params = _section(_section(cfg, "env"), "params")
                     params.pop("mj_scene", None)
                     params.pop("mj_scene_params", None)
-        runtime = None
+        runtime: PackRuntime | None = None
         from unigym.run.spec import requires_pack_runtime
 
         if requires_pack_runtime(cfg):
-            from unigym.pack_api import discover
+            runtime = self._pack_runtime
+            if runtime is None:
+                from unigym.pack_api import discover
 
-            runtime = discover(entry_points=True)
+                runtime = discover(entry_points=True)
+                runtime.activate_all()
+                self._pack_runtime = runtime
         spec = build_spec(cfg, self._args(), runtime=runtime)
         if self._world is not None:
             terrain = self._world.terrain_value()

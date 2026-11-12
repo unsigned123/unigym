@@ -232,11 +232,25 @@ def test_build_spec_rejects_benchmark_packs():
         ({"props": {"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]}}, True),
         ({"props": {"types": [{"name": "cup", "asset": "${UNIGYM_ASSET_PACK}/cup.urdf"}]}}, True),
         ({"objects": {"types": [{"name": "cup", "template": "acme.cup"}]}}, True),
+        ({"adapter": {"name": "manual"}}, False),
+        ({"adapter": {}}, False),
+        ({"adapter": {"name": "acme.policy"}}, True),
     ],
-    ids=["plain", "scene", "benchmark", "both", "pack", "removed-anchor", "template"],
+    ids=[
+        "plain",
+        "scene",
+        "benchmark",
+        "both",
+        "pack",
+        "removed-anchor",
+        "template",
+        "manual-adapter",
+        "adapter-without-name",
+        "external-adapter",
+    ],
 )
 def test_requires_pack_runtime_boundary_decision(overrides, expected):
-    """The composition helper detects scenes, benchmark modes and asset refs."""
+    """The helper detects scenes, benchmark modes, asset refs and external adapters."""
     assert requires_pack_runtime(_cfg(**overrides)) is expected
 
 

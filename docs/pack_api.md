@@ -54,6 +54,7 @@ from unigym.pack_api import (
     discover,
     load_asset_manifest,
     load_manifest_v1,
+    register_adapter,
     register_content_provider,
     register_prop_template,
     register_scene,
@@ -145,7 +146,7 @@ Each item is a mapping with:
 | `id` | required, non-empty string; namespaced by convention as `<pack>.<item>` |
 | `resource` | exactly one of `resource` / `entrypoint` |
 | `entrypoint` | exactly one of `resource` / `entrypoint`; `module:attribute` |
-| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator` |
+| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator` or `adapter` |
 
 An item with neither locator or with both locators is rejected. An
 `entrypoint` on any item requires the manifest `trust: code`. Unknown item keys
@@ -597,8 +598,8 @@ and it does not inspect the caller's frame.
 
 `runtime.activate(pack)` is explicit and cached per runtime:
 
-- a content pack, or a code pack with no manifest entrypoint, returns a
-  no-op `ActivationHandle(pack=..., entrypoint=None)`;
+- a content pack, or a code pack with no manifest entrypoint and no adapter
+  providers, returns a no-op `ActivationHandle(pack=..., entrypoint=None)`;
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
   normal `importlib`, and called with one `PackContext` argument;
 - there is no zero-argument fallback: a legacy `register()` entrypoint fails
@@ -618,8 +619,70 @@ returns a `tuple[ActivationHandle, ...]`. It uses the same per-runtime cache,
 so a repeated call returns the same handles without re-running an entrypoint.
 Content packs remain no-ops.
 
-Activation does not register providers or mutate a registry by itself; a pack
-entrypoint uses the public registration helpers directly when it needs to.
+### Adapter registration
+
+Adapters are registered in the existing process-global adapter registry; there
+is no separate adapter face. Two explicit forms produce the same entry:
+
+```python
+# dynamic: pack entrypoint code
+from unigym.pack_api import register_adapter
+
+def register(context):
+    register_adapter("acme.policy", AcmeAdapter)
+```
+
+```yaml
+# static: manifest-declared provider
+provides:
+  providers:
+    - id: acme.policy
+      kind: adapter
+      entrypoint: acme_adapter:AcmeAdapter
+```
+
+For a manifest `kind: adapter` item:
+
+- an `entrypoint` is required; a resource-only adapter item fails activation
+  with a teaching `PackError` naming the pack and item id;
+- activation imports the target through the same `module:attribute` resolver
+  used by the manifest-level entrypoint;
+- the target must be a class that subclasses
+  `unigym.adapters.base.Adapter`; an instance, factory or unrelated class is a
+  teaching `PackError`;
+- the item `id` is the adapter name a run config selects in `adapter.name`;
+- activation failures are wrapped with the pack, item id and entrypoint.
+
+Manifest adapter providers are processed after the pack-level entrypoint (or
+without one). Other provider kinds stay inert: they are catalog metadata and
+are not imported or registered by activation.
+
+Registration is process-global because the adapter registry is global.
+`register_adapter(name, cls)` rejects a malformed name, a non-class, a
+non-`Adapter` class and a duplicate name; a duplicate error names the class
+already registered under that name. One class owns exactly one adapter name:
+registering the same class under a second name is rejected as an alias.
+Activation is idempotent per runtime through `ActivationHandle`, whose
+`adapters` field records the manifest adapter ids that activation registered.
+A dynamic registration and a manifest registration for the same name still
+fail loudly on the second registration.
+
+Manifest adapter activation is transactional within one pack: every
+`kind: adapter` item is validated (entrypoint present, target importable, a
+class that subclasses `Adapter`, and a free registry name) before any of them is
+registered. Adapter names registered by the pack-level entrypoint are rolled
+back if a later provider item fails. A later invalid item therefore leaves no
+earlier adapter from that manifest registered, and retrying the same failing
+pack reports the original defect rather than a leaked duplicate.
+
+`unigym.pack_api.register_adapter` imports the adapter package lazily, so
+importing `unigym.pack_api` never imports torch or the adapter registry.
+`adapter_params_registry`, `build_adapter` and the spawn-params validation see a
+registered adapter immediately.
+
+Activation does not scan for adapters or import adapter modules on its own; the
+only automatic step is the manifest-declared `kind: adapter` provider above.
+A dynamic-only adapter has no manifest item and is legal.
 
 ### Code activation at composition boundaries
 
@@ -630,6 +693,9 @@ cache:
   `activate_all()` before the control plane starts;
 - `collect_cli` and `describe_cli` always build `discover(entry_points=True)`,
   call `activate_all()` and pass that runtime to `build_spec`;
+- `Run` builds `discover(entry_points=True)` and calls `activate_all()` before
+  `build_spec` whenever the config needs a pack runtime, including any adapter
+  name other than the built-in `manual`;
 - the launcher does not load code packs globally; command modules own their
   activation at their composition boundary.
 
@@ -674,7 +740,7 @@ The current phases deliberately do not implement:
   `catalog build` / `catalog search` remain unchanged;
 - a compatibility shim between the runtime and the deleted legacy loader;
 - requirement or `requires` resolution;
-- provider registration orchestration; `activate_all` only calls entrypoints
-  in catalog order and does not register providers;
+- provider registration orchestration beyond manifest-declared `kind: adapter`
+  items; other provider kinds stay catalog metadata;
 - changes to benchmark, scene, asset or task domain parsers;
 - a sandbox for trusted code packs.

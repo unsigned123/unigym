@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Mapping
 
 from unigym._typing import JsonValue
@@ -23,6 +24,53 @@ ADAPTER_REGISTRY = {
     # external driver feeds actions through ExternalRunner.step(actions).
     "manual": ManualAdapter,
 }
+
+_ADAPTER_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+
+
+def register_adapter(name: str, cls: type[Adapter]) -> type[Adapter]:
+    """Register one adapter class in the process-global adapter registry.
+
+    The registry is shared by dynamic pack code and manifest-declared
+    providers, so a duplicate name always fails instead of silently replacing
+    the existing entry.  ``name`` may be dot-namespaced (``acme.policy``) but
+    every segment must be lowercase snake_case.
+
+    Args:
+        name: Adapter name the run config selects in ``adapter.name``.
+        cls: An :class:`~unigym.adapters.base.Adapter` subclass (not an
+            instance and not a factory).
+
+    Returns:
+        *cls*, so the helper can be used as a decorator.
+
+    Raises:
+        ValueError: The name is malformed or already registered.
+        TypeError: *cls* is not a class or does not subclass ``Adapter``.
+    """
+    if not isinstance(name, str) or not _ADAPTER_NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"adapter name {name!r} must be lowercase snake_case, optionally "
+            f"dot-namespaced (e.g. 'acme.policy')"
+        )
+    if not isinstance(cls, type):
+        raise TypeError(f"adapter {name!r} target must be a class, got {type(cls).__name__}")
+    if not issubclass(cls, Adapter):
+        raise TypeError(f"adapter {name!r} target {cls!r} must subclass Adapter")
+    existing = ADAPTER_REGISTRY.get(name)
+    if existing is not None:
+        raise ValueError(
+            f"adapter name {name!r} is already registered to "
+            f"{existing.__module__}.{existing.__qualname__}"
+        )
+    alias = next((key for key, value in ADAPTER_REGISTRY.items() if value is cls), None)
+    if alias is not None:
+        raise ValueError(
+            f"adapter class {cls.__module__}.{cls.__qualname__} is already "
+            f"registered as {alias!r}; one class owns exactly one name"
+        )
+    ADAPTER_REGISTRY[name] = cls
+    return cls
 
 
 class AdapterParamsError(ValueError):

@@ -423,6 +423,7 @@ def test_public_pack_api_exports() -> None:
         "discover",
         "load_asset_manifest",
         "load_manifest_v1",
+        "register_adapter",
         "register_content_provider",
         "register_prop_template",
         "register_scene",

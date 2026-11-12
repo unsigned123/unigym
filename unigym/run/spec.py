@@ -345,14 +345,24 @@ def _declares_mj_scene(cfg: dict[str, JsonValue]) -> bool:
     return params.get("mj_scene") is not None
 
 
+def _declared_adapter_name(cfg: dict[str, JsonValue]) -> str | None:
+    """The adapter name declared by the config's ``adapter:`` mapping."""
+    adapter = cfg.get("adapter")
+    if not isinstance(adapter, Mapping):
+        return None
+    name = adapter.get("name")
+    return name if isinstance(name, str) else None
+
+
 def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) -> bool:
     """True when a run config needs an explicit runtime at its boundary.
 
     A scene reference, an ``env.params.mj_scene`` declaration, a
-    benchmark/both run, any pack/asset reference string or a prop-template
-    selection needs the runtime.  The helper is the one composition-boundary
-    decision shared by ``Run``, ``collect_cli`` and ``describe_cli``; it does
-    not build or cache a runtime.
+    benchmark/both run, an adapter other than the built-in ``manual``, any
+    pack/asset reference string or a prop-template selection needs the
+    runtime.  The helper is the one composition-boundary decision shared by
+    ``Run``, ``collect_cli`` and ``describe_cli``; it does not build or cache a
+    runtime.
     """
     if cfg.get("scene") is not None:
         return True
@@ -360,6 +370,9 @@ def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) ->
     if run_mode in ("benchmark", "both"):
         return True
     if _declares_mj_scene(cfg):
+        return True
+    adapter_name = _declared_adapter_name(cfg)
+    if adapter_name is not None and adapter_name != "manual":
         return True
     for section in ("objects", "props"):
         block = cfg.get(section)

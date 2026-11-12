@@ -14,6 +14,7 @@ activation stay lazy: importing this module never imports pack Python.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from unigym.packs.catalog import CatalogEntry, PackCatalog
 from unigym.packs.runtime import (
@@ -24,6 +25,9 @@ from unigym.packs.runtime import (
     discover,
 )
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
+
+if TYPE_CHECKING:
+    from unigym.adapters.base import Adapter
 
 
 def load_asset_manifest(path: str | Path) -> dict:
@@ -59,6 +63,17 @@ def register_prop_template(name: str, *, params: dict[str, dict]):
     return register(name, params=params)
 
 
+def register_adapter(name: str, cls: type[Adapter]) -> type[Adapter]:
+    """Register one adapter class in the core adapter registry.
+
+    The adapter package imports torch, so this wrapper imports it lazily at
+    call time; importing :mod:`unigym.pack_api` stays torch-free.
+    """
+    from unigym.adapters import register_adapter as register
+
+    return register(name, cls)
+
+
 def register_termination(name: str, cls):
     """Register a termination class in the core termination registry."""
     from unigym.terminations import TERMINATION_REGISTRY
@@ -89,6 +104,7 @@ __all__ = [
     "discover",
     "load_asset_manifest",
     "load_manifest_v1",
+    "register_adapter",
     "register_content_provider",
     "register_prop_template",
     "register_scene",

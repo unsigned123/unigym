@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -30,7 +31,10 @@ from unigym.core.paths import repo_root
 
 from . import PackError
 from .catalog import PackCatalog
-from .schema import PackManifestV1, load_manifest_v1
+from .schema import PackManifestV1, ProvidedItem, load_manifest_v1
+
+if TYPE_CHECKING:
+    from unigym.adapters.base import Adapter
 
 _ASSET_PACK_PREFIX = "pack:"
 
@@ -65,15 +69,20 @@ class PackContext:
 class ActivationHandle:
     """The cached result of activating one pack.
 
-    ``entrypoint`` is ``None`` for a content pack or a code pack that declares
-    no manifest entrypoint; both are no-ops in this phase.
+    ``entrypoint`` is the manifest-level entrypoint (``None`` for a content
+    pack or a code pack that declares none).  ``adapters`` names the manifest
+    ``kind: adapter`` items this activation registered, in declaration order.
+    Manifest adapter providers are still activated when the manifest-level
+    entrypoint is absent; this handle caches the whole activation, not one
+    entrypoint.
     """
 
     pack: str
     entrypoint: str | None
+    adapters: tuple[str, ...] = ()
 
 
-def _import_boundary(manifest: PackManifestV1) -> Path:
+def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) -> Path:
     """Return a code pack's explicit ``python/`` import boundary.
 
     The directory is required: importing the entrypoint from an ambient
@@ -81,9 +90,10 @@ def _import_boundary(manifest: PackManifestV1) -> Path:
     """
     python_dir = manifest.root / "python"
     if not python_dir.is_dir():
+        declared = entrypoint if entrypoint is not None else manifest.entrypoint
         raise PackError(
-            f"pack {manifest.name!r} has entrypoint {manifest.entrypoint!r} "
-            f"but no python/ directory: {python_dir}"
+            f"pack {manifest.name!r} entrypoint {declared!r} needs the pack's "
+            f"python/ import boundary, but it is missing: {python_dir}"
         )
     return python_dir.resolve()
 
@@ -120,6 +130,77 @@ def _resolve_entrypoint(entrypoint: str):
     if not callable(target):
         raise PackError(f"entrypoint {entrypoint!r} target {target!r} is not callable")
     return target
+
+
+def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
+    """Import and register manifest-declared ``kind: adapter`` providers.
+
+    The item id becomes the adapter name a run config selects.  Validation is
+    complete before any registration: every item must carry an entrypoint,
+    resolve to an ``Adapter`` subclass class and name a free registry slot.
+    A later invalid item therefore leaves no earlier registration behind, and
+    retrying the same pack fails on the original defect rather than on a
+    leaked duplicate.  The adapter package imports torch, so it is imported
+    lazily here and never at runtime-module import time.  Other provider kinds
+    stay inert in this phase.
+    """
+    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "adapter")
+    if not items:
+        return ()
+
+    from unigym.adapters import ADAPTER_REGISTRY, Adapter, register_adapter
+
+    for item in items:
+        if item.entrypoint is None:
+            raise PackError(
+                f"pack {manifest.name!r} provider id {item.id!r} declares "
+                f"kind 'adapter' but no entrypoint; declare "
+                f"'entrypoint: module:AdapterClass'"
+            )
+
+    python_dir = _import_boundary(manifest, items[0].entrypoint)
+    _add_to_sys_path(python_dir)
+
+    validated: list[tuple[ProvidedItem, type[Adapter]]] = []
+    proposed: set[str] = set()
+    for item in items:
+        where = f"pack {manifest.name!r} provider id {item.id!r}"
+        try:
+            target = _resolve_entrypoint(item.entrypoint)
+        except Exception as err:
+            raise PackError(
+                f"{where} entrypoint {item.entrypoint!r} failed to import: {err}"
+            ) from err
+        if not isinstance(target, type) or not issubclass(target, Adapter):
+            raise PackError(
+                f"{where} entrypoint {item.entrypoint!r} target {target!r} must be "
+                f"an Adapter subclass class, not an instance or factory"
+            )
+        existing = ADAPTER_REGISTRY.get(item.id)
+        if existing is not None:
+            raise PackError(
+                f"{where} entrypoint {item.entrypoint!r} cannot register adapter "
+                f"name {item.id!r}: already registered to "
+                f"{existing.__module__}.{existing.__qualname__}"
+            )
+        if item.id in proposed:
+            raise PackError(f"{where} appears more than once in the adapter provider list")
+        proposed.add(item.id)
+        validated.append((item, target))
+
+    registered: list[str] = []
+    try:
+        for item, target in validated:
+            register_adapter(item.id, target)
+            registered.append(item.id)
+    except Exception as err:
+        for name in registered:
+            ADAPTER_REGISTRY.pop(name, None)
+        raise PackError(
+            f"pack {manifest.name!r} provider id {item.id!r} entrypoint "
+            f"{item.entrypoint!r} failed to register: {err}"
+        ) from err
+    return tuple(item.id for item in items)
 
 
 @dataclass(frozen=True)
@@ -251,10 +332,12 @@ class PackRuntime:
     def activate(self, pack: str) -> ActivationHandle:
         """Activate *pack* once and return the cached handle.
 
-        Content packs and code packs without a manifest entrypoint are no-ops.
-        A code pack's entrypoint is imported normally and called with exactly
-        one :class:`PackContext` argument; there is no zero-argument fallback.
-        Failures are wrapped with the pack and entrypoint named.
+        A manifest-level entrypoint is imported normally and called with
+        exactly one :class:`PackContext` argument; there is no zero-argument
+        fallback.  After it (or without it), ``providers`` items with
+        ``kind: adapter`` are imported and registered under their item id.
+        Other provider kinds stay inert.  Failures are wrapped with the pack,
+        item id and entrypoint named.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -265,23 +348,46 @@ class PackRuntime:
 
         manifest = self.catalog.get(pack)
         entrypoint = manifest.entrypoint
-        if entrypoint is None:
-            handle = ActivationHandle(pack=pack, entrypoint=None)
-            self._handles[pack] = handle
-            return handle
+        adapter_items = tuple(
+            item for item in manifest.provides.get("providers", ()) if item.kind == "adapter"
+        )
+        adapter_registry = None
+        adapters_before: set[str] = set()
+        if adapter_items:
+            from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
 
-        context = PackContext(pack=pack, root=manifest.root, runtime=self)
+            adapters_before = set(adapter_registry)
+
+        def rollback_adapters() -> None:
+            """Remove adapter names a failed activation added to the global registry."""
+            if adapter_registry is None:
+                return
+            for name in set(adapter_registry) - adapters_before:
+                adapter_registry.pop(name, None)
+
         try:
-            python_dir = _import_boundary(manifest)
-            _add_to_sys_path(python_dir)
-            target = _resolve_entrypoint(entrypoint)
-            target(context)
+            if entrypoint is not None:
+                context = PackContext(pack=pack, root=manifest.root, runtime=self)
+                python_dir = _import_boundary(manifest, entrypoint)
+                _add_to_sys_path(python_dir)
+                target = _resolve_entrypoint(entrypoint)
+                target(context)
+
+            adapters = _activate_adapter_providers(manifest)
+        except PackError:
+            rollback_adapters()
+            raise
         except Exception as err:
+            rollback_adapters()
+            if entrypoint is None:
+                raise PackError(
+                    f"pack {pack!r} adapter providers failed to activate: {err}"
+                ) from err
             raise PackError(
                 f"pack {pack!r} entrypoint {entrypoint!r} failed to activate: {err}"
             ) from err
 
-        handle = ActivationHandle(pack=pack, entrypoint=entrypoint)
+        handle = ActivationHandle(pack=pack, entrypoint=entrypoint, adapters=adapters)
         self._handles[pack] = handle
         return handle
 
