@@ -447,7 +447,7 @@ class World:
     def _material(self) -> Material:
         """The inline world's declared material (one texture declaration)."""
         if self._inline_material is None:
-            from unigym.core.asset_root import repo_root
+            from unigym.core.paths import repo_root
 
             texture = Path(repo_root()) / "assets" / "table_wood.png"
             inline_name = self._inline_name

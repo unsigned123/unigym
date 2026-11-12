@@ -1,6 +1,6 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phases 1 through 8 are implemented. `unigym.pack/1` plus
+Status: Phases 1 through 9 are implemented. `unigym.pack/1` plus
 `PackRuntime` is the only pack loader:
 
 ```text
@@ -34,6 +34,7 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase6b-run-cutover.md`,
 `plans/drafts/pack-api-phase7a-benchmark-cutover.md`,
 `plans/drafts/pack-api-phase7b-asset-cutover.md`,
+`plans/drafts/pack-api-phase9-retire-asset-root.md`,
 `plans/drafts/legacy-loader-cutover.md`).
 
 ## Public imports
@@ -329,7 +330,7 @@ Rules:
   returned as an absolute `Path` without a pack lookup or an existence check,
   matching the run config's own absolute path;
 - a `pack:<pack>/<rel>` reference is canonicalized first with the existing pure
-  `unigym.core.asset_root.canonical_asset_path` rule, so a texture leaf such as
+  `unigym.assets.refs.canonical_asset_path` rule, so a texture leaf such as
   `assets/generators/tex/a/wood.png` names
   `assets/generators/tex/a/wood/wood.png` before the lookup;
 - the canonicalized reference then resolves through `runtime.resource(pack,
@@ -375,10 +376,10 @@ Rules:
   `discover(entry_points=True)` at their composition boundary when the config
   declares a scene, runs in `benchmark`/`both` mode, or carries any `pack:` /
   asset-reference string;
-- `expand_placeholders(obj, context=None)` keeps `${UNIGYM_REPO}` and
-  `${UNIGYM_DEPS_ROOT}`; `${UNIGYM_ASSET_ROOT}` and `${UNIGYM_ASSET_PACK}`
-  are teaching `PlaceholderError`s, and a `pack:` reference without a context
-  is one too;
+- `unigym.core.paths.expand_placeholders(obj, context=None)` keeps
+  `${UNIGYM_REPO}` and `${UNIGYM_DEPS_ROOT}`; `${UNIGYM_ASSET_ROOT}` and
+  `${UNIGYM_ASSET_PACK}` are teaching `PlaceholderError`s, and a `pack:`
+  reference without a context is one too;
 - `PropManager` resolves template entries and generated payload files at
   construction; backend `add_ir_body` / `_add_declarations` accept absolute
   `mesh.file` / `tex.file` only and perform no resolution;
@@ -386,8 +387,47 @@ Rules:
   textures and instance payload files at the scene boundary;
 - `load_spec` parses a resolved MJCF document only and rejects one that still
   carries `${...}` or a `pack:` reference (old content is not migrated);
-- no backend module imports `unigym.core.asset_root`; the old
-  `unigym.packs.refs` resolver was deleted.
+- no backend module imports a path or asset-anchor helper; generic path tokens
+  live in `unigym.core.paths`, asset path policy lives in `unigym.assets.refs`,
+  and the old `unigym.packs.refs` resolver was deleted.
+
+### Path tokens and asset path policy (Phase 9)
+
+The generic path helpers have one owner, `unigym.core.paths`:
+
+```python
+from unigym.core.paths import (
+    PlaceholderError,
+    deps_root,
+    expand_placeholders,
+    known_tokens,
+    repo_root,
+)
+```
+
+The asset path mapping has one owner, `unigym.assets.refs`:
+
+```python
+from unigym.assets.refs import canonical_asset_path, texture_payload_rel
+```
+
+Rules:
+
+- `unigym.core.asset_root` is deleted; there is no compatibility shim and no
+  second owner for either helper family;
+- only `${UNIGYM_REPO}` and `${UNIGYM_DEPS_ROOT}` remain known path
+  placeholders, and `known_tokens()` names exactly those two;
+- `${UNIGYM_ASSET_ROOT}` and `${UNIGYM_ASSET_PACK}` stay teaching
+  `PlaceholderError`s rather than becoming unknown-token typos;
+- a whole-string `pack:<pack>/<rel>` reference still requires an explicit
+  `AssetContext`; expansion without one is a teaching `PlaceholderError`;
+- placeholders expand once at the run/template/asset boundary, recursively over
+  the parsed document; backend render code never expands them;
+- `PackRuntime.asset_path` applies `assets.refs.canonical_asset_path` before its
+  resource lookup, preserving the exact texture-leaf spellings;
+- `unigym doctor` no longer reports `platform.asset_root` or
+  `platform.asset_face`; it still sources the dependency root through
+  `unigym.core.paths.deps_root` for executor discovery.
 
 ### Asset CLI and selection (Phase 7b-3)
 

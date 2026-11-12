@@ -29,7 +29,7 @@ from unigym._typing import (
     is_pair,
 )
 from unigym.backends.registry import backend_info, validate_backend_options
-from unigym.core.asset_root import expand_placeholders
+from unigym.core.paths import expand_placeholders
 from unigym.runtime.controls import (
     ControlError,
     ControlGroup,

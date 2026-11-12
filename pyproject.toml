@@ -90,20 +90,20 @@ ignore_imports = [
     "unigym.core.** -> unigym.scripts.**",
     # TYPE_CHECKING-only asset context handle; the expansion function owns no
     # runtime dependency on the pack layer.
-    "unigym.core.asset_root -> unigym.packs.runtime",
-    "unigym.core.asset_root -> unigym.errors",
+    "unigym.core.paths -> unigym.packs.runtime",
+    "unigym.core.paths -> unigym.errors",
     # repo_root() resolves the checkout root through the package object.
-    "unigym.core.asset_root -> unigym",
+    "unigym.core.paths -> unigym",
     # Shared JSON/typing alias is a root-level leaf, not a higher layer.
-    "unigym.core.asset_root -> unigym._typing",
+    "unigym.core.paths -> unigym._typing",
 ]
 
 [[tool.importlinter.contracts]]
-name = "backends never resolve legacy asset anchors"
+name = "backends never expand placeholders or canonicalize asset paths"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["unigym.backends"]
-forbidden_modules = ["unigym.core.asset_root"]
+forbidden_modules = ["unigym.core.paths", "unigym.assets.refs"]
 
 [[tool.importlinter.contracts]]
 name = "task providers import nothing above themselves (pure spec-builders)"
@@ -122,8 +122,8 @@ ignore_imports = [
     # TYPE_CHECKING-only request type; import-linter cannot distinguish it
     # from a runtime edge.
     "unigym.props.base -> unigym.adapters.base",
-    # Function-local config expansion through the neutral asset-root leaf.
-    "unigym.props.templates -> unigym.core.asset_root",
+    # Function-local config expansion through the neutral path-token leaf.
+    "unigym.props.templates -> unigym.core.paths",
     # TYPE_CHECKING-only asset-plan handles.
     "unigym.props -> unigym.assets.plan",
     "unigym.props.templates -> unigym.assets.plan",
@@ -332,7 +332,7 @@ convention = "google"
 "unigym/console/stepping.py" = ["D205", "D209", "D415"]
 "unigym/contacts/base.py" = ["D102", "D205", "D209", "D415"]
 "unigym/contacts/manager.py" = ["D102", "D205", "D209", "D415"]
-"unigym/core/asset_root.py" = ["D205", "D209", "D415"]
+"unigym/core/paths.py" = ["D205", "D209", "D415"]
 "unigym/core/quat.py" = ["D205", "D209", "D403", "D415"]
 "unigym/core/registry.py" = ["D209"]
 "unigym/core/run_ops.py" = ["D102", "D205", "D209", "D415"]

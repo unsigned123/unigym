@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from unigym.core.asset_root import expand_placeholders
+from unigym.core.paths import expand_placeholders
 
 if TYPE_CHECKING:
     from unigym.packs.runtime import AssetContext

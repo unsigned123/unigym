@@ -1,12 +1,11 @@
 """Path-anchor placeholders for run configs (single expansion point).
 
-Run configs spell host paths via ``${TOKEN}`` placeholders;
-unigym/scripts/collect_cli.py expands them at the SINGLE config load
-point, so both backends (mujoco host path; isaaclab container path,
-which re-reads the same yaml through this same module) see concrete
-paths.  Downstream needs zero changes: resolvers, raw paths (e.g.
-``spawn.texture.file``) and the docker path translation all receive
-expanded absolute paths.
+Run configs spell host paths via ``${TOKEN}`` placeholders; unigym expands
+them at the SINGLE run/template/asset boundary, so both backends (mujoco
+host path; isaaclab container path, which re-reads the same yaml through
+this same module) see concrete paths.  Downstream needs zero changes:
+resolvers, raw paths (e.g. ``spawn.texture.file``) and the docker path
+translation all receive expanded absolute paths.
 
 Tokens:
 
@@ -56,75 +55,17 @@ from unigym.errors import ConfigError
 if TYPE_CHECKING:
     from unigym.packs.runtime import AssetContext
 
-ENV_VAR = "UNIGYM_ASSET_ROOT"
-PLACEHOLDER = "${" + ENV_VAR + "}"  # the original token spelling
-
 DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
 DEPS_YAML_KEY = "unigym_deps_root"
-ASSET_YAML_KEY = "unigym_asset_root"
 # local overlay wins over the committed yaml (load_cfg layering)
-_YAML_FILES = ("unigym.local.yaml", "unigym.yaml")
-_DEPS_YAML_FILES = _YAML_FILES  # deps-root parity (legacy name)
-
-PACK_ENV_VAR = "UNIGYM_ASSET_PACK"
-PACK_YAML_KEY = "unigym_asset_pack_root"
+_DEPS_YAML_FILES = ("unigym.local.yaml", "unigym.yaml")
 
 _MAX_PASSES = 8  # deep-expansion cycle guard
 _PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-_IMAGE_SUFFIXES = frozenset(
-    {
-        ".bmp",
-        ".gif",
-        ".hdr",
-        ".exr",
-        ".jpeg",
-        ".jpg",
-        ".png",
-        ".tga",
-        ".webp",
-    }
-)
-"""Suffixes that make a ``tex/`` leaf a texture image (the stem-dir rule)."""
-
 
 class PlaceholderError(ValueError):
     """Unknown or non-terminating ``${TOKEN}`` in a run config."""
-
-
-class AssetPathError(FileNotFoundError):
-    """A content-pack asset anchor is undeclared or unusable."""
-
-
-def asset_root(repo: str | None = None) -> str:
-    """Asset root: env > yaml ``unigym_asset_root`` (no implicit default).
-
-    ``repo`` is injectable for tests; defaults to :func:`repo_root`.
-
-    Raises:
-        ConfigError: Neither the env var nor a yaml key is set (there is
-            no compiled-in machine default).
-    """
-    env = os.environ.get(ENV_VAR)
-    if env:
-        return env
-    base = Path(repo) if repo else Path(repo_root())
-    for name in _YAML_FILES:
-        p = base / name
-        if not p.is_file():
-            continue
-        try:
-            doc = yaml.safe_load(p.read_text()) or {}
-        except (OSError, ValueError):
-            doc = {}
-        v = doc.get(ASSET_YAML_KEY)
-        if v:
-            return str(v)
-    raise ConfigError(
-        f"no asset-root anchor: set {ENV_VAR}, or declare "
-        f"`{ASSET_YAML_KEY}` in unigym.local.yaml / unigym.yaml -- "
-        "v101 A1 removed the implicit machine default"
-    )
 
 
 def repo_root() -> str:
@@ -163,87 +104,6 @@ def deps_root(repo: str | None = None) -> str:
         f"`{DEPS_YAML_KEY}` in unigym.local.yaml / unigym.yaml -- "
         "v101 A1 removed the implicit machine default"
     )
-
-
-def _yaml_key(base: Path, file_name: str, key: str):
-    """One top-level yaml key from *file_name* under *base* (or None)."""
-    path = base / file_name
-    if not path.is_file():
-        return None
-    try:
-        doc = yaml.safe_load(path.read_text()) or {}
-    except (OSError, ValueError):
-        return None
-    return doc.get(key)
-
-
-def asset_pack_root(repo: str | None = None) -> str:
-    """The unified pack's asset face: env > yaml declaration.
-
-    The face is the content pack's ``assets`` directory -- the single
-    serving root for generator payload, textures and licenses since every
-    referenced asset was folded in.  The checkout declares it in
-    ``unigym.yaml`` (``unigym_asset_pack_root``) because core must not
-    import the packs layer; the retired standalone asset pack is no longer
-    a fallback rung, so a missing leaf is an error, not a second lookup.
-    ``repo`` is injectable for tests; defaults to :func:`repo_root`.
-    """
-    env = os.environ.get(PACK_ENV_VAR)
-    if env:
-        return env
-    base = Path(repo) if repo else Path(repo_root())
-    for name in _YAML_FILES:
-        value = _yaml_key(base, name, PACK_YAML_KEY)
-        if value:
-            return _expand_str(str(value), known_tokens(), None)
-    raise AssetPathError(
-        "no asset-face anchor: set UNIGYM_ASSET_PACK, or declare "
-        f"`{PACK_YAML_KEY}` (the content pack's assets directory, e.g. "
-        "${UNIGYM_DEPS_ROOT}/unigym_packs/robocasa/assets) in unigym.yaml"
-    )
-
-
-def texture_payload_rel(rel: Path) -> Path:
-    """Map a declared ``tex/`` image leaf onto its own asset directory.
-
-    Every texture image is its own self-contained asset (manifest beside
-    payload), so the declared leaf ``tex/<a>/<stem>.<ext>`` names
-    ``tex/<a>/<stem>/<stem>.<ext>``.  Deeper directories keep their
-    prefix: ``tex/gentex/<d>/texNNN.png`` becomes
-    ``tex/gentex/<d>/texNNN/texNNN.png``.  The mapping is computed from
-    the declared spelling alone; the CALLER decides which of the two
-    spellings the face actually carries (canonical wins, see
-    :func:`canonical_asset_path`).
-
-    Public because the closure/reporting tools must apply the SAME rule
-    when they predict a texture's pack destination.
-    """
-    if rel.parts[:1] != ("tex",):
-        return rel
-    if rel.suffix.lower() not in _IMAGE_SUFFIXES:
-        return rel
-    return rel.parent / rel.stem / rel.name
-
-
-#: the marker every asset-face path carries before its face-relative tail.
-_GENERATORS_MARK = "/generators/"
-
-
-def canonical_asset_path(value: str) -> str:
-    """Canonicalize the texture tail of one asset-face path (pure, no I/O).
-
-    Declared asset paths are INPUTS, never filesystem paths: a texture
-    leaf names its own asset directory (``tex/<a>/<stem>/<stem>.<ext>``).
-    Any string with a ``/generators/`` segment therefore maps through
-    :func:`texture_payload_rel` -- including a retired anchor XML or a
-    golden fragment written before the relocation.  Idempotent, so it is
-    safe on an already-canonical path and safe to apply on both sides of
-    a comparison.
-    """
-    head, sep, tail = str(value).partition(_GENERATORS_MARK)
-    if not sep:
-        return value
-    return head + sep + texture_payload_rel(Path(tail)).as_posix()
 
 
 def known_tokens() -> dict:

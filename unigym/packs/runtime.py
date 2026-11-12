@@ -25,7 +25,8 @@ from types import MappingProxyType
 
 import yaml
 
-from unigym.core.asset_root import canonical_asset_path, repo_root
+from unigym.assets.refs import canonical_asset_path
+from unigym.core.paths import repo_root
 
 from . import PackError
 from .catalog import PackCatalog
@@ -188,7 +189,7 @@ class PackRuntime:
         an absolute or ``~`` filesystem path:
 
         - a pack reference is canonicalized with the pure texture-leaf rule
-          (:func:`unigym.core.asset_root.canonical_asset_path`) and then
+          (:func:`unigym.assets.refs.canonical_asset_path`) and then
           resolved through :meth:`resource`, inheriting the inside-root path
           checks and the existence requirement;
         - an absolute or ``~`` path is the run config's own asset: it is

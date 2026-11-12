@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from unigym.assets.plan import AssetPlan
-from unigym.core.asset_root import PlaceholderError, expand_placeholders
+from unigym.core.paths import PlaceholderError, expand_placeholders
 from unigym.pack_api import AssetContext, PackRuntime, discover
 from unigym.props.asset_ir import AssetDefinition, Body, MeshDef, TextureDef
 from unigym.run.spec import build_spec

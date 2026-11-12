@@ -64,7 +64,7 @@ def _venv_globs() -> tuple[str, ...]:
     from unigym.errors import ConfigError
 
     try:
-        from unigym.core.asset_root import deps_root
+        from unigym.core.paths import deps_root
 
         root = deps_root()
     except ConfigError:
@@ -224,35 +224,6 @@ def _port_state(port: int) -> str:
         s.close()
 
 
-def _asset_face_diag(asset_pack_root) -> ex.Diag:
-    """One ``platform.asset_face`` item: the face carries ``generators/``.
-
-    The content pack's ``assets`` directory IS the only asset root, so the
-    probe is a plain presence test: a face without ``generators/`` serves
-    nothing and fails closed with the closure-tool hint.  An undeclared
-    anchor is a failure too -- there is no second rung to fall back to.
-    """
-    try:
-        root = Path(asset_pack_root())
-    except OSError as err:  # AssetPathError is a FileNotFound
-        return ex.Diag(
-            "platform.asset_face",
-            "fail",
-            str(err),
-            "declare the asset face (unigym.yaml "
-            "`unigym_asset_pack_root`) or set UNIGYM_ASSET_PACK",
-        )
-    generators = root / "generators"
-    if generators.is_dir():
-        return ex.Diag("platform.asset_face", "ok", str(generators))
-    return ex.Diag(
-        "platform.asset_face",
-        "fail",
-        f"{generators} (absent)",
-        "fold the missing payload: python tools/pack_asset_closure.py",
-    )
-
-
 def extras_diags(find_spec=importlib.util.find_spec) -> list[ex.Diag]:
     """One ``extras.<name>`` row per optional capability.
 
@@ -285,21 +256,7 @@ def extras_diags(find_spec=importlib.util.find_spec) -> list[ex.Diag]:
 
 
 def platform_diags(cfg: dict) -> list[ex.Diag]:
-    from unigym.core.asset_root import (  # lazy (thin-CLI door)
-        asset_pack_root,
-        asset_root,
-    )
-
-    a = asset_root()
-    out = [
-        ex.Diag(
-            "platform.asset_root",
-            "ok" if os.path.isdir(a) else "fail",
-            a,
-            "" if os.path.isdir(a) else "set UNIGYM_ASSET_ROOT (unigym/core/asset_root.py)",
-        )
-    ]
-    out.append(_asset_face_diag(asset_pack_root))
+    out: list[ex.Diag] = []
     for label, p in (
         ("runs_root", ss.runs_root(cfg)),
         ("data_out", Path(cfg.get("output_root") or "data_out")),

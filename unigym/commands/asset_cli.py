@@ -41,7 +41,7 @@ from unigym.assets.manifest import (
     load_manifest,
     split_asset_id,
 )
-from unigym.core.asset_root import deps_root, repo_root
+from unigym.core.paths import deps_root, repo_root
 from unigym.packs import PackError
 
 if TYPE_CHECKING:

@@ -337,7 +337,7 @@ def resolve_prop_entries(
     without references passes through unchanged (and never carries a
     payload).
     """
-    from ..core.asset_root import expand_placeholders
+    from ..core.paths import expand_placeholders
 
     context = asset_plan.context if asset_plan is not None else None
     raw_types = config.get("types", [])
