@@ -3,13 +3,11 @@
 The height/tilt fall logic now lives in the unified
 termination system (:mod:`unigym.terminations`).  :class:`FallenFilter`
 keeps its yaml interface unchanged (``max_fallen_ratio`` /
-``height_threshold`` / ``check_tilt`` / ``tilt_threshold`` /
-``check_all_feet_airborne``) but internally builds a
+``height_threshold`` / ``check_tilt`` / ``tilt_threshold``) but internally
+builds a
 :class:`~unigym.terminations.TerminationGroup` with a
 :class:`~unigym.terminations.FallTermination` and runs it over the
-episode's recorded arrays.  The "all four feet airborne" term has no
-termination counterpart (it is an episode-quality signal, not a state
-fault) and stays as a filter-local OR.
+episode's recorded arrays.
 
 Recorded state is read from ``articulation/<name>/...`` only.  A
 filter may name its ``articulation`` explicitly; otherwise it resolves the
@@ -49,15 +47,12 @@ class FallenFilter(EpisodeFilter):
 
     * ``base_z < height_threshold`` (low crouch / lying flat),
     * body tilt from vertical > ``tilt_threshold`` (side/back/face fall;
-      requires ``gravity_b`` in episode data, skipped otherwise),
-    * all four feet airborne (``check_all_feet_airborne``).
+      requires ``gravity_b`` in episode data, skipped otherwise).
 
     Args:
         max_fallen_ratio: if the fraction of fallen steps exceeds this
             value, the episode is discarded.
         height_threshold: base-z below which a step counts as "fallen" (m).
-        check_all_feet_airborne: if True, also count steps where all four
-            feet are airborne (foot_contact all False) as fallen steps.
         check_tilt: if True (default), count steps with body tilt >
             ``tilt_threshold`` as fallen (uses ``gravity_b`` when present).
         tilt_threshold: body-tilt-from-vertical threshold in rad
@@ -70,14 +65,12 @@ class FallenFilter(EpisodeFilter):
         self,
         max_fallen_ratio: float = 0.1,
         height_threshold: float = DEFAULT_HEIGHT_THRESHOLD,
-        check_all_feet_airborne: bool = True,
         check_tilt: bool = True,
         tilt_threshold: float | None = DEFAULT_TILT_THRESHOLD,
         articulation: str | None = None,
     ):
         self.max_fallen_ratio = float(max_fallen_ratio)
         self.height_threshold = float(height_threshold)
-        self.check_all_feet_airborne = bool(check_all_feet_airborne)
         self.check_tilt = bool(check_tilt)
         self.tilt_threshold = None if tilt_threshold is None else float(tilt_threshold)
         self.articulation = articulation
@@ -104,15 +97,6 @@ class FallenFilter(EpisodeFilter):
         if self.group is None:
             self.group = self._build_group(name)
         fallen = self.group.check(state)
-
-        if self.check_all_feet_airborne:
-            foot_contact = state.articulation(name).get("foot_contact")
-            if foot_contact is not None:
-                # (T, 4) bool: True when all feet off ground (works for
-                # numpy episodes and torch batches alike)
-                all_air = ~(foot_contact.sum(-1) > 0)
-                fallen = fallen | all_air
-
         ratio = float(fallen.mean())
         return ratio <= self.max_fallen_ratio
 

@@ -31,7 +31,6 @@ from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg
 from isaaclab.envs.mdp.actions import JointPositionActionCfg
 from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
@@ -43,7 +42,6 @@ from unigym.core import quat
 from unigym.env.episode import parse_episode_length, sample_durations
 from .init_pose import build_init_pose_cfg, sample_init_pose
 from .terrains.native import NativeTerrainPreset
-from unigym.env.naming import contact_sensor_prim_path
 from unigym.env.obs_catalog import (
     build_obs_catalog,
     canonicalize_obs_requests,
@@ -166,14 +164,6 @@ def _configure_robot_scene(
             "isaaclab2 backend: a run must declare at least one articulation "
             "with an ArticulationCfg realization"
         )
-    # The generic `.*_foot` regex only matches foot-style body names;
-    # derive an explicit alternation from the profile's declared feet
-    # (body_parts["feet"]) when available, else keep the default
-    # (profiles without body_parts — behavior unchanged for all
-    # existing robot profiles).
-    cfg.scene.contact_forces.prim_path = contact_sensor_prim_path(
-        (robot_profile.body_parts or {}).get("feet")
-    )
     # The body action term name is the body control's action face, which the
     # contract already requires to equal its articulation name.  Resolve it
     # from the neutral control runtimes instead of hard-coding a robot name:
@@ -282,10 +272,6 @@ class _IsaaclabSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.DistantLightCfg(intensity=3000.0, color=(0.95, 0.95, 0.95)),
     )
     dome_light: AssetBaseCfg | None = None  # optional sky-fill light (Task 1: brighter video)
-    contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
-        history_length=1,
-    )
     robot: ArticulationCfg | None = None  # filled from the backend realizer
     # camera sensors (obs + recorder camera_ref) join the scene ONLY via
     # cameras/ CameraManager.setup_scene under cam_<name> fields (the
@@ -347,7 +333,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         env_spacing: float = 4.0,
         decimation: int = 4,
         sim_dt: float = 0.005,
-        contact_force_threshold: float = 1.0,
         events_cfg=None,
         recorder=None,
         prop_manager=None,
@@ -369,8 +354,8 @@ class IsaaclabEnv(ManagerBasedEnv):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
         Args:
-            robot_profile: the neutral RobotProfile (joint order +
-                feet/body parts); source of the action term's joint list.
+            robot_profile: the neutral RobotProfile (joint order + body
+                facts); source of the action term's joint list.
             adapter: Adapter consuming this env (read for its
                 ``wants_reset_render`` opt-in only).
             num_envs: parallel env count (>1 requires the multi_env
@@ -381,8 +366,6 @@ class IsaaclabEnv(ManagerBasedEnv):
             decimation: sim steps per policy step (policy dt = decimation *
                 ``sim_dt``).
             sim_dt: physics step size (s; written to ``cfg.sim.dt``).
-            contact_force_threshold: foot-contact binary threshold (N; feeds
-                the ``foot_contact`` extra key).
             events_cfg: optional yaml ``randomization.events`` dict
                 (mode/interval DR events; backend capability ``events``).
             terrain_cfg: ``{SceneCfg field: cfg}`` dict from a TerrainPreset
@@ -451,7 +434,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._closed = False
         self._closing = False
         self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
-        self._contact_force_threshold = float(contact_force_threshold)
         self._init_pose = build_init_pose_cfg(init_pose)
         self._articulation_specs = tuple(articulations or ())
         self._profiles = dict(profiles or {})
@@ -542,7 +524,6 @@ class IsaaclabEnv(ManagerBasedEnv):
             return
 
         self.robot = self.scene["robot"]
-        self.contact = self.scene["contact_forces"]
         # named-action routing tables.  Entry keys must equal the
         # action-term names (field names of _IsaaclabActionsCfg); each term is
         # configured with preserve_order=True + explicit name lists, so term
@@ -629,22 +610,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._perm_pol2il = torch.argsort(self._perm_il2pol)
         self._q0_art = art.q0_art
         self._joint_gathers: dict = {}
-
-        foot_names = list(adapter.foot_order or robot_profile.foot_bodies)
-        body_names = list(self.contact.body_names)
-        if set(body_names) != set(foot_names):
-            raise ValueError(
-                f"foot name mismatch between adapter/profile and contact sensor:\n"
-                f"  sensor:  {body_names}\n  policy: {foot_names}"
-            )
-        self._foot_perm = torch.tensor(
-            [body_names.index(f) for f in foot_names], device=self.device
-        )
-        self._foot_body_idx = torch.tensor(
-            [self.robot.data.body_names.index(n) for n in foot_names],
-            device=self.device,
-            dtype=torch.long,
-        )
 
         # ---- obs cache: fill only what the adapter requested ----
         self._obs_requests = adapter.get_obs_requests()
@@ -918,11 +883,8 @@ class IsaaclabEnv(ManagerBasedEnv):
             # _joint_obs (name gather over the full articulation)
             "command": lambda: cmd,
             "prev_action": lambda: raw_action,
-            # additive obs sources (policy foot order)
+            # additive obs sources
             "base_ang_vel_b": lambda: d.root_ang_vel_b,
-            "foot_contact_force": lambda: torch.norm(
-                self.contact.data.net_forces_w[:, self._foot_perm], dim=-1
-            ),
             "base_yaw": lambda: math_utils.euler_xyz_from_quat(d.root_quat_w)[2].unsqueeze(-1),
             # additive obs source (recovery-switching termination state)
             "base_pos_w": lambda: d.root_pos_w,

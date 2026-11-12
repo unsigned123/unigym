@@ -21,12 +21,11 @@ class EpisodeFilter(ABC):
     - ``"base_pos"``:         (T, 3)   world frame
     - ``"base_lin_vel"``:     (T, 3)   body frame
     - ``"base_ang_vel"``:     (T, 3)   body frame
-    - ``"foot_contact"``:     (T, 4)   bool, policy order
     - ``"command"``:           (T, 15)
     - ``"time_in_episode"``:   (T,)
     - ``"episode_id"``:        scalar
     - ``"language"``:          list[str] or (T,) object array
-    - other fields (action_raw, joint_vel, foot_pos_z, …)
+    - other fields (action_raw, joint_vel, …)
 
     All arrays use the same leading time dimension ``T``.
     """

@@ -55,7 +55,7 @@ def _articulation_states(values: dict, renames: Mapping[str, str] | None = None)
     """Group ``articulation/<name>/<key>`` entries by articulation.
 
     The per-articulation inner keys are the canonical live names
-    (``base_pos_w`` / ``gravity_b`` / ``foot_contact`` / ``joint_pos`` ...);
+    (``base_pos_w`` / ``gravity_b`` / ``joint_pos`` ...);
     *renames* maps recorded-only leaf spellings onto them.
     """
     out: dict = {}
@@ -156,7 +156,7 @@ class TerminationState:
         if self.batch is not None:
             return self.batch
         for inner in (self.articulations or {}).values():
-            for key in ("base_pos_w", "joint_pos", "foot_contact", "gravity_b"):
+            for key in ("base_pos_w", "joint_pos", "gravity_b"):
                 value = inner.get(key)
                 if value is not None:
                     return value

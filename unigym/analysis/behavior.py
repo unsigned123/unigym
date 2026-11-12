@@ -283,7 +283,7 @@ def _articulation_report(data: dict, meta: dict) -> dict:
             rows = []
         out[name] = {
             "joint_names": joint_names,
-            "foot_names": list(record.get("foot_names") or []),
+            "foot_bodies": list(record.get("foot_bodies") or []),
             "joint_pos_key": key if key in data else None,
             "joint_travel": rows[:TOP_JOINTS],
             "joint_travel_truncated": max(0, len(rows) - TOP_JOINTS),
@@ -501,11 +501,11 @@ def _articulations_md(arts: dict) -> list[str]:
     L = [
         "",
         "## joint travel per articulation",
-        "articulation | joints | foot_names",
+        "articulation | joints | foot_bodies",
         "---|---|---",
     ]
     L += [
-        f"{name} | {len(a['joint_names'])} | " f"{', '.join(a['foot_names']) or '-'}"
+        f"{name} | {len(a['joint_names'])} | " f"{', '.join(a['foot_bodies']) or '-'}"
         for name, a in arts.items()
     ]
     for name, a in arts.items():

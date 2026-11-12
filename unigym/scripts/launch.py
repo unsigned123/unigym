@@ -36,10 +36,10 @@ Object state (slimmed): every prop records
     held_<name>[__<group>] generation was RETIRED -- hand
     contact criteria are DECLARED contact groups now (see below).
 Declarative contacts (docs/contracts/contacts_contract.md):
-    yaml `contacts:` groups may address robot body-parts groups
-    (sensor_bodies: {body_parts: grasp.left}) and props (filter_bodies:
-    {prop: cracker}) by name -- zero hardcoded bodies; the retired
-    auto-held chain is expressed as two declared pairwise groups.
+    yaml `contacts:` groups may address articulation inventory groups
+    (sensor_bodies: {contact_group: {articulation: g1, group: grasp.left}})
+    and props (filter_bodies: {prop: cracker}) by name -- zero hardcoded
+    bodies.
 usd props : type: usd -> isaaclab UsdFileCfg direct load
     (materials in file; usd_prep_prop.py sim-ready prep); mujoco
     declares its representation per prop (mjcf_file / box_texture /

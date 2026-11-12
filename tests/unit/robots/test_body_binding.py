@@ -10,7 +10,7 @@ from unigym.robots.base import (
     normalize_canonical_body_id,
     validate_body_bindings,
 )
-from unigym.scenes.articulation import AssetRef
+from unigym.assets.asset_ref import AssetRef
 
 
 @pytest.mark.parametrize(

@@ -201,8 +201,8 @@ def apply_spawn_params(
       keys would poison the new one (stale ``kinematics``/``control_port``-style
       keys are not the new adapter's business);
     * every *params* key must be a legal constructor keyword of the FINAL
-      adapter (``name`` and the injected ``body_parts`` handled
-      separately) -- unknown keys fail-fast with the teaching payload
+      adapter (``name`` handled separately) -- unknown keys fail-fast with
+      the teaching payload
       listing the legal set + an example;
     * DECLARATION-FIRST (the PARAMS convention): an adapter WITH a
       ``PARAMS`` table accepts only its declared keys (types gated too)
@@ -250,17 +250,6 @@ def apply_spawn_params(
         legal = _legal_keys(final_name)
     if legal is not None:
         unknown = set(params) - legal - {"name"}
-        if "body_parts" in params:
-            raise AdapterParamsError(
-                "adapter_params cannot override 'body_parts' (injected "
-                "from the yaml robot.body_parts section)",
-                _teaching_doc(
-                    "'body_parts' is not a spawn-param surface",
-                    legal=sorted(legal | {"name"}),
-                    example=_SPAWN_EXAMPLE,
-                    hint="body parts come from the config robot section",
-                ),
-            )
         if unknown:
             raise AdapterParamsError(
                 f"unknown adapter_params keys for '{final_name}': " f"{sorted(unknown)}",
@@ -280,14 +269,8 @@ def apply_spawn_params(
     return merged, overridden
 
 
-def build_adapter(
-    section: dict, num_envs: int, device: str, body_parts: dict | None = None
-) -> Adapter:
+def build_adapter(section: dict, num_envs: int, device: str) -> Adapter:
     """Instantiate an adapter from a config dict entry ``{name: ..., **params}``.
-
-    ``body_parts`` (from the yaml ``robot.body_parts`` section) is passed
-    through to the adapter constructor when provided, so the adapter can
-    use configurable joint/foot/hip names instead of hardcoded constants.
 
     DECLARED adapters (a ``PARAMS`` table on the class) are validated
     here on the EFFECTIVE section (yaml merged with spawn params):
@@ -309,8 +292,6 @@ def build_adapter(
         )
     validate_effective_section(name, section)
     params = {k: v for k, v in section.items() if k != "name"}
-    if body_parts is not None:
-        params["body_parts"] = body_parts
     adapter = ADAPTER_REGISTRY[name](num_envs=num_envs, device=device, **params)
     # registry identity: the build-time controls[] partition and the
     # runner's group validation resolve ownership by this name (never by

@@ -40,8 +40,8 @@ Attributes:
     ``joint_names`` / ``q0`` / ``drive`` / ``target``).
 ``articulations: Mapping[str, ArticulationRuntime]``
     One runtime per declared articulation (``joint_names`` / ``q0`` /
-    ``feet`` / ``body_parts`` / ``spawn`` / addresses).  No articulation is
-    primary.
+    ``foot_bodies`` / ``body_sets`` / ``contacts`` / ``spawn`` / addresses).
+    No articulation is primary.
 ``perm_il2pol / perm_pol2il: torch.Tensor``
     ``(J,)`` int64 gather indices (IL -> policy order and its inverse).
 ``to_policy_order(x_il) / to_il_order(x_pol)``
@@ -54,8 +54,8 @@ Attributes:
 extra-info key set (EXTRA_INFO_KEYS)
 ====================================
 Shapes are ``(N, ...)`` with ``N`` = num_envs, ``J`` = the policy
-body control's joint count, ``F`` = its foot count; ``Ki`` is variable-length.  All tensors live on
-``device``.  The 15 record keys are written to disk by collect.py; the 2
+body control's joint count, ``Ki`` is variable-length.  All tensors live on
+``device``.  The record keys are written to disk by collect.py; the 2
 control keys drive the record-before-reset loop and are excluded from records.
 
 Failure semantics
@@ -133,8 +133,8 @@ class ExtraKeySpec:
     """Shape/dtype contract for one ``extra`` key.
 
     ``dims`` entries are ints or the template letters ``"J"`` (policy joints)
-    / ``"F"`` (policy feet) / ``"K"`` (variable length; also dtype-wildcard
-    axis via ``-1``).  ``batch=False`` marks keys without the leading ``N``
+    / ``"K"`` (variable length; also dtype-wildcard axis via ``-1``).
+    ``batch=False`` marks keys without the leading ``N``
     env dim (``reset_env_ids`` is a plain id vector).  ``dtype`` is a
     ``torch.dtype``; ``should_reset`` uses the pseudo-marker ``"py_bool"``
     for a plain python bool.
@@ -158,10 +158,6 @@ EXTRA_INFO_KEYS: dict[str, ExtraKeySpec] = {
     "base_ang_vel_w": ExtraKeySpec(dims=(3,), dtype=torch.float32),
     "base_lin_vel_b": ExtraKeySpec(dims=(3,), dtype=torch.float32),
     "base_ang_vel_b": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    # ---- feet (policy foot order) ----
-    "foot_contact": ExtraKeySpec(dims=("F",), dtype=torch.bool),
-    "foot_contact_force_z": ExtraKeySpec(dims=("F",), dtype=torch.float32),
-    "foot_pos_z": ExtraKeySpec(dims=("F",), dtype=torch.float32),
     # ---- episode bookkeeping ----
     "time_in_episode": ExtraKeySpec(dims=(), dtype=torch.float32),
     "episode_id": ExtraKeySpec(dims=(), dtype=torch.int64),
@@ -336,9 +332,8 @@ class BackendContractError(AssertionError):
 def _resolve_dims(
     spec: ExtraKeySpec,
     n_joints: int,
-    n_feet: int,
 ) -> tuple[int, ...]:
-    table: dict[str, int] = {"J": n_joints, "F": n_feet, "K": -1}  # -1 == wildcard axis
+    table: dict[str, int] = {"J": n_joints, "K": -1}  # -1 == wildcard axis
     out: list[int] = []
     for d in spec.dims:
         if isinstance(d, str):
@@ -382,12 +377,11 @@ def check_extra_info(
     extra: dict[str, torch.Tensor | bool],
     num_envs: int,
     n_joints: int,
-    n_feet: int,
     device: str | torch.device = "cpu",
 ) -> None:
     """Validate one ``step()`` extra dict against ``EXTRA_INFO_KEYS``.
 
-    Checks key completeness (15 record keys + 2 control keys), shapes and
+    Checks key completeness (record keys + 2 control keys), shapes and
     dtypes.  Per-articulation record keys are resolved under
     ``articulation/<name>/...`` (v103.5).  Raises
     :class:`BackendContractError` on the first violation.
@@ -401,7 +395,7 @@ def check_extra_info(
     for key, spec in EXTRA_INFO_KEYS.items():
         for actual_key in resolved[key]:
             val = extra[actual_key]
-            dims = _resolve_dims(spec, n_joints, n_feet)  # "K" -> -1 wildcard
+            dims = _resolve_dims(spec, n_joints)  # "K" -> -1 wildcard
             expected_shape = ((num_envs,) if spec.batch else ()) + dims
             if spec.dtype == "py_bool":
                 if not isinstance(val, (bool, torch.Tensor)) or (
@@ -595,7 +589,7 @@ def assert_backend_contract(
             for rt in body_controls
         }
         obs, extra = env.step(actions)
-        check_extra_info(extra, n, j, len(runtime.feet), device=env.device)
+        check_extra_info(extra, n, j, device=env.device)
         check_obs_cache(obs, n, device=env.device)
         check_obs_cache(env.obs_cache, n, device=env.device)
 

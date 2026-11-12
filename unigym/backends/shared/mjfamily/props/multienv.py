@@ -8,8 +8,6 @@ same private tables the inline bodies used; N=1 output is unchanged.
 
 from __future__ import annotations
 
-import numpy as np
-
 
 def reject_model_global_unsupported(
     num_envs: int, prop_manager, camera_manager, director_cfg
@@ -43,32 +41,3 @@ def reject_model_global_unsupported(
             f"articulation anchors have no per-env write face; run these "
             f"features with num_envs=1 or switch to a free_articulation prop"
         )
-
-
-def foot_contact_forces(env, d=None) -> np.ndarray:
-    """Per-foot world-frame net contact force (F, 3), contact-filtered.
-
-    Contacts are matched by geom membership of the foot bodies (the sole
-    collision boxes are unnamed); ``mj_contactForce`` yields the
-    contact-frame force and the contact frame rows rotate it to world.
-    """
-    import mujoco
-
-    m = env._model
-    if d is None:
-        d = env._data
-    out = np.zeros((len(env._foot_geom_sets), 3))
-    ncon = int(d.ncon)
-    # array views (contact[i]/geom1 aliases go stale after a contact-buffer
-    # realloc -- mjwarp's get_data_into)
-    con_geoms = np.asarray(d.contact.geom)[:ncon]
-    frames = np.asarray(d.contact.frame)[:ncon].reshape(-1, 9)
-    for i in range(ncon):
-        g1, g2 = int(con_geoms[i, 0]), int(con_geoms[i, 1])
-        for f, geoms in enumerate(env._foot_geom_sets):
-            if g1 in geoms or g2 in geoms:
-                mujoco.mj_contactForce(m, d, i, env._frc6)
-                frame = frames[i].reshape(3, 3)  # rows: normal, t1, t2
-                out[f] += frame.T @ env._frc6[:3]
-                break
-    return out

@@ -36,8 +36,8 @@ import time
 import numpy as np
 import torch
 
-from unigym.env.naming import foot_metric_label
 from unigym.runtime.actions import NamedAction
+from unigym.runtime.controllers import articulation_facts
 
 from ..episodes import _flush_episode, slice_step_for_env
 
@@ -136,7 +136,6 @@ class CollectSink:
         dur_lo,
         dur_hi,
         command_dim,
-        body_parts,
     ):
         self.writer = writer
         self.logger = logger
@@ -156,7 +155,6 @@ class CollectSink:
         self.episode_length_s = episode_length_s
         self.dur_lo, self.dur_hi = dur_lo, dur_hi
         self.command_dim = command_dim
-        self.body_parts = body_parts
         # playback: the action-face contract, captured ONCE from the
         # actual first-step routing and written into the writer's meta
         # (lands in meta.json with the first flush); None until then
@@ -304,11 +302,6 @@ class CollectSink:
             step_metrics[f"base_z{suffix}"] = float(
                 extra[_state_key(rt, "base_pos_w")][:, 2].mean()
             )
-            contact = extra[_state_key(rt, "foot_contact")]
-            for i, name in enumerate(rt.feet):
-                label = foot_metric_label(name)
-                key = f"duty_{label}" if len(runtimes) == 1 else f"duty_{label}/{rt.name}"
-                step_metrics[key] = float(contact[:, i].float().mean())
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:  # P11: switch-state distribution
             step_metrics["in_recovery"] = float(in_recovery.float().mean())
@@ -347,18 +340,12 @@ class CollectSink:
             "policy_dt": self.policy_dt,
             "episode_length_s": self.episode_length_s,
             "episode_length_range": [self.dur_lo, self.dur_hi],
-            # per-articulation orders (v103.5/v3; no flat primary order)
+            # per-articulation neutral facts (v4; no flat primary order)
             "articulations": {
-                rt.articulation: {
-                    "joint_names": list(rt.joint_names),
-                    "foot_names": list(rt.feet),
-                    "asset_joint_names": list(rt.asset_joint_names),
-                    "action_face": rt.action_face,
-                }
+                rt.articulation: articulation_facts(self.env.articulations[rt.articulation], rt)
                 for rt in _policy_runtimes(self.env)
             },
             "command_dim": self.command_dim,
-            "body_parts": self.body_parts,
             "language_generator": (
                 type(self.language_gen).__name__ if self.language_gen is not None else None
             ),

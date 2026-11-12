@@ -79,9 +79,6 @@ ROBOT_STATE_LEAVES = frozenset(
         "base_ang_vel",
         "base_ang_vel_w",
         "base_ang_vel_b",
-        "foot_contact",
-        "foot_contact_force_z",
-        "foot_pos_z",
         "command",
     }
 )

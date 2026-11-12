@@ -130,13 +130,12 @@ def reset_articulations(env, d) -> None:
     """Write every articulation's root spawn + q0 (declaration order)."""
     for art in env._articulation_order:
         spawn = art.spawn or {}
-        pos = list(spawn.get("pos") or [0.0, 0.0, env._spawn_height])
-        if len(pos) != 3:
-            raise ValueError(
-                f"{_label(env)}: articulation {art.name!r} spawn.pos must be "
-                f"a 3-vector, got {spawn.get('pos')!r}"
-            )
-        yaw = float(spawn.get("yaw", env._spawn_yaw))
+        if spawn:
+            pos = list(spawn["pos"])
+            yaw = float(spawn.get("yaw", 0.0))
+        else:
+            pos = [float(env._spawn_xy[0]), float(env._spawn_xy[1]), float(env._spawn_height)]
+            yaw = float(env._spawn_yaw)
         if art.free_qpos_adr is not None:
             a = art.free_qpos_adr
             d.qpos[a : a + 3] = [float(v) for v in pos]

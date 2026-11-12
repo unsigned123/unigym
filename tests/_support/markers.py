@@ -29,11 +29,13 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "scenes": "domain_scene",
     "runtime": "domain_runtime",
     "run": "domain_run",
+    "contacts": "domain_contacts",
     "terminations": "domain_terminations",
     "filters": "domain_filters",
     "robots": "domain_robots",
     "actuators": "domain_actuators",
     "adapters": "domain_adapters",
+    "assets": "domain_assets",
     "backends": "domain_backends",
 }
 

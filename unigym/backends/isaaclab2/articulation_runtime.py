@@ -17,7 +17,6 @@ import math
 import torch
 import isaaclab.utils.math as math_utils
 from isaaclab.envs.mdp.actions import JointPositionActionCfg
-from isaaclab.sensors import ContactSensorCfg
 
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
@@ -35,18 +34,11 @@ __all__ = [
     "validate_options",
 ]
 
-DEFAULT_SPAWN_OFFSET_X = 1.8
-"""Fallback per-articulation x offset when no explicit ``spawn.pos`` is declared."""
-
 _LABEL = "isaaclab2 backend"
 
 
 def _scene_field(name: str, first: bool, prefix: str = "robot") -> str:
     return prefix if first else f"{prefix}_{name}"
-
-
-def _contact_field(name: str, first: bool) -> str:
-    return _scene_field(name, first, prefix="contact_forces")
 
 
 def validate_options(
@@ -125,8 +117,9 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
                     f"must be a 3-vector, got {spawn_pos!r}"
                 )
         else:
-            offset = DEFAULT_SPAWN_OFFSET_X * index
-            pos = (base_pos[0] + offset, base_pos[1], base_pos[2])
+            # spawn is the sole robot-root authority: absent -> the
+            # realizer/cfg init state, never an invented index offset.
+            pos = base_pos
         rot = tuple(getattr(init, "rot", (1.0, 0.0, 0.0, 0.0)))
         if spawn.get("yaw") is not None:
             yaw = float(spawn["yaw"])
@@ -137,14 +130,6 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
         )
         setattr(cfg.scene, field, new_cfg)
         fields[spec.name] = field
-
-        feet = tuple((getattr(spec, "body_parts", {}) or {}).get("feet") or ())
-        feet_regex = ("(" + "|".join(feet) + ")") if feet else ".*_foot"
-        setattr(
-            cfg.scene,
-            _contact_field(spec.name, first),
-            ContactSensorCfg(prim_path=f"{ENV_REGEX_NS}/{leaf}/{feet_regex}", history_length=1),
-        )
 
     for control in controls:
         if control.prop:
@@ -175,37 +160,32 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
     return fields
 
 
-def _articulation_runtime(env, spec, profile, asset, contact) -> ArticulationRuntime:
+def _articulation_runtime(env, spec, profile, asset) -> ArticulationRuntime:
     asset_names = tuple(asset.joint_names)
     defaults = dict(getattr(profile, "default_joint_pos", {}) or {})
     q0_art = torch.tensor(
         [float(defaults.get(n, 0.0)) for n in asset_names], dtype=torch.float32, device=env.device
     )
-    feet = tuple(getattr(profile, "foot_bodies", None) or ())
-    body_names = list(contact.body_names)
-    foot_perm = torch.tensor(
-        [body_names.index(f) for f in feet], dtype=torch.int64, device=env.device
-    )
-    asset_bodies = list(asset.data.body_names)
-    foot_body_idx = torch.tensor(
-        [asset_bodies.index(n) for n in feet], dtype=torch.long, device=env.device
-    )
+    base_body_id = getattr(profile, "base_body", None)
+    base_body = ""
+    if base_body_id is not None:
+        base_body = str(profile.body_bindings[base_body_id].names["usd"])
     art = ArticulationRuntime(
         name=spec.name,
         model=getattr(spec, "model", None),
         root=getattr(spec, "root", "free"),
         joint_names=asset_names,
         q0=q0_art.detach().cpu().numpy(),
-        feet=feet,
-        body_parts=dict(getattr(spec, "body_parts", {}) or {}),
+        foot_bodies=tuple(getattr(profile, "foot_bodies", None) or ()),
         spawn=dict(getattr(spec, "spawn", {}) or {}),
+        base_body=base_body,
+        base_body_id=base_body_id,
+        body_sets=dict(getattr(profile, "body_sets", {}) or {}),
+        contacts=getattr(spec, "contacts", None),
         profile=profile,
     )
     art.asset = asset
-    art.contact = contact
     art.q0_art = q0_art
-    art.foot_perm = foot_perm
-    art.foot_body_idx = foot_body_idx
     art.catalog = build_obs_catalog(
         profile, articulation_joint_names=list(asset_names), articulation=spec.name
     )
@@ -214,17 +194,13 @@ def _articulation_runtime(env, spec, profile, asset, contact) -> ArticulationRun
 
 def _bind_scene_fields(env, specs, fields, partitioned) -> str:
     env.robots = {}
-    env.contacts = {}
     for index, spec in enumerate(specs):
         field = fields.get(spec.name, "robot" if index == 0 else None)
         if field is None:
             raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no scene field")
         env.robots[spec.name] = env.scene[field]
-        cf = _contact_field(spec.name, index == 0) if partitioned else "contact_forces"
-        env.contacts[spec.name] = env.scene[cf]
     first = specs[0].name
     env.robot = env.robots[first]
-    env.contact = env.contacts[first]
     return first
 
 
@@ -249,7 +225,7 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
     env.articulations = {}
     for spec in specs:
         env.articulations[spec.name] = _articulation_runtime(
-            env, spec, profiles[spec.name], env.robots[spec.name], env.contacts[spec.name]
+            env, spec, profiles[spec.name], env.robots[spec.name]
         )
     controls: dict[str, ControlRuntime] = {}
     for control in tuple(env._planned_controls or ()):
@@ -268,7 +244,6 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
                 f"{control.articulation!r}, which has no runtime"
             )
         control.asset_joint_names = tuple(art.joint_names)
-        control.feet = tuple(art.feet)
         control.addresses["term"] = control.action_face
         index = {n: i for i, n in enumerate(art.joint_names)}
         control.addresses["perm_il2pol"] = [index[n] for n in control.joint_names if n in index]
@@ -347,8 +322,6 @@ def bind_articulations(env) -> None:
     env._perm_il2pol = first_art.perm_il2pol
     env._perm_pol2il = torch.argsort(env._perm_il2pol)
     env._q0_art = first_art.q0_art
-    env._foot_perm = first_art.foot_perm
-    env._foot_body_idx = first_art.foot_body_idx
     env._joint_gathers = {}
     _bind_obs_catalogs(env)
 
@@ -414,7 +387,6 @@ def route_actions(env, actions: dict) -> torch.Tensor:
 def _articulation_extra(env, art) -> dict:
     d = art.asset.data
     prefix = f"articulation/{art.name}"
-    fz = art.contact.data.net_forces_w[:, :, 2][:, art.foot_perm]
     return {
         f"{prefix}/joint_pos": d.joint_pos[:, art.perm_il2pol].clone(),
         f"{prefix}/joint_vel": d.joint_vel[:, art.perm_il2pol].clone(),
@@ -426,9 +398,6 @@ def _articulation_extra(env, art) -> dict:
         f"{prefix}/base_ang_vel_w": d.root_ang_vel_w.clone(),
         f"{prefix}/base_lin_vel_b": d.root_lin_vel_b.clone(),
         f"{prefix}/base_ang_vel_b": d.root_ang_vel_b.clone(),
-        f"{prefix}/foot_contact": fz > env._contact_force_threshold,
-        f"{prefix}/foot_contact_force_z": fz.clone(),
-        f"{prefix}/foot_pos_z": d.body_pos_w[:, art.foot_body_idx, 2].clone(),
     }
 
 
@@ -459,9 +428,6 @@ def refresh_obs_cache(env, raw_action=None, cmd=None) -> None:
         env.obs_cache[f"{prefix}/base_yaw"] = math_utils.euler_xyz_from_quat(d.root_quat_w)[
             2
         ].unsqueeze(-1)
-        env.obs_cache[f"{prefix}/foot_contact_force"] = torch.norm(
-            art.contact.data.net_forces_w[:, art.foot_perm], dim=-1
-        )
 
 
 def reset_articulations(env, env_ids) -> None:

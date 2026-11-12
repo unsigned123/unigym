@@ -224,3 +224,23 @@ def test_contact_body_id_errors_carry_group_field_context():
         match=r"contact sensor group 'feet' bodies\[0\]",
     ):
         ContactSensorGroup(name="feet", bodies=("left/hand",))
+
+
+def test_contact_inventory_serializes_bodies_and_body_set_groups():
+    """v4 metadata serializes each group as bodies or body_set."""
+    inventory = ContactSensorInventory(
+        mode="declared",
+        groups=(
+            ContactSensorGroup(name="feet", bodies=("left_ankle_roll",)),
+            ContactSensorGroup(name="grasp", body_set="grasp.left"),
+        ),
+    )
+
+    assert inventory.to_dict() == {
+        "mode": "declared",
+        "groups": [
+            {"name": "feet", "bodies": ["left_ankle_roll"]},
+            {"name": "grasp", "body_set": "grasp.left"},
+        ],
+    }
+    assert ContactSensorInventory(mode="none").to_dict() == {"mode": "none", "groups": []}

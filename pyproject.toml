@@ -79,6 +79,13 @@ type = "independence"
 modules = ["unigym.adapters.manual"]
 
 [[tool.importlinter.contracts]]
+name = "robot data never imports scene vocabulary"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.robots"]
+forbidden_modules = ["unigym.scenes"]
+
+[[tool.importlinter.contracts]]
 name = "unigym.core imports nothing above itself (stdlib + third-party only)"
 type = "forbidden"
 source_modules = ["unigym.core"]
@@ -258,11 +265,13 @@ markers = [
     "domain_scene: scene domain tests",
     "domain_runtime: runtime domain tests",
     "domain_run: run domain tests",
+    "domain_contacts: contact-group domain tests",
     "domain_terminations: termination domain tests",
     "domain_filters: filter domain tests",
     "domain_robots: robot domain tests",
     "domain_actuators: actuation domain tests",
     "domain_adapters: adapter domain tests",
+    "domain_assets: asset reference and manifest domain tests",
     "domain_backends: framework-level backend registry tests",
     "backend_agnostic: tests that do not target one specific backend",
     "backend_mujoco: MuJoCo backend tests",

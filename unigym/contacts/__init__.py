@@ -11,12 +11,12 @@ Public surface:
   (``contacts.base.apply_format``); backends only produce raw arrays.
 * :class:`contacts.base.ContactGroupSpec` — yaml-declarable group spec
   (frame REQUIRED, no default).
-* Declarative references : ``sensor_bodies: {body_parts:
-  grasp.left}`` and ``filter_bodies: {prop: cracker}`` resolve against the
-  robot profile body-parts groups and the run's declared props
+* Declarative references : ``sensor_bodies: {contact_group:
+  {articulation: g1, group: grasp.left}}`` and ``filter_bodies: {prop:
+  cracker}`` resolve against the run's per-articulation native-body
+  inventory and the run's declared props
   (``contacts.base.resolve_contact_entries``; name-addressing only, zero
-  hardcoded bodies).  The retired auto held groups are now
-  expressed as two declared pairwise groups.
+  hardcoded bodies).
 
 Record channel: the env backends merge ``manager.read()`` into ``extra`` so
 the keys flow through CollectSink/BenchmarkSink into npz / episode buffers
@@ -40,8 +40,8 @@ from .base import (
     ContactGroupSpec,
     apply_format,
     contact_key,
-    resolve_body_part_group,
     resolve_contact_entries,
+    resolve_contact_group,
     resolve_prop_filter,
 )
 from .manager import ContactManager, build_contact_manager
@@ -59,7 +59,7 @@ __all__ = [
     "apply_format",
     "build_contact_manager",
     "contact_key",
-    "resolve_body_part_group",
     "resolve_contact_entries",
+    "resolve_contact_group",
     "resolve_prop_filter",
 ]

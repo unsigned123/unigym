@@ -103,23 +103,6 @@ class MujocoContactBackend:
     backend_key = "mujoco"
 
     @classmethod
-    def group_bodies(cls, gval, path: str):
-        """Select this backend's value from a body-parts group declaration.
-
-        A flat list (or a non-mapping) is shared by every backend; a
-        per-backend mapping is keyed by :attr:`backend_key`.
-        """
-        if not isinstance(gval, dict):
-            return gval
-        if cls.backend_key not in gval:
-            group = path.rsplit(".", 1)[-1]
-            raise ValueError(
-                f"body_parts path {path!r}: group {group!r} declares no "
-                f"{cls.backend_key!r} bodies (available: {sorted(gval)})"
-            )
-        return gval[cls.backend_key]
-
-    @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]:
         """Native contact-filter address for a declared prop."""
         if articulated:

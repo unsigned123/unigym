@@ -1,9 +1,10 @@
 """Backend-neutral robot profile data.
 
 A :class:`RobotProfile` is authoring data only: named joint sets, the
-standby pose, feet, body parts, declared assets and named action faces.  It
-carries no backend object and no backend switch; a backend that needs an
-engine-specific realization builds it from this profile at its own boundary
+standby pose, the canonical base/feet/body-set facts, the per-format body
+bindings, declared assets and named action faces.  It carries no backend
+object and no backend switch; a backend that needs an engine-specific
+realization builds it from this profile at its own boundary
 (``BackendInfo.robot_realizer``).
 
 The profile supplies the robot facts consumed by controls, observations and
@@ -13,22 +14,19 @@ realizer, which owns actuator tables, prim paths and spawn conversion.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable, Mapping, NewType
 
-from unigym._typing import JsonValue
+from unigym.assets.asset_ref import AssetRef, AssetRefError
 
 __all__ = [
     "BodyBinding",
     "BodyBindingError",
     "CanonicalBodyId",
-    "RobotAsset",
     "RobotProfile",
     "normalize_canonical_body_id",
     "validate_body_bindings",
 ]
-
-_ASSET_FORMATS = frozenset({"usd", "mjcf", "urdf"})
 
 CanonicalBodyId = NewType("CanonicalBodyId", str)
 """A backend-neutral semantic body id (runtime value is ``str``)."""
@@ -70,8 +68,8 @@ class BodyBinding:
     Attributes:
         canonical: the backend-neutral semantic body id.
         names: asset format -> native name / prim path.  The format
-            vocabulary is owned by :class:`unigym.scenes.articulation.AssetRef`;
-            this record only requires a non-empty string mapping.
+            vocabulary is owned by :mod:`unigym.assets.asset_ref`; this
+            record only requires a non-empty string mapping.
     """
 
     canonical: CanonicalBodyId
@@ -190,27 +188,15 @@ def validate_body_bindings(
             )
 
 
-@dataclass(frozen=True)
-class RobotAsset:
-    """One declared robot asset reference.
-
-    Attributes:
-        format: asset format (``usd`` / ``mjcf`` / ``urdf``).
-        ref: resource reference as declared by the author (a pack-relative
-            or absolute path/URL); resolution belongs to the composition
-            boundary, not to this record.
-    """
-
-    format: str
-    ref: str
-
-    def __post_init__(self) -> None:
-        if self.format not in _ASSET_FORMATS:
-            raise ValueError(
-                f"RobotAsset format {self.format!r} is not one of " f"{sorted(_ASSET_FORMATS)}"
-            )
-        if not self.ref:
-            raise ValueError(f"RobotAsset({self.format!r}) requires a non-empty ref")
+def _canonical_ids(value: object, what: str) -> tuple[CanonicalBodyId, ...]:
+    """Normalize a sequence of canonical body ids."""
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        raise ValueError(f"{what} must be a sequence of body ids, got {value!r}")
+    return tuple(
+        normalize_canonical_body_id(entry, f"{what}[{index}]") for index, entry in enumerate(value)
+    )
 
 
 @dataclass(frozen=True)
@@ -222,23 +208,26 @@ class RobotProfile:
             ``g1``); an articulation may be renamed without changing it.
         joint_sets: the named joint vocabulary
             (``{set_name: (joint names in action order)}``).  ``body`` is
-            the primary policy/body order; extra sets (``hand`` /
-            ``right_hand`` / ...) are selected explicitly by
-            ``ControlGroup.joint_set``.  This is the only authoring source
-            of joint names.
+            the primary policy/body order; extra sets (curated groups such
+            as ``legs`` / ``waist`` / ``arms`` and explicit faces such as
+            ``hand`` / ``right_hand``) are selected by name.
         default_joint_pos: joint name -> default angle (rad), i.e. the
             policy standby pose (must match the policy's q0 by name).
-        foot_bodies: foot body names in policy order.
-        body_parts: cross-robot body-part metadata (feet/base/joints/...).
-        assets: declared asset formats and references.
+        assets: the neutral :class:`AssetRef` (or ``None`` when the asset is
+            owned by a scene/pack resource).
         action_faces: neutral named action surfaces beyond the primary body
             face (``{face_name: (joint names in term input order)}``); this
             is authoring data, not a backend capability.
+        base_body: the canonical id of the robot's base link (``None`` when
+            the robot declares none).
+        foot_bodies: semantic foot body ids (never a sensor declaration).
+        body_sets: named canonical body groups (``grasp.left`` ...).
+        body_bindings: canonical id -> per-format native name/path metadata.
         full_joint_order: optional explicit full-articulation joint order
             (document order) used by :attr:`full_joint_names`; ``None``
             derives the set union in declaration order.
 
-    Compatibility read-only properties (derived from the data above):
+    Read-only properties (derived from the data above):
 
         joint_order: the ``body`` set as a list.
         full_joint_names: :attr:`full_joint_order` or the union of every
@@ -248,10 +237,12 @@ class RobotProfile:
     name: str
     joint_sets: Mapping[str, tuple[str, ...]]
     default_joint_pos: Mapping[str, float]
-    foot_bodies: tuple[str, ...]
-    body_parts: Mapping[str, JsonValue] = field(default_factory=dict)
-    assets: tuple[RobotAsset, ...] = ()
-    action_faces: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    assets: AssetRef | None
+    action_faces: Mapping[str, tuple[str, ...]]
+    base_body: CanonicalBodyId | None
+    foot_bodies: tuple[CanonicalBodyId, ...]
+    body_sets: Mapping[str, tuple[CanonicalBodyId, ...]]
+    body_bindings: Mapping[CanonicalBodyId, BodyBinding]
     full_joint_order: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
@@ -282,6 +273,36 @@ class RobotProfile:
                 raise ValueError("RobotProfile full_joint_order must not be empty")
             if len(set(full_order)) != len(full_order):
                 raise ValueError("RobotProfile full_joint_order contains duplicate names")
+
+        assets = self.assets
+        if assets is not None:
+            try:
+                assets = AssetRef.from_mapping(assets, "RobotProfile assets")
+            except AssetRefError as exc:
+                raise ValueError(str(exc)) from exc
+        base_body = self.base_body
+        if base_body is not None:
+            base_body = normalize_canonical_body_id(base_body, "RobotProfile base_body")
+        foot_bodies = _canonical_ids(self.foot_bodies, "RobotProfile foot_bodies")
+        body_sets: dict[str, tuple[CanonicalBodyId, ...]] = {}
+        for set_name, bodies in dict(self.body_sets or {}).items():
+            name = str(set_name)
+            if not name:
+                raise ValueError("RobotProfile body_sets names must be non-empty")
+            members = _canonical_ids(bodies, f"RobotProfile body_sets[{name!r}]")
+            if not members:
+                raise ValueError(f"RobotProfile body set {name!r} is empty")
+            if len(set(members)) != len(members):
+                raise ValueError(f"RobotProfile body set {name!r} contains duplicate body ids")
+            body_sets[name] = members
+        bindings = dict(self.body_bindings or {})
+        required = list(foot_bodies)
+        if base_body is not None:
+            required.insert(0, base_body)
+        for members in body_sets.values():
+            required.extend(members)
+        validate_body_bindings(bindings, required_ids=required, formats=None)
+
         object.__setattr__(self, "name", str(self.name))
         object.__setattr__(self, "joint_sets", sets)
         default_pos = dict(self.default_joint_pos or {})
@@ -290,14 +311,16 @@ class RobotProfile:
             "default_joint_pos",
             {str(joint): float(value) for joint, value in default_pos.items()},
         )
-        object.__setattr__(self, "foot_bodies", tuple(str(body) for body in self.foot_bodies or ()))
-        object.__setattr__(self, "body_parts", dict(self.body_parts or {}))
-        object.__setattr__(self, "assets", tuple(self.assets or ()))
+        object.__setattr__(self, "assets", assets)
         object.__setattr__(self, "action_faces", faces)
+        object.__setattr__(self, "base_body", base_body)
+        object.__setattr__(self, "foot_bodies", foot_bodies)
+        object.__setattr__(self, "body_sets", body_sets)
+        object.__setattr__(self, "body_bindings", bindings)
         object.__setattr__(self, "full_joint_order", full_order)
 
     # ------------------------------------------------------------------ #
-    # read-only compatibility properties (derived data; no backend fields)
+    # read-only derived properties (no backend fields)
     # ------------------------------------------------------------------ #
     @property
     def joint_order(self) -> list[str]:

@@ -23,9 +23,6 @@ ARTICULATION_EXTRA_KEYS = (
     "base_ang_vel_w",
     "base_lin_vel_b",
     "base_ang_vel_b",
-    "foot_contact",
-    "foot_contact_force_z",
-    "foot_pos_z",
 )
 GLOBAL_EXTRA_KEYS = ("time_in_episode", "episode_id", "reset_env_ids", "should_reset")
 EXPECTED_EXTRA_KEYS = {
@@ -44,9 +41,6 @@ ONE_ENV_TENSOR_SPECS = {
     f"articulation/{ARTICULATION}/base_ang_vel_w": ((1, 3), torch.float32),
     f"articulation/{ARTICULATION}/base_lin_vel_b": ((1, 3), torch.float32),
     f"articulation/{ARTICULATION}/base_ang_vel_b": ((1, 3), torch.float32),
-    f"articulation/{ARTICULATION}/foot_contact": ((1, 1), torch.bool),
-    f"articulation/{ARTICULATION}/foot_contact_force_z": ((1, 1), torch.float32),
-    f"articulation/{ARTICULATION}/foot_pos_z": ((1, 1), torch.float32),
     "time_in_episode": ((1,), torch.float32),
     "episode_id": ((1,), torch.int64),
 }
@@ -55,7 +49,6 @@ TWO_ENV_TENSOR_SHAPES = {
     f"articulation/{ARTICULATION}/joint_pos": (2, 2),
     f"articulation/{ARTICULATION}/base_pos_w": (2, 3),
     f"articulation/{ARTICULATION}/base_quat_w": (2, 4),
-    f"articulation/{ARTICULATION}/foot_contact": (2, 1),
     "time_in_episode": (2,),
     "episode_id": (2,),
 }

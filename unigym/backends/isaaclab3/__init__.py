@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from unigym.backends.registry import ISAACLAB3_TRAITS, BackendInfo
 
-BACKEND_INFO = BackendInfo("isaaclab3", (3, 0), ISAACLAB3_TRAITS)
+BACKEND_INFO = BackendInfo("isaaclab3", (3, 0), ISAACLAB3_TRAITS, asset_format="usd")
 
 __all__ = ["BACKEND_INFO", "Isaaclab3Env"]
 

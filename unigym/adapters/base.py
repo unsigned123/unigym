@@ -55,11 +55,7 @@ _ROBOT_STATE_KEYS = frozenset(
         "base_pos_w",
         "base_quat_w",
         "base_ang_vel_b",
-        "foot_contact_force",
         "base_lin_vel_b",
-        "foot_contact",
-        "foot_contact_force_z",
-        "foot_pos_z",
     }
 )
 #: joint-vector keys whose request MUST carry an explicit ``joint_names``.
@@ -155,10 +151,10 @@ class ImageObsRequest(NamedTuple):
 class Adapter(ABC):
     """Group-addressed adapter: explicit observations -> named control targets.
 
-    The adapter declares the joint/foot order it wants via
-    :attr:`joint_order` / :attr:`foot_order` (lists of simulator entity
-    names).  The env backend gathers robot data by name, so no explicit
-    permutation matrices ever leak into adapter code.
+    The adapter declares the joint order it wants via :attr:`joint_order`
+    (a list of simulator entity names).  The env backend gathers robot data
+    by name, so no explicit permutation matrices ever leak into adapter
+    code.
 
     The ACTION boundary is group-addressed: :meth:`postprocess_action`
     returns ``dict[str, NamedAction]`` keyed by the control group names the
@@ -363,7 +359,3 @@ class Adapter(ABC):
     @property
     def joint_order(self) -> list[str] | None:
         """Joint names in the adapter's (policy) order; None -> use robot profile order."""
-
-    @property
-    def foot_order(self) -> list[str] | None:
-        """Foot body names in the adapter's (policy) order; None -> profile order."""

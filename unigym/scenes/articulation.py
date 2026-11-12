@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.robots.base import (
     BodyBinding,
     BodyBindingError,
@@ -72,7 +73,7 @@ class ArticulationError(ValueError):
     """A malformed articulation declaration (fail-fast, no alias)."""
 
 
-def _finite(value: JsonValue, what: str) -> float:
+def _finite(value: object, what: str) -> float:
     if not isinstance(value, (int, float, str)):
         raise ArticulationError(f"{what} must be a number, got {value!r}")
     try:
@@ -88,12 +89,6 @@ def _optional_float(value: JsonValue, what: str) -> float | None:
     if value is None:
         return None
     return _finite(value, what)
-
-
-def _optional_str(value: JsonValue, what: str) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _range_value(value: JsonValue, what: str) -> tuple[float, float] | None:
@@ -196,6 +191,12 @@ class ContactSensorGroup:
         object.__setattr__(self, "bodies", bodies)
         object.__setattr__(self, "body_set", body_set)
 
+    def to_dict(self) -> dict[str, JsonValue]:
+        """Serialize one inventory group (``bodies`` or ``body_set``)."""
+        if self.body_set is not None:
+            return {"name": self.name, "body_set": self.body_set}
+        return {"name": self.name, "bodies": [str(body) for body in (self.bodies or ())]}
+
 
 @dataclass(frozen=True)
 class ContactSensorInventory:
@@ -244,6 +245,13 @@ class ContactSensorInventory:
                 f"groups, got {names!r}"
             )
         object.__setattr__(self, "groups", entries)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        """Serialize the inventory for run metadata (mode + groups)."""
+        return {
+            "mode": self.mode,
+            "groups": [group.to_dict() for group in self.groups],
+        }
 
 
 def normalize_contact_sensor_inventory(value: object) -> ContactSensorInventory:
@@ -400,50 +408,6 @@ def validate_contact_sensor_inventory(
 
 
 @dataclass(frozen=True)
-class AssetRef:
-    """One articulation asset, per backend family (may leave all None)."""
-
-    mjcf: str | None = None
-    urdf: str | None = None
-    usd: str | None = None
-
-    def __post_init__(self):
-        for key in ("mjcf", "urdf", "usd"):
-            value = getattr(self, key)
-            if value is not None:
-                object.__setattr__(self, key, str(value))
-
-    def to_dict(self) -> dict[str, str]:
-        """Non-empty asset fields (stable key order)."""
-        out: dict[str, str] = {}
-        for key in ("mjcf", "urdf", "usd"):
-            value = getattr(self, key)
-            if value is not None:
-                out[key] = value
-        return out
-
-    @classmethod
-    def from_mapping(
-        cls,
-        value: AssetRef | Mapping[str, JsonValue],
-        what: str = "model",
-    ) -> AssetRef:
-        """Normalize an ``AssetRef`` or ``{mjcf|urdf|usd: <path>}`` mapping."""
-        if isinstance(value, cls):
-            return value
-        if not isinstance(value, Mapping):
-            raise ArticulationError(
-                f"{what} must be a mapping {{mjcf|urdf|usd: <path>}}, " f"got {value!r}"
-            )
-        _unknown_keys(value, ("mjcf", "urdf", "usd"), what)
-        return cls(
-            mjcf=_optional_str(value.get("mjcf"), f"{what}.mjcf"),
-            urdf=_optional_str(value.get("urdf"), f"{what}.urdf"),
-            usd=_optional_str(value.get("usd"), f"{what}.usd"),
-        )
-
-
-@dataclass(frozen=True)
 class JointSpec:
     """One declared joint of an articulation (authoring IR).
 
@@ -519,6 +483,83 @@ class JointSpec:
         )
 
 
+_SPAWN_KEYS = ("pos", "yaw")
+"""The closed run-level robot spawn vocabulary."""
+
+
+def _spawn_value(value: object, name: str) -> dict[str, JsonValue]:
+    """Validate one articulation spawn mapping (pos required when present)."""
+    if not is_json_object(value):
+        raise ArticulationError(f"articulation {name!r} spawn must be a mapping")
+    spawn = dict(value)
+    if not spawn:
+        return {}
+    unknown = sorted(set(spawn) - set(_SPAWN_KEYS))
+    if unknown:
+        raise ArticulationError(
+            f"articulation {name!r} spawn declares unknown keys {unknown}; "
+            f"allowed keys are {list(_SPAWN_KEYS)}"
+        )
+    raw_pos = spawn.get("pos")
+    if raw_pos is None:
+        raise ArticulationError(f"articulation {name!r} spawn requires `pos` (a finite 3-vector)")
+    if not is_object_sequence(raw_pos) or len(raw_pos) != 3:
+        raise ArticulationError(
+            f"articulation {name!r} spawn.pos must be a finite 3-vector, got {raw_pos!r}"
+        )
+    pos = tuple(
+        _finite(entry, f"articulation {name!r} spawn.pos[{index}]")
+        for index, entry in enumerate(raw_pos)
+    )
+    yaw = _finite(spawn.get("yaw", 0.0), f"articulation {name!r} spawn.yaw")
+    return {"pos": list(pos), "yaw": yaw}
+
+
+def _optional_body_ids(value: object, what: str) -> tuple[CanonicalBodyId, ...] | None:
+    """Normalize an optional canonical body-id tuple (None = inherit)."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not is_object_sequence(value):
+        raise ArticulationError(f"{what} must be a list of body ids, got {value!r}")
+    bodies: list[CanonicalBodyId] = []
+    for index, entry in enumerate(value):
+        try:
+            bodies.append(normalize_canonical_body_id(entry, f"{what}[{index}]"))
+        except BodyBindingError as exc:
+            raise ArticulationError(str(exc)) from exc
+    return tuple(bodies)
+
+
+def _optional_body_sets(value: object, what: str) -> dict[str, tuple[CanonicalBodyId, ...]] | None:
+    """Normalize optional named canonical body sets (None = inherit)."""
+    if value is None:
+        return None
+    if not is_json_object(value):
+        raise ArticulationError(f"{what} must be a mapping of set name -> bodies")
+    sets: dict[str, tuple[CanonicalBodyId, ...]] = {}
+    for raw_name, raw_bodies in value.items():
+        name = str(raw_name)
+        if not name:
+            raise ArticulationError(f"{what} names must be non-empty")
+        members = _optional_body_ids(raw_bodies, f"{what}[{name!r}]")
+        if not members:
+            raise ArticulationError(f"{what}[{name!r}] must declare at least one body id")
+        if len(set(members)) != len(members):
+            raise ArticulationError(f"{what}[{name!r}] contains duplicate body ids")
+        sets[name] = members
+    return sets
+
+
+def _optional_body_id(value: object, what: str) -> CanonicalBodyId | None:
+    """Normalize an optional canonical body id (None = inherit)."""
+    if value is None:
+        return None
+    try:
+        return normalize_canonical_body_id(value, what)
+    except BodyBindingError as exc:
+        raise ArticulationError(str(exc)) from exc
+
+
 @dataclass(frozen=True)
 class ArticulationSpec:
     """One articulation: root + model + joints + spawn (neutral IR).
@@ -528,6 +569,11 @@ class ArticulationSpec:
     actuated unless listed in ``passive_joints``.  Control coverage is
     validated at the run level against ``controls[]``
     (:func:`unigym.runtime.controls.validate_controls`).
+
+    The body fields are run-level overrides over the robot profile: ``None``
+    means inherit the profile, an explicit empty tuple/mapping means empty.
+    ``contacts`` is the per-articulation contact sensor inventory; ``None``
+    means omitted.  ``spawn`` is the only run-level robot-root spawn source.
     """
 
     name: str
@@ -535,7 +581,10 @@ class ArticulationSpec:
     root: str = "free"
     spawn: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
     joints: tuple[JointSpec, ...] = ()
-    body_parts: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
+    base_body: CanonicalBodyId | None = None
+    foot_bodies: tuple[CanonicalBodyId, ...] | None = None
+    body_sets: Mapping[str, tuple[CanonicalBodyId, ...]] | None = None
+    contacts: ContactSensorInventory | None = None
     passive_joints: tuple[str, ...] = ()
     params: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
 
@@ -549,14 +598,12 @@ class ArticulationSpec:
                 f"{ROOT_MODES}, got {self.root!r}"
             )
         if self.model is not None:
-            object.__setattr__(
-                self,
-                "model",
-                AssetRef.from_mapping(self.model, f"articulation {self.name!r} model"),
-            )
-        if not isinstance(self.spawn, Mapping):
-            raise ArticulationError(f"articulation {self.name!r} spawn must be a mapping")
-        object.__setattr__(self, "spawn", dict(self.spawn))
+            try:
+                model = AssetRef.from_mapping(self.model, f"articulation {self.name!r} model")
+            except AssetRefError as exc:
+                raise ArticulationError(str(exc)) from exc
+            object.__setattr__(self, "model", model)
+        object.__setattr__(self, "spawn", _spawn_value(self.spawn, self.name))
         object.__setattr__(self, "joints", _joints_tuple(self.name, self.joints))
         joint_names = [joint.name for joint in self.joints]
         duplicated = sorted({name for name in joint_names if joint_names.count(name) > 1})
@@ -564,9 +611,23 @@ class ArticulationSpec:
             raise ArticulationError(
                 f"articulation {self.name!r} declares duplicate joint names {duplicated!r}"
             )
-        if not isinstance(self.body_parts, Mapping):
-            raise ArticulationError(f"articulation {self.name!r} body_parts must be a mapping")
-        object.__setattr__(self, "body_parts", dict(self.body_parts))
+        object.__setattr__(
+            self,
+            "base_body",
+            _optional_body_id(self.base_body, f"articulation {self.name!r} base_body"),
+        )
+        object.__setattr__(
+            self,
+            "foot_bodies",
+            _optional_body_ids(self.foot_bodies, f"articulation {self.name!r} foot_bodies"),
+        )
+        object.__setattr__(
+            self,
+            "body_sets",
+            _optional_body_sets(self.body_sets, f"articulation {self.name!r} body_sets"),
+        )
+        if self.contacts is not None and not isinstance(self.contacts, ContactSensorInventory):
+            object.__setattr__(self, "contacts", normalize_contact_sensor_inventory(self.contacts))
         passive = tuple(str(name) for name in (self.passive_joints or ()))
         if len(set(passive)) != len(passive):
             raise ArticulationError(
@@ -657,17 +718,21 @@ def _model_field(value: JsonValue, name: str) -> AssetRef | None:
             f"articulation {name!r} model must be a mapping "
             f"{{mjcf|urdf|usd: <path>}}, got {value!r}"
         )
-    return AssetRef.from_mapping(value, f"articulation {name!r} model")
+    try:
+        return AssetRef.from_mapping(value, f"articulation {name!r} model")
+    except AssetRefError as exc:
+        raise ArticulationError(str(exc)) from exc
 
 
 def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
     """Normalize one ``articulations[]`` entry into an :class:`ArticulationSpec`.
 
     The config surface is a mapping with the IR fields
-    (``name/model/root/spawn/joints/body_parts/passive_joints/params``);
-    unknown keys fail fast (there is no shorthand and no alias).  The
-    articulation-level ``control:`` block is rejected with a teaching error
-    (drives are declared in the run-level ``controls[]``).
+    (``name/model/root/spawn/joints/base_body/foot_bodies/body_sets/
+    contacts/passive_joints/params``); unknown keys fail fast (there is no
+    shorthand and no alias).  The articulation-level ``control:`` block is
+    rejected with a teaching error (drives are declared in the run-level
+    ``controls[]``).
     """
     if not isinstance(entry, Mapping):
         raise ArticulationError(f"articulations entries must be mappings, got {entry!r}")
@@ -682,19 +747,44 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
         )
     _unknown_keys(
         entry,
-        ("name", "model", "root", "spawn", "joints", "body_parts", "passive_joints", "params"),
+        (
+            "name",
+            "model",
+            "root",
+            "spawn",
+            "joints",
+            "base_body",
+            "foot_bodies",
+            "body_sets",
+            "contacts",
+            "passive_joints",
+            "params",
+        ),
         "articulation",
     )
     if "name" not in entry:
         raise ArticulationError("articulation entry is missing 'name'")
     name = _articulation_name(entry)
+    raw_body_sets = entry.get("body_sets")
+    raw_contacts = entry.get("contacts")
     return ArticulationSpec(
         name=name,
         model=_model_field(entry.get("model"), name),
         root=_root_value(entry.get("root", "free"), name),
         spawn=_mapping_field(entry.get("spawn", {}), f"articulation {name!r} spawn"),
         joints=_joints_tuple(name, entry.get("joints")),
-        body_parts=_mapping_field(entry.get("body_parts", {}), f"articulation {name!r} body_parts"),
+        base_body=_optional_body_id(
+            entry.get("base_body") if "base_body" in entry else None,
+            f"articulation {name!r} base_body",
+        ),
+        foot_bodies=_optional_body_ids(
+            entry.get("foot_bodies") if "foot_bodies" in entry else None,
+            f"articulation {name!r} foot_bodies",
+        ),
+        body_sets=_optional_body_sets(raw_body_sets, f"articulation {name!r} body_sets"),
+        contacts=(
+            None if raw_contacts is None else normalize_contact_sensor_inventory(raw_contacts)
+        ),
         passive_joints=_str_tuple(
             entry.get("passive_joints"), f"articulation {name!r} passive_joints"
         ),
@@ -711,10 +801,10 @@ def normalize_articulations(entries: JsonValue) -> tuple[ArticulationSpec, ...]:
     """
     if entries is None:
         raise ArticulationError(
-            "run config declares no articulations; the v104 shape is "
-            "`articulations: [{name: <robot>, params: ..., body_parts: ...}]` "
-            "plus a top-level `controls:` list (the old top-level `robot:` "
-            "block was removed -- no alias)"
+            "run config declares no articulations; the neutral shape is "
+            "`articulations: [{name: <robot>, params: ...}]` plus a "
+            "top-level `controls:` list (the old top-level `robot:` block "
+            "was removed -- no alias)"
         )
     if not isinstance(entries, (list, tuple)) or not entries:
         raise ArticulationError("articulations must be a non-empty list of mappings")

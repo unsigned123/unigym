@@ -29,7 +29,6 @@ def test_named_action_step_advances_joints_and_returns_contract_shaped_output(ti
         extra,
         tiny_env.num_envs,
         len(control.joint_names),
-        len(control.feet),
         device=tiny_env.device,
     )
 

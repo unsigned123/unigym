@@ -3,9 +3,7 @@
 These functions operate on any env exposing the documented attribute set;
 engine actions belong to the backend.  They take the live env as their first
 argument but only read/write data-shaped attributes (``_datas``, joint
-tables, action resolver, prop/contact managers) -- no engine calls.  The one
-engine-shaped read, foot contact force, is a duck-typed method each backend
-provides (``env._foot_contact_forces(d)``).
+tables, action resolver, prop/contact managers) -- no engine calls.
 
 Imports here are deliberately restricted to numpy / torch / ``unigym.core``
 (plus lazy in-function imports of data-only helpers): no ``mujoco``,
@@ -37,9 +35,6 @@ def fetch_table(env, cmd, raw_action) -> dict:
             "base_yaw": lambda: torch.tensor(
                 [float(np.arctan2(state["rot"][1, 0], state["rot"][0, 0]))], dtype=torch.float32
             ).unsqueeze(0),
-            "foot_contact_force": lambda: torch.tensor(
-                [np.linalg.norm(state["foot_force_w"], axis=-1)], dtype=torch.float32
-            ),
             "command": lambda: cmd,
             "prev_action": lambda: raw_action,
         }
@@ -62,12 +57,6 @@ def fetch_table(env, cmd, raw_action) -> dict:
                 torch.tensor(
                     [float(np.arctan2(s["rot"][1, 0], s["rot"][0, 0]))], dtype=torch.float32
                 )
-                for s in states
-            ]
-        ),
-        "foot_contact_force": lambda: torch.stack(
-            [
-                torch.tensor([np.linalg.norm(s["foot_force_w"], axis=-1)], dtype=torch.float32)
                 for s in states
             ]
         ),
@@ -97,7 +86,6 @@ def build_extra(
 
     def core(s, ee):
         d = env._datas[ee]
-        fz = s["foot_force_w"][:, 2]
         torque = d.qfrc_actuator[env._jdr_pol]
         return {
             "joint_pos": torch.tensor(s["q_pol"], dtype=f32).unsqueeze(0),
@@ -110,11 +98,6 @@ def build_extra(
             "base_ang_vel_w": torch.tensor(s["ang_vel_w"], dtype=f32).unsqueeze(0),
             "base_lin_vel_b": torch.tensor(s["lin_vel_b"], dtype=f32).unsqueeze(0),
             "base_ang_vel_b": torch.tensor(s["ang_vel_b"], dtype=f32).unsqueeze(0),
-            "foot_contact": torch.tensor(fz > env._contact_force_threshold).unsqueeze(0),
-            "foot_contact_force_z": torch.tensor(fz, dtype=f32).unsqueeze(0),
-            "foot_pos_z": torch.tensor(
-                [d.xpos[b][2] for b in env._foot_body_ids], dtype=f32
-            ).unsqueeze(0),
         }
 
     if include_state:
@@ -181,7 +164,6 @@ def read_state(env, e: int = 0) -> dict:
         ang_vel_w = np.zeros(3)
     rot = quat.to_rotmat(quat_w)  # world <- body
     gravity_b = rot.T @ np.asarray([0.0, 0.0, -1.0])
-    foot_force_w = env._foot_contact_forces(d)  # (F, 3) world
     return {
         "q_pol": q_pol,
         "v_pol": v_pol,
@@ -193,5 +175,4 @@ def read_state(env, e: int = 0) -> dict:
         "ang_vel_w": ang_vel_w,
         "lin_vel_b": rot.T @ lin_vel_w,
         "ang_vel_b": rot.T @ ang_vel_w,
-        "foot_force_w": foot_force_w,
     }

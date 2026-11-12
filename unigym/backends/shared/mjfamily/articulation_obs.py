@@ -58,8 +58,13 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         lin_vel_w = d.qvel[art.free_dof_adr : art.free_dof_adr + 3].copy()
         ang_vel_w = d.qvel[art.free_dof_adr + 3 : art.free_dof_adr + 6].copy()
     else:
-        pos = list(art.spawn.get("pos") or [0.0, 0.0, env._spawn_height])
-        yaw = float(art.spawn.get("yaw") or 0.0)
+        spawn = art.spawn or {}
+        if spawn:
+            pos = list(spawn["pos"])
+            yaw = float(spawn.get("yaw", 0.0))
+        else:
+            pos = [float(env._spawn_xy[0]), float(env._spawn_xy[1]), float(env._spawn_height)]
+            yaw = float(env._spawn_yaw)
         pos_w = np.asarray(pos[:3], dtype=np.float64)
         quat_w = np.asarray([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)], dtype=np.float64)
         lin_vel_w = np.zeros(3)
@@ -77,30 +82,7 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         "ang_vel_w": ang_vel_w,
         "lin_vel_b": rot.T @ lin_vel_w,
         "ang_vel_b": rot.T @ ang_vel_w,
-        "foot_force_w": foot_forces(env, art, d),
     }
-
-
-def foot_forces(env, art, d) -> np.ndarray:
-    """Per-foot world-frame net contact force for ONE articulation."""
-    import mujoco
-
-    out = np.zeros((len(art.foot_geom_sets), 3))
-    frc6 = np.zeros(6)
-    ncon = int(d.ncon)
-    # array views: the cached contact[i]/geom1 aliases go stale after a
-    # backend contact-buffer realloc (mjwarp get_data_into)
-    geoms = np.asarray(d.contact.geom)[:ncon]
-    frames = np.asarray(d.contact.frame)[:ncon].reshape(-1, 9)
-    for i in range(ncon):
-        g1, g2 = int(geoms[i, 0]), int(geoms[i, 1])
-        for f, foot_geoms in enumerate(art.foot_geom_sets):
-            if g1 in foot_geoms or g2 in foot_geoms:
-                mujoco.mj_contactForce(env._model, d, i, frc6)
-                frame = frames[i].reshape(3, 3)
-                out[f] += frame.T @ frc6[:3]
-                break
-    return out
 
 
 def articulation_extra(env, art) -> dict:
@@ -126,14 +108,6 @@ def articulation_extra(env, art) -> dict:
         f"{prefix}/base_lin_vel_b": stack([s["lin_vel_b"] for s in states]),
         f"{prefix}/base_ang_vel_b": stack([s["ang_vel_b"] for s in states]),
     }
-    fz = [s["foot_force_w"][:, 2] for s in states]
-    out[f"{prefix}/foot_contact_force_z"] = stack(fz)
-    out[f"{prefix}/foot_contact"] = stack(
-        [f > env._contact_force_threshold for f in fz], dtype=torch.bool
-    )
-    out[f"{prefix}/foot_pos_z"] = stack(
-        [[env._datas[ee].xpos[b][2] for b in art.foot_body_ids] for ee in range(env.num_envs)]
-    )
     return out
 
 
@@ -176,10 +150,6 @@ def refresh_articulation_obs(env) -> None:
             env.obs_cache[f"{prefix}/{target}"] = torch.stack(
                 [torch.as_tensor(s[source], dtype=f32) for s in states], dim=0
             )
-        foot = [np.linalg.norm(s["foot_force_w"], axis=-1) for s in states]
-        env.obs_cache[f"{prefix}/foot_contact_force"] = torch.stack(
-            [torch.as_tensor(f, dtype=f32) for f in foot], dim=0
-        )
         env.obs_cache[f"{prefix}/base_yaw"] = torch.stack(
             [
                 torch.as_tensor([float(np.arctan2(s["rot"][1, 0], s["rot"][0, 0]))], dtype=f32)

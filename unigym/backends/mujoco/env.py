@@ -44,12 +44,9 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
   single-channel difference).
 * applied_torque records ``qfrc_actuator`` in policy order (the post-clip
   dof-space actuator force; gear=1 => the clipped PD torque).
-* foot contacts: the sole collision shapes are UNNAMED box geoms on the
-  ankle-roll bodies, so contacts are filtered by geom -> body membership;
-  per contact ``mj_contactForce`` gives the contact-frame force whose world
-  z component (via the contact frame rows) is aggregated per foot.  The
-  1.0 N threshold matches isaaclab2/env.py but is NOT calibrated across
-  engines — treat cross-sim duty comparisons accordingly.
+* contact sensors come from explicit contact declarations +
+  ``ContactManager`` only; the robot's foot body ids are metadata and drive
+  no sensor or observation.
 * Joint order: the controller's ``asset_joint_names`` is the MJ model's
   hinge order (43, fingers included, L hand between the arms); its
   ``joint_names`` is the adapter/profile IL order (29).  Both perms are
@@ -325,8 +322,6 @@ class MujocoEnv:
                 mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
-            contact_force_threshold: foot-contact threshold in N (default
-                1.0; UNCALIBRATED across engines — see module docstring).
             kp / kd: optional per-joint-name-or-regex PD gain overrides.
             hand_kp / hand_kd: optional hand-DOF soft-PD gain overrides
                 (defaults G1_KP_HANDS/G1_KD_HANDS = 20/2).
@@ -652,8 +647,6 @@ class MujocoEnv:
         self._fixed_base_quat_w = np.array(
             [np.cos(self._spawn_yaw / 2), 0.0, 0.0, np.sin(self._spawn_yaw / 2)], dtype=np.float64
         )
-        self._contact_force_threshold = float(params.get("contact_force_threshold", 1.0))
-
         # ---- feat/contact-manager: bind AFTER model/data exist (body ids,
         # geom tables); no scene elements are needed (setup_scene is a no-op)
         self.contact_manager = contact_manager
@@ -723,19 +716,14 @@ class MujocoEnv:
         # red line).  See unigym/backends/shared/mjfamily/props/reset_face.py.
         (self._initializer, self._reset_spec) = wire_reset_face(self, params, robot_profile)
 
-        # ---- compatibility aliases for the first articulation ----
-        # (_read_state / _foot_contact_forces / multienv helpers still read
-        # these; the authoritative per-articulation tables live on the
-        # ArticulationRuntime objects.)
+        # ---- compatibility alias for the first articulation ----
+        # The authoritative per-articulation tables live on the
+        # ArticulationRuntime objects.
         if self._articulation_order:
             first = self._articulation_order[0]
-            self._foot_body_ids = list(first.foot_body_ids)
-            self._foot_geom_sets = list(first.foot_geom_sets)
             self._base_body_id = first.addresses.get("base_body_id", -1)
         else:  # pragma: no cover - the run layer requires articulations
-            self._foot_body_ids, self._foot_geom_sets = [], []
             self._base_body_id = -1
-        self._frc6 = np.zeros(6)
 
         # ---- obs cache (exactly the adapter's requests) ----
         self._obs_requests = adapter.get_obs_requests()
@@ -1008,10 +996,6 @@ class MujocoEnv:
     def _read_state(self, e: int = 0) -> dict:
         """Snapshot of the post-step sim state of the first articulation."""
         return read_articulation_state(self, self._articulation_order[0], e)
-
-    def _foot_contact_forces(self, d=None) -> np.ndarray:
-        """Per-foot world-frame net contact force (F, 3), contact-filtered."""
-        return multienv.foot_contact_forces(self, d)
 
     def _build_extra(self, state: dict, e: int = 0) -> dict:
         """The recorded keys (per-articulation state namespaced)."""

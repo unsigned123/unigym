@@ -1,18 +1,17 @@
 """IsaacLab 2.x realization of the Unitree G1 (29-DoF) neutral profile.
 
 The neutral module (:mod:`unigym.robots.g1`) owns the joint vocabulary, q0,
-feet, body parts, declared assets and action faces.  This module owns the
+body bindings/sets, declared assets and action faces.  This module owns the
 engine-specific construction: the ``G1_29DOF_CFG`` asset, the contact-sensor
 patch, the clone prim path, the upright spawn conversion and the implicit-PD
 actuator table (5 groups with per-regex effort limits from the deployment
 motor specs).
 
-Patches applied via ``.replace()`` (the asset ships contact sensors OFF,
-a hardcoded ``/World/envs/env_.*/Robot`` prim path and a yaw+90° spawn):
+Patches applied via ``.replace()`` (the asset ships a hardcoded
+``/World/envs/env_.*/Robot`` prim path and a yaw+90° spawn):
 
-* contact sensors ON            — foot_contact / duty data source
 * prim_path per framework conv  — ``{ENV_REGEX_NS}/Robot``
-* upright spawn (identity yaw)  — SONIC anchors assume yaw 0
+* run-level spawn               — ``spec.spawn`` (pos/yaw) is the authority
 * SONIC standing q0             — spawn pose AND the controller q0 (obs
   ``joint_pos_rel = q - q0`` == deployment ``body_q`` semantics)
 * implicit-PD actuators in 5 groups with per-regex effort limits from
@@ -35,6 +34,7 @@ from unigym._typing import JsonValue
 from unigym.core import quat
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.robots.base import RobotProfile
+from unigym.scenes.articulation import ArticulationSpec
 from unigym.robots.g1_constants import (
     G1_EFFORT_ARMS,
     G1_EFFORT_FEET,
@@ -54,14 +54,6 @@ from unigym.robots.g1_constants import (
     G1_KP_WAIST,
     G1_SPAWN_HEIGHT,
 )
-
-
-def _number(params: Mapping[str, JsonValue], key: str, default: float) -> float:
-    """Read one numeric realizer param (fail-fast on a non-number)."""
-    value = params.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"G1 realizer param {key!r} must be numeric, got {value!r}")
-    return float(value)
 
 
 def _optional_number(params: Mapping[str, JsonValue], key: str) -> float | None:
@@ -102,39 +94,53 @@ def _override_gains(base: dict[str, float], override: dict[str, float] | None) -
     return out
 
 
-def _spawn_rot_wxyz(yaw_deg: float) -> tuple[float, float, float, float]:
-    """Spawn quaternion (w, x, y, z) for a yaw of *yaw_deg* degrees."""
-    yaw = math.radians(yaw_deg)
+def _spawn_rot_wxyz(yaw: float, *, radians: bool = False) -> tuple[float, float, float, float]:
+    """Spawn quaternion (w, x, y, z) for a yaw (degrees unless ``radians``)."""
+    if not radians:
+        yaw = math.radians(yaw)
     w, x, y, z = quat.about_z(yaw)
     return (float(w), float(x), float(y), float(z))
 
 
 def _usd_path(profile: RobotProfile) -> str | None:
     """The profile's declared USD asset ref, if any."""
-    for asset in profile.assets:
-        if asset.format == "usd":
-            return asset.ref
-    return None
+    return None if profile.assets is None else profile.assets.usd
+
+
+def _spawn_pose(
+    spec: ArticulationSpec,
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
+    """The robot-root init pose from ``spec.spawn`` (the sole authority).
+
+    Absent spawn -> the G1 backend default height at the origin with zero
+    yaw.  Present spawn -> its ``pos`` and ``yaw`` (yaw defaults to 0.0).
+    """
+    spawn = dict(spec.spawn or {})
+    if not spawn:
+        return (0.0, 0.0, float(G1_SPAWN_HEIGHT)), _spawn_rot_wxyz(0.0)
+    pos = tuple(float(v) for v in spawn["pos"])
+    yaw = float(spawn.get("yaw", 0.0))
+    return pos, _spawn_rot_wxyz(yaw, radians=True)
 
 
 def realize_g1(
     profile: RobotProfile,
     *,
+    spec: ArticulationSpec,
     params: Mapping[str, JsonValue],
 ) -> ArticulationCfg:
     """Build the isaaclab G1 ``ArticulationCfg`` from the neutral profile.
 
     Args:
         profile: the neutral G1 profile (q0/action faces come from here).
+        spec: the run-level articulation declaration; ``spec.spawn`` is the
+            only robot-root spawn source.
         params: the robot section's factory params that stay backend-owned
-            (spawn pose, gain/effort overrides, prim path).
+            (gain/effort overrides, prim path).
     """
     if profile.name != "g1":
         raise ValueError(f"realize_g1 requires a 'g1' profile, got {profile.name!r}")
-    spawn_height = _number(params, "spawn_height", G1_SPAWN_HEIGHT)
-    spawn_x = _number(params, "spawn_x", 0.0)
-    spawn_y = _number(params, "spawn_y", 0.0)
-    spawn_yaw_deg = _number(params, "spawn_yaw_deg", 0.0)
+    pos, rot = _spawn_pose(spec)
     prim_path = params.get("prim_path", f"{ENV_REGEX_NS}/Robot")
     if not isinstance(prim_path, str):
         raise TypeError(f"G1 realizer param 'prim_path' must be a string, got {prim_path!r}")
@@ -152,8 +158,8 @@ def realize_g1(
         prim_path=prim_path,
         spawn=G1_29DOF_CFG.spawn.replace(**spawn_kwargs),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(spawn_x, spawn_y, spawn_height),
-            rot=_spawn_rot_wxyz(spawn_yaw_deg),
+            pos=pos,
+            rot=rot,
             joint_pos=dict(profile.default_joint_pos),
             joint_vel={".*": 0.0},
         ),

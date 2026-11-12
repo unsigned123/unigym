@@ -9,18 +9,14 @@ separate layers built on top of it.
 The package is intentionally thin and dependency-light (stdlib + yaml):
 it is the foundation every later asset card imports, so it never reaches
 into backends, scenes or the pack loader.
+
+The public manifest names resolve lazily (PEP 562) so importing a light
+submodule (for example :mod:`.asset_ref`) does not import ``yaml``.
 """
 
-from .manifest import (
-    FORBIDDEN_KEYS,
-    KINDS,
-    SCHEMA,
-    ManifestError,
-    is_asset_id,
-    load_manifest,
-    split_asset_id,
-    validate_manifest,
-)
+from __future__ import annotations
+
+from typing import Any
 
 __all__ = [
     "FORBIDDEN_KEYS",
@@ -32,3 +28,13 @@ __all__ = [
     "split_asset_id",
     "validate_manifest",
 ]
+
+_MANIFEST_NAMES = frozenset(__all__)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MANIFEST_NAMES:
+        from . import manifest
+
+        return getattr(manifest, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

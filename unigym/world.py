@@ -618,7 +618,10 @@ class World:
         root: str | None = None,
         spawn: Mapping[str, JsonValue] | None = None,
         joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]] | None = None,
-        body_parts: Mapping[str, JsonValue] | None = None,
+        base_body: str | None = None,
+        foot_bodies: Sequence[str] | None = None,
+        body_sets: Mapping[str, Sequence[str]] | None = None,
+        contacts: JsonValue = None,
         passive_joints: Sequence[object] | None = None,
         params: Mapping[str, JsonValue] | None = None,
         adapter: str = "manual",
@@ -648,11 +651,15 @@ class World:
             model: ``{mjcf|urdf|usd: <path>}`` or a bare MJCF path.
             control: REMOVED (v104); passing it fails with a teaching error.
             root: ``free`` (default) / ``fixed`` / ``welded``.
-            spawn: Root spawn declaration (kept verbatim in the IR).
+            spawn: Root spawn declaration (``pos`` + optional ``yaw``).
             joints: Per-joint declarations (mapping or list of mappings).
-            body_parts: Optional policy body-part table (feet/base).
+            base_body: Optional canonical base body id (inherits the profile).
+            foot_bodies: Optional canonical foot body ids (inherits/empties).
+            body_sets: Optional canonical named body sets.
+            contacts: Optional contact sensor inventory (``all`` / ``none`` /
+                a group list / a normalized inventory).
             passive_joints: Joints the articulation owns but does not drive.
-            params: Optional backend knobs (e.g. ``spawn_height``).
+            params: Optional backend knobs.
             adapter: The adapter name owning this articulation's body group.
             drive: The body control drive (default ``position_pd``).
             target: The explicit target kind (must match ``drive``).
@@ -681,8 +688,16 @@ class World:
             entry["spawn"] = copy.deepcopy(dict(spawn))
         if joints is not None:
             entry["joints"] = _joints_json(joints)
-        if body_parts is not None:
-            entry["body_parts"] = copy.deepcopy(dict(body_parts))
+        if base_body is not None:
+            entry["base_body"] = str(base_body)
+        if foot_bodies is not None:
+            entry["foot_bodies"] = [str(body) for body in foot_bodies]
+        if body_sets is not None:
+            entry["body_sets"] = {
+                str(name): [str(body) for body in bodies] for name, bodies in body_sets.items()
+            }
+        if contacts is not None:
+            entry["contacts"] = copy.deepcopy(contacts)
         if passive_joints is not None:
             entry["passive_joints"] = [str(j) for j in passive_joints]
         if params is not None:

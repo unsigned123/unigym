@@ -142,38 +142,30 @@ def build_scene_ops(
 # --------------------------------------------------------------------------- #
 # shared curated helpers (backend-free; both ops implementations reuse these)
 # --------------------------------------------------------------------------- #
-def robot_joint_groups(joint_names: Iterable[str]) -> dict[str, list[str]]:
-    """G1 joint groups folded into the curated robot tree.
+def robot_joint_groups(
+    joint_names: Iterable[str],
+    joint_sets: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, list[str]]:
+    """Curated joint groups folded into the robot tree.
 
-    ``legs`` / ``waist`` / ``arms`` come from the profile body_parts
-    (``unigym/robots/g1_constants.G1_BODY_PARTS``), ``hands`` from the
-    14 finger joints; every group is intersected with the run's actual
-    joint set (order preserved, unknown names dropped) and empty groups
-    are omitted -- a non-G1 asset keeps the face honest instead of
-    listing joints it does not have.
+    The group vocabulary IS the profile's ``joint_sets``: every named set is
+    intersected with the run's actual joint set (run order preserved,
+    unknown names dropped) and empty groups are omitted -- an asset keeps
+    the face honest instead of listing joints it does not have.
     """
-    from ..robots.g1_constants import G1_BODY_PARTS, G1_HAND_JOINTS
-
-    parts: Mapping[str, object] = G1_BODY_PARTS
-    hand_joints: Sequence[str] = G1_HAND_JOINTS
     have = list(joint_names)
     groups: dict[str, list[str]] = {}
-    for key in ("legs", "waist", "arms"):
-        body = parts.get(key)
-        if not isinstance(body, (list, tuple)):
-            continue
-        names = [j for j in have if j in body]
+    for raw_name, declared in (joint_sets or {}).items():
+        names = [joint for joint in have if joint in declared]
         if names:
-            groups[key] = names
-    hands = [j for j in have if j in hand_joints]
-    if hands:
-        groups["hands"] = hands
+            groups[str(raw_name)] = names
     return groups
 
 
 def joint_limit_rows(
     names: Sequence[str],
     limits: Mapping[str, tuple[float, float] | None],
+    joint_sets: Mapping[str, Sequence[str]] | None = None,
 ) -> list[dict[str, JsonValue]]:
     """``tree.robot.joints`` / prop-articulation limit rows.
 
@@ -187,7 +179,7 @@ def joint_limit_rows(
     null range: no declared limit, no gate (nothing is guessed).
     ``group`` folds the curated robot groups (null outside them).
     """
-    groups = robot_joint_groups(names)
+    groups = robot_joint_groups(names, joint_sets)
     gname = {j: g for g, js in groups.items() for j in js}
     rows: list[dict[str, JsonValue]] = []
     for n in names:

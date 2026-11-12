@@ -28,6 +28,7 @@ Obs path (plan §4, decoupled from recording): adapters may request
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Callable, Optional, Protocol, cast, runtime_checkable
 
 import numpy as np
@@ -216,7 +217,7 @@ def build_contact_manager(
     backend: str,
     device: str = "cpu",
     adapter_requests: Optional[set] = None,
-    body_parts: Optional[dict] = None,
+    contact_groups: Optional[Mapping[str, Mapping[str, tuple[str, ...]]]] = None,
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
 ) -> Optional[ContactManager]:
@@ -226,9 +227,10 @@ def build_contact_manager(
         cfg: yaml ``contacts:`` section (list of group dicts) or None.
             None/empty -> ``None`` (no manager, zero code paths).  Each
             entry's ``sensor_bodies``/``filter_bodies`` may use the
-            declarative reference forms ``{body_parts: <key>[.<group>]}``
-            and ``{prop: <name>}``  -- resolved FIRST against
-            ``body_parts`` (the robot profile's body-parts dict) and
+            declarative reference forms
+            ``{contact_group: {articulation, group}}`` and
+            ``{prop: <name>}`` -- resolved FIRST against
+            ``contact_groups`` (the run layer's native-body inventory) and
             ``prop_names`` (the run's declared props), then validated as
             plain lists; see contacts.base.resolve_contact_entries.
         backend: env backend name (``isaaclab`` | ``mujoco``); anything else
@@ -236,9 +238,9 @@ def build_contact_manager(
         device: env device the record tensors must live on.
         adapter_requests: optional set of adapter obs-request keys used to
             pre-register the obs subset (see ``register_obs_requests``).
-        body_parts: robot profile body-parts dict backing the
-            ``{body_parts: ...}`` references (collect_cli passes
-            ``profile.body_parts``).
+        contact_groups: per-articulation native-body inventory backing the
+            ``{contact_group: ...}`` references
+            (``{articulation: {group: (native bodies)}}``).
         prop_names: names of the props declared in the same run config,
             backing the ``{prop: ...}`` filter references.
         articulated_props: names of the ARTICULATION props ;
@@ -254,7 +256,7 @@ def build_contact_manager(
         for e in resolve_contact_entries(
             cfg,
             backend,
-            body_parts=body_parts,
+            contact_groups=contact_groups,
             prop_names=prop_names,
             articulated_props=(frozenset(articulated_props or ())),
         )

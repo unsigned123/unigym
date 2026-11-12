@@ -9,7 +9,7 @@ import torch
 
 from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mujoco.env import MujocoEnv
-from unigym.robots.base import RobotProfile
+from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner import ExternalRunner
 from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import build_control_runtimes
@@ -81,13 +81,16 @@ def _make_env(tmp_path):
         name="tiny",
         joint_sets={"body": ("hinge",)},
         default_joint_pos={"hinge": 0.0},
-        foot_bodies=[],
-        body_parts={"base": "base"},
+        assets=None,
+        action_faces={},
+        base_body="base",
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
     articulation = ArticulationSpec(
         name="tiny",
         spawn={"pos": [0.0, 0.0, 0.8]},
-        body_parts={"base": "base"},
     )
     group = ControlGroup.from_mapping(
         {

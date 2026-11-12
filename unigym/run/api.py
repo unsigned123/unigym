@@ -273,7 +273,7 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
     config alias: it emits the same authoring shape a yaml file declares
-    (``{name, params?, body_parts?}`` -- no articulation-level control).
+    (``{name, params?}`` -- no articulation-level control).
     """
     entry: dict[str, JsonValue]
     if isinstance(robot, str):
@@ -284,10 +284,9 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
     else:
         raise NotImplementedError(
             "a RobotProfile INSTANCE is not representable in the current "
-            "config schema (robot is a {name, params, body_parts} "
-            "declaration built by build_robot_profile). Pass "
-            'robot="<registered robot>" with params/body_parts in the '
-            "config instead"
+            "config schema (robot is a {name, params} declaration built by "
+            'build_robot_profile). Pass robot="<registered robot>" with '
+            "params in the config instead"
         )
     return entry
 
@@ -523,8 +522,7 @@ class Run:
             raise ConfigError(
                 "Run(world=...) / Run.minimal(...) needs an explicit robot: "
                 'pass robot="<registered robot>" (or a robot declaration '
-                "{name, params?, body_parts?}); there is no implicit default "
-                "robot"
+                "{name, params?}); there is no implicit default robot"
             )
         self._world = world
         self._backend_options = (
@@ -1024,8 +1022,9 @@ class Run:
         """The neutral per-articulation views derived from the live runtime.
 
         One entry per ``env.articulations`` runtime: name/model/root/joints/
-        q0/feet/body_parts/spawn plus the owning body control's action face.
-        This is NOT a copy of a ``ModelIR.meta`` annotation.
+        q0/base_body/foot_bodies/body_sets/contacts/spawn plus the owning
+        body control's action face.  This is NOT a copy of a
+        ``ModelIR.meta`` annotation; body facts are canonical effective ids.
         """
         env = self.build().env
         controls = getattr(env, "controls", {}) or {}
@@ -1044,10 +1043,18 @@ class Run:
                     "role": "articulation",
                     "model": (None if model_view is None else _json_object(model_view)),
                     "root": _optional_str(getattr(art, "root", None)),
-                    "base_body": _optional_str(getattr(art, "base_body", None)),
+                    "base_body": _optional_str(getattr(art, "base_body_id", None)),
                     "joints": _json_list(_str_values(getattr(art, "joint_names", ()))),
-                    "feet": _json_list(_str_values(getattr(art, "feet", ()))),
-                    "body_parts": _json_object(getattr(art, "body_parts", {})),
+                    "foot_bodies": _json_list(_str_values(getattr(art, "foot_bodies", ()))),
+                    "body_sets": {
+                        str(set_name): _json_list(_str_values(bodies))
+                        for set_name, bodies in (getattr(art, "body_sets", {}) or {}).items()
+                    },
+                    "contacts": (
+                        None
+                        if getattr(art, "contacts", None) is None
+                        else getattr(art, "contacts").to_dict()
+                    ),
                     "spawn": _json_object(getattr(art, "spawn", {})),
                     "action_face": (None if body is None else _optional_str(body.action_face)),
                 }

@@ -18,12 +18,13 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeGuard, TypedDict, runtime_checkable
 
 import numpy as np
 
-from unigym._typing import JsonValue, is_json_object
+from unigym._typing import JsonValue, is_json_object, is_object_sequence
 from unigym.backends.registry import BackendInfo, backend_info
 from unigym.benchmarks import build_tasks
 from unigym.env.backends import build_env_backend
@@ -31,7 +32,9 @@ from unigym.filters import build_filter_chain
 from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
 from unigym.robots import build_robot_profile
+from unigym.robots.base import validate_body_bindings
 from unigym.runtime.controllers import (
+    articulation_facts,
     build_control_plan,
     build_control_runtimes,
 )
@@ -56,12 +59,15 @@ if TYPE_CHECKING:
     from unigym.packs.runtime import PackRuntime
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
-    from unigym.robots.base import RobotProfile
+    from unigym.robots.base import CanonicalBodyId, RobotProfile
     from unigym.runner.sinks.benchmark import BenchmarkSink
     from unigym.runtime.bridge import Bridge
     from unigym.runtime.controllers import ControlRuntime
     from unigym.runtime.rewind_providers import RewindStateProvider
-    from unigym.scenes.articulation import ArticulationSpec
+    from unigym.scenes.articulation import (
+        ArticulationSpec,
+        ContactSensorInventory,
+    )
     from unigym.scenes.terrain import Terrain
     from unigym.trace.replay import TraceReplay
     from unigym.watchers.timeline import EventLog, TimelineSink
@@ -122,6 +128,7 @@ class _RobotRealizer(Protocol):
         self,
         profile: RobotProfile,
         *,
+        spec: ArticulationSpec,
         params: Mapping[str, JsonValue],
         asset_plan: AssetPlan | None,
     ) -> object: ...
@@ -130,6 +137,7 @@ class _RobotRealizer(Protocol):
 class _ProfileBuild(TypedDict):
     profile: RobotProfile
     params: dict[str, JsonValue]
+    spec: ArticulationSpec
 
 
 class _RobotBundle(TypedDict):
@@ -141,6 +149,7 @@ class _RobotBundle(TypedDict):
     prop_manager: PropManager | None
     adapter: Adapter
     generates_command: bool
+    contact_groups: dict[str, dict[str, tuple[str, ...]]]
 
 
 class _SensingBundle(TypedDict):
@@ -210,7 +219,6 @@ class _RunMeta(TypedDict, total=False):
     articulations: dict[str, dict[str, JsonValue]]
     command_dim: int
     obs_collect_overridden: bool
-    body_parts: Mapping[str, JsonValue] | None
     language_generator: str | None
     language_interval_steps: int
     filters: JsonValue
@@ -225,6 +233,10 @@ class _RunMeta(TypedDict, total=False):
     adapter_params: dict[str, JsonValue]
     adapter_overrides: list[str]
     obs_catalog: dict[str, JsonValue] | None
+
+
+DATA_SCHEMA_VERSION = 4
+"""The run data schema version (v4: neutral body/contact facts)."""
 
 
 def _config_int(value: JsonValue) -> int:
@@ -278,12 +290,6 @@ def _config_bool(value: JsonValue, default: bool = False) -> bool:
 def _is_str_iterable(value: object) -> TypeGuard[Iterable[str]]:
     """True for a non-string iterable of names (catalog-style faces)."""
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
-
-
-def _profile_body_parts(profile: RobotProfile) -> dict[str, JsonValue] | None:
-    """The profile's body-parts mapping as a JSON object (None when absent)."""
-    value: object = profile.body_parts
-    return value if is_json_object(value) else None
 
 
 def _load_watch_specs(path: str) -> list[dict[str, JsonValue]]:
@@ -402,8 +408,6 @@ def _profile_section(art: ArticulationSpec) -> dict[str, JsonValue]:
     section: dict[str, JsonValue] = {"name": art.name}
     if art.params:
         section["params"] = dict(art.params)
-    if art.body_parts:
-        section["body_parts"] = dict(art.body_parts)
     return section
 
 
@@ -414,8 +418,7 @@ def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
     name is not the robot type (e.g. a second ``g1b`` articulation reuses
     the ``g1`` profile); it never reaches the profile factory.  The factory
     params are returned alongside the profile because the backend robot
-    realizer owns the construction values (spawn/gain/prim-path) that are
-    not neutral profile data.
+    realizer owns the construction values that are not neutral profile data.
     """
     section = _profile_section(art)
     raw_params = section.get("params")
@@ -424,7 +427,7 @@ def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
     if selector is not None:
         section["params"] = params
         section["name"] = str(selector)
-    return {"profile": build_robot_profile(section), "params": params}
+    return {"profile": build_robot_profile(section), "params": params, "spec": art}
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
@@ -437,13 +440,152 @@ def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
     return [by_name[name] for name in names if name in by_name]
 
 
-def _control_profiles(spec: RunSpec) -> dict[str, _ProfileBuild]:
-    """Build the neutral profile of every profile-backed control articulation."""
+def _required_body_ids(
+    profile: RobotProfile, inventory: ContactSensorInventory | None
+) -> list[CanonicalBodyId]:
+    """Every canonical body id the effective profile/contacts reference."""
+    required: list[CanonicalBodyId] = []
+    if profile.base_body is not None:
+        required.append(profile.base_body)
+    required.extend(profile.foot_bodies)
+    for members in profile.body_sets.values():
+        required.extend(members)
+    if inventory is not None and inventory.mode == "declared":
+        for group in inventory.groups:
+            if group.body_set is not None:
+                members = profile.body_sets.get(group.body_set)
+                if members is None:
+                    raise ValueError(
+                        f"contact sensor group {group.name!r} body_set "
+                        f"{group.body_set!r} is unknown; declared body sets "
+                        f"are {sorted(profile.body_sets)}"
+                    )
+                required.extend(members)
+            else:
+                required.extend(group.bodies or ())
+    unique: list[CanonicalBodyId] = []
+    for body in required:
+        if body not in unique:
+            unique.append(body)
+    return unique
+
+
+def _effective_profile(
+    art: ArticulationSpec,
+    profile: RobotProfile,
+    info: BackendInfo,
+) -> RobotProfile:
+    """Apply the run-level articulation overrides over the robot profile.
+
+    ``None`` fields inherit the profile; explicit empty values stay empty.
+    Body-binding completeness is validated with the D1 validator
+    (``formats=None`` -- a binding may legitimately carry several formats);
+    the selected backend format is then required separately.
+    """
+    if not info.asset_format:
+        raise ValueError(
+            f"backend {info.name!r} declares no asset_format; body-binding "
+            f"and contact resolution need the backend's selected asset format"
+        )
+    effective = replace(
+        profile,
+        assets=art.model if art.model is not None else profile.assets,
+        base_body=art.base_body if art.base_body is not None else profile.base_body,
+        foot_bodies=(art.foot_bodies if art.foot_bodies is not None else profile.foot_bodies),
+        body_sets=art.body_sets if art.body_sets is not None else profile.body_sets,
+    )
+    required = _required_body_ids(effective, art.contacts)
+    validate_body_bindings(effective.body_bindings, required_ids=required, formats=None)
+    if art.contacts is not None:
+        from unigym.scenes.articulation import validate_contact_sensor_inventory
+
+        validate_contact_sensor_inventory(
+            art.contacts,
+            body_sets=effective.body_sets,
+            bindings=effective.body_bindings,
+            formats=(info.asset_format,),
+        )
+    missing = sorted(
+        str(body)
+        for body in set(required)
+        if info.asset_format not in effective.body_bindings[body].names
+    )
+    if missing:
+        raise ValueError(
+            f"articulation {art.name!r}: body bindings lack the selected "
+            f"asset format {info.asset_format!r} for ids {missing}"
+        )
+    return effective
+
+
+def _contact_group_table(
+    builds: dict[str, _ProfileBuild], info: BackendInfo
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Per-articulation native contact-group inventory for the resolver.
+
+    Only ``declared`` inventories contribute groups; ``all``/``none`` carry
+    no resolvable groups in D2.  This is the only layer that touches
+    ``BodyBinding``.
+    """
+    table: dict[str, dict[str, tuple[str, ...]]] = {}
+    for name, build in builds.items():
+        profile = build["profile"]
+        inventory = build["spec"].contacts
+        if inventory is None:
+            continue
+        groups: dict[str, tuple[str, ...]] = {}
+        if inventory.mode == "declared":
+            for group in inventory.groups:
+                bodies = (
+                    group.bodies
+                    if group.body_set is None
+                    else profile.body_sets.get(group.body_set, ())
+                )
+                groups[group.name] = tuple(
+                    profile.body_bindings[body].names[info.asset_format] for body in (bodies or ())
+                )
+        table[name] = groups
+    return table
+
+
+def _reject_inventory_mode_refs(
+    contacts_cfg: object, articulations: Sequence[ArticulationSpec]
+) -> None:
+    """Fail fast when a run-level contact group references an ``all``/``none``.
+
+    D2 resolves only explicit ``declared`` inventory groups; materializing
+    omitted-contacts ``all`` is D3 work.
+    """
+    if not is_object_sequence(contacts_cfg):
+        return
+    modes = {art.name: art.contacts.mode for art in articulations if art.contacts is not None}
+    for entry in contacts_cfg:
+        if not is_json_object(entry):
+            continue
+        sensor_bodies = entry.get("sensor_bodies")
+        if not is_json_object(sensor_bodies):
+            continue
+        ref = sensor_bodies.get("contact_group")
+        if not is_json_object(ref):
+            continue
+        articulation = ref.get("articulation")
+        group = ref.get("group")
+        if isinstance(articulation, str) and modes.get(articulation) in ("all", "none"):
+            raise ValueError(
+                f"contact_group reference {articulation}.{group} targets an "
+                f"articulation whose contacts mode is {modes[articulation]!r}; "
+                f"D2 requires an explicit declared group (omitted-contacts "
+                f"materialization is D3)"
+            )
+
+
+def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBuild]:
+    """Build the effective profile of every profile-backed control articulation."""
     builds: dict[str, _ProfileBuild] = {}
     for art in _control_articulations(spec):
         groups = [g for g in spec.controls if g.articulation == art.name]
         try:
-            builds[art.name] = _profile_for(art)
+            build = _profile_for(art)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
             # profile-less articulations are legal only when every control
             # declares its joints/q0 explicitly (e.g. a future prop face);
@@ -456,6 +598,9 @@ def _control_profiles(spec: RunSpec) -> dict[str, _ProfileBuild]:
                     f"articulation or declare every group's explicit "
                     f"`joints` + `q0`"
                 ) from None
+            continue
+        build["profile"] = _effective_profile(art, build["profile"], info)
+        builds[art.name] = build
     return builds
 
 
@@ -475,7 +620,9 @@ def _realize_profiles(
     if not isinstance(realizer, _RobotRealizer):
         raise TypeError("backend robot realizer is not callable")
     return {
-        name: realizer(build["profile"], params=build["params"], asset_plan=asset_plan)
+        name: realizer(
+            build["profile"], spec=build["spec"], params=build["params"], asset_plan=asset_plan
+        )
         for name, build in builds.items()
     }
 
@@ -494,7 +641,7 @@ def _build_robot_and_props(
     backend_label = info.name
     # Every robot factory returns neutral data; backends that need an
     # engine object build it through their explicit robot realizer seam.
-    builds = _control_profiles(spec)
+    builds = _control_profiles(spec, info)
     if not builds:
         raise ValueError(
             "no profile-backed control articulation: declare a top-level "
@@ -552,12 +699,11 @@ def _build_robot_and_props(
     adapter_section = _config_dict(cfg.get("adapter"))
     if adapter_section is None:
         raise TypeError("run config 'adapter' section must be a mapping")
-    adapter = build_adapter(
-        adapter_section, num_envs=num_envs, device=device, body_parts=_profile_body_parts(profile)
-    )
+    adapter = build_adapter(adapter_section, num_envs=num_envs, device=device)
     # hierarchical adapters generate their own command each step ->
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(adapter.generates_command)
+    contact_groups = _contact_group_table(builds, info)
     return {
         "profile": profile,
         "profiles": profiles,
@@ -566,6 +712,7 @@ def _build_robot_and_props(
         "prop_manager": prop_manager,
         "adapter": adapter,
         "generates_command": generates_command,
+        "contact_groups": contact_groups,
     }
 
 
@@ -575,7 +722,8 @@ def _build_sensing(
     info: BackendInfo,
     device: str,
     num_envs: int,
-    profile: RobotProfile,
+    profiles: Mapping[str, RobotProfile],
+    contact_groups: Mapping[str, Mapping[str, tuple[str, ...]]],
     adapter: Adapter,
     prop_manager: PropManager | None,
 ) -> _SensingBundle:
@@ -613,17 +761,19 @@ def _build_sensing(
     # env (its ContactSensorCfgs must join the scene cfg prior to cloning on
     # isaaclab; docs/contracts/contacts_contract.md).  No ``contacts:`` section ->
     # None -> zero code paths in the env (baseline protocol).
-    # stage 2: contact groups are FULLY declarative -- sensor_bodies
-    # may reference a robot body-parts group (``{body_parts: grasp.left}``)
-    # and filter_bodies a prop (``{prop: <name>}``); resolution happens
-    # inside build_contact_manager against the profile body_parts + the
-    # declared prop names (the auto held groups are retired).
+    # contact groups are FULLY declarative -- sensor_bodies may reference an
+    # articulation inventory group
+    # (``{contact_group: {articulation, group}}``) and filter_bodies a prop
+    # (``{prop: <name>}``); resolution happens inside build_contact_manager
+    # against the run layer's native contact-group table + the declared prop
+    # names.
+    _reject_inventory_mode_refs(cfg.get("contacts"), spec.articulations)
     contact_manager = build_contact_manager(
         cfg.get("contacts"),
         backend=backend_label,
         device=device,
         adapter_requests={r.key for r in adapter.get_obs_requests()},
-        body_parts=_profile_body_parts(profile),
+        contact_groups=contact_groups,
         prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
         articulated_props=(
             {s.name for s in prop_manager.specs if s.type == "articulation"}
@@ -783,7 +933,8 @@ def _build_env_and_sampler(
         device=device,
         asset_plan=asset_plan,
         # backend-specific params (yaml env.params; mujoco: spawn_height /
-        # contact_force_threshold / kp / kd).  The run-level world_base is
+        # spawn_xy / spawn_yaw / kp / kd backend defaults).  The run-level
+        # world_base is
         # an explicit kwarg, never an env.params key.  isaaclab's
         # IsaaclabEnv does not accept this key -> isaaclab-only parity.
         # The artifact dir is an explicit mujoco kwarg (not an
@@ -900,7 +1051,6 @@ def _build_sinks(
     dur_lo: float,
     dur_hi: float,
     command_dim: int,
-    profile: RobotProfile,
     bench_cfg: dict[str, JsonValue],
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
@@ -962,7 +1112,6 @@ def _build_sinks(
             dur_lo=dur_lo,
             dur_hi=dur_hi,
             command_dim=command_dim,
-            body_parts=_profile_body_parts(profile),
         )
     bench_sink: BenchmarkSink | None = None
     stop_when: Callable[[], bool] | None = None
@@ -1202,7 +1351,17 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # controls freeze into the read-only plan; no guessing path remains.
     control_runtimes = build_control_runtimes(spec.controls, spec.articulations, profiles)
     control_plan = build_control_plan(spec.controls, control_runtimes)
-    sensing = _build_sensing(spec, cfg, info, device, num_envs, profile, adapter, prop_manager)
+    sensing = _build_sensing(
+        spec,
+        cfg,
+        info,
+        device,
+        num_envs,
+        profiles,
+        robot["contact_groups"],
+        adapter,
+        prop_manager,
+    )
     built = _build_env_and_sampler(
         spec,
         cfg,
@@ -1294,16 +1453,11 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "policy_dt": policy_dt,
         "episode_length_s": episode_length_s,
         "episode_length_range": [dur_lo, dur_hi],
-        # v3 data schema: per-articulation orders replace the flat
-        # joint_names_policy_order / foot_names_policy_order keys
-        "schema_version": 3,
+        # v4 data schema: neutral per-articulation body/contact facts
+        # (no body_parts, no foot_names, no foot-derived records).
+        "schema_version": DATA_SCHEMA_VERSION,
         "articulations": {
-            name: {
-                "joint_names": list(control.joint_names),
-                "foot_names": list(art.feet),
-                "asset_joint_names": list(art.joint_names),
-                "action_face": control.action_face,
-            }
+            name: articulation_facts(art, control)
             for name, art in (env.articulations or {}).items()
             for control in [_body_control_for(env, name)]
         },
@@ -1311,7 +1465,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "obs_collect_overridden": (
             type(adapter).compute_obs_collect is not Adapter.compute_obs_collect
         ),
-        "body_parts": _profile_body_parts(profile),
         "language_generator": (
             type(built["language_gen"]).__name__ if built["language_gen"] is not None else None
         ),
@@ -1384,7 +1537,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         dur_lo,
         dur_hi,
         built["command_dim"],
-        profile,
         bench_cfg,
         task_meta,
         sensing["contact_manager"],

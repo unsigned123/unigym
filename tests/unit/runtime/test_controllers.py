@@ -34,7 +34,12 @@ def _profile(joint_sets, defaults):
         name="arm",
         joint_sets=joint_sets,
         default_joint_pos=defaults,
-        foot_bodies=[],
+        assets=None,
+        action_faces={},
+        base_body=None,
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={},
     )
 
 
@@ -278,3 +283,27 @@ def test_control_runtime_checks_q0_shape_before_finiteness():
             joint_names=("shoulder", "elbow"),
             q0=(float("nan"),),
         )
+
+
+def test_articulation_runtime_keeps_native_and_canonical_base_body():
+    """base_body is the backend-native name; base_body_id is the canonical id."""
+    from unigym.scenes.articulation import ContactSensorInventory
+
+    runtime = ArticulationRuntime(
+        name="g1",
+        joint_names=("j",),
+        q0=(0.0,),
+        foot_bodies=("left_ankle_roll",),
+        base_body="pelvis",
+        base_body_id="base",
+        body_sets={"grasp": ("finger",)},
+        contacts=ContactSensorInventory(mode="none"),
+    )
+
+    assert runtime.base_body == "pelvis"
+    assert runtime.base_body_id == "base"
+    assert runtime.foot_bodies == ("left_ankle_roll",)
+    assert runtime.body_sets == {"grasp": ("finger",)}
+    assert runtime.contacts is not None and runtime.contacts.mode == "none"
+    assert not hasattr(runtime, "feet")
+    assert not hasattr(runtime, "body_parts")

@@ -9,7 +9,6 @@ import pytest
 from unigym.scenes.articulation import (
     ArticulationError,
     ArticulationSpec,
-    AssetRef,
     JointSpec,
     articulation_key,
     normalize_articulations,
@@ -133,13 +132,20 @@ def test_normalize_articulations_rejects_malformed_entries(entries, match):
 @pytest.mark.parametrize(
     ("call", "match"),
     [
-        (lambda: AssetRef.from_mapping({"mjcf": "a", "glb": "b"}), r"unknown keys \['glb'\]"),
-        (lambda: AssetRef.from_mapping("robot.urdf"), "must be a mapping"),
         (lambda: articulation_key("", "k"), "name must be non-empty"),
         (lambda: articulation_key("a", ""), "observation key must be non-empty"),
     ],
 )
-def test_malformed_asset_ref_and_articulation_key_fail_fast(call, match):
-    """Asset references and observation keys reject malformed input explicitly."""
+def test_malformed_articulation_key_fails_fast(call, match):
+    """Observation keys reject malformed input explicitly."""
     with pytest.raises(ArticulationError, match=match):
         call()
+
+
+def test_articulation_model_field_wraps_asset_errors():
+    """The articulation boundary reports field-level asset failures as IR errors."""
+    with pytest.raises(ArticulationError, match=r"unknown keys \['glb'\]"):
+        ArticulationSpec(name="a", model={"mjcf": "a", "glb": "b"})
+
+    with pytest.raises(ArticulationError, match="must be a mapping"):
+        ArticulationSpec(name="a", model="robot.urdf")

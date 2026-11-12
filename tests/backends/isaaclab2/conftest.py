@@ -15,7 +15,6 @@ CACHE_ENV = "UNIGYM_ISAACLAB2_ASSET_CACHE"
 CACHE_FILE = "cartpole.usd"
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
-FOOT_BODY = "cart"
 
 
 def _cartpole_usd() -> Path:
@@ -77,16 +76,19 @@ def _build_env(usd: Path, *, num_envs: int = 1):
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
-    body_parts = {"feet": [FOOT_BODY], "base": FOOT_BODY}
     articulation_cfg = _cartpole_articulation_cfg(usd)
     profile = RobotProfile(
         name=ARTICULATION,
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
-        foot_bodies=[FOOT_BODY],
-        body_parts=body_parts,
+        assets=None,
+        action_faces={},
+        base_body=None,
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={},
     )
-    articulation = ArticulationSpec(name=ARTICULATION, body_parts=body_parts)
+    articulation = ArticulationSpec(name=ARTICULATION)
     group = ControlGroup.from_mapping(
         {
             "name": ARTICULATION,

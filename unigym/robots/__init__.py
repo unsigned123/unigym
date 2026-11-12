@@ -16,7 +16,6 @@ from .base import (
     BodyBinding,
     BodyBindingError,
     CanonicalBodyId,
-    RobotAsset,
     RobotProfile,
     normalize_canonical_body_id,
     validate_body_bindings,
@@ -53,15 +52,13 @@ def __getattr__(name: str) -> Any:
 def build_robot_profile(section: dict[str, JsonValue]) -> RobotProfile:
     """Build a neutral :class:`RobotProfile` from one articulation declaration.
 
-    ``section`` is the projection ``{name, params, body_parts}`` of an
+    ``section`` is the projection ``{name, params}`` of an
     :class:`~unigym.scenes.articulation.ArticulationSpec`; it is authoring
-    data (joint order / q0 / feet / body parts / assets / action faces),
-    never a policy and never a backend object.
+    data (joint order / q0 / assets / action faces), never a policy and never
+    a backend object.
     """
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
-    if "body_parts" in section:
-        params["body_parts"] = section["body_parts"]
     name_value = section["name"]
     if not isinstance(name_value, str):
         raise TypeError(f"robot profile name must be a string, got {type(name_value).__name__}")
@@ -84,7 +81,6 @@ __all__ = [
     "BodyBinding",
     "BodyBindingError",
     "CanonicalBodyId",
-    "RobotAsset",
     "RobotProfile",
     "build_robot_profile",
     "normalize_canonical_body_id",

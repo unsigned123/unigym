@@ -87,10 +87,10 @@ G1_UPPER_BODY_IDX = (
 )  # 17 joints (waist + arms)
 G1_LOWER_BODY_IDX = (0, 1, 3, 4, 6, 7, 9, 10, 13, 14, 17, 18)  # 12 joints (legs)
 
-# foot bodies == contact-sensor bodies (MJ XML + IL asset: the ankle-roll
-# links are the last links of each leg)
-G1_FOOT_BODIES: List[str] = ["left_ankle_roll_link", "right_ankle_roll_link"]
-G1_BASE_BODY = "pelvis"
+# Canonical body facts: semantic ids only, never backend paths.  The native
+# names live in G1_BODY_BINDINGS below (one entry per canonical id).
+G1_FOOT_BODIES: List[str] = ["left_ankle_roll", "right_ankle_roll"]
+G1_BASE_BODY = "base"
 
 # SONIC standing q0 ``default_angles`` (policy_parameters.hpp:269-299,
 # sonic_decoder.py DEFAULT_ANGLES; MJ order mapped to IL by joint name).
@@ -129,13 +129,21 @@ G1_DEFAULT_Q: Dict[str, float] = {
 }
 
 
-def _g1_hand_finger_links(side: str) -> List[str]:
-    """The 7 finger link names of one G1 hand.
+def _g1_hand_finger_ids(side: str) -> List[str]:
+    """The 7 canonical finger body ids of one G1 hand.
 
-    MJ body names (g1_29dof_with_hand.xml: exactly these 14 hand bodies,
-    no palm body); the localized g1.usd prims additionally live under the
-    ``{side}_hand/`` scope, hence the per-backend forms below.
+    The canonical suffix is the same 0-based suffix as the native links, so
+    no offset is implicit: ``left_hand.index_0`` <-> ``left_hand_index_0_link``.
     """
+    return [
+        f"{side}_hand.{part}_{k}"
+        for part, n in (("index", 2), ("middle", 2), ("thumb", 3))
+        for k in range(n)
+    ]
+
+
+def _g1_hand_finger_native(side: str) -> List[str]:
+    """The 7 MJCF finger link names of one G1 hand (native data only)."""
     return [
         f"{side}_hand_{part}_{k}_link"
         for part, n in (("index", 2), ("middle", 2), ("thumb", 3))
@@ -143,68 +151,42 @@ def _g1_hand_finger_links(side: str) -> List[str]:
     ]
 
 
-# Named grasp groups (declarative): the robot-level
-# default for ``body_parts["grasp"]`` -- one group per hand.  The props layer
-# no longer consumes it directly (the auto held-chain was retired): contact
-# group declarations address these groups by NAME
-# (``contacts: [..., sensor_bodies: {body_parts: grasp.left}]``),
-# contacts/base.resolve_body_part_group resolves the per-backend sensor
-# specs.  Each group carries per-backend sensor-body specs (the two engines
-# name robot bodies differently):
-#   mujoco   : explicit MJ body names -- the 7 finger links of that hand
-#              (more precise than the former ``.*_hand_.*`` scan default:
-#              exact names cannot over-match, e.g. a future palm body)
-#   isaaclab : Robot-relative prim sub-paths (finger prims nest under
-#              ``{side}_hand/`` and ContactSensor prim-path matching is
-#              segment-wise; USD audit scripts/usd_hand_audit.py, runtime
-#              probe probe_hand_contacts.py -- retired in git history,
-#              v063 cleanup)
-# The palm links are deliberately NOT part of any group: they are
-# fixed-joint-merged into the wrist bodies at PhysX build time (reference
-# frames; palm-contact investigation) -- their contacts belong to the wrist.
-G1_GRASP_GROUPS: Dict[str, Dict[str, List[str]]] = {
-    side: {
-        "mujoco": _g1_hand_finger_links(side),
-        "isaaclab": [f"{side}_hand/{link}" for link in _g1_hand_finger_links(side)],
+#: Named canonical body sets.  ``grasp.left`` / ``grasp.right`` carry the
+#: 14 canonical finger ids via the per-hand groups below; ``grasp.both`` is
+#: the EITHER-hand group used by ``sensor_bodies: {contact_group: ...}``.
+G1_BODY_SETS: Dict[str, List[str]] = {
+    "grasp.left": _g1_hand_finger_ids("left"),
+    "grasp.right": _g1_hand_finger_ids("right"),
+    "grasp.both": _g1_hand_finger_ids("left") + _g1_hand_finger_ids("right"),
+}
+
+
+def _g1_body_bindings() -> Dict[str, Dict[str, str]]:
+    """Canonical id -> per-format native name/path.
+
+    ``mjcf`` uses the MJCF body names; ``usd`` uses the isaaclab prim
+    sub-paths (the localized G1 asset keeps the finger links under the
+    ``{side}_hand/`` scope).  The palm links are deliberately absent: they
+    are fixed-joint-merged into the wrist bodies at PhysX build time.
+    """
+    bindings: Dict[str, Dict[str, str]] = {
+        G1_BASE_BODY: {"mjcf": "pelvis", "usd": "pelvis"},
+        "left_ankle_roll": {
+            "mjcf": "left_ankle_roll_link",
+            "usd": "left_ankle_roll_link",
+        },
+        "right_ankle_roll": {
+            "mjcf": "right_ankle_roll_link",
+            "usd": "right_ankle_roll_link",
+        },
     }
-    for side in ("left", "right")
-}
-# (g1pick L3+): the EITHER-hand group -- one declared contact group
-# with ``sensor_bodies: {body_parts: grasp.both}`` reads "either hand touches
-# the filtered prop", which keeps per-object held criteria single-metric
-# (a per-hand pair would need a third combinator nesting level in formula
-# success trees, over the depth-2 whitelist).  Additive: left/right keep
-# their exact bodies, so every existing declaration resolves unchanged.
-G1_GRASP_GROUPS["both"] = {
-    "mujoco": (_g1_hand_finger_links("left") + _g1_hand_finger_links("right")),
-    "isaaclab": (
-        [f"left_hand/{link}" for link in _g1_hand_finger_links("left")]
-        + [f"right_hand/{link}" for link in _g1_hand_finger_links("right")]
-    ),
-}
+    for side in ("left", "right"):
+        for canonical, native in zip(_g1_hand_finger_ids(side), _g1_hand_finger_native(side)):
+            bindings[canonical] = {"mjcf": native, "usd": f"{side}_hand/{native}"}
+    return bindings
 
 
-# body_parts: base keys (feet/base/joints/hips — IsaaclabEnv reads
-# "feet"; adapters .get() what they know) + humanoid extensions (P4
-# (upper/lower/legs/waist/arms; no framework code reads those yet)
-# + "grasp" (named per-hand groups addressed by DECLARED contact
-# groups via {body_parts: grasp.<group>}; see G1_GRASP_GROUPS).
-G1_BODY_PARTS: Dict[str, Dict | List | str] = {
-    "feet": list(G1_FOOT_BODIES),
-    "base": G1_BASE_BODY,
-    "joints": list(G1_JOINT_ORDER_IL),  # full policy order (29)
-    # dominant proximal joints
-    "hips": ["left_hip_pitch_joint", "right_hip_pitch_joint"],
-    # humanoid extensions
-    "legs": [j for j in G1_JOINT_ORDER_IL if "hip" in j or "knee" in j or "ankle" in j],
-    "waist": ["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
-    "arms": [j for j in G1_JOINT_ORDER_IL if "shoulder" in j or "elbow" in j or "wrist" in j],
-    "upper_body": [G1_JOINT_ORDER_IL[i] for i in G1_UPPER_BODY_IDX],
-    "lower_body": [G1_JOINT_ORDER_IL[i] for i in G1_LOWER_BODY_IDX],
-    "grasp": {
-        side: {be: list(bodies) for be, bodies in m.items()} for side, m in G1_GRASP_GROUPS.items()
-    },
-}
+G1_BODY_BINDINGS: Dict[str, Dict[str, str]] = _g1_body_bindings()
 
 # ---------------------------------------------------------------------------
 # Effort limits (N·m) from policy_parameters.hpp EFFORT_LIMIT_* (motor spec
@@ -319,6 +301,20 @@ G1_HAND_JOINTS: List[str] = [
 # catalog uses the backend's own resolved order instead (isaaclab asset
 # order / MJ hinge order) — safe because publication is name-explicit.
 G1_JOINT_ORDER_FULL: List[str] = list(G1_JOINT_ORDER_IL) + list(G1_HAND_JOINTS)
+
+#: Curated joint groups folded into the profile vocabulary (the scene face
+#: reads these; ``body``/``hand`` remain the action-face sources).
+G1_JOINT_SETS: Dict[str, List[str]] = {
+    "body": list(G1_JOINT_ORDER_IL),
+    "hand": list(G1_HAND_JOINTS),
+    "hands": list(G1_HAND_JOINTS),
+    "hips": ["left_hip_pitch_joint", "right_hip_pitch_joint"],
+    "legs": [j for j in G1_JOINT_ORDER_IL if "hip" in j or "knee" in j or "ankle" in j],
+    "waist": ["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
+    "arms": [j for j in G1_JOINT_ORDER_IL if "shoulder" in j or "elbow" in j or "wrist" in j],
+    "upper_body": [G1_JOINT_ORDER_IL[i] for i in G1_UPPER_BODY_IDX],
+    "lower_body": [G1_JOINT_ORDER_IL[i] for i in G1_LOWER_BODY_IDX],
+}
 
 # spawn height for the standing q0 (SONIC clip reference z ~0.74; small
 # clearance so the robot settles onto its feet)

@@ -8,11 +8,15 @@ choice, actuator tables, prim paths, spawn conversion).  The neutral
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from isaaclab.assets import ArticulationCfg
 
 from unigym._typing import JsonValue
 from unigym.robots.base import RobotProfile
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.scenes.articulation import ArticulationSpec
 
 __all__ = ["articulation_cfg", "build_robot_realization"]
 
@@ -32,6 +36,7 @@ def articulation_cfg(realizations: Mapping[str, object] | None, name: str) -> Ar
 def build_robot_realization(
     profile: RobotProfile,
     *,
+    spec: ArticulationSpec,
     params: Mapping[str, JsonValue],
     asset_plan: object | None = None,
 ) -> object:
@@ -39,8 +44,9 @@ def build_robot_realization(
 
     Args:
         profile: the neutral robot profile.
-        params: the robot section's factory params (spawn/gain/prim-path
-            values not carried as neutral data).
+        spec: the run-level articulation declaration (the spawn authority).
+        params: the robot section's factory params (gain/prim-path values not
+            carried as neutral data).
         asset_plan: the composition boundary's resolved asset plan; no
             isaaclab realization consumes a pack asset yet, so it is
             accepted for the shared realizer seam and currently unused.
@@ -53,7 +59,7 @@ def build_robot_realization(
     if profile.name == "g1":
         from .g1 import realize_g1
 
-        return realize_g1(profile, params=params)
+        return realize_g1(profile, spec=spec, params=params)
     raise NotImplementedError(
         f"isaaclab2 backend: no robot realizer for profile {profile.name!r} | "
         f"hint: run this robot on a backend that consumes the neutral profile "

@@ -436,19 +436,27 @@ Robot definitions are backend-neutral authoring data. A profile factory returns
 `RobotProfile` with:
 
 ```text
-joint_sets / default_joint_pos / foot_bodies / body_parts
-assets (usd | mjcf | urdf refs)
+joint_sets / default_joint_pos
+assets (AssetRef: usd | mjcf | urdf refs, or None)
 action_faces
+base_body / foot_bodies / body_sets   (canonical body ids)
+body_bindings                          (canonical id -> per-format native name)
 ```
 
-`RobotProfile` carries no backend object and no backend switch. There is no
-`with_isaaclab` and no `articulation_cfg` field.
+`foot_bodies` is semantic metadata (it never implies a sensor). `body_bindings`
+is robot metadata, not backend logic: the selected backend asset format picks
+the native name. `RobotProfile` carries no backend object and no backend
+switch. There is no `with_isaaclab`, no `articulation_cfg`, no `body_parts`
+and no `RobotAsset` field.
 
 A backend that needs an engine object declares `BackendInfo.robot_realizer`:
 
 ```text
-realizer(profile, params=..., asset_plan=...) -> backend realization
+realizer(profile, *, spec, params, asset_plan) -> backend realization
 ```
+
+`spec` is the run-level `ArticulationSpec`; its `spawn` mapping is the only
+robot-root spawn authority.
 
 - isaaclab2/isaaclab3 build the `ArticulationCfg` from the neutral profile in
   `unigym/backends/isaaclab2/robots/`;

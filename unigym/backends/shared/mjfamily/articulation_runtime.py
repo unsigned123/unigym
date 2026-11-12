@@ -216,7 +216,6 @@ def _control_addresses(env, control, art):
         )
     backend_names = tuple(name_map.backend_name(art.name, name) for name in names)
     control.asset_joint_names = tuple(art.joint_names)
-    control.feet = tuple(art.feet)
     jadr = np.asarray(qpos_addresses(ir, backend_names), dtype=np.int64)
     jdr = np.asarray(dof_addresses(ir, backend_names), dtype=np.int64)
     control.addresses.update({"jadr": jadr, "jdr": jdr})
@@ -270,9 +269,9 @@ def _asset_robot_names(env, spec, name_map) -> tuple[str, ...]:
 def _build_articulation(env, spec, profile, name_map, params, label):
     """Build one :class:`ArticulationRuntime` for a declared articulation.
 
-    ``art.joint_names`` / ``art.feet`` / ``art.base_body`` are neutral
-    ``unigym_name`` values; the compiled names live on the backend-private
-    ``env._mj_articulation_bindings`` table.
+    ``art.joint_names`` / ``art.foot_bodies`` / ``art.base_body_id`` are
+    neutral ``unigym_name`` values; the compiled names live on the
+    backend-private ``env._mj_articulation_bindings`` table.
     """
     ir = env._model_ir
     model = env._model
@@ -280,8 +279,8 @@ def _build_articulation(env, spec, profile, name_map, params, label):
         name=spec.name,
         model=getattr(spec, "model", None),
         root=getattr(spec, "root", "free"),
-        body_parts=dict(getattr(spec, "body_parts", {}) or {}),
         spawn=dict(getattr(spec, "spawn", {}) or {}),
+        contacts=getattr(spec, "contacts", None),
         profile=profile,
     )
     if profile is None:
@@ -293,23 +292,27 @@ def _build_articulation(env, spec, profile, name_map, params, label):
         art.joint_names = joints
         art.q0 = torch.tensor([init.get(j, 0.0) for j in joints], dtype=torch.float32)
         art.robot_joint_names = joints
-        art.feet = tuple((art.body_parts or {}).get("feet") or ())
+        base_body = str(getattr(spec, "base_body", None) or "")
+        backend_base = str(name_map.backend_body(art.name, base_body)) if base_body else ""
+        foot_names = tuple(str(n) for n in (getattr(spec, "foot_bodies", None) or ()))
+        backend_feet = tuple(name_map.backend_body(art.name, n) for n in foot_names)
+        art.base_body = base_body
+        art.base_body_id = getattr(spec, "base_body", None)
+        art.foot_bodies = foot_names
+        art.body_sets = dict(getattr(spec, "body_sets", None) or {})
         art.jadr_pol = np.asarray(qpos_addresses(ir, backend_joints), dtype=np.int64)
         art.jdr_pol = np.asarray(dof_addresses(ir, backend_joints), dtype=np.int64)
         art.jadr_art = art.jadr_pol
         art.jdr_art = art.jdr_pol
         art.q0_mj = np.asarray(art.q0, dtype=np.float64)
         art.free_qpos_adr = art.free_dof_adr = None
-        art.foot_body_ids, art.foot_geom_sets = [], []
         env._mj_articulation_bindings[art.name] = MjArticulationBinding(
             unigym_joint_names=joints,
             backend_joint_names=backend_joints,
-            unigym_base_body=str((art.body_parts or {}).get("base") or ""),
-            backend_base_body=str(
-                name_map.backend_body(art.name, str((art.body_parts or {}).get("base") or ""))
-            ),
-            unigym_feet=art.feet,
-            backend_feet=tuple(name_map.backend_body(art.name, n) for n in art.feet),
+            unigym_base_body=base_body,
+            backend_base_body=backend_base,
+            unigym_feet=foot_names,
+            backend_feet=backend_feet,
         )
         return art
 
@@ -317,58 +320,52 @@ def _build_articulation(env, spec, profile, name_map, params, label):
     backend_names = tuple(name_map.backend_name(spec.name, name) for name in robot_names)
     defaults = dict(getattr(profile, "default_joint_pos", {}) or {})
     q0_mj = np.asarray([float(defaults.get(n, 0.0)) for n in robot_names], dtype=np.float64)
-    parts = dict(getattr(profile, "body_parts", None) or {})
-    base_body = str(parts.get("base") or "pelvis")
-    backend_base = name_map.backend_body(spec.name, base_body)
-    foot_names = [str(n) for n in (getattr(profile, "foot_bodies", None) or ())]
-    backend_feet = [name_map.backend_body(spec.name, n) for n in foot_names]
+    base_body_id = getattr(profile, "base_body", None)
+    if base_body_id is None:
+        base_body = ""
+        backend_base = ""
+    else:
+        base_body = str(base_body_id)
+        native_base = str(profile.body_bindings[base_body_id].names["mjcf"])
+        backend_base = name_map.backend_body(spec.name, native_base)
+    foot_names = tuple(str(n) for n in (getattr(profile, "foot_bodies", None) or ()))
+    backend_feet = []
+    for name in foot_names:
+        native = str(profile.body_bindings[name].names["mjcf"])
+        backend_feet.append(name_map.backend_body(spec.name, native))
     art.joint_names = tuple(robot_names)
     art.q0 = torch.tensor(q0_mj, dtype=torch.float32)
     art.robot_joint_names = tuple(robot_names)
     # Fingerprint parity: the reset write uses the float32-rounded q0
     # (the historical binding.q0), not the raw float64 profile defaults.
     art.q0_mj = np.asarray(art.q0, dtype=np.float64)
-    art.base_body = base_body
-    art.feet = tuple(foot_names)
+    art.base_body = backend_base
+    art.base_body_id = base_body_id
+    art.foot_bodies = foot_names
+    art.body_sets = dict(getattr(profile, "body_sets", {}) or {})
     art.jadr_pol = np.asarray(qpos_addresses(ir, backend_names), dtype=np.int64)
     art.jdr_pol = np.asarray(dof_addresses(ir, backend_names), dtype=np.int64)
     art.jadr_art = art.jadr_pol
     art.jdr_art = art.jdr_pol
-    base_bid = body_id(ir, backend_base)
-    if base_bid < 0:
+    base_bid = body_id(ir, backend_base) if backend_base else -1
+    if backend_base and base_bid < 0:
         raise ValueError(
             f"{label}: articulation {spec.name!r} base body {backend_base!r} "
             f"not in the MJ model"
         )
     art.addresses["base_body_id"] = base_bid
     art.free_qpos_adr, art.free_dof_adr = free_joint_adr(model, base_bid)
-    art.foot_body_ids, art.foot_geom_sets = [], []
-    for fname in backend_feet:
-        bid = body_id(ir, fname)
-        if bid < 0:
-            raise ValueError(
-                f"{label}: foot body {fname!r} of articulation "
-                f"{spec.name!r} not in the MJ model"
-            )
-        art.foot_body_ids.append(bid)
-        art.foot_geom_sets.append(
-            set(range(model.body_geomadr[bid], model.body_geomadr[bid] + model.body_geomnum[bid]))
-        )
-    art.addresses["foot_body_ids"] = list(art.foot_body_ids)
     env._mj_articulation_bindings[art.name] = MjArticulationBinding(
         unigym_joint_names=tuple(robot_names),
         backend_joint_names=backend_names,
         unigym_base_body=base_body,
         backend_base_body=backend_base,
-        unigym_feet=tuple(foot_names),
+        unigym_feet=foot_names,
         backend_feet=tuple(backend_feet),
     )
-    # spawn defaults mirror the historical single-robot reset write
-    spawn = dict(art.spawn or {})
-    if spawn.get("pos") is None:
-        spawn["pos"] = [float(env._spawn_xy[0]), float(env._spawn_xy[1]), float(env._spawn_height)]
-    spawn.setdefault("yaw", float(env._spawn_yaw))
-    art.spawn = spawn
+    # the declared spawn mapping is stored verbatim (empty when absent);
+    # env.params backend defaults are applied by the reset path only.
+    art.spawn = dict(getattr(spec, "spawn", {}) or {})
     return art
 
 

@@ -54,7 +54,7 @@ _JSON_TYPES = {
 }
 
 #: keys every adapter receives from the builder, never a spawn surface
-_INJECTED = {"num_envs", "device", "body_parts", "name"}
+_INJECTED = {"num_envs", "device", "name"}
 
 
 def declared_params(cls) -> dict | None:

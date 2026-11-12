@@ -255,9 +255,8 @@ def _normalize_articulations(
     if "robot" in cfg:
         raise ConfigError(
             "the top-level `robot:` block was removed in v101 A2; declare "
-            "`articulations: [{name: <robot>, params: ..., "
-            "body_parts: ...}]` plus a top-level `controls:` list instead "
-            "-- there is no alias"
+            "`articulations: [{name: <robot>, params: ...}]` plus a "
+            "top-level `controls:` list instead -- there is no alias"
         )
     try:
         return normalize_articulations(cfg.get("articulations"))

@@ -194,17 +194,20 @@ GR1_KP_BODY = 1000.0
 GR1_KD_BODY = 200.0
 
 # ---------------------------------------------------------------------------
-# body_parts (profile cross-robot configurability channel; feet is EMPTY --
-# the base is world-fixed, there is no locomotion contact surface)
+# Canonical body facts: the base is world-fixed (no feet / locomotion contact
+# surface); the MJCF base body is ``robot0_whole_body``.
 # ---------------------------------------------------------------------------
-GR1_BASE_BODY = "robot0_whole_body"
+GR1_BASE_BODY = "base"
 
-GR1_BODY_PARTS: Dict[str, Dict | List | str] = {
-    "feet": [],
-    "base": GR1_BASE_BODY,
-    "joints": list(GR1_JOINT_ORDER),
-    "waist": list(GR1_WAIST_JOINTS),
-    "arms": GR1_RIGHT_ARM_JOINTS + GR1_LEFT_ARM_JOINTS,
+GR1_BODY_BINDINGS: Dict[str, Dict[str, str]] = {
+    GR1_BASE_BODY: {"mjcf": "robot0_whole_body"},
+}
+
+#: Curated joint groups folded into the profile vocabulary.
+GR1_JOINT_SETS: Dict[str, List[str]] = {
+    "body": list(GR1_JOINT_ORDER),
     "right_hand": list(GR1_RIGHT_HAND_DRIVE_ORDER),
     "left_hand": list(GR1_LEFT_HAND_DRIVE_ORDER),
+    "waist": list(GR1_WAIST_JOINTS),
+    "arms": GR1_RIGHT_ARM_JOINTS + GR1_LEFT_ARM_JOINTS,
 }

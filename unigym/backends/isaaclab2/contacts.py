@@ -117,8 +117,7 @@ def general_field_names(name: str, entries: list[str]) -> list[str]:
 def sensor_prim_path(spec: ContactGroupSpec, entries: Optional[list[str]] = None) -> str:
     """Robot-anchored ``prim_path`` for a scope-less (union) group.
 
-    Also supports flat body sets (feet groups):
-    ``({e1}|{e2}|...)`` mirrors ``env/naming.py::contact_sensor_prim_path``.
+    Supports flat body sets: ``({e1}|{e2}|...)``.
     Scoped entries (containing ``/``) are not representable here -- use
     :func:`entry_prim_path` / :func:`general_prim_paths`.
     """
@@ -148,23 +147,6 @@ class IsaacLabContactBackend:
     """Backend object for all groups of one run (isaaclab)."""
 
     backend_key = "isaaclab"
-
-    @classmethod
-    def group_bodies(cls, gval, path: str):
-        """Select this backend's value from a body-parts group declaration.
-
-        A flat list (or a non-mapping) is shared by every backend; a
-        per-backend mapping is keyed by :attr:`backend_key`.
-        """
-        if not isinstance(gval, dict):
-            return gval
-        if cls.backend_key not in gval:
-            group = path.rsplit(".", 1)[-1]
-            raise ValueError(
-                f"body_parts path {path!r}: group {group!r} declares no "
-                f"{cls.backend_key!r} bodies (available: {sorted(gval)})"
-            )
-        return gval[cls.backend_key]
 
     @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]:

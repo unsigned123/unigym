@@ -28,8 +28,7 @@ Rules baked in here:
 * ``frame`` is **required with no default** (world|body) — no silent
   world-frame semantics;
 * ``component`` defaults to ``mag``; ``x|y|z`` are SIGNED projections
-  (so ``format: norm, component: z`` generalises the scalar
-  ``foot_contact_force_z`` channel); ``raw`` ignores ``component``;
+  (``raw`` ignores ``component``);
 * per-group isolation over sharing (one sensor cfg per group / pairwise
   entry), same isolation philosophy as cameras/;
 * baseline protocol: a config without a ``contacts:`` section produces
@@ -215,7 +214,7 @@ class ContactGroupSpec:
                 raise ValueError(
                     f"contact {entry['name']!r}: {arg} is still in the "
                     f"reference form {entry[arg]!r} -- resolve reference "
-                    f"forms ({{body_parts: ...}} / {{prop: ...}}) via "
+                    f"forms ({{contact_group: ...}} / {{prop: ...}}) via "
                     f"build_contact_manager/resolve_contact_entries first"
                 )
         kwargs = dict(entry)
@@ -269,7 +268,7 @@ def _str_list(value, arg: str, name: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# declarative reference resolution : {body_parts: ...} / {prop: ...}
+# declarative reference resolution : {contact_group: ...} / {prop: ...}
 # --------------------------------------------------------------------------- #
 BACKENDS = ("mujoco", "isaaclab")
 
@@ -295,9 +294,6 @@ class _ContactBackendFace(Protocol):
     def __init__(self, specs) -> None: ...
 
     @classmethod
-    def group_bodies(cls, value, path: str) -> list[str]: ...
-
-    @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]: ...
 
 
@@ -305,8 +301,8 @@ def _contact_face(backend: str) -> type[_ContactBackendFace]:
     """Resolve the backend contact face lazily through the registry.
 
     The face class owns BOTH the raw-reading backend object and the
-    backend-native name/path resolution (body-parts map keys, prop body
-    addresses), so the neutral package carries no backend-name branch.
+    backend-native name/path resolution (prop body addresses), so the neutral
+    package carries no backend-name branch.
     """
     from ..backends.registry import BackendSelectionError, backend_info
 
@@ -331,61 +327,60 @@ def build_contact_backend(backend: str, specs) -> _ContactBackendFace:
     return _contact_face(backend)(specs)
 
 
-def resolve_body_part_group(body_parts, path: str, backend: str) -> list[str]:
-    """Resolve a ``{body_parts: <path>}`` reference to concrete body specs.
+def _available_contact_refs(contact_groups) -> list[str]:
+    """Every resolvable ``articulation.group`` reference (sorted)."""
+    refs = [
+        f"{articulation}.{group}"
+        for articulation, groups in (contact_groups or {}).items()
+        for group in groups
+    ]
+    return sorted(refs)
 
-    ``path`` addresses the robot profile's ``body_parts`` dict
-    (``unigym/robots/*_constants.py``; collect_cli passes
-    ``profile.body_parts``):
 
-    * ``"<key>"`` -- the key's value must be a flat body list shared by
-      both backends (e.g. ``feet``);
-    * ``"<key>.<group>"`` -- the key's value is a NAMED-GROUP dict; the
-      group's value is either a flat shared list or an explicit per-backend
-      mapping ``{mujoco: [...], isaaclab: [...]}`` -- the entry for
-      *backend* is returned (the engines name robot bodies differently;
-      G1's ``grasp.left`` / ``grasp.right`` use the per-backend form).
+def resolve_contact_group(contact_groups, value) -> list[str]:
+    """Resolve ``{contact_group: {articulation, group}}`` to native regexes.
 
-    Name-addressing only: no backend knowledge is hardcoded here -- the
-    resolution fails fast listing the available keys/groups/backends.
+    The table is the run layer's per-articulation native-body inventory
+    (``{articulation: {group: (native bodies)}}``); this neutral module only
+    consumes it and never imports ``BodyBinding`` or ``AssetRef``.
     """
-    face = _contact_face(backend)
-    if not isinstance(path, str) or not path:
-        raise ValueError(f"body_parts path must be a non-empty string, " f"got {path!r}")
-    parts = path.split(".")
-    if len(parts) > 2:
+    if not isinstance(value, dict) or set(value) != {"contact_group"}:
         raise ValueError(
-            f"body_parts path {path!r} must be '<key>' or " f"'<key>.<group>' (at most one '.')"
+            "contact sensor_bodies reference form must be "
+            "{contact_group: {articulation: <name>, group: <name>}}, got "
+            f"keys {sorted(value) if isinstance(value, dict) else value!r}"
         )
-    if not body_parts or parts[0] not in body_parts:
+    ref = value["contact_group"]
+    if not isinstance(ref, dict) or set(ref) != {"articulation", "group"}:
         raise ValueError(
-            f"body_parts path {path!r}: key {parts[0]!r} not in body_parts "
-            f"(available: {sorted(body_parts or {})})"
+            "contact_group reference must declare exactly "
+            "{articulation: <name>, group: <name>}, got "
+            f"{sorted(ref) if isinstance(ref, dict) else ref!r}"
         )
-    value = body_parts[parts[0]]
-    if len(parts) == 1:
-        if isinstance(value, dict):
-            raise ValueError(
-                f"body_parts path {path!r}: key {parts[0]!r} holds named "
-                f"groups {sorted(value)} -- address one explicitly "
-                f"({parts[0]}.<group>)"
-            )
-        return _body_spec_list(value, f"body_parts[{path!r}]")
-    group = parts[1]
-    if not isinstance(value, dict) or group not in value:
-        available = sorted(value) if isinstance(value, dict) else "<flat list -- no named groups>"
+    articulation = ref["articulation"]
+    group = ref["group"]
+    available = _available_contact_refs(contact_groups)
+    if not isinstance(articulation, str) or not articulation:
         raise ValueError(
-            f"body_parts path {path!r}: group {group!r} not in "
-            f"{parts[0]!r} (available: {available})"
+            f"contact_group articulation must be a non-empty string; "
+            f"available references: {available}"
         )
-    gval = value[group]
-    selected = face.group_bodies(gval, path)
-    where = (
-        f"body_parts[{path!r}][{face.backend_key!r}]"
-        if isinstance(gval, dict)
-        else f"body_parts[{path!r}]"
-    )
-    return _body_spec_list(selected, where)
+    groups = (contact_groups or {}).get(articulation)
+    if groups is None:
+        raise ValueError(
+            f"contact_group articulation {articulation!r} is unknown; "
+            f"available references: {available}"
+        )
+    if not isinstance(group, str) or not group:
+        raise ValueError(
+            f"contact_group group must be a non-empty string; " f"available references: {available}"
+        )
+    if group not in groups:
+        raise ValueError(
+            f"contact_group reference {articulation}.{group} is unknown; "
+            f"available references: {available}"
+        )
+    return _body_spec_list(groups[group], f"contact_group {articulation}.{group} bodies")
 
 
 def resolve_prop_filter(name, backend: str, prop_names, articulated_props=frozenset()) -> list[str]:
@@ -395,9 +390,9 @@ def resolve_prop_filter(name, backend: str, prop_names, articulated_props=frozen
     ``Prop_<name>`` (mujoco) vs the cloned prim path
     ``{ENV_REGEX_NS}/Prop_<name>`` (isaaclab).  Articulation props
      own a whole SUBTREE (``Prop_<name>_<link>``), so their
-    filter is the subtree pattern.  Unknown names fail fast listing the
-    declared props (the declaration is the single source of truth --
-    zero hardcoded addresses).
+     filter is the subtree pattern.  Unknown names fail fast listing the
+     declared props (the declaration is the single source of truth --
+     zero hardcoded addresses).
     """
     face = _contact_face(backend)
     names = list(prop_names or [])
@@ -413,18 +408,24 @@ def resolve_prop_filter(name, backend: str, prop_names, articulated_props=frozen
 
 
 def _resolve_ref(
-    value, backend: str, arg: str, group: str, body_parts, prop_names, articulated_props=frozenset()
+    value,
+    backend: str,
+    arg: str,
+    group: str,
+    contact_groups,
+    prop_names,
+    articulated_props=frozenset(),
 ) -> list[str]:
     """One sensor_bodies/filter_bodies field: reference form OR list."""
     if isinstance(value, dict):
         keys = set(value)
         if arg == "sensor_bodies":
-            if keys != {"body_parts"}:
+            if keys != {"contact_group"}:
                 raise ValueError(
                     f"contact {group!r}: {arg} reference form is "
-                    f"{{body_parts: <key>[.<group>]}}, got keys {sorted(keys)}"
+                    f"{{contact_group: {{articulation, group}}}}, got keys {sorted(keys)}"
                 )
-            return resolve_body_part_group(body_parts, value["body_parts"], backend)
+            return resolve_contact_group(contact_groups, value)
         if keys != {"prop"}:
             raise ValueError(
                 f"contact {group!r}: {arg} reference form is "
@@ -435,15 +436,16 @@ def _resolve_ref(
 
 
 def resolve_contact_entry(
-    entry: dict, backend: str, body_parts=None, prop_names=None, articulated_props=frozenset()
+    entry: dict, backend: str, contact_groups=None, prop_names=None, articulated_props=frozenset()
 ) -> dict:
     """Resolve ONE yaml ``contacts:`` entry's reference forms to lists.
 
     ``sensor_bodies`` is either an explicit list of body specs or the
-    reference form ``{body_parts: "<key>[.<group>]"}``; ``filter_bodies``
-    either an explicit list or ``{prop: <name>}``.  Everything else passes
-    through untouched for :class:`ContactGroupSpec` validation.  Returns a
-    NEW dict (the input is never mutated).
+    reference form ``{contact_group: {articulation, group}}``;
+    ``filter_bodies`` either an explicit list or ``{prop: <name>}``.
+    Everything else passes through untouched for
+    :class:`ContactGroupSpec` validation.  Returns a NEW dict (the input is
+    never mutated).
     """
     if not isinstance(entry, dict):
         raise ValueError(f"contact group entry must be a mapping, got " f"{type(entry).__name__}")
@@ -454,7 +456,7 @@ def resolve_contact_entry(
             backend,
             "sensor_bodies",
             str(out.get("name", "?")),
-            body_parts,
+            contact_groups,
             prop_names,
             articulated_props,
         )
@@ -464,7 +466,7 @@ def resolve_contact_entry(
             backend,
             "filter_bodies",
             str(out.get("name", "?")),
-            body_parts,
+            contact_groups,
             prop_names,
             articulated_props,
         )
@@ -472,7 +474,7 @@ def resolve_contact_entry(
 
 
 def resolve_contact_entries(
-    entries, backend: str, body_parts=None, prop_names=None, articulated_props=frozenset()
+    entries, backend: str, contact_groups=None, prop_names=None, articulated_props=frozenset()
 ) -> list[dict]:
     """Resolve every entry of a ``contacts:`` list (see
     :func:`resolve_contact_entry`); the list itself must be a list."""
@@ -484,7 +486,7 @@ def resolve_contact_entries(
             f"entries, got {type(entries).__name__}"
         )
     return [
-        resolve_contact_entry(e, backend, body_parts, prop_names, articulated_props)
+        resolve_contact_entry(e, backend, contact_groups, prop_names, articulated_props)
         for e in entries
     ]
 

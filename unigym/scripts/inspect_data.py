@@ -34,7 +34,7 @@ def _single_key(data: dict, leaf: str, required: bool = False):
 
 
 def _articulation_orders(meta: dict) -> dict:
-    """``{name: {joint_names, foot_names, ...}}`` from the v3 meta record."""
+    """``{name: {joint_names, foot_bodies, ...}}`` from the v4 meta record."""
     arts = meta.get("articulations")
     if isinstance(arts, dict):
         return arts
@@ -159,23 +159,6 @@ def _print_joint_ranges(data, state_keys, orders):
             print(f"  {n:18s} [{lo[i]:+7.3f}, {hi[i]:+7.3f}]")
 
 
-def _print_foot_duty(data, state_keys, orders):
-    """Per-articulation foot duty factors (policy foot order names)."""
-    for name in sorted(state_keys):
-        fc_key = state_keys[name].get("foot_contact")
-        if fc_key is None:
-            continue
-        ct = data[fc_key].astype(np.float32)  # (T, N, F)
-        feet = orders.get(name, {}).get("foot_names") or [f"f{i}" for i in range(ct.shape[-1])]
-        duty = ct.mean(axis=(0, 1))
-        print(f"\n== foot duty factor [{name}] (all steps) ==")
-        for i, n in enumerate(feet):
-            print(f"  {n:8s} {duty[i]:.3f}")
-        print(
-            f"mean contact per env-step: {ct.mean(axis=-1).mean():.3f} " "(trot ~0.5 -> 2.0 feet)"
-        )
-
-
 def _print_episodes(data, T, N, tie):
     """Episode counts, durations, and per-env monotonicity."""
     if "episode_id" not in data:
@@ -226,7 +209,7 @@ def main():
             record = orders.get(name) or {}
             print(f"articulation {name}:")
             print(f"  joint_names = {record.get('joint_names')}")
-            print(f"  foot_names  = {record.get('foot_names')}")
+            print(f"  foot_bodies = {record.get('foot_bodies')}")
             print(f"  state_keys  = {sorted(state_keys.get(name, {}))}")
 
     # ---- field table + NaN/Inf check ----
@@ -260,7 +243,6 @@ def main():
     _print_base_velocity(data, state_keys, steady, args.steady_after_s)
     _print_command_tracking(data, state_keys)
     _print_joint_ranges(data, state_keys, orders)
-    _print_foot_duty(data, state_keys, orders)
 
     _print_episodes(data, T, N, tie)
 

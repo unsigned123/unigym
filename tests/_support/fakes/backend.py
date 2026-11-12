@@ -57,7 +57,7 @@ class FakeBackend(EnvBackend):
                 root="fixed",
                 joint_names=(JOINT_NAME,),
                 q0=(0.0,),
-                feet=(),
+                foot_bodies=(),
             )
         }
         self.controls: dict[str, ControlRuntime] = {
@@ -200,7 +200,6 @@ class FakeBackend(EnvBackend):
     def _build_extra(self) -> dict[str, torch.Tensor | bool]:
         prefix = f"articulation/{ARTICULATION_NAME}"
         zeros3 = torch.zeros(self.num_envs, 3, dtype=torch.float32, device=self.device)
-        empty = torch.zeros(self.num_envs, 0, dtype=torch.float32, device=self.device)
         return {
             f"{prefix}/joint_pos": self._joint_pos.clone(),
             f"{prefix}/joint_vel": torch.zeros_like(self._joint_pos),
@@ -220,11 +219,6 @@ class FakeBackend(EnvBackend):
             f"{prefix}/base_ang_vel_w": zeros3.clone(),
             f"{prefix}/base_lin_vel_b": zeros3.clone(),
             f"{prefix}/base_ang_vel_b": zeros3.clone(),
-            f"{prefix}/foot_contact": torch.zeros(
-                self.num_envs, 0, dtype=torch.bool, device=self.device
-            ),
-            f"{prefix}/foot_contact_force_z": empty.clone(),
-            f"{prefix}/foot_pos_z": empty.clone(),
             "time_in_episode": self._time_in_episode.clone(),
             "episode_id": self._episode_id.clone(),
             "reset_env_ids": torch.empty(0, dtype=torch.int64, device=self.device),

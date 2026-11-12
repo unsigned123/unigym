@@ -1,9 +1,9 @@
 """Unitree G1 (29-DoF) neutral robot profile with SONIC deployment parameters.
 
-The profile carries authoring data only (joint sets, standby pose, feet, body
-parts, declared assets and action faces).  The isaaclab ``ArticulationCfg``
-realization -- asset choice, contact-sensor patch, prim path, upright spawn,
-actuator groups and gain/effort tables -- lives in
+The profile carries authoring data only (joint sets, standby pose, canonical
+body facts and bindings, declared assets and action faces).  The isaaclab
+``ArticulationCfg`` realization -- asset choice, contact-sensor patch, prim
+path, spawn conversion, actuator groups and gain/effort tables -- lives in
 :mod:`unigym.backends.isaaclab2.robots.g1`; the mujoco family consumes this
 profile as pure constants.
 
@@ -21,14 +21,18 @@ from __future__ import annotations
 import re
 from typing import Dict, Optional
 
-from .base import RobotAsset, RobotProfile
+from unigym.assets.asset_ref import AssetRef
+
+from .base import BodyBinding, RobotProfile
 from .g1_constants import (
-    G1_BODY_PARTS,
+    G1_BASE_BODY,
+    G1_BODY_BINDINGS,
+    G1_BODY_SETS,
     G1_DEFAULT_Q,
+    G1_FOOT_BODIES,
     G1_HAND_JOINTS,
     G1_JOINT_ORDER_FULL,
-    G1_JOINT_ORDER_IL,
-    G1_SPAWN_HEIGHT,
+    G1_JOINT_SETS,
 )
 
 # NOTE: two Nucleus asset generations exist for G1 (both S3-listed
@@ -67,7 +71,6 @@ def _expand_default_q(default_q: Dict[str, float]) -> Dict[str, float]:
 
 
 def make_g1_profile(
-    spawn_height: float = G1_SPAWN_HEIGHT,
     stiffness: Optional[Dict] = None,
     damping: Optional[Dict] = None,
     effort: Optional[Dict] = None,
@@ -76,28 +79,21 @@ def make_g1_profile(
     prim_path: str = "{ENV_REGEX_NS}/Robot",
     usd_path: Optional[str] = None,
     actuate_hands: bool = False,
-    body_parts: Optional[Dict] = None,
     default_q: Optional[Dict] = None,
-    spawn_x: float = 0.0,
-    spawn_y: float = 0.0,
-    spawn_yaw_deg: float = 0.0,
 ) -> RobotProfile:
     """Build the neutral G1 29-DoF :class:`RobotProfile`.
 
-    The gain/spawn/prim-path/asset parameters are accepted here because the
-    run config declares them on the robot section; they are consumed by the
-    backend realizer, never stored on the neutral profile (only ``usd_path``
-    and ``actuate_hands`` change profile data: the declared asset and the
-    hand action face).
+    The gain/prim-path parameters are accepted here because the run config
+    declares them on the robot section; they are consumed by the backend
+    realizer, never stored on the neutral profile (only ``usd_path`` and
+    ``actuate_hands`` change profile data: the declared asset and the hand
+    action face).
 
     Args:
-        spawn_height: spawn base z (m).  SONIC standing reference ~0.74;
-            default 0.78 gives a small settle drop.
         stiffness/damping/effort: optional per-regex overrides merged into
             the playground-PD defaults (keys must match existing group
-            regexes).  ``effort`` + hands gains were added so a foreign
-            task's actuator table (e.g. HumanoidArena) is expressible in
-            config without touching the constants.
+            regexes).  ``effort`` + hands gains let a foreign task's actuator
+            table be expressible in config without touching the constants.
         hands_kp/hands_kd: the (non-policy) finger group gains; defaults
             keep the upstream G1_29DOF_CFG values.
         prim_path: framework-standard clone regex (asset hardcodes another).
@@ -109,32 +105,13 @@ def make_g1_profile(
             ``g1_29dof_with_hand_rev_1_0`` asset (Isaac 5.0
             ``configuration/`` build / ``G1_with_hand``); the default
             29-DoF Isaac 4.5 ``g1.usd`` has no finger DOFs.
-        body_parts: optional partial override of :data:`G1_BODY_PARTS`.
         default_q: optional per-joint override of the SONIC standby q0
             (same channel as the built-in profiles; lets a non-SONIC policy
             spawn at its own q0 — drives spawn pose AND the controller q0).
-        spawn_x/spawn_y: initial root world xy (m), applied on
-            ``init_state.pos`` together with ``spawn_height`` (isaaclab
-            spawn-pose parity of the mujoco ``spawn_xy`` planar spawn:
-            the pose is owned by the Isaac Lab init system, not written
-            per-reset).  Defaults 0/0 keep the historical identity spawn.
-        spawn_yaw_deg: initial root yaw in degrees (world frame, applied as
-            ``(cos, 0, 0, sin)`` wxyz on ``init_state.rot``).  Default 0
-            keeps the historical identity spawn.  Foreign scenes that place
-            the goal on the +y axis (e.g. HumanoidArena open_door, whose
-            upstream ``ROBOT_INIT_ROT`` is ``(0.7071, 0, 0, 0.7071)`` =
-            yaw +90°) set 90.0 — the HA G1 USD is authored facing +x
-            (verified 2026-09-26: identity spawn measures heading ≈ 0°), so
-            the old "asset ships yaw+90°" comment was a SONIC-asset
-            assumption and is removed.
     """
     # Backend-owned construction params: accepted for config compatibility
     # and consumed by the backend realizer, never stored on the profile.
-    del spawn_height, stiffness, damping, effort, hands_kp, hands_kd, spawn_x, spawn_y
-    del spawn_yaw_deg
-    bp = dict(G1_BODY_PARTS)
-    if body_parts:
-        bp.update(body_parts)
+    del stiffness, damping, effort, hands_kp, hands_kd, prim_path
     # default_joint_pos covers the FULL 43-joint articulation —
     # the 29 SONIC policy joints + the 14 finger joints at their rest
     # pose (0).  Drives spawn pose, the controller q0 (policy joints)
@@ -143,18 +120,22 @@ def make_g1_profile(
     joint_pos.update({n: 0.0 for n in G1_HAND_JOINTS})
     if default_q:
         joint_pos.update(_expand_default_q(default_q))
-    assets = (RobotAsset(format="usd", ref=usd_path),) if usd_path else ()
     return RobotProfile(
         name="g1",
-        joint_sets={"body": tuple(G1_JOINT_ORDER_IL), "hand": tuple(G1_HAND_JOINTS)},
+        joint_sets={name: tuple(joints) for name, joints in G1_JOINT_SETS.items()},
         default_joint_pos=joint_pos,
-        foot_bodies=tuple(bp["feet"]),
-        body_parts=bp,
-        assets=assets,
+        assets=AssetRef(usd=usd_path) if usd_path else None,
         # with the hands actuator group, the finger DOFs become a driveable
         # NamedAction face ("hand", dex3 open/close targets) -- term input
         # order == G1_HAND_JOINTS (the hand-face order external drivers
         # emit).  Without actuate_hands the 29-DoF single-face surface is
         # unchanged.
         action_faces={"hand": tuple(G1_HAND_JOINTS)} if actuate_hands else {},
+        base_body=G1_BASE_BODY,
+        foot_bodies=tuple(G1_FOOT_BODIES),
+        body_sets={name: tuple(bodies) for name, bodies in G1_BODY_SETS.items()},
+        body_bindings={
+            canonical: BodyBinding(canonical, dict(names))
+            for canonical, names in G1_BODY_BINDINGS.items()
+        },
     )

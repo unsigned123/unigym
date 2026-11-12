@@ -133,7 +133,7 @@ class DataCollectLogger:
         """Record one step's metrics and print progress at *log_interval*.
 
         ``extra_info`` should contain scalar values (already meaned over envs)
-        for keys such as ``vx``, ``base_z``, ``alive``, ``duty_FL`` ...
+        for keys such as ``vx``, ``base_z``, ``alive`` ...
         plus optional ``shards`` (current shard count).
         """
         metrics = {}
@@ -242,10 +242,6 @@ class DataCollectLogger:
             k[len("term_") :]: float(v) for k, v in overall.items() if k.startswith("term_")
         }
 
-        # duty metrics are generated per profile foot (collect.py); label sets
-        # vary by robot — scan the overall means instead of hardcoding them.
-        duty = {k[len("duty_") :]: float(v) for k, v in overall.items() if k.startswith("duty_")}
-
         durs = (
             np.array(self._episode_durations, dtype=np.float64)
             if self._episode_durations
@@ -279,7 +275,6 @@ class DataCollectLogger:
                 "fallen": dists.get("fallen", {}),
                 "terminated": dists.get("terminated", {}),
                 "in_recovery": dists.get("in_recovery", {}),
-                "duty_factor": duty,
             },
             "terminations": term_fractions,
             "episodes": {

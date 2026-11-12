@@ -60,7 +60,7 @@ def test_step_publishes_contract_shaped_obs_and_extra(env):
 
     check_obs_cache(obs, env.num_envs, device=env.device)
     check_obs_cache(env.obs_cache, env.num_envs, device=env.device)
-    check_extra_info(extra, env.num_envs, len(control.joint_names), len(control.feet), env.device)
+    check_extra_info(extra, env.num_envs, len(control.joint_names), env.device)
 
     assert set(obs) == {"joint_pos", "prev_action"}
     assert tuple(obs["joint_pos"].shape) == (env.num_envs, len(control.joint_names))

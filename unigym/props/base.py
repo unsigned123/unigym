@@ -34,7 +34,7 @@ Prop kinds (see articulation.py / ball.py / generic.py):
 
 The manager is domain-neutral : it knows nothing about hands,
 grasps or held semantics.  Any hand-contact criterion is a DECLARED contact
-group (yaml ``contacts:`` with ``{body_parts: ...}`` / ``{prop: ...}``
+group (yaml ``contacts:`` with ``{contact_group: ...}`` / ``{prop: ...}``
 references -- contacts/base.py) consumed by the ContactManager; the
 ``object/<name>/{pos,quat}`` record keys (props/object_state.py) are the
 only object-key family the manager emits.

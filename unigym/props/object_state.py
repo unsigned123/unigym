@@ -14,7 +14,7 @@ as before):
 Domain-neutral: this layer knows ONLY geometry (root pose +
 declared joint values).  There is deliberately no ``held`` key family any
 more -- any hand-contact criterion is a DECLARED contact group (yaml
-``contacts:`` referencing ``{body_parts: grasp.left}`` and
+``contacts:`` referencing ``{contact_group: {articulation, group}}`` and
 ``{prop: <name>}``; contacts/base.py) that lands in npz as
 ``contact/<name>`` and is judged by the FormulaTask ``contact_any``
 template (benchmarks/terms.py).

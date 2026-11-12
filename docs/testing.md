@@ -177,9 +177,11 @@ tests/
 │   ├── scenes/
 │   ├── runtime/
 │   ├── run/
+│   ├── contacts/
 │   ├── terminations/
 │   ├── filters/
 │   ├── robots/
+│   ├── assets/
 │   ├── adapters/
 │   └── backends/                # framework-level registry tests only
 ├── backends/
@@ -230,10 +232,12 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_scene` | `tests/unit/scenes/**` |
 | `domain_runtime` | `tests/unit/runtime/**` |
 | `domain_run` | `tests/unit/run/**` |
+| `domain_contacts` | `tests/unit/contacts/**` |
 | `domain_terminations` | `tests/unit/terminations/**` |
 | `domain_filters` | `tests/unit/filters/**` |
 | `domain_robots` | `tests/unit/robots/**` |
 | `domain_adapters` | `tests/unit/adapters/**` |
+| `domain_assets` | `tests/unit/assets/**` |
 | `domain_backends` | `tests/unit/backends/**` |
 | `backend_agnostic` | no specific backend |
 | `backend_mujoco` | `tests/backends/mujoco/**` or conformance fixture |

@@ -27,7 +27,7 @@ def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mjwarp.env import MjwarpEnv
-    from unigym.robots.base import RobotProfile
+    from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
@@ -36,13 +36,16 @@ def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
         name=ARTICULATION,
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
-        foot_bodies=[],
-        body_parts={"base": "base"},
+        assets=None,
+        action_faces={},
+        base_body="base",
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
     articulation = ArticulationSpec(
         name=ARTICULATION,
         spawn={"pos": [0.0, 0.0, 0.8]},
-        body_parts={"base": "base"},
     )
     group = ControlGroup.from_mapping(
         {

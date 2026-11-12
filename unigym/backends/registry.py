@@ -223,12 +223,20 @@ class BackendInfo:
     kit_launcher: Callable[[], Callable[..., tuple[Any, Any]]] | None = None
     """Factory -> ``kit_launcher(parser, warn=None)`` (kit launch before build)."""
     robot_realizer: Callable[[], object] | None = None
-    """Factory -> ``realize(profile, *, params, asset_plan)``.
+    """Factory -> ``realize(profile, *, spec, params, asset_plan)``.
 
     The realizer turns a neutral :class:`~unigym.robots.base.RobotProfile`
-    into the backend's robot realization (e.g. an Isaac Lab
-    ``ArticulationCfg``).  ``None`` means the backend consumes the neutral
-    profile directly and builds no backend robot object.
+    plus its :class:`~unigym.scenes.articulation.ArticulationSpec` into the
+    backend's robot realization (e.g. an Isaac Lab ``ArticulationCfg``).
+    ``None`` means the backend consumes the neutral profile directly and
+    builds no backend robot object.
+    """
+    asset_format: str = ""
+    """The backend-owned selected asset format (``mjcf`` / ``usd``).
+
+    It selects the ``BodyBinding`` native-name key used by contact-group and
+    body-binding resolution; it does not require ``profile.assets`` to carry
+    that format (a pack/provider may own the asset).
     """
     default_lighting: Mapping[str, float] | None = None
     """Default lights for a textured usd prop when the config declares none."""
@@ -859,6 +867,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "mujoco",
         (0, 0),
         MUJOCO_TRAITS,
+        asset_format="mjcf",
         options_schema=_MJ_COMPOSE_OPTIONS,
         scene_engine=_mujoco_scene_engine,
         scopes=MUJOCO_SCOPES,
@@ -885,6 +894,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "mjwarp",
         (0, 0),
         MJWARP_TRAITS,
+        asset_format="mjcf",
         options_schema=_MJ_COMPOSE_OPTIONS,
         scene_engine=_mujoco_scene_engine,
         scopes=MJWARP_SCOPES,
@@ -908,6 +918,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "isaaclab2",
         (2, 3),
         ISAACLAB2_TRAITS,
+        asset_format="usd",
         env_class=_isaaclab2_env,
         model_provider=_isaaclab2_model_provider,
         prop_backend=_isaaclab2_prop_backend,
@@ -929,6 +940,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "isaaclab3",
         (3, 0),
         ISAACLAB3_TRAITS,
+        asset_format="usd",
         env_class=_isaaclab3_env,
         camera_backend=_isaaclab2_rig_factory,
         director_ops=_isaaclab2_director_ops,

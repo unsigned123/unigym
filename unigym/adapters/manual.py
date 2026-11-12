@@ -39,12 +39,11 @@ class ManualAdapter(Adapter):
         obs_dim: int = 0,
         num_envs: int = 1,
         device: str = "cpu",
-        body_parts: dict | None = None,
         **kwargs,
     ):
-        # num_envs/device/body_parts are the registry-injected kwargs
-        # (build_adapter always supplies them); a manual adapter ignores
-        # them -- there is no policy to bind or joint map to use.
+        # num_envs/device are the registry-injected kwargs (build_adapter
+        # always supplies them); a manual adapter ignores them -- there is
+        # no policy to bind or joint map to use.
         self._control_dt = float(control_dt)
         self._obs_dim = int(obs_dim)
 

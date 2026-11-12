@@ -34,3 +34,24 @@ def test_model_ir_reports_the_cartpole_body_and_joint_topology(cartpole_env):
 def test_two_env_fixture_exposes_two_envs(two_env):
     """The two-env fixture builds a batch of two envs."""
     assert two_env.num_envs == 2
+
+
+def test_partitioned_isaaclab_rejects_contact_manager_before_env(simulation_app):
+    """Partitioned IsaacLab keeps its pre-env contact-manager fail-fast."""
+    from unigym.backends.isaaclab2.articulation_runtime import validate_options
+
+    class _Adapter:
+        def get_obs_requests(self):
+            return []
+
+    with pytest.raises(NotImplementedError, match="contact_manager"):
+        validate_options(
+            _Adapter(),
+            events_cfg=None,
+            recorder=None,
+            prop_manager=None,
+            camera_manager=None,
+            contact_manager=object(),
+            director_cfg=None,
+            init_pose_cfg=None,
+        )

@@ -68,13 +68,17 @@ class MujocoSceneOps:
         # cached by the face).
         backend_limits = model_joint_limits(m, backend_joints)
         limits = {j: backend_limits[b] for j, b in zip(joints, backend_joints)}
+        from unigym.runtime.controllers import single_articulation_runtime
+
+        profile = single_articulation_runtime(self.env).profile
+        joint_sets = dict(getattr(profile, "joint_sets", None) or {})
         tree: dict = {
             "robot": {
                 "name": self.robot_name,
                 "base": base,
                 "n_joints": len(joints),
-                "joint_groups": robot_joint_groups(joints),
-                "joints": joint_limit_rows(joints, limits),
+                "joint_groups": robot_joint_groups(joints, joint_sets),
+                "joints": joint_limit_rows(joints, limits, joint_sets),
             },
             "props": self._props_tree(),
             "contacts": self._contacts_tree(),

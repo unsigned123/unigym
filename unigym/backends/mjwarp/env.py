@@ -37,8 +37,9 @@ Highlights inherited from the mujoco backend (unchanged semantics):
   built by name and cross-checked against ``MUJOCO_TO_ISAACLAB``.
 * Reset writes q0 explicitly and runs ``mj_forward`` on the mirror, then
   re-seeds the device with ``mjw.put_data``.
-* Foot contacts filter by geom -> foot body membership and
-  ``mj_contactForce`` on the mirror.
+* Contact sensors come from explicit contact declarations +
+  ``ContactManager`` only; the robot's foot body ids are metadata and drive
+  no sensor or observation.
 """
 
 from __future__ import annotations
@@ -235,8 +236,6 @@ class MjwarpEnv(WarpBatchMixin):
                 mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
-            contact_force_threshold: foot-contact threshold in N (default
-                1.0; UNCALIBRATED across engines — see module docstring).
             kp / kd: optional per-joint-name-or-regex PD gain overrides.
             hand_kp / hand_kd: optional hand-DOF soft-PD gain overrides
                 (defaults G1_KP_HANDS/G1_KD_HANDS = 20/2).
@@ -608,8 +607,6 @@ class MjwarpEnv(WarpBatchMixin):
         self._fixed_base_quat_w = np.array(
             [np.cos(self._spawn_yaw / 2), 0.0, 0.0, np.sin(self._spawn_yaw / 2)], dtype=np.float64
         )
-        self._contact_force_threshold = float(params.get("contact_force_threshold", 1.0))
-
         # ---- feat/contact-manager: bind AFTER model/data exist (body ids,
         # geom tables); no scene elements are needed (setup_scene is a no-op)
         self.contact_manager = contact_manager
@@ -679,16 +676,12 @@ class MjwarpEnv(WarpBatchMixin):
         # red line).  See unigym/backends/shared/mjfamily/props/reset_face.py.
         (self._initializer, self._reset_spec) = wire_reset_face(self, params, robot_profile)
 
-        # ---- compatibility aliases for the first articulation ----
+        # ---- compatibility alias for the first articulation ----
         if self._articulation_order:
             first_art = self._articulation_order[0]
-            self._foot_body_ids = list(first_art.foot_body_ids)
-            self._foot_geom_sets = list(first_art.foot_geom_sets)
             self._base_body_id = first_art.addresses.get("base_body_id", -1)
         else:  # pragma: no cover - the run layer requires articulations
-            self._foot_body_ids, self._foot_geom_sets = [], []
             self._base_body_id = -1
-        self._frc6 = np.zeros(6)
 
         # ---- obs cache (exactly the adapter's requests) ----
         self._obs_requests = adapter.get_obs_requests()
@@ -999,34 +992,6 @@ class MjwarpEnv(WarpBatchMixin):
         the shared articulation record helper.
         """
         return read_articulation_state(self, self._articulation_order[0], e)
-
-    def _foot_contact_forces(self, d=None) -> np.ndarray:
-        """Per-foot world-frame net contact force (F, 3), contact-filtered.
-
-        Mirrors ``backends/mujoco/multienv.foot_contact_forces`` but reads
-        the warp-synced mirror: contacts are matched by geom membership of
-        the foot bodies (the sole collision boxes are unnamed), and
-        ``mj_contactForce`` yields the contact-frame force whose frame rows
-        rotate it to world.
-        """
-        m = self._model
-        if d is None:
-            d = self._data
-        out = np.zeros((len(self._foot_geom_sets), 3))
-        ncon = int(d.ncon)
-        # array views (contact[i]/geom1 go stale after get_data_into reallocs
-        # the mirror contact buffer under mujoco's cached struct aliases)
-        con_geoms = np.asarray(d.contact.geom)[:ncon]
-        frames = np.asarray(d.contact.frame)[:ncon].reshape(-1, 9)
-        for i in range(ncon):
-            g1, g2 = int(con_geoms[i, 0]), int(con_geoms[i, 1])
-            for f, geoms in enumerate(self._foot_geom_sets):
-                if g1 in geoms or g2 in geoms:
-                    mujoco.mj_contactForce(m, d, i, self._frc6)
-                    frame = frames[i].reshape(3, 3)  # rows: normal, t1, t2
-                    out[f] += frame.T @ self._frc6[:3]
-                    break
-        return out
 
     def _build_extra(self, state: dict, e: int = 0) -> dict:
         """The recorded keys (per-articulation state namespaced)."""

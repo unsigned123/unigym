@@ -42,6 +42,14 @@ def _asset_joint_names(env):
     return list(single_articulation_runtime(env).joint_names)
 
 
+def _profile_joint_sets(env):
+    """The articulation profile's named joint sets (empty without a profile)."""
+    from unigym.runtime.controllers import single_articulation_runtime
+
+    profile = single_articulation_runtime(env).profile
+    return dict(getattr(profile, "joint_sets", None) or {})
+
+
 def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None:
     """An articulation's sim-provided joint limits by name.
 
@@ -111,13 +119,14 @@ class IsaacLabSceneOps:
         # a degraded/sourceless face keeps the honest nulls (contract
         # §1.23 chain).
         limits = sim_joint_limits(robot.data, [str(n) for n in robot.joint_names]) or {}
+        joint_sets = _profile_joint_sets(env)
         return {
             "robot": {
                 "name": self.robot_name,
                 "base": base,
                 "n_joints": len(joints),
-                "joint_groups": robot_joint_groups(joints),
-                "joints": joint_limit_rows(joints, {n: limits.get(n) for n in joints}),
+                "joint_groups": robot_joint_groups(joints, joint_sets),
+                "joints": joint_limit_rows(joints, {n: limits.get(n) for n in joints}, joint_sets),
             },
             "props": self._props_tree(),
             "contacts": self._contacts_tree(),

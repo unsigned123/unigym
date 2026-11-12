@@ -30,6 +30,7 @@ import torch
 
 from unigym._typing import JsonValue
 
+from unigym.robots.base import CanonicalBodyId
 from unigym.runtime.controls import (
     CONTROL_DRIVES,
     DRIVE_TARGET,
@@ -43,7 +44,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.env.obs_catalog import ObsCatalog
     from unigym.robots.base import RobotProfile
     from unigym.runtime.controls import ControlGroup
-    from unigym.scenes.articulation import ArticulationSpec, AssetRef
+    from unigym.scenes.articulation import (
+        ArticulationSpec,
+        AssetRef,
+        ContactSensorInventory,
+    )
 
 __all__ = [
     "ArticulationRuntime",
@@ -52,6 +57,7 @@ __all__ = [
     "DriveStrategy",
     "ResolvedControl",
     "ResolvedControlPlan",
+    "articulation_facts",
     "build_control_plan",
     "build_control_runtimes",
     "control_of",
@@ -109,6 +115,11 @@ def _as_q0(values: torch.Tensor | Sequence[float] | None, count: int, what: str)
     return q0
 
 
+def _empty_body_sets() -> dict[str, tuple[CanonicalBodyId, ...]]:
+    """Typed empty default for the runtime body-set mapping."""
+    return {}
+
+
 @dataclass
 class ArticulationRuntime:
     """One declared articulation's runtime facts (not a policy).
@@ -120,12 +131,14 @@ class ArticulationRuntime:
         root: ``free`` / ``fixed`` / ``welded``.
         joint_names: the asset hinge joint names (asset order).
         q0: default positions aligned with ``joint_names`` (torch float32).
-        feet: foot body names (articulation order).
-        body_parts: authoring metadata (feet/base/...).
-        spawn: root spawn declaration (``{pos, yaw}``).
-        base_body: base/root body name (unigym_name).
+        foot_bodies: canonical foot body ids (semantic metadata only).
+        spawn: root spawn declaration (``{pos, yaw}``; empty when absent).
+        base_body: the backend-native base/root body name (model lookups).
+        base_body_id: the canonical base body id (public/meta fact).
+        body_sets: named canonical body groups.
+        contacts: the effective contact sensor inventory (or ``None``).
         addresses: backend-specific address bookkeeping (free joint, base
-            body id, foot ids, ...).
+            body id, ...).
         profile: the :class:`~unigym.robots.base.RobotProfile` when the
             articulation is profile-backed.
     """
@@ -138,10 +151,12 @@ class ArticulationRuntime:
     #: sequence); kept arbitrary at the dataclass boundary so backends may
     #: hand over their native array without a conversion dance.
     q0: Any = None
-    feet: tuple[str, ...] = ()
-    body_parts: Mapping = field(default_factory=dict)
+    foot_bodies: tuple[str, ...] = ()
     spawn: Mapping = field(default_factory=dict)
     base_body: str = ""
+    base_body_id: CanonicalBodyId | None = None
+    body_sets: Mapping[str, tuple[CanonicalBodyId, ...]] = field(default_factory=_empty_body_sets)
+    contacts: ContactSensorInventory | None = None
     addresses: dict = field(default_factory=dict)
     profile: RobotProfile | None = None
     # Backend-populated MuJoCo-family runtime state (compiled address tables +
@@ -156,8 +171,6 @@ class ArticulationRuntime:
     q0_mj: np.ndarray | None = None
     free_qpos_adr: int | None = None
     free_dof_adr: int | None = None
-    foot_body_ids: list[int] = field(default_factory=list)
-    foot_geom_sets: list[set[int]] = field(default_factory=list)
     catalog: ObsCatalog | None = None
 
     def __post_init__(self):
@@ -165,11 +178,13 @@ class ArticulationRuntime:
             raise ControlError("articulation runtime name must be non-empty")
         self.name = str(self.name)
         self.joint_names = tuple(str(n) for n in (self.joint_names or ()))
-        self.feet = tuple(str(n) for n in (self.feet or ()))
-        body_parts: Mapping[str, JsonValue] = self.body_parts or {}
-        self.body_parts = dict(body_parts)
+        self.foot_bodies = tuple(str(n) for n in (self.foot_bodies or ()))
         spawn: Mapping[str, JsonValue] = self.spawn or {}
         self.spawn = dict(spawn)
+        self.body_sets = {
+            str(name): tuple(CanonicalBodyId(str(body)) for body in (bodies or ()))
+            for name, bodies in (self.body_sets or {}).items()
+        }
         addresses: Mapping[str, JsonValue] = self.addresses or {}
         self.addresses = dict(addresses)
         self.q0 = _as_q0(self.q0, len(self.joint_names), f"articulation {self.name!r}")
@@ -184,6 +199,21 @@ class ArticulationRuntime:
             raise ControlError(
                 f"articulation {self.name!r} has no q0 for joint " f"{exc.args[0]!r}"
             ) from None
+
+
+def articulation_facts(art: ArticulationRuntime, control: ControlRuntime) -> dict[str, JsonValue]:
+    """The v4 per-articulation neutral facts shared by meta and summary."""
+    return {
+        "joint_names": list(control.joint_names),
+        "asset_joint_names": list(art.joint_names),
+        "action_face": control.action_face,
+        "base_body": None if art.base_body_id is None else str(art.base_body_id),
+        "foot_bodies": [str(body) for body in art.foot_bodies],
+        "body_sets": {
+            set_name: [str(body) for body in bodies] for set_name, bodies in art.body_sets.items()
+        },
+        "contacts": None if art.contacts is None else art.contacts.to_dict(),
+    }
 
 
 @dataclass
@@ -205,7 +235,6 @@ class ControlRuntime:
         strategy: the neutral :class:`DriveStrategy` descriptor.
         addresses: backend-specific addressing/strategy state.
         asset_joint_names: the owning articulation's full asset joints.
-        feet: owning articulation's foot body names.
         required: True when every joint must be addressed by an action entry.
         source: provenance of the resolved joints (``profile:<art>.<set>``
             when expanded from a profile joint set, ``config.joints`` when
@@ -230,7 +259,6 @@ class ControlRuntime:
     strategy: DriveStrategy | None = None
     addresses: dict = field(default_factory=dict)
     asset_joint_names: tuple[str, ...] = ()
-    feet: tuple[str, ...] = ()
     required: bool = True
     source: str = ""
     joint_set: str | None = None
@@ -262,7 +290,6 @@ class ControlRuntime:
         gains: Mapping[str, float] = self.gains or {}
         self.gains = {str(k): float(v) for k, v in dict(gains).items()}
         self.asset_joint_names = tuple(str(n) for n in (self.asset_joint_names or ()))
-        self.feet = tuple(str(n) for n in (self.feet or ()))
         addresses: Mapping[str, JsonValue] = self.addresses or {}
         self.addresses = dict(addresses)
         self.source = str(self.source or "")

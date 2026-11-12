@@ -16,9 +16,8 @@ What the catalog locks
 * **Fixed keys** — the requestable obs-cache keys every backend serves
   (``gravity_b`` / ``joint_pos_rel`` / ``joint_vel`` / ``command`` /
   ``prev_action`` / ``base_yaw`` / ``base_pos_w`` / ``base_quat_w`` /
-  ``base_ang_vel_b`` / ``foot_contact_force``) plus the record-only extra
-  keys that document the recorded channel (``base_lin_vel_b`` /
-  ``foot_contact`` / ``foot_contact_force_z`` / ``foot_pos_z``).  Joint
+  ``base_ang_vel_b``) plus the record-only extra key ``base_lin_vel_b``.
+  Joint
   order semantics are EXPLICIT here: ``joint_pos_rel`` / ``joint_vel``
   publish the run's FULL articulation joint set with ``joint_names``
   naming every element (isaaclab = the asset's own
@@ -115,11 +114,7 @@ PER_ARTICULATION_KEYS = frozenset(
         "base_pos_w",
         "base_quat_w",
         "base_ang_vel_b",
-        "foot_contact_force",
         "base_lin_vel_b",
-        "foot_contact",
-        "foot_contact_force_z",
-        "foot_pos_z",
     }
 )
 
@@ -424,8 +419,6 @@ def _fixed_entries(profile, joint_names=None) -> tuple[dict, set]:
     ``profile.full_joint_names`` then ``profile.joint_order``.
     """
     joints = tuple(joint_names or profile.full_joint_names or profile.joint_order or ())
-    feet = tuple(profile.foot_bodies or ())
-    f = len(feet)
     entries = {
         # ---- requestable obs-cache keys (fixed, every backend) ----
         "gravity_b": ObsSpec("gravity_b", (3,), "f32", unit="g", frame="base", source="computed"),
@@ -448,25 +441,12 @@ def _fixed_entries(profile, joint_names=None) -> tuple[dict, set]:
         "base_ang_vel_b": ObsSpec(
             "base_ang_vel_b", (3,), "f32", unit="rad/s", frame="base", source="robot"
         ),
-        "foot_contact_force": ObsSpec(
-            "foot_contact_force", (f,), "f32", unit="N", source="contact_sensor"
-        ),
         # ---- record-only extras (documented; never obs_cache) ----
         "base_lin_vel_b": ObsSpec(
             "base_lin_vel_b", (3,), "f32", unit="m/s", frame="base", source="robot"
         ),
-        "foot_contact": ObsSpec("foot_contact", (f,), "bool", source="contact_sensor"),
-        "foot_contact_force_z": ObsSpec(
-            "foot_contact_force_z", (f,), "f32", unit="N", frame="world", source="contact_sensor"
-        ),
-        "foot_pos_z": ObsSpec("foot_pos_z", (f,), "f32", unit="m", frame="world", source="robot"),
     }
-    requestable = set(entries) - {
-        "base_lin_vel_b",
-        "foot_contact",
-        "foot_contact_force_z",
-        "foot_pos_z",
-    }
+    requestable = set(entries) - {"base_lin_vel_b"}
     return entries, requestable
 
 
