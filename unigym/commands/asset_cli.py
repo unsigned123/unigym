@@ -30,6 +30,7 @@ from collections import Counter
 from collections.abc import Mapping
 from difflib import get_close_matches
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -41,6 +42,10 @@ from unigym.assets.manifest import (
     split_asset_id,
 )
 from unigym.core.asset_root import deps_root, repo_root
+from unigym.packs import PackError
+
+if TYPE_CHECKING:
+    from unigym.packs.runtime import PackRuntime
 
 REPO_ROOT = Path(repo_root())
 """The checkout that owns ``tools/``; the collector script lives there."""
@@ -211,30 +216,25 @@ def _find_entry(document: dict, asset_id: str) -> dict:
     raise AssetCliError("\n".join(lines))
 
 
-def _pack_root(namespace: str, asset_id: str) -> Path:
-    """The mounted pack's root directory for one id namespace.
+def _pack_root(namespace: str, asset_id: str, runtime: PackRuntime) -> Path:
+    """The pack-resolved asset directory for one id namespace.
 
-    An asset id path is relative to the pack root (``pack:<ns>/assets/...``
-    for the ``assets`` face; the collector checks id against directory the
-    same way), so the manifest sits at ``<root>/<id path>/asset.yaml``.
+    The namespace selects the owning pack; the id path resolves through
+    :meth:`PackRuntime.resource`, so the inside-root, missing-resource and
+    symlink checks stay with the runtime.  The manifest sits at
+    ``<asset dir>/asset.yaml``.
     """
-    from unigym.packs import pack_roots
-
-    mounts = {pack.name: pack for pack in pack_roots()}
-    pack = mounts.get(namespace)
-    if pack is None:
+    if namespace not in runtime.root_by_pack:
         raise AssetCliError(
             f"{asset_id}: no mounted pack owns namespace {namespace!r}; "
-            f"mounted packs: {sorted(mounts)} -- mount the pack "
+            f"mounted packs: {sorted(runtime.root_by_pack)} -- mount the pack "
             "(UNIGYM_PACKS or <deps_root>/unigym_packs) or fix the id"
         )
-    if pack.faces.get("assets") is None:
-        present = sorted(name for name, path in pack.faces.items() if path)
-        raise AssetCliError(
-            f"{asset_id}: pack {namespace!r} declares no 'assets' face; "
-            f"faces present: {present}"
-        )
-    return Path(pack.root) if pack.root is not None else Path(repo_root())
+    _namespace, path = split_asset_id(asset_id)
+    try:
+        return runtime.resource(namespace, path)
+    except PackError as exc:
+        raise AssetCliError(f"{asset_id}: {exc}") from exc
 
 
 def _payload_role(document: Mapping, asset_id: str) -> str:
@@ -273,7 +273,7 @@ def _payload_base(document: Mapping, asset_dir: Path) -> Path:
     return asset_dir
 
 
-def _payload_path(entry: dict) -> Path:
+def _payload_path(entry: dict, runtime: PackRuntime) -> Path:
     """Resolve one file asset's primary payload to an absolute path.
 
     The id path is relative to the owning pack root, so the
@@ -281,8 +281,8 @@ def _payload_path(entry: dict) -> Path:
     relative to that directory.
     """
     asset_id = entry["id"]
-    namespace, path = split_asset_id(asset_id)
-    asset_dir = _pack_root(namespace, asset_id) / path
+    namespace = split_asset_id(asset_id)[0]
+    asset_dir = _pack_root(namespace, asset_id, runtime)
     manifest_path = asset_dir / "asset.yaml"
     try:
         document = load_manifest(manifest_path)
@@ -308,18 +308,17 @@ def _payload_path(entry: dict) -> Path:
     return payload
 
 
-def _generator_template(name: str) -> tuple[str, list[str]]:
+def _generator_template(name: str, runtime: PackRuntime) -> tuple[str, list[str]]:
     """Resolve a generator name to ``(qualified template, param keys)``.
 
     The template registry is the single truth for a computed payload: the
     registered name keys the builder and the callable's module names the
-    pack that owns it.  The mounted code face is imported first (the closed
-    registry fills as an import side effect).
+    pack that owns it.  The runtime activates every catalog pack first (the
+    closed registry fills as an entrypoint side effect).
     """
-    from unigym.packs.load import load_mounted_code
     from unigym.props import templates
 
-    load_mounted_code()
+    runtime.activate_all()
     if name not in templates._TEMPLATES:
         raise AssetCliError(
             f"generator {name!r} is catalogued but no template is "
@@ -333,13 +332,13 @@ def _generator_template(name: str) -> tuple[str, list[str]]:
     return f"{module}:{qualname}", sorted(schema)
 
 
-def _print_generator(asset_id: str) -> int:
+def _print_generator(asset_id: str, runtime: PackRuntime) -> int:
     """Print the registered template behind a generator asset id."""
     _namespace, path = split_asset_id(asset_id)
     name = path[len("generator/") :]
     try:
-        template, params = _generator_template(name)
-    except AssetCliError as exc:
+        template, params = _generator_template(name, runtime)
+    except (AssetCliError, PackError) as exc:
         print(f"[unigym asset] {exc}")
         return 1
     print(f"generator: {asset_id}")
@@ -350,17 +349,20 @@ def _print_generator(asset_id: str) -> int:
 
 def cmd_file(a, _extra=None) -> int:
     """``unigym asset file <id>`` -- the absolute payload path of one asset."""
+    from unigym.pack_api import discover
+
     asset_id = a.id
     try:
+        runtime = discover(entry_points=True)
         document = _fresh_catalog()
         entry = _find_entry(document, asset_id)
-    except (AssetCliError, asset_catalog.CatalogError) as exc:
+    except (AssetCliError, PackError, asset_catalog.CatalogError) as exc:
         print(f"[unigym asset] {exc}")
         return 1
     if entry.get("carrier") == "generator":
-        return _print_generator(asset_id)
+        return _print_generator(asset_id, runtime)
     try:
-        payload = _payload_path(entry)
+        payload = _payload_path(entry, runtime)
     except AssetCliError as exc:
         print(f"[unigym asset] {exc}")
         return 1
@@ -425,8 +427,8 @@ def _orphan_locks(directory: Path, specs: list[Path]) -> list[str]:
     ]
 
 
-def _selection_dirs(explicit: str | None) -> list[Path]:
-    """The selection faces to check: ``--dir`` or every mounted pack's."""
+def _selection_dirs(explicit: str | None, runtime: PackRuntime | None) -> list[Path]:
+    """The selection faces to check: ``--dir`` or every declared runtime one."""
     if explicit:
         directory = Path(explicit).expanduser().resolve()
         if not directory.is_dir():
@@ -436,27 +438,42 @@ def _selection_dirs(explicit: str | None) -> list[Path]:
                 "*.lock)"
             )
         return [directory]
-    from unigym.packs import pack_roots
+    if runtime is None:
+        raise AssetCliError(
+            "selection discovery needs a pack runtime; pass --dir to check "
+            "one explicit directory"
+        )
 
     found: list[Path] = []
-    for pack in pack_roots():
-        root = Path(pack.root) if pack.root is not None else Path(repo_root())
-        candidate = root / "selection"
-        if candidate.is_dir():
-            found.append(candidate)
+    seen: set[Path] = set()
+    for entry in runtime.catalog.entries("selection"):
+        try:
+            resource = runtime.resource_for("selection", entry.id)
+        except PackError as exc:
+            raise AssetCliError(f"{entry.id}: {exc}") from exc
+        directory = resource if resource.is_dir() else resource.parent
+        resolved = directory.resolve()
+        if not resolved.is_dir() or resolved in seen:
+            continue
+        seen.add(resolved)
+        found.append(resolved)
     return found
 
 
 def cmd_selection_check(a, _extra=None) -> int:
     """``unigym asset selection check`` -- resolve specs, verify the locks."""
+    from unigym.pack_api import discover
+
+    explicit = getattr(a, "dir", None)
     try:
-        directories = _selection_dirs(getattr(a, "dir", None))
-    except AssetCliError as exc:
+        runtime = None if explicit else discover(entry_points=True)
+        directories = _selection_dirs(explicit, runtime)
+    except (AssetCliError, PackError) as exc:
         print(f"[unigym asset] {exc}")
         return 1
     if not directories:
         print(
-            "[unigym asset] selection: no mounted pack carries a 'selection' "
+            "[unigym asset] selection: no mounted pack declares a 'selection' "
             "face; nothing to verify (pass --dir DIR to check one)"
         )
         return 0
@@ -558,7 +575,7 @@ def add_asset_subparser(sub) -> None:
     check.add_argument(
         "--dir",
         default=None,
-        help="selection face directory (default: every " "mounted pack's selection/ directory)",
+        help="selection face directory (default: every declared " "runtime 'selection' resource)",
     )
     check.set_defaults(fn=cmd_selection_check)
 

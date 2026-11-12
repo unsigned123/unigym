@@ -3,19 +3,20 @@
 Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
 Phase 5 runtime parity, the Phase 6a scene consumer cutover, the Phase 6b run
 consumer cutover, the Phase 7a benchmark consumer cutover, the Phase 7b-1
-asset-resolver foundation and the Phase 7b-2 boundary-resolved asset cutover
-are implemented. Scene references resolve only through the runtime `scenes`
-face; run config references resolve only as absolute file paths or exact
-runtime `runs` catalog ids; benchmark pack discovery reads only
-resource-backed entries of the runtime `benchmarks` face. Asset references
-resolve once at the composition/domain boundary into an
+asset-resolver foundation, the Phase 7b-2 boundary-resolved asset cutover and
+the Phase 7b-3 asset CLI/selection cutover are implemented. Scene references
+resolve only through the runtime `scenes` face; run config references resolve
+only as absolute file paths or exact runtime `runs` catalog ids; benchmark pack
+discovery reads only resource-backed entries of the runtime `benchmarks` face.
+Asset references resolve once at the composition/domain boundary into an
 `unigym.assets.plan.AssetPlan`: prop templates, generated `AssetDefinition`
 files, scene assets and MJCF documents reach backend code with absolute paths
 only. `UNIGYM_ASSET_ROOT` / `UNIGYM_ASSET_PACK` were removed from the known
 placeholder vocabulary. The runtime is still a parallel path for task, asset
 and termination loading: the legacy `unigym.packs` discovery and loader remain
-the active runtime there, and asset CLI/selection cutover (Phase 7b-3) is not
-part of this change.
+the active runtime there. The asset CLI resolves pack roots and selection faces
+through the explicit runtime; catalog build/search keep their external collector
+contract because `tools/build_asset_catalog.py` is not part of the public core.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -375,7 +376,31 @@ Rules:
 - no backend module imports `unigym.core.asset_root`; the legacy
   `unigym.packs.refs` resolver was deleted.
 
-Asset CLI and selection still use the legacy asset face; that is Phase 7b-3.
+### Asset CLI and selection (Phase 7b-3)
+
+`unigym asset` builds `discover(entry_points=True)` at the command boundary when
+runtime discovery is needed. There is no module-level runtime or cache.
+
+- `unigym asset file <id>` checks the id namespace against
+  `runtime.root_by_pack` and resolves the asset directory through
+  `runtime.resource`, so the inside-root, missing-resource and symlink checks
+  stay with the runtime owner. It never calls the legacy `pack_roots()` /
+  `repo_pack()` helpers. An unknown namespace is a teaching error naming the
+  mounted packs. A generator id activates every catalog pack through
+  `runtime.activate_all()` before reading the template registry; the registry
+  and its error behavior are unchanged, and an activation failure is a teaching
+  CLI error rather than a traceback.
+- `unigym asset selection check` without `--dir` enumerates
+  `runtime.catalog.entries("selection")` and resolves each item through
+  `runtime.resource_for("selection", id)`. A directory resource is the
+  selection directory; a file resource uses its parent directory. Resolved
+  directories are canonical-deduped and only directories are checked. There is
+  no `<pack-root>/selection/` subdirectory scan.
+- An explicit `--dir` keeps its existing behavior and needs no runtime.
+- `unigym asset catalog build` and `catalog search` still run the external
+  collector `tools/build_asset_catalog.py`. The public core does not
+  reimplement the collector; an absent collector fails with the existing
+  teaching error.
 
 ### Scene resources
 
@@ -550,10 +575,11 @@ The current phases deliberately do not implement:
 
 - switching the legacy `unigym.packs` loader onto this runtime for task, asset
   or termination loading; the legacy loader remains the active discovery path
-  there (scene references, run config references and benchmark pack discovery
-  are already cut over);
-- switching the asset CLI and selection onto the runtime catalog (Phase
-  7b-3); their legacy asset-face use remains;
+  there (scene references, run config references, benchmark pack discovery and
+  the asset CLI/selection faces are already cut over);
+- implementing the asset catalog collector in the public core; the external
+  `tools/build_asset_catalog.py` and the explicit collector contract of
+  `catalog build` / `catalog search` remain unchanged;
 - migration of existing runs and packs: old run configs and old pack manifests
   are not migrated, and the legacy loader modules are not deleted by this
   phase;
