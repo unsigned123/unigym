@@ -10,10 +10,19 @@ backend keeps only its engine-shaped step loop.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping, Sequence
+from typing import cast
+
 import numpy as np
 import torch
 
-from unigym.actuators import StandardPdActuator
+from unigym.actuators import ActuatorBase, build_actuator
+from unigym.actuators.ir import (
+    ResolvedActuationGroup,
+    validate_actuation_group,
+    validate_drive_law_matrix,
+)
 from unigym.backends.shared.mjfamily.articulation_obs import (
     articulation_catalog,
 )
@@ -28,20 +37,17 @@ from unigym.backends.shared.mjfamily.name_map import (
     MjControlBinding,
 )
 from unigym.env.obs_catalog import ObsCatalog
-from unigym.robots.g1_constants import G1_KD_HANDS, G1_KP_HANDS
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
 )
-from unigym.runtime.controls import ControlError
 
 __all__ = [
-    "apply_control_substep",
+    "build_actuator_seam",
     "free_joint_adr",
     "init_tables",
     "reset_articulations",
     "route_actions",
-    "validate_drive_support",
 ]
 
 
@@ -62,139 +68,6 @@ def free_joint_adr(model, body_bid):
         if int(model.jnt_bodyid[jid]) == int(body_bid):
             return (int(model.jnt_qposadr[jid]), int(model.jnt_dofadr[jid]))
     return None, None
-
-
-# --------------------------------------------------------------------------- #
-# drive support (honest capability, fail-fast at construction)
-# --------------------------------------------------------------------------- #
-def _actuator_law(model, slot: int) -> str:
-    """Classify a compiled actuator's honest ctrl law.
-
-    ``motor``           -- gain fixed / bias none (direct torque/effort ctrl)
-    ``position_servo``  -- affine bias with a stiffness term
-    ``velocity_servo``  -- affine bias with a damping term only
-    ``general``         -- anything else (no honest generic drive)
-    """
-    import mujoco
-
-    gain = int(model.actuator_gaintype[slot])
-    bias = int(model.actuator_biastype[slot])
-    if bias == int(mujoco.mjtBias.mjBIAS_NONE) and gain == int(mujoco.mjtGain.mjGAIN_FIXED):
-        return "motor"
-    if bias == int(mujoco.mjtBias.mjBIAS_AFFINE) and gain == int(mujoco.mjtGain.mjGAIN_FIXED):
-        biasprm = model.actuator_biasprm[slot]
-        if float(biasprm[1]) != 0.0:
-            return "position_servo"
-        if float(biasprm[2]) != 0.0:
-            return "velocity_servo"
-    return "general"
-
-
-_LAW_FOR_DRIVE = {
-    "position_servo": "position_servo",
-    "torque": "motor",
-    "effort": "motor",
-    "velocity": "velocity_servo",
-}
-
-
-def validate_drive_support(env, control: ControlRuntime, label: str) -> None:
-    """Fail fast when the compiled actuators cannot honour *control.drive*.
-
-    ``position_pd`` is software PD (always available); ``position_servo`` /
-    ``torque`` / ``effort`` / ``velocity`` require a matching compiled
-    actuator law.  ``current`` has no MuJoCo actuator representation and is
-    always refused here.
-    """
-    if control.prop:
-        return
-    if control.drive == "position_pd":
-        return
-    if control.drive == "current":
-        raise NotImplementedError(
-            f"{label}: articulation {control.articulation!r} control "
-            f"{control.name!r} requests drive 'current', which the "
-            f"MuJoCo actuator model does not represent | hint: use "
-            f"'torque'/'effort' with a motor actuator, or 'position_pd'"
-        )
-    wanted = _LAW_FOR_DRIVE.get(control.drive)
-    if wanted is None:
-        raise NotImplementedError(
-            f"{label}: articulation {control.articulation!r} control "
-            f"{control.name!r} requests unsupported drive "
-            f"{control.drive!r}"
-        )
-    slots = np.asarray(control.addresses.get("act"), dtype=np.int64)
-    bad = []
-    for slot in slots.tolist():
-        if _actuator_law(env._model, int(slot)) != wanted:
-            bad.append(int(slot))
-    if bad:
-        raise NotImplementedError(
-            f"{label}: articulation {control.articulation!r} control "
-            f"{control.name!r} requests drive {control.drive!r} but its "
-            f"compiled actuators {bad} are not {wanted!r} actuators | hint: "
-            f"compile a matching actuator (motor for torque/effort, affine "
-            f"velocity actuator for velocity) or use drive 'position_pd'"
-        )
-
-
-# --------------------------------------------------------------------------- #
-# gains
-# --------------------------------------------------------------------------- #
-def _resolve_named_gains(gains, count, what):
-    kp = gains.get("kp")
-    kd = gains.get("kd")
-    out = {}
-    for key, value in (("kp", kp), ("kd", kd)):
-        if value is None:
-            continue
-        if isinstance(value, (int, float)):
-            out[key] = np.full(count, float(value), dtype=np.float64)
-        else:
-            arr = np.asarray(value, dtype=np.float64)
-            if arr.shape != (count,):
-                raise ControlError(
-                    f"{what} gain {key!r} must be a scalar or length-" f"{count} vector"
-                )
-            out[key] = arr
-    if kp is not None and kd is not None:
-        return out["kp"], out["kd"]
-    return None
-
-
-def _default_gains(env, control, bare, params, gains_fn):
-    if control.action_face == control.articulation:
-        return gains_fn(bare, params.get("kp"), params.get("kd"))
-    kp = float(params["hand_kp"]) if params.get("hand_kp") is not None else float(G1_KP_HANDS)
-    kd = float(params["hand_kd"]) if params.get("hand_kd") is not None else float(G1_KD_HANDS)
-    return (np.full(len(bare), kp, dtype=np.float64), np.full(len(bare), kd, dtype=np.float64))
-
-
-def _build_drive(env, control, bare, backend_bare, params, gains_fn, label):
-    """Attach the executable strategy state to one control runtime."""
-    control.addresses["bare_joint_names"] = tuple(bare)
-    if control.drive == "position_pd":
-        resolved = _resolve_named_gains(control.gains, len(bare), f"control {control.name!r}")
-        if resolved is None:
-            kp, kd = _default_gains(env, control, bare, params, gains_fn)
-        else:
-            kp, kd = resolved
-        control.addresses["kp"] = kp
-        control.addresses["kd"] = kd
-        control._model = env._model
-        control._act_of_joint = env._act_of_joint
-        control._damping_stability_scale = getattr(env, "_damping_stability_scale", None)
-        pd = StandardPdActuator(live_ctrlrange=(control.action_face != control.articulation))
-        control._compiled_joint_names = tuple(backend_bare)
-        pd.bind(control, {"joint_names": list(backend_bare), "kp": kp, "kd": kd})
-        control.pd = pd
-    elif control.prop:
-        # prop servos keep their persistent target and ctrl write face
-        control.addresses.setdefault(
-            "targets", np.zeros((env.num_envs, len(control.joint_names)), dtype=np.float64)
-        )
-    validate_drive_support(env, control, label)
 
 
 def _control_addresses(env, control, art):
@@ -266,7 +139,7 @@ def _asset_robot_names(env, spec, name_map) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _build_articulation(env, spec, profile, name_map, params, label):
+def _build_articulation(env, spec, profile, name_map, label):
     """Build one :class:`ArticulationRuntime` for a declared articulation.
 
     ``art.joint_names`` / ``art.foot_bodies`` / ``art.base_body_id`` are
@@ -451,7 +324,7 @@ def _bind_articulation_limits(env, art_order, model) -> None:
     env._joint_limits = first_limits
 
 
-def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
+def init_tables(env, model, *, label=None) -> None:
     """Build ``env.articulations`` / ``env.controls`` + shared address tables."""
     label = label or _label(env)
     act_of_joint = actuator_by_joint(env._model_ir)
@@ -464,7 +337,7 @@ def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
     art_order = []
     arts = {}
     for spec in specs:
-        art = _build_articulation(env, spec, profiles.get(spec.name), name_map, params, label)
+        art = _build_articulation(env, spec, profiles.get(spec.name), name_map, label)
         arts[art.name] = art
         art_order.append(art)
     env.articulations = arts
@@ -497,9 +370,6 @@ def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
                 f"{control.articulation!r}, which has no runtime"
             )
         _control_addresses(env, control, art)
-        bare = list(control.joint_names)
-        binding = env._mj_bindings[control.name]
-        _build_drive(env, control, bare, binding.backend_joint_names, params, gains_fn, label)
     env.controls = controls
     env._control_order = [controls[g.name] for g in (getattr(env, "_planned_controls", ()) or ())]
     env._control_order += [c for c in controls.values() if c.prop]
@@ -518,13 +388,236 @@ def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# actuator seam
+# --------------------------------------------------------------------------- #
+class _ActuatorTargetFeed:
+    """Compose one actuator's joint-ordered target vector from controls."""
+
+    def __init__(self, act: ActuatorBase, sources) -> None:
+        self.act = act
+        self._sources = list(sources)
+
+    def __call__(self, targets: dict, e: int) -> np.ndarray:
+        out = np.zeros(len(self._sources), dtype=np.float64)
+        for index, (control_name, column) in enumerate(self._sources):
+            out[index] = targets[control_name][e, column]
+        return out
+
+
+def _actuator_law(model, slot: int) -> str:
+    """Classify a compiled actuator's honest ctrl law.
+
+    ``motor``           -- gain fixed / bias none (direct torque/effort ctrl)
+    ``position_servo``  -- affine bias with a stiffness term
+    ``velocity_servo``  -- affine bias with a damping term only
+    ``general``         -- anything else (no honest generic drive)
+    """
+    import mujoco
+
+    gain = int(model.actuator_gaintype[slot])
+    bias = int(model.actuator_biastype[slot])
+    if bias == int(mujoco.mjtBias.mjBIAS_NONE) and gain == int(mujoco.mjtGain.mjGAIN_FIXED):
+        return "motor"
+    if bias == int(mujoco.mjtBias.mjBIAS_AFFINE) and gain == int(mujoco.mjtGain.mjGAIN_FIXED):
+        biasprm = model.actuator_biasprm[slot]
+        if float(biasprm[1]) != 0.0:
+            return "position_servo"
+        if float(biasprm[2]) != 0.0:
+            return "velocity_servo"
+    return "general"
+
+
+def _translate_gain_value(
+    value,
+    neutral_names: Sequence[str],
+    compiled_names: Sequence[str],
+    what: str,
+):
+    """Translate a scalar or joint-keyed gain into compiled-name form."""
+    if not isinstance(value, Mapping):
+        return float(value)
+    out: dict[str, float] = {}
+    for key, gain in value.items():
+        name = str(key)
+        if name in neutral_names:
+            out[compiled_names[neutral_names.index(name)]] = float(gain)
+            continue
+        matches = [i for i, joint in enumerate(neutral_names) if re.fullmatch(name, joint)]
+        if not matches:
+            raise ValueError(
+                f"{what} key {name!r} matches none of the group joints "
+                f"{list(neutral_names)} | hint: keys are joint names or regexes "
+                f"fullmatching them"
+            )
+        for index in matches:
+            out[compiled_names[index]] = float(gain)
+    return out
+
+
+def _translate_parts(
+    parts: Sequence[str],
+    neutral_names: Sequence[str],
+    compiled_names: Sequence[str],
+    what: str,
+) -> list[str]:
+    """Turn each parts regex into one alternation regex over compiled names."""
+    translated: list[str] = []
+    for expr in parts:
+        matched = [
+            compiled_names[index]
+            for index, joint in enumerate(neutral_names)
+            if re.fullmatch(str(expr), joint)
+        ]
+        if not matched:
+            raise ValueError(
+                f"{what} part {expr!r} matches none of the group joints " f"{list(neutral_names)}"
+            )
+        translated.append("(?:" + "|".join(re.escape(name) for name in matched) + ")")
+    return translated
+
+
+def _law_config(
+    resolved: ResolvedActuationGroup,
+    compiled_names: Sequence[str],
+) -> dict:
+    """Build the law config dict consumed by :func:`build_actuator`."""
+    group = resolved.group
+    cfg: dict = {"type": group.law, "joint_names": list(compiled_names)}
+    neutral_names = resolved.joint_names
+    for key in ("kp", "kd"):
+        if key in group.gains:
+            cfg[key] = _translate_gain_value(
+                group.gains[key],
+                neutral_names,
+                compiled_names,
+                f"actuation group {group.name!r} gain {key!r}",
+            )
+    if group.parts:
+        cfg["parts"] = _translate_parts(
+            group.parts,
+            neutral_names,
+            compiled_names,
+            f"actuation group {group.name!r}",
+        )
+    return cfg
+
+
+def build_actuator_seam(
+    env,
+    plans: Mapping[str, Sequence[ResolvedActuationGroup]] | None,
+    *,
+    backend: str,
+    label: str | None = None,
+) -> tuple[list[ActuatorBase], list[_ActuatorTargetFeed], bool]:
+    """Build the always-active ctrl seam from the resolved actuation plans.
+
+    The run layer owns exactly-once coverage; this seam owns name translation
+    (neutral -> compiled), law payload validation, slot uniqueness and the
+    native_servo compiled-plant check.  A direct env with driven controls but
+    no plan fails fast instead of silently leaving the world unactuated.
+    """
+    label = label or _label(env)
+    plans = dict(plans or {})
+    # The env is a duck-typed backend; this boundary cast states the table
+    # type its init_tables owner already established.
+    art_order = cast(
+        "tuple[ArticulationRuntime, ...]",
+        tuple(getattr(env, "_articulation_order", ()) or ()),
+    )
+    controls: list[ControlRuntime] = [c for c in getattr(env, "_control_order", ()) if not c.prop]
+    by_articulation: dict[str, list[ControlRuntime]] = {}
+    for control in controls:
+        by_articulation.setdefault(control.articulation, []).append(control)
+
+    resolved_groups: list[ResolvedActuationGroup] = []
+    group_rows: list[tuple[ResolvedActuationGroup, Sequence[str]]] = []
+    for art in art_order:
+        art_controls = by_articulation.get(art.name, [])
+        if not art_controls:
+            continue
+        groups = tuple(plans.get(art.name, ()) or ())
+        if not groups:
+            raise ValueError(
+                f"{label}: articulation {art.name!r} has driven joints but no "
+                f"actuation plan | hint: declare "
+                f"ArticulationSpec.actuation groups"
+            )
+        for resolved in groups:
+            validate_actuation_group(resolved.group, backend=backend)
+            compiled = tuple(
+                env._mj_name_map.backend_name(art.name, joint) for joint in resolved.joint_names
+            )
+            resolved_groups.append(resolved)
+            group_rows.append((resolved, compiled))
+    validate_drive_law_matrix(resolved_groups, controls)
+
+    compiled_universe: list[str] = []
+    for art in art_order:
+        binding = env._mj_articulation_bindings.get(art.name)
+        if binding is not None:
+            compiled_universe.extend(str(name) for name in binding.backend_joint_names)
+            continue
+        neutral_joints: tuple[str, ...] = art.joint_names
+        for joint in neutral_joints:
+            compiled_universe.append(str(env._mj_name_map.backend_name(art.name, joint)))
+    env._compiled_joint_names = tuple(dict.fromkeys(compiled_universe))
+
+    owner: dict[tuple[str, str], tuple[str, int]] = {}
+    for control in controls:
+        for index, joint in enumerate(control.joint_names):
+            owner[(str(control.articulation), str(joint))] = (control.name, index)
+
+    acts: list[ActuatorBase] = []
+    feeds: list[_ActuatorTargetFeed] = []
+    claimed: dict[int, str] = {}
+    prop_slots = set(np.nonzero(env._prop_ctrl_mask)[0].tolist())
+    for resolved, compiled in group_rows:
+        group = resolved.group
+        cfg = _law_config(resolved, compiled)
+        act = build_actuator(cfg)
+        act.bind(env, cfg)
+        slots = act.bound_slots.tolist()
+        duplicate = sorted(set(slots) & set(claimed))
+        if duplicate:
+            owners = sorted({claimed[slot] for slot in duplicate})
+            raise ValueError(
+                f"{label}: actuation group {group.name!r} re-addresses ctrl "
+                f"slots {duplicate} already owned by group(s) {owners} (each "
+                f"actuator slot must have exactly one ctrl law)"
+            )
+        prop_hit = sorted(set(slots) & prop_slots)
+        if prop_hit:
+            raise ValueError(
+                f"{label}: actuation group {group.name!r} claims prop-servo "
+                f"ctrl slots {prop_hit} (props own their position-hold write "
+                f"face; actuation groups address ROBOT joints only)"
+            )
+        for slot in slots:
+            claimed[slot] = group.name
+        if group.law == "native_servo":
+            for joint, slot in zip(act.joint_names, slots):
+                compiled_law = _actuator_law(env._model, int(slot))
+                if compiled_law != "position_servo":
+                    raise ValueError(
+                        f"{label}: articulation {resolved.articulation!r} "
+                        f"actuation group {group.name!r} joint {joint!r} law "
+                        f"'native_servo' requires a compiled position_servo; "
+                        f"compiled law is {compiled_law!r}"
+                    )
+        sources = [owner[(resolved.articulation, str(joint))] for joint in resolved.joint_names]
+        acts.append(act)
+        feeds.append(_ActuatorTargetFeed(act, sources))
+    phase_split = any(resolved.group.law != "standard_pd" for resolved in resolved_groups)
+    return acts, feeds, phase_split
+
+
+# --------------------------------------------------------------------------- #
 # action routing + physics
 # --------------------------------------------------------------------------- #
 
 # action routing/physics split into a sibling module (MI floor);
 # re-exported here so every existing import face stays stable.
 from .articulation_actions import (  # noqa: E402,F401
-    apply_control_substep,
     reset_articulations,
     route_actions,
 )

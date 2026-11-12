@@ -149,3 +149,70 @@ def test_articulation_model_field_wraps_asset_errors():
 
     with pytest.raises(ArticulationError, match="must be a mapping"):
         ArticulationSpec(name="a", model="robot.urdf")
+
+
+def test_articulation_spec_normalizes_actuation_groups():
+    """Raw actuation mappings normalize into neutral ActuationGroup records."""
+    spec = ArticulationSpec(
+        name="arm",
+        joints=(JointSpec("shoulder"), JointSpec("elbow")),
+        actuation=[
+            {
+                "name": "body",
+                "law": "standard_pd",
+                "joint_set": "body",
+                "gains": {"kp": {"shoulder": 10.0}, "kd": 1.0},
+            }
+        ],
+    )
+
+    assert spec.actuation is not None
+    assert spec.actuation[0].name == "body"
+    assert spec.actuation[0].gains == {"kp": {"shoulder": 10.0}, "kd": 1.0}
+    assert ArticulationSpec(name="arm").actuation is None
+    assert ArticulationSpec(name="arm", actuation=()).actuation == ()
+
+
+@pytest.mark.parametrize(
+    ("actuation", "match"),
+    [
+        ([{"name": "body", "law": "standard_pd", "joints": ["j"], "bogus": 1}], "unknown keys"),
+        ([{"law": "standard_pd", "joints": ["j"]}], "missing 'name'"),
+        (
+            [
+                {"name": "a", "law": "standard_pd", "joints": ["j"]},
+                {"name": "a", "law": "standard_pd", "joints": ["k"]},
+            ],
+            "names must be unique",
+        ),
+        ({"name": "body"}, "must be a list"),
+    ],
+    ids=["unknown-key", "missing-name", "duplicate-name", "non-list"],
+)
+def test_articulation_spec_wraps_actuation_errors_as_articulation_errors(actuation, match):
+    """ActuationGroup errors surface as ArticulationError at the field boundary."""
+    with pytest.raises(ArticulationError, match=match):
+        ArticulationSpec(name="arm", actuation=actuation)
+
+
+def test_normalize_articulation_accepts_explicit_actuation():
+    """The config normalizer passes the actuation field through."""
+    (spec,) = normalize_articulations(
+        [
+            {
+                "name": "arm",
+                "joints": [{"name": "shoulder"}],
+                "actuation": [
+                    {
+                        "name": "body",
+                        "law": "standard_pd",
+                        "joints": ["shoulder"],
+                        "gains": {"kp": 1.0, "kd": 1.0},
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert spec.actuation is not None
+    assert spec.actuation[0].joints == ("shoulder",)

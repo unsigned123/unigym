@@ -107,25 +107,6 @@ def route_actions(env, actions: dict, label=None) -> dict:
     return targets
 
 
-def apply_control_substep(env, targets: dict, e: int, d) -> None:
-    """Apply every control strategy once for one sim substep on env *e*."""
-    for control in env._control_order:
-        target = targets[control.name][e]
-        if control.drive == "position_pd":
-            control.pd.set_targets(target)
-            control.pd.step(env._model, d)
-        elif control.drive in ("position_servo", "torque", "effort", "velocity"):
-            slots = control.addresses.get("ctrl")
-            if slots is None:
-                slots = control.addresses["act"]
-            d.ctrl[slots] = target
-        else:  # pragma: no cover - construction rejects unsupported drives
-            raise NotImplementedError(
-                f"{_label(env)}: control {control.name!r} drive "
-                f"{control.drive!r} has no runtime strategy"
-            )
-
-
 def reset_articulations(env, d) -> None:
     """Write every articulation's root spawn + q0 (declaration order)."""
     for art in env._articulation_order:
@@ -150,4 +131,4 @@ def reset_articulations(env, d) -> None:
                 d.qpos[control.addresses["jadr"]] = control.q0.detach().cpu().numpy()
 
 
-__all__ = ["apply_control_substep", "reset_articulations", "route_actions"]
+__all__ = ["reset_articulations", "route_actions"]

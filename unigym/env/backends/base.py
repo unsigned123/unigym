@@ -76,7 +76,6 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 
 import torch
 
-from ..._typing import JsonValue
 from ...runtime.actions import NamedAction
 
 if TYPE_CHECKING:
@@ -118,11 +117,6 @@ def _is_obs_request_sequence(
         and not isinstance(value, (str, bytes))
         and not isinstance(value, Mapping)
     )
-
-
-def _is_json_mapping(value: object) -> TypeGuard[Mapping[str, JsonValue]]:
-    """True for a mapping (the JSON config shape)."""
-    return isinstance(value, Mapping)
 
 
 # --------------------------------------------------------------------------- #
@@ -199,9 +193,6 @@ class BackendCapabilities:
     snapshot: bool = False  # mjSTATE-exact snapshot()/restore() (rewind,
     # Round B B1: mujoco only; isaaclab v1 stays
     # False -> the rewind gate fail-fasts)
-    actuator_seam: bool = False  # pluggable ctrl laws (env.params.actuators,
-    # unigym/actuators; mujoco only
-    # for now, isaaclab maps ActuatorBase later)
 
     @classmethod
     def full(cls) -> BackendCapabilities:
@@ -246,7 +237,6 @@ class BackendCapabilities:
             "contacts": (Trait.CONTACTS_GROUPS,),
             "multi_env": (Trait.MULTI_ENV,),
             "snapshot": (Trait.SNAPSHOT,),
-            "actuator_seam": (Trait.ACTUATORS_PLUGGABLE,),
         }
         out: set[Trait] = set()
         for feat, enabled in {
@@ -259,7 +249,6 @@ class BackendCapabilities:
             "contacts": self.contacts,
             "multi_env": self.multi_env,
             "snapshot": self.snapshot,
-            "actuator_seam": self.actuator_seam,
         }.items():
             if enabled:
                 out.update(groups[feat])
@@ -597,26 +586,6 @@ def assert_backend_contract(
 # --------------------------------------------------------------------------- #
 # capability gate (used by build_env_backend; needs no backend instance)
 # --------------------------------------------------------------------------- #
-def _requests_pluggable_actuators(
-    backend_params: Mapping[str, JsonValue] | None,
-) -> bool:
-    """Does ``env.params.actuators`` declare a non-default ctrl law?
-
-    Capability-gate inference: software laws beyond standard_pd
-    (computed_torque_pd / native_servo / custom registrations) are
-    mujoco-only for now; a standard-only declaration rides the shared
-    default face and never gates.  Missing ``type`` counts as standard
-    here (the backend's own config validation fails fast on it).
-    """
-    act = backend_params.get("actuators") if backend_params is not None else None
-    if not isinstance(act, dict):
-        return False
-    for group in act.values():
-        if isinstance(group, dict) and str(group.get("type", "standard_pd")) != "standard_pd":
-            return True
-    return False
-
-
 def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
     """Map capability name -> requested? from ``build_env_backend`` kwargs."""
     adapter = kwargs.get("adapter")
@@ -641,10 +610,6 @@ def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
         n_envs = int(raw_n)
     except (TypeError, ValueError):
         n_envs = 1
-    raw_params = kwargs.get("backend_params")
-    backend_params: Mapping[str, JsonValue] | None = None
-    if _is_json_mapping(raw_params):
-        backend_params = raw_params
     return {
         "events": kwargs.get("events_cfg") is not None,
         "props": kwargs.get("prop_manager") is not None,
@@ -654,7 +619,6 @@ def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
         "cameras": kwargs.get("camera_manager") is not None,
         "contacts": kwargs.get("contact_manager") is not None,
         "multi_env": n_envs > 1,
-        "actuator_seam": _requests_pluggable_actuators(backend_params),
         # director is not a capability bit: the registry trait table is its
         # truth (see the gate's director branch below).
         "director": kwargs.get("director_cfg") is not None,
@@ -714,7 +678,6 @@ def gate_capabilities(
             # trait at command time); mapped here so the bit->trait view
             # cannot drift from the gate
             "snapshot": (Trait.SNAPSHOT,),
-            "actuator_seam": (Trait.ACTUATORS_PLUGGABLE,),
             "director": (
                 Trait.DIRECTOR_TELEPORT,
                 Trait.DIRECTOR_SETVEL,
@@ -735,14 +698,6 @@ def gate_capabilities(
                 if feat == "multi_env"
                 else ""
             )
-            if feat == "actuator_seam":
-                hint = (
-                    " | hint: env.params.actuators non-standard ctrl "
-                    "laws (computed_torque_pd / native_servo) are "
-                    "mujoco-only for now (unigym/actuators, v063 D2) "
-                    "-- run this config with env.backend: mujoco; the "
-                    "isaaclab ActuatorBase mapping is a later task"
-                )
             raise NotImplementedError(
                 f"backend '{backend_label}' does not implement capability "
                 f"'{feat}' but the yaml/adapter requests it "

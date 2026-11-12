@@ -1,85 +1,14 @@
 """Small engine/device helpers for the mjwarp backend.
 
 Split out of ``env.py`` so that module keeps its maintainability index; the
-helpers are stateless (gain tables, action-feed scatter, device resolution,
-option-enum resolution).
+helpers are stateless (device resolution and option-enum resolution).
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 from unigym.core import quat
-from unigym.robots.g1_constants import (
-    G1_KD_ARMS,
-    G1_KD_FEET,
-    G1_KD_LEGS,
-    G1_KD_WAIST,
-    G1_KP_ARMS,
-    G1_KP_FEET,
-    G1_KP_LEGS,
-    G1_KP_WAIST,
-)
-
-
-def _gather_gain(joint: str, table) -> Optional[float]:
-    """First regex (fullmatch) hit in a g1_constants gain group table."""
-    import re
-
-    for expr, val in table.items():
-        if re.fullmatch(expr, joint):
-            return float(val)
-    return None
-
-
-def _policy_gains(joint_names, kp_override=None, kd_override=None):
-    """Per-policy-joint (kp, kd) from the g1_constants playground tables.
-
-    Groups tried in order: legs / feet / waist / arms (the isaaclab profile's
-    implicit-PD groups, same numbers).  yaml ``kp``/``kd`` overrides (joint
-    name or regex keys, applied via the same merge semantics as the profile)
-        take precedence per joint.
-    """
-    groups_kp = (G1_KP_LEGS, G1_KP_FEET, G1_KP_WAIST, G1_KP_ARMS)
-    groups_kd = (G1_KD_LEGS, G1_KD_FEET, G1_KD_WAIST, G1_KD_ARMS)
-    kp, kd = [], []
-    for name in joint_names:
-        kv = _override_hit(name, kp_override)
-        dv = _override_hit(name, kd_override)
-        if kv is None:
-            for tab in groups_kp:
-                kv = _gather_gain(name, tab)
-                if kv is not None:
-                    break
-        if dv is None:
-            for tab in groups_kd:
-                dv = _gather_gain(name, tab)
-                if dv is not None:
-                    break
-        if kv is None or dv is None:
-            raise ValueError(
-                f"mujoco backend: no PD gain group matches policy joint "
-                f"{name!r} (kp={kv}, kd={dv}); extend the gain tables or "
-                f"set env.params.kp/kd"
-            )
-        kp.append(kv)
-        kd.append(dv)
-    return np.asarray(kp, dtype=np.float64), np.asarray(kd, dtype=np.float64)
-
-
-def _override_hit(name: str, override) -> Optional[float]:
-    if not override:
-        return None
-    import re
-
-    if name in override:
-        return float(override[name])
-    for expr, val in override.items():
-        if re.fullmatch(str(expr), name):
-            return float(val)
-    return None
 
 
 def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:

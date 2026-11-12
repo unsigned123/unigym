@@ -115,7 +115,7 @@ from unigym.backends.shared.mjfamily.articulation_obs import (
     refresh_articulation_obs,
 )
 from unigym.backends.shared.mjfamily.articulation_runtime import (
-    apply_control_substep,
+    build_actuator_seam,
     init_tables,
     reset_articulations,
     route_actions,
@@ -126,7 +126,6 @@ from unigym.backends import collect_core
 from unigym.backends.mjwarp import sizing
 from unigym.backends.mjwarp.support import (  # noqa: F401 (re-exported)
     _mj_enum,
-    _policy_gains,
     _put_warp_model,
     _quat_to_rotmat,
     _resolve_warp_device,
@@ -150,34 +149,29 @@ from unigym.backends.shared.mjfamily.world_base import (
     resolve_world_base_mjcf,
 )
 from unigym.runtime.actions import MujocoJointResolver
-from unigym.actuators import StandardPdActuator, build_actuator
 
 BASE_BODY = "pelvis"
 
 # capability bits: runs N>1 as ONE batched warp Data (nworld=N) with N CPU
 # mirrors.  contacts/props/recorder ride the CPU mirror; cameras are per-world
-# (N=1 CPU mirror renderer, N>1 native warp batch renderer); the
+# (N=1 CPU mirror renderer, N>1 native warp batch renderer).  The
 # actuator seam is the same software ctrl face as the mujoco backend.
-# bits must stay a CHECKED subset of MJWARP_TRAITS.  Both paths are
-# proved by tests/backends/mjwarp/test_recorder.py and
-# test_actuator_seam.py; the matching traits are declared.
 BACKEND_CAPABILITIES = BackendCapabilities(
-    recorder=True, cameras=True, contacts=True, props=True, actuator_seam=True, multi_env=True
+    recorder=True, cameras=True, contacts=True, props=True, multi_env=True
 )
 
 
-class _ActuatorTargetFeed:
-    """Compose one actuator's joint-ordered target vector from controls."""
-
-    def __init__(self, act, sources):
-        self.act = act
-        self._sources = list(sources)
-
-    def __call__(self, targets: dict, e: int) -> np.ndarray:
-        out = np.zeros(len(self._sources), dtype=np.float64)
-        for i, (control_name, index) in enumerate(self._sources):
-            out[i] = targets[control_name][e, index]
-        return out
+def _reject_removed_gain_params(params: dict, *, source: str) -> None:
+    """Reject the removed env gain/actuator channels at construction."""
+    removed = sorted(
+        key for key in ("actuators", "kp", "kd", "hand_kp", "hand_kd") if key in params
+    )
+    if removed:
+        raise ValueError(
+            f"{source} declares removed actuator/gain keys {removed}; declare "
+            f"explicit ArticulationSpec.actuation groups (actuation is the "
+            f"only physical gain source)"
+        )
 
 
 class MjwarpEnv(WarpBatchMixin):
@@ -236,26 +230,13 @@ class MjwarpEnv(WarpBatchMixin):
                 mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
-            kp / kd: optional per-joint-name-or-regex PD gain overrides.
-            hand_kp / hand_kd: optional hand-DOF soft-PD gain overrides
-                (defaults G1_KP_HANDS/G1_KD_HANDS = 20/2).
-            actuators: optional ctrl-law map.  ABSENT -> the legacy path
-                (standard_pd on the policy + hand joints), bit-identical.
-                Present: {group: {type, regex | joint_names, ...law
-                fields}}; every robot joint (policy + hands) must be
-                covered exactly once (fail-fast gaps/overlaps, and prop
-                servo slots are off limits).  Laws (unigym/actuators
-                registry): standard_pd = the legacy formula (kp/kd
-                optional -- the gain channel above pre-fills them);
-                computed_torque_pd = tau = M_part@(kp*e - kd*dq) +
-                qfrc_bias recomputed per substep, per-part blocks via
-                'parts' (regex list partitioning the group; kp/kd
-                required); native_servo = ctrl = clip(target, ctrlrange)
-                passthrough (model-side affine servo).  Any non-standard
-                law switches the decimation loop into the mj_step1 ->
-                actuator.step -> mj_step2 phase split (fresh per-substep
-                M/bias).  The isaaclab backends reject non-standard
-                declarations at the capability gate (error + hint).
+            actuation: the resolved per-articulation actuation plan
+                (``actuation_plans`` kwarg from the run layer).  Every
+                driven joint must be covered by exactly one
+                ``ArticulationSpec.actuation`` group; the seam translates
+                neutral joint/gain/parts names to compiled names.  The
+                removed ``env.params.actuators`` / ``kp`` / ``kd`` /
+                ``hand_kp`` / ``hand_kd`` keys fail fast.
             reset: optional reset-protocol block (legacy face; the
                 scene-bundle wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
@@ -369,6 +350,7 @@ class MjwarpEnv(WarpBatchMixin):
         profiles=None,
         backend_options=None,
         asset_plan=None,
+        actuation_plans=None,
     ):
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -398,6 +380,7 @@ class MjwarpEnv(WarpBatchMixin):
         self.warp_device = _resolve_warp_device(device)
         params = dict(backend_params or {})
         options = dict(backend_options or {})
+        _reject_removed_gain_params(params, source="env.params")
         auto_prefix = bool((options.get("compose") or {}).get("auto_prefix", False))
         reject_legacy_mj_model(params, source="env.params")
 
@@ -634,7 +617,7 @@ class MjwarpEnv(WarpBatchMixin):
         self._planned_controls = tuple(controls or ())
         self._jid0 = 1 if int(m.jnt_type[0]) == int(mujoco.mjtJoint.mjJNT_FREE) else 0
         self._has_freejoint = bool(self._jid0)
-        init_tables(self, m, params, _policy_gains, label="mjwarp backend")
+        init_tables(self, m, label="mjwarp backend")
         self._hand_names = sorted(
             n
             for art in self._articulation_order
@@ -662,11 +645,10 @@ class MjwarpEnv(WarpBatchMixin):
             self._restricted_to_policy = torch.zeros(0, dtype=torch.int64)
 
         # ---- actuator seam:
-        # explicit per-substep ctrl laws over pluggable actuators.  The
-        # default laws ALWAYS exist (the retired inline _apply_pd body);
-        # a declared env.params.actuators map replaces the loop's write
-        # face and may switch it into the phase-split protocol.
-        self._setup_actuator_seam(params)
+        # explicit per-substep ctrl laws built from the run's resolved
+        # actuation plan.  The seam is always active; a direct env with
+        # driven controls but no plan fails fast.
+        self._setup_actuator_seam(actuation_plans)
 
         # ---- reset dispatch (scene bundles): the declared initializer
         # block resolves through INITIALIZER_REGISTRY (six-step
@@ -1061,19 +1043,15 @@ class MjwarpEnv(WarpBatchMixin):
                 )
         if self.num_envs == 1:
             for _ in range(int(n)):
-                if self._actuator_seam_declared:
-                    for feed in self._actuator_feeds:
-                        feed.act.set_targets(feed(targets, 0))
-                    if self._actuator_phase_split:
-                        self._warp_step1(d)
-                    for act in self._actuators:
-                        act.step(self._model, d)
-                    if self._actuator_phase_split:
-                        self._warp_step2(d)
-                    else:
-                        self._warp_step(d)
+                for feed in self._actuator_feeds:
+                    feed.act.set_targets(feed(targets, 0))
+                if self._actuator_phase_split:
+                    self._warp_step1(d)
+                for act in self._actuators:
+                    act.step(self._model, d)
+                if self._actuator_phase_split:
+                    self._warp_step2(d)
                 else:
-                    apply_control_substep(self, targets, 0, d)
                     self._warp_step(d)
             return
         # N>1: settle ONE world on a scratch single-world Data so the other
@@ -1081,19 +1059,15 @@ class MjwarpEnv(WarpBatchMixin):
         e = next(i for i, dd in enumerate(self._datas) if dd is d)
         scratch = self._new_warp_data(d, nworld=1)
         for _ in range(int(n)):
-            if self._actuator_seam_declared:
-                for feed in self._actuator_feeds:
-                    feed.act.set_targets(feed(targets, 0))
-                if self._actuator_phase_split:
-                    self._warp_step1(d, 0, scratch)
-                for act in self._actuators:
-                    act.step(self._model, d)
-                if self._actuator_phase_split:
-                    self._warp_step2(d, 0, scratch)
-                else:
-                    self._warp_step(d, 0, scratch)
+            for feed in self._actuator_feeds:
+                feed.act.set_targets(feed(targets, 0))
+            if self._actuator_phase_split:
+                self._warp_step1(d, 0, scratch)
+            for act in self._actuators:
+                act.step(self._model, d)
+            if self._actuator_phase_split:
+                self._warp_step2(d, 0, scratch)
             else:
-                apply_control_substep(self, targets, 0, d)
                 self._warp_step(d, 0, scratch)
         # the settled world becomes the device truth for world e only
         self._push_mirror_to_device(d, e)
@@ -1164,101 +1138,24 @@ class MjwarpEnv(WarpBatchMixin):
         finally:
             self._active_data = prev
 
-    def _setup_actuator_seam(self, params: dict) -> None:
+    def _setup_actuator_seam(self, plans) -> None:
         """Wire the ctrl laws for the decimation loop.
 
-        ABSENT ``actuators`` key -> the legacy body: the two default
-        standard_pd laws bound to the exact policy/hand slot tables;
-        ``_apply_pd`` (the retired inline formula) keeps its signature and
-        the default code path stays bit-identical.  A DECLARED map
-        must cover every robot joint (policy + hands) exactly once
-        (fail-fast gaps/duplicates/prop-slot collisions); a non-standard
-        law in the map switches the loop into the
-        ``mj_step1 -> actuator.step -> mj_step2`` phase split (computed
-        -torque needs the CURRENT substep's M/qfrc_bias).
+        The seam is always active: every driven joint is covered by the
+        resolved actuation plan, the neutral joint/gain/parts names are
+        translated to the compiled names, and a non-standard law switches
+        the loop into the ``mj_step1 -> actuator.step -> mj_step2`` phase
+        split (computed torque needs the CURRENT substep's M/qfrc_bias).
         """
-        self._actuators = []
-        self._actuator_feeds: list = []
-        self._actuator_phase_split = False
-        self._actuator_seam_declared = False
-
-        cfg = params.get("actuators")
-        if not cfg:
-            self._actuator_default_path = True
-            return
-        if not isinstance(cfg, dict):
-            raise ValueError(
-                f"env.params.actuators must be a mapping of group name -> "
-                f"group spec, got {type(cfg).__name__}"
-            )
-        acts, claimed = [], {}
-        for gname, gcfg in cfg.items():
-            if not isinstance(gcfg, dict):
-                raise ValueError(
-                    f"env.params.actuators.{gname} must be a group spec "
-                    f"mapping, got {type(gcfg).__name__}"
-                )
-            act = build_actuator(gcfg)
-            act.bind(self, gcfg)
-            slot_list = act.bound_slots.tolist()
-            dup = sorted(set(slot_list) & set(claimed))
-            if dup:
-                owners = sorted({claimed[s] for s in dup})
-                raise ValueError(
-                    f"env.params.actuators.{gname} re-addresses ctrl slots "
-                    f"{dup} already owned by group(s) {owners} (each "
-                    f"actuator slot must have exactly one ctrl law)"
-                )
-            prop_hit = sorted(set(slot_list) & set(np.nonzero(self._prop_ctrl_mask)[0].tolist()))
-            if prop_hit:
-                raise ValueError(
-                    f"env.params.actuators.{gname} claims prop-servo ctrl "
-                    f"slots {prop_hit} (props own their position-hold "
-                    f"write face; actuator groups address ROBOT joints "
-                    f"only)"
-                )
-            for s in slot_list:
-                claimed[s] = gname
-            acts.append(act)
-        # The coverage universe is the ACTUATED robot joints
-        # (policy + hands) -- a fixed-base scene carries unactuated device
-        # hinges / baked freejoints that no ctrl law may or must address
-        # (for G1 this is exactly the non-Prop hinge set, unchanged)
-        controls = [c for c in self._control_order if not c.prop]
-        robot_universe = [n for c in controls for n in c.joint_names]
-        bound = [n for act in acts for n in act.joint_names]
-        if sorted(bound) != sorted(robot_universe):
-            missing = sorted(set(robot_universe) - set(bound))
-            extra = sorted(set(bound) - set(robot_universe))
-            raise ValueError(
-                f"env.params.actuators must cover every robot joint "
-                f"exactly once; uncovered: {missing}"
-                + (f"; over-covered: {extra}" if extra else "")
-                + f" | hint: group regexes fullmatch against the robot "
-                f"hinge names, e.g. {robot_universe[:4]} ..."
-            )
-        owner = {}
-        for control in controls:
-            for index, name in enumerate(control.joint_names):
-                owner[name] = (control.name, index)
-        feeds = []
-        for act in acts:
-            feeds.append(_ActuatorTargetFeed(act, [owner[n] for n in act.joint_names]))
+        acts, feeds, phase_split = build_actuator_seam(
+            self,
+            plans,
+            backend="mjwarp",
+            label="mjwarp backend",
+        )
         self._actuators = acts
         self._actuator_feeds = feeds
-        self._actuator_phase_split = any(not isinstance(a, StandardPdActuator) for a in acts)
-        self._actuator_seam_declared = True
-        self._actuator_default_path = False
-
-    def _actuator_gain_fallback(self, joint_name: str, which: str):
-        """Legacy gain-channel lookup for declared standard_pd groups."""
-        for control in self._control_order:
-            if control.prop or joint_name not in control.joint_names:
-                continue
-            gains = control.addresses.get(which)
-            if gains is not None:
-                return float(gains[control.joint_names.index(joint_name)])
-        return None
+        self._actuator_phase_split = phase_split
 
     def step(
         self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
@@ -1269,10 +1166,9 @@ class MjwarpEnv(WarpBatchMixin):
         ``postprocess_action`` output); entry joint names resolve by name to
         policy-order PD targets (the "g1" body face).  Read AFTER the
         physics as in the isaaclab backend (``step -> refresh obs/extra``).
-        The ctrl write face is the actuator seam (``_setup_actuator_seam``):
-        default = the legacy explicit-PD body; a declared
-        ``env.params.actuators`` map with a non-standard law runs the
-        mj_step1/step2 phase split.
+        The ctrl write face is the always-active actuator seam
+        (``_setup_actuator_seam``); a non-standard law runs the mj_step1/
+        step2 phase split.
         """
         if self._closed or self._closing:
             raise RuntimeError("mjwarp backend: environment is closed")
@@ -1281,32 +1177,24 @@ class MjwarpEnv(WarpBatchMixin):
             # prop position servos: ctrl IS the position target ;
             # written once per policy step, held across the decimation loop
             d.ctrl[self._prop_ctrl_mask] = self._prop_targets[e][self._prop_ctrl_mask]
-        if self._actuator_seam_declared:
-            # declared ctrl laws (fresh-forward): targets fed once
-            # per control step (held across the substeps); laws recompute
-            # per substep.  Non-standard laws run the phase split
-            # mj_step1 -> actuator.step -> mj_step2: mj_step alone would
-            # hand a computed-torque law LAST substep's M/qfrc_bias.
+        # Laws are shared across worlds: feed each world's target right
+        # before stepping that world.  Targets are held across the substeps;
+        # non-standard laws run the phase split mj_step1 -> actuator.step ->
+        # mj_step2 (mj_step alone would hand a computed-torque law LAST
+        # substep's M/qfrc_bias).
+        for _ in range(self._decimation):
+            if self._actuator_phase_split:
+                self._warp_step1_all()
             for e, d in enumerate(self._datas):
                 for feed in self._actuator_feeds:
                     feed.act.set_targets(feed(targets, e))
-            for _ in range(self._decimation):
-                if self._actuator_phase_split:
-                    self._warp_step1_all()
-                for e, d in enumerate(self._datas):
-                    for act in self._actuators:
-                        act.step(self._model, d)
-                    if not self._actuator_phase_split:
-                        self._warp_put_ctrl(d, e)
-                if self._actuator_phase_split:
-                    self._warp_step2_all()
-                else:
-                    self._warp_step_all()
-        else:
-            for _ in range(self._decimation):
-                for e, d in enumerate(self._datas):
-                    apply_control_substep(self, targets, e, d)
+                for act in self._actuators:
+                    act.step(self._model, d)
+                if not self._actuator_phase_split:
                     self._warp_put_ctrl(d, e)
+            if self._actuator_phase_split:
+                self._warp_step2_all()
+            else:
                 self._warp_step_all()
         self._time_in_episode += self.step_dt
         state = self._read_state()

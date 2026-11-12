@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from unigym.actuators import ActuationGroup
 from unigym.backends.registry import backend_info
 from unigym.robots import build_robot_profile
 from unigym.run.build import _realize_profiles
@@ -14,7 +15,17 @@ def test_mujoco_has_no_robot_realization() -> None:
         "g1": {
             "profile": build_robot_profile({"name": "g1"}),
             "params": {},
-            "spec": ArticulationSpec(name="g1"),
+            "spec": ArticulationSpec(
+                name="g1",
+                actuation=(
+                    ActuationGroup(
+                        name="body",
+                        law="standard_pd",
+                        joint_set="body",
+                        gains={"kp": 1.0, "kd": 1.0},
+                    ),
+                ),
+            ),
         }
     }
 
@@ -32,7 +43,15 @@ def test_realizer_receives_profile_spec_params_and_asset_plan() -> None:
         seen.append((profile, spec, params, asset_plan))
         return "realized"
 
-    spec = ArticulationSpec(name="arm", spawn={"pos": [0.0, 0.0, 1.0]})
+    spec = ArticulationSpec(
+        name="arm",
+        spawn={"pos": [0.0, 0.0, 1.0]},
+        actuation=(
+            ActuationGroup(
+                name="body", law="standard_pd", joints=("shoulder",), gains={"kp": 1.0, "kd": 1.0}
+            ),
+        ),
+    )
     builds = {
         "arm": {
             "profile": build_robot_profile({"name": "g1"}),

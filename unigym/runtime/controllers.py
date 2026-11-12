@@ -227,7 +227,6 @@ class ControlRuntime:
         articulation: the owning articulation name.
         joint_names: joints owned by this face, in action order.
         q0: default positions aligned with ``joint_names`` (torch float32).
-        gains: declared gain mapping (backend fills defaults).
         drive: one of :data:`unigym.runtime.controls.CONTROL_DRIVES`.
         target: the explicit target kind (must match ``drive``).
         control_dt: control period (s) or ``None`` (inherits).
@@ -251,7 +250,6 @@ class ControlRuntime:
     joint_names: tuple[str, ...]
     #: normalized to a torch.Tensor in __post_init__ (see ArticulationRuntime)
     q0: Any = None
-    gains: Mapping[str, float] = field(default_factory=dict)
     drive: str = "position_pd"
     target: str = "position"
     control_dt: float | None = None
@@ -287,8 +285,6 @@ class ControlRuntime:
         if len(set(self.joint_names)) != len(self.joint_names):
             raise ControlError(f"control runtime {self.name!r} joint_names contains " f"duplicates")
         self.q0 = _as_q0(self.q0, len(self.joint_names), f"control {self.name!r}")
-        gains: Mapping[str, float] = self.gains or {}
-        self.gains = {str(k): float(v) for k, v in dict(gains).items()}
         self.asset_joint_names = tuple(str(n) for n in (self.asset_joint_names or ()))
         addresses: Mapping[str, JsonValue] = self.addresses or {}
         self.addresses = dict(addresses)
@@ -400,7 +396,6 @@ def _declared_control_runtime(
         articulation=group.articulation,
         joint_names=tuple(bare),
         q0=_control_q0(group, bare, profile, f"control group {group.name!r}"),
-        gains=dict(group.gains),
         drive=group.drive,
         target=group.target,
         control_dt=group.control_dt,

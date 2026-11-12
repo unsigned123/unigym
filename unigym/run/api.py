@@ -273,7 +273,9 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
     config alias: it emits the same authoring shape a yaml file declares
-    (``{name, params?}`` -- no articulation-level control).
+    (``{name, params?, actuation?}`` -- no articulation-level control).  A
+    declaration dict passes ``actuation`` through verbatim; the bare string
+    form carries no actuation, so a live build fails under the hard cut.
     """
     entry: dict[str, JsonValue]
     if isinstance(robot, str):
@@ -464,10 +466,14 @@ class Run:
             string) merged into the run config top level.
         cameras: Camera-spec dicts (``unigym.Camera.*``) or a ``CameraSet``.
         adapter: ``None`` (ManualAdapter) / a registered adapter name.
-        robot: A registered robot name.  Required for world/minimal
+        robot: A registered robot name or robot declaration mapping
+            (``{name, params?, actuation?}``).  Required for world/minimal
             construction; optional when *cfg* already declares articulations.
             An explicitly provided robot replaces the first articulation and
-            its controls in *cfg*.
+            its controls in *cfg*.  The declaration-dict form is how a
+            programmatic run declares ``actuation``; the bare string form
+            remains representable but a live build fails because it carries
+            no actuation (there is no implicit default law).
         backend: Environment backend (default ``"mujoco"``).
         backend_options: Backend-private options mapping
             (``env.backend_options``), e.g.

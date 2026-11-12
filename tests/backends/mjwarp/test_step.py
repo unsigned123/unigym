@@ -140,6 +140,51 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
 
 
 @pytest.mark.parametrize(
+    ("drive", "target"),
+    [
+        ("torque", "torque"),
+        ("velocity", "velocity"),
+        ("effort", "effort"),
+        ("current", "current"),
+    ],
+)
+def test_mjwarp_rejects_direct_drive_controls_at_build(tiny_env_factory, drive, target):
+    """Direct drives have no D4 actuation law and fail before routing."""
+    with pytest.raises(ValueError, match="no D4 actuation law"):
+        tiny_env_factory(drive=drive, target=target)
+
+
+def test_computed_torque_pd_is_a_supported_non_standard_law(tiny_env_factory):
+    """A computed_torque_pd group builds the seam and still tracks a target."""
+    env = tiny_env_factory(law="computed_torque_pd")
+    _, extra = env.step(_action(env, [[0.3, -0.2]]))
+
+    joint_pos = extra["articulation/tiny/joint_pos"]
+    assert 0.0 < joint_pos[0, 0] <= 0.3
+
+    env.reset_all()
+
+
+def test_native_servo_requires_a_compiled_position_servo(tiny_env_factory):
+    """A native_servo law over torque motors is a plant mismatch, not silent."""
+    with pytest.raises(ValueError, match=r"native_servo.*compiled law is 'motor'"):
+        tiny_env_factory(law="native_servo", gains={}, drive="position_servo")
+
+
+def test_direct_env_with_controls_but_no_plan_fails(tiny_env_factory):
+    """A direct env must not silently leave driven joints unactuated."""
+    with pytest.raises(ValueError, match="no actuation plan"):
+        tiny_env_factory(plans=False)
+
+
+@pytest.mark.parametrize("params", [{"actuators": {}}, {"kp": {"shoulder": 1.0}}])
+def test_direct_env_rejects_removed_gain_env_params(tiny_env_factory, params):
+    """The removed env actuator/gain channels fail at construction."""
+    with pytest.raises(ValueError, match="removed actuator/gain keys"):
+        tiny_env_factory(params=params)
+
+
+@pytest.mark.parametrize(
     ("joint_names", "fragment"),
     [
         pytest.param(["elbow"], "leaves joints unaddressed: ['shoulder']", id="missing-joint"),

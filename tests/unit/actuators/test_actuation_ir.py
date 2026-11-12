@@ -7,7 +7,13 @@ import pytest
 from unigym.actuators.ir import (
     ActuationError,
     ActuationGroup,
+    ResolvedActuationGroup,
+    normalize_actuation_group,
+    normalize_actuation_groups,
+    resolve_actuation_groups,
+    validate_actuation_group,
     validate_actuation_groups,
+    validate_drive_law_matrix,
 )
 
 
@@ -185,3 +191,175 @@ def test_empty_actuation_fails_with_driven_joints():
     """An empty group list fails when a non-passive joint exists."""
     with pytest.raises(ActuationError, match="do not cover joints"):
         validate_actuation_groups((), joints=("j1",))
+
+
+def test_actuation_group_accepts_scalar_and_joint_keyed_gain_values():
+    """A gain value is a finite scalar or a non-empty joint-keyed finite map."""
+    group = ActuationGroup(
+        name="arm",
+        law="standard_pd",
+        joints=("j1", "j2"),
+        gains={"kp": {"j1": 10.0, "j2": 20.0}, "kd": 1.0},
+    )
+
+    assert group.gains == {"kp": {"j1": 10.0, "j2": 20.0}, "kd": 1.0}
+
+
+@pytest.mark.parametrize(
+    ("gains", "match"),
+    [
+        ({"kp": {}}, "non-empty joint-keyed map"),
+        ({"kp": {"j1": float("nan")}}, "must be finite"),
+        ({"kp": {"": 1.0}}, "keys must be non-empty"),
+    ],
+)
+def test_actuation_group_rejects_malformed_gain_values(gains, match):
+    """Nested gain maps must be non-empty, non-blank-keyed and finite."""
+    with pytest.raises(ActuationError, match=match):
+        ActuationGroup(name="arm", law="standard_pd", joints=("j1",), gains=gains)
+
+
+def test_normalize_actuation_group_accepts_mapping_and_unknown_keys_fail():
+    """Mapping declarations normalize; the group key set is closed."""
+    group = normalize_actuation_group(
+        {"name": "arm", "law": "standard_pd", "joint_set": "body", "gains": {"kp": 1.0}}
+    )
+
+    assert isinstance(group, ActuationGroup)
+    assert group.joint_set == "body"
+    with pytest.raises(ActuationError, match=r"unknown keys \['bogus'\]"):
+        normalize_actuation_group(
+            {"name": "arm", "law": "standard_pd", "joints": ["j1"], "bogus": 1}
+        )
+
+
+def test_normalize_actuation_groups_rejects_duplicate_names_and_non_lists():
+    """The list helper rejects duplicate group names and non-list bundles."""
+    with pytest.raises(ActuationError, match="names must be unique"):
+        normalize_actuation_groups(
+            [
+                {"name": "a", "law": "standard_pd", "joints": ["j1"]},
+                {"name": "a", "law": "standard_pd", "joints": ["j2"]},
+            ]
+        )
+    with pytest.raises(ActuationError, match="must be a list"):
+        normalize_actuation_groups({"name": "a"})
+
+
+def test_resolve_actuation_groups_returns_declaration_order_and_joint_set():
+    """Resolution expands joint_set and keeps the declaration order."""
+    groups = (
+        ActuationGroup(name="hand", law="standard_pd", joints=("finger",)),
+        ActuationGroup(name="body", law="computed_torque_pd", joint_set="body"),
+    )
+
+    resolved = resolve_actuation_groups(
+        groups,
+        articulation="arm",
+        joints=("shoulder", "elbow", "finger"),
+        joint_sets={"body": ("shoulder", "elbow")},
+    )
+
+    assert [row.group.name for row in resolved] == ["hand", "body"]
+    assert [row.joint_names for row in resolved] == [("finger",), ("shoulder", "elbow")]
+    assert all(row.articulation == "arm" for row in resolved)
+
+
+def test_validate_actuation_group_law_matrix():
+    """Law payloads validate per backend and law."""
+    standard = ActuationGroup(
+        name="body", law="standard_pd", joints=("j1",), gains={"kp": 1.0, "kd": 2.0}
+    )
+    validate_actuation_group(standard, backend="mujoco")
+    validate_actuation_group(standard, backend="isaaclab2")
+    with pytest.raises(ActuationError, match="not supported by backend 'isaaclab2'"):
+        validate_actuation_group(
+            ActuationGroup(
+                name="body",
+                law="computed_torque_pd",
+                joints=("j1",),
+                gains={"kp": 1.0, "kd": 2.0},
+            ),
+            backend="isaaclab2",
+        )
+    with pytest.raises(ActuationError, match="missing gains"):
+        validate_actuation_group(
+            ActuationGroup(name="body", law="standard_pd", joints=("j1",), gains={"kp": 1.0}),
+            backend="mujoco",
+        )
+    with pytest.raises(ActuationError, match="unknown gains"):
+        validate_actuation_group(
+            ActuationGroup(
+                name="body",
+                law="standard_pd",
+                joints=("j1",),
+                gains={"kp": 1.0, "kd": 1.0, "bogus": 1.0},
+            ),
+            backend="mujoco",
+        )
+    with pytest.raises(ActuationError, match="parts are only valid"):
+        validate_actuation_group(
+            ActuationGroup(
+                name="body",
+                law="standard_pd",
+                joints=("j1",),
+                gains={"kp": 1.0, "kd": 1.0},
+                parts=("j1",),
+            ),
+            backend="mujoco",
+        )
+    with pytest.raises(ActuationError, match="backend-owned limits"):
+        validate_actuation_group(
+            ActuationGroup(
+                name="body",
+                law="standard_pd",
+                joints=("j1",),
+                gains={"kp": 1.0, "kd": 1.0},
+                effort_limit=1.0,
+            ),
+            backend="mujoco",
+        )
+
+
+def _resolved(law: str, joints: tuple[str, ...]) -> tuple[ResolvedActuationGroup, ...]:
+    return (
+        ResolvedActuationGroup(
+            articulation="arm",
+            group=ActuationGroup(name="body", law=law, joints=joints),
+            joint_names=joints,
+        ),
+    )
+
+
+def _drive(drive: str, joints: tuple[str, ...] = ("j1",)):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        name="body",
+        articulation="arm",
+        drive=drive,
+        joint_names=joints,
+        prop=False,
+    )
+
+
+@pytest.mark.parametrize("law", ["standard_pd", "computed_torque_pd"])
+def test_drive_law_matrix_position_pd_accepts_position_laws(law):
+    """position_pd is served by both position-PD laws."""
+    validate_drive_law_matrix(_resolved(law, ("j1",)), (_drive("position_pd"),))
+
+
+def test_drive_law_matrix_position_servo_requires_native_servo():
+    """position_servo needs native_servo, and native_servo needs position_servo."""
+    validate_drive_law_matrix(_resolved("native_servo", ("j1",)), (_drive("position_servo"),))
+    with pytest.raises(ActuationError, match="requires native_servo"):
+        validate_drive_law_matrix(_resolved("standard_pd", ("j1",)), (_drive("position_servo"),))
+    with pytest.raises(ActuationError, match="position_pd.*standard_pd or computed_torque_pd"):
+        validate_drive_law_matrix(_resolved("native_servo", ("j1",)), (_drive("position_pd"),))
+
+
+@pytest.mark.parametrize("drive", ["torque", "velocity", "effort", "current"])
+def test_drive_law_matrix_rejects_direct_drives(drive):
+    """D4 has no direct-drive law; the teaching error names the drive."""
+    with pytest.raises(ActuationError, match="no D4 actuation law"):
+        validate_drive_law_matrix(_resolved("standard_pd", ("j1",)), (_drive(drive),))

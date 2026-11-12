@@ -66,3 +66,21 @@ def test_build_terrain_without_any_terrain_raises_teaching_error():
     """Neither native nor yaml terrain is a fail-fast configuration error."""
     with pytest.raises(ValueError, match="declares no terrain.*terrain:.*World.terrain"):
         build_terrain({}, num_envs=1, env_spacing=2.0)
+
+
+def test_env_kwargs_accepts_and_ignores_actuation_plans():
+    """The common run-layer plan kwarg is accepted but not forwarded in D4."""
+    plans = {"arm": (object(),)}
+
+    result = env_kwargs({}, None, None, _RunSpec(), actuation_plans=plans)
+
+    assert "actuation_plans" not in result
+    assert set(result) == {
+        "terrain",
+        "static_shapes",
+        "articulations",
+        "controls",
+        "profiles",
+        "robot_realizations",
+        "backend_options",
+    }

@@ -69,6 +69,7 @@ def _build_env(usd: Path, *, num_envs: int = 1):
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
 
+    from unigym.actuators import ActuationGroup
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.robots.base import RobotProfile
@@ -88,7 +89,17 @@ def _build_env(usd: Path, *, num_envs: int = 1):
         body_sets={},
         body_bindings={},
     )
-    articulation = ArticulationSpec(name=ARTICULATION)
+    articulation = ArticulationSpec(
+        name=ARTICULATION,
+        actuation=(
+            ActuationGroup(
+                name=ARTICULATION,
+                law="standard_pd",
+                joints=JOINT_ORDER,
+                gains={"kp": 1.0, "kd": 0.1},
+            ),
+        ),
+    )
     group = ControlGroup.from_mapping(
         {
             "name": ARTICULATION,

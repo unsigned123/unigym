@@ -8,17 +8,14 @@ acme.tabletop``); :func:`apply_scene_bundle` resolves that id through
 YAML document and routes the bundle's blocks into the run config's existing
 consumption points BEFORE placeholder expansion (the pack's
 ``${UNIGYM_REPO}`` tokens ride the same single expansion point as the run
-yaml).  The actuator laws are part of the world declaration: a bundle
-WITHOUT its ``backend.mujoco.actuators`` block leaves the seam on its legacy
-default path, and a run config that dropped its ``env.params.actuators``
-block on the migration intent must therefore fall through to the scene
-declaration, never silently to ``standard_pd``.
+yaml).  Actuation is not a scene-bundle block: the only physical gain source
+is the run-level ``ArticulationSpec.actuation`` IR.
 
 =======================  =============================================
 ``backend.mujoco``       routed: ``world_base`` -> the run config TOP
                          LEVEL (the world declaration); the rest
-                         (``mj_scene``, ``mj_scene_params``, ``base``,
-                         ``actuators``) -> ``env.params`` -- backend
+                         (``mj_scene``, ``mj_scene_params``, ``base``) ->
+                         ``env.params`` -- backend
                          content lives under ``backend: <name>:`` blocks
                          (per-backend hole; ``mj_scene`` names a REGISTERED
                          scene definition the mujoco backend composes +
@@ -117,9 +114,9 @@ def apply_scene_bundle(
     Returns the config with the bundle's blocks routed in and the consumed
     ``scene:`` ref removed; configs without a ``scene:`` key pass through
     untouched and need no runtime.  Run-level values win at every layer;
-    mapping sections (``initializer.params``, ``base``, ``actuators``) merge
-    key-wise so a run can carry a single param override (e.g. the per-seed
-    stream seed) or one actuator group override without restating the table.
+    mapping sections (``initializer.params``, ``base``) merge key-wise so a
+    run can carry a single param override (e.g. the per-seed stream seed)
+    without restating the table.
     Only ``backend.mujoco`` blocks route this phase; other backend blocks are
     left for their backends.
     """
@@ -168,7 +165,7 @@ def apply_scene_bundle(
     # the world asset is run-level, not a backend param.
     if "world_base" in mujoco_block:
         cfg["world_base"] = _merge(mujoco_block["world_base"], cfg.get("world_base"))
-    for key in ("mj_scene", "mj_scene_params", "base", "actuators"):
+    for key in ("mj_scene", "mj_scene_params", "base"):
         if key in mujoco_block:
             params[key] = _merge(mujoco_block[key], params.get(key))
     if "props" in doc:

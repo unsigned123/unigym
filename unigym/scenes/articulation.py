@@ -1,12 +1,17 @@
 """Neutral articulation IR (authoring model).
 
-An articulation is ``root + model + joints + spawn``.  There is no
+An articulation is ``root + model + joints + spawn + actuation``.  There is no
 articulation-level control mode: *how* a joint is driven (and which adapter
 owns it) is declared explicitly in the run-level ``controls[]`` block
-(:mod:`unigym.runtime.controls`), and joints that are not driven at all are
-listed in :attr:`ArticulationSpec.passive_joints`.  The IR is pure data and
-imports only the standard library plus the neutral robot vocabulary -- no
-engine and no backend name is allowed here (attribute neutrality).
+(:mod:`unigym.runtime.controls`), and the physical ctrl law lives in
+:attr:`ArticulationSpec.actuation` (the neutral
+:mod:`unigym.actuators.ir` records).  Joints that are neither driven nor
+passive are an error at run/build.
+
+The IR is pure authoring data: it imports the standard library, the neutral
+robot vocabulary and the neutral actuation IR (which is NumPy-backed).  No
+engine and no backend name is allowed here (attribute neutrality); the scene
+package forbids backend imports, not the neutral actuators package.
 
 v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
 / ``policy_section``: the drive declaration lives in ``controls[]`` and the
@@ -21,6 +26,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym.actuators.ir import (
+    ActuationError,
+    ActuationGroup,
+    normalize_actuation_groups,
+)
 from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.robots.base import (
     BodyBinding,
@@ -469,7 +479,7 @@ class JointSpec:
             raise ArticulationError(
                 f"joint {name!r} declares a removed v104 key "
                 f"({sorted(set(params) & {'stiffness', 'latch'})}); declare "
-                f"gains on the owning top-level `controls[]` group instead"
+                f"gains on the owning `articulations[].actuation` group instead"
             )
         _unknown_keys(params, ("init", "range", "effort_limit", "damping"), f"joint {name!r}")
         return cls(
@@ -586,6 +596,7 @@ class ArticulationSpec:
     body_sets: Mapping[str, tuple[CanonicalBodyId, ...]] | None = None
     contacts: ContactSensorInventory | None = None
     passive_joints: tuple[str, ...] = ()
+    actuation: tuple[ActuationGroup, ...] | None = None
     params: Mapping[str, JsonValue] = field(default_factory=_empty_json_map)
 
     def __post_init__(self):
@@ -642,6 +653,12 @@ class ArticulationSpec:
                     f"not declared joints"
                 )
         object.__setattr__(self, "passive_joints", passive)
+        if self.actuation is not None:
+            try:
+                actuation = normalize_actuation_groups(self.actuation)
+            except ActuationError as exc:
+                raise ArticulationError(f"articulation {self.name!r} actuation: {exc}") from exc
+            object.__setattr__(self, "actuation", actuation)
         if not isinstance(self.params, Mapping):
             raise ArticulationError(f"articulation {self.name!r} params must be a mapping")
         object.__setattr__(self, "params", dict(self.params))
@@ -724,12 +741,34 @@ def _model_field(value: JsonValue, name: str) -> AssetRef | None:
         raise ArticulationError(str(exc)) from exc
 
 
+def _actuation_field(value: JsonValue, name: str) -> tuple[ActuationGroup, ...] | None:
+    """Normalize an optional raw ``actuation`` list, wrapping IR errors."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        raise ArticulationError(
+            f"articulation {name!r} actuation must be a list of groups, got {value!r}"
+        )
+    entries: list[ActuationGroup | Mapping[str, JsonValue]] = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, (ActuationGroup, Mapping)):
+            raise ArticulationError(
+                f"articulation {name!r} actuation[{index}] must be a group "
+                f"mapping, got {entry!r}"
+            )
+        entries.append(entry)
+    try:
+        return normalize_actuation_groups(entries)
+    except ActuationError as exc:
+        raise ArticulationError(f"articulation {name!r} actuation: {exc}") from exc
+
+
 def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
     """Normalize one ``articulations[]`` entry into an :class:`ArticulationSpec`.
 
     The config surface is a mapping with the IR fields
     (``name/model/root/spawn/joints/base_body/foot_bodies/body_sets/
-    contacts/passive_joints/params``); unknown keys fail fast (there is no
+    contacts/passive_joints/actuation/params``); unknown keys fail fast (there is no
     shorthand and no alias).  The articulation-level ``control:`` block is
     rejected with a teaching error (drives are declared in the run-level
     ``controls[]``).
@@ -758,6 +797,7 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
             "body_sets",
             "contacts",
             "passive_joints",
+            "actuation",
             "params",
         ),
         "articulation",
@@ -788,6 +828,7 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
         passive_joints=_str_tuple(
             entry.get("passive_joints"), f"articulation {name!r} passive_joints"
         ),
+        actuation=_actuation_field(entry.get("actuation"), name),
         params=_mapping_field(entry.get("params", {}), f"articulation {name!r} params"),
     )
 

@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import torch
 
+from unigym.actuators import ActuationGroup
+from unigym.actuators.ir import resolve_actuation_groups
 from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mujoco.env import MujocoEnv
 from unigym.robots.base import BodyBinding, RobotProfile
@@ -61,10 +63,24 @@ def make_env():
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
+    actuation = ActuationGroup(
+        name="body",
+        law="standard_pd",
+        joints=("hinge",),
+        gains={"kp": 40.0, "kd": 2.0},
+    )
     articulation = ArticulationSpec(
         name="tiny",
         spawn={"pos": [0.0, 0.0, 0.8]},
+        actuation=(actuation,),
     )
+    actuation_plans = {
+        "tiny": resolve_actuation_groups(
+            articulation.actuation,
+            articulation="tiny",
+            joints=("hinge",),
+        )
+    }
     group = ControlGroup.from_mapping(
         {
             "name": "tiny",
@@ -73,7 +89,6 @@ def make_env():
             "joints": ["hinge"],
             "drive": "position_pd",
             "target": "position",
-            "gains": {"kp": 40.0, "kd": 2.0},
         }
     )
     controls = build_control_runtimes((group,), (articulation,), {"tiny": profile})
@@ -90,6 +105,7 @@ def make_env():
         articulations=(articulation,),
         controls=controls,
         profiles={"tiny": profile},
+        actuation_plans=actuation_plans,
     )
     env.adapter_groups = {"manual": ("tiny",)}
     return env

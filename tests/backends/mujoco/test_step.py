@@ -59,38 +59,64 @@ def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
     assert "accepted faces: ['tiny']" in message
 
 
-@pytest.mark.parametrize(
-    ("drive", "target", "kind"),
-    [
-        ("position_pd", "position", "torque"),
-        ("position_pd", "position", "velocity"),
-        ("position_pd", "position", "effort"),
-        ("position_pd", "position", "current"),
-        ("torque", "torque", "position"),
-        ("effort", "effort", "position"),
-    ],
-)
-def test_step_rejects_an_action_kind_that_differs_from_the_control_target(
-    tiny_env_factory, drive, target, kind
-):
+@pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
+def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_env, kind):
     """A mismatched NamedAction.kind is rejected against the control's target."""
-    env = tiny_env_factory(drive=drive, target=target)
-    control = env.controls["tiny"]
-    entry = NamedAction.zeros(env.num_envs, list(control.joint_names), kind)
+    control = tiny_env.controls["tiny"]
+    entry = NamedAction.zeros(tiny_env.num_envs, list(control.joint_names), kind)
 
     with pytest.raises(ValueError) as excinfo:
-        env.step({"tiny": entry})
+        tiny_env.step({"tiny": entry})
 
     message = str(excinfo.value)
     assert "action entry 'tiny'" in message
     assert f"kind '{kind}'" in message
-    assert f"control 'tiny' expects target '{target}'" in message
+    assert "control 'tiny' expects target 'position'" in message
 
 
-def test_mujoco_rejects_a_current_drive_before_routing_can_run(tiny_env_factory):
-    """No MuJoCo actuator law represents current, so a current control never builds."""
-    with pytest.raises(NotImplementedError, match=r"requests drive 'current'"):
-        tiny_env_factory(drive="current", target="current")
+@pytest.mark.parametrize(
+    ("drive", "target"),
+    [
+        ("torque", "torque"),
+        ("velocity", "velocity"),
+        ("effort", "effort"),
+        ("current", "current"),
+    ],
+)
+def test_mujoco_rejects_direct_drive_controls_at_build(tiny_env_factory, drive, target):
+    """Direct drives have no D4 actuation law and fail before routing."""
+    with pytest.raises(ValueError, match="no D4 actuation law"):
+        tiny_env_factory(drive=drive, target=target)
+
+
+def test_computed_torque_pd_is_a_supported_non_standard_law(tiny_env_factory):
+    """A computed_torque_pd group builds the seam and still tracks a target."""
+    env = tiny_env_factory(law="computed_torque_pd")
+    _, extra = env.step(_action(env, [[0.3, -0.2]]))
+
+    joint_pos = extra["articulation/tiny/joint_pos"]
+    assert 0.0 < joint_pos[0, 0] <= 0.3
+
+    env.reset_all()
+
+
+def test_native_servo_requires_a_compiled_position_servo(tiny_env_factory):
+    """A native_servo law over torque motors is a plant mismatch, not silent."""
+    with pytest.raises(ValueError, match=r"native_servo.*compiled law is 'motor'"):
+        tiny_env_factory(law="native_servo", gains={}, drive="position_servo")
+
+
+def test_direct_env_with_controls_but_no_plan_fails(tiny_env_factory):
+    """A direct env must not silently leave driven joints unactuated."""
+    with pytest.raises(ValueError, match="no actuation plan"):
+        tiny_env_factory(plans=False)
+
+
+@pytest.mark.parametrize("params", [{"actuators": {}}, {"kp": {"shoulder": 1.0}}])
+def test_direct_env_rejects_removed_gain_env_params(tiny_env_factory, params):
+    """The removed env actuator/gain channels fail at construction."""
+    with pytest.raises(ValueError, match="removed actuator/gain keys"):
+        tiny_env_factory(params=params)
 
 
 def test_step_rejects_a_missing_control_joint(tiny_env):

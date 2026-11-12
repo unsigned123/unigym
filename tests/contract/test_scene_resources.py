@@ -42,10 +42,6 @@ backend:
       x: 1
     base:
       kind: scene
-    actuators:
-      legs:
-        drive: position_pd
-        kp: 100
 objects:
   types:
     - name: scene_box
@@ -90,7 +86,6 @@ def test_scene_bundle_routes_blocks_and_run_values_win(tmp_path: Path) -> None:
         "world_base": {"mjcf": "run.xml"},
         "env": {
             "params": {
-                "actuators": {"legs": {"kp": 200}},
                 "initializer": {"params": {"seed": 9}},
             }
         },
@@ -104,7 +99,6 @@ def test_scene_bundle_routes_blocks_and_run_values_win(tmp_path: Path) -> None:
     assert params["mj_scene"] == "table_top"
     assert params["mj_scene_params"] == {"x": 1}
     assert params["base"] == {"kind": "scene"}
-    assert params["actuators"]["legs"] == {"drive": "position_pd", "kp": 200}
     assert params["initializer"] == {
         "name": "scene_initializer",
         "params": {"mode": "scene", "seed": 9},
@@ -246,3 +240,16 @@ def test_config_without_scene_passes_through_without_a_runtime() -> None:
 
     assert result is cfg
     assert result == {"run_name": "r", "env": {"backend": "mujoco"}}
+
+
+def test_scene_bundle_no_longer_routes_an_actuator_block(tmp_path: Path) -> None:
+    """Actuation is run-level IR; scene bundles have no actuator route."""
+    scene = SCENE.replace(
+        "    base:\n      kind: scene\n",
+        "    base:\n      kind: scene\n    actuators:\n      legs:\n        type: standard_pd\n",
+    )
+    runtime = _runtime(tmp_path, scene)
+
+    merged = apply_scene_bundle({"scene": "acme_scene.tabletop"}, runtime)
+
+    assert "actuators" not in merged["env"].get("params", {})

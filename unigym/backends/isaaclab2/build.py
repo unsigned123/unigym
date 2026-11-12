@@ -18,6 +18,7 @@ def env_kwargs(
     profiles=None,
     robot_realizations=None,
     backend_options=None,
+    actuation_plans=None,
 ) -> dict:
     """Builder kwargs ``IsaaclabEnv`` accepts.
 
@@ -27,9 +28,11 @@ def env_kwargs(
     ``controls`` / ``profiles`` carry the neutral control runtimes and the
     per-articulation :class:`~unigym.robots.base.RobotProfile` objects;
     ``robot_realizations`` carries the backend-owned articulation configs
-    built by this backend's robot realizer.
+    built by this backend's robot realizer.  ``actuation_plans`` is accepted
+    for the common run-layer contract and ignored here: D4 does not wire the
+    generic Isaac Lab actuator plan into the G1 realizer (D5 does).
     """
-    del (env_cfg, artifacts_dir, world_base)
+    del (env_cfg, artifacts_dir, world_base, actuation_plans)
     return {
         "terrain": getattr(spec, "terrain", None),
         "static_shapes": getattr(spec, "static_shapes", None),
@@ -57,20 +60,6 @@ def build_terrain(cfg: dict, num_envs: int, env_spacing: float, spec_terrain=Non
     )
 
 
-def apply_actuator_override(realization, section) -> None:
-    """Apply the yaml top-level ``actuator:`` override to the ArticulationCfg."""
-    from isaaclab.assets import ArticulationCfg
-
-    from unigym.backends.isaaclab2.actuators import build_actuator
-
-    if not isinstance(realization, ArticulationCfg):
-        raise TypeError(
-            "isaaclab actuator override requires an ArticulationCfg "
-            f"realization, got {type(realization).__name__}"
-        )
-    realization.actuators = {"legs": build_actuator(section)}
-
-
 def build_events(section):
     """Build the yaml ``randomization.events`` config."""
     from unigym.backends.isaaclab2.dr_events import build_events_cfg
@@ -79,7 +68,6 @@ def build_events(section):
 
 
 __all__ = [
-    "apply_actuator_override",
     "build_events",
     "build_terrain",
     "env_kwargs",

@@ -465,9 +465,13 @@ robot-root spawn authority.
 - the run layer validates the realizer callable and passes the same
   profile/params/asset plan; no engine import happens in `unigym.robots`.
 
-G1's isaaclab asset/actuator/prim/spawn realization lives in the backend.
-GR1 is neutral-only and has no isaaclab realization; the backend realizer
-rejects it. Its MJCF remains a scene resource, not a neutral robot asset.
+G1's isaaclab asset/prim/spawn realization lives in the backend until the D5
+migration; its hardcoded actuator table is the explicit exception.  Neutral
+actuation is declared on the articulation (`ArticulationSpec.actuation`) and
+translated by the backend; `env.params.actuators`, `controls[].gains` and the
+top-level `actuator:` override are removed.  GR1 is neutral-only and has no
+isaaclab realization; the backend realizer rejects it. Its MJCF remains a
+scene resource, not a neutral robot asset.
 
 Dynamic `register_robot` / manifest `kind: robot` registration is a later
 phase and is not implemented yet.

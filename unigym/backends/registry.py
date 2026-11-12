@@ -101,8 +101,6 @@ class Trait(Enum):
     MOCAP = "MOCAP"  # mocap body carrier (mujoco)
     # --- rewind (Round B B1) ---
     SNAPSHOT = "SNAPSHOT"  # mjSTATE-exact snapshot()/restore()
-    # --- actuator seam ---
-    ACTUATORS_PLUGGABLE = "ACTUATORS_PLUGGABLE"  # env.params.actuators software ctrl laws
     # --- model introspection (no second capability enum) ---
     MODEL_ADDRESSES = "MODEL_ADDRESSES"  # qpos/dof/geom/actuator ids
     MODEL_MASS_INERTIA = "MODEL_MASS_INERTIA"  # compiled mass/inertia
@@ -208,11 +206,6 @@ class BackendInfo:
 
     Returns the terrain object (or None for the native-IR pass-through);
     ``None`` on the info means the backend declares no terrain face.
-    """
-    build_actuator_override: Callable[[], object] | None = None
-    """Factory -> ``apply_actuator_override(profile, section)``.
-
-    ``None`` means the backend has no yaml top-level ``actuator:`` face.
     """
     build_events: Callable[[], object] | None = None
     """Factory -> ``build_events(section)`` (DR events; None = unsupported)."""
@@ -523,7 +516,6 @@ MUJOCO_TRAITS = _CORE | frozenset(
         Trait.SPAWN_XY_YAW,
         Trait.MOCAP,
         Trait.SNAPSHOT,
-        Trait.ACTUATORS_PLUGGABLE,  # unigym/actuators seam
         # Model introspection: the compiled MjModel carries them all
         Trait.MODEL_ADDRESSES,
         Trait.MODEL_MASS_INERTIA,
@@ -552,7 +544,6 @@ MJWARP_TRAITS = _CORE | frozenset(
         Trait.CAMERAS_PER_ENV_STATE,
         Trait.CAMERAS_BATCH_RENDER,  # native warp renderer
         Trait.RECORDER_VIDEO,  # manager cache -> mp4
-        Trait.ACTUATORS_PLUGGABLE,  # step1 -> law -> step2
         Trait.DIRECTOR_TELEPORT,
         Trait.DIRECTOR_SETVEL,  # N=1 mirror + push
         Trait.DIRECTOR_ATTACH_WELD,
@@ -826,12 +817,6 @@ def _isaaclab2_build_terrain() -> object:
     return build_terrain
 
 
-def _isaaclab2_actuator_override() -> object:
-    from unigym.backends.isaaclab2.build import apply_actuator_override
-
-    return apply_actuator_override
-
-
 def _isaaclab2_build_events() -> object:
     from unigym.backends.isaaclab2.build import build_events
 
@@ -928,7 +913,6 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         gripper_backend=_isaaclab2_gripper_backend,
         env_kwargs=_isaaclab2_env_kwargs,
         build_terrain=_isaaclab2_build_terrain,
-        build_actuator_override=_isaaclab2_actuator_override,
         build_events=_isaaclab2_build_events,
         scene_ops=_isaaclab2_scene_ops,
         kit_launcher=_isaaclab2_kit_launcher,
@@ -948,7 +932,6 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         gripper_backend=_isaaclab2_gripper_backend,
         env_kwargs=_isaaclab2_env_kwargs,
         build_terrain=_isaaclab2_build_terrain,
-        build_actuator_override=_isaaclab2_actuator_override,
         build_events=_isaaclab2_build_events,
         scene_ops=_isaaclab2_scene_ops,
         kit_launcher=_isaaclab2_kit_launcher,

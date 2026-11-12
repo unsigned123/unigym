@@ -1,4 +1,4 @@
-"""standard_pd: the DEFAULT explicit-PD ctrl law (= legacy _apply_pd, verbatim).
+"""standard_pd: the explicit-PD ctrl law.
 
 Playground-authority form (playground_official_sonic.py::apply_pd):
 ``tau = kp*(q_target - q) - kd*dq``, clipped to the actuator ctrlrange,
@@ -11,12 +11,9 @@ the env provides one (``_damping_stability_scale``) -- a no-op (scale 1)
 for every dof inside the explicit-integration stability bound.
 
 Group fields: ``kp``/``kd`` as scalar | joint-name/regex dict | full
-vector.  Omitted fields fall back to the env's legacy gain channel (the
-mujoco backend exposes ``_actuator_gain_fallback``: g1 gain tables +
-env.params kp/kd overrides for policy joints, the hand gains for finger
-joints), so an ``actuators:`` section that re-declares standard_pd
-reproduces the default path bit-for-bit; on envs without the channel the
-explicit fields are required.
+vector.  Both are REQUIRED: actuation is the only physical gain source,
+so a group without explicit gains fails at bind (there is no env gain
+fallback channel).
 
 ``live_ctrlrange`` (constructor arg, NOT a config field): read the
 ctrlrange from the model on every step instead of the bind-time copy --
@@ -45,50 +42,19 @@ class StandardPdActuator(ActuatorBase):
         self._scale_fn = None
 
     def _on_bind(self, env, joint_group: dict) -> None:
-        kp_spec, kd_spec = joint_group.get("kp"), joint_group.get("kd")
-        if kp_spec is None or kd_spec is None:
-            # gain-channel compatibility: consult the env's legacy gain
-            # resolver (mujoco seam: g1 tables + env.params overrides,
-            # hand gains for finger joints) per joint -- fail fast when
-            # neither an explicit gain nor a legacy entry exists
-            fallback = getattr(env, "_actuator_gain_fallback", None)
-            if fallback is None:
-                missing = [k for k in ("kp", "kd") if joint_group.get(k) is None]
-                raise ValueError(
-                    f"standard_pd actuator group is missing {missing} | "
-                    f"hint: set the group's kp/kd (scalar or joint-name/"
-                    f"regex dict); no legacy gain channel is available on "
-                    f"this env"
-                )
-            if kp_spec is None:
-                self._kp = self._fallback_vector(fallback, "kp", self._joint_names)
-            else:
-                self._kp = resolve_gain_vector(kp_spec, "kp", self._joint_names)
-            if kd_spec is None:
-                self._kd = self._fallback_vector(fallback, "kd", self._joint_names)
-            else:
-                self._kd = resolve_gain_vector(kd_spec, "kd", self._joint_names)
-        else:
-            self._kp = resolve_gain_vector(kp_spec, "kp", self._joint_names)
-            self._kd = resolve_gain_vector(kd_spec, "kd", self._joint_names)
+        missing = [key for key in ("kp", "kd") if joint_group.get(key) is None]
+        if missing:
+            raise ValueError(
+                f"standard_pd actuator group is missing {missing} | hint: set "
+                f"the group's kp/kd (scalar or joint-name/regex dict); there "
+                f"is no env gain fallback"
+            )
+        self._kp = resolve_gain_vector(joint_group["kp"], "kp", self._joint_names)
+        self._kd = resolve_gain_vector(joint_group["kd"], "kd", self._joint_names)
         # the damping-stability guard is an env-side numerical concern
         # (mj_fullM of THIS model at THIS sim_dt): adopt the env's when it
         # provides one, exactly as the legacy _apply_pd path did
         self._scale_fn = getattr(env, "_damping_stability_scale", None)
-
-    @staticmethod
-    def _fallback_vector(fallback, which: str, names: list) -> np.ndarray:
-        vals = []
-        for n in names:
-            v = fallback(n, which)
-            if v is None:
-                raise ValueError(
-                    f"standard_pd gain channel: no legacy {which} gain for "
-                    f"joint {n!r} | hint: set the group's {which} "
-                    f"explicitly or extend the env gain tables"
-                )
-            vals.append(float(v))
-        return np.asarray(vals, dtype=np.float64)
 
     def step(self, model, data) -> None:
         """One sim substep: explicit-PD write over the owned slots.

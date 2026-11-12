@@ -71,19 +71,16 @@ def build_actuator(cfg: dict) -> ActuatorBase:
     """
     if not isinstance(cfg, dict):
         raise ValueError(
-            f"actuator group must be a mapping {{type, regex, ...}}, got "
-            f"{type(cfg).__name__} | hint: env.params.actuators entries "
-            f"look like {{body: {{type: computed_torque_pd, regex: "
-            f"robot0_.*, kp: 1000, kd: 200}}}}"
+            f"actuator group must be a mapping {{type, joint_names, ...}}, "
+            f"got {type(cfg).__name__} | hint: the backend seam translates "
+            f"ActuationGroup records into this law config"
         )
     atype = cfg.get("type")
     if atype not in ACTUATOR_REGISTRY:
         raise ValueError(
             f"unknown actuator type {atype!r}; registered types: "
-            f"{sorted(ACTUATOR_REGISTRY)} | hint: set "
-            f"env.params.actuators.<group>.type to one of the registered "
-            f"names (standard_pd is the default law; omitting the whole "
-            f"'actuators' key keeps the legacy backend path)"
+            f"{sorted(ACTUATOR_REGISTRY)} | hint: set the ActuationGroup's "
+            f"`law` to one of the registered names"
         )
     return ACTUATOR_REGISTRY[atype]()
 

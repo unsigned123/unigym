@@ -156,3 +156,143 @@ def test_close_failure_leaves_backend_guarded_and_retryable(tiny_env, monkeypatc
     assert tiny_env.mj_datas is None
     assert tiny_env.mj_data is None
     assert tiny_env.mj_model is None
+
+
+_BASE_XML = """<?xml version="1.0"?>
+<mujoco model="base_scene">
+  <compiler angle="radian"/>
+  <worldbody>
+    <geom name="ground" type="plane" size="4 4 0.1"/>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _two_articulation_env(tmp_path, tiny_mjcf):
+    from unigym.actuators import ActuationGroup
+    from unigym.actuators.ir import resolve_actuation_groups
+    from unigym.adapters.manual import ManualAdapter
+    from unigym.backends.mjwarp.env import MjwarpEnv
+    from unigym.robots.base import BodyBinding, RobotProfile
+    from unigym.runtime.controllers import build_control_runtimes
+    from unigym.runtime.controls import ControlGroup
+    from unigym.scenes.articulation import ArticulationSpec
+
+    base = tmp_path / "base_scene.xml"
+    base.write_text(_BASE_XML, encoding="utf-8")
+    joints = ("elbow", "shoulder")
+    source = "\n".join(
+        line
+        for line in tiny_mjcf.read_text(encoding="utf-8").splitlines()
+        if 'geom name="floor"' not in line
+    )
+    specs = []
+    profiles = {}
+    groups = []
+    for name, sign in (("left", -1.0), ("right", 1.0)):
+        robot = tmp_path / f"tiny_arm_{name}.xml"
+        robot.write_text(
+            source.replace('name="base_geom"', f'name="{name}_base_geom"')
+            .replace('name="link_geom"', f'name="{name}_link_geom"')
+            .replace('name="tip_geom"', f'name="{name}_tip_geom"'),
+            encoding="utf-8",
+        )
+        profiles[name] = RobotProfile(
+            name=name,
+            joint_sets={"body": joints},
+            default_joint_pos={joint: 0.0 for joint in joints},
+            assets=None,
+            action_faces={},
+            base_body="base",
+            foot_bodies=(),
+            body_sets={},
+            body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
+        )
+        actuation = (
+            ActuationGroup(
+                name="body",
+                law="computed_torque_pd",
+                joints=joints,
+                gains={
+                    "kp": {"elbow": 20.0, "shoulder": 30.0},
+                    "kd": {"elbow": 1.0, "shoulder": 2.0},
+                },
+                parts=("elbow", "shoulder"),
+            )
+            if name == "left"
+            else ActuationGroup(
+                name="body",
+                law="standard_pd",
+                joints=joints,
+                gains={"kp": 20.0, "kd": 1.0},
+            )
+        )
+        specs.append(
+            ArticulationSpec(
+                name=name,
+                model={"mjcf": str(robot)},
+                spawn={"pos": [sign, 0.0, 0.8]},
+                actuation=(actuation,),
+            )
+        )
+        groups.append(
+            ControlGroup.from_mapping(
+                {
+                    "name": name,
+                    "adapter": "manual",
+                    "articulation": name,
+                    "joints": list(joints),
+                    "drive": "position_pd",
+                    "target": "position",
+                }
+            )
+        )
+    controls = build_control_runtimes(tuple(groups), tuple(specs), profiles)
+    plans = {
+        spec.name: resolve_actuation_groups(
+            spec.actuation,
+            articulation=spec.name,
+            joints=joints,
+        )
+        for spec in specs
+    }
+    env = MjwarpEnv(
+        robot_profile=profiles["left"],
+        adapter=ManualAdapter(),
+        num_envs=1,
+        episode_length_s=100.0,
+        decimation=4,
+        sim_dt=0.005,
+        world_base={"mjcf": str(base)},
+        backend_params={},
+        backend_options={"compose": {"auto_prefix": True}},
+        device="cpu",
+        articulations=tuple(specs),
+        controls=controls,
+        profiles=profiles,
+        actuation_plans=plans,
+    )
+    return env
+
+
+def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tmp_path, tiny_mjcf):
+    """The seam maps neutral joints/gain keys/parts to compiled prefixed names."""
+    env = _two_articulation_env(tmp_path, tiny_mjcf)
+    try:
+        actions = {
+            name: NamedAction(
+                torch.tensor([[sign * 0.4, sign * -0.2]], dtype=torch.float32),
+                ["elbow", "shoulder"],
+                "position",
+            )
+            for name, sign in (("left", 1.0), ("right", -1.0))
+        }
+
+        _, extra = env.step(actions)
+
+        assert extra["articulation/left/joint_pos"][0, 0] > 0.0
+        assert extra["articulation/right/joint_pos"][0, 0] < 0.0
+        assert env.controls["left"].joint_names == ("elbow", "shoulder")
+        assert env.controls["right"].joint_names == ("elbow", "shoulder")
+    finally:
+        env.close()

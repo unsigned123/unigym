@@ -25,6 +25,12 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, TypedDict, runtime_checka
 import numpy as np
 
 from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym.actuators.ir import (
+    ResolvedActuationGroup,
+    resolve_actuation_groups,
+    validate_actuation_group,
+    validate_drive_law_matrix,
+)
 from unigym.backends.registry import BackendInfo, backend_info
 from unigym.benchmarks import build_tasks
 from unigym.env.backends import build_env_backend
@@ -90,6 +96,7 @@ class _EnvKwargsBuilder(Protocol):
         profiles: Mapping[str, RobotProfile] | None,
         robot_realizations: Mapping[str, object] | None,
         backend_options: dict[str, JsonValue],
+        actuation_plans: Mapping[str, tuple[ResolvedActuationGroup, ...]] | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -104,13 +111,6 @@ class _TerrainBuilder(Protocol):
         env_spacing: float,
         terrain: JsonValue | Terrain | None,
     ) -> object: ...
-
-
-@runtime_checkable
-class _ActuatorOverride(Protocol):
-    """Backend actuator override applier (registry factory -> callable)."""
-
-    def __call__(self, realization: object, section: JsonValue) -> None: ...
 
 
 @runtime_checkable
@@ -627,6 +627,81 @@ def _realize_profiles(
     }
 
 
+def _reject_removed_actuator_sources(cfg: dict[str, JsonValue]) -> None:
+    """Reject the removed top-level actuator/gain config sources."""
+    if "actuator" in cfg:
+        raise ValueError(
+            "run config declares the removed top-level `actuator:` override; "
+            "declare explicit `ActuationGroup` records on each "
+            "`articulations[].actuation` instead"
+        )
+    env_value = cfg.get("env")
+    env_cfg = env_value if isinstance(env_value, dict) else {}
+    params_value = env_cfg.get("params")
+    params = params_value if isinstance(params_value, dict) else {}
+    removed = sorted(
+        key for key in ("actuators", "kp", "kd", "hand_kp", "hand_kd") if key in params
+    )
+    if removed:
+        raise ValueError(
+            f"env.params declares removed actuator/gain keys {removed}; declare "
+            f"explicit `ActuationGroup` records on each "
+            f"`articulations[].actuation` instead"
+        )
+
+
+def _build_actuation_plans(
+    articulations: Sequence[ArticulationSpec],
+    profiles: Mapping[str, RobotProfile],
+    controls: Sequence[ControlRuntime],
+    backend: str,
+) -> dict[str, tuple[ResolvedActuationGroup, ...]]:
+    """Resolve each driven articulation's actuation plan (exactly-once).
+
+    The coverage universe is the control-driven joints of each articulation;
+    passive joints are excluded and every driven joint must be covered by
+    exactly one declared group.
+    """
+    by_articulation: dict[str, list[ControlRuntime]] = {}
+    for control in controls:
+        if control.prop:
+            continue
+        by_articulation.setdefault(control.articulation, []).append(control)
+    plans: dict[str, tuple[ResolvedActuationGroup, ...]] = {}
+    for art in articulations:
+        art_controls = by_articulation.get(art.name, [])
+        if not art_controls:
+            continue
+        driven: list[str] = []
+        seen: set[str] = set()
+        for control in art_controls:
+            for joint in control.joint_names:
+                if joint not in seen:
+                    seen.add(joint)
+                    driven.append(joint)
+        groups = art.actuation
+        if groups is None or not groups:
+            raise ValueError(
+                f"articulation {art.name!r} declares driven joints but no "
+                f"`actuation`; declare at least one ActuationGroup covering "
+                f"the driven joints {driven} (there is no implicit default law)"
+            )
+        profile = profiles.get(art.name)
+        joint_sets = dict(profile.joint_sets) if profile is not None else None
+        resolved = resolve_actuation_groups(
+            groups,
+            articulation=art.name,
+            joints=tuple(driven),
+            joint_sets=joint_sets,
+            passive_joints=art.passive_joints,
+        )
+        for row in resolved:
+            validate_actuation_group(row.group, backend=backend)
+        validate_drive_law_matrix(resolved, art_controls)
+        plans[art.name] = resolved
+    return plans
+
+
 def _build_robot_and_props(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
@@ -654,24 +729,6 @@ def _build_robot_and_props(
     profile = builds[first_name]["profile"]
     profiles = {name: build["profile"] for name, build in builds.items()}
     robot_realizations = _realize_profiles(info, builds, asset_plan)
-    # Pluggable actuators: the yaml top-level "actuator" field overrides
-    # the realization's actuator table (default implicit_pd).
-    # Backends with no robot realization (mujoco) have no such table:
-    # gains go through env.params (PD lives inside the backend) -- reject
-    # explicitly.  The pluggable ctrl laws on the mujoco side go through
-    # env.params.actuators (the unigym/actuators top-level package,
-    # standard_pd / computed_torque_pd / native_servo) -- the top-level
-    # "actuator" key semantics unchanged (isaaclab-only).
-    if "actuator" in cfg:
-        if info.build_actuator_override is None or robot_realizations is None:
-            raise ValueError(
-                "yaml top-level 'actuator' override is not supported by the "
-                f"'{backend_label}' backend; configure gains via env.params"
-            )
-        override = info.build_actuator_override()
-        if not isinstance(override, _ActuatorOverride):
-            raise TypeError("backend actuator override is not callable")
-        override(robot_realizations[first_name], cfg["actuator"])
     # terrain preset is a backend construction face; backends without one
     # serve their own ground (e.g. the floor geom of the MJ XML scene).  A
     # programmatic ``Run(world=World.terrain...)`` carries the native
@@ -878,6 +935,7 @@ def _build_env_and_sampler(
     profiles: Mapping[str, RobotProfile] | None = None,
     robot_realizations: Mapping[str, object] | None = None,
     asset_plan: AssetPlan | None = None,
+    actuation_plans: Mapping[str, tuple[ResolvedActuationGroup, ...]] | None = None,
 ) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
     # the run output dir resolves BEFORE the backend build: the recorded
@@ -911,6 +969,7 @@ def _build_env_and_sampler(
         profiles=profiles,
         robot_realizations=robot_realizations,
         backend_options=spec.backend_options,
+        actuation_plans=actuation_plans,
     )
     env: RunEnv = build_env_backend(
         info.name,
@@ -1302,6 +1361,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     """Construct every live resource of one run from ``spec`` (no driving)."""
     cfg = spec.cfg
     backend_label = spec.backend
+    _reject_removed_actuator_sources(cfg)
     info = backend_info(backend_label)
     mode = spec.mode
     pack_runtime = spec.pack_runtime
@@ -1351,6 +1411,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # controls freeze into the read-only plan; no guessing path remains.
     control_runtimes = build_control_runtimes(spec.controls, spec.articulations, profiles)
     control_plan = build_control_plan(spec.controls, control_runtimes)
+    actuation_plans = _build_actuation_plans(
+        spec.articulations,
+        profiles,
+        control_runtimes,
+        info.name,
+    )
     sensing = _build_sensing(
         spec,
         cfg,
@@ -1384,6 +1450,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         profiles=profiles,
         robot_realizations=robot_realizations,
         asset_plan=asset_plan,
+        actuation_plans=actuation_plans,
     )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)

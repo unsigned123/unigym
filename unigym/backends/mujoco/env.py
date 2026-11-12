@@ -126,16 +126,6 @@ from unigym.backends.shared.mjfamily.world_base import (
     reject_legacy_mj_model,
     resolve_world_base_mjcf,
 )
-from unigym.robots.g1_constants import (
-    G1_KD_ARMS,
-    G1_KD_FEET,
-    G1_KD_LEGS,
-    G1_KD_WAIST,
-    G1_KP_ARMS,
-    G1_KP_FEET,
-    G1_KP_LEGS,
-    G1_KP_WAIST,
-)
 from unigym.runtime.actions import MujocoJointResolver
 from unigym.backends.shared.mjfamily.articulation_obs import (
     articulation_extra,
@@ -144,12 +134,11 @@ from unigym.backends.shared.mjfamily.articulation_obs import (
     refresh_obs_sources,
 )
 from unigym.backends.shared.mjfamily.articulation_runtime import (
-    apply_control_substep,
+    build_actuator_seam,
     init_tables,
     reset_articulations,
     route_actions,
 )
-from unigym.actuators import StandardPdActuator, build_actuator
 
 BASE_BODY = "pelvis"
 
@@ -161,84 +150,22 @@ BASE_BODY = "pelvis"
 # ON: contact groups are served by contacts/mujoco_backend.py .
 # props is ON : box-family props are appended to the MjSpec and
 # served by props/mujoco_backend.py (object/* record keys + held groups).
-# actuator_seam is ON: the pluggable ctrl laws (unigym/actuators,
-# env.params.actuators) -- isaaclab backends reject non-standard
-# declarations at the capability gate until their ActuatorBase mapping lands.
 BACKEND_CAPABILITIES = BackendCapabilities(
-    recorder=True, cameras=True, contacts=True, props=True, actuator_seam=True, multi_env=True
+    recorder=True, cameras=True, contacts=True, props=True, multi_env=True
 )
 
 
-def _gather_gain(joint: str, table) -> Optional[float]:
-    """First regex (fullmatch) hit in a g1_constants gain group table."""
-    import re
-
-    for expr, val in table.items():
-        if re.fullmatch(expr, joint):
-            return float(val)
-    return None
-
-
-def _policy_gains(joint_names, kp_override=None, kd_override=None):
-    """Per-policy-joint (kp, kd) from the g1_constants playground tables.
-
-    Groups tried in order: legs / feet / waist / arms (the isaaclab profile's
-    implicit-PD groups, same numbers).  yaml ``kp``/``kd`` overrides (joint
-    name or regex keys, applied via the same merge semantics as the profile)
-        take precedence per joint.
-    """
-    groups_kp = (G1_KP_LEGS, G1_KP_FEET, G1_KP_WAIST, G1_KP_ARMS)
-    groups_kd = (G1_KD_LEGS, G1_KD_FEET, G1_KD_WAIST, G1_KD_ARMS)
-    kp, kd = [], []
-    for name in joint_names:
-        kv = _override_hit(name, kp_override)
-        dv = _override_hit(name, kd_override)
-        if kv is None:
-            for tab in groups_kp:
-                kv = _gather_gain(name, tab)
-                if kv is not None:
-                    break
-        if dv is None:
-            for tab in groups_kd:
-                dv = _gather_gain(name, tab)
-                if dv is not None:
-                    break
-        if kv is None or dv is None:
-            raise ValueError(
-                f"mujoco backend: no PD gain group matches policy joint "
-                f"{name!r} (kp={kv}, kd={dv}); extend the gain tables or "
-                f"set env.params.kp/kd"
-            )
-        kp.append(kv)
-        kd.append(dv)
-    return np.asarray(kp, dtype=np.float64), np.asarray(kd, dtype=np.float64)
-
-
-def _override_hit(name: str, override) -> Optional[float]:
-    if not override:
-        return None
-    import re
-
-    if name in override:
-        return float(override[name])
-    for expr, val in override.items():
-        if re.fullmatch(str(expr), name):
-            return float(val)
-    return None
-
-
-class _ActuatorTargetFeed:
-    """Compose one actuator's joint-ordered target vector from controls."""
-
-    def __init__(self, act, sources):
-        self.act = act
-        self._sources = list(sources)
-
-    def __call__(self, targets: dict, e: int) -> np.ndarray:
-        out = np.zeros(len(self._sources), dtype=np.float64)
-        for i, (control_name, index) in enumerate(self._sources):
-            out[i] = targets[control_name][e, index]
-        return out
+def _reject_removed_gain_params(params: dict, *, source: str) -> None:
+    """Reject the removed env gain/actuator channels at construction."""
+    removed = sorted(
+        key for key in ("actuators", "kp", "kd", "hand_kp", "hand_kd") if key in params
+    )
+    if removed:
+        raise ValueError(
+            f"{source} declares removed actuator/gain keys {removed}; declare "
+            f"explicit ArticulationSpec.actuation groups (actuation is the "
+            f"only physical gain source)"
+        )
 
 
 def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
@@ -322,26 +249,13 @@ class MujocoEnv:
                 mujoco-only capability: the isaaclab backend manages its
                 spawn through the Isaac Lab init system and has no
                 spawn_height/spawn_xy/spawn_yaw params either.
-            kp / kd: optional per-joint-name-or-regex PD gain overrides.
-            hand_kp / hand_kd: optional hand-DOF soft-PD gain overrides
-                (defaults G1_KP_HANDS/G1_KD_HANDS = 20/2).
-            actuators: optional ctrl-law map.  ABSENT -> the legacy path
-                (standard_pd on the policy + hand joints), bit-identical.
-                Present: {group: {type, regex | joint_names, ...law
-                fields}}; every robot joint (policy + hands) must be
-                covered exactly once (fail-fast gaps/overlaps, and prop
-                servo slots are off limits).  Laws (unigym/actuators
-                registry): standard_pd = the legacy formula (kp/kd
-                optional -- the gain channel above pre-fills them);
-                computed_torque_pd = tau = M_part@(kp*e - kd*dq) +
-                qfrc_bias recomputed per substep, per-part blocks via
-                'parts' (regex list partitioning the group; kp/kd
-                required); native_servo = ctrl = clip(target, ctrlrange)
-                passthrough (model-side affine servo).  Any non-standard
-                law switches the decimation loop into the mj_step1 ->
-                actuator.step -> mj_step2 phase split (fresh per-substep
-                M/bias).  The isaaclab backends reject non-standard
-                declarations at the capability gate (error + hint).
+            actuation: the resolved per-articulation actuation plan
+                (``actuation_plans`` kwarg from the run layer).  Every
+                driven joint must be covered by exactly one
+                ``ArticulationSpec.actuation`` group; the seam translates
+                neutral joint/gain/parts names to compiled names.  The
+                removed ``env.params.actuators`` / ``kp`` / ``kd`` /
+                ``hand_kp`` / ``hand_kd`` keys fail fast.
             reset: optional reset-protocol block (legacy face; the
                 scene-bundle wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
@@ -453,6 +367,7 @@ class MujocoEnv:
         backend_options=None,
         articulation_specs=None,
         asset_plan=None,
+        actuation_plans=None,
     ):
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -474,6 +389,7 @@ class MujocoEnv:
             multienv.reject_model_global_unsupported(n, prop_manager, camera_manager, director_cfg)
         params = dict(backend_params or {})
         options = dict(backend_options or {})
+        _reject_removed_gain_params(params, source="env.params")
         auto_prefix = bool((options.get("compose") or {}).get("auto_prefix", False))
         reject_legacy_mj_model(params, source="env.params")
 
@@ -674,7 +590,7 @@ class MujocoEnv:
         self._planned_controls = tuple(controls or ())
         self._jid0 = 1 if int(m.jnt_type[0]) == int(mujoco.mjtJoint.mjJNT_FREE) else 0
         self._has_freejoint = bool(self._jid0)
-        init_tables(self, m, params, _policy_gains, label="mujoco backend")
+        init_tables(self, m, label="mujoco backend")
         self._hand_names = sorted(
             n
             for art in self._articulation_order
@@ -702,11 +618,10 @@ class MujocoEnv:
             self._restricted_to_policy = torch.zeros(0, dtype=torch.int64)
 
         # ---- actuator seam:
-        # explicit per-substep ctrl laws over pluggable actuators.  The
-        # default laws ALWAYS exist (the retired inline _apply_pd body);
-        # a declared env.params.actuators map replaces the loop's write
-        # face and may switch it into the phase-split protocol.
-        self._setup_actuator_seam(params)
+        # explicit per-substep ctrl laws built from the run's resolved
+        # actuation plan.  The seam is always active; a direct env with
+        # driven controls but no plan fails fast.
+        self._setup_actuator_seam(actuation_plans)
 
         # ---- reset dispatch (scene bundles): the declared initializer
         # block resolves through INITIALIZER_REGISTRY (six-step
@@ -1064,19 +979,15 @@ class MujocoEnv:
                     control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
                 )
         for _ in range(int(n)):
-            if self._actuator_seam_declared:
-                for feed in self._actuator_feeds:
-                    feed.act.set_targets(feed(targets, 0))
-                if self._actuator_phase_split:
-                    mujoco.mj_step1(self._model, d)
-                for act in self._actuators:
-                    act.step(self._model, d)
-                if self._actuator_phase_split:
-                    mujoco.mj_step2(self._model, d)
-                else:
-                    mujoco.mj_step(self._model, d)
+            for feed in self._actuator_feeds:
+                feed.act.set_targets(feed(targets, 0))
+            if self._actuator_phase_split:
+                mujoco.mj_step1(self._model, d)
+            for act in self._actuators:
+                act.step(self._model, d)
+            if self._actuator_phase_split:
+                mujoco.mj_step2(self._model, d)
             else:
-                apply_control_substep(self, targets, 0, d)
                 mujoco.mj_step(self._model, d)
 
     def _prop_extents(self, name: str) -> tuple:
@@ -1178,102 +1089,24 @@ class MujocoEnv:
             sites.append((sname, sid))
         return sites
 
-    def _setup_actuator_seam(self, params: dict) -> None:
+    def _setup_actuator_seam(self, plans) -> None:
         """Wire the ctrl laws for the decimation loop.
 
-        ABSENT ``actuators`` key -> the legacy body: the two default
-        standard_pd laws bound to the exact policy/hand slot tables;
-        ``_apply_pd`` (the retired inline formula) keeps its signature and
-        the default code path stays bit-identical.  A DECLARED map
-        must cover every robot joint (policy + hands) exactly once
-        (fail-fast gaps/duplicates/prop-slot collisions); a non-standard
-        law in the map switches the loop into the
-        ``mj_step1 -> actuator.step -> mj_step2`` phase split (computed
-        -torque needs the CURRENT substep's M/qfrc_bias).
+        The seam is always active: every driven joint is covered by the
+        resolved actuation plan, the neutral joint/gain/parts names are
+        translated to the compiled names, and a non-standard law switches
+        the loop into the ``mj_step1 -> actuator.step -> mj_step2`` phase
+        split (computed torque needs the CURRENT substep's M/qfrc_bias).
         """
-        self._actuators = []
-        self._actuator_feeds: list = []
-        self._actuator_phase_split = False
-        self._actuator_seam_declared = False
-
-        cfg = params.get("actuators")
-        if not cfg:
-            self._actuator_default_path = True
-            return
-        if not isinstance(cfg, dict):
-            raise ValueError(
-                f"env.params.actuators must be a mapping of group name -> "
-                f"group spec, got {type(cfg).__name__}"
-            )
-        acts, claimed = [], {}
-        for gname, gcfg in cfg.items():
-            if not isinstance(gcfg, dict):
-                raise ValueError(
-                    f"env.params.actuators.{gname} must be a group spec "
-                    f"mapping, got {type(gcfg).__name__}"
-                )
-            act = build_actuator(gcfg)
-            act.bind(self, gcfg)
-            slot_list = act.bound_slots.tolist()
-            dup = sorted(set(slot_list) & set(claimed))
-            if dup:
-                owners = sorted({claimed[s] for s in dup})
-                raise ValueError(
-                    f"env.params.actuators.{gname} re-addresses ctrl slots "
-                    f"{dup} already owned by group(s) {owners} (each "
-                    f"actuator slot must have exactly one ctrl law)"
-                )
-            prop_hit = sorted(set(slot_list) & set(np.nonzero(self._prop_ctrl_mask)[0].tolist()))
-            if prop_hit:
-                raise ValueError(
-                    f"env.params.actuators.{gname} claims prop-servo ctrl "
-                    f"slots {prop_hit} (props own their position-hold "
-                    f"write face; actuator groups address ROBOT joints "
-                    f"only)"
-                )
-            for s in slot_list:
-                claimed[s] = gname
-            acts.append(act)
-        # the coverage universe is the ACTUATED robot joints
-        # (policy + hands) -- a fixed-base scene carries unactuated device
-        # hinges / baked freejoints that no ctrl law may or must address
-        # (for G1 this is exactly the non-Prop hinge set, unchanged)
-        controls = [c for c in self._control_order if not c.prop]
-        robot_universe = [n for c in controls for n in c.joint_names]
-        bound = [n for act in acts for n in act.joint_names]
-        if sorted(bound) != sorted(robot_universe):
-            missing = sorted(set(robot_universe) - set(bound))
-            extra = sorted(set(bound) - set(robot_universe))
-            raise ValueError(
-                f"env.params.actuators must cover every robot joint "
-                f"exactly once; uncovered: {missing}"
-                + (f"; over-covered: {extra}" if extra else "")
-                + f" | hint: group regexes fullmatch against the robot "
-                f"hinge names, e.g. {robot_universe[:4]} ..."
-            )
-        owner = {}
-        for control in controls:
-            for index, name in enumerate(control.joint_names):
-                owner[name] = (control.name, index)
-        feeds = []
-        for act in acts:
-            sources = [owner[n] for n in act.joint_names]
-            feeds.append(_ActuatorTargetFeed(act, sources))
+        acts, feeds, phase_split = build_actuator_seam(
+            self,
+            plans,
+            backend="mujoco",
+            label="mujoco backend",
+        )
         self._actuators = acts
         self._actuator_feeds = feeds
-        self._actuator_phase_split = any(not isinstance(a, StandardPdActuator) for a in acts)
-        self._actuator_seam_declared = True
-        self._actuator_default_path = False
-
-    def _actuator_gain_fallback(self, joint_name: str, which: str):
-        """Legacy gain-channel lookup for declared standard_pd groups."""
-        for control in self._control_order:
-            if control.prop or joint_name not in control.joint_names:
-                continue
-            gains = control.addresses.get(which)
-            if gains is not None:
-                return float(gains[control.joint_names.index(joint_name)])
-        return None
+        self._actuator_phase_split = phase_split
 
     def step(
         self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
@@ -1284,10 +1117,9 @@ class MujocoEnv:
         ``postprocess_action`` output); entry joint names resolve by name to
         policy-order PD targets (the "g1" body face).  Read AFTER the
         physics as in the isaaclab backend (``step -> refresh obs/extra``).
-        The ctrl write face is the actuator seam (``_setup_actuator_seam``):
-        default = the legacy explicit-PD body; a declared
-        ``env.params.actuators`` map with a non-standard law runs the
-        mj_step1/step2 phase split.
+        The ctrl write face is the always-active actuator seam
+        (``_setup_actuator_seam``); a non-standard law runs the mj_step1/
+        step2 phase split.
         """
         if self._closed or self._closing:
             raise RuntimeError("mujoco backend: environment is closed")
@@ -1296,26 +1128,20 @@ class MujocoEnv:
             # prop position servos: ctrl IS the position target ;
             # written once per policy step, held across the decimation loop
             d.ctrl[self._prop_ctrl_mask] = self._prop_targets[e][self._prop_ctrl_mask]
-            if self._actuator_seam_declared:
-                # declared ctrl laws (fresh-forward): targets fed once
-                # per control step (held across the substeps); laws recompute
-                # per substep.  Non-standard laws run the phase split
-                # mj_step1 -> actuator.step -> mj_step2: mj_step alone would
-                # hand a computed-torque law LAST substep's M/qfrc_bias.
-                for feed in self._actuator_feeds:
-                    feed.act.set_targets(feed(targets, e))
-                for _ in range(self._decimation):
-                    if self._actuator_phase_split:
-                        mujoco.mj_step1(self._model, d)
-                    for act in self._actuators:
-                        act.step(self._model, d)
-                    if self._actuator_phase_split:
-                        mujoco.mj_step2(self._model, d)
-                    else:
-                        mujoco.mj_step(self._model, d)
-            else:
-                for _ in range(self._decimation):
-                    apply_control_substep(self, targets, e, d)
+            # targets fed once per control step (held across the substeps);
+            # laws recompute per substep.  Non-standard laws run the phase
+            # split mj_step1 -> actuator.step -> mj_step2: mj_step alone would
+            # hand a computed-torque law LAST substep's M/qfrc_bias.
+            for feed in self._actuator_feeds:
+                feed.act.set_targets(feed(targets, e))
+            for _ in range(self._decimation):
+                if self._actuator_phase_split:
+                    mujoco.mj_step1(self._model, d)
+                for act in self._actuators:
+                    act.step(self._model, d)
+                if self._actuator_phase_split:
+                    mujoco.mj_step2(self._model, d)
+                else:
                     mujoco.mj_step(self._model, d)
             self._time_in_episode[e] += self.step_dt
         state = self._read_state()

@@ -42,14 +42,19 @@ def _arm(*joints: str, passive: tuple[str, ...] = ()) -> ArticulationSpec:
     ("field", "value", "match"),
     [
         ("q0", {"shoulder": float("nan")}, "must be finite"),
-        ("gains", {"elbow": float("inf")}, "must be finite"),
         ("q0", {"shoulder": "not-a-number"}, "must be a number"),
     ],
 )
 def test_control_group_rejects_non_finite_numeric_maps(field, value, match):
-    """Per-joint q0/gains reject non-numeric and non-finite values."""
+    """Per-joint q0 rejects non-numeric and non-finite values."""
     with pytest.raises(ControlError, match=match):
         ControlGroup.from_mapping(_entry(**{field: value}))
+
+
+def test_control_group_rejects_removed_gains_key():
+    """Physical gains belong to ArticulationSpec.actuation, not controls[]."""
+    with pytest.raises(ControlError, match="unknown keys.*gains"):
+        ControlGroup.from_mapping(_entry(gains={"kp": 1.0}))
 
 
 @pytest.mark.parametrize("control_dt", [0.0, -0.02, float("nan")])

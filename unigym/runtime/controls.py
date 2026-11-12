@@ -81,7 +81,6 @@ class ProjectedGroup(TypedDict):
     articulation: str
     joint_names: tuple[str, ...]
     q0: tuple[float, ...]
-    gains: dict[str, float]
     drive: str
     target: str
 
@@ -95,7 +94,6 @@ _CONTROL_KEYS = (
     "drive",
     "target",
     "q0",
-    "gains",
     "command",
     "control_dt",
 )
@@ -106,7 +104,7 @@ class ControlError(ValueError):
 
 
 def _empty_float_map() -> dict[str, float]:
-    """Typed empty default for the q0 / gains fields."""
+    """Typed empty default for the q0 field."""
     return {}
 
 
@@ -216,7 +214,6 @@ class ControlGroup:
         target: one of :data:`CONTROL_TARGETS`; must match ``drive``.
         q0: optional per-joint default positions (overrides ``JointSpec.init``
             and the profile defaults).
-        gains: optional per-joint / group gains.
         command: optional execution parameters (e.g. servo parameters).
         control_dt: optional control period (s); all groups of one adapter
             must agree (absent values inherit).
@@ -230,7 +227,6 @@ class ControlGroup:
     joint_set: str | None = None
     joints: tuple[str, ...] | None = None
     q0: Mapping[str, float] = field(default_factory=_empty_float_map)
-    gains: Mapping[str, float] = field(default_factory=_empty_float_map)
     command: Mapping[str, JsonValue] | None = None
     control_dt: float | None = None
 
@@ -289,14 +285,6 @@ class ControlGroup:
                 for name, value in dict(self.q0 or {}).items()
             },
         )
-        object.__setattr__(
-            self,
-            "gains",
-            {
-                str(name): _finite(value, f"control group {self.name!r} " f"gains[{name!r}]")
-                for name, value in dict(self.gains or {}).items()
-            },
-        )
         if self.command is not None:
             if not isinstance(self.command, Mapping):
                 raise ControlError(
@@ -345,7 +333,6 @@ class ControlGroup:
             joint_set=_raw_joint_set(entry.get("joint_set"), group_name),
             joints=_raw_strings(entry.get("joints"), f"control group {group_name!r} joints"),
             q0=_raw_float_map(entry.get("q0"), f"control group {group_name!r} q0"),
-            gains=_raw_float_map(entry.get("gains"), f"control group {group_name!r} gains"),
             command=_raw_command(entry.get("command"), f"control group {group_name!r} command"),
             control_dt=(
                 None
@@ -534,7 +521,7 @@ def project_group(
 
     Returns:
         A plain dict ``{name, action_face, adapter, articulation,
-        joint_names, q0, gains, drive, target}``; ``q0`` is a tuple aligned
+        joint_names, q0, drive, target}``; ``q0`` is a tuple aligned
         with ``joint_names``.
 
     ``joint_set`` groups must be resolved upstream (build expands the set
@@ -568,7 +555,6 @@ def project_group(
         "articulation": group.articulation,
         "joint_names": names,
         "q0": tuple(q0),
-        "gains": dict(group.gains),
         "drive": group.drive,
         "target": group.target,
     }

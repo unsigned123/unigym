@@ -17,6 +17,7 @@ def env_kwargs(
     profiles=None,
     robot_realizations=None,
     backend_options=None,
+    actuation_plans=None,
 ) -> dict:
     """Builder kwargs for ``MjwarpEnv`` (legacy kwargs, byte-identical).
 
@@ -37,6 +38,7 @@ def env_kwargs(
         "articulations": getattr(spec, "articulations", None),
         "controls": controls,
         "profiles": profiles,
+        "actuation_plans": actuation_plans,
         "backend_options": backend_options,
     }
 
