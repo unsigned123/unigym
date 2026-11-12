@@ -172,7 +172,7 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
 
 @pytest.mark.parametrize("mode", ["all", "none"])
 def test_all_and_none_contribute_no_resolvable_groups(mode):
-    """D2 leaves omitted-contacts all/none materialization to D3."""
+    """D2 leaves omitted-contacts all/none materialization to D5."""
     profile = _profile()
     spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode=mode))
     effective = _effective_profile(spec, profile, _info("mjcf"))

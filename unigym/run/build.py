@@ -554,7 +554,7 @@ def _reject_inventory_mode_refs(
     """Fail fast when a run-level contact group references an ``all``/``none``.
 
     D2 resolves only explicit ``declared`` inventory groups; materializing
-    omitted-contacts ``all`` is D3 work.
+    omitted-contacts ``all`` is D5 work.
     """
     if not is_object_sequence(contacts_cfg):
         return
@@ -575,7 +575,7 @@ def _reject_inventory_mode_refs(
                 f"contact_group reference {articulation}.{group} targets an "
                 f"articulation whose contacts mode is {modes[articulation]!r}; "
                 f"D2 requires an explicit declared group (omitted-contacts "
-                f"materialization is D3)"
+                f"materialization is D5)"
             )
 
 
