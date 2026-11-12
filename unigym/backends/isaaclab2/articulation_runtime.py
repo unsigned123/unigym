@@ -19,6 +19,7 @@ import isaaclab.utils.math as math_utils
 from isaaclab.envs.mdp.actions import JointPositionActionCfg
 from isaaclab.sensors import ContactSensorCfg
 
+from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.env.obs_catalog import ObsCatalog, ObsSpec, build_obs_catalog
 from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
@@ -96,7 +97,7 @@ def _initial_state(init, pos, rot):
     )
 
 
-def configure_scene(cfg, controls, articulations, recipes) -> dict:
+def configure_scene(cfg, controls, articulations, profiles, robot_realizations) -> dict:
     """Add per-articulation scene fields + one action term per control."""
     if len(articulations) < 2:
         raise ValueError(
@@ -105,15 +106,9 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
     controls = tuple(controls or ())
     fields: dict[str, str] = {}
     for index, spec in enumerate(articulations):
-        recipe = recipes.get(spec.name)
-        if recipe is None:
-            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no recipe")
-        asset_cfg = recipe.articulation_cfg
-        if asset_cfg is None:
-            raise ValueError(
-                f"{_LABEL}: articulation {spec.name!r} recipe carries no "
-                f"ArticulationCfg (the isaaclab backend needs one)"
-            )
+        if profiles.get(spec.name) is None:
+            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no profile")
+        asset_cfg = articulation_cfg(robot_realizations, spec.name)
         first = index == 0
         field = _scene_field(spec.name, first)
         leaf = "Robot" if first else f"Robot_{spec.name}"
@@ -180,13 +175,13 @@ def configure_scene(cfg, controls, articulations, recipes) -> dict:
     return fields
 
 
-def _articulation_runtime(env, spec, recipe, asset, contact) -> ArticulationRuntime:
+def _articulation_runtime(env, spec, profile, asset, contact) -> ArticulationRuntime:
     asset_names = tuple(asset.joint_names)
-    defaults = dict(getattr(recipe, "default_joint_pos", {}) or {})
+    defaults = dict(getattr(profile, "default_joint_pos", {}) or {})
     q0_art = torch.tensor(
         [float(defaults.get(n, 0.0)) for n in asset_names], dtype=torch.float32, device=env.device
     )
-    feet = tuple(getattr(recipe, "foot_bodies", None) or ())
+    feet = tuple(getattr(profile, "foot_bodies", None) or ())
     body_names = list(contact.body_names)
     foot_perm = torch.tensor(
         [body_names.index(f) for f in feet], dtype=torch.int64, device=env.device
@@ -204,7 +199,7 @@ def _articulation_runtime(env, spec, recipe, asset, contact) -> ArticulationRunt
         feet=feet,
         body_parts=dict(getattr(spec, "body_parts", {}) or {}),
         spawn=dict(getattr(spec, "spawn", {}) or {}),
-        recipe=recipe,
+        profile=profile,
     )
     art.asset = asset
     art.contact = contact
@@ -212,7 +207,7 @@ def _articulation_runtime(env, spec, recipe, asset, contact) -> ArticulationRunt
     art.foot_perm = foot_perm
     art.foot_body_idx = foot_body_idx
     art.catalog = build_obs_catalog(
-        recipe, articulation_joint_names=list(asset_names), articulation=spec.name
+        profile, articulation_joint_names=list(asset_names), articulation=spec.name
     )
     return art
 
@@ -250,11 +245,11 @@ def _bind_term_resolvers(env) -> None:
         env._term_resolvers[name] = IsaaclabJointResolver(joint_names)
 
 
-def _bind_control_runtimes(env, specs, recipes, partitioned, first) -> dict:
+def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
     env.articulations = {}
     for spec in specs:
         env.articulations[spec.name] = _articulation_runtime(
-            env, spec, recipes[spec.name], env.robots[spec.name], env.contacts[spec.name]
+            env, spec, profiles[spec.name], env.robots[spec.name], env.contacts[spec.name]
         )
     controls: dict[str, ControlRuntime] = {}
     for control in tuple(env._planned_controls or ()):
@@ -337,16 +332,15 @@ def _bind_obs_catalogs(env) -> None:
     env.obs_catalog = ObsCatalog(entries, requestable)
 
 
-def bind_articulations(env, robot_profile=None) -> None:
+def bind_articulations(env) -> None:
     """Bind every articulation/control runtime after ``super().__init__``."""
-    del robot_profile
     specs = tuple(env._articulation_specs)
-    recipes = dict(env._recipes)
+    profiles = dict(env._profiles)
     fields = dict(env._articulation_fields or {})
     partitioned = len(specs) > 1
     first = _bind_scene_fields(env, specs, fields, partitioned)
     _bind_term_resolvers(env)
-    controls = _bind_control_runtimes(env, specs, recipes, partitioned, first)
+    controls = _bind_control_runtimes(env, specs, profiles, partitioned, first)
     _bind_control_order(env, controls)
 
     first_art = env.articulations[first]

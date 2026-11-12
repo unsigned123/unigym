@@ -222,8 +222,14 @@ class BackendInfo:
     """Factory -> the backend's ``SceneOps`` class (typed scene query)."""
     kit_launcher: Callable[[], Callable[..., tuple[Any, Any]]] | None = None
     """Factory -> ``kit_launcher(parser, warn=None)`` (kit launch before build)."""
-    recipe_with_isaaclab: bool = False
-    """Build the ``ArticulationCfg`` on the robot recipe (kit-bound)."""
+    robot_realizer: Callable[[], object] | None = None
+    """Factory -> ``realize(profile, *, params, asset_plan)``.
+
+    The realizer turns a neutral :class:`~unigym.robots.base.RobotProfile`
+    into the backend's robot realization (e.g. an Isaac Lab
+    ``ArticulationCfg``).  ``None`` means the backend consumes the neutral
+    profile directly and builds no backend robot object.
+    """
     default_lighting: Mapping[str, float] | None = None
     """Default lights for a textured usd prop when the config declares none."""
     camera_enable_required: bool = False
@@ -842,6 +848,12 @@ def _isaaclab2_kit_launcher() -> Callable[..., tuple[Any, Any]]:
     return kit_launcher
 
 
+def _isaaclab2_robot_realizer() -> object:
+    from unigym.backends.isaaclab2.robots import build_robot_realization
+
+    return build_robot_realization
+
+
 _STATIC_INFO: dict[str, BackendInfo] = {
     "mujoco": BackendInfo(
         "mujoco",
@@ -909,7 +921,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         build_events=_isaaclab2_build_events,
         scene_ops=_isaaclab2_scene_ops,
         kit_launcher=_isaaclab2_kit_launcher,
-        recipe_with_isaaclab=True,
+        robot_realizer=_isaaclab2_robot_realizer,
         default_lighting={"dome_intensity": 600.0},
         camera_enable_required=True,
     ),
@@ -928,7 +940,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         build_events=_isaaclab2_build_events,
         scene_ops=_isaaclab2_scene_ops,
         kit_launcher=_isaaclab2_kit_launcher,
-        recipe_with_isaaclab=True,
+        robot_realizer=_isaaclab2_robot_realizer,
         default_lighting={"dome_intensity": 600.0},
         camera_enable_required=True,
     ),

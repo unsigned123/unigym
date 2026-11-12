@@ -74,7 +74,7 @@ if TYPE_CHECKING:
         ResolvedControlPlan,
     )
     from unigym.packs.runtime import PackRuntime
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.run.instance import RunInstance
     from unigym.runner.base import Runner, StepResult
     from unigym.world import World
@@ -283,9 +283,9 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
         entry.pop("control", None)
     else:
         raise NotImplementedError(
-            "a RobotRecipe INSTANCE is not representable in the current "
+            "a RobotProfile INSTANCE is not representable in the current "
             "config schema (robot is a {name, params, body_parts} "
-            "declaration built by build_robot_recipe). Pass "
+            "declaration built by build_robot_profile). Pass "
             'robot="<registered robot>" with params/body_parts in the '
             "config instead"
         )
@@ -299,7 +299,7 @@ def _controls_entries(
     """Builder convenience: the top-level ``controls:`` groups.
 
     The body group is named after the articulation (the historical action
-    face) and selects ``joint_set: body``; recipe-declared extra faces
+    face) and selects ``joint_set: body``; profile-declared extra faces
     (``hand`` / ``right_hand`` / ...) select their same-named joint set.
     Joints are resolved once at build time -- the builder never copies a
     joint list and never infers a set from the group name.
@@ -315,20 +315,20 @@ def _controls_entries(
         "target": "position",
     }
     groups: list[dict[str, JsonValue]] = [body]
-    recipe: RobotRecipe | None = None
+    profile: RobotProfile | None = None
     try:
-        from unigym.robots import build_robot_recipe
+        from unigym.robots import build_robot_profile
 
-        recipe = build_robot_recipe(entry, with_isaaclab=False)
+        profile = build_robot_profile(entry)
     except (AttributeError, KeyError, NotImplementedError, ValueError):
-        recipe = None
-    if recipe is not None:
+        profile = None
+    if profile is not None:
         body["joint_set"] = "body"
-        # Only recipe-declared extra faces (``actuate_hands``) are emitted
-        # here: an adapter that emits a face the recipe does not declare
+        # Only profile-declared extra faces (``actuate_hands``) are emitted
+        # here: an adapter that emits a face the profile does not declare
         # (e.g. the G1 ``hand`` face) must get it from its config's
         # ``controls[]`` -- the partition is the single authority.
-        terms: Mapping[str, Sequence[str]] = recipe.extra_action_terms or {}
+        terms: Mapping[str, Sequence[str]] = profile.action_faces or {}
         for face in terms:
             groups.append(
                 {

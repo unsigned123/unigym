@@ -15,7 +15,8 @@ def env_kwargs(
     spec=None,
     *,
     controls=None,
-    recipes=None,
+    profiles=None,
+    robot_realizations=None,
     backend_options=None,
 ) -> dict:
     """Builder kwargs ``IsaaclabEnv`` accepts.
@@ -23,8 +24,10 @@ def env_kwargs(
     The isaaclab env takes neither ``backend_params`` nor ``world_base``
     (the world is the cloned scene); it takes the native ``terrain`` IR
     and the ``static_shapes`` declarations from the run spec.
-    ``controls`` / ``recipes`` carry the neutral control runtimes and the
-    per-articulation RobotRecipes.
+    ``controls`` / ``profiles`` carry the neutral control runtimes and the
+    per-articulation :class:`~unigym.robots.base.RobotProfile` objects;
+    ``robot_realizations`` carries the backend-owned articulation configs
+    built by this backend's robot realizer.
     """
     del (env_cfg, artifacts_dir, world_base)
     return {
@@ -32,7 +35,8 @@ def env_kwargs(
         "static_shapes": getattr(spec, "static_shapes", None),
         "articulations": getattr(spec, "articulations", None),
         "controls": controls,
-        "recipes": recipes,
+        "profiles": profiles,
+        "robot_realizations": robot_realizations,
         "backend_options": backend_options,
     }
 
@@ -53,11 +57,18 @@ def build_terrain(cfg: dict, num_envs: int, env_spacing: float, spec_terrain=Non
     )
 
 
-def apply_actuator_override(profile, section) -> None:
+def apply_actuator_override(realization, section) -> None:
     """Apply the yaml top-level ``actuator:`` override to the ArticulationCfg."""
+    from isaaclab.assets import ArticulationCfg
+
     from unigym.backends.isaaclab2.actuators import build_actuator
 
-    profile.articulation_cfg.actuators = {"legs": build_actuator(section)}
+    if not isinstance(realization, ArticulationCfg):
+        raise TypeError(
+            "isaaclab actuator override requires an ArticulationCfg "
+            f"realization, got {type(realization).__name__}"
+        )
+    realization.actuators = {"legs": build_actuator(section)}
 
 
 def build_events(section):

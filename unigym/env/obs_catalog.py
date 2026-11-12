@@ -484,7 +484,7 @@ def build_obs_catalog(
     """Build the run's :class:`ObsCatalog` at env-construction time.
 
     Args:
-        profile: the run's :class:`~unigym.robots.base.RobotRecipe`
+        profile: the run's :class:`~unigym.robots.base.RobotProfile`
             (joint/foot orders feed the fixed key table).
         camera_manager: optional wired
             :class:`~unigym.cameras.CameraManager` — its ``cam/*`` keys and

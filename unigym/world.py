@@ -703,10 +703,10 @@ class World:
                 joints_json: list[JsonValue] = [name for name in declared]
                 group["joints"] = joints_json
             else:
-                # empty declaration == the recipe's body set (v105)
+                # empty declaration == the profile's body set
                 group["joint_set"] = "body"
         else:
-            # a programmatic body group selects the recipe set explicitly;
+            # a programmatic body group selects the profile set explicitly;
             # build resolves it once (no group-name inference)
             group["joint_set"] = "body"
         self._controls.append(group)

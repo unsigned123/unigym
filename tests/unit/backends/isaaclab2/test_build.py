@@ -22,7 +22,8 @@ def test_env_kwargs_forwards_backend_payload():
     static_shapes = [object()]
     articulations = [object()]
     controls = object()
-    recipes = object()
+    profiles = object()
+    robot_realizations = object()
     backend_options = {"headless": True}
     spec = _RunSpec(terrain=terrain, static_shapes=static_shapes, articulations=articulations)
 
@@ -32,7 +33,8 @@ def test_env_kwargs_forwards_backend_payload():
         "world",
         spec,
         controls=controls,
-        recipes=recipes,
+        profiles=profiles,
+        robot_realizations=robot_realizations,
         backend_options=backend_options,
     )
 
@@ -40,7 +42,8 @@ def test_env_kwargs_forwards_backend_payload():
     assert result["static_shapes"] is static_shapes
     assert result["articulations"] is articulations
     assert result["controls"] is controls
-    assert result["recipes"] is recipes
+    assert result["profiles"] is profiles
+    assert result["robot_realizations"] is robot_realizations
     assert result["backend_options"] is backend_options
 
 
@@ -53,7 +56,8 @@ def test_env_kwargs_does_not_leak_builder_only_arguments():
         "static_shapes",
         "articulations",
         "controls",
-        "recipes",
+        "profiles",
+        "robot_realizations",
         "backend_options",
     }
 

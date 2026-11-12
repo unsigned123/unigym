@@ -10,7 +10,7 @@ allowed here (attribute neutrality).
 
 v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
 / ``policy_section``: the drive declaration lives in ``controls[]`` and the
-robot recipe only supplies the joint order / q0 / body parts.
+robot profile only supplies the joint order / q0 / body parts.
 """
 
 from __future__ import annotations
@@ -234,8 +234,8 @@ class JointSpec:
 class ArticulationSpec:
     """One articulation: root + model + joints + spawn (neutral IR).
 
-    ``joints`` may be omitted for recipe-derived articulations (the robot
-    recipe supplies the joint order); when it is declared, every joint is
+    ``joints`` may be omitted for profile-derived articulations (the robot
+    profile supplies the joint order); when it is declared, every joint is
     actuated unless listed in ``passive_joints``.  Control coverage is
     validated at the run level against ``controls[]``
     (:func:`unigym.runtime.controls.validate_controls`).

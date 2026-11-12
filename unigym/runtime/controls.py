@@ -207,15 +207,15 @@ class ControlGroup:
         name: the action face and ``NamedAction`` key.
         adapter: the adapter instance that drives this group.
         articulation: the articulation this group belongs to (one only, MVP).
-        joint_set: a named joint set of the articulation's ``RobotRecipe``
-            (e.g. ``body`` / ``hand``).  Requires a recipe-backed
+        joint_set: a named joint set of the articulation's ``RobotProfile``
+            (e.g. ``body`` / ``hand``).  Requires a profile-backed
             articulation; build resolves it exactly once.
-        joints: explicit joint names (recipe-backed OR recipe-less
+        joints: explicit joint names (profile-backed OR profile-less
             articulation).  Exactly one of ``joint_set`` / ``joints``.
         drive: one of :data:`CONTROL_DRIVES`.
         target: one of :data:`CONTROL_TARGETS`; must match ``drive``.
         q0: optional per-joint default positions (overrides ``JointSpec.init``
-            and the recipe defaults).
+            and the profile defaults).
         gains: optional per-joint / group gains.
         command: optional execution parameters (e.g. servo parameters).
         control_dt: optional control period (s); all groups of one adapter
@@ -416,10 +416,10 @@ def validate_controls(
         one group or listed in its ``passive_joints``;
       * all groups of one adapter agree on ``control_dt`` (absent inherits).
 
-    ``joint_set`` groups are resolved by the recipe at build time, so their
+    ``joint_set`` groups are resolved by the profile at build time, so their
     concrete joints are not known here; joint-level checks skip them (the
     build-time resolution validates the set name and coverage).
-    Recipe-derived articulations (no declared ``joints``) cannot be checked
+    Profile-derived articulations (no declared ``joints``) cannot be checked
     for coverage here either.
 
     Raises:
@@ -496,7 +496,7 @@ def validate_controls(
                 f"{unknown_passive} are not declared joints"
             )
         if art.name in unresolved:
-            # a joint_set group is resolved by the recipe at build time;
+            # a joint_set group is resolved by the profile at build time;
             # coverage is validated there, not against a partial
             # driven set
             continue
@@ -528,7 +528,7 @@ def project_group(
 
     Args:
         group: the frozen :class:`ControlGroup`.
-        defaults: optional recipe defaults (``{joint: q0}``) used when the
+        defaults: optional profile defaults (``{joint: q0}``) used when the
             group does not override a joint.
         prefix: optional composition prefix applied to the joint names.
 
@@ -538,14 +538,14 @@ def project_group(
         with ``joint_names``.
 
     ``joint_set`` groups must be resolved upstream (build expands the set
-    against the recipe before projecting); this neutral helper only projects
+    against the profile before projecting); this neutral helper only projects
     explicit ``joints``.
     """
     if group.joints is None:
         raise ControlError(
             f"control group {group.name!r} selects joint_set "
             f"{group.joint_set!r}; resolve it against the articulation's "
-            f"RobotRecipe before projecting (joints are not known here)"
+            f"RobotProfile before projecting (joints are not known here)"
         )
     base = dict(defaults or {})
     base.update(group.q0)
@@ -554,7 +554,7 @@ def project_group(
         if joint not in base:
             raise ControlError(
                 f"control group {group.name!r} has no q0 for joint "
-                f"{joint!r}; declare control.q0 or extend the recipe"
+                f"{joint!r}; declare control.q0 or extend the profile"
             )
         q0.append(_finite(base[joint], f"control group {group.name!r} " f"q0[{joint!r}]"))
     names = tuple(

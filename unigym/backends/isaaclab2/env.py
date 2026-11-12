@@ -37,6 +37,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
 from unigym.cameras.manager import validate_image_frame
+from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.core import quat
 
 from unigym.env.episode import parse_episode_length, sample_durations
@@ -118,7 +119,8 @@ def _configure_robot_scene(
     adapter,
     controls,
     articulations,
-    recipes,
+    profiles,
+    robot_realizations,
     prop_manager,
     *,
     events_cfg,
@@ -149,9 +151,21 @@ def _configure_robot_scene(
             director_cfg=director_cfg,
             init_pose_cfg=init_pose_cfg,
         )
-        fields = _articulation_runtime.configure_scene(cfg, controls, ars, dict(recipes or {}))
+        fields = _articulation_runtime.configure_scene(
+            cfg,
+            controls,
+            ars,
+            dict(profiles or {}),
+            dict(robot_realizations or {}),
+        )
         return partitioned, fields
-    cfg.scene.robot = robot_profile.articulation_cfg
+    if ars:
+        cfg.scene.robot = articulation_cfg(robot_realizations, ars[0].name)
+    else:
+        raise ValueError(
+            "isaaclab2 backend: a run must declare at least one articulation "
+            "with an ArticulationCfg realization"
+        )
     # The generic `.*_foot` regex only matches foot-style body names;
     # derive an explicit alternation from the profile's declared feet
     # (body_parts["feet"]) when available, else keep the default
@@ -238,7 +252,7 @@ def _configure_robot_scene(
     # (declaration-becomes-capability, same rule as the prop terms
     # above).  ``None`` (every profile built without actuate_hands)
     # leaves the action surface untouched.
-    for term_name, term_joints in (robot_profile.extra_action_terms or {}).items():
+    for term_name, term_joints in (robot_profile.action_faces or {}).items():
         if hasattr(cfg.actions, term_name):
             raise ValueError(
                 f"extra action entry {term_name!r} collides with an " f"existing action term name"
@@ -272,7 +286,7 @@ class _IsaaclabSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         history_length=1,
     )
-    robot: ArticulationCfg | None = None  # filled from RobotRecipe
+    robot: ArticulationCfg | None = None  # filled from the backend realizer
     # camera sensors (obs + recorder camera_ref) join the scene ONLY via
     # cameras/ CameraManager.setup_scene under cam_<name> fields (the
     # recorder's self-built tiled_camera path was removed).
@@ -347,14 +361,15 @@ class IsaaclabEnv(ManagerBasedEnv):
         static_shapes=None,
         articulations=None,
         controls=None,
-        recipes=None,
+        profiles=None,
+        robot_realizations=None,
         backend_options=None,
         asset_plan=None,
     ):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
         Args:
-            robot_profile: RobotRecipe (articulation cfg + joint order +
+            robot_profile: the neutral RobotProfile (joint order +
                 feet/body parts); source of the action term's joint list.
             adapter: Adapter consuming this env (read for its
                 ``wants_reset_render`` opt-in only).
@@ -420,9 +435,11 @@ class IsaaclabEnv(ManagerBasedEnv):
             device: torch device string for the sim (default ``cuda:0``).
             articulations: the run's ordered neutral articulation specs.
             controls: neutral ``ControlRuntime`` entries built from
-                ``RunSpec.controls`` + the robot recipes.
-            recipes: ``{articulation name: RobotRecipe}`` supplying each
-                articulation's ArticulationCfg.
+                ``RunSpec.controls`` + the robot profiles.
+            profiles: ``{articulation name: RobotProfile}`` neutral robot
+                data for every articulation.
+            robot_realizations: ``{articulation name: ArticulationCfg}``
+                built by this backend's robot realizer.
             backend_options: backend-private options; isaaclab declares none
                 (``env.backend_options.isaaclab`` fails fast before build).
             asset_plan: accepted for the shared build face; the isaaclab
@@ -437,7 +454,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._contact_force_threshold = float(contact_force_threshold)
         self._init_pose = build_init_pose_cfg(init_pose)
         self._articulation_specs = tuple(articulations or ())
-        self._recipes = dict(recipes or {})
+        self._profiles = dict(profiles or {})
         if backend_options:
             raise ValueError(
                 "isaaclab backend declares no backend_options (unknown keys "
@@ -467,7 +484,8 @@ class IsaaclabEnv(ManagerBasedEnv):
             adapter,
             controls,
             articulations,
-            recipes,
+            profiles,
+            robot_realizations,
             prop_manager,
             events_cfg=events_cfg,
             recorder=recorder,
@@ -576,7 +594,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         # ---- articulation/control runtimes ----
         from . import articulation_runtime as _articulation_runtime
 
-        _articulation_runtime.bind_articulations(self, robot_profile)
+        _articulation_runtime.bind_articulations(self)
         # single articulation keeps the historical flat compatibility attrs
         art = next(iter(self.articulations.values()))
         pol_names = list(
@@ -639,7 +657,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         self.obs_catalogs = {}
         for a in self.articulations.values():
             cat = build_obs_catalog(
-                a.recipe,
+                a.profile,
                 camera_manager=self.camera_manager,
                 prop_manager=self.prop_manager,
                 contact_manager=self.contact_manager,

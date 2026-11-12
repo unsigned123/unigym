@@ -267,7 +267,7 @@ def _asset_robot_names(env, spec, name_map) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _build_articulation(env, spec, recipe, name_map, params, label):
+def _build_articulation(env, spec, profile, name_map, params, label):
     """Build one :class:`ArticulationRuntime` for a declared articulation.
 
     ``art.joint_names`` / ``art.feet`` / ``art.base_body`` are neutral
@@ -282,9 +282,9 @@ def _build_articulation(env, spec, recipe, name_map, params, label):
         root=getattr(spec, "root", "free"),
         body_parts=dict(getattr(spec, "body_parts", {}) or {}),
         spawn=dict(getattr(spec, "spawn", {}) or {}),
-        recipe=recipe,
+        profile=profile,
     )
-    if recipe is None:
+    if profile is None:
         joints = tuple(str(j.name) for j in (getattr(spec, "joints", ()) or ()))
         init = {
             str(j.name): float(getattr(j, "init", 0.0)) for j in (getattr(spec, "joints", ()) or ())
@@ -315,18 +315,18 @@ def _build_articulation(env, spec, recipe, name_map, params, label):
 
     robot_names = _asset_robot_names(env, spec, name_map)
     backend_names = tuple(name_map.backend_name(spec.name, name) for name in robot_names)
-    defaults = dict(getattr(recipe, "default_joint_pos", {}) or {})
+    defaults = dict(getattr(profile, "default_joint_pos", {}) or {})
     q0_mj = np.asarray([float(defaults.get(n, 0.0)) for n in robot_names], dtype=np.float64)
-    parts = dict(getattr(recipe, "body_parts", None) or {})
+    parts = dict(getattr(profile, "body_parts", None) or {})
     base_body = str(parts.get("base") or "pelvis")
     backend_base = name_map.backend_body(spec.name, base_body)
-    foot_names = [str(n) for n in (getattr(recipe, "foot_bodies", None) or ())]
+    foot_names = [str(n) for n in (getattr(profile, "foot_bodies", None) or ())]
     backend_feet = [name_map.backend_body(spec.name, n) for n in foot_names]
     art.joint_names = tuple(robot_names)
     art.q0 = torch.tensor(q0_mj, dtype=torch.float32)
     art.robot_joint_names = tuple(robot_names)
     # Fingerprint parity: the reset write uses the float32-rounded q0
-    # (the historical binding.q0), not the raw float64 recipe defaults.
+    # (the historical binding.q0), not the raw float64 profile defaults.
     art.q0_mj = np.asarray(art.q0, dtype=np.float64)
     art.base_body = base_body
     art.feet = tuple(foot_names)
@@ -460,14 +460,14 @@ def init_tables(env, model, params: dict, gains_fn, *, label=None) -> None:
     act_of_joint = actuator_by_joint(env._model_ir)
     env._act_of_joint = act_of_joint
     specs = tuple(getattr(env, "_articulation_specs", ()) or ())
-    recipes = dict(getattr(env, "_recipes", {}) or {})
+    profiles = dict(getattr(env, "_profiles", {}) or {})
     name_map = env._mj_name_map
     env._mj_bindings = {}
     env._mj_articulation_bindings = {}
     art_order = []
     arts = {}
     for spec in specs:
-        art = _build_articulation(env, spec, recipes.get(spec.name), name_map, params, label)
+        art = _build_articulation(env, spec, profiles.get(spec.name), name_map, params, label)
         arts[art.name] = art
         art_order.append(art)
     env.articulations = arts

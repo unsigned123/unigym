@@ -1,15 +1,15 @@
 """Fourier GR1 robot profile (GR1ArmsAndWaistFourierHands, tabletop).
 
 Asset: the T1.1 bitwise-reconstructed gr1 tabletop world -- since the
-scene retirement it is assembled from the robot world-part XML
-(``assets/gr1_tabletop/gr1_tabletop_robot.xml``) plus the registered
+scene retirement it is assembled from the robot world-part XML owned by the registered
 ``gr1_tabletop`` scene (the retired live scene XMLs live in
 the anchors machine domain, set gr00t-r1 ``scene_retirement/``); 39
 actuators over 39 robot hinges, NO freejoint -- the
-pelvis is welded to the world.  The profile is consumed by the mujoco
-backend as pure constants (``articulation_cfg=None``): joint order, reset
-pose tables, hand drive faces and body parts all come from
-:mod:`unigym.robots.gr1_constants` (audit-transcribed, provenance there).
+pelvis is welded to the world.  The profile is pure neutral data consumed
+by the mujoco family: joint order, reset pose tables, hand drive faces and
+body parts all come from :mod:`unigym.robots.gr1_constants`
+(audit-transcribed, provenance there).  No isaaclab realization exists for
+this asset; the isaaclab robot realizer rejects it explicitly.
 
 Action face (T1.2b): the 5-group
 29-dim GR00T layout maps onto TWO NamedAction faces:
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from .base import RobotRecipe
+from .base import RobotProfile
 from .gr1_constants import (
     GR1_BODY_PARTS,
     GR1_COTRAIN_POSE,
@@ -48,9 +48,8 @@ from .gr1_constants import (
 def make_gr1_profile(
     default_q: Optional[Dict[str, float]] = None,
     body_parts: Optional[Dict] = None,
-    with_isaaclab: bool = False,
-) -> RobotRecipe:
-    """Build the GR1 (arms+waist+Fourier hands) RobotRecipe.
+) -> RobotProfile:
+    """Build the neutral GR1 (arms+waist+Fourier hands) :class:`RobotProfile`.
 
     Args:
         default_q: optional per-joint override of the nominal reset pose
@@ -59,18 +58,7 @@ def make_gr1_profile(
             :data:`GR1_COTRAIN_POSE` + per-joint noise at reset time
             (T1.4) -- this channel is for the profile-level pose only.
         body_parts: optional partial override of :data:`GR1_BODY_PARTS`.
-        with_isaaclab: NOT supported -- there is no isaaclab GR1 asset in
-            this campaign and the isaaclab-side computed-torque
-            ActuatorModel is a later task (design D2); the mujoco backend
-            consumes this profile as pure constants.
     """
-    if with_isaaclab:
-        raise NotImplementedError(
-            "make_gr1_profile: no isaaclab ArticulationCfg exists for the "
-            "GR1 tabletop asset; the isaaclab backend cannot carry the "
-            "computed-torque laws yet (design D2 defers the ActuatorModel "
-            "mapping) | hint: run the GR1 campaign on the mujoco backend"
-        )
     joint_pos = dict(GR1_INIT_QPOS)
     # fingers rest at 0 (audit §7: gripper.init_qpos = [0]*11) -- same
     # convention as the G1 profile's hand block
@@ -88,28 +76,30 @@ def make_gr1_profile(
     bp = dict(GR1_BODY_PARTS)
     if body_parts:
         bp.update(body_parts)
-    return RobotRecipe(
-        articulation_cfg=None,
-        # v105: the named joint vocabulary.  ``body`` is the 17 policy
-        # joints; the two hand faces keep their exact drive order.
+    return RobotProfile(
+        name="gr1",
+        # the named joint vocabulary.  ``body`` is the 17 policy joints; the
+        # two hand faces keep their exact drive order.
         joint_sets={
             "body": tuple(GR1_JOINT_ORDER),
             "right_hand": tuple(GR1_RIGHT_HAND_DRIVE_ORDER),
             "left_hand": tuple(GR1_LEFT_HAND_DRIVE_ORDER),
         },
         default_joint_pos=joint_pos,
-        foot_bodies=[],  # world-fixed base: no feet
+        foot_bodies=(),  # world-fixed base: no feet
         body_parts=bp,
-        # document-order preservation for the full-articulation obs keys;
-        # the set union is body+right_hand+left_hand, not MJ document order
-        _full_joint_names=list(GR1_JOINT_ORDER_MJ),
+        # No RobotAsset here: the GR1 MJCF is owned by the robocasa pack's
+        # scene resource, not by the neutral robot profile.
         # the two hand NamedAction faces (11 drive-order names each; the
         # 6 -> 11 repetition is adapter-side arithmetic over
         # GR1_HAND_EXPANSION -- module docstring)
-        _extra_action_terms={
-            "right_hand": list(GR1_RIGHT_HAND_DRIVE_ORDER),
-            "left_hand": list(GR1_LEFT_HAND_DRIVE_ORDER),
+        action_faces={
+            "right_hand": tuple(GR1_RIGHT_HAND_DRIVE_ORDER),
+            "left_hand": tuple(GR1_LEFT_HAND_DRIVE_ORDER),
         },
+        # document-order preservation for the full-articulation obs keys;
+        # the set union is body+right_hand+left_hand, not MJ document order
+        full_joint_order=tuple(GR1_JOINT_ORDER_MJ),
     )
 
 

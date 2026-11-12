@@ -14,7 +14,8 @@ def env_kwargs(
     spec=None,
     *,
     controls=None,
-    recipes=None,
+    profiles=None,
+    robot_realizations=None,
     backend_options=None,
 ) -> dict:
     """Builder kwargs for ``MjwarpEnv`` (legacy kwargs, byte-identical).
@@ -23,16 +24,19 @@ def env_kwargs(
     wiring left it at its default ``None`` and this face preserves that
     (the mujoco face passes it; see ``unigym.backends.mujoco.build``).
     ``articulations`` is the neutral run spec's ordered list.
-    ``controls`` / ``recipes`` carry the neutral control runtimes and the
-    per-articulation RobotRecipes.
+    ``controls`` / ``profiles`` carry the neutral control runtimes and the
+    per-articulation :class:`~unigym.robots.base.RobotProfile` objects.
+    ``robot_realizations`` is not consumed: this backend builds no backend
+    robot object and receives the neutral profile only.
     """
     del artifacts_dir
+    del robot_realizations
     return {
         "backend_params": env_cfg.get("params") or {},
         "world_base": world_base,
         "articulations": getattr(spec, "articulations", None),
         "controls": controls,
-        "recipes": recipes,
+        "profiles": profiles,
         "backend_options": backend_options,
     }
 

@@ -1,9 +1,9 @@
 """Passive-joint authoring sugar for the programmatic builders.
 
-A recipe declares its full actuated vocabulary (``joint_sets``) and
+A profile declares its full actuated vocabulary (``joint_sets``) and
 every control group selects an explicit subset.  The programmatic builders
 (``Run(robot=...)`` / ``World``) are authoring sugar, so the remaining
-recipe joints are written into ``passive_joints`` instead of inventing a
+profile joints are written into ``passive_joints`` instead of inventing a
 runtime action face.  An explicit caller declaration always wins.
 """
 
@@ -21,7 +21,7 @@ def declare_passive_joints(
     entry: dict[str, JsonValue],
     controls: Sequence[JsonValue],
 ) -> None:
-    """Declare recipe joints no emitted control group drives as passive.
+    """Declare profile joints no emitted control group drives as passive.
 
     Args:
         entry: One ``articulations[]`` mapping (mutated in place).
@@ -35,17 +35,17 @@ def declare_passive_joints(
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     selector = params.pop("profile", None)
     if selector is not None:
-        # `params.profile` selects the recipe for a renamed
-        # articulation (e.g. g1b); it never reaches the recipe factory.
+        # `params.profile` selects the profile for a renamed
+        # articulation (e.g. g1b); it never reaches the profile factory.
         section["params"] = params
         section["name"] = str(selector)
     try:
-        from unigym.robots import build_robot_recipe
+        from unigym.robots import build_robot_profile
 
-        recipe = build_robot_recipe(section, with_isaaclab=False)
+        profile = build_robot_profile(section)
     except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
         return
-    sets = dict(recipe.joint_sets)
+    sets = dict(profile.joint_sets)
     actuated: list[str] = []
     for joints in sets.values():
         for joint in joints:
@@ -74,7 +74,7 @@ def declare_passive_joints(
 
 
 def declare_world_passive_joints(cfg: dict[str, JsonValue]) -> None:
-    """Declare recipe joints of every world articulation no control drives."""
+    """Declare profile joints of every world articulation no control drives."""
     raw_controls = cfg.get("controls")
     controls: list[JsonValue] = list(raw_controls) if isinstance(raw_controls, list) else []
     raw_entries = cfg.get("articulations")

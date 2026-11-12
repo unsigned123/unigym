@@ -30,7 +30,7 @@ from unigym.env.backends import build_env_backend
 from unigym.filters import build_filter_chain
 from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
-from unigym.robots import build_robot_recipe
+from unigym.robots import build_robot_profile
 from unigym.runtime.controllers import (
     build_control_plan,
     build_control_runtimes,
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from unigym.packs.runtime import PackRuntime
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runner.sinks.benchmark import BenchmarkSink
     from unigym.runtime.bridge import Bridge
     from unigym.runtime.controllers import ControlRuntime
@@ -81,7 +81,8 @@ class _EnvKwargsBuilder(Protocol):
         spec: RunSpec,
         *,
         controls: Sequence[ControlRuntime] | None,
-        recipes: Mapping[str, RobotRecipe] | None,
+        profiles: Mapping[str, RobotProfile] | None,
+        robot_realizations: Mapping[str, object] | None,
         backend_options: dict[str, JsonValue],
     ) -> dict[str, object]: ...
 
@@ -103,7 +104,7 @@ class _TerrainBuilder(Protocol):
 class _ActuatorOverride(Protocol):
     """Backend actuator override applier (registry factory -> callable)."""
 
-    def __call__(self, profile: RobotRecipe, section: JsonValue) -> None: ...
+    def __call__(self, realization: object, section: JsonValue) -> None: ...
 
 
 @runtime_checkable
@@ -113,9 +114,28 @@ class _EventsBuilder(Protocol):
     def __call__(self, section: JsonValue) -> object: ...
 
 
+@runtime_checkable
+class _RobotRealizer(Protocol):
+    """Backend robot realizer: neutral profile -> backend-owned object."""
+
+    def __call__(
+        self,
+        profile: RobotProfile,
+        *,
+        params: Mapping[str, JsonValue],
+        asset_plan: AssetPlan | None,
+    ) -> object: ...
+
+
+class _ProfileBuild(TypedDict):
+    profile: RobotProfile
+    params: dict[str, JsonValue]
+
+
 class _RobotBundle(TypedDict):
-    profile: RobotRecipe
-    profiles: dict[str, RobotRecipe]
+    profile: RobotProfile
+    profiles: dict[str, RobotProfile]
+    robot_realizations: dict[str, object] | None
     terrain: object | None
     """Backend-built terrain object; opaque to the run layer."""
     prop_manager: PropManager | None
@@ -260,8 +280,8 @@ def _is_str_iterable(value: object) -> TypeGuard[Iterable[str]]:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
 
 
-def _profile_body_parts(profile: RobotRecipe) -> dict[str, JsonValue] | None:
-    """The recipe's body-parts mapping as a JSON object (None when absent)."""
+def _profile_body_parts(profile: RobotProfile) -> dict[str, JsonValue] | None:
+    """The profile's body-parts mapping as a JSON object (None when absent)."""
     value: object = profile.body_parts
     return value if is_json_object(value) else None
 
@@ -325,7 +345,7 @@ def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[str, ...]]:
 
     This is the authoritative control partition: the config's
     ``controls[]`` names exactly which control group each adapter drives.
-    One group cannot be claimed by two adapters; recipe-derived extra faces
+    One group cannot be claimed by two adapters; profile-derived extra faces
     and articulated props are NOT implicitly added here (an adapter that
     emits them must have them declared as control groups).
     """
@@ -377,8 +397,8 @@ def _build_replay(spec: ReplaySpec, num_envs: int) -> TraceReplay | None:
         raise SystemExit(f"[replay] error: {e} | hint: {e.hint}") from e
 
 
-def _recipe_section(art: ArticulationSpec) -> dict[str, JsonValue]:
-    """Project one articulation into the recipe-builder section."""
+def _profile_section(art: ArticulationSpec) -> dict[str, JsonValue]:
+    """Project one articulation into the profile-builder section."""
     section: dict[str, JsonValue] = {"name": art.name}
     if art.params:
         section["params"] = dict(art.params)
@@ -387,21 +407,24 @@ def _recipe_section(art: ArticulationSpec) -> dict[str, JsonValue]:
     return section
 
 
-def _profile_for(art: ArticulationSpec, with_isaaclab: bool) -> RobotRecipe:
-    """Build the :class:`RobotRecipe` of one robot articulation.
+def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
+    """Build the neutral :class:`RobotProfile` of one robot articulation.
 
     ``params.profile`` is the reserved selector for runs whose articulation
     name is not the robot type (e.g. a second ``g1b`` articulation reuses
-    the ``g1`` recipe); it never reaches the recipe factory.
+    the ``g1`` profile); it never reaches the profile factory.  The factory
+    params are returned alongside the profile because the backend robot
+    realizer owns the construction values (spawn/gain/prim-path) that are
+    not neutral profile data.
     """
-    section = _recipe_section(art)
+    section = _profile_section(art)
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     selector = params.pop("profile", None)
     if selector is not None:
         section["params"] = params
         section["name"] = str(selector)
-    return build_robot_recipe(section, with_isaaclab=with_isaaclab)
+    return {"profile": build_robot_profile(section), "params": params}
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
@@ -414,26 +437,47 @@ def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
     return [by_name[name] for name in names if name in by_name]
 
 
-def _control_recipes(spec: RunSpec, info: BackendInfo) -> dict[str, RobotRecipe]:
-    """Build the RobotRecipe of every recipe-backed control articulation."""
-    recipes: dict[str, RobotRecipe] = {}
+def _control_profiles(spec: RunSpec) -> dict[str, _ProfileBuild]:
+    """Build the neutral profile of every profile-backed control articulation."""
+    builds: dict[str, _ProfileBuild] = {}
     for art in _control_articulations(spec):
         groups = [g for g in spec.controls if g.articulation == art.name]
         try:
-            recipes[art.name] = _profile_for(art, info.recipe_with_isaaclab)
+            builds[art.name] = _profile_for(art)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
-            # recipe-less articulations are legal only when every control
+            # profile-less articulations are legal only when every control
             # declares its joints/q0 explicitly (e.g. a future prop face);
-            # a `joint_set` selector REQUIRES a recipe.
+            # a `joint_set` selector REQUIRES a profile.
             if any(g.joint_set is not None for g in groups):
                 raise ValueError(
-                    f"control articulation {art.name!r} has no RobotRecipe "
+                    f"control articulation {art.name!r} has no RobotProfile "
                     f"(unknown robot type) and at least one control group "
                     f"selects a `joint_set` | hint: use a registered robot "
                     f"articulation or declare every group's explicit "
                     f"`joints` + `q0`"
                 ) from None
-    return recipes
+    return builds
+
+
+def _realize_profiles(
+    info: BackendInfo,
+    builds: dict[str, _ProfileBuild],
+    asset_plan: AssetPlan | None,
+) -> dict[str, object] | None:
+    """Build every backend robot realization through the registry seam.
+
+    ``None`` means the backend consumes the neutral profiles directly.
+    """
+    factory = info.robot_realizer
+    if factory is None:
+        return None
+    realizer = factory()
+    if not isinstance(realizer, _RobotRealizer):
+        raise TypeError("backend robot realizer is not callable")
+    return {
+        name: realizer(build["profile"], params=build["params"], asset_plan=asset_plan)
+        for name, build in builds.items()
+    }
 
 
 def _build_robot_and_props(
@@ -448,30 +492,31 @@ def _build_robot_and_props(
 ) -> _RobotBundle:
     """Step 1: policy profile(s) + actuator/terrain/prop + adapter."""
     backend_label = info.name
-    # backends that build an ArticulationCfg declare it on their
-    # BackendInfo face; the others take the pure-constants profile
-    # (articulation_cfg None).
-    profiles = _control_recipes(spec, info)
-    if not profiles:
+    # Every robot factory returns neutral data; backends that need an
+    # engine object build it through their explicit robot realizer seam.
+    builds = _control_profiles(spec)
+    if not builds:
         raise ValueError(
-            "no recipe-backed control articulation: declare a top-level "
+            "no profile-backed control articulation: declare a top-level "
             "`controls:` group over a registered robot articulation "
             "(v104 authoring shape) | hint: e.g. controls: [{name: g1, "
             "adapter: <name>, articulation: g1, drive: position_pd, "
             "target: position}]"
         )
-    first_name = next(iter(profiles))
-    profile = profiles[first_name]
+    first_name = next(iter(builds))
+    profile = builds[first_name]["profile"]
+    profiles = {name: build["profile"] for name, build in builds.items()}
+    robot_realizations = _realize_profiles(info, builds, asset_plan)
     # Pluggable actuators: the yaml top-level "actuator" field overrides
-    # the profile default (default implicit_pd).
-    # The mujoco backend has no articulation_cfg: gains go through
-    # env.params (PD lives inside the backend) -- reject explicitly.
-    # The pluggable ctrl laws on the mujoco side go through
+    # the realization's actuator table (default implicit_pd).
+    # Backends with no robot realization (mujoco) have no such table:
+    # gains go through env.params (PD lives inside the backend) -- reject
+    # explicitly.  The pluggable ctrl laws on the mujoco side go through
     # env.params.actuators (the unigym/actuators top-level package,
-    # standard_pd / computed_torque_pd / native_servo) --
-    # the top-level "actuator" key semantics unchanged (isaaclab-only).
+    # standard_pd / computed_torque_pd / native_servo) -- the top-level
+    # "actuator" key semantics unchanged (isaaclab-only).
     if "actuator" in cfg:
-        if info.build_actuator_override is None or profile.articulation_cfg is None:
+        if info.build_actuator_override is None or robot_realizations is None:
             raise ValueError(
                 "yaml top-level 'actuator' override is not supported by the "
                 f"'{backend_label}' backend; configure gains via env.params"
@@ -479,7 +524,7 @@ def _build_robot_and_props(
         override = info.build_actuator_override()
         if not isinstance(override, _ActuatorOverride):
             raise TypeError("backend actuator override is not callable")
-        override(profile, cfg["actuator"])
+        override(robot_realizations[first_name], cfg["actuator"])
     # terrain preset is a backend construction face; backends without one
     # serve their own ground (e.g. the floor geom of the MJ XML scene).  A
     # programmatic ``Run(world=World.terrain...)`` carries the native
@@ -516,6 +561,7 @@ def _build_robot_and_props(
     return {
         "profile": profile,
         "profiles": profiles,
+        "robot_realizations": robot_realizations,
         "terrain": terrain,
         "prop_manager": prop_manager,
         "adapter": adapter,
@@ -529,7 +575,7 @@ def _build_sensing(
     info: BackendInfo,
     device: str,
     num_envs: int,
-    profile: RobotRecipe,
+    profile: RobotProfile,
     adapter: Adapter,
     prop_manager: PropManager | None,
 ) -> _SensingBundle:
@@ -667,7 +713,7 @@ def _build_env_and_sampler(
     info: BackendInfo,
     device: str,
     num_envs: int,
-    profile: RobotRecipe,
+    profile: RobotProfile,
     adapter: Adapter,
     prop_manager: PropManager | None,
     terrain: object | None,
@@ -679,7 +725,8 @@ def _build_env_and_sampler(
     recorder: Recorder,
     episode_length_s: JsonValue,
     controls: Sequence[ControlRuntime] | None = None,
-    recipes: Mapping[str, RobotRecipe] | None = None,
+    profiles: Mapping[str, RobotProfile] | None = None,
+    robot_realizations: Mapping[str, object] | None = None,
     asset_plan: AssetPlan | None = None,
 ) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
@@ -711,7 +758,8 @@ def _build_env_and_sampler(
         spec.world_base,
         spec,
         controls=controls,
-        recipes=recipes,
+        profiles=profiles,
+        robot_realizations=robot_realizations,
         backend_options=spec.backend_options,
     )
     env: RunEnv = build_env_backend(
@@ -852,7 +900,7 @@ def _build_sinks(
     dur_lo: float,
     dur_hi: float,
     command_dim: int,
-    profile: RobotRecipe,
+    profile: RobotProfile,
     bench_cfg: dict[str, JsonValue],
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
@@ -1144,12 +1192,13 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
     profile = robot["profile"]
     profiles = robot["profiles"]
+    robot_realizations = robot["robot_realizations"]
     adapter = robot["adapter"]
     prop_manager = robot["prop_manager"]
     generates_command = robot["generates_command"]
     # RunSpec.controls is authoritative.  Build one
     # ControlRuntime per declared group by expanding `joint_set` from the
-    # recipe (or using explicit `joints`) -- once.  The same resolved
+    # profile (or using explicit `joints`) -- once.  The same resolved
     # controls freeze into the read-only plan; no guessing path remains.
     control_runtimes = build_control_runtimes(spec.controls, spec.articulations, profiles)
     control_plan = build_control_plan(spec.controls, control_runtimes)
@@ -1173,7 +1222,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sensing["recorder"],
         sensing["episode_length_s"],
         controls=control_runtimes,
-        recipes=profiles,
+        profiles=profiles,
+        robot_realizations=robot_realizations,
         asset_plan=asset_plan,
     )
     env = built["env"]

@@ -72,14 +72,15 @@ def _build_env(usd: Path, *, num_envs: int = 1):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
     body_parts = {"feet": [FOOT_BODY], "base": FOOT_BODY}
-    profile = RobotRecipe(
-        articulation_cfg=_cartpole_articulation_cfg(usd),
+    articulation_cfg = _cartpole_articulation_cfg(usd)
+    profile = RobotProfile(
+        name=ARTICULATION,
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
         foot_bodies=[FOOT_BODY],
@@ -112,7 +113,8 @@ def _build_env(usd: Path, *, num_envs: int = 1):
         device="cuda:0",
         articulations=(articulation,),
         controls=controls,
-        recipes={ARTICULATION: profile},
+        profiles={ARTICULATION: profile},
+        robot_realizations={ARTICULATION: articulation_cfg},
     )
 
 

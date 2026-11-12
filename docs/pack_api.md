@@ -430,6 +430,40 @@ Rules:
   `platform.asset_face`; it still sources the dependency root through
   `unigym.core.paths.deps_root` for executor discovery.
 
+### Robot profiles and backend realization
+
+Robot definitions are backend-neutral authoring data. A profile factory returns
+`RobotProfile` with:
+
+```text
+joint_sets / default_joint_pos / foot_bodies / body_parts
+assets (usd | mjcf | urdf refs)
+action_faces
+```
+
+`RobotProfile` carries no backend object and no backend switch. There is no
+`with_isaaclab` and no `articulation_cfg` field.
+
+A backend that needs an engine object declares `BackendInfo.robot_realizer`:
+
+```text
+realizer(profile, params=..., asset_plan=...) -> backend realization
+```
+
+- isaaclab2/isaaclab3 build the `ArticulationCfg` from the neutral profile in
+  `unigym/backends/isaaclab2/robots/`;
+- mujoco/mjwarp consume the neutral profile directly and build no engine robot
+  object;
+- the run layer validates the realizer callable and passes the same
+  profile/params/asset plan; no engine import happens in `unigym.robots`.
+
+G1's isaaclab asset/actuator/prim/spawn realization lives in the backend.
+GR1 is neutral-only and has no isaaclab realization; the backend realizer
+rejects it. Its MJCF remains a scene resource, not a neutral robot asset.
+
+Dynamic `register_robot` / manifest `kind: robot` registration is a later
+phase and is not implemented yet.
+
 ### Asset CLI and selection (Phase 7b-3)
 
 `unigym asset` builds `discover(entry_points=True)` at the command boundary when

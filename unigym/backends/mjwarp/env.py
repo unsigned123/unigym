@@ -188,8 +188,8 @@ class MjwarpEnv(WarpBatchMixin):
 
     Args (``build_env_backend`` kwargs; backend-specific keys come from the
     yaml ``env.params`` section via collect.py's ``backend_params``):
-        robot_profile: RobotRecipe (pure constants; ``articulation_cfg``
-            unused — the simulator model is the MJ XML).
+        robot_profile: RobotProfile (pure neutral constants; the
+            simulator model is the MJ XML).
         adapter: Adapter (declares obs requests / orders).
         num_envs: native N>1 batched worlds (one warp ``nworld=N`` Data; N
             CPU mirrors).  Cameras are per-world; director ops /
@@ -367,7 +367,7 @@ class MjwarpEnv(WarpBatchMixin):
         director_cfg=None,
         artifact_dir: Optional[str] = None,
         controls=None,
-        recipes=None,
+        profiles=None,
         backend_options=None,
         asset_plan=None,
     ):
@@ -629,11 +629,11 @@ class MjwarpEnv(WarpBatchMixin):
 
         # Every engine iterates env.articulations / env.controls.
         # The run layer built the neutral control runtimes from RunSpec.controls
-        # + the robot recipes; this backend resolves their addresses + drive
+        # + the neutral robot profiles; this backend resolves their addresses + drive
         # strategies against the compiled model.
         self._backend_label = "mjwarp backend"
         self._articulation_specs = tuple(articulations or ())
-        self._recipes = dict(recipes or {})
+        self._profiles = dict(profiles or {})
         self._planned_controls = tuple(controls or ())
         self._jid0 = 1 if int(m.jnt_type[0]) == int(mujoco.mjtJoint.mjJNT_FREE) else 0
         self._has_freejoint = bool(self._jid0)
@@ -701,7 +701,7 @@ class MjwarpEnv(WarpBatchMixin):
         self.obs_catalogs = {}
         for art in self._articulation_order:
             cat = build_obs_catalog(
-                art.recipe,
+                art.profile,
                 camera_manager=self.camera_manager,
                 prop_manager=self.prop_manager,
                 contact_manager=self.contact_manager,

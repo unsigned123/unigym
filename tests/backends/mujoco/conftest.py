@@ -24,13 +24,13 @@ def build_tiny_env(
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mujoco.env import MujocoEnv
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
-    profile = RobotRecipe(
-        articulation_cfg=None,
+    profile = RobotProfile(
+        name=ARTICULATION,
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
         foot_bodies=[],
@@ -65,7 +65,7 @@ def build_tiny_env(
         device="cpu",
         articulations=(articulation,),
         controls=controls,
-        recipes={ARTICULATION: profile},
+        profiles={ARTICULATION: profile},
     )
 
 

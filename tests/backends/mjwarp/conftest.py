@@ -27,13 +27,13 @@ def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mjwarp.env import MjwarpEnv
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
-    profile = RobotRecipe(
-        articulation_cfg=None,
+    profile = RobotProfile(
+        name=ARTICULATION,
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
         foot_bodies=[],
@@ -68,7 +68,7 @@ def build_tiny_env(mjcf: Path, *, num_envs: int = 1):
         device="cpu",
         articulations=(articulation,),
         controls=controls,
-        recipes={ARTICULATION: profile},
+        profiles={ARTICULATION: profile},
     )
 
 

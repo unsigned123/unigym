@@ -41,7 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.adapters.base import Adapter
     from unigym.env.backends.base import EnvBackend
     from unigym.env.obs_catalog import ObsCatalog
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec, AssetRef
 
@@ -116,7 +116,7 @@ class ArticulationRuntime:
     Attributes:
         name: articulation name (the ``env.articulations`` key).
         model: the declared :class:`~unigym.scenes.articulation.AssetRef`
-            (or ``None`` for recipe-backed assets).
+            (or ``None`` for profile-backed assets).
         root: ``free`` / ``fixed`` / ``welded``.
         joint_names: the asset hinge joint names (asset order).
         q0: default positions aligned with ``joint_names`` (torch float32).
@@ -126,8 +126,8 @@ class ArticulationRuntime:
         base_body: base/root body name (unigym_name).
         addresses: backend-specific address bookkeeping (free joint, base
             body id, foot ids, ...).
-        recipe: the :class:`~unigym.robots.base.RobotRecipe` when the
-            articulation is recipe-backed.
+        profile: the :class:`~unigym.robots.base.RobotProfile` when the
+            articulation is profile-backed.
     """
 
     name: str
@@ -143,7 +143,7 @@ class ArticulationRuntime:
     spawn: Mapping = field(default_factory=dict)
     base_body: str = ""
     addresses: dict = field(default_factory=dict)
-    recipe: RobotRecipe | None = None
+    profile: RobotProfile | None = None
     # Backend-populated MuJoCo-family runtime state (compiled address tables +
     # per-articulation obs catalog).  Declared here so the step/obs faces can
     # read the contract without scattered ``setattr`` unknown-attribute errors;
@@ -207,10 +207,10 @@ class ControlRuntime:
         asset_joint_names: the owning articulation's full asset joints.
         feet: owning articulation's foot body names.
         required: True when every joint must be addressed by an action entry.
-        source: provenance of the resolved joints (``recipe:<art>.<set>``
-            when expanded from a recipe joint set, ``config.joints`` when
+        source: provenance of the resolved joints (``profile:<art>.<set>``
+            when expanded from a profile joint set, ``config.joints`` when
             declared verbatim).  Neutral: no backend names.
-        joint_set: the recipe joint-set name selected by the declaration
+        joint_set: the profile joint-set name selected by the declaration
             (``None`` for explicit ``joints``).
         prop: True for an articulated-prop servo face.
     """
@@ -281,14 +281,14 @@ class ControlRuntime:
         return self.strategy.strategy
 
 
-def _recipe_defaults(recipe: RobotRecipe | None) -> dict[str, float]:
-    return dict(getattr(recipe, "default_joint_pos", {}) or {})
+def _profile_defaults(profile: RobotProfile | None) -> dict[str, float]:
+    return dict(getattr(profile, "default_joint_pos", {}) or {})
 
 
 def _control_q0(
-    group: ControlGroup, joint_names: Sequence[str], recipe: RobotRecipe | None, what: str
+    group: ControlGroup, joint_names: Sequence[str], profile: RobotProfile | None, what: str
 ) -> tuple[float, ...]:
-    defaults = _recipe_defaults(recipe)
+    defaults = _profile_defaults(profile)
     values: list[float] = []
     for joint in joint_names:
         if joint in group.q0:
@@ -304,27 +304,27 @@ def _control_q0(
     return tuple(values)
 
 
-def _explicit_joint_set(group: ControlGroup, recipe: RobotRecipe | None) -> tuple[str, ...]:
-    """Resolve ``group.joint_set`` against the articulation's recipe.
+def _explicit_joint_set(group: ControlGroup, profile: RobotProfile | None) -> tuple[str, ...]:
+    """Resolve ``group.joint_set`` against the articulation's profile.
 
-    Fail-fast when the articulation has no recipe or the set is unknown; no
+    Fail-fast when the articulation has no profile or the set is unknown; no
     group-name / ``hand`` inference is involved.
     """
     name = str(group.joint_set)
-    if recipe is None:
+    if profile is None:
         raise ControlError(
             f"control group {group.name!r} selects joint_set {name!r} on "
-            f"articulation {group.articulation!r}, which has no RobotRecipe; "
-            f"`joint_set` requires a recipe-backed articulation (list "
-            f"`joints` explicitly for recipe-less articulations)"
+            f"articulation {group.articulation!r}, which has no RobotProfile; "
+            f"`joint_set` requires a profile-backed articulation (list "
+            f"`joints` explicitly for profile-less articulations)"
         )
-    sets: Mapping[str, tuple[str, ...]] = dict(getattr(recipe, "joint_sets", None) or {})
+    sets: Mapping[str, tuple[str, ...]] = dict(getattr(profile, "joint_sets", None) or {})
     try:
         joints = tuple(str(j) for j in sets[name])
     except KeyError:
         raise ControlError(
             f"control group {group.name!r} selects unknown joint_set "
-            f"{name!r} on articulation {group.articulation!r}; the recipe "
+            f"{name!r} on articulation {group.articulation!r}; the profile "
             f"declares {sorted(sets)}"
         ) from None
     if not joints:
@@ -338,7 +338,7 @@ def _explicit_joint_set(group: ControlGroup, recipe: RobotRecipe | None) -> tupl
 def _declared_control_runtime(
     group: ControlGroup,
     arts: Mapping[str, ArticulationSpec],
-    recipes: Mapping[str, RobotRecipe],
+    profiles: Mapping[str, RobotProfile],
 ) -> ControlRuntime:
     """Build one declared ``controls[]`` runtime (fail-fast resolution)."""
     art = arts.get(group.articulation)
@@ -347,15 +347,15 @@ def _declared_control_runtime(
             f"control group {group.name!r} names articulation "
             f"{group.articulation!r}, which is not declared"
         )
-    recipe = recipes.get(group.articulation)
+    profile = profiles.get(group.articulation)
     # explicit resolution: explicit joints win; otherwise the named
-    # joint_set is expanded once from the recipe; no group-name inference.
+    # joint_set is expanded once from the profile; no group-name inference.
     if group.joints:
         bare = tuple(group.joints)
         source = "config.joints"
     elif group.joint_set:
-        bare = _explicit_joint_set(group, recipe)
-        source = f"recipe:{group.articulation}.{group.joint_set}"
+        bare = _explicit_joint_set(group, profile)
+        source = f"profile:{group.articulation}.{group.joint_set}"
     else:
         raise ControlError(
             f"control group {group.name!r} declares neither `joints` nor "
@@ -364,7 +364,7 @@ def _declared_control_runtime(
     if not bare:
         raise ControlError(
             f"control group {group.name!r} resolves no joints (declare "
-            f"`joints` or use a recipe-backed articulation)"
+            f"`joints` or use a profile-backed articulation)"
         )
     return ControlRuntime(
         name=group.name,
@@ -372,7 +372,7 @@ def _declared_control_runtime(
         adapter=group.adapter,
         articulation=group.articulation,
         joint_names=tuple(bare),
-        q0=_control_q0(group, bare, recipe, f"control group {group.name!r}"),
+        q0=_control_q0(group, bare, profile, f"control group {group.name!r}"),
         gains=dict(group.gains),
         drive=group.drive,
         target=group.target,
@@ -482,10 +482,10 @@ def build_control_plan(
     return ResolvedControlPlan(tuple(rows))
 
 
-def _actuated_joints(art: ArticulationSpec, recipe: RobotRecipe | None) -> tuple[str, ...]:
+def _actuated_joints(art: ArticulationSpec, profile: RobotProfile | None) -> tuple[str, ...]:
     """The articulation's full actuated joint vocabulary (§4)."""
-    if recipe is not None:
-        sets: Mapping[str, Sequence[str]] = dict(getattr(recipe, "joint_sets", None) or {})
+    if profile is not None:
+        sets: Mapping[str, Sequence[str]] = dict(getattr(profile, "joint_sets", None) or {})
         union: list[str] = []
         for joints in sets.values():
             for joint in joints:
@@ -498,7 +498,7 @@ def _actuated_joints(art: ArticulationSpec, recipe: RobotRecipe | None) -> tuple
 
 def validate_resolved_coverage(
     articulations: Iterable[ArticulationSpec] | None,
-    recipes: AbcMapping[str, RobotRecipe] | None,
+    profiles: AbcMapping[str, RobotProfile] | None,
     controls: Iterable[ControlGroup] | None,
     runtimes: Iterable[ControlRuntime] | None,
 ) -> None:
@@ -506,8 +506,8 @@ def validate_resolved_coverage(
 
     For each articulation with declared controls:
 
-    * ``actuated`` = union of the recipe ``joint_sets`` (recipe-backed) or
-      ``ArticulationSpec.joints`` (recipe-less);
+    * ``actuated`` = union of the profile ``joint_sets`` (profile-backed)
+      or ``ArticulationSpec.joints`` (profile-less);
     * ``driven`` = union of the resolved control joints;
     * ``passive`` = ``ArticulationSpec.passive_joints``;
     * every control group of one articulation must be disjoint;
@@ -519,7 +519,7 @@ def validate_resolved_coverage(
             passive-conflict / unknown joint names.
     """
     arts = {art.name: art for art in tuple(articulations or ())}
-    recipes = dict(recipes or {})
+    profiles = dict(profiles or {})
     declared = {group.name for group in (controls or ())}
 
     driven: dict[str, list[str]] = {}
@@ -545,8 +545,8 @@ def validate_resolved_coverage(
 
     for name, owned in driven.items():
         art = arts[name]
-        recipe = recipes.get(name)
-        actuated = set(_actuated_joints(art, recipe))
+        profile = profiles.get(name)
+        actuated = set(_actuated_joints(art, profile))
         passive = set(getattr(art, "passive_joints", ()) or ())
         driven_set = set(owned)
         conflict = sorted(driven_set & passive)
@@ -556,7 +556,7 @@ def validate_resolved_coverage(
                 f"by a control group and listed in passive_joints"
             )
         if not actuated:
-            # recipe-less articulation without declared joints: the actuated
+            # profile-less articulation without declared joints: the actuated
             # vocabulary is not knowable here; overlap is still enforced.
             continue
         covered = driven_set | passive
@@ -571,7 +571,7 @@ def validate_resolved_coverage(
         if unknown:
             raise ControlError(
                 f"articulation {name!r}: joints {unknown} are not in the "
-                f"articulation's actuated joint vocabulary (recipe "
+                f"articulation's actuated joint vocabulary (profile "
                 f"joint_sets or ArticulationSpec.joints)"
             )
 
@@ -579,13 +579,13 @@ def validate_resolved_coverage(
 def build_control_runtimes(
     controls: Sequence[ControlGroup] | None,
     articulations: Sequence[ArticulationSpec] | None,
-    recipes: Mapping[str, RobotRecipe] | None,
+    profiles: Mapping[str, RobotProfile] | None,
 ) -> tuple[ControlRuntime, ...]:
     """Build neutral :class:`ControlRuntime` entries from the run declaration.
 
     Only declared :class:`~unigym.runtime.controls.ControlGroup` entries are
     consumed: each selects its joints explicitly (``joints``) or through a
-    recipe ``joint_set``.  There is no face-name / ``hand`` inference and no
+    profile ``joint_set``.  There is no face-name / ``hand`` inference and no
     implicit extra face -- an adapter that emits a face must have it
     declared in ``controls[]``.
 
@@ -594,17 +594,17 @@ def build_control_runtimes(
             entries (``RunSpec.controls`` is authoritative).
         articulations: normalized :class:`~unigym.scenes.articulation.
             ArticulationSpec` entries.
-        recipes: ``{articulation name: RobotRecipe}`` for recipe-backed
+        profiles: ``{articulation name: RobotProfile}`` for profile-backed
             (robot) articulations.
 
     Returns:
         The control runtimes in declaration order (one per control group).
     """
     arts = {art.name: art for art in tuple(articulations or ())}
-    recipes = dict(recipes or {})
+    profiles = dict(profiles or {})
     declared = tuple(controls or ())
-    out = tuple(_declared_control_runtime(group, arts, recipes) for group in declared)
-    validate_resolved_coverage(arts.values(), recipes, declared, out)
+    out = tuple(_declared_control_runtime(group, arts, profiles) for group in declared)
+    validate_resolved_coverage(arts.values(), profiles, declared, out)
     return out
 
 

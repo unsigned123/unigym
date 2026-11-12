@@ -40,7 +40,7 @@ def refresh_obs_sources(env) -> None:
 def articulation_catalog(articulation) -> ObsCatalog:
     """The per-articulation obs catalog, keys under ``articulation/<name>``."""
     return build_obs_catalog(
-        articulation.recipe,
+        articulation.profile,
         articulation_joint_names=articulation.robot_joint_names,
         articulation=articulation.name,
     )

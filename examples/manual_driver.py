@@ -18,7 +18,7 @@ import torch
 
 from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mujoco.env import MujocoEnv
-from unigym.robots.base import RobotRecipe
+from unigym.robots.base import RobotProfile
 from unigym.runner import ExternalRunner
 from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import build_control_runtimes
@@ -50,8 +50,8 @@ class PrintSink:
 
 def make_env():
     """Build the tiny free-base arm and its manual control face."""
-    profile = RobotRecipe(
-        articulation_cfg=None,
+    profile = RobotProfile(
+        name="tiny",
         joint_sets={"body": ("hinge",)},
         default_joint_pos={"hinge": 0.0},
         foot_bodies=[],
@@ -86,7 +86,7 @@ def make_env():
         device="cpu",
         articulations=(articulation,),
         controls=controls,
-        recipes={"tiny": profile},
+        profiles={"tiny": profile},
     )
     env.adapter_groups = {"manual": ("tiny",)}
     return env

@@ -1,10 +1,9 @@
-"""Robot recipe registry (isaaclab-dependent factories; lazy-loaded).
+"""Backend-neutral robot profile registry (lazy-loaded factories).
 
-The factory modules (g1) import isaaclab at module level, so they are loaded
-on first attribute access (PEP 562) — i.e. only after AppLauncher in
-scripts/collect.py.  Pure-constant modules such as
-``unigym.robots.g1_constants`` stay importable WITHOUT isaaclab
-(local unit tests; importing this package no longer pulls isaaclab).
+Every factory returns a :class:`~unigym.robots.base.RobotProfile`; nothing in
+this package imports a backend or an engine.  The factory modules are still
+loaded on first attribute access (PEP 562) so the registry table stays the
+single, explicit name -> factory map.
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ from __future__ import annotations
 from typing import Any
 
 from unigym._typing import JsonValue
+
+from .base import RobotAsset, RobotProfile
 
 # registry name -> (module, factory function)
 _FACTORIES = {
@@ -41,12 +42,13 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def build_robot_recipe(section: dict[str, JsonValue], with_isaaclab: bool = False) -> RobotRecipe:
-    """Build a :class:`RobotRecipe` from one articulation declaration.
+def build_robot_profile(section: dict[str, JsonValue]) -> RobotProfile:
+    """Build a neutral :class:`RobotProfile` from one articulation declaration.
 
     ``section`` is the projection ``{name, params, body_parts}`` of an
     :class:`~unigym.scenes.articulation.ArticulationSpec`; it is authoring
-    data (joint order / q0 / feet / body parts / asset), never a policy.
+    data (joint order / q0 / feet / body parts / assets / action faces),
+    never a policy and never a backend object.
     """
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
@@ -54,17 +56,24 @@ def build_robot_recipe(section: dict[str, JsonValue], with_isaaclab: bool = Fals
         params["body_parts"] = section["body_parts"]
     name_value = section["name"]
     if not isinstance(name_value, str):
-        raise TypeError(f"robot recipe name must be a string, got " f"{type(name_value).__name__}")
+        raise TypeError(f"robot profile name must be a string, got {type(name_value).__name__}")
     factory = __getattr__(name_value)
-    # with_isaaclab: isaaclab backends need the ArticulationCfg (built after
-    # AppLauncher); the mujoco backend passes False -> articulation_cfg=None.
-    return factory(**params, with_isaaclab=with_isaaclab)
+    profile = factory(**params)
+    if not isinstance(profile, RobotProfile):
+        raise TypeError(
+            f"robot factory {name_value!r} must return a RobotProfile, "
+            f"got {type(profile).__name__}"
+        )
+    if profile.name != name_value:
+        raise ValueError(
+            f"robot factory {name_value!r} returned profile {profile.name!r}; "
+            f"the registry name and the profile name must match"
+        )
+    return profile
 
 
-# typing-only import (kept last; base.py pulls isaaclab).  Under `from
-# __future__ import annotations` evaluation is lazy, but a real import here
-# would defeat the laziness — use TYPE_CHECKING.
-from typing import TYPE_CHECKING  # noqa: E402
-
-if TYPE_CHECKING:  # pragma: no cover
-    from .base import RobotRecipe
+__all__ = [
+    "RobotAsset",
+    "RobotProfile",
+    "build_robot_profile",
+]

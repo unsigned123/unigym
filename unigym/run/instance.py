@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from unigym.model.live import LiveModel
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
-    from unigym.robots.base import RobotRecipe
+    from unigym.robots.base import RobotProfile
     from unigym.runtime.bridge import Bridge
     from unigym.runtime.controllers import (
         ResolvedControl,
@@ -86,7 +86,7 @@ class RunInstance:
     """Live resources of one run (env / managers / sinks / bridge)."""
 
     spec: RunSpec
-    profile: RobotRecipe
+    profile: RobotProfile
     adapter: Adapter
     sampler: CommandSampler | None
     term_group: TerminationGroup

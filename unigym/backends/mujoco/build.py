@@ -14,7 +14,8 @@ def env_kwargs(
     spec=None,
     *,
     controls=None,
-    recipes=None,
+    profiles=None,
+    robot_realizations=None,
     backend_options=None,
 ) -> dict:
     """Builder kwargs ``MujocoEnv`` accepts (the mj-family shape + artifact dir).
@@ -24,16 +25,19 @@ def env_kwargs(
     artifact directory is mujoco-only wiring (never an ``env.params`` key).
     ``articulations`` is the neutral run spec's ordered list: the
     env composes entries declaring ``model.mjcf`` into the world base.
-    ``controls`` / ``recipes`` carry the neutral control runtimes and the
-    per-articulation RobotRecipes.
+    ``controls`` / ``profiles`` carry the neutral control runtimes and the
+    per-articulation :class:`~unigym.robots.base.RobotProfile` objects.
+    ``robot_realizations`` is not consumed: this backend builds no backend
+    robot object and receives the neutral profile only.
     """
+    del robot_realizations
     return {
         "backend_params": env_cfg.get("params") or {},
         "world_base": world_base,
         "artifact_dir": artifacts_dir,
         "articulations": getattr(spec, "articulations", None),
         "controls": controls,
-        "recipes": recipes,
+        "profiles": profiles,
         "backend_options": backend_options,
     }
 

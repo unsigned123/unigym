@@ -1,11 +1,11 @@
-"""Control runtime construction: validation, recipe resolution and coverage."""
+"""Control runtime construction: validation, profile resolution and coverage."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from unigym.robots.base import RobotRecipe
+from unigym.robots.base import RobotProfile
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
@@ -29,9 +29,9 @@ def _group(**overrides):
     return ControlGroup.from_mapping(entry)
 
 
-def _recipe(joint_sets, defaults):
-    return RobotRecipe(
-        articulation_cfg=None,
+def _profile(joint_sets, defaults):
+    return RobotProfile(
+        name="arm",
         joint_sets=joint_sets,
         default_joint_pos=defaults,
         foot_bodies=[],
@@ -110,10 +110,10 @@ def test_build_control_runtimes_uses_explicit_joints_and_q0_precedence():
         name="arm",
         joints=(JointSpec("a"), JointSpec("b"), JointSpec("c")),
     )
-    recipe = _recipe({"body": ("a", "b", "c")}, {"a": 0.1, "b": 0.2})
+    profile = _profile({"body": ("a", "b", "c")}, {"a": 0.1, "b": 0.2})
     group = _group(joints=["a", "b", "c"], q0={"b": 0.9})
 
-    runtime = build_control_runtimes((group,), (arm,), {"arm": recipe})[0]
+    runtime = build_control_runtimes((group,), (arm,), {"arm": profile})[0]
 
     assert runtime.joint_names == ("a", "b", "c")
     assert runtime.q0.tolist() == pytest.approx([0.1, 0.9, 0.0])
@@ -127,38 +127,38 @@ def test_build_control_runtimes_rejects_missing_q0_for_non_position_drive():
     group = _group(joints=["shoulder"], drive="torque", target="torque")
 
     with pytest.raises(ControlError, match="only position drives may default to 0"):
-        build_control_runtimes((group,), (arm,), {"arm": _recipe({"body": ("shoulder",)}, {})})
+        build_control_runtimes((group,), (arm,), {"arm": _profile({"body": ("shoulder",)}, {})})
 
 
-def test_build_control_runtimes_expands_recipe_joint_set():
-    """A named joint set is expanded once against the real recipe."""
+def test_build_control_runtimes_expands_profile_joint_set():
+    """A named joint set is expanded once against the real profile."""
     arm = ArticulationSpec(name="arm", joints=(JointSpec("finger"),))
-    recipe = _recipe({"hand": ("finger",)}, {"finger": 0.25})
+    profile = _profile({"hand": ("finger",)}, {"finger": 0.25})
     group = _group(joint_set="hand", joints=None)
 
-    runtime = build_control_runtimes((group,), (arm,), {"arm": recipe})[0]
+    runtime = build_control_runtimes((group,), (arm,), {"arm": profile})[0]
 
     assert runtime.joint_names == ("finger",)
     assert runtime.q0.tolist() == pytest.approx([0.25])
-    assert runtime.source == "recipe:arm.hand"
+    assert runtime.source == "profile:arm.hand"
     assert runtime.joint_set == "hand"
 
 
 @pytest.mark.parametrize(
-    ("recipes", "match"),
+    ("profiles", "match"),
     [
-        ({}, "has no RobotRecipe"),
-        ({"arm": _recipe({"body": ("shoulder",)}, {})}, "unknown joint_set 'hand'"),
+        ({}, "has no RobotProfile"),
+        ({"arm": _profile({"body": ("shoulder",)}, {})}, "unknown joint_set 'hand'"),
     ],
-    ids=["no-recipe", "unknown-set"],
+    ids=["no-profile", "unknown-set"],
 )
-def test_build_control_runtimes_rejects_unresolvable_joint_set(recipes, match):
-    """A joint_set selector fails fast without a matching recipe set."""
+def test_build_control_runtimes_rejects_unresolvable_joint_set(profiles, match):
+    """A joint_set selector fails fast without a matching profile set."""
     arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
     group = _group(joint_set="hand", joints=None)
 
     with pytest.raises(ControlError, match=match):
-        build_control_runtimes((group,), (arm,), recipes)
+        build_control_runtimes((group,), (arm,), profiles)
 
 
 def _coverage_case(kind: str):
