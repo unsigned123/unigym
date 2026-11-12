@@ -10,12 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from isaaclab.assets import ArticulationCfg
-
 from unigym._typing import JsonValue
 from unigym.robots.base import RobotProfile
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from isaaclab.assets import ArticulationCfg
+
     from unigym.scenes.articulation import ArticulationSpec
 
 __all__ = ["articulation_cfg", "build_robot_realization"]
@@ -23,6 +23,8 @@ __all__ = ["articulation_cfg", "build_robot_realization"]
 
 def articulation_cfg(realizations: Mapping[str, object] | None, name: str) -> ArticulationCfg:
     """The backend realization of one articulation (fail-fast when absent)."""
+    from isaaclab.assets import ArticulationCfg
+
     value = dict(realizations or {}).get(name)
     if not isinstance(value, ArticulationCfg):
         raise ValueError(
