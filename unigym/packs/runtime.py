@@ -8,8 +8,8 @@ A code pack activates through normal Python: its ``python/`` directory is the
 explicit import boundary, the manifest entrypoint is imported and called with
 one :class:`PackContext`, and the handle is cached per runtime.
 
-This is a parallel runtime.  The legacy ``unigym.packs`` mount/load path stays
-the active runtime until a later migration phase.
+This is the only pack loader.  There is no implicit repository mount, no
+mount order and no separate code loader.
 """
 
 from __future__ import annotations
