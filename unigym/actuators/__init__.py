@@ -37,9 +37,12 @@ from .base import (
 from .standard_pd import StandardPdActuator
 from .computed_torque_pd import ComputedTorquePdActuator
 from .native_servo import NativeServoActuator
+from .ir import ActuationError, ActuationGroup, validate_actuation_groups
 
 __all__ = [
     "ACTUATOR_REGISTRY",
+    "ActuationError",
+    "ActuationGroup",
     "ActuatorBase",
     "ComputedTorquePdActuator",
     "NativeServoActuator",
@@ -47,4 +50,5 @@ __all__ = [
     "build_actuator",
     "register",
     "resolve_gain_vector",
+    "validate_actuation_groups",
 ]

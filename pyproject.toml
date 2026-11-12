@@ -261,6 +261,7 @@ markers = [
     "domain_terminations: termination domain tests",
     "domain_filters: filter domain tests",
     "domain_robots: robot domain tests",
+    "domain_actuators: actuation domain tests",
     "domain_adapters: adapter domain tests",
     "domain_backends: framework-level backend registry tests",
     "backend_agnostic: tests that do not target one specific backend",

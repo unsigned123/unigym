@@ -12,7 +12,15 @@ from typing import Any
 
 from unigym._typing import JsonValue
 
-from .base import RobotAsset, RobotProfile
+from .base import (
+    BodyBinding,
+    BodyBindingError,
+    CanonicalBodyId,
+    RobotAsset,
+    RobotProfile,
+    normalize_canonical_body_id,
+    validate_body_bindings,
+)
 
 # registry name -> (module, factory function)
 _FACTORIES = {
@@ -73,7 +81,12 @@ def build_robot_profile(section: dict[str, JsonValue]) -> RobotProfile:
 
 
 __all__ = [
+    "BodyBinding",
+    "BodyBindingError",
+    "CanonicalBodyId",
     "RobotAsset",
     "RobotProfile",
     "build_robot_profile",
+    "normalize_canonical_body_id",
+    "validate_body_bindings",
 ]

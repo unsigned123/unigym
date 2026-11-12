@@ -14,13 +14,180 @@ realizer, which owns actuator tables, prim paths and spawn conversion.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Iterable, Mapping, NewType
 
 from unigym._typing import JsonValue
 
-__all__ = ["RobotAsset", "RobotProfile"]
+__all__ = [
+    "BodyBinding",
+    "BodyBindingError",
+    "CanonicalBodyId",
+    "RobotAsset",
+    "RobotProfile",
+    "normalize_canonical_body_id",
+    "validate_body_bindings",
+]
 
 _ASSET_FORMATS = frozenset({"usd", "mjcf", "urdf"})
+
+CanonicalBodyId = NewType("CanonicalBodyId", str)
+"""A backend-neutral semantic body id (runtime value is ``str``)."""
+
+
+class BodyBindingError(ValueError):
+    """A malformed canonical body id or body binding (fail-fast, no alias)."""
+
+
+def normalize_canonical_body_id(value: object, what: str) -> CanonicalBodyId:
+    """Validate and normalize one canonical body id.
+
+    Canonical ids are semantic names, never backend paths: non-empty, with no
+    surrounding or internal whitespace, no path separators, no wildcard and
+    no empty dot-separated segment.
+    """
+    if not isinstance(value, str) or not value:
+        raise BodyBindingError(f"{what} must be a non-empty string, got {value!r}")
+    if value != value.strip():
+        raise BodyBindingError(f"{what} must not have leading/trailing whitespace, got {value!r}")
+    if any(character.isspace() for character in value):
+        raise BodyBindingError(f"{what} must not contain whitespace, got {value!r}")
+    if "/" in value or "\\" in value:
+        raise BodyBindingError(
+            f"{what} must be a semantic body id without path separators, got {value!r}"
+        )
+    if "*" in value:
+        raise BodyBindingError(f"{what} must not contain the wildcard '*', got {value!r}")
+    segments = value.split(".")
+    if any(not segment for segment in segments):
+        raise BodyBindingError(f"{what} must have non-empty dot-separated segments, got {value!r}")
+    return CanonicalBodyId(value)
+
+
+@dataclass(frozen=True)
+class BodyBinding:
+    """One canonical body id bound to per-format native names or prim paths.
+
+    Attributes:
+        canonical: the backend-neutral semantic body id.
+        names: asset format -> native name / prim path.  The format
+            vocabulary is owned by :class:`unigym.scenes.articulation.AssetRef`;
+            this record only requires a non-empty string mapping.
+    """
+
+    canonical: CanonicalBodyId
+    names: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        canonical = normalize_canonical_body_id(self.canonical, "BodyBinding canonical")
+        object.__setattr__(self, "canonical", canonical)
+        if not isinstance(self.names, Mapping) or not self.names:
+            raise BodyBindingError(
+                f"BodyBinding {canonical!r} names must be a non-empty mapping of "
+                f"format -> native name, got {self.names!r}"
+            )
+        names: dict[str, str] = {}
+        for asset_format, native_name in self.names.items():
+            if not isinstance(asset_format, str) or not asset_format.strip():
+                raise BodyBindingError(
+                    f"BodyBinding {canonical!r} format must be a non-empty string, "
+                    f"got {asset_format!r}"
+                )
+            if asset_format != asset_format.strip():
+                raise BodyBindingError(
+                    f"BodyBinding {canonical!r} format {asset_format!r} must not "
+                    f"have leading/trailing whitespace"
+                )
+            if not isinstance(native_name, str) or not native_name.strip():
+                raise BodyBindingError(
+                    f"BodyBinding {canonical!r} native name for format "
+                    f"{asset_format!r} must be a non-empty string, got {native_name!r}"
+                )
+            if native_name != native_name.strip():
+                raise BodyBindingError(
+                    f"BodyBinding {canonical!r} native name for format "
+                    f"{asset_format!r} must not have leading/trailing whitespace, "
+                    f"got {native_name!r}"
+                )
+            names[asset_format] = native_name
+        object.__setattr__(self, "names", names)
+
+
+def validate_body_bindings(
+    bindings: Mapping[CanonicalBodyId, BodyBinding],
+    *,
+    required_ids: Iterable[CanonicalBodyId] = (),
+    formats: Iterable[str] | None = None,
+) -> None:
+    """Validate one canonical-id -> binding map against required ids/formats.
+
+    Every mapping key must equal its binding's ``canonical``.  Duplicate
+    native names are rejected per format only.  With ``formats=None`` the
+    duplicate scan covers the formats present; with explicit ``formats`` any
+    unknown format key is rejected and every required id must carry every
+    listed format.
+    """
+    if not isinstance(bindings, Mapping):
+        raise BodyBindingError(f"body bindings must be a mapping, got {bindings!r}")
+    records: dict[CanonicalBodyId, BodyBinding] = {}
+    for key, binding in bindings.items():
+        if not isinstance(binding, BodyBinding):
+            raise BodyBindingError(f"body bindings[{key!r}] must be a BodyBinding, got {binding!r}")
+        if key != binding.canonical:
+            raise BodyBindingError(
+                f"body bindings key {key!r} does not match its record canonical "
+                f"{binding.canonical!r}"
+            )
+        records[binding.canonical] = binding
+
+    required = tuple(
+        normalize_canonical_body_id(required_id, "required body id") for required_id in required_ids
+    )
+    missing_ids = sorted(str(required_id) for required_id in required if required_id not in records)
+    if missing_ids:
+        raise BodyBindingError(f"body bindings are missing required ids {missing_ids}")
+
+    if formats is None:
+        allowed_formats: tuple[str, ...] | None = None
+    else:
+        allowed_formats = tuple(str(asset_format) for asset_format in formats)
+        allowed = set(allowed_formats)
+        for binding in records.values():
+            unknown = sorted(set(binding.names) - allowed)
+            if unknown:
+                raise BodyBindingError(
+                    f"BodyBinding {binding.canonical!r} declares unknown formats "
+                    f"{unknown}; allowed formats are {list(allowed_formats)}"
+                )
+
+    seen: dict[str, dict[str, CanonicalBodyId]] = {}
+    for binding in records.values():
+        for asset_format, native_name in binding.names.items():
+            if allowed_formats is not None and asset_format not in allowed_formats:
+                continue
+            owners = seen.setdefault(asset_format, {})
+            previous = owners.get(native_name)
+            if previous is not None and previous != binding.canonical:
+                raise BodyBindingError(
+                    f"duplicate {asset_format} native name {native_name!r} for bodies "
+                    f"{previous!r} and {binding.canonical!r}"
+                )
+            owners[native_name] = binding.canonical
+
+    if allowed_formats is not None:
+        missing_formats = []
+        for required_id in required:
+            binding = records[required_id]
+            missing = [fmt for fmt in allowed_formats if fmt not in binding.names]
+            if missing:
+                missing_formats.append((required_id, missing))
+        if missing_formats:
+            details = ", ".join(
+                f"{required_id!r} missing {missing}" for required_id, missing in missing_formats
+            )
+            raise BodyBindingError(
+                f"body bindings lack required formats for ids: {details}; "
+                f"declared formats are {list(allowed_formats)}"
+            )
 
 
 @dataclass(frozen=True)

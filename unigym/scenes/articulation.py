@@ -5,8 +5,8 @@ articulation-level control mode: *how* a joint is driven (and which adapter
 owns it) is declared explicitly in the run-level ``controls[]`` block
 (:mod:`unigym.runtime.controls`), and joints that are not driven at all are
 listed in :attr:`ArticulationSpec.passive_joints`.  The IR is pure data and
-imports only the standard library -- no engine and no backend name is
-allowed here (attribute neutrality).
+imports only the standard library plus the neutral robot vocabulary -- no
+engine and no backend name is allowed here (attribute neutrality).
 
 v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
 / ``policy_section``: the drive declaration lives in ``controls[]`` and the
@@ -16,21 +16,32 @@ robot profile only supplies the joint order / q0 / body parts.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
-from unigym._typing import JsonValue
+from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym.robots.base import (
+    BodyBinding,
+    BodyBindingError,
+    CanonicalBodyId,
+    normalize_canonical_body_id,
+)
 
 __all__ = [
     "ARTICULATION_PREFIX",
     "ArticulationError",
     "ArticulationSpec",
     "AssetRef",
+    "ContactSensorGroup",
+    "ContactSensorInventory",
     "JointSpec",
     "ROOT_MODES",
     "articulation_key",
     "normalize_articulation",
     "normalize_articulations",
+    "normalize_contact_sensor_inventory",
+    "validate_contact_sensor_inventory",
 ]
 
 ARTICULATION_PREFIX = "articulation"
@@ -108,6 +119,284 @@ def _unknown_keys(
         raise ArticulationError(
             f"{what} declares unknown keys {unknown}; allowed keys are " f"{list(allowed)}"
         )
+
+
+_CONTACT_MODES = ("declared", "all", "none")
+"""The closed contact-sensor inventory modes."""
+
+_CONTACT_GROUP_NAME = re.compile(r"[A-Za-z0-9_-]+")
+_RESERVED_CONTACT_GROUP_NAMES = frozenset({"all", "none"})
+_CONTACT_GROUP_KEYS = ("name", "bodies", "body_set")
+
+
+def _contact_bodies(value: object, what: str) -> tuple[CanonicalBodyId, ...] | None:
+    if value is None:
+        return None
+    if not is_object_sequence(value):
+        raise ArticulationError(f"{what} must be a list of body ids, got {value!r}")
+    entries = tuple(value)
+    if not entries:
+        return None
+    bodies: list[CanonicalBodyId] = []
+    for index, entry in enumerate(entries):
+        try:
+            bodies.append(normalize_canonical_body_id(entry, f"{what}[{index}]"))
+        except BodyBindingError as exc:
+            raise ArticulationError(str(exc)) from exc
+    duplicates = sorted({str(body) for body in bodies if bodies.count(body) > 1})
+    if duplicates:
+        raise ArticulationError(f"{what} contains duplicate bodies {duplicates}")
+    return tuple(bodies)
+
+
+def _contact_body_set(value: object, what: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ArticulationError(f"{what} must be a non-empty set name, got {value!r}")
+    return value.strip()
+
+
+@dataclass(frozen=True)
+class ContactSensorGroup:
+    """One named group of robot bodies that carry contact sensors.
+
+    A group addresses its bodies through exactly one of an explicit
+    ``bodies`` tuple or a ``body_set`` reference resolved by
+    :func:`validate_contact_sensor_inventory`.
+    """
+
+    name: str
+    bodies: tuple[CanonicalBodyId, ...] | None = None
+    body_set: str | None = None
+
+    def __post_init__(self) -> None:
+        name = self.name
+        if not isinstance(name, str) or not name.strip():
+            raise ArticulationError(
+                f"contact sensor group name must be a non-empty string, got {name!r}"
+            )
+        name = name.strip()
+        if _CONTACT_GROUP_NAME.fullmatch(name) is None:
+            raise ArticulationError(f"contact sensor group name {name!r} must match [A-Za-z0-9_-]+")
+        if name in _RESERVED_CONTACT_GROUP_NAMES:
+            raise ArticulationError(
+                f"contact sensor group name {name!r} is reserved; "
+                f"{sorted(_RESERVED_CONTACT_GROUP_NAMES)} are mode/wildcard names"
+            )
+        bodies = _contact_bodies(self.bodies, f"contact sensor group {name!r} bodies")
+        body_set = _contact_body_set(self.body_set, f"contact sensor group {name!r} body_set")
+        if (bodies is None) == (body_set is None):
+            raise ArticulationError(
+                f"contact sensor group {name!r} must declare exactly one of "
+                f"non-empty `bodies` or `body_set` (got bodies={bodies!r}, "
+                f"body_set={body_set!r})"
+            )
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "bodies", bodies)
+        object.__setattr__(self, "body_set", body_set)
+
+
+@dataclass(frozen=True)
+class ContactSensorInventory:
+    """One articulation's contact-sensor body inventory.
+
+    ``mode`` is ``declared`` (named groups), ``all`` (every rigid body, not
+    enumerated in this layer) or ``none`` (explicit opt-out).
+    """
+
+    mode: str
+    groups: tuple[ContactSensorGroup, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.mode not in _CONTACT_MODES:
+            raise ArticulationError(
+                f"contact sensor inventory mode must be one of "
+                f"{list(_CONTACT_MODES)}, got {self.mode!r}"
+            )
+        groups = self.groups
+        if groups is None:
+            groups = ()
+        if isinstance(groups, (str, bytes)) or not isinstance(groups, Sequence):
+            raise ArticulationError(
+                f"contact sensor inventory groups must be a list, got {groups!r}"
+            )
+        entries = tuple(groups)
+        for entry in entries:
+            if not isinstance(entry, ContactSensorGroup):
+                raise ArticulationError(
+                    f"contact sensor inventory groups must be ContactSensorGroup "
+                    f"records, got {entry!r}"
+                )
+        names = [group.name for group in entries]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ArticulationError(
+                f"contact sensor inventory declares duplicate group names {duplicates}"
+            )
+        if self.mode == "declared" and not entries:
+            raise ArticulationError(
+                "contact sensor inventory mode 'declared' requires at least one group"
+            )
+        if self.mode in ("all", "none") and entries:
+            raise ArticulationError(
+                f"contact sensor inventory mode {self.mode!r} must not declare "
+                f"groups, got {names!r}"
+            )
+        object.__setattr__(self, "groups", entries)
+
+
+def normalize_contact_sensor_inventory(value: object) -> ContactSensorInventory:
+    """Normalize ``all`` / ``none`` / a group list into the inventory IR.
+
+    ``contacts: all`` and the wildcard spelling
+    ``[{name: all, bodies: ["*"]}]`` normalize to the same ``mode="all"``
+    inventory.  An already normalized inventory is returned unchanged.
+    """
+    if isinstance(value, ContactSensorInventory):
+        return value
+    if isinstance(value, str):
+        mode = value.strip()
+        if mode in ("all", "none"):
+            return ContactSensorInventory(mode=mode)
+        raise ArticulationError(
+            f"contact sensor inventory string must be 'all' or 'none', got {value!r}"
+        )
+    if isinstance(value, Mapping):
+        raise ArticulationError(
+            f"contact sensor inventory must be 'all', 'none' or a list of groups, " f"got {value!r}"
+        )
+    if not is_object_sequence(value):
+        raise ArticulationError(
+            f"contact sensor inventory must be 'all', 'none' or a list of groups, " f"got {value!r}"
+        )
+    entries = tuple(value)
+    if not entries:
+        raise ArticulationError(
+            "contact sensor inventory declared mode requires at least one group"
+        )
+    groups: list[ContactSensorGroup] = []
+    for entry in entries:
+        if isinstance(entry, ContactSensorGroup):
+            groups.append(entry)
+            continue
+        if not is_json_object(entry):
+            raise ArticulationError(
+                f"contact sensor inventory groups must be mappings, got {entry!r}"
+            )
+        unknown = sorted(set(entry) - set(_CONTACT_GROUP_KEYS))
+        if unknown:
+            raise ArticulationError(
+                f"contact sensor group declares unknown keys {unknown}; allowed "
+                f"keys are {list(_CONTACT_GROUP_KEYS)}"
+            )
+        raw_name = entry.get("name")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ArticulationError(
+                f"contact sensor group name must be a non-empty string, got {raw_name!r}"
+            )
+        name = raw_name.strip()
+        raw_bodies = entry.get("bodies")
+        if is_object_sequence(raw_bodies):
+            body_values = tuple(raw_bodies)
+            wildcards = [body for body in body_values if body == "*"]
+            if wildcards:
+                if (
+                    name != "all"
+                    or len(body_values) != 1
+                    or entry.get("body_set") is not None
+                    or len(entries) != 1
+                ):
+                    raise ArticulationError(
+                        f"contact sensor wildcard '*' must be the only body of a "
+                        f"single group named 'all', got name={name!r}, "
+                        f"bodies={list(body_values)!r}"
+                    )
+                return ContactSensorInventory(mode="all")
+        bodies = _contact_bodies(raw_bodies, f"contact sensor group {name!r} bodies")
+        body_set = _contact_body_set(
+            entry.get("body_set"), f"contact sensor group {name!r} body_set"
+        )
+        groups.append(ContactSensorGroup(name=name, bodies=bodies, body_set=body_set))
+    return ContactSensorInventory(mode="declared", groups=tuple(groups))
+
+
+def _format_names(formats: Iterable[str] | None) -> tuple[str, ...] | None:
+    if formats is None:
+        return None
+    return tuple(str(asset_format) for asset_format in formats)
+
+
+def validate_contact_sensor_inventory(
+    inventory: ContactSensorInventory,
+    *,
+    body_sets: Mapping[str, Sequence[str]] | None = None,
+    bindings: Mapping[CanonicalBodyId, BodyBinding] | None = None,
+    formats: Iterable[str] | None = None,
+) -> None:
+    """Validate one contact-sensor inventory against sets, bindings and formats.
+
+    ``all`` and ``none`` need no body lookup.  Declared groups resolve their
+    body sets, reject unknown bodies/formats, and require every canonical body
+    to appear in at most one group.
+    """
+    if not isinstance(inventory, ContactSensorInventory):
+        raise ArticulationError(
+            f"contact sensor inventory must be a ContactSensorInventory, " f"got {inventory!r}"
+        )
+    if inventory.mode in ("all", "none"):
+        return
+    declared_sets = (
+        {} if body_sets is None else {str(key): value for key, value in body_sets.items()}
+    )
+    known_sets = sorted(declared_sets)
+    format_names = _format_names(formats)
+    if format_names is not None and bindings is None:
+        raise ArticulationError("contact sensor inventory format validation requires body bindings")
+    owner: dict[CanonicalBodyId, str] = {}
+    for group in inventory.groups:
+        if group.body_set is not None:
+            if group.body_set not in declared_sets:
+                raise ArticulationError(
+                    f"contact sensor group {group.name!r} body_set "
+                    f"{group.body_set!r} is unknown; declared body sets are "
+                    f"{known_sets}"
+                )
+            refs = _contact_bodies(
+                declared_sets[group.body_set],
+                f"contact sensor group {group.name!r} body_set " f"{group.body_set!r} bodies",
+            )
+        else:
+            refs = group.bodies
+        referenced = refs or ()
+        for body in referenced:
+            if body in owner:
+                raise ArticulationError(
+                    f"body {str(body)!r} appears in multiple contact sensor groups "
+                    f"{owner[body]!r} and {group.name!r}; one sensor per body"
+                )
+        if bindings is not None:
+            unknown_bodies = sorted(str(body) for body in referenced if body not in bindings)
+            if unknown_bodies:
+                known = sorted(str(key) for key in bindings)
+                raise ArticulationError(
+                    f"contact sensor group {group.name!r} names unknown bodies "
+                    f"{unknown_bodies}; bound bodies are {known}"
+                )
+        if format_names is not None and bindings is not None:
+            missing: list[tuple[CanonicalBodyId, list[str]]] = []
+            for body in referenced:
+                absent = [fmt for fmt in format_names if fmt not in bindings[body].names]
+                if absent:
+                    missing.append((body, absent))
+            if missing:
+                details = ", ".join(f"{str(body)!r} missing {absent}" for body, absent in missing)
+                raise ArticulationError(
+                    f"contact sensor group {group.name!r} bodies lack required "
+                    f"formats: {details}; declared formats are {list(format_names)}"
+                )
+        for body in referenced:
+            owner[body] = group.name
 
 
 @dataclass(frozen=True)
