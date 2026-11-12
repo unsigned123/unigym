@@ -59,17 +59,20 @@ def _require_content_scene(spec, scene_name) -> None:
         )
 
 
-def _fill_scene_content(scene, spec):
+def _fill_scene_content(scene, spec, asset_plan):
     """Fill *scene* with the declared content spec and merge the instances.
 
     The catalog is loaded from the provider factory's declared
-    ``catalog_ref`` (shipped with the pack; never rebuilt per run).  The
+    ``catalog_ref`` (shipped with the pack; never rebuilt per run) and resolved
+    through the run's explicit :class:`~unigym.assets.plan.AssetPlan`.  The
     build-time fill uses ``spec.seed`` (default 0); a per-episode refill is
     reserved for the reset stage and is not wired here yet.
 
     Args:
         scene: The built neutral scene the provider fills.
         spec: The content spec, or ``None`` (the scene passes through).
+        asset_plan: The composition boundary that resolves the provider's
+            ``catalog_ref``; ``None`` when the run declared no pack runtime.
 
     Returns:
         The scene with the provider's instances appended, plus the fill
@@ -78,12 +81,12 @@ def _fill_scene_content(scene, spec):
 
     Raises:
         ValueError: The spec is not a mapping, the provider is unknown or
-            carries no ``catalog_ref``, or a binding rule fails.
+            carries no ``catalog_ref``, no asset plan is available, or a
+            binding rule fails.
     """
     from dataclasses import replace
 
     from unigym.assets.catalog import load_catalog
-    from unigym.pack_api import resolve
     from unigym.scenes.pipeline import content_provider, validate_binding
 
     if spec is None:
@@ -98,8 +101,13 @@ def _fill_scene_content(scene, spec):
             f"content provider {name!r} declares no catalog_ref -- the "
             f"runtime loads the shipped catalog from the pack"
         )
+    if asset_plan is None:
+        raise ValueError(
+            f"content provider {name!r} catalog_ref {catalog_ref!r} needs an "
+            f"explicit AssetPlan; build the run with a pack runtime"
+        )
     provider = factory(
-        catalog=load_catalog(resolve(catalog_ref)),
+        catalog=load_catalog(asset_plan.resolve(catalog_ref)),
         generator_exists=_scene_generator_exists,
     )
     fill_spec = dict(spec)

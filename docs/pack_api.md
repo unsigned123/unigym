@@ -1,22 +1,27 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phase 1, Phase 3, Phase 3b, the additive Phase 4 `(face, id)` lookup,
-Phase 5 runtime parity, the Phase 6a scene consumer cutover, the Phase 6b run
-consumer cutover, the Phase 7a benchmark consumer cutover, the Phase 7b-1
-asset-resolver foundation, the Phase 7b-2 boundary-resolved asset cutover and
-the Phase 7b-3 asset CLI/selection cutover are implemented. Scene references
-resolve only through the runtime `scenes` face; run config references resolve
-only as absolute file paths or exact runtime `runs` catalog ids; benchmark pack
-discovery reads only resource-backed entries of the runtime `benchmarks` face.
-Asset references resolve once at the composition/domain boundary into an
-`unigym.assets.plan.AssetPlan`: prop templates, generated `AssetDefinition`
-files, scene assets and MJCF documents reach backend code with absolute paths
-only. `UNIGYM_ASSET_ROOT` / `UNIGYM_ASSET_PACK` were removed from the known
-placeholder vocabulary. The runtime is still a parallel path for task, asset
-and termination loading: the legacy `unigym.packs` discovery and loader remain
-the active runtime there. The asset CLI resolves pack roots and selection faces
-through the explicit runtime; catalog build/search keep their external collector
-contract because `tools/build_asset_catalog.py` is not part of the public core.
+Status: Phases 1 through 8 are implemented. `unigym.pack/1` plus
+`PackRuntime` is the only pack loader:
+
+```text
+discover -> catalog -> resource/asset -> activate
+```
+
+The legacy `unigym.packs` mount, manifest, resolve and load modules are
+deleted; there is no dual-read period, compatibility shim or implicit
+repository mount. Scene references resolve only through the runtime `scenes`
+face; run config references resolve only as absolute file paths or exact
+runtime `runs` catalog ids; benchmark pack discovery reads only resource-backed
+entries of the runtime `benchmarks` face. Asset references resolve once at the
+composition/domain boundary into an `unigym.assets.plan.AssetPlan`: prop
+templates, generated `AssetDefinition` files, scene assets and MJCF documents
+reach backend code with absolute paths only. `UNIGYM_ASSET_ROOT` /
+`UNIGYM_ASSET_PACK` were removed from the known placeholder vocabulary. Code
+packs activate explicitly through `PackRuntime.activate_all()` at the daemon
+and CLI composition boundaries. The asset CLI resolves pack roots and selection
+faces through the explicit runtime; catalog build/search keep their external
+collector contract because `tools/build_asset_catalog.py` is not part of the
+public core.
 
 Parent plan: the "unigym external pack API" draft and its phase briefs in the
 planning repository (`plans/drafts/unigym-pack-api.md`,
@@ -46,12 +51,20 @@ from unigym.pack_api import (
     PackRuntime,
     ProvidedItem,
     discover,
+    load_asset_manifest,
     load_manifest_v1,
+    register_content_provider,
+    register_prop_template,
+    register_scene,
+    register_termination,
 )
 ```
 
-Existing legacy exports (`find`, `resolve`, `register_scene`,
-`register_termination`, ...) remain unchanged. Importing `unigym.pack_api`
+The removed helper exports `find`, `resolve`, `code_pack_root`, `load_table`
+and `asset_path` no longer exist. Pack code reaches its own resources only
+through `PackContext`, and every resource resolves through `PackRuntime`.
+`unigym.packs` exports only `PackError`; `MANIFEST_NAME`, `FACE_NAMES` and the
+manifest types live in `unigym.packs.schema`. Importing `unigym.pack_api`
 never imports pack Python.
 
 ## Manifest document
@@ -314,7 +327,7 @@ Rules:
 - only a non-empty string is accepted;
 - an absolute or `~` path is a run config's own asset: it is expanded and
   returned as an absolute `Path` without a pack lookup or an existence check,
-  matching the legacy absolute pass-through;
+  matching the run config's own absolute path;
 - a `pack:<pack>/<rel>` reference is canonicalized first with the existing pure
   `unigym.core.asset_root.canonical_asset_path` rule, so a texture leaf such as
   `assets/generators/tex/a/wood.png` names
@@ -373,7 +386,7 @@ Rules:
   textures and instance payload files at the scene boundary;
 - `load_spec` parses a resolved MJCF document only and rejects one that still
   carries `${...}` or a `pack:` reference (old content is not migrated);
-- no backend module imports `unigym.core.asset_root`; the legacy
+- no backend module imports `unigym.core.asset_root`; the old
   `unigym.packs.refs` resolver was deleted.
 
 ### Asset CLI and selection (Phase 7b-3)
@@ -384,9 +397,9 @@ runtime discovery is needed. There is no module-level runtime or cache.
 - `unigym asset file <id>` checks the id namespace against
   `runtime.root_by_pack` and resolves the asset directory through
   `runtime.resource`, so the inside-root, missing-resource and symlink checks
-  stay with the runtime owner. It never calls the legacy `pack_roots()` /
+  stay with the runtime owner. It never calls the removed `pack_roots()` /
   `repo_pack()` helpers. An unknown namespace is a teaching error naming the
-  mounted packs. A generator id activates every catalog pack through
+  discovered packs. A generator id activates every catalog pack through
   `runtime.activate_all()` before reading the template registry; the registry
   and its error behavior are unchanged, and an activation failure is a teaching
   CLI error rather than a traceback.
@@ -565,31 +578,63 @@ returns a `tuple[ActivationHandle, ...]`. It uses the same per-runtime cache,
 so a repeated call returns the same handles without re-running an entrypoint.
 Content packs remain no-ops.
 
-Activation does not register providers or mutate a registry in this phase; a
-pack entrypoint may use the existing public registration helpers directly if
-it needs to.
+Activation does not register providers or mutate a registry by itself; a pack
+entrypoint uses the public registration helpers directly when it needs to.
+
+### Code activation at composition boundaries
+
+Activation is explicit at each process boundary, never a module-level flag or
+cache:
+
+- `DaemonService.__init__` discovers the configured runtime and calls
+  `activate_all()` before the control plane starts;
+- `collect_cli` and `describe_cli` always build `discover(entry_points=True)`,
+  call `activate_all()` and pass that runtime to `build_spec`;
+- the launcher does not load code packs globally; command modules own their
+  activation at their composition boundary.
+
+## Pack CLI
+
+`unigym pack` is backed by the runtime and `discover(entry_points=True)`:
+
+- `pack list [--json]` prints each runtime manifest's name, version, api,
+  trust, declared provided-item counts per face and root;
+- `pack path <name> [face]` prints the pack root, or for one declared face
+  prints each item's absolute resource path or its entrypoint;
+- `pack doctor [--name NAME] [--json]` revalidates the manifest schema,
+  checks `BUILD_MANIFEST.txt` against the live tree and activates the pack
+  through the runtime. It performs no legacy mount, api/requires or mount-face
+  checks.
+
+There is no `repo` pack and no mount table. The CLI fails with the known packs
+or known faces, never with an implicit checkout fallback.
+
+## Breaking removals
+
+- `unigym.packs.mount`, `unigym.packs.manifest`, `unigym.packs.resolve` and
+  `unigym.packs.load` are deleted; there are no shims.
+- `unigym.pack_api.find`, `resolve`, `code_pack_root`, `load_table` and
+  `asset_path` are removed.
+- `load_mounted_code`, `pack_roots`, `repo_pack`, the `unigym_packs_<name>`
+  custom module loader and the `faces:` manifest schema are gone.
+- Old `faces:` packs no longer load; a pack must declare the
+  `unigym.pack/1` document, and code packs must use a manifest entrypoint that
+  accepts one `PackContext`.
+- Out-of-tree importers of the removed helpers must migrate to the runtime and
+  `PackContext`.
 
 ## Non-goals
 
 The current phases deliberately do not implement:
 
-- switching the legacy `unigym.packs` loader onto this runtime for task, asset
-  or termination loading; the legacy loader remains the active discovery path
-  there (scene references, run config references, benchmark pack discovery and
-  the asset CLI/selection faces are already cut over);
+- migration of existing runs and packs: old run configs and old pack manifests
+  are not migrated;
 - implementing the asset catalog collector in the public core; the external
   `tools/build_asset_catalog.py` and the explicit collector contract of
   `catalog build` / `catalog search` remain unchanged;
-- migration of existing runs and packs: old run configs and old pack manifests
-  are not migrated, and the legacy loader modules are not deleted by this
-  phase;
-- a compatibility shim between the runtime and legacy mounts;
+- a compatibility shim between the runtime and the deleted legacy loader;
 - requirement or `requires` resolution;
 - provider registration orchestration; `activate_all` only calls entrypoints
   in catalog order and does not register providers;
-- migration of task, asset or termination loaders onto pack resources;
+- changes to benchmark, scene, asset or task domain parsers;
 - a sandbox for trusted code packs.
-
-The legacy loader stays active for task, asset and termination loading until
-their later cutover phases. Benchmark pack discovery and the daemon
-`benchmark_packs` listing use the runtime `benchmarks` face.

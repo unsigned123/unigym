@@ -412,18 +412,29 @@ def test_catalog_and_manifest_are_immutable(tmp_path: Path) -> None:
 
 def test_public_pack_api_exports() -> None:
     expected = {
+        "ActivationHandle",
+        "AssetContext",
         "CatalogEntry",
         "PackCatalog",
         "PackContext",
         "PackManifestV1",
+        "PackRuntime",
         "ProvidedItem",
+        "discover",
+        "load_asset_manifest",
         "load_manifest_v1",
+        "register_content_provider",
+        "register_prop_template",
+        "register_scene",
+        "register_termination",
     }
-    legacy = {"asset_path", "find", "register_scene", "resolve"}
+    removed = {"asset_path", "code_pack_root", "find", "load_table", "resolve"}
 
-    assert expected | legacy <= set(pack_api.__all__)
-    for name in expected | legacy:
+    assert set(pack_api.__all__) == expected
+    for name in expected:
         assert getattr(pack_api, name) is not None
+    for name in removed:
+        assert not hasattr(pack_api, name)
 
 
 def test_manifest_load_does_not_import_pack_code(

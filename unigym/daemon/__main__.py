@@ -34,19 +34,6 @@ import sys  # noqa: E402
 
 from .service import DaemonService  # noqa: E402  (after the env pin)
 
-_CODE_PACKS_LOADED = False
-
-
-def _load_code_packs() -> None:
-    """Import mounted code packs once, before the control plane starts."""
-    global _CODE_PACKS_LOADED
-    if _CODE_PACKS_LOADED:
-        return
-    from unigym.packs.load import load_mounted_code
-
-    load_mounted_code()
-    _CODE_PACKS_LOADED = True
-
 
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI args, print the code-origin line, and run DaemonService.
@@ -117,7 +104,6 @@ def main(argv: list[str] | None = None) -> int:
     import unigym
 
     print(f"[unigymd] code {unigym.__file__} version " f"{unigym.__version__}", flush=True)
-    _load_code_packs()
     svc = DaemonService(
         api_port=a.api_port,
         webui_port=a.webui_port,

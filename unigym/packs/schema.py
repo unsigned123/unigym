@@ -6,8 +6,8 @@ resource/entrypoint rules.  Loading is pure: it reads YAML and checks
 filesystem paths but never imports pack Python, so a manifest can be
 enumerated without activating a pack.
 
-The legacy ``unigym.packs`` loader stays in place; this schema is a separate
-contract until the discovery/load path migrates to it.
+The schema is the only manifest contract: discovery, catalog lookup and
+activation in :mod:`unigym.packs.runtime` all read it.
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ from types import MappingProxyType
 import yaml
 
 from . import PackError
-from .manifest import MANIFEST_NAME
+
+MANIFEST_NAME = "unigym.pack.yaml"
+"""The single manifest file every pack root carries."""
 
 SCHEMA_ID = "unigym.pack/1"
 """The one document schema this parser accepts."""
@@ -312,6 +314,7 @@ def load_manifest_v1(root: str | Path) -> PackManifestV1:
 
 __all__ = [
     "FACE_NAMES",
+    "MANIFEST_NAME",
     "SCHEMA_ID",
     "TRUST_LEVELS",
     "PackManifestV1",

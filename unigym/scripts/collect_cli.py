@@ -428,26 +428,16 @@ def _resolve_artifacts_dir(cfg, args_cli, out_dir) -> Path | None:
 
 
 def main():
-    # v084: load the mounted pack's code face BEFORE any scene resolution --
-    # the daemon-spawned worker is a fresh process, and without this the
-    # registry is empty ("unknown scene ... registered: []").  Idempotent;
-    # a no-op when no pack is mounted.
-    from unigym.packs.load import load_mounted_code
-
-    load_mounted_code()
     with open(args_cli.config) as f:
         cfg = yaml.safe_load(f)
-    # a scene-bearing run resolves its exact `scenes` catalog id, and a
-    # benchmark/both run resolves benchmark packs, through an explicit runtime
-    # built at this composition boundary (no module global)
-    runtime = None
-    if isinstance(cfg, dict):
-        from unigym.run.spec import requires_pack_runtime
+    # Code packs activate through the explicit runtime at this composition
+    # boundary; build_spec receives the same runtime (no module global).  A
+    # daemon-spawned worker is a fresh process, so scenes, benchmarks and asset
+    # resources must be discovered here before spec construction.
+    from unigym.pack_api import discover
 
-        if requires_pack_runtime(cfg):
-            from unigym.pack_api import discover
-
-            runtime = discover(entry_points=True)
+    runtime = discover(entry_points=True)
+    runtime.activate_all()
     # v068 runtime layout: the worker ensures the artifact tree too
     # (idempotent; design §2 -- the daemon side also mkdir -p's at
     # start, this covers direct `collect_cli` invocations)

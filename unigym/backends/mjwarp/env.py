@@ -457,7 +457,9 @@ class MjwarpEnv(WarpBatchMixin):
                 # the mj_scene_params slot dict rides the provider
                 # dispatch verbatim; absent -> the provider's own gates
                 scene = build_scene_definition(str(self.mj_scene), self._mj_scene_params)
-                scene, self._fill_record = _fill_scene_content(scene, self._content_spec)
+                scene, self._fill_record = _fill_scene_content(
+                    scene, self._content_spec, asset_plan
+                )
                 self._placement_regions = compose_and_attach(mjspec, scene, asset_plan)
             # the fixed-base spawn declaration (None -> XML-baked pose)
             apply_spawn_base_pose(mjspec, spawn_base)

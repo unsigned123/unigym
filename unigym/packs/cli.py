@@ -1,13 +1,15 @@
-"""``unigym pack`` CLI: list, doctor and path over the mounted packs.
+"""``unigym pack`` CLI: list, path and doctor over the pack runtime.
 
-The launcher owns the argparse wiring; this module owns the three
-read-only commands.  Nothing here writes a pack: ``list`` renders the
-mount table, ``doctor`` re-validates every declared pack (manifest, api,
-requires, faces, ``BUILD_MANIFEST.txt`` against the live tree and the
-code-face import), and ``path`` prints the resolved face path(s).
+The launcher owns the argparse wiring; this module owns the three read-only
+commands.  Everything goes through :func:`unigym.packs.runtime.discover`, so
+the CLI sees the same manifests, resources and activation the rest of the
+system uses.  There is no implicit repository pack and no legacy mount table.
 
-Every failure names the legal options (known packs / known faces) so the
-CLI stays fail-closed and teachable, matching the resolver's style.
+``list`` renders the runtime catalog, ``path`` prints a pack root or the
+declared resources/entrypoints of one face, and ``doctor`` revalidates each
+manifest, checks ``BUILD_MANIFEST.txt`` against the live tree and activates
+the pack through the runtime.  Every failure names the legal choices (known
+packs / known faces) so the CLI stays fail-closed and teachable.
 """
 
 from __future__ import annotations
@@ -17,103 +19,71 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-import yaml
-
-from . import (
-    PACK_API,
-    PackError,
-    load_manifest,
-    pack_roots,
-)
-from .load import load_mounted_code, registration_report
-from .manifest import FACE_NAMES, MANIFEST_NAME, _check_unigym_requirement
-from .mount import _declared_roots
+from . import PackError
+from .runtime import PackRuntime, discover
+from .schema import FACE_NAMES, MANIFEST_NAME, PackManifestV1, load_manifest_v1
 
 INVENTORY_NAME = "BUILD_MANIFEST.txt"
-"""Per-pack tree inventory written by ``tools/build_pack.py``."""
+"""Per-pack tree inventory written by the external pack build tool."""
 
 _MISMATCH_LIMIT = 10
 """How many inventory mismatches a doctor report lists."""
-
 
 SKIP_DIRS = frozenset({".git", "__pycache__"})
 """Directories the pack inventory never counts (VCS and bytecode)."""
 
 
-def _count_files(path: Path) -> int:
-    """Number of regular files under *path* (excluding VCS/bytecode)."""
-    total = 0
-    for _dirpath, dirnames, filenames in os.walk(path):
-        dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS]
-        total += len([name for name in filenames if not name.endswith(".pyc")])
-    return total
+def _runtime() -> PackRuntime:
+    """Discover the configured packs, including installed entry points."""
+    return discover(entry_points=True)
 
 
-def _face_counts(pack) -> str:
-    """``face=count`` cells for every face the pack provides."""
-    cells: list[str] = []
-    for face in FACE_NAMES:
-        path = pack.faces.get(face)
-        if path is None or not path.is_dir():
-            continue
-        cells.append(f"{face}={_count_files(path)}")
-    return " ".join(cells) or "-"
+def _provides_counts(manifest: PackManifestV1) -> dict[str, int]:
+    """Declared item counts per provided face, in face vocabulary order."""
+    return {face: len(manifest.provides[face]) for face in FACE_NAMES if face in manifest.provides}
 
 
-def _manifest_row(pack) -> tuple[str, str]:
-    """``(version, api)`` cells; external packs read their manifest."""
-    if pack.root is None:
-        return "-", "-"
-    try:
-        manifest = load_manifest(pack.root)
-    except PackError:
-        return "?", "?"
-    return manifest.version, str(manifest.api)
+def _provides_text(counts: Mapping[str, int]) -> str:
+    """``face=count`` cells for every face the manifest provides."""
+    return " ".join(f"{face}={count}" for face, count in counts.items()) or "-"
 
 
 def cmd_list(a, extra: list[str] | None = None) -> int:
-    """``unigym pack list`` -- the mount table with per-face file counts."""
-    packs = pack_roots()
+    """``unigym pack list`` -- runtime manifests with provided-item counts."""
+    try:
+        runtime = _runtime()
+    except PackError as err:
+        print(f"[unigym pack] FAIL discovery: {err}")
+        return 1
     rows = []
-    for pack in packs:
-        version, api = _manifest_row(pack)
+    for manifest in runtime.catalog.manifests:
+        counts = _provides_counts(manifest)
         rows.append(
             {
-                "name": pack.name,
-                "version": version,
-                "api": api,
-                "trust": pack.trust,
-                "origin": pack.origin,
-                "faces": _face_counts(pack),
-                "root": None if pack.root is None else str(pack.root),
+                "name": manifest.name,
+                "version": manifest.version,
+                "api": manifest.api,
+                "trust": manifest.trust,
+                "provides": counts,
+                "root": str(manifest.root),
             }
         )
     if getattr(a, "json", False):
         print(json.dumps({"ok": True, "packs": rows}))
         return 0
-    print(f"{'name':<16} {'version':<9} {'api':<4} {'trust':<11} " f"{'origin':<5} faces")
+    print(f"{'name':<16} {'version':<9} {'api':<4} {'trust':<8} provides root")
     for row in rows:
         print(
             f"{row['name']:<16} {row['version']:<9} {row['api']:<4} "
-            f"{row['trust']:<11} {row['origin']:<5} {row['faces']}"
+            f"{row['trust']:<8} {_provides_text(row['provides'])} {row['root']}"
         )
     return 0
 
 
-def _raw_document(root: Path) -> tuple[dict | None, str | None]:
-    """Read a raw manifest mapping; ``(None, error)`` when it is unusable."""
-    path = root / MANIFEST_NAME
-    try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, ValueError) as err:
-        return None, str(err)
-    if not isinstance(doc, Mapping):
-        return None, f"{path} is not a mapping"
-    return dict(doc), None
-
-
 def _inventory_kind(rel: str) -> str:
     """Inventory kind of one pack-relative path (``manifest`` at the root)."""
+    if rel == MANIFEST_NAME:
+        return "manifest"
     kind = rel.split("/", 1)[0] if "/" in rel else "manifest"
     return kind if kind in (*FACE_NAMES, "python") else "manifest"
 
@@ -180,8 +150,8 @@ def _inventory_diff(root: Path) -> tuple[bool, str, list[str]]:
     return False, detail, mismatches[:_MISMATCH_LIMIT]
 
 
-def _doctor_one(root: Path) -> tuple[str, list[str], int]:
-    """Validate one pack root; return ``(name, report lines, fail count)``."""
+def _doctor_one(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[list[str], int]:
+    """Validate one runtime manifest; return ``(report lines, fail count)``."""
     lines: list[str] = []
     fails = 0
 
@@ -191,123 +161,57 @@ def _doctor_one(root: Path) -> tuple[str, list[str], int]:
         if not ok:
             fails += 1
 
-    manifest = None
     try:
-        manifest = load_manifest(root)
-        check("manifest", True, f"valid ({manifest.name} {manifest.version})")
+        revalidated = load_manifest_v1(manifest.root)
     except PackError as err:
         check("manifest", False, str(err))
-
-    raw, raw_error = _raw_document(root)
-    name = manifest.name if manifest is not None else str((raw or {}).get("name") or root.name)
-    if raw is None:
-        check("api", False, f"unreadable manifest: {raw_error}")
-        check("requires", False, f"unreadable manifest: {raw_error}")
-        check("faces", False, f"unreadable manifest: {raw_error}")
     else:
-        api = raw.get("api")
-        api_ok = isinstance(api, int) and not isinstance(api, bool) and api == PACK_API
-        check("api", api_ok, f"{api!r} (kernel {PACK_API})")
+        check("manifest", True, f"valid ({revalidated.name} {revalidated.version})")
 
-        requires = raw.get("requires") or {}
-        expr = requires.get("unigym") if isinstance(requires, Mapping) else None
-        if expr is None:
-            check("requires", True, "(no unigym constraint)")
-        else:
-            try:
-                _check_unigym_requirement(str(expr), root / MANIFEST_NAME)
-            except PackError as err:
-                check("requires", False, str(err))
-            else:
-                check("requires", True, str(expr))
-
-        raw_faces = raw.get("faces") or {}
-        if not isinstance(raw_faces, Mapping):
-            check("faces", False, "faces must be a mapping")
-        else:
-            cells: list[str] = []
-            ok = True
-            for face, value in raw_faces.items():
-                if face not in FACE_NAMES:
-                    ok = False
-                    cells.append(f"unknown {face!r}")
-                    continue
-                candidate = root / str(value)
-                if not isinstance(value, str) or not candidate.exists():
-                    ok = False
-                    cells.append(f"{face}: missing {value!r}")
-                else:
-                    cells.append(face)
-            check("faces", ok, ", ".join(cells) or "(none)")
-
-    inv_ok, inv_detail, mismatches = _inventory_diff(root)
+    inv_ok, inv_detail, mismatches = _inventory_diff(manifest.root)
     check(INVENTORY_NAME, inv_ok, inv_detail)
     for row in mismatches:
         lines.append(f"       {row}")
 
-    trust = manifest.trust if manifest is not None else (raw or {}).get("trust")
-    if trust == "code":
-        try:
-            loaded = load_mounted_code()
-        except PackError as err:
-            check("code", False, str(err))
-        else:
-            modules = loaded.get(name, ())
-            report = registration_report()
-            count = int(report["scenes"]) + int(report["props"]) + int(report["terminations"])
-            check(
-                "code",
-                True,
-                f"imported unigym_packs_{name} ({len(modules)} modules, "
-                f"{count} registrations, no hash, internal trust)",
-            )
+    try:
+        handle = runtime.activate(manifest.name)
+    except PackError as err:
+        check("activation", False, str(err))
     else:
-        check("code", True, f"trust={trust!r} (no import)")
-    return name, lines, fails
-
-
-def _candidate_roots() -> list[Path]:
-    """Every declared external pack root in mount order (deduplicated)."""
-    roots: list[Path] = []
-    seen: set[Path] = set()
-    for root in _declared_roots():
-        resolved = Path(root).expanduser().resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        roots.append(resolved)
-    return roots
-
-
-def _root_label(root: Path) -> str:
-    """Best-effort pack name for a root that may carry an invalid manifest."""
-    doc, _err = _raw_document(root)
-    name = (doc or {}).get("name")
-    return str(name) if name else root.name
+        detail = "no manifest entrypoint" if handle.entrypoint is None else handle.entrypoint
+        check("activation", True, detail)
+    return lines, fails
 
 
 def cmd_doctor(a, extra: list[str] | None = None) -> int:
-    """``unigym pack doctor [--name NAME]`` -- per-pack validation."""
+    """``unigym pack doctor [--name NAME]`` -- per-pack runtime validation."""
     try:
-        roots = _candidate_roots()
+        runtime = _runtime()
     except PackError as err:
         print(f"[unigym pack] FAIL discovery: {err}")
         return 1
-    names = [_root_label(root) for root in roots]
+    names = list(runtime.catalog.packs())
     wanted = getattr(a, "name", None)
     if wanted is not None and wanted not in names:
         print(f"[unigym pack] unknown pack {wanted!r}; known packs: {names}")
         return 1
     report = []
     total = 0
-    for root, name in zip(roots, names):
-        if wanted is not None and name != wanted:
+    for manifest in runtime.catalog.manifests:
+        if wanted is not None and manifest.name != wanted:
             continue
-        pack_name, lines, fails = _doctor_one(root)
+        lines, fails = _doctor_one(manifest, runtime)
         total += fails
-        report.append({"name": pack_name, "root": str(root), "ok": fails == 0, "checks": lines})
+        report.append(
+            {
+                "name": manifest.name,
+                "root": str(manifest.root),
+                "ok": fails == 0,
+                "checks": lines,
+            }
+        )
         if not getattr(a, "json", False):
-            print(f"[{pack_name}] {root}")
+            print(f"[{manifest.name}] {manifest.root}")
             print("\n".join(lines))
     if getattr(a, "json", False):
         print(json.dumps({"ok": total == 0, "packs": report}))
@@ -318,55 +222,61 @@ def cmd_doctor(a, extra: list[str] | None = None) -> int:
 
 
 def cmd_path(a, extra: list[str] | None = None) -> int:
-    """``unigym pack path <name> [face]`` -- print the resolved path(s)."""
-    packs = pack_roots()
-    by_name = {pack.name: pack for pack in packs}
-    pack = by_name.get(a.name)
-    if pack is None:
-        print(f"[unigym pack] unknown pack {a.name!r}; " f"known packs: {sorted(by_name)}")
+    """``unigym pack path <name> [face]`` -- pack root or face resources."""
+    try:
+        runtime = _runtime()
+    except PackError as err:
+        print(f"[unigym pack] FAIL discovery: {err}")
+        return 1
+    try:
+        manifest = runtime.catalog.get(a.name)
+    except PackError as err:
+        print(f"[unigym pack] {err}")
         return 1
     face = getattr(a, "face", None)
     if face is None:
-        for candidate in FACE_NAMES:
-            path = pack.faces.get(candidate)
-            print(f"{candidate}: {path if path is not None else '(absent)'}")
+        print(manifest.root)
         return 0
     if face not in FACE_NAMES:
-        print(f"[unigym pack] unknown face {face!r}; " f"known faces: {list(FACE_NAMES)}")
+        print(f"[unigym pack] unknown face {face!r}; known faces: {list(FACE_NAMES)}")
         return 1
-    path = pack.faces.get(face)
-    if path is None:
-        available = [name for name in FACE_NAMES if pack.faces.get(name) is not None]
-        print(f"[unigym pack] pack {a.name!r} has no {face!r} face; " f"faces: {available}")
+    items = manifest.provides.get(face, ())
+    if not items:
+        available = [name for name in FACE_NAMES if name in manifest.provides]
+        print(f"[unigym pack] pack {a.name!r} has no {face!r} face; faces: {available}")
         return 1
-    print(path)
+    for item in items:
+        if item.resource is not None:
+            print(f"{item.id}: {runtime.resource(manifest.name, item.resource)}")
+        else:
+            print(f"{item.id}: {item.entrypoint}")
     return 0
 
 
 def add_pack_subparser(sub) -> None:
     """Register the ``pack`` command group on the launcher parser."""
-    pack = sub.add_parser("pack", help="pack registry: list / doctor / path")
+    pack = sub.add_parser("pack", help="pack registry: list / path / doctor")
     pack_sub = pack.add_subparsers(dest="pack_cmd", required=True)
 
     listing = pack_sub.add_parser(
-        "list", help="mounted packs: name, version, api, trust, origin, " "faces with file counts"
+        "list", help="runtime packs: name, version, api, trust, provided-item counts, root"
     )
     listing.add_argument("--json", action="store_true", help="single JSON document on stdout")
     listing.set_defaults(fn=cmd_list)
 
     doctor = pack_sub.add_parser(
         "doctor",
-        help="validate packs: manifest, api, requires, faces, "
-        "BUILD_MANIFEST.txt, code import (exit 1 on failure)",
+        help="validate packs: manifest, BUILD_MANIFEST.txt, runtime activation "
+        "(exit 1 on failure)",
     )
     doctor.add_argument(
-        "--name", default=None, help="only this pack (default: every external pack)"
+        "--name", default=None, help="only this pack (default: every discovered pack)"
     )
     doctor.add_argument("--json", action="store_true", help="single JSON document on stdout")
     doctor.set_defaults(fn=cmd_doctor)
 
-    path = pack_sub.add_parser("path", help="print resolved pack face path(s)")
-    path.add_argument("name", help="pack name (or 'repo')")
+    path = pack_sub.add_parser("path", help="print a pack root or its face resources/entrypoints")
+    path.add_argument("name", help="pack name")
     path.add_argument("face", nargs="?", default=None, help=f"one face: {', '.join(FACE_NAMES)}")
     path.set_defaults(fn=cmd_path)
 

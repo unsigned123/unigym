@@ -164,22 +164,14 @@ def _compiled_model(instance):
 
 def cmd_describe(a: argparse.Namespace, extra: list[str]) -> int:
     """Build the run's IR in-process and print the requested face."""
-    from unigym.packs.load import load_mounted_code
-
-    load_mounted_code()
     with open(a.config) as f:
         cfg = yaml.safe_load(f)
-    # a scene-bearing run resolves its exact `scenes` catalog id, and a
-    # benchmark/both run resolves benchmark packs, through an explicit runtime
-    # built at this composition boundary (no module global)
-    runtime = None
-    if isinstance(cfg, dict):
-        from unigym.run.spec import requires_pack_runtime
+    # Code packs activate through the explicit runtime at this composition
+    # boundary; build_spec receives the same runtime (no module global).
+    from unigym.pack_api import discover
 
-        if requires_pack_runtime(cfg):
-            from unigym.pack_api import discover
-
-            runtime = discover(entry_points=True)
+    runtime = discover(entry_points=True)
+    runtime.activate_all()
     tmp_dir = tempfile.mkdtemp(prefix="unigym_describe_")
     instance = None
     try:

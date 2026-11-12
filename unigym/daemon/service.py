@@ -108,6 +108,7 @@ class DaemonService:
         from unigym.pack_api import discover
 
         self.pack_runtime = discover(entry_points=True)
+        self.pack_runtime.activate_all()
         self.poll = float(poll)
         self.rebuild_s = float(rebuild_s)
         self.handshake_timeout_s = float(handshake_timeout_s)

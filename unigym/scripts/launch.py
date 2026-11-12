@@ -987,9 +987,6 @@ def main(argv: list[str] | None = None) -> None:
         a, extra = parser.parse_known_args(argv)
         if a.cmd == "pytest" and not extra:
             extra = ["-q"]
-        from unigym.packs.load import load_mounted_code
-
-        load_mounted_code()
         if a.cmd == "daemon":
             from unigym.daemon import manage as daemon_manage
 
