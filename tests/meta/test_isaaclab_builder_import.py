@@ -22,13 +22,14 @@ def test_builder_import_does_not_load_isaaclab():
     assert result.returncode == 0, result.stderr
 
 
-def test_build_robot_realization_rejects_a_profile_without_usd():
-    """A profile without an effective USD is rejected by asset, not by name."""
+def test_build_robot_realization_rejects_a_profile_without_an_asset():
+    """A profile without an effective asset is rejected by asset, not by name."""
+    from unigym.assets.asset_ref import AssetRefError
     from unigym.backends.isaaclab2.robots import build_robot_realization
     from unigym.scenes.articulation import ArticulationSpec
     from tests._support.profiles import fixture_profile
 
     profile = fixture_profile(name="arm")
 
-    with pytest.raises(NotImplementedError, match="no effective USD"):
+    with pytest.raises(AssetRefError, match="no asset reference is declared"):
         build_robot_realization(profile, spec=ArticulationSpec(name="arm"), params={})

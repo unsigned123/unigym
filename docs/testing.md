@@ -560,8 +560,10 @@ uses the pre-clone USD inventory (`unigym/backends/isaaclab2/usd.py`),
 materializes one sensor per rigid body, excludes fixed-joint merged palms, and
 resets/reads the per-body rows. A missing Cartpole or G1 pack fails the strict
 lane rather than skipping. The G1 builder tests exercise the generic realizer
-(any effective profile with a USD asset plus run-level actuation), not a
-`profile.name` branch.
+(any effective profile with a USD or URDF asset plus run-level actuation), not
+a `profile.name` branch. The lane also builds a real `UrdfFileCfg`
+`ArticulationCfg` from the shared primitives-only URDF fixture, so the URDF
+`AssetRef` path is proved in the actual IsaacLab environment.
 
 ### 7.4 Target commands
 

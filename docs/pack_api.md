@@ -493,8 +493,23 @@ base_height                            (free-base spawn height, or None)
 ```
 
 `foot_bodies` is semantic metadata (it never implies a sensor). `body_bindings`
-is robot metadata, not backend logic: the selected backend asset format picks
-the native name. `base_height` is the neutral free-base spawn height: G1
+is robot metadata, not backend logic: the backend's selected asset format picks
+the native name. Each backend declares an ordered, non-empty
+`BackendInfo.asset_formats` preference tuple: `("mjcf",)` for
+mujoco/mjwarp and `("usd", "urdf")` for isaaclab2/isaaclab3. For each
+articulation the run layer selects the first preferred format present on the
+effective `AssetRef` (`spec.model` when set, otherwise `profile.assets`). There
+is no fallback or conversion: an effective asset with no compatible format
+fails with a teaching error. The selected format is used for body bindings,
+contact-group native names, the camera base mount and selected-format asset
+path resolution; it is not one global backend format.
+
+A profile with no effective `AssetRef` remains legal for backends whose
+provider or scene owns the asset (for example the MuJoCo-family scene MJCF).
+There is no asset format to select in that case, so the run layer uses the
+backend's first declared format as the binding-key format; a backend robot
+realizer that needs an asset (IsaacLab) still fails explicitly.
+`base_height` is the neutral free-base spawn height: G1
 declares `0.78`, GR1 and other robots declare `None`. `ArticulationSpec.spawn`
 is the run-level spawn authority; when it is absent, an explicit
 `env.params.spawn_height` wins over the profile `base_height`, whose final
@@ -525,7 +540,9 @@ articulations:
 - MuJoCo/mjwarp expand `all` at bind over the referenced articulation's model
   bodies (articulation-binding scoped). IsaacLab expands it pre-clone through
   the inventory in `unigym/backends/isaaclab2/usd.py`, with fixed-joint merged
-  links excluded and one sensor per body.
+  links excluded and one sensor per body. That inventory walks a USD asset, so
+  an articulation that selects its URDF `AssetRef` cannot use `contacts: all`;
+  declare explicit contact groups (or provide the USD reference) instead.
  `RobotProfile` carries no backend object and no backend
 switch. There is no `with_isaaclab`, no `articulation_cfg`, no `body_parts`
 and no `RobotAsset` field.
@@ -547,13 +564,16 @@ robot-root spawn authority.
   profile/params/asset plan; no engine import happens in `unigym.robots`.
 
 G1's isaaclab realization is built through the generic builder: the neutral
-profile supplies q0/body facts, the effective USD `AssetRef` (`spec.model` when
+profile supplies q0/body facts, the effective `AssetRef` (`spec.model` when
 set, otherwise the profile's `assets`) is the spawn asset (the 43-DoF
 with-hand `g1.usd` from an installed robot/asset pack), and the run-level
-`ArticulationSpec.actuation` groups are the only actuator source.  There is no
-`G1_29DOF_CFG` template and no hardcoded G1 actuator table and no
-`profile.name` dispatch: any effective profile with a USD asset and run-level
-actuation builds through the same generic path.  The realizer resolves each
+`ArticulationSpec.actuation` groups are the only actuator source. The realizer
+selects the first backend-preferred format present on that effective asset:
+IsaacLab prefers USD and also accepts URDF (`UrdfFileCfg`), with no MJCF
+conversion or template. There is no `G1_29DOF_CFG` template and no hardcoded
+G1 actuator table and no `profile.name` dispatch: any effective profile with a
+USD or URDF asset and run-level actuation builds through the same generic path.
+The realizer resolves each
 group's `joint_set` through the profile vocabulary (`resolve_group_joints`)
 without a coverage check; the run layer owns driven-joint coverage.
 Realizer-only robot-section params (`prim_path`, `spawn_options`,
@@ -565,9 +585,10 @@ explicitly.  When `spec.spawn` is absent, `default_pos` is
 the builder fails because there is no spawn default.  Neutral actuation is
 declared on the articulation (`ArticulationSpec.actuation`) and translated by
 the backend; `env.params.actuators`, `controls[].gains` and the top-level
-`actuator:` override are removed.  GR1 declares no neutral USD asset, so the
-backend realizer rejects it because its effective asset has no USD, not because
-of its name.  Its MJCF remains a scene resource, not a neutral robot asset.
+`actuator:` override are removed.  GR1 declares no neutral USD/URDF asset, so
+the backend realizer rejects it because its effective asset has no compatible
+format, not because of its name.  Its MJCF remains a scene resource, not a
+neutral robot asset.
 
 Dynamic `register_robot` / manifest `kind: robot` registration is the explicit
 external-robot path: a pack registers a backend-neutral factory or resource

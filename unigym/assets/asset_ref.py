@@ -12,12 +12,17 @@ every backend.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from unigym._typing import JsonValue
 
-__all__ = ["ASSET_FORMATS", "AssetRef", "AssetRefError"]
+__all__ = [
+    "ASSET_FORMATS",
+    "AssetRef",
+    "AssetRefError",
+    "select_asset_format",
+]
 
 ASSET_FORMATS: tuple[str, ...] = ("mjcf", "urdf", "usd")
 """The closed asset-format vocabulary (stable declaration order)."""
@@ -82,3 +87,40 @@ class AssetRef:
             urdf=_optional_str(value.get("urdf"), f"{what}.urdf"),
             usd=_optional_str(value.get("usd"), f"{what}.usd"),
         )
+
+
+def select_asset_format(assets: AssetRef | None, formats: Sequence[str]) -> str:
+    """Select the first declared format supported by a backend.
+
+    Args:
+        assets: The effective neutral asset reference.
+        formats: The backend's declared format preference order.
+
+    Returns:
+        The first format in *formats* with a non-empty reference.
+
+    Raises:
+        AssetRefError: The preference list is empty, unknown, duplicated, the
+            assets are absent, or no preferred format is declared.
+    """
+    ordered = tuple(str(value) for value in formats)
+    if not ordered:
+        raise AssetRefError("asset format preference list must not be empty")
+    unknown = sorted(set(ordered) - set(ASSET_FORMATS))
+    if unknown:
+        raise AssetRefError(
+            f"asset format preference list declares unknown format(s) {unknown}; "
+            f"allowed formats are {list(ASSET_FORMATS)}"
+        )
+    if len(set(ordered)) != len(ordered):
+        raise AssetRefError(f"asset format preference list repeats a format: {list(ordered)}")
+    if assets is None:
+        raise AssetRefError(f"no asset reference is declared; backend formats are {list(ordered)}")
+    for asset_format in ordered:
+        if getattr(assets, asset_format):
+            return asset_format
+    declared = [asset_format for asset_format in ASSET_FORMATS if getattr(assets, asset_format)]
+    raise AssetRefError(
+        f"asset reference declares format(s) {declared}, but the backend supports "
+        f"{list(ordered)}; no compatible format"
+    )

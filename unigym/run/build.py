@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, TypedDict, runtime_checka
 import numpy as np
 
 from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym.assets.asset_ref import select_asset_format
 from unigym.actuators.ir import (
     ResolvedActuationGroup,
     resolve_actuation_groups,
@@ -134,15 +135,20 @@ class _RobotRealizer(Protocol):
     ) -> object: ...
 
 
-class _ProfileBuild(TypedDict):
+class _ProfileSeed(TypedDict):
     profile: RobotProfile
     params: dict[str, JsonValue]
     spec: ArticulationSpec
 
 
+class _ProfileBuild(_ProfileSeed):
+    asset_format: str
+
+
 class _RobotBundle(TypedDict):
     profile: RobotProfile
     profiles: dict[str, RobotProfile]
+    asset_formats: dict[str, str]
     robot_realizations: dict[str, object] | None
     terrain: object | None
     """Backend-built terrain object; opaque to the run layer."""
@@ -422,7 +428,7 @@ _REALIZER_PARAMS = (
 """Robot-section params owned by the backend realizer, never the profile."""
 
 
-def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
+def _profile_for(art: ArticulationSpec) -> _ProfileSeed:
     """Build the neutral :class:`RobotProfile` of one robot articulation.
 
     ``params.profile`` is the reserved selector for runs whose articulation
@@ -441,7 +447,11 @@ def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
     if selector is not None:
         section["name"] = str(selector)
     section["params"] = params
-    return {"profile": build_robot_profile(section), "params": realizer_params, "spec": art}
+    return {
+        "profile": build_robot_profile(section),
+        "params": realizer_params,
+        "spec": art,
+    }
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
@@ -488,19 +498,21 @@ def _effective_profile(
     art: ArticulationSpec,
     profile: RobotProfile,
     info: BackendInfo,
-) -> RobotProfile:
-    """Apply the run-level articulation overrides over the robot profile.
+) -> tuple[RobotProfile, str]:
+    """Apply run-level overrides and select one backend-compatible format.
 
     ``None`` fields inherit the profile; explicit empty values stay empty.
     Body-binding completeness is validated with the D1 validator
     (``formats=None`` -- a binding may legitimately carry several formats);
     the selected backend format is then required separately.
+
+    With an effective ``AssetRef`` the selected format is the first declared
+    backend-preferred format present on it (no fallback/conversion).  A
+    profile with no effective ``AssetRef`` is legal for backends whose
+    provider/scene owns the asset (for example the MuJoCo-family scene MJCF);
+    there is no asset format to select, so the run layer uses the backend's
+    first declared format as the ``BodyBinding`` native-name key.
     """
-    if not info.asset_format:
-        raise ValueError(
-            f"backend {info.name!r} declares no asset_format; body-binding "
-            f"and contact resolution need the backend's selected asset format"
-        )
     effective = replace(
         profile,
         assets=art.model if art.model is not None else profile.assets,
@@ -508,6 +520,10 @@ def _effective_profile(
         foot_bodies=(art.foot_bodies if art.foot_bodies is not None else profile.foot_bodies),
         body_sets=art.body_sets if art.body_sets is not None else profile.body_sets,
     )
+    if effective.assets is None:
+        asset_format = info.asset_formats[0]
+    else:
+        asset_format = select_asset_format(effective.assets, info.asset_formats)
     required = _required_body_ids(effective, art.contacts)
     validate_body_bindings(effective.body_bindings, required_ids=required, formats=None)
     if art.contacts is not None:
@@ -517,29 +533,29 @@ def _effective_profile(
             art.contacts,
             body_sets=effective.body_sets,
             bindings=effective.body_bindings,
-            formats=(info.asset_format,),
+            formats=(asset_format,),
         )
     missing = sorted(
         str(body)
         for body in set(required)
-        if info.asset_format not in effective.body_bindings[body].names
+        if asset_format not in effective.body_bindings[body].names
     )
     if missing:
         raise ValueError(
             f"articulation {art.name!r}: body bindings lack the selected "
-            f"asset format {info.asset_format!r} for ids {missing}"
+            f"asset format {asset_format!r} for ids {missing}"
         )
-    return effective
+    return effective, asset_format
 
 
 def _selected_asset_path(
-    profile: RobotProfile, info: BackendInfo, asset_plan: AssetPlan | None
+    profile: RobotProfile, asset_format: str, asset_plan: AssetPlan | None
 ) -> str | None:
     """The effective profile's selected-format asset path, when resolvable."""
     assets = profile.assets
     if assets is None:
         return None
-    value = getattr(assets, info.asset_format, None)
+    value = getattr(assets, asset_format, None)
     if not value:
         return None
     if asset_plan is not None:
@@ -575,7 +591,6 @@ def _effective_contacts(
 
 def _contact_group_table(
     builds: dict[str, _ProfileBuild],
-    info: BackendInfo,
     *,
     run_contacts: bool = False,
     asset_plan: AssetPlan | None = None,
@@ -583,8 +598,8 @@ def _contact_group_table(
     """Per-articulation native contact-group inventory for the resolver.
 
     ``declared`` inventories map their canonical bodies through the selected
-    backend format; ``all`` contributes one synthetic group named ``all``
-    whose sensor bodies are the typed ``ALL_BODIES`` sentinel; ``none``
+    per-articulation format; ``all`` contributes one synthetic group named
+    ``all`` whose sensor bodies are the typed ``ALL_BODIES`` sentinel; ``none``
     contributes no group.  The second return value is the per-articulation
     resolved selected asset path used by the backend ``all`` expansion.
     Only this layer touches ``BodyBinding``.
@@ -601,7 +616,7 @@ def _contact_group_table(
         groups: dict[str, tuple[str, ...]] = {}
         if inventory.mode == "all":
             groups["all"] = (ALL_BODIES,)
-            asset_path = _selected_asset_path(profile, info, asset_plan)
+            asset_path = _selected_asset_path(profile, build["asset_format"], asset_plan)
             if asset_path is not None:
                 contact_assets[name] = asset_path
         else:
@@ -612,7 +627,8 @@ def _contact_group_table(
                     else profile.body_sets.get(group.body_set, ())
                 )
                 groups[group.name] = tuple(
-                    profile.body_bindings[body].names[info.asset_format] for body in (bodies or ())
+                    profile.body_bindings[body].names[build["asset_format"]]
+                    for body in (bodies or ())
                 )
         table[name] = groups
     return table, contact_assets
@@ -655,7 +671,7 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
     for art in _control_articulations(spec):
         groups = [g for g in spec.controls if g.articulation == art.name]
         try:
-            build = _profile_for(art)
+            seed = _profile_for(art)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
             # profile-less articulations are legal only when every control
             # declares its joints/q0 explicitly (e.g. a future prop face);
@@ -669,8 +685,13 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
                     f"`joints` + `q0`"
                 ) from None
             continue
-        build["profile"] = _effective_profile(art, build["profile"], info)
-        builds[art.name] = build
+        profile, asset_format = _effective_profile(art, seed["profile"], info)
+        builds[art.name] = {
+            "profile": profile,
+            "params": seed["params"],
+            "spec": art,
+            "asset_format": asset_format,
+        }
     return builds
 
 
@@ -832,13 +853,13 @@ def _build_robot_and_props(
     generates_command = bool(adapter.generates_command)
     contact_groups, contact_assets = _contact_group_table(
         builds,
-        info,
         run_contacts=bool(cfg.get("contacts")),
         asset_plan=asset_plan,
     )
     return {
         "profile": profile,
         "profiles": profiles,
+        "asset_formats": {name: build["asset_format"] for name, build in builds.items()},
         "robot_realizations": robot_realizations,
         "terrain": terrain,
         "prop_manager": prop_manager,
@@ -850,7 +871,9 @@ def _build_robot_and_props(
 
 
 def _camera_base_mount(
-    cameras_cfg: JsonValue, profiles: Mapping[str, RobotProfile], info: BackendInfo
+    cameras_cfg: JsonValue,
+    profiles: Mapping[str, RobotProfile],
+    asset_formats: Mapping[str, str],
 ) -> JsonValue:
     """Fill each body camera's explicit mount from the effective profile.
 
@@ -862,10 +885,13 @@ def _camera_base_mount(
     """
     if not isinstance(cameras_cfg, list) or not cameras_cfg:
         return cameras_cfg
-    profile = next(iter(profiles.values()), None)
-    if profile is None or profile.base_body is None:
+    profile_name, profile = next(iter(profiles.items()), (None, None))
+    if profile is None or profile_name is None or profile.base_body is None:
         return cameras_cfg
-    native = profile.body_bindings[profile.base_body].names.get(info.asset_format)
+    asset_format = asset_formats.get(profile_name)
+    if not asset_format:
+        return cameras_cfg
+    native = profile.body_bindings[profile.base_body].names.get(asset_format)
     if not native:
         return cameras_cfg
     out: list[JsonValue] = []
@@ -896,6 +922,7 @@ def _build_sensing(
     device: str,
     num_envs: int,
     profiles: Mapping[str, RobotProfile],
+    asset_formats: Mapping[str, str],
     contact_groups: Mapping[str, Mapping[str, tuple[str, ...]]],
     contact_assets: Mapping[str, str],
     adapter: Adapter,
@@ -915,7 +942,7 @@ def _build_sensing(
 
     rec_cfg = _config_dict(cfg.get("recorder")) or {}
     rec_ref = rec_cfg.get("camera_ref") if rec_cfg.get("enabled") else None
-    cameras_cfg = _camera_base_mount(cfg.get("cameras"), profiles, info)
+    cameras_cfg = _camera_base_mount(cfg.get("cameras"), profiles, asset_formats)
     camera_manager = build_camera_manager(
         cameras_cfg,
         adapter.get_obs_requests(),
@@ -1542,6 +1569,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         device,
         num_envs,
         profiles,
+        robot["asset_formats"],
         robot["contact_groups"],
         robot["contact_assets"],
         adapter,

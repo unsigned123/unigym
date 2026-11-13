@@ -10,14 +10,18 @@ def fixture_profile(
     name: str = "fixture_arm",
     *,
     usd_path: str | None = None,
+    urdf_path: str | None = None,
     base_height: float | None = None,
 ) -> RobotProfile:
     """Build a tiny typed profile with a body and hand face."""
+    assets = None
+    if usd_path is not None or urdf_path is not None:
+        assets = AssetRef(usd=usd_path, urdf=urdf_path)
     return RobotProfile(
         name=name,
         joint_sets={"body": ("shoulder", "elbow"), "hand": ("finger",)},
         default_joint_pos={"shoulder": 0.0, "elbow": 0.0, "finger": 0.0},
-        assets=AssetRef(usd=usd_path) if usd_path is not None else None,
+        assets=assets,
         action_faces={"hand": ("finger",)},
         base_body="base",
         foot_bodies=(),

@@ -26,6 +26,8 @@ from typing import Any
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
+from unigym.assets.asset_ref import ASSET_FORMATS
+
 __all__ = [
     "CANONICAL_BACKENDS",
     "BACKEND_ALIASES",
@@ -224,12 +226,12 @@ class BackendInfo:
     ``None`` means the backend consumes the neutral profile directly and
     builds no backend robot object.
     """
-    asset_format: str = ""
-    """The backend-owned selected asset format (``mjcf`` / ``usd``).
+    asset_formats: tuple[str, ...] = ()
+    """Supported robot asset formats in backend preference order.
 
-    It selects the ``BodyBinding`` native-name key used by contact-group and
-    body-binding resolution; it does not require ``profile.assets`` to carry
-    that format (a pack/provider may own the asset).
+    The run layer selects the first declared format present on the effective
+    ``AssetRef``; this tuple is also the native-name key set used by
+    ``BodyBinding`` and contact resolution.  An empty tuple is invalid.
     """
     default_lighting: Mapping[str, float] | None = None
     """Default lights for a textured usd prop when the config declares none."""
@@ -247,6 +249,24 @@ class BackendInfo:
     """``unigym probe`` runs in the host venv (vs the container lane)."""
     probe_env: tuple[tuple[str, str], ...] = ()
     """Environment defaults injected into a host-lane probe subprocess."""
+
+    def __post_init__(self) -> None:
+        """Validate and freeze the backend asset-format preference list."""
+        formats = tuple(str(value) for value in self.asset_formats)
+        unknown = sorted(set(formats) - set(ASSET_FORMATS))
+        if not formats:
+            raise ValueError(
+                f"backend {self.name!r} must declare at least one asset format; "
+                f"allowed formats are {list(ASSET_FORMATS)}"
+            )
+        if unknown:
+            raise ValueError(
+                f"backend {self.name!r} declares unknown asset format(s) {unknown}; "
+                f"allowed formats are {list(ASSET_FORMATS)}"
+            )
+        if len(set(formats)) != len(formats):
+            raise ValueError(f"backend {self.name!r} repeats an asset format: {list(formats)}")
+        object.__setattr__(self, "asset_formats", formats)
 
     def has(self, *traits: Trait) -> bool:
         """Every listed trait present?"""
@@ -852,7 +872,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "mujoco",
         (0, 0),
         MUJOCO_TRAITS,
-        asset_format="mjcf",
+        asset_formats=("mjcf",),
         options_schema=_MJ_COMPOSE_OPTIONS,
         scene_engine=_mujoco_scene_engine,
         scopes=MUJOCO_SCOPES,
@@ -879,7 +899,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "mjwarp",
         (0, 0),
         MJWARP_TRAITS,
-        asset_format="mjcf",
+        asset_formats=("mjcf",),
         options_schema=_MJ_COMPOSE_OPTIONS,
         scene_engine=_mujoco_scene_engine,
         scopes=MJWARP_SCOPES,
@@ -904,7 +924,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "isaaclab2",
         (2, 3),
         ISAACLAB2_TRAITS,
-        asset_format="usd",
+        asset_formats=("usd", "urdf"),
         env_class=_isaaclab2_env,
         model_provider=_isaaclab2_model_provider,
         prop_backend=_isaaclab2_prop_backend,
@@ -925,7 +945,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         "isaaclab3",
         (3, 0),
         ISAACLAB3_TRAITS,
-        asset_format="usd",
+        asset_formats=("usd", "urdf"),
         env_class=_isaaclab3_env,
         camera_backend=_isaaclab2_rig_factory,
         director_ops=_isaaclab2_director_ops,

@@ -6,7 +6,12 @@ import dataclasses
 
 import pytest
 
-from unigym.assets.asset_ref import ASSET_FORMATS, AssetRef, AssetRefError
+from unigym.assets.asset_ref import (
+    ASSET_FORMATS,
+    AssetRef,
+    AssetRefError,
+    select_asset_format,
+)
 
 
 def test_asset_formats_are_the_closed_stable_vocabulary():
@@ -56,3 +61,52 @@ def test_scenes_reexports_the_same_asset_ref_type():
     from unigym.scenes.articulation import AssetRef as SceneAssetRef
 
     assert SceneAssetRef is AssetRef
+
+
+@pytest.mark.parametrize(
+    ("assets", "formats", "expected"),
+    [
+        (AssetRef(usd="robot.usd", urdf="robot.urdf"), ("usd", "urdf"), "usd"),
+        (AssetRef(urdf="robot.urdf", mjcf="robot.xml"), ("usd", "urdf"), "urdf"),
+        (AssetRef(mjcf="robot.xml"), ("usd", "urdf", "mjcf"), "mjcf"),
+        (AssetRef(usd="robot.usd"), ("mjcf",), None),
+    ],
+    ids=["usd-first", "urdf-when-no-usd", "mjcf-last", "no-compatible"],
+)
+def test_select_asset_format_returns_the_first_compatible_declared_format(
+    assets, formats, expected
+):
+    """Selection follows the backend order, never the AssetRef declaration order."""
+    if expected is None:
+        with pytest.raises(AssetRefError, match="no compatible format"):
+            select_asset_format(assets, formats)
+        return
+
+    assert select_asset_format(assets, formats) == expected
+
+
+def test_select_asset_format_treats_an_empty_reference_as_absent():
+    """An empty AssetRef field is not a declared format."""
+    with pytest.raises(AssetRefError, match="no compatible format"):
+        select_asset_format(AssetRef(usd=""), ("usd",))
+
+
+def test_select_asset_format_rejects_a_missing_asset_reference():
+    """No effective asset is a teaching error that names the backend formats."""
+    with pytest.raises(AssetRefError, match="no asset reference is declared"):
+        select_asset_format(None, ("usd", "urdf"))
+
+
+@pytest.mark.parametrize(
+    ("formats", "match"),
+    [
+        ((), "must not be empty"),
+        (("usd", "glb"), r"unknown format\(s\) \['glb'\]"),
+        (("usd", "usd"), "repeats a format"),
+    ],
+    ids=["empty", "unknown", "duplicate"],
+)
+def test_select_asset_format_rejects_a_malformed_preference_list(formats, match):
+    """The format preference list is validated before selection."""
+    with pytest.raises(AssetRefError, match=match):
+        select_asset_format(AssetRef(usd="robot.usd"), formats)

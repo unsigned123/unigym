@@ -34,3 +34,32 @@ Consumers:
   file into each test's `tmp_path` so tests can write artifacts beside it
   without touching the tracked asset;
 - `tests/backends/mujoco/` builds a real `MujocoEnv` from the fixture.
+
+## `tiny_arm.urdf`
+
+Purpose: one small, deterministic URDF for the generic IsaacLab realizer, so
+the URDF `AssetRef` path is exercised without a robot pack, benchmark asset or
+machine path.
+
+Model: a fixed-capable base (`base_link`) with two revolute joints (`shoulder`,
+`elbow`) and primitive box/cylinder collision and visual geometry. It is
+authored only to prove an `ArticulationCfg` builds with the real `UrdfFileCfg`.
+
+Provenance: original to this repository, authored for the pytest test suite. It
+is not derived from any robot vendor file, benchmark asset or third-party
+model.
+
+Constraints (keep them when editing):
+
+- URDF primitives only (box/cylinder here);
+- no `mesh`, `package://`, texture, include or network reference;
+- no machine-specific paths;
+- small enough for CPU-only, sub-second test construction.
+
+License: MIT, matching the repository `LICENSE`.
+
+Consumers:
+
+- `tests/conftest.py` exposes it as the `tiny_urdf` fixture, which copies the
+  file into each test's `tmp_path`;
+- `tests/backends/isaaclab2/test_robot_realizer.py` builds the real URDF spawn.

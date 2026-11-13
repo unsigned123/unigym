@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<!--
+  tiny_arm.urdf - self-authored, MIT-clean IsaacLab URDF test fixture.
+
+  A two-revolute-joint arm with primitive collision/visual geometry only: no
+  mesh, texture, package:// reference or network access.  The model is
+  original to this repository and MIT-licensed (see tests/_support/data/
+  README.md for provenance and the intended consumers).
+
+  It exists to prove the generic IsaacLab realizer builds an UrdfFileCfg
+  spawn for a neutral AssetRef, not to model a real robot.
+-->
+<robot name="tiny_arm">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="2.0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="link1">
+    <inertial>
+      <origin xyz="0 0 -0.15"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.15"/>
+      <geometry>
+        <cylinder radius="0.03" length="0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.15"/>
+      <geometry>
+        <cylinder radius="0.03" length="0.3"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="link2">
+    <inertial>
+      <origin xyz="0 0 -0.1"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.005" ixy="0.0" ixz="0.0" iyy="0.005" iyz="0.0" izz="0.005"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.1"/>
+      <geometry>
+        <cylinder radius="0.02" length="0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.1"/>
+      <geometry>
+        <cylinder radius="0.02" length="0.2"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link1"/>
+    <origin xyz="0 0 -0.1"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="20.0" velocity="10.0"/>
+  </joint>
+
+  <joint name="elbow" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="0 0 -0.3"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.5" upper="1.0" effort="10.0" velocity="10.0"/>
+  </joint>
+</robot>

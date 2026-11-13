@@ -15,6 +15,7 @@ from unigym.runtime.controllers import (
 )
 from unigym.run.build import (
     DATA_SCHEMA_VERSION,
+    _camera_base_mount,
     _contact_group_table,
     _effective_profile,
     _required_body_ids,
@@ -57,7 +58,16 @@ def _profile() -> RobotProfile:
 
 
 def _info(asset_format: str) -> BackendInfo:
-    return BackendInfo("mujoco", (0, 0), frozenset(), asset_format=asset_format)
+    return BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=(asset_format,))
+
+
+def _build(profile: RobotProfile, spec: ArticulationSpec, asset_format: str) -> dict:
+    return {
+        "profile": profile,
+        "params": {},
+        "spec": spec,
+        "asset_format": asset_format,
+    }
 
 
 def test_data_schema_version_is_v4():
@@ -75,8 +85,9 @@ def test_spec_overrides_win_over_profile_body_facts():
         body_sets={"grasp": ("finger", "palm")},
     )
 
-    effective = _effective_profile(spec, profile, _info("mjcf"))
+    effective, asset_format = _effective_profile(spec, profile, _info("mjcf"))
 
+    assert asset_format == "mjcf"
     assert effective.base_body == "palm"
     assert effective.foot_bodies == ("right_foot",)
     assert effective.body_sets == {"grasp": ("finger", "palm")}
@@ -90,11 +101,45 @@ def test_none_spec_fields_inherit_the_profile():
     profile = _profile()
     spec = ArticulationSpec(name="arm")
 
-    effective = _effective_profile(spec, profile, _info("usd"))
+    effective, asset_format = _effective_profile(spec, profile, _info("usd"))
 
+    assert asset_format == "usd"
     assert effective.base_body == "base"
     assert effective.foot_bodies == ("left_foot",)
     assert effective.body_sets == {"grasp": ("finger",)}
+
+
+def test_asset_format_selection_is_per_articulation():
+    """Each articulation selects its own first compatible declared format."""
+    info = BackendInfo("isaaclab2", (2, 3), frozenset(), asset_formats=("usd", "urdf", "mjcf"))
+
+    usd_profile, usd_format = _effective_profile(
+        ArticulationSpec(name="usd_arm", model=AssetRef(usd="/assets/arm.usd")),
+        _profile(),
+        info,
+    )
+    mjcf_profile, mjcf_format = _effective_profile(
+        ArticulationSpec(name="mjcf_arm", model=AssetRef(mjcf="/assets/arm.xml")),
+        _profile(),
+        info,
+    )
+
+    assert usd_format == "usd"
+    assert mjcf_format == "mjcf"
+    assert usd_profile.assets is not None
+    assert usd_profile.assets.usd == "/assets/arm.usd"
+    assert mjcf_profile.assets is not None
+    assert mjcf_profile.assets.mjcf == "/assets/arm.xml"
+
+
+def test_no_effective_asset_uses_the_first_declared_binding_format():
+    """A provider/scene-owned asset has no AssetRef; the binding key is the head."""
+    info = BackendInfo("fixture", (0, 0), frozenset(), asset_formats=("usd", "urdf", "mjcf"))
+
+    effective, asset_format = _effective_profile(ArticulationSpec(name="arm"), _profile(), info)
+
+    assert effective.assets is None
+    assert asset_format == "usd"
 
 
 def test_selected_backend_format_must_exist_on_every_required_binding():
@@ -115,9 +160,8 @@ def test_selected_backend_format_must_exist_on_every_required_binding():
     with pytest.raises(ValueError, match="lack the selected asset format 'usd'"):
         _effective_profile(ArticulationSpec(name="arm"), bad, _info("usd"))
     # multiformat profile still passes when the required format is present
-    assert (
-        _effective_profile(ArticulationSpec(name="arm"), profile, _info("usd")).base_body == "base"
-    )
+    effective, _ = _effective_profile(ArticulationSpec(name="arm"), profile, _info("usd"))
+    assert effective.base_body == "base"
 
 
 def test_contact_references_extend_the_required_body_ids():
@@ -159,10 +203,10 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
         ),
     )
     spec = ArticulationSpec(name="arm", contacts=inventory)
-    effective = _effective_profile(spec, profile, _info("usd"))
-    builds = {"arm": {"profile": effective, "params": {}, "spec": spec}}
+    effective, asset_format = _effective_profile(spec, profile, _info("usd"))
+    builds = {"arm": _build(effective, spec, asset_format)}
 
-    table, assets = _contact_group_table(builds, _info("usd"))
+    table, assets = _contact_group_table(builds)
 
     assert table == {
         "arm": {
@@ -187,21 +231,42 @@ def test_all_contributes_one_sentinel_group_and_the_selected_asset():
         body_bindings={},
     )
     spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="all"))
-    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
+    builds = {"arm": _build(profile, spec, "usd")}
 
-    table, assets = _contact_group_table(builds, _info("usd"))
+    table, assets = _contact_group_table(builds)
 
     assert table == {"arm": {"all": (ALL_BODIES,)}}
     assert assets == {"arm": "/tmp/arm.usd"}
+
+
+def test_all_uses_the_per_articulation_selected_asset_format():
+    """contacts: all passes the selected format's path, not a backend-wide one."""
+    profile = RobotProfile(
+        name="arm",
+        joint_sets={"body": ("j",)},
+        default_joint_pos={"j": 0.0},
+        assets=AssetRef(usd="/tmp/arm.usd", urdf="/tmp/arm.urdf"),
+        action_faces={},
+        base_body=None,
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={},
+    )
+    spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="all"))
+    builds = {"arm": _build(profile, spec, "urdf")}
+
+    _, assets = _contact_group_table(builds)
+
+    assert assets == {"arm": "/tmp/arm.urdf"}
 
 
 def test_omitted_contacts_with_a_contacts_section_default_to_all(capsys):
     """An omitted inventory under a run-level contacts section becomes all."""
     profile = _profile()
     spec = ArticulationSpec(name="arm")
-    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
+    builds = {"arm": _build(profile, spec, "mjcf")}
 
-    table, assets = _contact_group_table(builds, _info("mjcf"), run_contacts=True)
+    table, assets = _contact_group_table(builds, run_contacts=True)
 
     assert table == {"arm": {"all": (ALL_BODIES,)}}
     assert assets == {}
@@ -214,12 +279,34 @@ def test_none_suppresses_the_implicit_all_default():
     """contacts: none carries no group even under a run-level section."""
     profile = _profile()
     spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="none"))
-    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
+    builds = {"arm": _build(profile, spec, "mjcf")}
 
-    table, assets = _contact_group_table(builds, _info("mjcf"), run_contacts=True)
+    table, assets = _contact_group_table(builds, run_contacts=True)
 
     assert table == {}
     assert assets == {}
+
+
+def test_camera_base_mount_uses_the_per_articulation_selected_format():
+    """A body rig attach resolves through that articulation's selected format."""
+    profile = RobotProfile(
+        name="arm",
+        joint_sets={"body": ("j",)},
+        default_joint_pos={"j": 0.0},
+        assets=None,
+        action_faces={},
+        base_body="base",
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={
+            "base": BodyBinding("base", {"mjcf": "pelvis_mjcf", "urdf": "pelvis_urdf"}),
+        },
+    )
+    cameras = [{"name": "chase", "rig": {"type": "body"}}]
+
+    out = _camera_base_mount(cameras, {"arm": profile}, {"arm": "urdf"})
+
+    assert out[0]["rig"]["attach"] == "pelvis_urdf"
 
 
 def test_v4_articulation_facts_serialize_body_and_contact_vocabulary():

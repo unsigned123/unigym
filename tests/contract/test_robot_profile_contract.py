@@ -76,9 +76,14 @@ def test_legacy_recipe_names_are_removed():
 
 
 @pytest.mark.parametrize(
-    ("backend", "asset_format"),
-    [("mujoco", "mjcf"), ("mjwarp", "mjcf"), ("isaaclab2", "usd"), ("isaaclab3", "usd")],
+    ("backend", "asset_formats"),
+    [
+        ("mujoco", ("mjcf",)),
+        ("mjwarp", ("mjcf",)),
+        ("isaaclab2", ("usd", "urdf")),
+        ("isaaclab3", ("usd", "urdf")),
+    ],
 )
-def test_every_backend_declares_its_asset_format(backend: str, asset_format: str):
-    """The selected asset format is backend-owned and complete."""
-    assert backend_info(backend).asset_format == asset_format
+def test_every_backend_declares_its_asset_formats(backend: str, asset_formats: tuple[str, ...]):
+    """Each backend owns an ordered, non-empty asset-format preference list."""
+    assert backend_info(backend).asset_formats == asset_formats

@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from unigym._typing import JsonValue
+from unigym.assets.asset_ref import select_asset_format
 from unigym.robots.base import RobotProfile
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
@@ -85,9 +86,9 @@ def build_robot_realization(
 ) -> object:
     """Build the isaaclab realization of one neutral robot profile.
 
-    The realizer is generic: any effective profile with a USD asset and
-    run-level ``actuation`` groups builds through the same path.  There is no
-    ``profile.name`` dispatch.
+    The realizer is generic: any effective profile with a USD or URDF asset
+    and run-level ``actuation`` groups builds through the same path.  There is
+    no ``profile.name`` dispatch.
 
     Args:
         profile: the neutral robot profile.
@@ -100,27 +101,20 @@ def build_robot_realization(
             generic builder.
 
     Raises:
-        NotImplementedError: The effective asset (``spec.model`` when set,
-            otherwise ``profile.assets``) carries no USD reference.  A
-            ``spec.model`` without USD never falls back to ``profile.assets``.
+        AssetRefError: The effective asset (``spec.model`` when set, otherwise
+            ``profile.assets``) has no USD or URDF reference.  A ``spec.model``
+            without a supported format never falls back to ``profile.assets``.
         ValueError: The articulation declares no run-level ``actuation``
             groups.
     """
     from unigym.actuators.ir import resolve_group_joints
+    from unigym.backends.registry import backend_info
 
     from ..actuators.plan import build_actuator_plan
     from .builder import build_articulation_cfg
 
     assets = spec.model if spec.model is not None else profile.assets
-    if assets is None or not assets.usd:
-        source = "spec.model" if spec.model is not None else "profile.assets"
-        raise NotImplementedError(
-            f"isaaclab2 backend: articulation {spec.name!r} has no effective "
-            f"USD asset ({source} carries no `usd` reference; spec.model does "
-            f"not fall back to profile.assets) | hint: declare a run-level "
-            f"`model: {{usd: <path>}}` or give the neutral profile a USD "
-            f"asset; the isaaclab builder spawns USD only"
-        )
+    asset_format = select_asset_format(assets, backend_info("isaaclab2").asset_formats)
     if not spec.actuation:
         raise ValueError(
             f"articulation {spec.name!r}: the IsaacLab realizer requires "
@@ -138,7 +132,7 @@ def build_robot_realization(
         profile,
         spec=spec,
         params=params,
-        asset_format="usd",
+        asset_format=asset_format,
         actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved),
         asset_plan=asset_plan,
         default_pos=default_pos,

@@ -27,6 +27,15 @@ def tiny_mjcf(tmp_path: Path) -> Path:
     return target
 
 
+@pytest.fixture
+def tiny_urdf(tmp_path: Path) -> Path:
+    """Copy the shared primitives-only URDF into an isolated tmp directory."""
+    source = _DATA_ROOT / "tiny_arm.urdf"
+    target = tmp_path / "tiny_arm.urdf"
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
 def _relative_parts(path: Path) -> tuple[str, ...] | None:
     try:
         return path.resolve().relative_to(_TESTS_ROOT).parts
