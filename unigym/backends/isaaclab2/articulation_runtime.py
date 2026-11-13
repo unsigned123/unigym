@@ -233,9 +233,10 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
             raise NotImplementedError(
                 f"{_LABEL}: articulation {control.articulation!r} control "
                 f"{control.name!r} requests drive {control.drive!r}; the "
-                f"isaaclab backend implements only position joint targets "
-                f"(position_pd / position_servo) | hint: use drive "
-                f"position_pd or a backend that supports the drive"
+                f"isaaclab backend has no native direct-drive actuator "
+                f"mapping and implements only position joint targets "
+                f"(position_pd / position_servo) | hint: use a backend that "
+                f"supports direct drive"
             )
         art = env.articulations.get(control.articulation)
         if art is None:

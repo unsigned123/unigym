@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from unigym.actuators.ir import (
+    BACKEND_LAW_CAPABILITIES,
     ActuationError,
     ActuationGroup,
     ResolvedActuationGroup,
@@ -401,8 +402,62 @@ def test_drive_law_matrix_position_servo_requires_native_servo():
         validate_drive_law_matrix(_resolved("native_servo", ("j1",)), (_drive("position_pd"),))
 
 
-@pytest.mark.parametrize("drive", ["torque", "velocity", "effort", "current"])
-def test_drive_law_matrix_rejects_direct_drives(drive):
-    """D4 has no direct-drive law; the teaching error names the drive."""
-    with pytest.raises(ActuationError, match="no D4 actuation law"):
+@pytest.mark.parametrize(
+    ("drive", "law"),
+    [("torque", "direct_torque"), ("velocity", "direct_velocity")],
+)
+def test_drive_law_matrix_accepts_direct_drive_laws(drive, law):
+    """torque and velocity are served by their explicit direct-drive laws."""
+    validate_drive_law_matrix(_resolved(law, ("j1",)), (_drive(drive),))
+
+
+@pytest.mark.parametrize(
+    ("drive", "law"),
+    [
+        ("torque", "standard_pd"),
+        ("torque", "direct_velocity"),
+        ("velocity", "native_servo"),
+        ("velocity", "direct_torque"),
+    ],
+)
+def test_drive_law_matrix_rejects_a_mismatched_direct_drive_law(drive, law):
+    """A direct drive requires its own law, never a position or other law."""
+    with pytest.raises(ActuationError, match=rf"drive '{drive}' requires direct_"):
+        validate_drive_law_matrix(_resolved(law, ("j1",)), (_drive(drive),))
+
+
+@pytest.mark.parametrize("drive", ["effort", "current"])
+def test_drive_law_matrix_rejects_unserved_direct_drives(drive):
+    """effort/current have no native direct-drive law; the error names them."""
+    with pytest.raises(ActuationError, match="no native direct-drive actuation law"):
         validate_drive_law_matrix(_resolved("standard_pd", ("j1",)), (_drive(drive),))
+
+
+def test_drive_law_matrix_rejects_an_unknown_drive():
+    """An unknown drive fails with the closed legal set, not a fallback."""
+    with pytest.raises(ActuationError, match="unknown drive 'bogus'"):
+        validate_drive_law_matrix(_resolved("standard_pd", ("j1",)), (_drive("bogus"),))
+
+
+@pytest.mark.parametrize("law", ["direct_torque", "direct_velocity"])
+def test_direct_law_capability_is_mujoco_family_only(law):
+    """Direct laws are declared by the MuJoCo family and rejected by IsaacLab."""
+    group = ActuationGroup(name="body", law=law, joints=("j1",))
+
+    validate_actuation_group(group, backend="mujoco")
+    validate_actuation_group(group, backend="mjwarp")
+    assert law in BACKEND_LAW_CAPABILITIES["mujoco"]
+    assert law in BACKEND_LAW_CAPABILITIES["mjwarp"]
+    assert law not in BACKEND_LAW_CAPABILITIES["isaaclab2"]
+    with pytest.raises(ActuationError, match="not supported by backend 'isaaclab2'"):
+        validate_actuation_group(group, backend="isaaclab2")
+    with pytest.raises(ActuationError, match="unknown gains"):
+        validate_actuation_group(
+            ActuationGroup(name="body", law=law, joints=("j1",), gains={"kp": 1.0}),
+            backend="mujoco",
+        )
+    with pytest.raises(ActuationError, match="has no parts"):
+        validate_actuation_group(
+            ActuationGroup(name="body", law=law, joints=("j1",), parts=("j1",)),
+            backend="mujoco",
+        )

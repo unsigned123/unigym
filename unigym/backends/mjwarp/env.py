@@ -119,6 +119,7 @@ from unigym.backends.shared.mjfamily.articulation_runtime import (
     init_tables,
     reset_articulations,
     route_actions,
+    settle_targets,
 )
 from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, wire_reset_face
 from unigym.backends.shared.mjfamily.props.multienv import reject_model_global_unsupported
@@ -1027,21 +1028,15 @@ class MjwarpEnv(WarpBatchMixin):
     def _settle_substeps(self, n: int) -> None:
         """Zero-action settle loop.
 
-        Exactly ``step()``'s per-substep physics with the targets PINNED
-        to the stage-1 q0 (the audited ``composite_controller.reset()``
-        goal semantics: the body holds its reset pose under gravity
-        compensation, the hand servos hold 0, re-placed objects fall and
-        settle).
+        Exactly ``step()``'s per-substep physics with the targets PINNED to
+        each control's settle goal: the stage-1 ``q0`` for position drives and
+        the neutral zero target for direct (torque/velocity) drives (the
+        audited ``composite_controller.reset()`` goal semantics: the body
+        holds its reset pose under gravity compensation, the hand servos hold
+        0, re-placed objects fall and settle).
         """
         d = self._active_data
-        targets = {}
-        for control in self._control_order:
-            if control.prop:
-                targets[control.name] = np.zeros((1, len(control.joint_names)), dtype=np.float64)
-            else:
-                targets[control.name] = (
-                    control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
-                )
+        targets = settle_targets(self)
         if self.num_envs == 1:
             for _ in range(int(n)):
                 for feed in self._actuator_feeds:

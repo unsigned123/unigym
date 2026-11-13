@@ -10,6 +10,13 @@ work belongs to the backend translation step).
 independent; :func:`validate_actuation_groups` only proves group addressing
 and one-group-per-joint coverage, while :func:`validate_drive_law_matrix`
 proves that each declared control drive is served by a compatible law.
+
+The neutral law/drive matrix is explicit: ``position_pd`` -> ``standard_pd``
+or ``computed_torque_pd``, ``position_servo`` -> ``native_servo``,
+``torque`` -> ``direct_torque`` and ``velocity`` -> ``direct_velocity``.
+``effort`` and ``current`` have no direct-drive law and fail with a teaching
+error.  :data:`BACKEND_LAW_CAPABILITIES` is the backend capability matrix;
+a law absent from a backend's set is rejected, never approximated.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from unigym._typing import JsonValue
 from .base import ACTUATOR_REGISTRY
 
 __all__ = [
+    "BACKEND_LAW_CAPABILITIES",
     "ActuationError",
     "ActuationGroup",
     "GainValue",
@@ -61,17 +69,39 @@ _LAW_GAIN_KEYS: dict[str, frozenset[str]] = {
     "standard_pd": frozenset({"kp", "kd"}),
     "computed_torque_pd": frozenset({"kp", "kd"}),
     "native_servo": frozenset(),
+    "direct_torque": frozenset(),
+    "direct_velocity": frozenset(),
 }
 
 _POSITION_PD_LAWS = frozenset({"standard_pd", "computed_torque_pd"})
-_DIRECT_DRIVES = frozenset({"torque", "velocity", "effort", "current"})
+_DIRECT_LAWS = frozenset({"direct_torque", "direct_velocity"})
+_UNSERVED_DRIVES = frozenset({"effort", "current"})
 
-_BACKEND_LAWS: dict[str, frozenset[str]] = {
+#: Backend -> the actuation laws that backend implements natively.  A law
+#: outside this set fails with a teaching error; no backend approximates a
+#: different physics model.  IsaacLab has no native direct-drive actuator
+#: mapping, so its set stays position-PD only.
+BACKEND_LAW_CAPABILITIES: dict[str, frozenset[str]] = {
     "isaaclab2": frozenset({"standard_pd"}),
     "isaaclab3": frozenset({"standard_pd"}),
-    "mujoco": frozenset({"standard_pd", "computed_torque_pd", "native_servo"}),
-    "mjwarp": frozenset({"standard_pd", "computed_torque_pd", "native_servo"}),
+    "mujoco": frozenset(
+        {"standard_pd", "computed_torque_pd", "native_servo", "direct_torque", "direct_velocity"}
+    ),
+    "mjwarp": frozenset(
+        {"standard_pd", "computed_torque_pd", "native_servo", "direct_torque", "direct_velocity"}
+    ),
 }
+
+#: Drive -> (required laws, teaching label).  Every legal drive has exactly
+#: one row; ``effort``/``current`` are absent because no registered backend
+#: has a native direct-drive law for them.
+_DRIVE_REQUIREMENTS: dict[str, tuple[frozenset[str], str]] = {
+    "position_pd": (_POSITION_PD_LAWS, "standard_pd or computed_torque_pd"),
+    "position_servo": (frozenset({"native_servo"}), "native_servo"),
+    "torque": (frozenset({"direct_torque"}), "direct_torque"),
+    "velocity": (frozenset({"direct_velocity"}), "direct_velocity"),
+}
+_KNOWN_DRIVES = frozenset(_DRIVE_REQUIREMENTS) | _UNSERVED_DRIVES
 
 
 class _DriveControl(Protocol):
@@ -480,11 +510,11 @@ def validate_actuation_group(group: ActuationGroup, *, backend: str) -> None:
 
     This is pure IR: it never inspects compiled actuator types.
     """
-    supported = _BACKEND_LAWS.get(backend)
+    supported = BACKEND_LAW_CAPABILITIES.get(backend)
     if supported is None:
         raise ActuationError(
             f"backend {backend!r} declares no actuation law support; supported "
-            f"backends are {sorted(_BACKEND_LAWS)}"
+            f"backends are {sorted(BACKEND_LAW_CAPABILITIES)}"
         )
     if group.law not in supported:
         raise ActuationError(
@@ -527,6 +557,11 @@ def validate_actuation_group(group: ActuationGroup, *, backend: str) -> None:
                 f"actuation group {group.name!r} law 'native_servo' declares "
                 f"parts {list(group.parts)}; native_servo has no parts"
             )
+    if group.law in _DIRECT_LAWS and group.parts:
+        raise ActuationError(
+            f"actuation group {group.name!r} law {group.law!r} declares "
+            f"parts {list(group.parts)}; a direct-drive law has no parts"
+        )
     if backend in ("mujoco", "mjwarp"):
         limits = [
             name for name in ("effort_limit", "velocity_limit") if getattr(group, name) is not None
@@ -545,10 +580,12 @@ def validate_drive_law_matrix(
 ) -> None:
     """Validate every control drive against the resolved actuation plan.
 
-    ``position_pd`` needs ``standard_pd`` or ``computed_torque_pd``;
-    ``position_servo`` needs ``native_servo``; the direct-drive kinds
-    (``torque`` / ``velocity`` / ``effort`` / ``current``) have no D4 law and
-    fail with a teaching error.
+    The matrix is explicit: ``position_pd`` needs ``standard_pd`` or
+    ``computed_torque_pd``; ``position_servo`` needs ``native_servo``;
+    ``torque`` needs ``direct_torque``; ``velocity`` needs
+    ``direct_velocity``.  ``effort`` and ``current`` have no native
+    direct-drive law on any registered backend and fail with a teaching
+    error.
     """
     law_by_joint: dict[tuple[str, str], str] = {}
     for resolved in groups:
@@ -560,19 +597,19 @@ def validate_drive_law_matrix(
         drive = str(control.drive)
         name = str(getattr(control, "name", "<unnamed>"))
         articulation = str(control.articulation)
-        if drive in _DIRECT_DRIVES:
+        if drive not in _KNOWN_DRIVES:
             raise ActuationError(
-                f"control {name!r} requests drive {drive!r}, which has no D4 "
-                f"actuation law; direct torque/velocity/effort/current drives "
-                f"are unsupported | hint: declare drive position_pd "
-                f"(standard_pd/computed_torque_pd) or position_servo "
-                f"(native_servo)"
+                f"control {name!r} requests unknown drive {drive!r}; legal "
+                f"drives are {sorted(_KNOWN_DRIVES)}"
             )
-        if drive not in ("position_pd", "position_servo"):
+        if drive in _UNSERVED_DRIVES:
             raise ActuationError(
-                f"control {name!r} requests unknown drive {drive!r}; legal D4 "
-                f"drives are position_pd and position_servo"
+                f"control {name!r} requests drive {drive!r}, which has no native "
+                f"direct-drive actuation law on any registered backend; "
+                f"supported direct drives are torque (direct_torque) and "
+                f"velocity (direct_velocity)"
             )
+        required, label = _DRIVE_REQUIREMENTS[drive]
         for joint in control.joint_names:
             law = law_by_joint.get((articulation, str(joint)))
             if law is None:
@@ -580,15 +617,9 @@ def validate_drive_law_matrix(
                     f"control {name!r} drives joint {joint!r} of articulation "
                     f"{articulation!r}, which no actuation group covers"
                 )
-            if drive == "position_pd" and law not in _POSITION_PD_LAWS:
+            if law not in required:
                 raise ActuationError(
-                    f"control {name!r} requests drive 'position_pd' for joint "
-                    f"{joint!r}, but its actuation law is {law!r}; position_pd "
-                    f"requires standard_pd or computed_torque_pd"
-                )
-            if drive == "position_servo" and law != "native_servo":
-                raise ActuationError(
-                    f"control {name!r} requests drive 'position_servo' for joint "
-                    f"{joint!r}, but its actuation law is {law!r}; position_servo "
-                    f"requires native_servo"
+                    f"control {name!r} requests drive {drive!r} for joint "
+                    f"{joint!r}, but its actuation law is {law!r}; drive "
+                    f"{drive!r} requires {label}"
                 )

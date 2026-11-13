@@ -77,9 +77,12 @@ def test_standard_pd_can_omit_limits():
     assert "velocity_limit_sim" not in kwargs
 
 
-@pytest.mark.parametrize("law", ["computed_torque_pd", "native_servo", "bogus"])
+@pytest.mark.parametrize(
+    "law",
+    ["computed_torque_pd", "native_servo", "direct_torque", "direct_velocity", "bogus"],
+)
 def test_unsupported_laws_fail_with_a_capability_error(law):
-    """Only standard_pd has a native Isaac Lab actuator mapping."""
+    """Only standard_pd has a native Isaac Lab actuator mapping; direct drive is rejected."""
     if law == "bogus":
         with pytest.raises(ValueError, match="not registered"):
             _resolved(law=law)

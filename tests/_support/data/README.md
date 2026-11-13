@@ -35,6 +35,26 @@ Consumers:
   without touching the tracked asset;
 - `tests/backends/mujoco/` builds a real `MujocoEnv` from the fixture.
 
+## `tiny_arm_velocity.xml`
+
+Purpose: the same small MuJoCo model with compiled velocity servos, so the
+`direct_velocity` law is proved against a real native velocity actuator rather
+than a torque motor or a software PD approximation.
+
+Model: a free base body (`base`) with two vertical-axis hinge joints
+(`shoulder`, `elbow`) and two velocity servos (`shoulder_velocity`,
+`elbow_velocity`). The horizontal links and wide joint ranges keep a short
+velocity-tracking run free of gravity torque and joint-limit collisions. It is
+primitive-only and self-authored.
+
+Consumers:
+
+- `tests/conftest.py` exposes it as the `tiny_velocity_mjcf` fixture;
+- the MuJoCo and MuJoCo Warp `tiny_env_factory` fixtures accept an `mjcf`
+  override and use it for the direct-velocity run and plant-mismatch tests.
+
+License: MIT, matching the repository `LICENSE`.
+
 ## `tiny_arm.urdf`
 
 Purpose: one small, deterministic URDF for the generic IsaacLab realizer, so

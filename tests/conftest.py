@@ -28,6 +28,15 @@ def tiny_mjcf(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def tiny_velocity_mjcf(tmp_path: Path) -> Path:
+    """Copy the primitives-only velocity-servo MJCF into an isolated directory."""
+    source = _DATA_ROOT / "tiny_arm_velocity.xml"
+    target = tmp_path / "tiny_arm_velocity.xml"
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+@pytest.fixture
 def tiny_urdf(tmp_path: Path) -> Path:
     """Copy the shared primitives-only URDF into an isolated tmp directory."""
     source = _DATA_ROOT / "tiny_arm.urdf"

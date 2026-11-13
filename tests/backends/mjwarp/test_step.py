@@ -139,18 +139,181 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
     assert "control 'tiny' expects target 'position'" in message
 
 
+def test_direct_torque_writes_the_target_torque(tiny_env_factory):
+    """A torque control runs the compiled motors with the requested torque."""
+    env = tiny_env_factory(drive="torque", target="torque", law="direct_torque", gains={})
+
+    _, extra = env.step(_action(env, [[2.0, -1.0]]))
+
+    applied = extra["articulation/tiny/applied_torque"]
+    assert applied[0].tolist() == pytest.approx([2.0, -1.0])
+    joint_vel = extra["articulation/tiny/joint_vel"]
+    assert joint_vel[0, 0] > 0.0
+    assert joint_vel[0, 1] < 0.0
+
+
+def test_direct_velocity_writes_the_target_velocity(tiny_env_factory, tiny_velocity_mjcf):
+    """A velocity control runs the compiled velocity servos at the target."""
+    env = tiny_env_factory(
+        mjcf=tiny_velocity_mjcf,
+        drive="velocity",
+        target="velocity",
+        law="direct_velocity",
+        gains={},
+    )
+
+    for _ in range(10):
+        _, extra = env.step(_action(env, [[1.0, -1.0]]))
+
+    joint_vel = extra["articulation/tiny/joint_vel"]
+    assert joint_vel[0, 0] > 0.5
+    assert joint_vel[0, 1] < -0.5
+
+
+def test_direct_torque_requires_a_compiled_motor(tiny_env_factory, tiny_velocity_mjcf):
+    """direct_torque over velocity servos is a plant mismatch, not a fallback."""
+    with pytest.raises(ValueError, match=r"direct_torque.*compiled law is 'velocity_servo'"):
+        tiny_env_factory(
+            mjcf=tiny_velocity_mjcf,
+            drive="torque",
+            target="torque",
+            law="direct_torque",
+            gains={},
+        )
+
+
+def test_direct_velocity_requires_a_compiled_velocity_servo(tiny_env_factory):
+    """direct_velocity over torque motors is a plant mismatch, not a fallback."""
+    with pytest.raises(ValueError, match=r"direct_velocity.*compiled law is 'motor'"):
+        tiny_env_factory(drive="velocity", target="velocity", law="direct_velocity", gains={})
+
+
+def test_direct_torque_rejects_a_non_unit_gain_product(tiny_env_factory, tiny_mjcf, tmp_path):
+    """A gain-2 bias-free general actuator doubles ctrl: not joint torque."""
+    variant = tmp_path / "tiny_arm_gain2.xml"
+    variant.write_text(
+        tiny_mjcf.read_text(encoding="utf-8").replace(
+            '<motor name="shoulder_motor" joint="shoulder" ctrlrange="-20 20"/>',
+            '<general name="shoulder_motor" joint="shoulder" biastype="none" '
+            'gainprm="2 0 0" ctrlrange="-20 20"/>',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        tiny_env_factory(
+            mjcf=variant,
+            drive="torque",
+            target="torque",
+            law="direct_torque",
+            gains={},
+        )
+
+    message = str(excinfo.value)
+    assert "articulation 'tiny'" in message
+    assert "actuation group 'body'" in message
+    assert "joint 'shoulder'" in message
+    assert "law 'direct_torque'" in message
+    assert "gain*gear is 2.0" in message
+    assert "gainprm[0]=2.0" in message
+    assert "gear=1.0" in message
+
+
+def test_direct_torque_accepts_a_unit_gain_general_actuator(tiny_env_factory, tiny_mjcf, tmp_path):
+    """A general gain-1 bias-free actuator is still a plain torque motor."""
+    variant = tmp_path / "tiny_arm_gain1.xml"
+    variant.write_text(
+        tiny_mjcf.read_text(encoding="utf-8").replace(
+            '<motor name="shoulder_motor" joint="shoulder" ctrlrange="-20 20"/>',
+            '<general name="shoulder_motor" joint="shoulder" biastype="none" '
+            'gainprm="1 0 0" ctrlrange="-20 20"/>',
+        ),
+        encoding="utf-8",
+    )
+
+    env = tiny_env_factory(
+        mjcf=variant,
+        drive="torque",
+        target="torque",
+        law="direct_torque",
+        gains={},
+    )
+
+    _, extra = env.step(_action(env, [[2.0, -1.0]]))
+    applied = extra["articulation/tiny/applied_torque"]
+    assert applied[0].tolist() == pytest.approx([2.0, -1.0])
+
+
+def test_settle_feeds_a_neutral_target_to_direct_torque(tiny_env_factory):
+    """Settle must not command torque=q0: a direct torque law settles on zero."""
+    env = tiny_env_factory(drive="torque", target="torque", law="direct_torque", gains={})
+    control = env.controls["tiny"]
+    control.q0 = control.q0 + 5.0
+
+    env._settle_substeps(1)
+
+    slots = env._actuators[0].bound_slots
+    assert env._active_data.ctrl[slots].tolist() == pytest.approx([0.0, 0.0])
+
+
+def test_settle_feeds_a_neutral_target_to_direct_velocity(tiny_env_factory, tiny_velocity_mjcf):
+    """Settle must not command velocity=q0: a direct velocity law settles on zero."""
+    env = tiny_env_factory(
+        mjcf=tiny_velocity_mjcf,
+        drive="velocity",
+        target="velocity",
+        law="direct_velocity",
+        gains={},
+    )
+    control = env.controls["tiny"]
+    control.q0 = control.q0 + 5.0
+
+    env._settle_substeps(1)
+
+    slots = env._actuators[0].bound_slots
+    assert env._active_data.ctrl[slots].tolist() == pytest.approx([0.0, 0.0])
+
+
+def test_settle_keeps_the_q0_goal_for_position_drives(tiny_env_factory, monkeypatch):
+    """Settle still feeds q0 to position laws (the unchanged reset semantics)."""
+    env = tiny_env_factory()
+    control = env.controls["tiny"]
+    control.q0 = control.q0 + 0.5
+    seen = []
+    actuator = env._actuators[0]
+    original = actuator.set_targets
+
+    def record(targets):
+        seen.append(list(targets))
+        original(targets)
+
+    monkeypatch.setattr(actuator, "set_targets", record)
+
+    env._settle_substeps(1)
+
+    assert seen[0] == pytest.approx([0.5, 0.5])
+
+
+def test_direct_torque_keeps_batch_rows_independent(tiny_env_factory):
+    """A batched direct-torque step writes each row's own target."""
+    env = tiny_env_factory(
+        num_envs=2, drive="torque", target="torque", law="direct_torque", gains={}
+    )
+
+    _, extra = env.step(_action(env, [[1.0, -1.0], [2.0, 0.5]]))
+
+    applied = extra["articulation/tiny/applied_torque"]
+    assert applied[0].tolist() == pytest.approx([1.0, -1.0])
+    assert applied[1].tolist() == pytest.approx([2.0, 0.5])
+
+
 @pytest.mark.parametrize(
     ("drive", "target"),
-    [
-        ("torque", "torque"),
-        ("velocity", "velocity"),
-        ("effort", "effort"),
-        ("current", "current"),
-    ],
+    [("effort", "effort"), ("current", "current")],
 )
-def test_mjwarp_rejects_direct_drive_controls_at_build(tiny_env_factory, drive, target):
-    """Direct drives have no D4 actuation law and fail before routing."""
-    with pytest.raises(ValueError, match="no D4 actuation law"):
+def test_mjwarp_rejects_unserved_direct_drives_at_build(tiny_env_factory, drive, target):
+    """effort/current have no native direct-drive law and fail before routing."""
+    with pytest.raises(ValueError, match="no native direct-drive actuation law"):
         tiny_env_factory(drive=drive, target=target)
 
 

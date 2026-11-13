@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!--
+  tiny_arm_velocity.xml - self-authored, MIT-clean MuJoCo test fixture.
+
+  Two vertical-axis hinges with horizontal links, compiled with velocity
+  servos, for the direct_velocity law.  Gravity contributes no joint torque
+  and the wide ranges keep a short velocity-tracking run away from a limit.
+  Primitive-only: no mesh, texture, heightfield, include or network
+  reference.
+
+  Compiled order: joints shoulder, elbow; actuators shoulder_velocity,
+  elbow_velocity; bodies world, base, link, tip.
+-->
+<mujoco model="tiny_arm_velocity">
+  <compiler angle="radian"/>
+  <option timestep="0.005" gravity="0 0 -9.81"/>
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="base" pos="0 0 0.8">
+      <freejoint name="root"/>
+      <geom name="base_geom" type="box" size="0.08 0.08 0.08" mass="2.0"/>
+      <body name="link" pos="0 0 -0.16">
+        <joint name="shoulder" type="hinge" axis="0 0 1" range="-10 10"/>
+        <geom name="link_geom" type="capsule" fromto="0 0 0 0.3 0 0" size="0.04" mass="1.0"/>
+        <body name="tip" pos="0.3 0 0">
+          <joint name="elbow" type="hinge" axis="0 0 1" range="-10 10"/>
+          <geom name="tip_geom" type="capsule" fromto="0 0 0 0.2 0 0" size="0.03" mass="0.5"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <velocity name="shoulder_velocity" joint="shoulder" kv="1" ctrlrange="-5 5"/>
+    <velocity name="elbow_velocity" joint="elbow" kv="0.1" ctrlrange="-5 5"/>
+  </actuator>
+</mujoco>

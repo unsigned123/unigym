@@ -590,6 +590,34 @@ the backend realizer rejects it because its effective asset has no compatible
 format, not because of its name.  Its MJCF remains a scene resource, not a
 neutral robot asset.
 
+The drive/law matrix is explicit and closed:
+
+```text
+position_pd    -> standard_pd or computed_torque_pd
+position_servo -> native_servo
+torque         -> direct_torque
+velocity       -> direct_velocity
+effort/current -> unsupported (no native direct-drive law)
+```
+
+`direct_torque` writes the target torque to compiled `motor` actuators;
+`direct_velocity` writes the target velocity to compiled velocity servos.
+These are ctrl-space writes: MuJoCo's `ctrl` is the actuator-space value and
+the compiled force is `gear * (gainprm[0] * ctrl + bias)`.  For
+`direct_torque` (a fixed-gain, bias-free motor) the seam therefore requires
+`gear * gainprm[0] == 1`, not just `gear == 1`: a general actuator with
+`biastype="none"` and `gainprm="2 0 0"` still looks like a motor but would
+double every commanded torque.  `direct_velocity` keeps the `gear == 1` rule
+and additionally requires an affine `kv * (ctrl - qvel)` servo
+(`gain == -bias[2]`, no constant bias).  A model that cannot honor the named
+joint-space unit fails at build with a teaching error rather than silently
+commanding a different plant.  Both laws require an empty `gains`/`parts`
+payload (the compiled actuator owns the plant) and are supported by the
+MuJoCo family only.  The IsaacLab backends have no native direct-drive
+actuator mapping and reject these laws with a teaching error; direct drive is
+never approximated with a position PD.  `BACKEND_LAW_CAPABILITIES` is the
+machine-readable backend capability matrix.
+
 Dynamic `register_robot` / manifest `kind: robot` registration is the explicit
 external-robot path: a pack registers a backend-neutral factory or resource
 and `build_robot_profile(name)` resolves it without a core factory table.

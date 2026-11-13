@@ -41,6 +41,7 @@ from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
 )
+from unigym.runtime.controls import target_for_drive
 
 __all__ = [
     "build_actuator_seam",
@@ -48,6 +49,7 @@ __all__ = [
     "init_tables",
     "reset_articulations",
     "route_actions",
+    "settle_targets",
 ]
 
 
@@ -407,7 +409,8 @@ class _ActuatorTargetFeed:
 def _actuator_law(model, slot: int) -> str:
     """Classify a compiled actuator's honest ctrl law.
 
-    ``motor``           -- gain fixed / bias none (direct torque/effort ctrl)
+    ``motor``           -- gain fixed / bias none (direct torque ctrl only
+                           when gainprm[0] * gear == 1)
     ``position_servo``  -- affine bias with a stiffness term
     ``velocity_servo``  -- affine bias with a damping term only
     ``general``         -- anything else (no honest generic drive)
@@ -425,6 +428,56 @@ def _actuator_law(model, slot: int) -> str:
         if float(biasprm[2]) != 0.0:
             return "velocity_servo"
     return "general"
+
+
+#: Neutral law -> the compiled plant it requires.  A software direct-drive
+#: law over a different compiled actuator class would silently mean a
+#: different physics model, so the seam rejects it before the law binds.
+_REQUIRED_COMPILED_LAW: dict[str, str] = {
+    "native_servo": "position_servo",
+    "direct_torque": "motor",
+    "direct_velocity": "velocity_servo",
+}
+
+
+def _direct_plant_error(model, slot: int, law: str) -> str | None:
+    """Why a direct law's ctrl write would not carry its named joint unit.
+
+    MuJoCo force is ``gear * (gainprm[0] * ctrl + bias)``.  For the
+    fixed-gain, bias-free plant ``direct_torque`` accepts, ctrl is a
+    joint-space torque only when ``gear * gainprm[0] == 1``.  Both factors
+    matter: a ``general`` ``biastype=none gainprm=2`` actuator still compiles
+    as a ``motor`` class but would double every commanded torque.
+
+    ``direct_velocity`` keeps the ``gear == 1`` rule and additionally requires
+    the affine ``kv*(ctrl - qvel)`` servo (``gain == -bias[2]``, no constant
+    bias) so ctrl is the declared target velocity rather than a different
+    affine model.
+    """
+    gear = float(model.actuator_gear[slot][0])
+    gain = float(model.actuator_gainprm[slot][0])
+    if law == "direct_torque":
+        scale = gear * gain
+        if scale != 1.0:
+            return (
+                f"compiled gain*gear is {scale!r} (gainprm[0]={gain!r}, "
+                f"gear={gear!r}); compiled force is gain*gear*ctrl, so the "
+                f"product must be 1 for ctrl to be a joint-space torque"
+            )
+        return None
+    if gear != 1.0:
+        return (
+            f"compiled gear is {gear!r}; ctrl is the actuator-space value, so "
+            f"gear must be 1 for the target to be a joint-space velocity"
+        )
+    bias = model.actuator_biasprm[slot]
+    if float(bias[0]) != 0.0 or float(bias[1]) != 0.0 or gain != -float(bias[2]):
+        return (
+            f"compiled velocity servo is not the affine kv*(ctrl - qvel) "
+            f"law (gain={gain!r}, bias={[float(v) for v in bias[:3]]!r}); "
+            f"ctrl would not be a target velocity"
+        )
+    return None
 
 
 def _translate_gain_value(
@@ -513,8 +566,10 @@ def build_actuator_seam(
 
     The run layer owns exactly-once coverage; this seam owns name translation
     (neutral -> compiled), law payload validation, slot uniqueness and the
-    native_servo compiled-plant check.  A direct env with driven controls but
-    no plan fails fast instead of silently leaving the world unactuated.
+    compiled-plant checks (``native_servo`` -> position_servo,
+    ``direct_torque`` -> motor, ``direct_velocity`` -> velocity_servo).  A
+    direct env with driven controls but no plan fails fast instead of
+    silently leaving the world unactuated.
     """
     label = label or _label(env)
     plans = dict(plans or {})
@@ -594,21 +649,51 @@ def build_actuator_seam(
             )
         for slot in slots:
             claimed[slot] = group.name
-        if group.law == "native_servo":
+        required_plant = _REQUIRED_COMPILED_LAW.get(group.law)
+        if required_plant is not None:
             for joint, slot in zip(act.joint_names, slots):
                 compiled_law = _actuator_law(env._model, int(slot))
-                if compiled_law != "position_servo":
+                if compiled_law != required_plant:
                     raise ValueError(
                         f"{label}: articulation {resolved.articulation!r} "
                         f"actuation group {group.name!r} joint {joint!r} law "
-                        f"'native_servo' requires a compiled position_servo; "
+                        f"{group.law!r} requires a compiled {required_plant}; "
                         f"compiled law is {compiled_law!r}"
                     )
+                if group.law in ("direct_torque", "direct_velocity"):
+                    problem = _direct_plant_error(env._model, int(slot), group.law)
+                    if problem is not None:
+                        raise ValueError(
+                            f"{label}: articulation {resolved.articulation!r} "
+                            f"actuation group {group.name!r} joint {joint!r} law "
+                            f"{group.law!r}: {problem}"
+                        )
         sources = [owner[(resolved.articulation, str(joint))] for joint in resolved.joint_names]
         acts.append(act)
         feeds.append(_ActuatorTargetFeed(act, sources))
     phase_split = any(resolved.group.law != "standard_pd" for resolved in resolved_groups)
     return acts, feeds, phase_split
+
+
+def settle_targets(env) -> dict:
+    """Per-control reset-settle goals: q0 for position drives, neutral for direct.
+
+    The reset settle holds the stage-1 pose through position laws, so those
+    controls are fed their ``q0``.  A direct law's target is a torque or a
+    velocity; feeding ``q0`` there would silently command torque=q0 /
+    velocity=q0, so those drives settle on their neutral target (zero).  The
+    position/direct split is owned by the drive taxonomy (``DRIVE_TARGET``),
+    not duplicated here, so a new drive cannot silently receive a position
+    goal.
+    """
+    targets: dict = {}
+    for control in env._control_order:
+        width = len(control.joint_names)
+        if control.prop or target_for_drive(control.drive) != "position":
+            targets[control.name] = np.zeros((1, width), dtype=np.float64)
+        else:
+            targets[control.name] = control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
+    return targets
 
 
 # --------------------------------------------------------------------------- #

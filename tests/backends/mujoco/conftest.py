@@ -113,9 +113,10 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         parts: tuple[str, ...] | None = None,
         plans: bool = True,
         params: dict | None = None,
+        mjcf: Path | None = None,
     ):
         env = build_tiny_env(
-            tiny_mjcf,
+            tiny_mjcf if mjcf is None else mjcf,
             num_envs=num_envs,
             drive=drive,
             target=target,

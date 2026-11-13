@@ -130,16 +130,38 @@ def test_plan_is_per_articulation_and_excludes_prop_controls():
     assert set(plans) == {"left", "right"}
 
 
-@pytest.mark.parametrize("drive", ["torque", "velocity", "effort", "current"])
-def test_plan_rejects_direct_drive_controls(drive):
-    """Direct drives fail at plan time with the D4 teaching error."""
+@pytest.mark.parametrize(
+    ("drive", "law"),
+    [("torque", "direct_torque"), ("velocity", "direct_velocity")],
+)
+def test_plan_accepts_direct_drive_laws_on_mujoco_family(drive, law):
+    """torque/velocity plans resolve to their explicit direct-drive law."""
+    spec = ArticulationSpec(
+        name="arm",
+        joints=(JointSpec("shoulder"),),
+        actuation=(_group(law=law, joints=("shoulder",)),),
+    )
+
+    plans = _build_actuation_plans(
+        (spec,),
+        {"arm": _profile()},
+        (_control("body", "arm", ("shoulder",), drive=drive),),
+        "mujoco",
+    )
+
+    assert [row.group.law for row in plans["arm"]] == [law]
+
+
+@pytest.mark.parametrize("drive", ["effort", "current"])
+def test_plan_rejects_unserved_direct_drive_controls(drive):
+    """effort/current fail at plan time with the teaching error."""
     spec = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"),),
         actuation=(_group(joints=("shoulder",)),),
     )
 
-    with pytest.raises(ActuationError, match="no D4 actuation law"):
+    with pytest.raises(ActuationError, match="no native direct-drive actuation law"):
         _build_actuation_plans(
             (spec,),
             {"arm": _profile()},
@@ -149,19 +171,27 @@ def test_plan_rejects_direct_drive_controls(drive):
 
 
 @pytest.mark.parametrize("backend", ["isaaclab2", "isaaclab3"])
-def test_plan_backend_gate_rejects_non_standard_laws(backend):
-    """IsaacLab support is standard_pd only, including the G1 exception."""
+@pytest.mark.parametrize(
+    ("law", "drive"),
+    [
+        ("computed_torque_pd", "position_pd"),
+        ("direct_torque", "torque"),
+        ("direct_velocity", "velocity"),
+    ],
+)
+def test_plan_backend_gate_rejects_non_standard_laws(backend, law, drive):
+    """IsaacLab support is standard_pd only; direct drive is not faked."""
     spec = ArticulationSpec(
         name="g1",
         joints=(JointSpec("shoulder"),),
-        actuation=(_group(law="computed_torque_pd", joints=("shoulder",)),),
+        actuation=(_group(law=law, joints=("shoulder",)),),
     )
 
     with pytest.raises(ActuationError, match="not supported by backend"):
         _build_actuation_plans(
             (spec,),
             {"g1": _profile("g1")},
-            (_control("g1", "g1", ("shoulder",)),),
+            (_control("g1", "g1", ("shoulder",), drive=drive),),
             backend,
         )
 

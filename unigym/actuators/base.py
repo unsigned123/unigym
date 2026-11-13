@@ -8,7 +8,7 @@ untouched (NamedAction = absolute position targets; routing stays with the
 backend); an actuator owns ONLY the ctrl slots assigned at bind time, and
 out-of-bounds/duplicate coverage fails fast.
 
-Protocol shape (the three built-in laws subclass this base; third-party
+Protocol shape (the five built-in laws subclass this base; third-party
 laws subclass + ``@register``):
 * ``bind(env, joint_group)`` -- resolve joints + actuator slots from the
   group's regex/joint_names (fail-fast: unknown joint / no actuator /
@@ -289,11 +289,14 @@ class ActuatorBase:
         return self._slots
 
     def set_targets(self, qpos_targets) -> None:
-        """Feed this control step's absolute position targets (joint order).
+        """Feed this control step's target vector (joint order).
 
-        Called once per control step by the backend, BEFORE the decimation
-        loop; the law holds them constant across the substeps (the audited
-        GR1 stack semantics: goal set once, ctrl recomputed per substep).
+        Position laws receive absolute joint positions; direct-drive laws
+        receive the drive target (torque or velocity) named by the control's
+        ``target``.  Called once per control step by the backend, BEFORE the
+        decimation loop; the law holds it constant across the substeps (the
+        audited GR1 stack semantics: goal set once, ctrl recomputed per
+        substep).
         """
         t = np.asarray(qpos_targets, dtype=np.float64).reshape(-1)
         if not self._bound or t.shape[0] != len(self._joint_names):
