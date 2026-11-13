@@ -1,9 +1,8 @@
-"""Real IsaacLab 2 Cartpole fixture from the installed test pack."""
+"""Real IsaacLab 2 Cartpole and G1 fixtures from installed test packs."""
 
 from __future__ import annotations
 
 import argparse
-import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -11,27 +10,8 @@ import pytest
 
 from tests._support.envs import require_optional_module
 
-G1_ASSET_ENV = "UNIGYM_ISAACLAB2_G1_ASSET"
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
-
-
-def _g1_usd() -> Path:
-    """The provisioned 43-DoF G1 USD; a missing lane asset fails the lane."""
-    value = os.environ.get(G1_ASSET_ENV)
-    if not value:
-        pytest.fail(
-            f"{G1_ASSET_ENV} is not set: point it at the provisioned 43-DoF G1 "
-            f"USD root (g1.usd with its configuration/ folder); the backend "
-            f"lane never downloads assets"
-        )
-    usd = Path(value)
-    if not usd.is_file():
-        pytest.fail(
-            f"{G1_ASSET_ENV}={value!r} is not a file; provision the 43-DoF G1 "
-            "asset before running the IsaacLab 2 lane"
-        )
-    return usd
 
 
 @pytest.fixture(scope="session")
@@ -139,11 +119,12 @@ def cartpole_usd(pack_runtime) -> Path:
     return runtime.resource_for("assets", "isaaclab_cartpole.usd")
 
 
-@pytest.fixture(scope="session")
-def g1_usd() -> Path:
-    """Resolve the provisioned 43-DoF G1 USD before Kit is launched."""
+@pytest.fixture
+def g1_usd(pack_runtime) -> Path:
+    """Resolve the 43-DoF G1 USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
-    return _g1_usd()
+    runtime = pack_runtime("g1")
+    return runtime.resource_for("assets", "g1.usd")
 
 
 @pytest.fixture

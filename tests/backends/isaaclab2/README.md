@@ -7,11 +7,10 @@ These tests run only in the clean dog lane:
 ```text
 UNIGYM_ISAACLAB2_ENV=unigym-isaaclab232
 UNIGYM_TEST_ENV_STRICT=1
-UNIGYM_ISAACLAB2_G1_ASSET=<provisioned 43-DoF g1.usd>
 ```
 
 The environment also needs the `unigym-test-packs` plugin and the
-`unigym-test-pack-isaaclab-cartpole` wheel installed.
+`unigym-test-pack-isaaclab-cartpole` and `unigym-test-pack-g1` wheels installed.
 
 The directory is outside default `testpaths`; run it explicitly with the
 IsaacLab 2 environment. The clean lane is recorded in
@@ -21,20 +20,19 @@ IsaacLab 2 environment. The clean lane is recorded in
 
 The Cartpole fixture resolves `isaaclab_cartpole.usd` through
 `pack_runtime("isaaclab_cartpole")`; the pack ships the USD and its `Props/`
-companion. Tests never read an asset-cache environment variable. The G1 builder
-fixture still reads `UNIGYM_ISAACLAB2_G1_ASSET`; it must name the 43-DoF
-with-hand `g1.usd` root whose `configuration/` folder sits beside it. Tests
-never download assets. A missing Cartpole pack or G1 asset fails the lane
-(strict); it is not skipped.
+companion. The G1 fixture resolves `g1.usd` through `pack_runtime("g1")`; the
+pack ships the complete `configuration/**` tree. Tests never read an asset
+environment variable and never download assets. A missing Cartpole or G1 pack
+fails the lane (strict); it is not skipped.
 
 ```bash
 conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pip install --no-deps \
   <wheelhouse>/unigym_test_packs-*.whl \
-  <wheelhouse>/unigym_test_pack_isaaclab_cartpole-*.whl
+  <wheelhouse>/unigym_test_pack_isaaclab_cartpole-*.whl \
+  <wheelhouse>/unigym_test_pack_g1-*.whl
 
 OMNI_KIT_ACCEPT_EULA=YES \
-UNIGYM_ISAACLAB2_G1_ASSET=<provisioned 43-DoF g1.usd> \
 UNIGYM_TEST_ENV_STRICT=1 \
 conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pytest --strict-test-packs tests/backends/isaaclab2 -q

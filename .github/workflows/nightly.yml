@@ -121,6 +121,7 @@ jobs:
           "$CONDA" run --no-capture-output -n "$UNIGYM_ISAACLAB2_ENV" \
             python -m pip install --no-deps \
             "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_packs-*.whl \
-            "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_pack_isaaclab_cartpole-*.whl
+            "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_pack_isaaclab_cartpole-*.whl \
+            "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_pack_g1-*.whl
       - name: Run isaaclab2 lane
         run: python3 tools/ci/run_lane.py --lane isaaclab2

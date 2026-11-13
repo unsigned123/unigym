@@ -8,7 +8,11 @@ from dataclasses import replace
 
 import pytest
 
-pytestmark = [pytest.mark.sim, pytest.mark.usefixtures("simulation_app")]
+pytestmark = [
+    pytest.mark.sim,
+    pytest.mark.usefixtures("simulation_app"),
+    pytest.mark.requires_test_packs("g1"),
+]
 
 ARTICULATION = "g1"
 

@@ -487,15 +487,12 @@ with the `isaaclab2` label, the `UNIGYM_ISAACLAB2_ENV` repository variable
 naming the clean conda environment, the `UNIGYM_TEST_PACKS_WHEELHOUSE`
 repository variable naming a provisioned wheelhouse, and a `conda` executable
 visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the runner). The job
-installs the plugin and Cartpole pack wheels from that wheelhouse into the
+installs the plugin, Cartpole and G1 pack wheels from that wheelhouse into the
 conda environment before running the lane; the tests never read the wheelhouse
-path. A missing Cartpole pack fails the strict lane rather than skipping. The
-G1 builder tests still read `UNIGYM_ISAACLAB2_G1_ASSET`, which must name the
-provisioned 43-DoF with-hand `g1.usd` root (its `configuration/` folder sits
-beside it); a missing or non-file value fails the strict lane rather than
-skipping. A skipped `isaaclab2` job is a visible skip, not a green pass: the
-job uses neither `continue-on-error` nor an echo/`exit 0` stub, and it installs
-no Isaac dependency itself — the external conda environment owns them.
+path. A missing Cartpole or G1 pack fails the strict lane rather than skipping.
+A skipped `isaaclab2` job is a visible skip, not a green pass: the job uses
+neither `continue-on-error` nor an echo/`exit 0` stub, and it installs no Isaac
+dependency itself — the external conda environment owns them.
 
 The `package` job proves the installed wheel, not the source tree. It runs
 `tests/smoke` with the test working directory outside the checkout, supplies no
@@ -539,30 +536,31 @@ environment back to the 4.0 lock.
 
 The real IsaacLab backend tests also run on the `dog` host in the pinned
 `unigym-isaaclab232` conda environment. Sync the working tree to a fresh
-`/tmp/unigym-m1` checkout (do not reuse an older checkout), install the plugin
-and Cartpole pack wheels into the conda environment, then run the lane:
+`/tmp/unigym-m2` checkout (do not reuse an older checkout), install the plugin,
+Cartpole and G1 pack wheels into the conda environment, then run the lane:
 
 ```bash
 conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pip install --no-deps \
   /path/to/unigym_test_packs-*.whl \
-  /path/to/unigym_test_pack_isaaclab_cartpole-*.whl
+  /path/to/unigym_test_pack_isaaclab_cartpole-*.whl \
+  /path/to/unigym_test_pack_g1-*.whl
 
 OMNI_KIT_ACCEPT_EULA=YES \
 UNIGYM_TEST_ENV_STRICT=1 \
-UNIGYM_ISAACLAB2_G1_ASSET=/public/workspace/dlx_workspace_ci/g1_asset/g1.usd \
 conda run -n unigym-isaaclab232 python -m pytest \
   --strict-test-packs tests/backends/isaaclab2 -q
 ```
 
 The Cartpole USD and its `Props/instanceable_meshes.usd` companion are resolved
-through `pack_runtime("isaaclab_cartpole")`; no Cartpole asset environment
-variable is read. The G1 contact-all test is part of this lane: it uses the
-pre-clone USD inventory (`unigym/backends/isaaclab2/usd.py`), materializes one
-sensor per rigid body, excludes fixed-joint merged palms, and resets/reads the
-per-body rows. A missing Cartpole pack or G1 asset fails the strict lane rather
-than skipping. The G1 builder tests exercise the generic realizer (any
-effective profile with a USD asset plus run-level actuation), not a
+through `pack_runtime("isaaclab_cartpole")`; the G1 root and its complete
+`configuration/**` tree are resolved through `pack_runtime("g1")`. No asset
+environment variable is read. The G1 contact-all test is part of this lane: it
+uses the pre-clone USD inventory (`unigym/backends/isaaclab2/usd.py`),
+materializes one sensor per rigid body, excludes fixed-joint merged palms, and
+resets/reads the per-body rows. A missing Cartpole or G1 pack fails the strict
+lane rather than skipping. The G1 builder tests exercise the generic realizer
+(any effective profile with a USD asset plus run-level actuation), not a
 `profile.name` branch.
 
 ### 7.4 Target commands
