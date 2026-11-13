@@ -225,6 +225,29 @@ def test_every_lane_declares_repo_relative_existing_selectors(registry):
     assert not offenders, f"lane selectors that are missing or not repo-relative: {offenders}"
 
 
+def test_lane_pytest_args_are_non_empty_string_lists(registry):
+    """An optional lane pytest_args entry is a non-empty list of strings."""
+    offenders = []
+    for name, lane in _tables(registry, "lanes").items():
+        value = lane.get("pytest_args")
+        if value is None:
+            continue
+        if (
+            not isinstance(value, list)
+            or not value
+            or not all(isinstance(item, str) and item for item in value)
+        ):
+            offenders.append((name, value))
+    assert not offenders, f"lanes with invalid pytest_args: {offenders}"
+
+
+def test_isaaclab2_lane_requires_strict_test_packs(registry):
+    """The IsaacLab 2 lane fails when its declared test pack is absent."""
+    lane = _tables(registry, "lanes").get("isaaclab2")
+    assert lane is not None, "registry must declare the isaaclab2 lane"
+    assert "--strict-test-packs" in lane.get("pytest_args", [])
+
+
 def test_variant_lanes_reference_a_primary_lane_with_identical_selectors(registry):
     """A variant lane reuses one primary lane's ownership, not a second copy."""
     lanes = _tables(registry, "lanes")

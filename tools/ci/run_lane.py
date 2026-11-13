@@ -28,10 +28,12 @@ class Lane(TypedDict):
 
     ``variant_of`` marks a versioned lane that reuses another lane's test
     ownership in a different environment; it is not a second owner.
+    ``pytest_args`` are extra arguments passed verbatim to pytest.
     """
 
     environment: str
     selectors: list[str]
+    pytest_args: NotRequired[list[str]]
     variant_of: NotRequired[str]
 
 
@@ -162,6 +164,9 @@ def _parse_lane(name: str, table: dict[str, object]) -> Lane:
         _fail(f"{REGISTRY_PATH}: lanes.{name}.environment must be a non-empty string")
     selectors = _str_list(table.get("selectors"), field=f"lanes.{name}.selectors")
     lane: Lane = {"environment": environment, "selectors": selectors}
+    pytest_args = table.get("pytest_args")
+    if pytest_args is not None:
+        lane["pytest_args"] = _str_list(pytest_args, field=f"lanes.{name}.pytest_args")
     variant_of = table.get("variant_of")
     if variant_of is not None:
         if not isinstance(variant_of, str) or not variant_of:
@@ -252,6 +257,7 @@ def _build_command(
             "-m",
             "pytest",
         ]
+    command.extend(lane.get("pytest_args", []))
     command.extend(lane["selectors"])
     command.append("-q")
     return command
@@ -281,6 +287,8 @@ def _print_lanes(registry: Registry) -> None:
             details += f" manifest={environment['manifest']}"
         if "variant_of" in lane:
             details += f" variant_of={lane['variant_of']}"
+        if "pytest_args" in lane:
+            details += f" pytest_args={lane['pytest_args']}"
         print(
             f"{name:<12} environment={environment_name} "
             f"provision={environment['provision']}{details} selectors={selectors}"

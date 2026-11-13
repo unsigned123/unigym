@@ -135,6 +135,7 @@ def test_resource_markers_cover_phase0_capability_and_deviation():
             "serial",
             "requires_capabilities",
             "known_deviation",
+            "requires_test_packs",
         }
     )
 
@@ -208,3 +209,13 @@ def test_used_markers_are_registered(request):
         used.update(_marker_names(item))
     missing = sorted(used - registered - _BUILTIN_MARKERS)
     assert not missing, f"unregistered markers: {missing}"
+
+
+def test_d0_lane_has_no_test_pack_dependencies(request):
+    """The provision-free D0 lane never collects a pack-dependent test."""
+    offenders = [
+        item.nodeid
+        for item in request.session.items
+        if "requires_test_packs" in _marker_names(item)
+    ]
+    assert not offenders, f"D0 items requiring test packs: {offenders}"

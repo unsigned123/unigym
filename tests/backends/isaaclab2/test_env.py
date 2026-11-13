@@ -7,7 +7,10 @@ import torch
 
 from unigym.env.backends.base import assert_backend_contract
 
-pytestmark = pytest.mark.sim
+pytestmark = [
+    pytest.mark.sim,
+    pytest.mark.requires_test_packs("isaaclab_cartpole"),
+]
 
 ARTICULATION = "cartpole"
 

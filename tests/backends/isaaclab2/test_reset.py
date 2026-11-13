@@ -6,7 +6,10 @@ import pytest
 
 from unigym.runtime.actions import NamedAction
 
-pytestmark = pytest.mark.sim
+pytestmark = [
+    pytest.mark.sim,
+    pytest.mark.requires_test_packs("isaaclab_cartpole"),
+]
 
 ARTICULATION = "cartpole"
 CART_JOINTS = ("slider_to_cart", "cart_to_pole")

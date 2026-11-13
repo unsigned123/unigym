@@ -56,6 +56,7 @@ RESOURCE_MARKERS: frozenset[str] = frozenset(
         "serial",
         "requires_capabilities",
         "known_deviation",
+        "requires_test_packs",
     }
 )
 

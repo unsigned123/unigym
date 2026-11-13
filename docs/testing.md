@@ -267,7 +267,7 @@ Only resource or capability requirements are hand-written:
 | `serial` | cannot run concurrently |
 | `requires_capabilities("...")` | conformance capability requirement |
 | `known_deviation("...", ..., report="...")` | documented backend deviation |
-| future `pack` / `external_asset` | provisioned assets |
+| `requires_test_packs("...")` | requires installed test pack distribution(s) |
 | future `golden` | golden regression |
 
 Rules:
@@ -343,7 +343,9 @@ markers remain resource and capability markers.
 | `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
 | `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
 
-The `[nightly]` table names the lanes the nightly workflow runs
+The `isaaclab2` lane also declares
+`pytest_args = ["--strict-test-packs"]`; the runner appends pytest args before
+the selectors. The `[nightly]` table names the lanes the nightly workflow runs
 (`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`).
 
 Selector ownership rules:
@@ -369,6 +371,10 @@ Selector ownership rules:
   environment; no machine path is stored. A strict lane fails when the variable
   is missing. The lane runner exports `UNIGYM_TEST_ENV_STRICT=1` for strict
   conda lanes so a missing environment fails instead of skipping.
+- A lane may declare `pytest_args`, a non-empty list of extra pytest arguments.
+  The runner passes them verbatim before the selectors. The `isaaclab2` lane
+  uses `--strict-test-packs`; its provisioned environment owns the plugin and
+  pack wheels, not a test-read asset path.
 - Every `tests/**/test_*.py` file must match exactly one **primary** lane
   selector; `variant_of` lanes reuse that ownership in another environment.
   `tests/meta/test_lane_registry.py` enforces this and also requires the
@@ -478,18 +484,18 @@ when no renderer is created. The `isaaclab2` job is default-skipped through a
 job-level `if:` condition on the repository variable
 `UNIGYM_RUN_ISAACLAB2 == 'true'`; enabling it requires a self-hosted runner
 with the `isaaclab2` label, the `UNIGYM_ISAACLAB2_ENV` repository variable
-naming the clean conda environment, the `UNIGYM_ISAACLAB2_ASSET_CACHE`
-repository variable pointing at the provisioned Cartpole cache, and a `conda`
-executable visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the
-runner). The cache directory must contain `cartpole.usd` and its `Props/`
-dependency; a missing cache fails the strict lane rather than skipping. The
-G1 builder tests additionally read `UNIGYM_ISAACLAB2_G1_ASSET`, which must
-name the provisioned 43-DoF with-hand `g1.usd` root (its `configuration/`
-folder sits beside it); a missing or non-file value fails the strict lane
-rather than skipping. A skipped `isaaclab2`
-job is a visible skip, not a green pass: the job uses neither
-`continue-on-error` nor an echo/`exit 0` stub, and it installs no Isaac
-dependency itself — the external conda environment owns them.
+naming the clean conda environment, the `UNIGYM_TEST_PACKS_WHEELHOUSE`
+repository variable naming a provisioned wheelhouse, and a `conda` executable
+visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the runner). The job
+installs the plugin and Cartpole pack wheels from that wheelhouse into the
+conda environment before running the lane; the tests never read the wheelhouse
+path. A missing Cartpole pack fails the strict lane rather than skipping. The
+G1 builder tests still read `UNIGYM_ISAACLAB2_G1_ASSET`, which must name the
+provisioned 43-DoF with-hand `g1.usd` root (its `configuration/` folder sits
+beside it); a missing or non-file value fails the strict lane rather than
+skipping. A skipped `isaaclab2` job is a visible skip, not a green pass: the
+job uses neither `continue-on-error` nor an echo/`exit 0` stub, and it installs
+no Isaac dependency itself — the external conda environment owns them.
 
 The `package` job proves the installed wheel, not the source tree. It runs
 `tests/smoke` with the test working directory outside the checkout, supplies no
@@ -533,23 +539,31 @@ environment back to the 4.0 lock.
 
 The real IsaacLab backend tests also run on the `dog` host in the pinned
 `unigym-isaaclab232` conda environment. Sync the working tree to a fresh
-`/tmp/unigym-d6` checkout (do not reuse an older checkout) and point the
-environment at the provisioned assets:
+`/tmp/unigym-m1` checkout (do not reuse an older checkout), install the plugin
+and Cartpole pack wheels into the conda environment, then run the lane:
 
 ```bash
+conda run --no-capture-output -n unigym-isaaclab232 \
+  python -m pip install --no-deps \
+  /path/to/unigym_test_packs-*.whl \
+  /path/to/unigym_test_pack_isaaclab_cartpole-*.whl
+
 OMNI_KIT_ACCEPT_EULA=YES \
 UNIGYM_TEST_ENV_STRICT=1 \
-UNIGYM_ISAACLAB2_ASSET_CACHE=/public/workspace/dlx_workspace_ci/isaaclab-asset-cache \
 UNIGYM_ISAACLAB2_G1_ASSET=/public/workspace/dlx_workspace_ci/g1_asset/g1.usd \
-conda run -n unigym-isaaclab232 python -m pytest tests/backends/isaaclab2 -q
+conda run -n unigym-isaaclab232 python -m pytest \
+  --strict-test-packs tests/backends/isaaclab2 -q
 ```
 
-The G1 contact-all test is part of this lane: it uses the pre-clone USD
-inventory (`unigym/backends/isaaclab2/usd.py`), materializes one sensor per
-rigid body, excludes fixed-joint merged palms, and resets/reads the per-body
-rows. A missing cache or G1 asset fails the strict lane rather than skipping.
-The G1 builder tests exercise the generic realizer (any effective profile with
-a USD asset plus run-level actuation), not a `profile.name` branch.
+The Cartpole USD and its `Props/instanceable_meshes.usd` companion are resolved
+through `pack_runtime("isaaclab_cartpole")`; no Cartpole asset environment
+variable is read. The G1 contact-all test is part of this lane: it uses the
+pre-clone USD inventory (`unigym/backends/isaaclab2/usd.py`), materializes one
+sensor per rigid body, excludes fixed-joint merged palms, and resets/reads the
+per-body rows. A missing Cartpole pack or G1 asset fails the strict lane rather
+than skipping. The G1 builder tests exercise the generic realizer (any
+effective profile with a USD asset plus run-level actuation), not a
+`profile.name` branch.
 
 ### 7.4 Target commands
 

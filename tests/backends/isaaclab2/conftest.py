@@ -1,4 +1,4 @@
-"""Real IsaacLab 2 Cartpole fixture from a provisioned asset cache."""
+"""Real IsaacLab 2 Cartpole fixture from the installed test pack."""
 
 from __future__ import annotations
 
@@ -11,28 +11,9 @@ import pytest
 
 from tests._support.envs import require_optional_module
 
-CACHE_ENV = "UNIGYM_ISAACLAB2_ASSET_CACHE"
-CACHE_FILE = "cartpole.usd"
 G1_ASSET_ENV = "UNIGYM_ISAACLAB2_G1_ASSET"
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
-
-
-def _cartpole_usd() -> Path:
-    """The provisioned Cartpole USD; a missing cache fails the lane."""
-    cache = os.environ.get(CACHE_ENV)
-    if not cache:
-        pytest.fail(
-            f"{CACHE_ENV} is not set: point it at a provisioned directory "
-            f"containing {CACHE_FILE}; the backend lane never downloads assets"
-        )
-    usd = Path(cache) / CACHE_FILE
-    if not usd.is_file():
-        pytest.fail(
-            f"{CACHE_ENV}={cache!r} has no {CACHE_FILE}; provision the "
-            "Cartpole asset cache before running the IsaacLab 2 lane"
-        )
-    return usd
 
 
 def _g1_usd() -> Path:
@@ -150,11 +131,12 @@ def _build_env(usd: Path, *, num_envs: int = 1):
     )
 
 
-@pytest.fixture(scope="session")
-def cartpole_usd() -> Path:
-    """Resolve the optional lane and cached USD before Kit is launched."""
+@pytest.fixture
+def cartpole_usd(pack_runtime) -> Path:
+    """Resolve the Cartpole USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
-    return _cartpole_usd()
+    runtime = pack_runtime("isaaclab_cartpole")
+    return runtime.resource_for("assets", "isaaclab_cartpole.usd")
 
 
 @pytest.fixture(scope="session")

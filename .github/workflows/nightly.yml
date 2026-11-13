@@ -108,11 +108,19 @@ jobs:
     timeout-minutes: 60
     env:
       UNIGYM_ISAACLAB2_ENV: ${{ vars.UNIGYM_ISAACLAB2_ENV }}
-      UNIGYM_ISAACLAB2_ASSET_CACHE: ${{ vars.UNIGYM_ISAACLAB2_ASSET_CACHE }}
+      UNIGYM_TEST_PACKS_WHEELHOUSE: ${{ vars.UNIGYM_TEST_PACKS_WHEELHOUSE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install test packs
+        run: |
+          test -n "$UNIGYM_TEST_PACKS_WHEELHOUSE"
+          CONDA="${UNIGYM_CONDA_EXE:-conda}"
+          "$CONDA" run --no-capture-output -n "$UNIGYM_ISAACLAB2_ENV" \
+            python -m pip install --no-deps \
+            "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_packs-*.whl \
+            "$UNIGYM_TEST_PACKS_WHEELHOUSE"/unigym_test_pack_isaaclab_cartpole-*.whl
       - name: Run isaaclab2 lane
         run: python3 tools/ci/run_lane.py --lane isaaclab2

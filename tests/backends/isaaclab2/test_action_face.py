@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.sim
+pytestmark = [
+    pytest.mark.sim,
+    pytest.mark.requires_test_packs("isaaclab_cartpole"),
+]
 
 
 def test_action_entry_is_the_articulation_name(cartpole_env):
