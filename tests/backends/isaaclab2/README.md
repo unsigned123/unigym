@@ -32,6 +32,15 @@ conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pytest tests/backends/isaaclab2 -q
 ```
 
+## Contact inventory and ``contacts: all``
+
+Contact sensors must exist before the scene clone. `unigym/backends/isaaclab2/usd.py`
+is the lazy OpenUSD inventory owner: it walks the robot asset root, returns the
+robot-relative rigid-body paths in traversal order, flags collision coverage,
+and excludes links merged by a fixed joint (the G1 palm links). `contacts: all`
+materializes one `ContactSensorCfg` per inventory body and binds one row per
+body; collisionless bodies stay as zero rows. There is no wildcard all sensor.
+
 Planned coverage:
 
 - backend construction and `EnvBackend` contract;
@@ -40,7 +49,9 @@ Planned coverage:
 - reset subset and reset-all;
 - model IR topology;
 - action-face and kind failure paths;
-- close lifecycle.
+- close lifecycle;
+- G1 contact-all per-body sensor rows (nested finger links, merged palms
+  excluded).
 
 No public-core asset pack is used. The test plan defines the allowed
 IsaacLab-provided asset boundary and any `external_asset`/`sim` markers.

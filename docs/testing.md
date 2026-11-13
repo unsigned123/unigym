@@ -529,7 +529,27 @@ import; that is why C1 is provisioned clean and why its lanes run through the
 runner's `--no-sync` mode rather than `--frozen`, which would resync the
 environment back to the 4.0 lock.
 
-### 7.3 Target commands
+### 7.3 Dog real IsaacLab lane
+
+The real IsaacLab backend tests also run on the `dog` host in the pinned
+`unigym-isaaclab232` conda environment. Sync the working tree to a fresh
+`/tmp/unigym-d6` checkout (do not reuse an older checkout) and point the
+environment at the provisioned assets:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES \
+UNIGYM_TEST_ENV_STRICT=1 \
+UNIGYM_ISAACLAB2_ASSET_CACHE=/public/workspace/dlx_workspace_ci/isaaclab-asset-cache \
+UNIGYM_ISAACLAB2_G1_ASSET=/public/workspace/dlx_workspace_ci/g1_asset/g1.usd \
+conda run -n unigym-isaaclab232 python -m pytest tests/backends/isaaclab2 -q
+```
+
+The G1 contact-all test is part of this lane: it uses the pre-clone USD
+inventory (`unigym/backends/isaaclab2/usd.py`), materializes one sensor per
+rigid body, excludes fixed-joint merged palms, and resets/reads the per-body
+rows. A missing cache or G1 asset fails the strict lane rather than skipping.
+
+### 7.4 Target commands
 
 Once the test Makefile exists:
 
@@ -548,7 +568,7 @@ pytest -m "layer_conformance and not sim"
 pytest -m "backend_mujoco and not slow"
 ```
 
-### 7.4 Before commit
+### 7.5 Before commit
 
 At minimum:
 
@@ -559,7 +579,7 @@ pytest -m fast -x -q
 If the change touches a backend, public API, or dependency boundary, run the
 relevant targeted lane/tests as well.
 
-### 7.5 Before merge/release
+### 7.6 Before merge/release
 
 The full required matrix is a CI responsibility. Do not claim a lane passed
 unless you actually ran it. Report unrun lanes explicitly.

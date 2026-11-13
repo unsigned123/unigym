@@ -151,13 +151,13 @@ def test_g1_realization_reads_the_explicit_soft_factor_and_collision_group(g1_us
     assert cfg.debug_vis is True
 
 
-def test_g1_realization_absent_spawn_uses_the_g1_height(g1_usd):
-    """An absent run-level spawn uses the G1 backend height and zero yaw."""
-    from unigym.robots.g1_constants import G1_SPAWN_HEIGHT
-
+def test_g1_realization_absent_spawn_uses_the_profile_base_height(g1_usd):
+    """An absent run-level spawn uses the profile base_height and zero yaw."""
     cfg = _realize(_spec(g1_usd))
 
-    assert cfg.init_state.pos == (0.0, 0.0, G1_SPAWN_HEIGHT)
+    assert cfg.init_state.pos[0] == 0.0
+    assert cfg.init_state.pos[1] == 0.0
+    assert cfg.init_state.pos[2] == pytest.approx(0.78)
     assert cfg.init_state.rot == pytest.approx((1.0, 0.0, 0.0, 0.0))
 
 
@@ -195,6 +195,84 @@ def test_g1_realization_has_no_old_module_or_template():
 
     assert importlib.util.find_spec("unigym.backends.isaaclab2.robots.g1") is None
     assert not hasattr(robots, "G1_29DOF_CFG")
+
+
+def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
+    """contacts: all uses the pre-clone USD inventory and reads per-body rows."""
+    import isaaclab.sim as sim_utils
+    from isaaclab.assets import AssetBaseCfg
+
+    from unigym.adapters.manual import ManualAdapter
+    from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.backends.isaaclab2.usd import robot_rigid_bodies
+    from unigym.contacts.base import ALL_BODIES
+    from unigym.contacts.manager import build_contact_manager
+    from unigym.robots import g1_constants as g1c
+    from unigym.runtime.controllers import build_control_runtimes
+    from unigym.runtime.controls import ControlGroup
+
+    inventory = robot_rigid_bodies(str(g1_usd))
+    paths = [body.path for body in inventory]
+    assert "pelvis" in paths
+    assert "left_ankle_roll_link" in paths
+    assert "right_ankle_roll_link" in paths
+    assert "left_hand/left_hand_index_0_link" in paths
+    assert "right_hand/right_hand_thumb_2_link" in paths
+    assert "left_hand/left_hand_palm_link" not in paths
+    assert "right_hand/right_hand_palm_link" not in paths
+
+    manager = build_contact_manager(
+        [{"name": "all", "sensor_bodies": [ALL_BODIES], "frame": "world"}],
+        backend="isaaclab2",
+        contact_assets={"g1": str(g1_usd)},
+    )
+    assert manager is not None
+
+    profile = _profile()
+    spec = _spec(g1_usd, passive_joints=g1c.G1_HAND_JOINTS)
+    realization = _realize(spec)
+    group = ControlGroup.from_mapping(
+        {
+            "name": ARTICULATION,
+            "adapter": "manual",
+            "articulation": ARTICULATION,
+            "joints": list(g1c.G1_JOINT_ORDER_IL),
+            "drive": "position_pd",
+            "target": "position",
+        }
+    )
+    controls = build_control_runtimes((group,), (spec,), {ARTICULATION: profile})
+    terrain_cfg = {
+        "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
+    }
+    sim_utils.create_new_stage()
+    env = IsaaclabEnv(
+        robot_profile=profile,
+        adapter=ManualAdapter(),
+        terrain_cfg=terrain_cfg,
+        num_envs=1,
+        episode_length_s=100.0,
+        decimation=4,
+        sim_dt=0.005,
+        device="cuda:0",
+        articulations=(spec,),
+        controls=controls,
+        profiles={ARTICULATION: profile},
+        robot_realizations={ARTICULATION: realization},
+        contact_manager=manager,
+    )
+    try:
+        assert manager.backend.group_axes(manager.specs[0]) == (len(paths), 0)
+
+        value = manager.read()["contact/all"]
+        assert tuple(value.shape) == (1, len(paths), 3)
+
+        assert env.reset_all().tolist() == [0]
+        after_reset = manager.read()["contact/all"]
+        assert tuple(after_reset.shape) == (1, len(paths), 3)
+        assert after_reset[0, paths.index("pelvis")].tolist() == [0.0, 0.0, 0.0]
+    finally:
+        env.close()
 
 
 def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from unigym.assets.asset_ref import AssetRef
 from unigym.backends.registry import BackendInfo
+from unigym.contacts.base import ALL_BODIES
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runtime.controllers import (
     ArticulationRuntime,
@@ -160,7 +162,7 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
     effective = _effective_profile(spec, profile, _info("usd"))
     builds = {"arm": {"profile": effective, "params": {}, "spec": spec}}
 
-    table = _contact_group_table(builds, _info("usd"))
+    table, assets = _contact_group_table(builds, _info("usd"))
 
     assert table == {
         "arm": {
@@ -168,17 +170,56 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
             "grasp": ("hand/finger_link",),
         }
     }
+    assert assets == {}
 
 
-@pytest.mark.parametrize("mode", ["all", "none"])
-def test_all_and_none_contribute_no_resolvable_groups(mode):
-    """D2 leaves omitted-contacts all/none materialization to D6."""
+def test_all_contributes_one_sentinel_group_and_the_selected_asset():
+    """contacts: all maps to the typed sentinel plus the resolved asset path."""
+    profile = RobotProfile(
+        name="arm",
+        joint_sets={"body": ("j",)},
+        default_joint_pos={"j": 0.0},
+        assets=AssetRef(usd="/tmp/arm.usd"),
+        action_faces={},
+        base_body=None,
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={},
+    )
+    spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="all"))
+    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
+
+    table, assets = _contact_group_table(builds, _info("usd"))
+
+    assert table == {"arm": {"all": (ALL_BODIES,)}}
+    assert assets == {"arm": "/tmp/arm.usd"}
+
+
+def test_omitted_contacts_with_a_contacts_section_default_to_all(capsys):
+    """An omitted inventory under a run-level contacts section becomes all."""
     profile = _profile()
-    spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode=mode))
-    effective = _effective_profile(spec, profile, _info("mjcf"))
-    builds = {"arm": {"profile": effective, "params": {}, "spec": spec}}
+    spec = ArticulationSpec(name="arm")
+    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
 
-    assert _contact_group_table(builds, _info("mjcf")) == {"arm": {}}
+    table, assets = _contact_group_table(builds, _info("mjcf"), run_contacts=True)
+
+    assert table == {"arm": {"all": (ALL_BODIES,)}}
+    assert assets == {}
+    warning = capsys.readouterr().out
+    assert "omits `contacts`" in warning
+    assert "ContactSensorCfg per rigid body" in warning
+
+
+def test_none_suppresses_the_implicit_all_default():
+    """contacts: none carries no group even under a run-level section."""
+    profile = _profile()
+    spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="none"))
+    builds = {"arm": {"profile": profile, "params": {}, "spec": spec}}
+
+    table, assets = _contact_group_table(builds, _info("mjcf"), run_contacts=True)
+
+    assert table == {}
+    assert assets == {}
 
 
 def test_v4_articulation_facts_serialize_body_and_contact_vocabulary():

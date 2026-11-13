@@ -102,7 +102,6 @@ def build_robot_realization(
     """
     if profile.name == "g1":
         from unigym.actuators.ir import resolve_group_joints
-        from unigym.robots.g1_constants import G1_SPAWN_HEIGHT
 
         from ..actuators.plan import build_actuator_plan
         from .builder import build_articulation_cfg
@@ -112,6 +111,12 @@ def build_robot_realization(
                 f"articulation {spec.name!r}: profile 'g1' requires explicit "
                 f"run-level `actuation` groups; the G1 IsaacLab actuator source "
                 f"is the run-level ActuationGroup set (no hardcoded table)"
+            )
+        if profile.base_height is None:
+            raise ValueError(
+                f"articulation {spec.name!r}: profile {profile.name!r} declares "
+                f"no base_height; the IsaacLab realizer needs an explicit "
+                f"profile base_height for an absent run-level spawn"
             )
         resolved = resolve_group_joints(
             spec.actuation,
@@ -125,7 +130,7 @@ def build_robot_realization(
             asset_format="usd",
             actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved),
             asset_plan=asset_plan,
-            default_pos=(0.0, 0.0, G1_SPAWN_HEIGHT),
+            default_pos=(0.0, 0.0, profile.base_height),
             spawn_options=_param_mapping(params, "spawn_options"),
             collision_group=_param_int(params, "collision_group", 0),
             debug_vis=_param_bool(params, "debug_vis", False),

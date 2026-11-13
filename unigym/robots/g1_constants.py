@@ -1,13 +1,13 @@
 """Unitree G1 (29-DoF) deployment constants — pure data, NO isaaclab imports.
 
 Single source of truth for the G1 policy-facing contract (joint order, standby
-pose, body parts, effort limits, PD gains).  Kept isaaclab-free so the unit
-tests (and the interface-contract doc) can import it without Isaac Sim.
+pose, canonical body facts/bindings).  Kept isaaclab-free so the unit tests
+(and the interface-contract doc) can import it without Isaac Sim.
 
 Provenance of every number:
   * SONIC release constants (the GR00T-WholeBodyControl deployment
     checkout, byte-verified 2026-09-02):
-      - gear_sonic_deploy/.../policy_parameters.hpp  (q0, effort limits,
+      - gear_sonic_deploy/.../policy_parameters.hpp  (q0,
         upper/lower-body IL index tables)
       - gear_sonic/scripts/play/sonic_decoder.py     (IL 29-joint order,
         DEFAULT_ANGLES)
@@ -18,10 +18,6 @@ Provenance of every number:
     probe_g1_profile.py (retired in git history, v063 cleanup) — the
     name-based permutation in
     IsaaclabEnv makes order differences harmless, only the name SET matters.
-  * PD gains: SONIC playground MuJoCo sim values
-    (playground_official_sonic.py:96-104), sim-to-sim reference; the hardware
-    deployment gains (policy_parameters.hpp:141-210) remain the documented
-    A/B alternative via the yaml ``actuator`` override.
 """
 
 from __future__ import annotations
@@ -189,88 +185,6 @@ def _g1_body_bindings() -> Dict[str, Dict[str, str]]:
 G1_BODY_BINDINGS: Dict[str, Dict[str, str]] = _g1_body_bindings()
 
 # ---------------------------------------------------------------------------
-# Effort limits (N·m) from policy_parameters.hpp EFFORT_LIMIT_* (motor spec
-# 7520_22=139, 7520_14=88, 5020=25, 4010=5).  Keys are joint-name regexes as
-# consumed by ImplicitActuatorCfg.  NB: deliberately NOT the G1_29DOF_CFG
-# asset defaults (which use ankle 50 / waist_yaw 88) — the deployment motor
-# ratings are the contract.
-# ---------------------------------------------------------------------------
-G1_EFFORT_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 139.0,
-    ".*_hip_roll_joint": 139.0,
-    ".*_knee_joint": 139.0,
-    ".*_hip_yaw_joint": 88.0,
-}
-G1_EFFORT_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 25.0,
-    ".*_ankle_roll_joint": 25.0,
-}
-G1_EFFORT_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 50.0,
-    "waist_roll_joint": 50.0,
-    "waist_pitch_joint": 50.0,
-}
-G1_EFFORT_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 25.0,
-    ".*_shoulder_roll_joint": 25.0,
-    ".*_shoulder_yaw_joint": 25.0,
-    ".*_elbow_joint": 25.0,
-    ".*_wrist_roll_joint": 25.0,
-    ".*_wrist_pitch_joint": 5.0,
-    ".*_wrist_yaw_joint": 5.0,
-}
-
-# ---------------------------------------------------------------------------
-# PD gains (playground MuJoCo sim values, playground_official_sonic.py:96-104;
-# keys are joint-name regexes).  Deployment gains stay an A/B alternative via
-# yaml ``actuator`` whole-group replacement (collect.py build_actuator).
-# ---------------------------------------------------------------------------
-G1_KP_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 150.0,
-    ".*_hip_roll_joint": 150.0,
-    ".*_hip_yaw_joint": 150.0,
-    ".*_knee_joint": 200.0,
-}
-G1_KD_LEGS: Dict[str, float] = {
-    ".*_hip_pitch_joint": 2.0,
-    ".*_hip_roll_joint": 2.0,
-    ".*_hip_yaw_joint": 2.0,
-    ".*_knee_joint": 4.0,
-}
-G1_KP_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 40.0,
-    ".*_ankle_roll_joint": 40.0,
-}
-G1_KD_FEET: Dict[str, float] = {
-    ".*_ankle_pitch_joint": 2.0,
-    ".*_ankle_roll_joint": 2.0,
-}
-G1_KP_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 250.0,
-    "waist_roll_joint": 250.0,
-    "waist_pitch_joint": 250.0,
-}
-G1_KD_WAIST: Dict[str, float] = {
-    "waist_yaw_joint": 5.0,
-    "waist_roll_joint": 5.0,
-    "waist_pitch_joint": 5.0,
-}
-G1_KP_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 100.0,
-    ".*_shoulder_roll_joint": 100.0,
-    ".*_shoulder_yaw_joint": 40.0,
-    ".*_elbow_joint": 40.0,
-    ".*_wrist_.*_joint": 20.0,
-}
-G1_KD_ARMS: Dict[str, float] = {
-    ".*_shoulder_pitch_joint": 5.0,
-    ".*_shoulder_roll_joint": 5.0,
-    ".*_shoulder_yaw_joint": 2.0,
-    ".*_elbow_joint": 2.0,
-    ".*_wrist_.*_joint": 2.0,
-}
-
-# ---------------------------------------------------------------------------
 # Hand DOFs (NOT part of the 29-joint policy contract).  The actual Nucleus
 # ``g1.usd`` (IsaacSim asset tree ``Robots/Unitree/G1/``, sub-asset
 # ``g1_29dof_with_hand_rev_1_0``) carries 14 finger joints
@@ -278,13 +192,7 @@ G1_KD_ARMS: Dict[str, float] = {
 # index_0,index_1}_joint``) beyond the 29 body joints — probed 2026-09-02.
 # They are actuated (held at USD rest pose 0, matching the Unitree URDF rest
 # configuration) but excluded from obs/action by the name-based permutation.
-# Gains/limits verbatim from the upstream ``G1_29DOF_CFG`` "hands" group
-# (container isaaclab_assets/robots/unitree.py, Isaac Lab 2.3.2).
 # ---------------------------------------------------------------------------
-G1_HAND_EXPRS: List[str] = [".*_index_.*", ".*_middle_.*", ".*_thumb_.*"]
-G1_KP_HANDS = 20.0
-G1_KD_HANDS = 2.0
-G1_EFFORT_HANDS = 300.0
 
 # The 14 finger JOINT names of the with-hand asset (psi/Unitree naming:
 # per hand thumb_0/1/2, middle_0/1, index_0/1, L then R).  Not part of the
@@ -315,7 +223,3 @@ G1_JOINT_SETS: Dict[str, List[str]] = {
     "upper_body": [G1_JOINT_ORDER_IL[i] for i in G1_UPPER_BODY_IDX],
     "lower_body": [G1_JOINT_ORDER_IL[i] for i in G1_LOWER_BODY_IDX],
 }
-
-# spawn height for the standing q0 (SONIC clip reference z ~0.74; small
-# clearance so the robot settles onto its feet)
-G1_SPAWN_HEIGHT = 0.78

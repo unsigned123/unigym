@@ -33,11 +33,11 @@ from unigym.cameras.base import CameraSpec, depth_key, rgb_key, rig_type, rig_hi
 def build_sensor_cfg(spec: CameraSpec):
     """Build the isaaclab sensor cfg (CameraCfg / TiledCameraCfg) for *spec*.
 
-    Prim path by rig type: ``body`` defaults to the env root
-    (``{ENV_REGEX_NS}/<name>_camera``; ``rig.prim_path`` override wins for
-    robot-child mountings — note a robot-child path must reference an
-    EXISTING link prim, e.g. G1's USD has no "base" link, only "pelvis").
-    ``world``/``chase`` sit at the env origin level too
+    Prim path by rig type: ``body`` requires an explicit mount -- either
+    ``rig.attach`` (a robot-child link prim) or an explicit ``rig.prim_path``
+    override; the run layer fills ``attach`` from the effective profile
+    ``base_body`` when the camera omits both.  There is no implicit body
+    mount.  ``world``/``chase`` sit at the env origin level
     (``{ENV_REGEX_NS}/<name>_camera``).
 
     Offset resolution: explicit ``rig.rot`` (w,x,y,z, world convention)
@@ -74,8 +74,15 @@ def build_sensor_cfg(spec: CameraSpec):
     if rtype == "body":
         if mount_body:
             prim_path = f"{{ENV_REGEX_NS}}/Robot/{mount_body}/" f"{spec.sensor_key()}"
+        elif rig.get("prim_path") is not None:
+            prim_path = str(rig["prim_path"])
         else:
-            prim_path = str(rig.get("prim_path") or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
+            raise ValueError(
+                f"camera {spec.name!r}: a body rig requires an explicit "
+                f"`attach` link or an explicit `prim_path`; the effective "
+                f"profile base_body is filled before this boundary (there is "
+                f"no implicit body mount)"
+            )
     elif rtype in ("world", "chase"):
         prim_path = str(rig.get("prim_path") or f"{{ENV_REGEX_NS}}/{spec.sensor_key()}")
     elif rtype == "fixed":

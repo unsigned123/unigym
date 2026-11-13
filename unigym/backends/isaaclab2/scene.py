@@ -50,6 +50,24 @@ def _profile_joint_sets(env):
     return dict(getattr(profile, "joint_sets", None) or {})
 
 
+def _runtime_base_body(env, robot_name: str) -> str:
+    """The articulation's runtime ``base_body`` binding (backend-native name).
+
+    The scene tree never infers the base from ``body_names[0]``: the run
+    layer's effective profile binding is the authority.
+    """
+    runtime = (getattr(env, "articulations", None) or {}).get(robot_name)
+    base = str(getattr(runtime, "base_body", "") or "")
+    if base:
+        return base
+    robot = getattr(env, "robot", None)
+    bodies = [str(name) for name in getattr(getattr(robot, "data", None), "body_names", [])]
+    raise ValueError(
+        f"scene tree: articulation {robot_name!r} has no runtime base_body "
+        f"binding; declared body names: {bodies}"
+    )
+
+
 def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None:
     """An articulation's sim-provided joint limits by name.
 
@@ -110,7 +128,7 @@ class IsaacLabSceneOps:
 
         env = self.env
         robot = env.robot
-        base = str(robot.data.body_names[0])  # root link
+        base = _runtime_base_body(env, self.robot_name)
         joints = list(_asset_joint_names(env))
         # limit rows over ALL actuated joints
         # (the policy controller's asset_joint_names == the articulation
@@ -307,7 +325,7 @@ class IsaacLabSceneOps:
         robot = self.env.robot
         doc: dict = {
             "robot": {
-                "base": str(robot.data.body_names[0]),
+                "base": _runtime_base_body(self.env, self.robot_name),
                 "links": [str(n) for n in robot.data.body_names],
                 "joints": [str(n) for n in _asset_joint_names(self.env)],
             },

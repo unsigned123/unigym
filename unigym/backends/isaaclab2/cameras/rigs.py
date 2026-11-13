@@ -6,15 +6,13 @@ import time**; isaaclab imports happen inside methods
 (``setup_scene``/``sync_pose``/``read``), mirroring the lazy-import
 convention of the package.
 
-* :class:`BodyRig` — mounted on the robot base (default) or, with
-  ``attach: <body_name>``, on ANY link: the mount pose is that body's
-  FK ∘ the mount offset/orientation.  Base mounts re-posed to
-  ``root_pose ∘ offset`` at every step TAIL (the next step's render then
-  captures this pose) and after every reset — the generalized, exact
-  port of the classic ``_sync_depth_camera_pose`` (the standard Camera
-  render product is pinned to the prim's world transform, so an explicit
-  per-step ``set_world_poses`` is what makes the frame follow the
-  robot).  Link mounts own their pose through the kinematic tree.
+* :class:`BodyRig` — mounted on an explicit link.  ``attach: <body_name>``
+  (or the run-layer-filled effective profile ``base_body``) makes the
+  camera a robot-child prim: the mount pose is that body's FK ∘ the mount
+  offset/orientation, and the kinematic tree owns the pose.  A body rig
+  without an explicit mount fails; there is no implicit base body.
+  ``rig.prim_path`` remains the explicit escape hatch for a root-level
+  camera.
 * :class:`WorldRig` — world-anchored tripod at the env origin (the cfg
   offset poses it at spawn); never re-posed by the physics loop.  NOT
   frozen hardware though: the live-property whitelist re-aims the head
@@ -302,17 +300,16 @@ class _RigBase:
 
 
 class BodyRig(_RigBase):
-    """Robot mount; per-step pose follows the mount body's FK ∘ offset.
+    """Robot mount; per-step pose follows the explicit mount link.
 
-    Default (no ``attach``): the base mount — ``rig.pos`` is base-frame;
-    re-posed to ``root ∘ offset`` at every step tail (step-tail
-    semantics, ``_sync_depth_camera_pose`` port — see cameras/base.py).
-    ``attach: <body_name>`` welds the camera to ANY link: the pose is
-    that body's FK ∘ the mount offset/orientation (isaaclab: the sensor
-    prim is a robot-link child — see ``cameras.cfg.build_sensor_cfg`` —
-    so the kinematic tree owns the pose and per-step re-posing is
-    DISABLED; mujoco: the MJCF camera is injected on that body, see
-    ``backends/mujoco/cameras.inject_spec_camera``).
+    ``attach: <body_name>`` (or the run-layer-filled effective profile
+    ``base_body``) welds the camera to that link: the pose is the body's
+    FK ∘ the mount offset/orientation (isaaclab: the sensor prim is a
+    robot-link child — see ``cameras.cfg.build_sensor_cfg`` — so the
+    kinematic tree owns the pose and per-step re-posing is DISABLED;
+    mujoco: the MJCF camera is injected on that body, see
+    ``backends/mujoco/cameras.inject_spec_camera``).  A body rig with no
+    explicit mount fails; there is no implicit base body.
 
     Orientation: explicit ``rig.rot`` (w,x,y,z) or ``pitch_down_deg``
     (rotation about +Y, the pitch quaternion
@@ -345,7 +342,8 @@ class BodyRig(_RigBase):
         own env's robot.  ``env_ids`` scopes WHICH instances are refreshed;
         the pose is DERIVED (env robot FK ∘ mount offset) and never stored
         (design §4).  Link-mounted prims (``attach``) skip this entirely
-        (kinematic parent poses the prim; see class docstring).
+        (kinematic parent poses the prim; see class docstring); an explicit
+        root-level ``prim_path`` keeps the step-tail root re-pose.
         """
         if self._sensor is None or self._prim_mounted:
             return

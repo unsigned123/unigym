@@ -890,6 +890,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         prop_backend=_mujoco_prop_backend,
         camera_backend=_mjwarp_rig_factory,
         director_ops=_mjwarp_director_ops,
+        contact_backend=_mujoco_contact_backend,
         gripper_backend=_mujoco_gripper_backend,
         env_kwargs=_mjwarp_env_kwargs,
         scene_ops=_mujoco_scene_ops,

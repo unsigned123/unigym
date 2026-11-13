@@ -240,9 +240,9 @@ class CameraSpec:
         name: rig name (unique; part of the obs key).
         rig: rig description dict; ``type`` in ``body|world|chase`` plus
             type-specific params (see ``cameras/rigs.py``):
-            body  -> ``attach`` (mount link name; absent = the base mount,
-                     re-posed ``root ∘ offset`` every step; a declared
-                     ``attach`` welds the sensor to that link's FK),
+            body  -> ``attach`` (explicit mount link name; the run layer
+                     fills it from the effective profile ``base_body`` when
+                     omitted, and a body rig with no mount fails),
                      ``pos`` (mount-frame offset), ``pitch_down_deg`` or
                      ``rot`` (w,x,y,z world-convention override, wins),
                      ``prim_path`` override, ``update_latest_camera_pose``;
@@ -570,9 +570,13 @@ class CameraSpec:
             name="depth",
             rig={
                 "type": "body",
+                # explicit base mount: the classic shim assumed a "base" link
+                # prim the G1 USD does not have (root body = pelvis); the
+                # mount is explicit, never an implicit shared default.
+                "attach": "pelvis",
                 "pos": [0.33, 0.0, 0.043],
                 "pitch_down_deg": 5.0,
-                # env-root mount: the classic default
+                # env-root prim placement; the classic default
                 # "{ENV_REGEX_NS}/Robot/base/depth_camera" assumed a "base"
                 # link prim which the G1 USD does not have (root body =
                 # pelvis) and crashed scene cloning; the rig poses the

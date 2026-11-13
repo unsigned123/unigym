@@ -122,4 +122,5 @@ def make_g1_profile(
             canonical: BodyBinding(canonical, dict(names))
             for canonical, names in G1_BODY_BINDINGS.items()
         },
+        base_height=0.78,
     )

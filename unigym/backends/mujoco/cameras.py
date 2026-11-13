@@ -77,7 +77,6 @@ from unigym.cameras.rigs import DEFAULT_CHASE_OFFSET, lookat_quat, yaw_pitch_rol
 from unigym.cameras.spec import NAMED_VIEW_PARAMS, DEFAULT_ORBIT, spherical_camera_keys
 
 from unigym.backends.shared.mjfamily.cameras.helpers import (  # noqa: F401
-    DEFAULT_BODY_MOUNT,
     MJ_CAMERA_PREFIX,
     _quat_conj,
     _quat_mul_np,

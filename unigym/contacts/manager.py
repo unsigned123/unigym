@@ -220,6 +220,7 @@ def build_contact_manager(
     contact_groups: Optional[Mapping[str, Mapping[str, tuple[str, ...]]]] = None,
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
+    contact_assets: Optional[Mapping[str, str]] = None,
 ) -> Optional[ContactManager]:
     """collect_cli entry point.
 
@@ -246,6 +247,10 @@ def build_contact_manager(
         articulated_props: names of the ARTICULATION props ;
             their ``{prop: ...}`` filters resolve to the whole subtree
             (``Prop_<name>_.*``) instead of a single body.
+        contact_assets: per-articulation resolved selected asset path for
+            ``contacts: all``.  Backends use it to scope the all-bodies
+            expansion (isaaclab reads the pre-clone USD inventory);
+            ``None``/absent means no ``all`` inventory was declared.
     """
     if not cfg:
         return None
@@ -265,7 +270,7 @@ def build_contact_manager(
     if len(set(names)) != len(names):
         dupes = sorted({n for n in names if names.count(n) > 1})
         raise ValueError(f"duplicate contact group names in yaml: {dupes}")
-    be = build_contact_backend(backend, specs)
+    be = build_contact_backend(backend, specs, contact_assets=contact_assets)
     mgr = ContactManager(specs, be, device=device)
     if adapter_requests:
         mgr.register_obs_requests(adapter_requests)

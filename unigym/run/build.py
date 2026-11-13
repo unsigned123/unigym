@@ -150,6 +150,7 @@ class _RobotBundle(TypedDict):
     adapter: Adapter
     generates_command: bool
     contact_groups: dict[str, dict[str, tuple[str, ...]]]
+    contact_assets: dict[str, str]
 
 
 class _SensingBundle(TypedDict):
@@ -531,23 +532,79 @@ def _effective_profile(
     return effective
 
 
+def _selected_asset_path(
+    profile: RobotProfile, info: BackendInfo, asset_plan: AssetPlan | None
+) -> str | None:
+    """The effective profile's selected-format asset path, when resolvable."""
+    assets = profile.assets
+    if assets is None:
+        return None
+    value = getattr(assets, info.asset_format, None)
+    if not value:
+        return None
+    if asset_plan is not None:
+        return asset_plan.resolve(str(value))
+    return str(value) if os.path.isabs(str(value)) else None
+
+
+def _effective_contacts(
+    name: str, build: _ProfileBuild, run_contacts: bool
+) -> ContactSensorInventory | None:
+    """The articulation's effective contact inventory.
+
+    An explicit declaration wins (``none`` is the opt-out); omitted contacts
+    become ``all`` only when the run declares a contacts section, with the
+    build warning that states the per-body sensor cost.
+    """
+    inventory = build["spec"].contacts
+    if inventory is not None:
+        return inventory
+    if not run_contacts:
+        return None
+    from unigym.scenes.articulation import ContactSensorInventory
+
+    print(
+        f"[collect] WARNING articulation {name!r} omits `contacts` while the "
+        f"run declares a contacts section: defaulting to contacts: all "
+        f"(every rigid-body link under the robot asset; on isaaclab this "
+        f"materializes one ContactSensorCfg per rigid body per env clone)",
+        flush=True,
+    )
+    return ContactSensorInventory(mode="all")
+
+
 def _contact_group_table(
-    builds: dict[str, _ProfileBuild], info: BackendInfo
-) -> dict[str, dict[str, tuple[str, ...]]]:
+    builds: dict[str, _ProfileBuild],
+    info: BackendInfo,
+    *,
+    run_contacts: bool = False,
+    asset_plan: AssetPlan | None = None,
+) -> tuple[dict[str, dict[str, tuple[str, ...]]], dict[str, str]]:
     """Per-articulation native contact-group inventory for the resolver.
 
-    Only ``declared`` inventories contribute groups; ``all``/``none`` carry
-    no resolvable groups in D2.  This is the only layer that touches
-    ``BodyBinding``.
+    ``declared`` inventories map their canonical bodies through the selected
+    backend format; ``all`` contributes one synthetic group named ``all``
+    whose sensor bodies are the typed ``ALL_BODIES`` sentinel; ``none``
+    contributes no group.  The second return value is the per-articulation
+    resolved selected asset path used by the backend ``all`` expansion.
+    Only this layer touches ``BodyBinding``.
     """
+    from unigym.contacts.base import ALL_BODIES
+
     table: dict[str, dict[str, tuple[str, ...]]] = {}
+    contact_assets: dict[str, str] = {}
     for name, build in builds.items():
         profile = build["profile"]
-        inventory = build["spec"].contacts
-        if inventory is None:
+        inventory = _effective_contacts(name, build, run_contacts)
+        if inventory is None or inventory.mode == "none":
             continue
         groups: dict[str, tuple[str, ...]] = {}
-        if inventory.mode == "declared":
+        if inventory.mode == "all":
+            groups["all"] = (ALL_BODIES,)
+            asset_path = _selected_asset_path(profile, info, asset_plan)
+            if asset_path is not None:
+                contact_assets[name] = asset_path
+        else:
             for group in inventory.groups:
                 bodies = (
                     group.bodies
@@ -558,16 +615,17 @@ def _contact_group_table(
                     profile.body_bindings[body].names[info.asset_format] for body in (bodies or ())
                 )
         table[name] = groups
-    return table
+    return table, contact_assets
 
 
 def _reject_inventory_mode_refs(
     contacts_cfg: object, articulations: Sequence[ArticulationSpec]
 ) -> None:
-    """Fail fast when a run-level contact group references an ``all``/``none``.
+    """Fail fast when a run-level contact group references ``contacts: none``.
 
-    D2 resolves only explicit ``declared`` inventory groups; materializing
-    omitted-contacts ``all`` is D6 work.
+    ``all`` contributes the synthetic ``all`` group and resolves normally;
+    ``none`` deliberately has no group, so a reference to it is a teaching
+    error instead of a generic unknown-group failure.
     """
     if not is_object_sequence(contacts_cfg):
         return
@@ -583,12 +641,11 @@ def _reject_inventory_mode_refs(
             continue
         articulation = ref.get("articulation")
         group = ref.get("group")
-        if isinstance(articulation, str) and modes.get(articulation) in ("all", "none"):
+        if isinstance(articulation, str) and modes.get(articulation) == "none":
             raise ValueError(
                 f"contact_group reference {articulation}.{group} targets an "
-                f"articulation whose contacts mode is {modes[articulation]!r}; "
-                f"D2 requires an explicit declared group (omitted-contacts "
-                f"materialization is D6)"
+                f"articulation whose contacts mode is 'none'; declare an "
+                f"explicit group or remove the contacts opt-out"
             )
 
 
@@ -773,7 +830,12 @@ def _build_robot_and_props(
     # hierarchical adapters generate their own command each step ->
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(adapter.generates_command)
-    contact_groups = _contact_group_table(builds, info)
+    contact_groups, contact_assets = _contact_group_table(
+        builds,
+        info,
+        run_contacts=bool(cfg.get("contacts")),
+        asset_plan=asset_plan,
+    )
     return {
         "profile": profile,
         "profiles": profiles,
@@ -783,7 +845,48 @@ def _build_robot_and_props(
         "adapter": adapter,
         "generates_command": generates_command,
         "contact_groups": contact_groups,
+        "contact_assets": contact_assets,
     }
+
+
+def _camera_base_mount(
+    cameras_cfg: JsonValue, profiles: Mapping[str, RobotProfile], info: BackendInfo
+) -> JsonValue:
+    """Fill each body camera's explicit mount from the effective profile.
+
+    The run layer owns the effective profile, so a ``body`` rig that declares
+    neither ``attach`` nor an explicit ``prim_path`` receives the profile's
+    ``base_body`` native name as its explicit ``attach``.  There is no
+    implicit mount: a profile without a base body leaves the camera untouched
+    and the backend boundary fails with the declared body names.
+    """
+    if not isinstance(cameras_cfg, list) or not cameras_cfg:
+        return cameras_cfg
+    profile = next(iter(profiles.values()), None)
+    if profile is None or profile.base_body is None:
+        return cameras_cfg
+    native = profile.body_bindings[profile.base_body].names.get(info.asset_format)
+    if not native:
+        return cameras_cfg
+    out: list[JsonValue] = []
+    for entry in cameras_cfg:
+        rig_value = entry.get("rig") if is_json_object(entry) else None
+        if not is_json_object(entry) or not is_json_object(rig_value):
+            out.append(entry)
+            continue
+        rig = dict(rig_value)
+        rtype = str(rig.get("type", "")).strip().lower()
+        if rtype != "body" or str(rig.get("attach") or "").strip():
+            out.append(entry)
+            continue
+        if rig.get("prim_path") is not None:
+            out.append(entry)
+            continue
+        rig["attach"] = native
+        updated = dict(entry)
+        updated["rig"] = rig
+        out.append(updated)
+    return out
 
 
 def _build_sensing(
@@ -794,6 +897,7 @@ def _build_sensing(
     num_envs: int,
     profiles: Mapping[str, RobotProfile],
     contact_groups: Mapping[str, Mapping[str, tuple[str, ...]]],
+    contact_assets: Mapping[str, str],
     adapter: Adapter,
     prop_manager: PropManager | None,
 ) -> _SensingBundle:
@@ -811,8 +915,9 @@ def _build_sensing(
 
     rec_cfg = _config_dict(cfg.get("recorder")) or {}
     rec_ref = rec_cfg.get("camera_ref") if rec_cfg.get("enabled") else None
+    cameras_cfg = _camera_base_mount(cfg.get("cameras"), profiles, info)
     camera_manager = build_camera_manager(
-        cfg.get("cameras"),
+        cameras_cfg,
         adapter.get_obs_requests(),
         enable_cameras=spec.enable_cameras,
         refs=[rec_ref] if rec_ref else None,
@@ -850,6 +955,7 @@ def _build_sensing(
             if prop_manager is not None
             else None
         ),
+        contact_assets=dict(contact_assets),
     )
     # default lights: a textured usd prop on isaaclab without scene
     # fill light renders as a black silhouette -- when the config declares
@@ -1438,6 +1544,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         num_envs,
         profiles,
         robot["contact_groups"],
+        robot["contact_assets"],
         adapter,
         prop_manager,
     )

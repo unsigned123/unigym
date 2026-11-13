@@ -441,11 +441,44 @@ assets (AssetRef: usd | mjcf | urdf refs, or None)
 action_faces
 base_body / foot_bodies / body_sets   (canonical body ids)
 body_bindings                          (canonical id -> per-format native name)
+base_height                            (free-base spawn height, or None)
 ```
 
 `foot_bodies` is semantic metadata (it never implies a sensor). `body_bindings`
 is robot metadata, not backend logic: the selected backend asset format picks
-the native name. `RobotProfile` carries no backend object and no backend
+the native name. `base_height` is the neutral free-base spawn height: G1
+declares `0.78`, GR1 and other robots declare `None`. `ArticulationSpec.spawn`
+is the run-level spawn authority; when it is absent, an explicit
+`env.params.spawn_height` wins over the profile `base_height`, whose final
+fallback is `0.0`.
+
+Contact inventories are declared per articulation:
+
+```yaml
+articulations:
+  - name: g1
+    contacts: all          # every rigid-body link under the robot asset
+    # contacts: none       # explicit opt-out from the omitted default
+    # contacts:
+    #   - {name: feet, bodies: [left_ankle_roll, right_ankle_roll]}
+```
+
+- `all` materializes every rigid-body link under the robot asset subtree
+  (world, props and other articulations excluded); collisionless bodies stay
+  as zero contact channels. It contributes one synthetic inventory group
+  named `all`.
+- Omitting `contacts` while the run declares a run-level `contacts:` section
+  defaults to `all` with a build warning that states the per-body sensor cost
+  (on isaaclab one `ContactSensorCfg` per rigid body per env clone).
+- `none` suppresses the implicit default; explicitly declared inventory groups
+  and explicit run-level `sensor_bodies` lists still work.
+- Adapter contact-observation requests never synthesize contact groups; they
+  only pre-register requests on a manager built from the run config.
+- MuJoCo/mjwarp expand `all` at bind over the referenced articulation's model
+  bodies (articulation-binding scoped). IsaacLab expands it pre-clone through
+  the inventory in `unigym/backends/isaaclab2/usd.py`, with fixed-joint merged
+  links excluded and one sensor per body.
+ `RobotProfile` carries no backend object and no backend
 switch. There is no `with_isaaclab`, no `articulation_cfg`, no `body_parts`
 and no `RobotAsset` field.
 

@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from typing import ClassVar, Optional, Protocol, Sequence, cast
+from typing import ClassVar, Mapping, Optional, Protocol, Sequence, cast
 
 import numpy as np
 import torch
@@ -51,6 +51,32 @@ MODES = ("general", "pairwise")
 # aggregate vocabulary by format (plan §2: contact -> any|all; value -> sum|mean|max)
 AGGREGATE_CONTACT = ("any", "all", "none")
 AGGREGATE_VALUE = ("sum", "mean", "max", "none")
+
+ALL_BODIES = "<all>"
+"""Typed sentinel for the ``contacts: all`` inventory mode.
+
+The run layer maps an ``all`` inventory to one synthetic group named
+``all`` whose sensor bodies are this sentinel.  MuJoCo/mjwarp expand it at
+bind over the referenced articulation's model bodies; isaaclab expands it
+through the pre-clone USD inventory.  It is never a body-name regex.
+"""
+
+
+def is_all_bodies(entries) -> bool:
+    """True when *entries* is the single ``ALL_BODIES`` sentinel."""
+    return isinstance(entries, (list, tuple)) and tuple(entries) == (ALL_BODIES,)
+
+
+def expand_all_bodies(entries, resolver) -> list[str]:
+    """Expand the ``ALL_BODIES`` sentinel through a backend resolver.
+
+    A non-sentinel list passes through unchanged; the sentinel form must be
+    exactly one entry (validated by :class:`ContactGroupSpec`).
+    """
+    if not is_all_bodies(entries):
+        return [str(entry) for entry in entries]
+    return [str(name) for name in resolver()]
+
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 ENV_PREFIX_SENTINEL = "{ENV_REGEX_NS}"
@@ -127,8 +153,18 @@ class ContactGroupSpec:
                 f"of the contact/<name> key and a scene field suffix)"
             )
         self.sensor_bodies = _str_list(self.sensor_bodies, "sensor_bodies", self.name)
+        if ALL_BODIES in self.sensor_bodies and tuple(self.sensor_bodies) != (ALL_BODIES,):
+            raise ValueError(
+                f"contact {self.name!r}: the all-bodies sentinel {ALL_BODIES!r} "
+                f"must be the only sensor body entry"
+            )
         if self.filter_bodies is not None:
             self.filter_bodies = _str_list(self.filter_bodies, "filter_bodies", self.name)
+            if ALL_BODIES in self.filter_bodies:
+                raise ValueError(
+                    f"contact {self.name!r}: the all-bodies sentinel {ALL_BODIES!r} "
+                    f"is not a valid filter body"
+                )
         if self.mode is None:
             self.mode = "pairwise" if self.filter_bodies else "general"
         if self.mode not in MODES:
@@ -291,7 +327,7 @@ class _ContactBackendFace(Protocol):
 
     backend_key: ClassVar[str]
 
-    def __init__(self, specs) -> None: ...
+    def __init__(self, specs, contact_assets: Mapping[str, str] | None = None) -> None: ...
 
     @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]: ...
@@ -322,9 +358,11 @@ def _contact_face(backend: str) -> type[_ContactBackendFace]:
     return cast("type[_ContactBackendFace]", factory())
 
 
-def build_contact_backend(backend: str, specs) -> _ContactBackendFace:
+def build_contact_backend(
+    backend: str, specs, contact_assets: Mapping[str, str] | None = None
+) -> _ContactBackendFace:
     """Construct the backend contact object for *specs* (registry face)."""
-    return _contact_face(backend)(specs)
+    return _contact_face(backend)(specs, contact_assets=contact_assets)
 
 
 def _available_contact_refs(contact_groups) -> list[str]:

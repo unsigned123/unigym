@@ -14,6 +14,7 @@ realizer, which owns actuator tables, prim paths and spawn conversion.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Iterable, Mapping, NewType
 
@@ -223,6 +224,9 @@ class RobotProfile:
         foot_bodies: semantic foot body ids (never a sensor declaration).
         body_sets: named canonical body groups (``grasp.left`` ...).
         body_bindings: canonical id -> per-format native name/path metadata.
+        base_height: the free-base spawn height in metres (``None`` when the
+            robot declares none); the mujoco family and the isaaclab G1
+            realizer consume it as their default spawn height.
         full_joint_order: optional explicit full-articulation joint order
             (document order) used by :attr:`full_joint_names`; ``None``
             derives the set union in declaration order.
@@ -243,6 +247,7 @@ class RobotProfile:
     foot_bodies: tuple[CanonicalBodyId, ...]
     body_sets: Mapping[str, tuple[CanonicalBodyId, ...]]
     body_bindings: Mapping[CanonicalBodyId, BodyBinding]
+    base_height: float | None = None
     full_joint_order: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
@@ -273,6 +278,17 @@ class RobotProfile:
                 raise ValueError("RobotProfile full_joint_order must not be empty")
             if len(set(full_order)) != len(full_order):
                 raise ValueError("RobotProfile full_joint_order contains duplicate names")
+
+        base_height = self.base_height
+        if base_height is not None:
+            if isinstance(base_height, bool) or not isinstance(base_height, (int, float)):
+                raise ValueError(
+                    f"RobotProfile base_height must be a finite number or None, "
+                    f"got {base_height!r}"
+                )
+            base_height = float(base_height)
+            if not math.isfinite(base_height):
+                raise ValueError(f"RobotProfile base_height must be finite, got {base_height!r}")
 
         assets = self.assets
         if assets is not None:
@@ -317,6 +333,7 @@ class RobotProfile:
         object.__setattr__(self, "foot_bodies", foot_bodies)
         object.__setattr__(self, "body_sets", body_sets)
         object.__setattr__(self, "body_bindings", bindings)
+        object.__setattr__(self, "base_height", base_height)
         object.__setattr__(self, "full_joint_order", full_order)
 
     # ------------------------------------------------------------------ #

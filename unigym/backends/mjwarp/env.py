@@ -150,7 +150,6 @@ from unigym.backends.shared.mjfamily.world_base import (
 )
 from unigym.runtime.actions import MujocoJointResolver
 
-BASE_BODY = "pelvis"
 
 # capability bits: runs N>1 as ONE batched warp Data (nworld=N) with N CPU
 # mirrors.  contacts/props/recorder ride the CPU mirror; cameras are per-world
@@ -222,7 +221,8 @@ class MjwarpEnv(WarpBatchMixin):
                 in).  ABSENT -> the XML-baked pose (bit-identical).
                 Fail-closed: the body must exist, pos finite 3-vector,
                 yaw finite radians.
-            spawn_height: pelvis z at reset (default 0.78, g1_constants).
+            spawn_height: base z at reset (default: the effective profile
+                ``base_height``, else 0.0).
             spawn_xy: planar spawn position [x, y] in metres, finite 2-vector
                 (default [0, 0]); written into the freejoint qpos every reset.
             spawn_yaw: planar spawn heading in radians, finite scalar
@@ -567,9 +567,10 @@ class MjwarpEnv(WarpBatchMixin):
         self.sim_device = self.warp_device
         # base declaration (scene bundles): ``base.joint: fixed``
         # absorbs the legacy spawn_height param (no freejoint, no drop
-        # -> 0.0); no declaration -> the legacy spawn_height semantics
+        # -> 0.0); no declaration -> the explicit spawn_height param, else
+        # the effective profile base_height (then 0.0)
         # (unigym/backends/shared/mjfamily/props/reset_face.py)
-        self._spawn_height = resolve_base_height(params)
+        self._spawn_height = resolve_base_height(params, robot_profile)
         # spawn_xy/spawn_yaw (forward-port from the cyx g1_nav fork): planar
         # spawn pose written into the freejoint qpos on EVERY reset.  Fail-fast
         # validation; the defaults keep the origin spawn bit-for-bit identical.

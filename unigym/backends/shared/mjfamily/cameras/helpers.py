@@ -21,8 +21,23 @@ from unigym.cameras.rigs import lookat_quat
 
 MJ_CAMERA_PREFIX = "dc_"
 
-# BodyRig default mount body (the G1 freejoint root body).
-DEFAULT_BODY_MOUNT = "pelvis"
+
+def resolve_body_mount(rig, default_body: str | None = None) -> str:
+    """The body a ``body`` rig attaches to (explicit mount, never implicit).
+
+    ``attach`` wins; ``default_body`` is the caller-resolved effective
+    profile ``base_body``.  With neither the failure is explicit -- there is
+    no hidden ``pelvis`` default.
+    """
+    body_name = str((rig or {}).get("attach") or "").strip()
+    if not body_name:
+        body_name = str(default_body or "").strip()
+    if not body_name:
+        raise ValueError(
+            "camera body rig requires an explicit `attach` or an effective "
+            "profile base_body (no default mount)"
+        )
+    return body_name
 
 
 # --------------------------------------------------------------------------- #
@@ -126,14 +141,15 @@ def _rig_offset_quat(spec: CameraSpec) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # MjSpec injection (pre-compile)
 # --------------------------------------------------------------------------- #
-def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
+def inject_spec_camera(spec: CameraSpec, mjspec, default_body: str | None = None) -> None:
     """Add the rig's ``<camera>`` element to an ``mujoco.MjSpec``.
 
     Mounting (``attach`` = the BodyRig link mount):
-      * ``body``  -> attached to the mount body (``rig.attach``; default
-        ``pelvis``) with the mount-frame ``rig.pos`` offset — the body
-        attach makes the camera follow the robot for free (no per-step
-        re-posing, unlike the isaaclab scene-level sensor prim).
+      * ``body``  -> attached to the explicit mount body (``rig.attach`` or
+        the caller-resolved effective profile base_body) with the
+        mount-frame ``rig.pos`` offset — the body attach makes the camera
+        follow the robot for free (no per-step re-posing, unlike the
+        isaaclab scene-level sensor prim).  There is no implicit mount.
       * ``world`` -> worldbody at the world-frame ``rig.pos``.
       * ``chase`` -> worldbody placeholder; ``sync_pose`` overwrites
         ``model.cam_pos/cam_quat`` every step tail.
@@ -142,9 +158,15 @@ def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
     name = MJ_CAMERA_PREFIX + spec.name
     fovy = fovy_from_spec(spec)
     rig = spec.rig or {}
+    body_name: str | None = None
+    if rtype == "body":
+        try:
+            body_name = resolve_body_mount(rig, default_body)
+        except ValueError as e:
+            bodies = [b.name for b in mjspec.bodies if b.name]
+            raise ValueError(f"camera {spec.name!r}: {e}; declared bodies: {bodies}") from e
     try:
         if rtype == "body":
-            body_name = str(rig.get("attach") or DEFAULT_BODY_MOUNT)
             body = mjspec.body(body_name)
             if body is None:
                 # same fail-fast-with-candidates pattern as the contacts
@@ -178,8 +200,7 @@ def inject_spec_camera(spec: CameraSpec, mjspec) -> None:
         if rtype == "body":
             raise ValueError(
                 f"camera {spec.name!r}: mount body "
-                f"{rig.get('body') or DEFAULT_BODY_MOUNT!r} not found in the "
-                f"MJ model ({e})"
+                f"{body_name!r} not found in the MJ model ({e})"
             ) from e
         raise
     body.add_camera(name=name, pos=pos, quat=[float(q) for q in quat], fovy=fovy)

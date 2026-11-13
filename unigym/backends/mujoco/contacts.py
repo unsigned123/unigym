@@ -42,7 +42,7 @@ import numpy as np
 if TYPE_CHECKING:  # pragma: no cover - typing-only (mujoco is imported lazily)
     import mujoco
 
-from unigym.contacts.base import ContactGroupSpec
+from unigym.contacts.base import ContactGroupSpec, is_all_bodies
 from unigym.contacts.discovery import contact_candidate_error, mujoco_body_inventory
 
 # measured probe result (scripts/probe_contact_sign.py): the 6D force
@@ -109,8 +109,9 @@ class MujocoContactBackend:
             return [f"Prop_{name}_.*"]
         return [f"Prop_{name}"]
 
-    def __init__(self, specs: list[ContactGroupSpec]):
+    def __init__(self, specs: list[ContactGroupSpec], contact_assets=None):
         self.specs = list(specs)
+        self._contact_assets = dict(contact_assets or {})
         self._resolved: dict[str, dict] = {}
 
     # typed internal handles: bound by ``bind_env`` before any read.
@@ -142,15 +143,18 @@ class MujocoContactBackend:
 
         body_names = [m.body(i).name for i in range(m.nbody)]
         for spec in self.specs:
-            sensor_ids = _resolve_bodies(
-                m,
-                body_names,
-                spec.sensor_bodies,
-                spec.name,
-                "sensor_bodies",
-                require_geoms=True,
-                inventory_fn=inventory,
-            )
+            if is_all_bodies(spec.sensor_bodies):
+                sensor_ids = self._all_body_ids(env)
+            else:
+                sensor_ids = _resolve_bodies(
+                    m,
+                    body_names,
+                    spec.sensor_bodies,
+                    spec.name,
+                    "sensor_bodies",
+                    require_geoms=True,
+                    inventory_fn=inventory,
+                )
             entry: dict = {"sensor_ids": sensor_ids}
             if spec.mode == "pairwise":
                 filter_ids: list[int] = []
@@ -167,6 +171,57 @@ class MujocoContactBackend:
                     filter_ids.extend(ids)
                 entry["filter_ids"] = filter_ids
             self._resolved[spec.name] = entry
+
+    def _all_body_ids(self, env) -> list[int]:
+        """Model body ids under the referenced articulation(s), model order.
+
+        ``all`` means every rigid-body link under the robot asset subtree.
+        The scope comes from the backend articulation bindings (their
+        compiled base bodies): each body is attributed to its nearest
+        articulation root, so world bodies, props and other articulations are
+        excluded.  Collisionless bodies stay in the B axis with zero force
+        channels -- they are never a bind failure.
+        """
+        m = self._model
+        import mujoco
+
+        bindings = getattr(env, "_mj_articulation_bindings", {}) or {}
+        target_names = list(self._contact_assets) or list(bindings)
+        roots: dict[int, str] = {}
+        for articulation in bindings:
+            binding = bindings[articulation]
+            base = str(getattr(binding, "backend_base_body", "") or "")
+            bid = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, base)) if base else -1
+            if bid > 0:
+                roots[bid] = articulation
+        if not roots:
+            fallback = int(getattr(env, "_base_body_id", -1))
+            if fallback > 0:
+                roots[fallback] = next(iter(target_names), "robot")
+        if not roots:
+            bodies = [m.body(i).name for i in range(1, m.nbody) if m.body(i).name]
+            raise ValueError(
+                f"contacts: all: no articulation base_body binding in the MJ "
+                f"model; declared bodies: {bodies}"
+            )
+        targets = {roots[bid] for bid in roots if not target_names or roots[bid] in target_names}
+        if not targets:
+            targets = set(roots.values())
+        selected = {bid for bid, articulation in roots.items() if articulation in targets}
+        ids: list[int] = []
+        for i in range(1, m.nbody):
+            p = i
+            while p > 0 and p not in roots:
+                p = int(m.body_parentid[p])
+            if p in selected:
+                ids.append(i)
+        if not ids:
+            bodies = [m.body(i).name for i in range(1, m.nbody) if m.body(i).name]
+            raise ValueError(
+                f"contacts: all: resolved no bodies under articulations "
+                f"{sorted(targets)}; declared bodies: {bodies}"
+            )
+        return ids
 
     def group_axes(self, spec: ContactGroupSpec) -> tuple[int, int]:
         """Resolved ``(B, F)`` sensor/filter counts (post bind_env).

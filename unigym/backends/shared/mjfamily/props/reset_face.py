@@ -86,21 +86,23 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
         raise PlacementCapabilityError(str(exc)) from exc
 
 
-def resolve_base_height(params: dict) -> float:
-    """The base declaration's spawn height (scene-bundle §3 semantics).
+def resolve_base_height(params: dict, profile) -> float:
+    """The free-base spawn height in metres (scene-bundle §3 semantics).
 
-    ``base.joint: fixed`` absorbs the legacy spawn_height param: a
-    world-fixed base has no freejoint and no spawn drop -> height 0.0
+    Precedence: an explicit ``env.params.spawn_height`` wins over the
+    effective profile's ``base_height``; with neither the fallback is
+    ``0.0``.  ``base.joint: fixed`` absorbs the legacy spawn_height param:
+    a world-fixed base has no freejoint and no spawn drop -> height 0.0
     (the GR1 tabletop scenes' declared behavior, bitwise).  A free-base
-    declaration fails fast until the base migration lands.  No
-    declaration -> the legacy spawn_height param (G1 scenes, default
-    profile height).
+    declaration fails fast until the base migration lands.
     """
     base_decl = params.get("base")
     if base_decl is None:
-        from unigym.robots.g1_constants import G1_SPAWN_HEIGHT
-
-        return float(params.get("spawn_height", G1_SPAWN_HEIGHT))
+        explicit = params.get("spawn_height")
+        if explicit is not None:
+            return float(explicit)
+        base_height = getattr(profile, "base_height", None)
+        return float(base_height) if base_height is not None else 0.0
     if not isinstance(base_decl, dict):
         raise ValueError(
             f"mujoco backend: env.params.base must be a mapping "

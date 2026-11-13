@@ -40,7 +40,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec
+from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec, is_all_bodies
 from unigym.contacts.discovery import resolve_bucket_names, resolve_entry_name, usd_robot_inventory
 
 
@@ -155,20 +155,56 @@ class IsaacLabContactBackend:
             return [f"{{ENV_REGEX_NS}}/Prop_{name}/.*"]
         return [f"{{ENV_REGEX_NS}}/Prop_{name}"]
 
-    def __init__(self, specs: list[ContactGroupSpec]):
+    def __init__(self, specs: list[ContactGroupSpec], contact_assets=None):
         self.specs = list(specs)
+        self._contact_assets = dict(contact_assets or {})
         self._sensors: dict[str, dict] = {}  # name -> pieces
         self._perm: dict[str, list[list[int]]] = {}  # name -> per-piece perm
+        self._all_bodies: dict[str, list] = {}  # name -> pre-clone inventory
         self._bound = False
 
     # ---------------------------------------------------------------- #
     # scene contribution (before cloning)
     # ---------------------------------------------------------------- #
+    def _all_inventory(self) -> list:
+        """The pre-clone rigid-body inventory for ``contacts: all``.
+
+        Materialized from the registered USD asset(s) through
+        :mod:`unigym.backends.isaaclab2.usd` -- the source of truth before
+        cloning (post-spawn body names cannot create sensors).  Fixed-joint
+        merged links are excluded by the inventory owner.
+        """
+        from .usd import robot_rigid_bodies
+
+        if not self._contact_assets:
+            raise ValueError(
+                "contacts: all requires the articulation's resolved USD asset "
+                "path; the run layer supplies contact_assets for an all-mode "
+                "inventory"
+            )
+        bodies: list = []
+        seen: set[str] = set()
+        for articulation, asset_path in self._contact_assets.items():
+            try:
+                inventory = robot_rigid_bodies(asset_path)
+            except (OSError, ValueError) as exc:
+                raise ValueError(
+                    f"contacts: all: cannot inventory articulation "
+                    f"{articulation!r} asset {asset_path!r}: {exc}"
+                ) from exc
+            for body in inventory:
+                if body.path in seen:
+                    continue
+                seen.add(body.path)
+                bodies.append(body)
+        return bodies
+
     def setup_scene(self) -> dict:
         """``{scene_field: ContactSensorCfg}`` for every group.
 
         Fields: ``contact_<name>`` (general, single scope bucket) and
-        ``contact_<name>__sN`` (general, further scope buckets) and
+        ``contact_<name>__sN`` (general, further scope buckets),
+        ``contact_<name>_b<i>`` (ONE sensor per body for ``all``) and
         ``contact_<name>_<j>`` (pairwise entry j).  ``history_length=1``
         matches the manager's v1 history support; ``track_air_time`` stays
         off (we serve forces, not timings).
@@ -177,6 +213,15 @@ class IsaacLabContactBackend:
 
         fields_cfg: dict = {}
         for spec in self.specs:
+            if is_all_bodies(spec.sensor_bodies):
+                bodies = self._all_inventory()
+                self._all_bodies[spec.name] = bodies
+                for i, body in enumerate(bodies):
+                    fields_cfg[f"contact_{spec.name}_b{i}"] = ContactSensorCfg(
+                        prim_path=f"{{ENV_REGEX_NS}}/Robot/{body.path}",
+                        history_length=1,
+                    )
+                continue
             if spec.mode == "general":
                 paths = general_prim_paths(list(spec.sensor_bodies))
                 fields = general_field_names(spec.name, list(spec.sensor_bodies))
@@ -219,6 +264,26 @@ class IsaacLabContactBackend:
             return usd_robot_inventory(env.robot)
 
         for spec in self.specs:
+            if is_all_bodies(spec.sensor_bodies):
+                pieces, perms = [], []
+                for i, body in enumerate(self._all_bodies[spec.name]):
+                    sensor = env.scene[f"contact_{spec.name}_b{i}"]
+                    names = [str(n) for n in sensor.body_names]
+                    expected = str(body.path).rsplit("/", 1)[-1]
+                    if expected in names:
+                        perm = [names.index(expected)]
+                    elif len(names) == 1:
+                        perm = [0]
+                    else:
+                        raise ValueError(
+                            f"contact group {spec.name!r}: all-body sensor "
+                            f"{body.path!r} resolves to bodies {names}"
+                        )
+                    pieces.append(sensor)
+                    perms.append(perm)
+                self._sensors[spec.name] = {"mode": "general", "sensors": pieces}
+                self._perm[spec.name] = perms
+                continue
             if spec.mode == "general":
                 fields = general_field_names(spec.name, list(spec.sensor_bodies))
                 buckets = _general_buckets(list(spec.sensor_bodies))
@@ -294,6 +359,7 @@ class IsaacLabContactBackend:
         """Release the cached sensor handles (ContactBackend lifecycle)."""
         self._sensors.clear()
         self._perm.clear()
+        self._all_bodies.clear()
         self._bound = False
 
 

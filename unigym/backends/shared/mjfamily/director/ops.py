@@ -342,15 +342,19 @@ class MujocoDirectorOps(_OpsBase):
         from unigym.director import _fail
 
         m, d = self.env.mj_model, self.env.mj_data
-        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
-        if bid < 0:
+        bid = int(getattr(self.env, "_base_body_id", -1))
+        if bid <= 0:
+            bodies = [m.body(i).name for i in range(1, m.nbody) if m.body(i).name]
             raise _fail(
-                "no robot base body 'pelvis' in the MJ model", "push needs a free-root robot model"
+                "no robot base body in the MJ model",
+                f"push needs the articulation base_body binding; " f"declared bodies: {bodies}",
             )
         jadr = int(m.body_jntadr[bid])
         if jadr < 0 or int(m.jnt_type[jadr]) != int(mujoco.mjtJoint.mjJNT_FREE):
+            base_name = m.body(bid).name
             raise _fail(
-                "robot base 'pelvis' has no freejoint", "push writes the root freejoint qvel"
+                f"robot base {base_name!r} has no freejoint",
+                "push writes the root freejoint qvel",
             )
         vadr = int(m.jnt_dofadr[jadr])
         if mode == "set":

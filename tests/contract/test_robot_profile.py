@@ -43,6 +43,7 @@ def test_g1_neutral_profile_matches_the_deployment_facts():
     assert profile.joint_sets["body"] == tuple(g1c.G1_JOINT_ORDER_IL)
     assert profile.joint_sets["hand"] == tuple(g1c.G1_HAND_JOINTS)
     assert profile.base_body == g1c.G1_BASE_BODY
+    assert profile.base_height == pytest.approx(0.78)
     assert tuple(profile.foot_bodies) == tuple(g1c.G1_FOOT_BODIES)
     assert {name: tuple(bodies) for name, bodies in profile.body_sets.items()} == {
         name: tuple(bodies) for name, bodies in g1c.G1_BODY_SETS.items()
@@ -98,6 +99,7 @@ def test_gr1_neutral_profile_matches_the_tabletop_facts():
     }
     assert tuple(profile.foot_bodies) == ()
     assert profile.base_body == gr1c.GR1_BASE_BODY
+    assert profile.base_height is None
     assert profile.body_sets == {}
     assert profile.body_bindings["base"].names["mjcf"] == "robot0_whole_body"
     assert profile.full_joint_names == list(gr1c.GR1_JOINT_ORDER_MJ)
