@@ -4,7 +4,8 @@ Public surface:
 
 * :func:`build_camera_manager` — collect.py entry point; builds a
   :class:`CameraManager` from the yaml ``cameras:`` section + the adapter's
-  obs requests (request-driven instantiation + the depth alias sugar shim).
+  obs requests (request-driven instantiation; the depth aliases are served
+  only by an explicitly declared camera named ``depth``).
 * :class:`CameraManager` — key space ``cam/<name>/<rgb|depth>``, interval
   sampling, placeholder fallback frames.
 * :class:`cameras.base.CameraSpec` — yaml-declarable camera rig spec.

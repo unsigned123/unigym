@@ -85,10 +85,14 @@ def build_robot_realization(
 ) -> object:
     """Build the isaaclab realization of one neutral robot profile.
 
+    The realizer is generic: any effective profile with a USD asset and
+    run-level ``actuation`` groups builds through the same path.  There is no
+    ``profile.name`` dispatch.
+
     Args:
         profile: the neutral robot profile.
-        spec: the run-level articulation declaration (the spawn authority and
-            the asset/model source).
+        spec: the run-level articulation declaration (spawn authority,
+            effective asset override and actuation groups).
         params: the realizer-only robot-section params (``prim_path``,
             ``spawn_options``, ``collision_group``, ``debug_vis``,
             ``soft_joint_pos_limit_factor``).
@@ -96,49 +100,50 @@ def build_robot_realization(
             generic builder.
 
     Raises:
-        ValueError: The G1 profile has no run-level ``actuation`` groups.
-        NotImplementedError: The profile names a robot with no isaaclab
-            realization.
+        NotImplementedError: The effective asset (``spec.model`` when set,
+            otherwise ``profile.assets``) carries no USD reference.  A
+            ``spec.model`` without USD never falls back to ``profile.assets``.
+        ValueError: The articulation declares no run-level ``actuation``
+            groups.
     """
-    if profile.name == "g1":
-        from unigym.actuators.ir import resolve_group_joints
+    from unigym.actuators.ir import resolve_group_joints
 
-        from ..actuators.plan import build_actuator_plan
-        from .builder import build_articulation_cfg
+    from ..actuators.plan import build_actuator_plan
+    from .builder import build_articulation_cfg
 
-        if not spec.actuation:
-            raise ValueError(
-                f"articulation {spec.name!r}: profile 'g1' requires explicit "
-                f"run-level `actuation` groups; the G1 IsaacLab actuator source "
-                f"is the run-level ActuationGroup set (no hardcoded table)"
-            )
-        if profile.base_height is None:
-            raise ValueError(
-                f"articulation {spec.name!r}: profile {profile.name!r} declares "
-                f"no base_height; the IsaacLab realizer needs an explicit "
-                f"profile base_height for an absent run-level spawn"
-            )
-        resolved = resolve_group_joints(
-            spec.actuation,
-            articulation=spec.name,
-            joint_sets=profile.joint_sets,
+    assets = spec.model if spec.model is not None else profile.assets
+    if assets is None or not assets.usd:
+        source = "spec.model" if spec.model is not None else "profile.assets"
+        raise NotImplementedError(
+            f"isaaclab2 backend: articulation {spec.name!r} has no effective "
+            f"USD asset ({source} carries no `usd` reference; spec.model does "
+            f"not fall back to profile.assets) | hint: declare a run-level "
+            f"`model: {{usd: <path>}}` or give the neutral profile a USD "
+            f"asset; the isaaclab builder spawns USD only"
         )
-        return build_articulation_cfg(
-            profile,
-            spec=spec,
-            params=params,
-            asset_format="usd",
-            actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved),
-            asset_plan=asset_plan,
-            default_pos=(0.0, 0.0, profile.base_height),
-            spawn_options=_param_mapping(params, "spawn_options"),
-            collision_group=_param_int(params, "collision_group", 0),
-            debug_vis=_param_bool(params, "debug_vis", False),
-            soft_joint_pos_limit_factor=_param_float(params, "soft_joint_pos_limit_factor", 0.9),
+    if not spec.actuation:
+        raise ValueError(
+            f"articulation {spec.name!r}: the IsaacLab realizer requires "
+            f"explicit run-level `actuation` groups; the actuator source is "
+            f"the run-level ActuationGroup set (no hardcoded table)"
         )
-    raise NotImplementedError(
-        f"isaaclab2 backend: no robot realizer for profile {profile.name!r} | "
-        f"hint: run this robot on a backend that consumes the neutral profile "
-        f"(mujoco) or add its isaaclab realizer under "
-        f"unigym/backends/isaaclab2/robots/"
+    resolved = resolve_group_joints(
+        spec.actuation,
+        articulation=spec.name,
+        joint_sets=profile.joint_sets,
+    )
+    base_height = profile.base_height
+    default_pos = (0.0, 0.0, base_height) if base_height is not None else None
+    return build_articulation_cfg(
+        profile,
+        spec=spec,
+        params=params,
+        asset_format="usd",
+        actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved),
+        asset_plan=asset_plan,
+        default_pos=default_pos,
+        spawn_options=_param_mapping(params, "spawn_options"),
+        collision_group=_param_int(params, "collision_group", 0),
+        debug_vis=_param_bool(params, "debug_vis", False),
+        soft_joint_pos_limit_factor=_param_float(params, "soft_joint_pos_limit_factor", 1.0),
     )

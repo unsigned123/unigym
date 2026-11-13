@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -62,11 +63,11 @@ def _spec(g1_usd, *, actuation=None, spawn=None, passive_joints=()):
     return ArticulationSpec(**kwargs)
 
 
-def _realize(spec, *, params=None):
+def _realize(spec, *, params=None, profile=None):
     from unigym.backends.isaaclab2.robots import build_robot_realization
 
     return build_robot_realization(
-        _profile(),
+        _profile() if profile is None else profile,
         spec=spec,
         params={} if params is None else params,
         asset_plan=None,
@@ -97,6 +98,7 @@ def test_g1_realization_builds_the_generic_articulation_cfg(g1_usd):
         params={
             "prim_path": "/World/envs/env_0/G1",
             "spawn_options": spawn_options,
+            "soft_joint_pos_limit_factor": 0.9,
         },
     )
 
@@ -140,7 +142,7 @@ def test_g1_realization_converts_nested_spawn_props_to_schema_cfgs(g1_usd):
 
 
 def test_g1_realization_reads_the_explicit_soft_factor_and_collision_group(g1_usd):
-    """Realizer-only params override the G1 defaults."""
+    """Realizer-only params override the generic defaults."""
     cfg = _realize(
         _spec(g1_usd),
         params={"collision_group": 3, "soft_joint_pos_limit_factor": 0.8, "debug_vis": True},
@@ -159,6 +161,45 @@ def test_g1_realization_absent_spawn_uses_the_profile_base_height(g1_usd):
     assert cfg.init_state.pos[1] == 0.0
     assert cfg.init_state.pos[2] == pytest.approx(0.78)
     assert cfg.init_state.rot == pytest.approx((1.0, 0.0, 0.0, 0.0))
+
+
+def test_generic_realizer_defaults_the_soft_limit_factor_to_one(g1_usd):
+    """Without an explicit param the generic realizer uses the 1.0 default."""
+    cfg = _realize(_spec(g1_usd))
+
+    assert cfg.soft_joint_pos_limit_factor == 1.0
+
+
+def test_realizer_builds_a_renamed_profile_through_the_generic_path(g1_usd):
+    """A profile whose name is not 'g1' builds the same generic cfg."""
+    from unigym.env.naming import ENV_REGEX_NS
+
+    profile = replace(_profile(), name="custom_humanoid")
+    cfg = _realize(_spec(g1_usd), profile=profile)
+
+    assert cfg.prim_path == f"{ENV_REGEX_NS}/Robot"
+    assert cfg.spawn.usd_path == str(g1_usd)
+    assert cfg.init_state.joint_pos == dict(profile.default_joint_pos)
+    assert set(cfg.actuators) == {"legs", "feet", "waist", "arms"}
+
+
+def test_realizer_absent_spawn_without_base_height_requires_an_explicit_spawn(g1_usd):
+    """base_height=None with no spawn fails in the builder, not the realizer."""
+    profile = replace(_profile(), base_height=None)
+
+    with pytest.raises(ValueError, match="no spawn and the builder received no default_pos"):
+        _realize(_spec(g1_usd), profile=profile)
+
+
+def test_realizer_absent_base_height_with_an_explicit_spawn_builds(g1_usd):
+    """base_height=None is legal when the run-level spawn supplies the pose."""
+    profile = replace(_profile(), base_height=None)
+    cfg = _realize(
+        _spec(g1_usd, spawn={"pos": [0.5, -0.25, 0.4]}),
+        profile=profile,
+    )
+
+    assert cfg.init_state.pos == (0.5, -0.25, 0.4)
 
 
 def test_g1_realization_rejects_a_non_standard_law(g1_usd):

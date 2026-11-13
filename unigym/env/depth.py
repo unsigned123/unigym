@@ -2,9 +2,10 @@
 
 Standalone module so IsaaclabEnv keeps a
 self-contained, adapter-independent depth pipeline (crop -> clip -> normalize
-to [-0.5, 0.5]).  A future robot profile with a trained depth encoder only
-needs to request the ``depth_image`` obs key; the numeric conventions below
-are the deployment provenance (factual history, kept as-is).
+to [-0.5, 0.5]).  A robot profile with a trained depth encoder requests the
+``depth_image`` obs key AND the run declares an explicit ``depth`` camera
+(there is no implicit shim camera); the numeric conventions below are the
+deployment provenance (factual history, kept as-is).
 """
 
 from __future__ import annotations

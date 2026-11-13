@@ -105,7 +105,6 @@ class RunSpec:
     scene: dict[str, JsonValue] | None
     props: JsonValue
     cameras: JsonValue
-    camera_depth: JsonValue
     contacts: JsonValue
     director: dict[str, JsonValue] | None
     recorder: dict[str, JsonValue]
@@ -541,6 +540,13 @@ def build_spec(
     from unigym.errors import ConfigError
 
     benchmark_cfg = _require_config(cfg.get("benchmark") or {}, "benchmark")
+    if "camera_depth" in cfg:
+        raise ConfigError(
+            f"{args.config}: top-level `camera_depth:` was removed; depth is "
+            "served only by an explicitly declared `cameras:` entry named "
+            "'depth' (declare the camera geometry explicitly -- the classic "
+            "depth-encoder recipe lives in docs/pack_api.md)"
+        )
     if "packs" in benchmark_cfg:
         raise ConfigError(
             f"{args.config}: benchmark.packs is removed; benchmark packs are "
@@ -624,7 +630,6 @@ def build_spec(
         scene=scene,
         props=cfg.get("props"),
         cameras=cfg.get("cameras"),
-        camera_depth=cfg.get("camera_depth"),
         contacts=cfg.get("contacts"),
         director=director,
         recorder=_require_config(cfg.get("recorder") or {}, "recorder"),

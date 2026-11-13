@@ -181,7 +181,7 @@ class BackendCapabilities:
     events: bool = False  # yaml randomization.events (per-step/reset DR)
     props: bool = False  # yaml props (interactive door/ball/generic)
     recorder: bool = False  # yaml recorder.enabled RGB recording
-    depth_camera: bool = False  # yaml camera_depth (depth-encoder policy input)
+    depth_camera: bool = False  # adapter depth-alias obs requests (explicit `depth` camera)
     init_pose: bool = False  # yaml init_pose (randomized fallen spawn)
     cameras: bool = False  # camera obs (yaml cameras / adapter image obs;
     # docs/contracts/camera_contract.md)

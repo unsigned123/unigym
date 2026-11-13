@@ -23,12 +23,12 @@ def test_builder_import_does_not_load_isaaclab():
 
 
 def test_build_robot_realization_still_rejects_gr1():
-    """The package keeps the non-G1 teaching error in the base environment."""
+    """GR1 is rejected by its missing effective USD asset, not by name."""
     from unigym.backends.isaaclab2.robots import build_robot_realization
     from unigym.robots import build_robot_profile
     from unigym.scenes.articulation import ArticulationSpec
 
     profile = build_robot_profile({"name": "gr1"})
 
-    with pytest.raises(NotImplementedError, match="no robot realizer.*gr1"):
+    with pytest.raises(NotImplementedError, match="no effective USD"):
         build_robot_realization(profile, spec=ArticulationSpec(name="gr1"), params={})

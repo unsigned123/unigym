@@ -430,6 +430,48 @@ Rules:
   `platform.asset_face`; it still sources the dependency root through
   `unigym.core.paths.deps_root` for executor discovery.
 
+### Cameras and depth
+
+Cameras are declared explicitly under the run's `cameras:` list. The manager
+serves `cam/<name>/rgb` and `cam/<name>/depth`; a camera only renders the
+streams named in its `types` (default `["rgb", "depth"]`).
+
+Depth is served only by an explicitly declared camera. The adapter-facing
+`depth_image` / `depth_image_raw` obs aliases map to a declared camera named
+`depth`; if an adapter requests either alias and the run declares no `depth`
+camera, the run fails with a teaching error. There is no implicit depth shim
+camera.
+
+Migration from the removed top-level `camera_depth:` key: declare the camera
+under `cameras:` and reproduce the classic depth-encoder geometry explicitly:
+
+```yaml
+cameras:
+  - name: depth
+    rig:
+      type: body
+      attach: pelvis
+      pos: [0.33, 0.0, 0.043]
+      pitch_down_deg: 5.0
+      prim_path: "{ENV_REGEX_NS}/depth_camera"
+    types: [depth]
+    width: 106
+    height: 60
+    hfov_deg: 87.0
+    far_clip: 20.0
+    depth_type: distance_to_camera
+    interval: 1
+```
+
+`prim_path` and `attach` are optional: a body rig without `attach` uses the
+effective profile's `base_body`. The removed `CameraSpec.depth_body_default`
+factory has no replacement; code that constructed it must declare the same
+`CameraSpec` explicitly under `cameras:`.
+
+The `depth_image` alias applies
+`preprocess_depth` and therefore requires the classic `106x60` render; use
+`depth_image_raw` plus adapter-side preprocessing for any other geometry.
+
 ### Robot profiles and backend realization
 
 Robot definitions are backend-neutral authoring data. A profile factory returns
@@ -499,21 +541,27 @@ robot-root spawn authority.
   profile/params/asset plan; no engine import happens in `unigym.robots`.
 
 G1's isaaclab realization is built through the generic builder: the neutral
-profile supplies q0/body facts, the run-level `spec.model` USD `AssetRef` is
-the spawn asset (the 43-DoF with-hand `g1.usd` provisioned outside the
-repository), and the run-level `ArticulationSpec.actuation` groups are the
-only actuator source.  There is no `G1_29DOF_CFG` template and no hardcoded
-G1 actuator table.  The realizer resolves each group's `joint_set` through the
-profile vocabulary (`resolve_group_joints`) without a coverage check; the run
-layer owns driven-joint coverage.  Realizer-only robot-section params
-(`prim_path`, `spawn_options`, `collision_group`, `debug_vis`,
-`soft_joint_pos_limit_factor`) are split off before the neutral profile
-factory.  Neutral actuation is declared on the articulation
-(`ArticulationSpec.actuation`) and translated by the backend;
-`env.params.actuators`, `controls[].gains` and the top-level `actuator:`
-override are removed.  GR1 is neutral-only and has no isaaclab realization;
-the backend realizer rejects it. Its MJCF remains a scene resource, not a
-neutral robot asset.
+profile supplies q0/body facts, the effective USD `AssetRef` (`spec.model` when
+set, otherwise the profile's `assets`) is the spawn asset (the 43-DoF
+with-hand `g1.usd` provisioned outside the repository), and the run-level
+`ArticulationSpec.actuation` groups are the only actuator source.  There is no
+`G1_29DOF_CFG` template and no hardcoded G1 actuator table and no
+`profile.name` dispatch: any effective profile with a USD asset and run-level
+actuation builds through the same generic path.  The realizer resolves each
+group's `joint_set` through the profile vocabulary (`resolve_group_joints`)
+without a coverage check; the run layer owns driven-joint coverage.
+Realizer-only robot-section params (`prim_path`, `spawn_options`,
+`collision_group`, `debug_vis`, `soft_joint_pos_limit_factor`) are split off
+before the neutral profile factory.  `soft_joint_pos_limit_factor` defaults to
+the generic `1.0`; a profile that wants the old G1 parity declares `0.9`
+explicitly.  When `spec.spawn` is absent, `default_pos` is
+`(0, 0, profile.base_height)` only when `base_height` is not `None`; otherwise
+the builder fails because there is no spawn default.  Neutral actuation is
+declared on the articulation (`ArticulationSpec.actuation`) and translated by
+the backend; `env.params.actuators`, `controls[].gains` and the top-level
+`actuator:` override are removed.  GR1 declares no neutral USD asset, so the
+backend realizer rejects it because its effective asset has no USD, not because
+of its name.  Its MJCF remains a scene resource, not a neutral robot asset.
 
 Dynamic `register_robot` / manifest `kind: robot` registration is a later
 phase and is not implemented yet.

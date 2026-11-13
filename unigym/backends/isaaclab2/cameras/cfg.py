@@ -5,10 +5,11 @@ import-safe without the kit (unit tests only touch the pure helpers).
 This sensor module and the sibling ``rigs`` module are the only camera
 modules that import isaaclab, and both do so inside function bodies.
 
-Sensor construction reproduces the classic depth-camera math verbatim
-(``isaaclab2/env.py._build_depth_camera_cfg``): pinhole focal solved from the
-horizontal FOV (``focal = aperture / (2 tan(hfov/2))``), ``convention=
-"world"`` offsets, ray-distance depth annotator by default.
+Sensor construction reproduces the classic depth-camera sensor math
+(``isaaclab2/env.py._build_depth_camera_cfg``) for an explicitly declared
+depth camera: pinhole focal solved from the horizontal FOV
+(``focal = aperture / (2 tan(hfov/2))``), ``convention="world"`` offsets,
+ray-distance depth annotator by default.
 
 Frame reading normalizes annotator layouts to the manager contract:
 

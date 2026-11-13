@@ -127,8 +127,8 @@ class ImageObsRequest(NamedTuple):
     batch axis excluded).  Image keys are served by the
     ``unigym.cameras`` CameraManager (built from the yaml ``cameras:``
     section); keys follow the ``cam/<name>/<rgb|depth>`` key space, plus the
-    ``depth_image`` / ``depth_image_raw`` aliases provisioned by the
-    sugar shim (docs/contracts/camera_contract.md).
+    ``depth_image`` / ``depth_image_raw`` aliases served by an explicitly
+    declared camera named ``depth`` (there is no implicit shim camera).
 
     Attributes:
         key: cache key, e.g. "cam/ego/rgb" or "cam/ego/depth".

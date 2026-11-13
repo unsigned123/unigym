@@ -906,8 +906,8 @@ def _build_sensing(
     # feat/camera-obs: request-driven camera manager, built BEFORE the env
     # (sensors must join the scene cfg prior to cloning; also feeds the
     # backend capability gate).  Requires --enable_cameras (kit camera
-    # pipeline); depth alias obs keys get the implicit sugar-shim camera
-    # (yaml ``camera_depth`` = verbatim override params for that camera).
+    # pipeline); depth alias obs keys are served only by an explicitly
+    # declared ``depth`` camera.
     # An enabled recorder's camera_ref is passed as a ref so a video-only
     # rig (not consumed by the adapter) is instantiated too.
     from unigym.cameras import build_camera_manager
@@ -921,7 +921,6 @@ def _build_sensing(
         adapter.get_obs_requests(),
         enable_cameras=spec.enable_cameras,
         refs=[rec_ref] if rec_ref else None,
-        depth_overrides=_config_dict(cfg.get("camera_depth")),
         backend=backend_label,
         policy_hz=_policy_hz_of(adapter),
         num_envs=num_envs,

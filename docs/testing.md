@@ -548,6 +548,8 @@ The G1 contact-all test is part of this lane: it uses the pre-clone USD
 inventory (`unigym/backends/isaaclab2/usd.py`), materializes one sensor per
 rigid body, excludes fixed-joint merged palms, and resets/reads the per-body
 rows. A missing cache or G1 asset fails the strict lane rather than skipping.
+The G1 builder tests exercise the generic realizer (any effective profile with
+a USD asset plus run-level actuation), not a `profile.name` branch.
 
 ### 7.4 Target commands
 

@@ -2,9 +2,9 @@
 
 Responsibilities (design doc §1.1):
 
-* **Key space** — ``cam/<name>/<rgb|depth>`` obs keys plus the optional depth
-  aliases (``depth_image`` / ``depth_image_raw`` sugar shim, docs/
-  camera_contract.md §depth migration).
+* **Key space** — ``cam/<name>/<rgb|depth>`` obs keys plus the depth
+  aliases (``depth_image`` / ``depth_image_raw``) served only by an
+  explicitly declared camera named ``depth`` (no implicit shim camera).
 * **Request-driven instantiation** — of the yaml-declared cameras, those
   actually consumed (adapter image requests or recorder ``camera_ref``)
   are instantiated; unknown requested keys fail with the list of
@@ -73,7 +73,7 @@ the publish/WYSIWYG paths never re-render through the capture face for
 it."""
 
 # the ``depth_image`` alias reproduces the TSC 106x60 -> 58x87 crop
-# geometry; any other shim resolution would silently mis-crop.
+# geometry; a declared camera of any other resolution would silently mis-crop.
 _PREPROCESS_SIZE = (60, 106)
 
 POSE_INLINE_RIG_TYPES = ("world",)
@@ -740,7 +740,6 @@ def build_camera_manager(
     obs_requests,
     enable_cameras: bool = False,
     refs=None,
-    depth_overrides: dict | None = None,
     backend: str = "isaaclab",
     render_groups=None,
     policy_hz: float | None = None,
@@ -759,9 +758,6 @@ def build_camera_manager(
         refs: recorder ``camera_ref`` names — cameras referenced only for
             video are instantiated too (zero extra sensors: the same
             rig serves obs and video).
-        depth_overrides: yaml ``camera_depth`` dict — the classic-parameter
-            overrides applied to the IMPLICIT shim camera only (verbatim
-            semantics; a user-declared ``depth`` camera wins instead).
         backend: ``"isaaclab"`` (default; kit sensors), ``"mujoco"``
             (MjSpec-injected cameras + in-process renderers) or
             ``"mjwarp"`` (C3; N=1 mirror renderer, N>1 native warp batch).
@@ -776,7 +772,8 @@ def build_camera_manager(
 
     Returns ``None`` when nothing is requested (no-camera runs are
     untouched); raises ``ValueError`` on unknown keys, duplicate names,
-    a non-``--enable_cameras`` isaaclab request, or a shim/alias geometry
+    a non-``--enable_cameras`` isaaclab request, a depth alias request
+    without an explicit ``depth`` camera, or a depth-camera geometry
     mismatch.
     """
     try:
@@ -790,28 +787,26 @@ def build_camera_manager(
     if dup:
         raise ValueError(f"duplicate camera names in yaml cameras: {dup}")
 
+    alias_keys = [k for k in DEPTH_ALIAS_KEYS if k in req_keys]
     available = {k for s in declared for k in s.keys()}
     cam_req = {k for k in req_keys if k.startswith("cam/")}
     image_req = {r.key for r in reqs if isinstance(r, ImageObsRequest)}
-    unknown = (cam_req | image_req) - available
+    unknown = ((cam_req | image_req) - available) - set(DEPTH_ALIAS_KEYS)
     if unknown:
         raise ValueError(
             f"adapter requests unknown camera obs keys {sorted(unknown)}; "
             f"declared cameras serve: {sorted(available)}"
         )
-
-    alias_keys = [k for k in DEPTH_ALIAS_KEYS if k in req_keys]
-    shim = False
     if alias_keys and not any(s.name == "depth" for s in declared):
-        shim_spec = CameraSpec.depth_body_default(depth_overrides)
-        if policy_hz and shim_spec.target_fps is None:
-            # shim obs-rate parity pin (camera_contract §16.2): the
-            # implicit depth shim historically read every policy tick
-            # (interval=1); pin it to the policy rate so the tier
-            # defaults never silently change a consumer's obs rate.
-            shim_spec.target_fps = float(policy_hz)
-        declared.append(shim_spec)
-        shim = True
+        raise ValueError(
+            f"adapter requests depth obs alias keys {sorted(alias_keys)} but "
+            f"the run declares no 'depth' camera; depth is served only by an "
+            f"explicitly declared camera named 'depth' (there is no implicit "
+            f"shim) | hint: declare the camera under `cameras:` with "
+            f"rig.type=body, width=106, height=60, hfov_deg=87, far_clip=20 "
+            f"for the classic depth-encoder geometry, or stop requesting the "
+            f"alias"
+        )
 
     refs = set(refs or [])
     # obs-served key set: the rigs whose keys were actually requested
@@ -841,9 +836,8 @@ def build_camera_manager(
                 bool(set(spec.keys()) & cam_req)
                 or spec.name in refs
                 or spec.name == "free"  # debug-console fly
-                or (shim and spec.name == "depth")  # camera (contract:
-                or (alias_keys and spec.name == "depth")
-            )  # console §free)
+                or (alias_keys and spec.name == "depth")  # camera contract:
+            )  # console §free; depth aliases need the declared depth camera
             if wanted:
                 included.append(spec)
             else:
@@ -852,19 +846,13 @@ def build_camera_manager(
                     f"requested by adapter/recorder -> not instantiated",
                     flush=True,
                 )
-    if alias_keys and not shim and depth_overrides:
-        print(
-            "[cameras] note: yaml 'camera_depth' overrides ignored — a "
-            "user-declared 'depth' camera wins over the implicit shim",
-            flush=True,
-        )
 
     aliases: dict[str, tuple[str, bool]] = {}
     if alias_keys:
         depth_spec = next((s for s in included if s.name == "depth"), None)
         if depth_spec is None:
             raise ValueError(
-                "adapter requests depth alias obs but no 'depth' camera is " "instantiated"
+                "adapter requests depth alias obs but no declared 'depth' " "camera is instantiated"
             )
         if depth_key("depth") not in depth_spec.keys():
             raise ValueError(

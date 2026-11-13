@@ -13,9 +13,11 @@ Every camera *rig* named ``<name>`` serves up to two obs keys::
     cam/<name>/depth  ->  (N, 1, H, W) float32 metric depth (meters; inf beyond
                           the far clip = "nothing observed")
 
-The manager additionally maps the ``depth_image`` /
-``depth_image_raw`` keys onto an implicitly provisioned ``depth`` body rig
-(sugar shim, docs/contracts/camera_contract.md §depth migration).
+Depth is served only by an explicitly declared camera.  When the run's
+``cameras:`` list contains a camera named ``depth``, the manager also maps the
+adapter-facing ``depth_image`` / ``depth_image_raw`` aliases onto that camera's
+``cam/depth/depth`` stream; without a declared ``depth`` camera the alias
+request fails with a teaching error (there is no implicit shim camera).
 
 Caching stores RAW values: uint8 RGB / metric depth; any
 normalization (crop/clip/normalize) belongs to the adapter — the only
@@ -48,7 +50,7 @@ def depth_key(name: str) -> str:
 
 
 DEPTH_ALIAS_KEYS = ("depth_image", "depth_image_raw")
-"""Adapter-facing depth obs aliases served by the sugar shim."""
+"""Adapter-facing depth obs aliases served by an explicitly declared ``depth`` camera."""
 
 
 # --------------------------------------------------------------------------- #
@@ -550,72 +552,6 @@ class CameraSpec:
     def sensor_key(self) -> str:
         """Scene key of the cloned sensor prim (last prim path component)."""
         return f"{self.name}_camera"
-
-    @classmethod
-    def depth_body_default(cls, overrides: dict | None = None) -> CameraSpec:
-        """The implicit sugar-shim camera: a verbatim port of the classic
-        ``isaaclab2/env.py``'s ``_DEPTH_CAM_DEFAULTS`` + ``_build_depth_camera_cfg``,
-        so the depth migration keeps the trained/deployed per-pixel
-        ray geometry exactly (106x60 @ 87 deg H-FOV, front-of-base mount
-        pitched 5 deg down, 20 m far clip, ray-distance depth).
-
-        ``overrides`` accepts the classic ``camera_depth`` yaml keys verbatim
-        (``pos`` / ``pitch_down_deg`` / ``width`` / ``height`` /
-        ``horizontal_fov_deg`` / ``horizontal_aperture`` / ``far_clip`` /
-        ``data_type`` / ``update_latest_camera_pose``) plus the native
-        CameraSpec field names.  Note the classic ``data_type`` maps to
-        ``depth_type``.
-        """
-        spec = cls(
-            name="depth",
-            rig={
-                "type": "body",
-                # explicit base mount: the classic shim assumed a "base" link
-                # prim the G1 USD does not have (root body = pelvis); the
-                # mount is explicit, never an implicit shared default.
-                "attach": "pelvis",
-                "pos": [0.33, 0.0, 0.043],
-                "pitch_down_deg": 5.0,
-                # env-root prim placement; the classic default
-                # "{ENV_REGEX_NS}/Robot/base/depth_camera" assumed a "base"
-                # link prim which the G1 USD does not have (root body =
-                # pelvis) and crashed scene cloning; the rig poses the
-                # render camera explicitly every step anyway, so the prim
-                # placement carries no frame semantics.
-                "prim_path": "{ENV_REGEX_NS}/depth_camera",
-            },
-            kind="standard",
-            types=("depth",),
-            width=106,
-            height=60,
-            hfov_deg=87.0,
-            horizontal_aperture=20.955,
-            depth_type="distance_to_camera",
-            interval=1,
-            near_clip=0.1,
-            far_clip=20.0,
-            focus_distance=400.0,
-            update_latest_camera_pose=True,
-        )
-        if overrides:
-            classic_map = {"horizontal_fov_deg": "hfov_deg", "data_type": "depth_type"}
-            spec_fields = {f.name for f in fields(cls)}
-            rig_fields = {"pos", "pitch_down_deg", "rot", "prim_path", "update_latest_camera_pose"}
-            for k, v in overrides.items():
-                k2 = classic_map.get(k, k)
-                if k2 in rig_fields:
-                    spec.rig[k2] = v
-                elif k2 in spec_fields:
-                    setattr(spec, k2, v)
-                else:
-                    raise ValueError(
-                        f"camera_depth override {k!r} is not a known camera "
-                        f"parameter (classic keys: pos/pitch_down_deg/width/"
-                        f"height/horizontal_fov_deg/horizontal_aperture/"
-                        f"far_clip/data_type)"
-                    )
-            spec.__post_init__()
-        return spec
 
 
 # --------------------------------------------------------------------------- #

@@ -113,3 +113,25 @@ def test_live_build_rejects_removed_gain_env_params(key):
     """The removed env actuator/gain channels fail before construction."""
     with pytest.raises(ValueError, match="removed actuator/gain keys"):
         Run(_live_cfg(**{key: {}})).build()
+
+
+def test_spec_rejects_the_removed_camera_depth_key():
+    """The retired top-level `camera_depth:` key fails at spec construction."""
+    cfg = _live_cfg()
+    cfg["camera_depth"] = {"width": 106, "height": 60}
+
+    with pytest.raises(ConfigError, match="camera_depth"):
+        Run(cfg).spec
+
+
+def test_spec_keeps_a_renamed_profile_backed_articulation():
+    """A renamed articulation selecting a profile is valid run construction."""
+    cfg = _live_cfg()
+    cfg["articulations"][0]["name"] = "humanoid"
+    cfg["articulations"][0]["params"] = {"profile": "g1"}
+    cfg["controls"][0]["articulation"] = "humanoid"
+
+    spec = Run(cfg).spec
+
+    assert spec.articulations[0].name == "humanoid"
+    assert spec.articulations[0].params == {"profile": "g1"}

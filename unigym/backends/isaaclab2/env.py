@@ -498,10 +498,9 @@ class IsaaclabEnv(ManagerBasedEnv):
         if lighting is not None:  # Task 1: brighter scene for video capture
             self._apply_lighting(cfg.scene, lighting)
         # feat/camera-obs: camera-manager sensors join the scene before
-        # cloning (same pattern as props above).  This
-        # INCLUDES the implicit depth sugar-shim camera when the adapter
-        # requests the depth alias obs keys (yaml ``camera_depth`` params
-        # were folded into the manager spec by collect.py).
+        # cloning (same pattern as props above).  Depth is served only by
+        # an explicitly declared ``depth`` camera; there is no implicit
+        # shim camera.
         self.camera_manager = camera_manager
         # r4 ha_open_door: opt-in reset-time render (adapter-declared t0
         # frame contract -- upstream provider fills the frame BEFORE the
