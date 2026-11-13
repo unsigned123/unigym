@@ -426,6 +426,7 @@ def test_public_pack_api_exports() -> None:
         "register_adapter",
         "register_content_provider",
         "register_prop_template",
+        "register_robot",
         "register_scene",
         "register_termination",
     }

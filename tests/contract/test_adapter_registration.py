@@ -18,17 +18,20 @@ import yaml
 from unigym.adapters import ADAPTER_REGISTRY, Adapter, build_adapter
 from unigym.pack_api import discover
 from unigym.packs import PackError
+from unigym.robots import ROBOT_REGISTRY, restore_robots, snapshot_robots
 
 
 @pytest.fixture(autouse=True)
 def _isolate_adapter_registration():
-    """Restore the adapter registry, ``sys.path`` and imported pack modules."""
+    """Restore the adapter and robot registries, ``sys.path`` and pack modules."""
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
     registry_snapshot = set(ADAPTER_REGISTRY)
+    robots_snapshot = snapshot_robots()
     yield
     for name in set(ADAPTER_REGISTRY) - registry_snapshot:
         del ADAPTER_REGISTRY[name]
+    restore_robots(robots_snapshot)
     sys.path[:] = path_snapshot
     for name in set(sys.modules) - modules_snapshot:
         del sys.modules[name]
@@ -345,3 +348,96 @@ def test_mixed_entrypoint_and_provider_failure_rolls_back_adapters(tmp_path: Pat
     assert "acme.bad" in str(second.value)
     assert "already registered" not in str(second.value)
     assert "acme.dynamic" not in ADAPTER_REGISTRY
+
+
+_ROBOT_BODY = (
+    "from unigym.robots.base import RobotProfile\n\n\n"
+    "def make_arm():\n"
+    "    return RobotProfile(\n"
+    "        name='acme.robot',\n"
+    "        joint_sets={'body': ('shoulder',)},\n"
+    "        default_joint_pos={'shoulder': 0.0},\n"
+    "        assets=None,\n"
+    "        action_faces={},\n"
+    "        base_body=None,\n"
+    "        foot_bodies=(),\n"
+    "        body_sets={},\n"
+    "        body_bindings={},\n"
+    "    )\n"
+)
+
+_ROBOT_SOURCE = (
+    '"""Robot provider fixture."""\n\n' "from __future__ import annotations\n\n" + _ROBOT_BODY
+)
+
+
+def test_entrypoint_robot_rolls_back_when_adapter_provider_fails(tmp_path: Path) -> None:
+    """A cross-kind failure removes robots registered by the pack entrypoint."""
+    source = _ROBOT_SOURCE + (
+        "\n\nfrom unigym.pack_api import register_robot\n\n\n"
+        "def register(context):\n"
+        "    register_robot('acme.robot', make_arm)\n\n\n"
+        "def not_an_adapter():\n"
+        "    return None\n"
+    )
+    root = tmp_path / "adapter_cross_robot"
+    _write_pack(
+        root,
+        _manifest(
+            "adapter_cross_robot",
+            entrypoint="adapter_cross_robot_pack:register",
+            providers=[
+                {
+                    "id": "acme.bad",
+                    "kind": "adapter",
+                    "entrypoint": "adapter_cross_robot_pack:not_an_adapter",
+                }
+            ],
+        ),
+        {"adapter_cross_robot_pack": source},
+    )
+
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate_all()
+
+    assert "acme.bad" in str(info.value)
+    assert "acme.robot" not in ROBOT_REGISTRY
+    assert "acme.bad" not in ADAPTER_REGISTRY
+
+
+def test_adapter_provider_rolls_back_when_robot_provider_fails(tmp_path: Path) -> None:
+    """A later robot provider failure removes an earlier adapter registration."""
+    source = (
+        _adapter_source("GoodAdapter") + "\n\n" + _ROBOT_BODY + ("\nnot_a_factory = object()\n")
+    )
+    root = tmp_path / "adapter_cross_kind"
+    _write_pack(
+        root,
+        _manifest(
+            "adapter_cross_kind",
+            providers=[
+                {
+                    "id": "acme.good",
+                    "kind": "adapter",
+                    "entrypoint": "adapter_cross_kind_pack:GoodAdapter",
+                },
+                {
+                    "id": "acme.robot",
+                    "kind": "robot",
+                    "entrypoint": "adapter_cross_kind_pack:not_a_factory",
+                },
+            ],
+        ),
+        {"adapter_cross_kind_pack": source},
+    )
+
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate_all()
+
+    assert "acme.robot" in str(info.value)
+    assert "acme.good" not in ADAPTER_REGISTRY
+    assert "acme.robot" not in ROBOT_REGISTRY

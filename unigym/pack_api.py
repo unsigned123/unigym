@@ -13,6 +13,7 @@ activation stay lazy: importing this module never imports pack Python.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
+    from unigym.robots import RobotProfile
 
 
 def load_asset_manifest(path: str | Path) -> dict:
@@ -74,6 +76,13 @@ def register_adapter(name: str, cls: type[Adapter]) -> type[Adapter]:
     return register(name, cls)
 
 
+def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[..., RobotProfile]:
+    """Register one external robot profile factory in the core registry."""
+    from unigym.robots import register_robot as register
+
+    return register(name, factory)
+
+
 def register_termination(name: str, cls):
     """Register a termination class in the core termination registry."""
     from unigym.terminations import TERMINATION_REGISTRY
@@ -107,6 +116,7 @@ __all__ = [
     "register_adapter",
     "register_content_provider",
     "register_prop_template",
+    "register_robot",
     "register_scene",
     "register_termination",
 ]

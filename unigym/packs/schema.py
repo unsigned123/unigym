@@ -69,7 +69,8 @@ class ProvidedItem:
     """One item a pack provides under a declared face.
 
     Exactly one of ``resource`` and ``entrypoint`` is set; ``kind`` optionally
-    names a provider kind (for example ``asset_generator``).
+    names a provider kind (for example ``asset_generator``, ``adapter`` or
+    ``robot``).
     """
 
     id: str

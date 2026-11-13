@@ -18,11 +18,11 @@ import importlib
 import importlib.metadata
 import os
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -35,6 +35,7 @@ from .schema import PackManifestV1, ProvidedItem, load_manifest_v1
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
+    from unigym.robots import RobotProfile
 
 _ASSET_PACK_PREFIX = "pack:"
 
@@ -72,14 +73,17 @@ class ActivationHandle:
     ``entrypoint`` is the manifest-level entrypoint (``None`` for a content
     pack or a code pack that declares none).  ``adapters`` names the manifest
     ``kind: adapter`` items this activation registered, in declaration order.
-    Manifest adapter providers are still activated when the manifest-level
-    entrypoint is absent; this handle caches the whole activation, not one
-    entrypoint.
+    ``robots`` names the manifest ``kind: robot`` items this activation
+    registered, in declaration order; robots registered by the manifest-level
+    entrypoint itself are not recorded here.  Manifest providers are still
+    activated when the manifest-level entrypoint is absent; this handle caches
+    the whole activation, not one entrypoint.
     """
 
     pack: str
     entrypoint: str | None
     adapters: tuple[str, ...] = ()
+    robots: tuple[str, ...] = ()
 
 
 def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) -> Path:
@@ -114,7 +118,7 @@ def _add_to_sys_path(python_dir: Path) -> None:
     sys.path.insert(0, str(python_dir))
 
 
-def _resolve_entrypoint(entrypoint: str):
+def _resolve_entrypoint(entrypoint: str) -> Callable[..., Any]:
     """Import ``module:attribute`` and return the callable target."""
     module_name, separator, attribute = entrypoint.partition(":")
     if not separator or not module_name or not attribute:
@@ -200,6 +204,71 @@ def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
             f"pack {manifest.name!r} provider id {item.id!r} entrypoint "
             f"{item.entrypoint!r} failed to register: {err}"
         ) from err
+    return tuple(item.id for item in items)
+
+
+def _activate_robot_providers(manifest: PackManifestV1) -> tuple[str, ...]:
+    """Import and register manifest-declared ``kind: robot`` providers.
+
+    The item id becomes the robot name a run config selects.  Validation is
+    complete before any registration: every item must carry an entrypoint,
+    resolve to a callable factory and name a free registry slot (the policy
+    owner is :mod:`unigym.robots`).  A later invalid item therefore leaves no
+    earlier registration behind, and retrying the same pack fails on the
+    original defect rather than on a leaked duplicate.  Return-type and
+    profile-name legality stay in :func:`unigym.robots.build_robot_profile`.
+    Other registration helpers are imported lazily here.
+    """
+    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "robot")
+    if not items:
+        return ()
+
+    from unigym.robots import register_robot, validate_robot_registration
+
+    declared: list[tuple[ProvidedItem, str]] = []
+    for item in items:
+        if item.entrypoint is None:
+            raise PackError(
+                f"pack {manifest.name!r} provider id {item.id!r} declares "
+                f"kind 'robot' but no entrypoint; declare "
+                f"'entrypoint: module:make_profile'"
+            )
+        declared.append((item, item.entrypoint))
+
+    python_dir = _import_boundary(manifest, declared[0][1])
+    _add_to_sys_path(python_dir)
+
+    validated: list[tuple[ProvidedItem, Callable[..., RobotProfile]]] = []
+    for item, entrypoint in declared:
+        where = f"pack {manifest.name!r} provider id {item.id!r}"
+        try:
+            target = _resolve_entrypoint(entrypoint)
+        except Exception as err:
+            raise PackError(f"{where} entrypoint {entrypoint!r} failed to import: {err}") from err
+        try:
+            validate_robot_registration(item.id, target)
+        except ValueError as err:
+            raise PackError(
+                f"{where} entrypoint {entrypoint!r} cannot register robot "
+                f"name {item.id!r}: {err}"
+            ) from err
+        alias = next((earlier.id for earlier, factory in validated if factory is target), None)
+        if alias is not None:
+            raise PackError(
+                f"{where} entrypoint {entrypoint!r} registers the same robot "
+                f"factory as provider id {alias!r} under a second name {item.id!r}; "
+                f"one factory owns exactly one name"
+            )
+        validated.append((item, target))
+
+    for item, target in validated:
+        try:
+            register_robot(item.id, target)
+        except Exception as err:
+            raise PackError(
+                f"pack {manifest.name!r} provider id {item.id!r} entrypoint "
+                f"{item.entrypoint!r} failed to register: {err}"
+            ) from err
     return tuple(item.id for item in items)
 
 
@@ -335,9 +404,12 @@ class PackRuntime:
         A manifest-level entrypoint is imported normally and called with
         exactly one :class:`PackContext` argument; there is no zero-argument
         fallback.  After it (or without it), ``providers`` items with
-        ``kind: adapter`` are imported and registered under their item id.
+        ``kind: adapter`` are imported and registered under their item id,
+        then ``kind: robot`` items are registered through the robot registry.
         Other provider kinds stay inert.  Failures are wrapped with the pack,
-        item id and entrypoint named.
+        item id and entrypoint named; a failed activation restores both the
+        adapter and robot registries to their prior contents, including names
+        a manifest-level entrypoint registered itself.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -351,12 +423,21 @@ class PackRuntime:
         adapter_items = tuple(
             item for item in manifest.provides.get("providers", ()) if item.kind == "adapter"
         )
+        robot_items = tuple(
+            item for item in manifest.provides.get("providers", ()) if item.kind == "robot"
+        )
         adapter_registry = None
         adapters_before: set[str] = set()
-        if adapter_items:
+        if entrypoint is not None or adapter_items:
             from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
 
             adapters_before = set(adapter_registry)
+
+        robots_before: dict[str, Callable[..., RobotProfile]] | None = None
+        if entrypoint is not None or robot_items:
+            from unigym.robots import snapshot_robots
+
+            robots_before = snapshot_robots()
 
         def rollback_adapters() -> None:
             """Remove adapter names a failed activation added to the global registry."""
@@ -364,6 +445,14 @@ class PackRuntime:
                 return
             for name in set(adapter_registry) - adapters_before:
                 adapter_registry.pop(name, None)
+
+        def rollback_robots() -> None:
+            """Restore the external robot registry a failed activation changed."""
+            if robots_before is None:
+                return
+            from unigym.robots import restore_robots
+
+            restore_robots(robots_before)
 
         try:
             if entrypoint is not None:
@@ -374,20 +463,26 @@ class PackRuntime:
                 target(context)
 
             adapters = _activate_adapter_providers(manifest)
+            robots = _activate_robot_providers(manifest)
         except PackError:
             rollback_adapters()
+            rollback_robots()
             raise
         except Exception as err:
             rollback_adapters()
+            rollback_robots()
             if entrypoint is None:
-                raise PackError(
-                    f"pack {pack!r} adapter providers failed to activate: {err}"
-                ) from err
+                raise PackError(f"pack {pack!r} provider activation failed: {err}") from err
             raise PackError(
                 f"pack {pack!r} entrypoint {entrypoint!r} failed to activate: {err}"
             ) from err
 
-        handle = ActivationHandle(pack=pack, entrypoint=entrypoint, adapters=adapters)
+        handle = ActivationHandle(
+            pack=pack,
+            entrypoint=entrypoint,
+            adapters=adapters,
+            robots=robots,
+        )
         self._handles[pack] = handle
         return handle
 

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from unigym.pack_api import ActivationHandle, PackContext, PackRuntime, discover
 from unigym.packs import PackError
@@ -40,6 +41,16 @@ def _isolate_pack_modules() -> None:
     yield
     sys.path[:] = path_snapshot
     _drop_pack_modules()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_robot_registry():
+    """Restore the process-global external robot registry after every test."""
+    from unigym.robots import restore_robots, snapshot_robots
+
+    snapshot = snapshot_robots()
+    yield
+    restore_robots(snapshot)
 
 
 def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[object]:
@@ -289,3 +300,318 @@ def test_runtime_module_has_no_legacy_loader_bindings() -> None:
 
     for name in ("MountedPack", "load_pack_code", "mount", "pack_roots"):
         assert name not in runtime_module.__dict__
+
+
+_ROBOT_SOURCE = (
+    '"""Robot provider fixture."""\n\n'
+    "from __future__ import annotations\n\n"
+    "from unigym.robots.base import RobotProfile\n\n\n"
+    "def make_arm():\n"
+    "    return RobotProfile(\n"
+    "        name='acme.arm',\n"
+    "        joint_sets={'body': ('shoulder',)},\n"
+    "        default_joint_pos={'shoulder': 0.0},\n"
+    "        assets=None,\n"
+    "        action_faces={},\n"
+    "        base_body=None,\n"
+    "        foot_bodies=(),\n"
+    "        body_sets={},\n"
+    "        body_bindings={},\n"
+    "    )\n"
+)
+
+_NOT_A_FACTORY = "\nnot_a_factory = object()\n"
+
+
+def _write_code_pack(
+    root: Path,
+    document: dict[str, object],
+    modules: dict[str, str],
+) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    text = yaml.safe_dump(document, sort_keys=False)
+    (root / "unigym.pack.yaml").write_text(text, encoding="utf-8")
+    for module_name, source in modules.items():
+        package = root / "python" / module_name
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "__init__.py").write_text(source, encoding="utf-8")
+
+
+def _robot_manifest(
+    name: str,
+    providers: list[dict[str, str]],
+    *,
+    entrypoint: str | None = None,
+    trust: str = "code",
+) -> dict[str, object]:
+    document: dict[str, object] = {
+        "schema": "unigym.pack/1",
+        "name": name,
+        "version": "1.0.0",
+        "api": 1,
+        "trust": trust,
+        "provides": {"providers": providers},
+    }
+    if entrypoint is not None:
+        document["entrypoint"] = entrypoint
+    return document
+
+
+def test_manifest_robot_provider_registers_a_factory(tmp_path: Path) -> None:
+    """A kind: robot item registers its entrypoint factory under the item id."""
+    root = tmp_path / "robot_pack"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_pack",
+            [{"id": "acme.arm", "kind": "robot", "entrypoint": "robot_success_module:make_arm"}],
+        ),
+        {"robot_success_module": _ROBOT_SOURCE},
+    )
+
+    runtime = discover([root])
+    handle = runtime.activate("robot_pack")
+
+    from unigym.robots import ROBOT_REGISTRY, build_robot_profile
+
+    assert handle.robots == ("acme.arm",)
+    assert "acme.arm" in ROBOT_REGISTRY
+    assert build_robot_profile({"name": "acme.arm"}).name == "acme.arm"
+
+
+def test_manifest_robot_item_requires_an_entrypoint(tmp_path: Path) -> None:
+    """A resource-only kind: robot item is a teaching PackError."""
+    root = tmp_path / "robot_resource"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robot.yaml"}],
+            trust="content",
+        ),
+        {},
+    )
+    (root / "robot.yaml").write_text("kind: robot\n", encoding="utf-8")
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_resource")
+
+    message = str(info.value)
+    assert "robot_resource" in message
+    assert "acme.arm" in message
+    assert "no entrypoint" in message
+
+
+def test_manifest_robot_target_must_be_callable(tmp_path: Path) -> None:
+    """A profile instance or other non-callable target fails before registration."""
+    root = tmp_path / "robot_not_callable"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_not_callable",
+            [
+                {
+                    "id": "acme.arm",
+                    "kind": "robot",
+                    "entrypoint": "robot_callable_module:not_a_factory",
+                }
+            ],
+        ),
+        {"robot_callable_module": _ROBOT_SOURCE + _NOT_A_FACTORY},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_not_callable")
+
+    message = str(info.value)
+    assert "acme.arm" in message
+    assert "not callable" in message
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.arm" not in ROBOT_REGISTRY
+
+
+@pytest.mark.parametrize(
+    ("item_id", "reason"),
+    [
+        ("Acme.Arm", "lowercase snake_case"),
+        ("g1", "reserved"),
+    ],
+)
+def test_manifest_robot_name_is_validated_before_registration(
+    tmp_path: Path, item_id: str, reason: str
+) -> None:
+    """The item id uses the external grammar and cannot take a built-in name."""
+    root = tmp_path / "robot_bad_name"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_bad_name",
+            [{"id": item_id, "kind": "robot", "entrypoint": "robot_name_module:make_arm"}],
+        ),
+        {"robot_name_module": _ROBOT_SOURCE},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_bad_name")
+
+    message = str(info.value)
+    assert item_id in message
+    assert reason in message
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert item_id not in ROBOT_REGISTRY
+
+
+def test_manifest_robot_provider_rejects_one_factory_under_two_names(tmp_path: Path) -> None:
+    """Two provider ids for one factory fail before either name is registered."""
+    root = tmp_path / "robot_alias"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_alias",
+            [
+                {"id": "acme.arm", "kind": "robot", "entrypoint": "robot_alias_module:make_arm"},
+                {"id": "acme.other", "kind": "robot", "entrypoint": "robot_alias_module:make_arm"},
+            ],
+        ),
+        {"robot_alias_module": _ROBOT_SOURCE},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_alias")
+
+    message = str(info.value)
+    assert "acme.arm" in message
+    assert "acme.other" in message
+    assert "exactly one name" in message
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.arm" not in ROBOT_REGISTRY
+    assert "acme.other" not in ROBOT_REGISTRY
+
+
+def test_manifest_robot_provider_rejects_an_already_registered_name(tmp_path: Path) -> None:
+    """A manifest item cannot replace a pre-existing external robot."""
+    from unigym.robots import ROBOT_REGISTRY, register_robot
+    from unigym.robots.base import RobotProfile
+
+    def existing() -> RobotProfile:
+        return RobotProfile(
+            name="acme.arm",
+            joint_sets={"body": ("shoulder",)},
+            default_joint_pos={"shoulder": 0.0},
+            assets=None,
+            action_faces={},
+            base_body=None,
+            foot_bodies=(),
+            body_sets={},
+            body_bindings={},
+        )
+
+    register_robot("acme.arm", existing)
+    root = tmp_path / "robot_duplicate"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_duplicate",
+            [{"id": "acme.arm", "kind": "robot", "entrypoint": "robot_duplicate_module:make_arm"}],
+        ),
+        {"robot_duplicate_module": _ROBOT_SOURCE},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_duplicate")
+
+    assert "already registered" in str(info.value)
+    assert ROBOT_REGISTRY["acme.arm"] is existing
+
+
+def test_entrypoint_registered_robot_rolls_back_on_robot_provider_failure(
+    tmp_path: Path,
+) -> None:
+    """A later bad robot provider removes robots the entrypoint registered."""
+    source = (
+        _ROBOT_SOURCE
+        + _NOT_A_FACTORY
+        + (
+            "\n\nfrom unigym.pack_api import register_robot\n\n\n"
+            "def register(context):\n"
+            "    register_robot('acme.dynamic', make_arm)\n"
+        )
+    )
+    root = tmp_path / "robot_mixed"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_mixed",
+            [{"id": "acme.arm", "kind": "robot", "entrypoint": "robot_mixed_module:not_a_factory"}],
+            entrypoint="robot_mixed_module:register",
+        ),
+        {"robot_mixed_module": source},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as first:
+        runtime.activate("robot_mixed")
+    assert "acme.arm" in str(first.value)
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.dynamic" not in ROBOT_REGISTRY
+    assert "acme.arm" not in ROBOT_REGISTRY
+
+    with pytest.raises(PackError) as second:
+        runtime.activate("robot_mixed")
+    assert "acme.arm" in str(second.value)
+    assert "already registered" not in str(second.value)
+
+
+def test_entrypoint_registered_robot_does_not_appear_in_the_handle(tmp_path: Path) -> None:
+    """handle.robots records manifest kind: robot ids only, in declaration order."""
+    source = _ROBOT_SOURCE + (
+        "\n\nfrom unigym.pack_api import register_robot\n"
+        "from unigym.robots.base import RobotProfile\n\n\n"
+        "def make_dynamic():\n"
+        "    return RobotProfile(\n"
+        "        name='acme.dynamic',\n"
+        "        joint_sets={'body': ('shoulder',)},\n"
+        "        default_joint_pos={'shoulder': 0.0},\n"
+        "        assets=None,\n"
+        "        action_faces={},\n"
+        "        base_body=None,\n"
+        "        foot_bodies=(),\n"
+        "        body_sets={},\n"
+        "        body_bindings={},\n"
+        "    )\n\n\n"
+        "def register(context):\n"
+        "    register_robot('acme.dynamic', make_dynamic)\n"
+    )
+    root = tmp_path / "robot_handle"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_handle",
+            [{"id": "acme.arm", "kind": "robot", "entrypoint": "robot_handle_module:make_arm"}],
+            entrypoint="robot_handle_module:register",
+        ),
+        {"robot_handle_module": source},
+    )
+    runtime = discover([root])
+
+    handle = runtime.activate("robot_handle")
+
+    assert handle.robots == ("acme.arm",)
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.dynamic" in ROBOT_REGISTRY
+    assert "acme.arm" in ROBOT_REGISTRY

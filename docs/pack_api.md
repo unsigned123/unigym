@@ -57,6 +57,7 @@ from unigym.pack_api import (
     register_adapter,
     register_content_provider,
     register_prop_template,
+    register_robot,
     register_scene,
     register_termination,
 )
@@ -146,7 +147,7 @@ Each item is a mapping with:
 | `id` | required, non-empty string; namespaced by convention as `<pack>.<item>` |
 | `resource` | exactly one of `resource` / `entrypoint` |
 | `entrypoint` | exactly one of `resource` / `entrypoint`; `module:attribute` |
-| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator` or `adapter` |
+| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator`, `adapter` or `robot` |
 
 An item with neither locator or with both locators is rejected. An
 `entrypoint` on any item requires the manifest `trust: code`. Unknown item keys
@@ -563,8 +564,60 @@ the backend; `env.params.actuators`, `controls[].gains` and the top-level
 backend realizer rejects it because its effective asset has no USD, not because
 of its name.  Its MJCF remains a scene resource, not a neutral robot asset.
 
-Dynamic `register_robot` / manifest `kind: robot` registration is a later
-phase and is not implemented yet.
+Dynamic `register_robot` / manifest `kind: robot` registration is the explicit
+external-robot path: a pack registers a backend-neutral factory and
+`build_robot_profile(name)` resolves it without editing any core factory table.
+The shipped `g1` / `gr1` factories remain built-ins and are resolved first.
+
+### Robot registration
+
+Dynamic registration and manifest providers share the external robot registry:
+
+```python
+from unigym.pack_api import register_robot
+
+def register(context):
+    register_robot("acme.arm", make_arm_profile)
+```
+
+```yaml
+provides:
+  providers:
+    - id: acme.arm
+      kind: robot
+      entrypoint: acme_robot:make_profile
+```
+
+For a manifest `kind: robot` item:
+
+- an `entrypoint` is required; a resource-only robot item fails activation with
+  a teaching `PackError` naming the pack and item id;
+- activation imports the target through the same `module:attribute` resolver
+  used by the manifest-level entrypoint;
+- the target must be a callable factory (a function or class); a profile
+  instance or other non-callable is a teaching `PackError`;
+- the item `id` is the robot name used verbatim by
+  `unigym.robots.build_robot_profile`;
+- factory callability and free-name validation happen before any registration;
+  return-type and profile-name legality are proved when the factory is called
+  by `build_robot_profile`;
+- activation failures are wrapped with the pack, item id and entrypoint, and
+  restore the prior robot registry exactly.
+
+The external registry is authoritative and external-only: names use the
+adapter-style grammar `[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*`, are never
+trimmed, and must be free of duplicate names, built-in names and exposed factory
+function names. One factory owns exactly one name. A factory must be callable.
+`ROBOT_REGISTRY`, `register_robot`, `snapshot_robots` and `restore_robots` live
+in `unigym.robots`; `unigym.pack_api.register_robot` is the pack-facing wrapper.
+The registry lives for the process lifetime, like `ADAPTER_REGISTRY`.
+
+Manifest robot providers are processed after the pack-level entrypoint and
+after adapter providers (or without a pack-level entrypoint). The activation
+handle's `robots` field records the manifest `kind: robot` item ids in
+declaration order; robots registered by the manifest-level entrypoint itself
+are not recorded. A failed activation restores the robot registry exactly on
+both failure branches, including entrypoint-registered robots.
 
 ### Asset CLI and selection (Phase 7b-3)
 
@@ -734,8 +787,8 @@ and it does not inspect the caller's frame.
 
 `runtime.activate(pack)` is explicit and cached per runtime:
 
-- a content pack, or a code pack with no manifest entrypoint and no adapter
-  providers, returns a no-op `ActivationHandle(pack=..., entrypoint=None)`;
+- a content pack, or a code pack with no manifest entrypoint and no adapter or
+  robot providers, returns a no-op `ActivationHandle(pack=..., entrypoint=None)`;
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
   normal `importlib`, and called with one `PackContext` argument;
 - there is no zero-argument fallback: a legacy `register()` entrypoint fails
@@ -790,8 +843,9 @@ For a manifest `kind: adapter` item:
 - activation failures are wrapped with the pack, item id and entrypoint.
 
 Manifest adapter providers are processed after the pack-level entrypoint (or
-without one). Other provider kinds stay inert: they are catalog metadata and
-are not imported or registered by activation.
+without one). Manifest robot providers are processed after that. Other provider
+kinds stay inert: they are catalog metadata and are not imported or registered
+by activation.
 
 Registration is process-global because the adapter registry is global.
 `register_adapter(name, cls)` rejects a malformed name, a non-class, a
@@ -877,6 +931,6 @@ The current phases deliberately do not implement:
 - a compatibility shim between the runtime and the deleted legacy loader;
 - requirement or `requires` resolution;
 - provider registration orchestration beyond manifest-declared `kind: adapter`
-  items; other provider kinds stay catalog metadata;
+  and `kind: robot` items; other provider kinds stay catalog metadata;
 - changes to benchmark, scene, asset or task domain parsers;
 - a sandbox for trusted code packs.
