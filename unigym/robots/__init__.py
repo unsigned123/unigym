@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from unigym._typing import JsonValue
 
@@ -27,6 +27,9 @@ from .base import (
     normalize_canonical_body_id,
     validate_body_bindings,
 )
+
+if TYPE_CHECKING:
+    from .data import load_robot_profile
 
 # registry name -> (module, factory function)
 _FACTORIES = {
@@ -162,6 +165,8 @@ def restore_robots(snapshot: Mapping[str, Callable[..., RobotProfile]]) -> None:
 
 
 def __getattr__(name: str) -> Any:
+    if name == "load_robot_profile":
+        return _load("data", "load_robot_profile")
     if name in _FACTORIES or name in ROBOT_REGISTRY:
         return _resolve_robot(name)
     for module, function in _FACTORIES.values():  # also expose make_*_profile directly
@@ -209,6 +214,7 @@ __all__ = [
     "CanonicalBodyId",
     "RobotProfile",
     "build_robot_profile",
+    "load_robot_profile",
     "normalize_canonical_body_id",
     "register_robot",
     "restore_robots",

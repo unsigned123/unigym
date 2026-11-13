@@ -102,6 +102,9 @@ provides:
     - id: acme.dynamic_assets
       kind: asset_generator
       entrypoint: acme_unigym.assets:register
+    - id: acme.arm
+      kind: robot
+      resource: robots/acme_arm.yaml
 ```
 
 ### Required fields
@@ -151,7 +154,9 @@ Each item is a mapping with:
 
 An item with neither locator or with both locators is rejected. An
 `entrypoint` on any item requires the manifest `trust: code`. Unknown item keys
-are rejected.
+are rejected. A `kind: robot` provider is either entrypoint-backed (a factory)
+or resource-backed (one `unigym.robot/1` document); a `kind: adapter` provider
+is entrypoint-only.
 
 ### Resource rules
 
@@ -569,6 +574,46 @@ external-robot path: a pack registers a backend-neutral factory and
 `build_robot_profile(name)` resolves it without editing any core factory table.
 The shipped `g1` / `gr1` factories remain built-ins and are resolved first.
 
+### Robot data documents
+
+An external robot may be declared as data, with no pack Python:
+
+```yaml
+schema: unigym.robot/1
+name: acme.arm
+joint_sets:
+  body: [shoulder, elbow]
+default_joint_pos:
+  shoulder: 0.0
+  elbow: 0.0
+base_body: base
+body_bindings:
+  base:
+    mjcf: base
+    usd: /World/base
+assets:
+  usd: pack:acme/robots/acme_arm.usd
+```
+
+`unigym.robots.load_robot_profile(path)` builds the neutral `RobotProfile`:
+
+- required: `schema` (exactly `unigym.robot/1`), `name`, `joint_sets`,
+  `default_joint_pos`;
+- optional: `base_body`, `base_height`, `foot_bodies`, `body_sets`,
+  `body_bindings`, `assets`, `action_faces`, `full_joint_order`;
+- only top-level unknown keys fail; `body_bindings.<id>.<format>` is data, not
+  a top-level field;
+- `body_bindings` builds `BodyBinding(canonical=<key>, names=<value>)`;
+- `assets` uses the same `{mjcf|urdf|usd: <ref>}` mapping as `AssetRef`; a
+  `pack:` reference stays an unresolved string; `assets: null` and an omitted
+  key both become `None`;
+- every other invariant stays with `RobotProfile`; errors name the file, the
+  field and the expected/actual form.
+
+The loader imports `yaml` but never an engine, a backend or pack Python. It
+does not know the provider item id; the pack resource provider enforces
+`profile.name == item.id`.
+
 ### Robot registration
 
 Dynamic registration and manifest providers share the external robot registry:
@@ -585,23 +630,41 @@ provides:
   providers:
     - id: acme.arm
       kind: robot
+      resource: robots/acme_arm.yaml
+```
+
+```yaml
+provides:
+  providers:
+    - id: acme.arm
+      kind: robot
       entrypoint: acme_robot:make_profile
 ```
 
 For a manifest `kind: robot` item:
 
-- an `entrypoint` is required; a resource-only robot item fails activation with
-  a teaching `PackError` naming the pack and item id;
-- activation imports the target through the same `module:attribute` resolver
-  used by the manifest-level entrypoint;
-- the target must be a callable factory (a function or class); a profile
-  instance or other non-callable is a teaching `PackError`;
+- the item declares exactly one locator:
+  - `resource: robots/<name>.yaml` loads one `unigym.robot/1` document at
+    activation and registers a constant, parameterless factory under the item
+    id; a run config that passes non-empty `params` to it is a teaching
+    `PackError`;
+  - `entrypoint: module:make_profile` imports and registers a callable factory
+    (the R1 form);
+- a resource profile's `name` must equal the item id; a mismatch is a teaching
+  `PackError` naming the pack, the item id and both names;
+- a resource-only robot provider list requires no `python/` directory and never
+  mutates `sys.path`; when resource and entrypoint items are mixed, the import
+  boundary comes from the first item that declares an entrypoint;
+- all robot items are loaded and validated before any registration, so a later
+  invalid item leaves no earlier registration behind;
+- an entrypoint target must be a callable factory (a function or class); a
+  profile instance or other non-callable is a teaching `PackError`;
 - the item `id` is the robot name used verbatim by
   `unigym.robots.build_robot_profile`;
 - factory callability and free-name validation happen before any registration;
-  return-type and profile-name legality are proved when the factory is called
-  by `build_robot_profile`;
-- activation failures are wrapped with the pack, item id and entrypoint, and
+  entrypoint return-type and profile-name legality are proved when the factory
+  is called by `build_robot_profile`;
+- activation failures are wrapped with the pack, item id and locator, and
   restore the prior robot registry exactly.
 
 The external registry is authoritative and external-only: names use the
@@ -791,6 +854,12 @@ and it does not inspect the caller's frame.
   robot providers, returns a no-op `ActivationHandle(pack=..., entrypoint=None)`;
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
   normal `importlib`, and called with one `PackContext` argument;
+- after the manifest entrypoint (or without it), manifest `kind: adapter` items
+  are imported and registered, then `kind: robot` items are registered. A robot
+  item is entrypoint-backed or resource-backed; a resource-only robot list
+  needs no `python/` directory and never mutates `sys.path`, while a mixed list
+  adds the first entrypoint item's `python/` boundary. All robot items are
+  loaded and validated before registration;
 - there is no zero-argument fallback: a legacy `register()` entrypoint fails
   to activate and is not supported;
 - the pack root's `python/` directory is the explicit import boundary. It is

@@ -71,6 +71,16 @@ class ProvidedItem:
     Exactly one of ``resource`` and ``entrypoint`` is set; ``kind`` optionally
     names a provider kind (for example ``asset_generator``, ``adapter`` or
     ``robot``).
+
+    A robot provider is resource-backed or entrypoint-backed::
+
+        - id: acme.arm
+          kind: robot
+          resource: robots/acme_arm.yaml
+
+        - id: acme.factory
+          kind: robot
+          entrypoint: acme_robot:make_profile
     """
 
     id: str

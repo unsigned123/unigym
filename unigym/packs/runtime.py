@@ -207,67 +207,121 @@ def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
     return tuple(item.id for item in items)
 
 
-def _activate_robot_providers(manifest: PackManifestV1) -> tuple[str, ...]:
-    """Import and register manifest-declared ``kind: robot`` providers.
+def _constant_robot_factory(where: str, profile: RobotProfile) -> Callable[..., RobotProfile]:
+    """Return the parameterless factory a resource robot registers under its id."""
 
-    The item id becomes the robot name a run config selects.  Validation is
-    complete before any registration: every item must carry an entrypoint,
-    resolve to a callable factory and name a free registry slot (the policy
+    def factory(**params: object) -> RobotProfile:
+        if params:
+            raise PackError(
+                f"{where} is a resource robot and takes no parameters, " f"got {sorted(params)}"
+            )
+        return profile
+
+    return factory
+
+
+def _activate_robot_providers(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[str, ...]:
+    """Load and register manifest-declared ``kind: robot`` providers.
+
+    The item id becomes the robot name a run config selects.  An item is
+    either an ``entrypoint`` factory (R1) or a ``resource`` pointing at one
+    ``unigym.robot/1`` document.  A resource-only provider needs no ``python/``
+    directory and never mutates ``sys.path``.  When both forms are mixed, the
+    import boundary comes from the first item that declares an entrypoint.
+
+    Validation is complete before any registration: every resource profile is
+    loaded and checked against its item id, every entrypoint resolves to a
+    callable factory and every item names a free registry slot (the policy
     owner is :mod:`unigym.robots`).  A later invalid item therefore leaves no
     earlier registration behind, and retrying the same pack fails on the
     original defect rather than on a leaked duplicate.  Return-type and
-    profile-name legality stay in :func:`unigym.robots.build_robot_profile`.
-    Other registration helpers are imported lazily here.
+    profile-name legality for entrypoint factories stay in
+    :func:`unigym.robots.build_robot_profile`; a resource profile's name is
+    checked here because the document is already loaded.  Other registration
+    helpers are imported lazily here.
     """
     items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "robot")
     if not items:
         return ()
 
-    from unigym.robots import register_robot, validate_robot_registration
+    from unigym.robots import (
+        load_robot_profile,
+        register_robot,
+        validate_robot_registration,
+    )
 
-    declared: list[tuple[ProvidedItem, str]] = []
-    for item in items:
-        if item.entrypoint is None:
-            raise PackError(
-                f"pack {manifest.name!r} provider id {item.id!r} declares "
-                f"kind 'robot' but no entrypoint; declare "
-                f"'entrypoint: module:make_profile'"
-            )
-        declared.append((item, item.entrypoint))
-
-    python_dir = _import_boundary(manifest, declared[0][1])
-    _add_to_sys_path(python_dir)
+    first_entrypoint = next(
+        (item.entrypoint for item in items if item.entrypoint is not None), None
+    )
+    if first_entrypoint is not None:
+        python_dir = _import_boundary(manifest, first_entrypoint)
+        _add_to_sys_path(python_dir)
 
     validated: list[tuple[ProvidedItem, Callable[..., RobotProfile]]] = []
-    for item, entrypoint in declared:
+    for item in items:
         where = f"pack {manifest.name!r} provider id {item.id!r}"
+        if item.entrypoint is not None:
+            entrypoint = item.entrypoint
+            try:
+                target = _resolve_entrypoint(entrypoint)
+            except Exception as err:
+                raise PackError(
+                    f"{where} entrypoint {entrypoint!r} failed to import: {err}"
+                ) from err
+            try:
+                validate_robot_registration(item.id, target)
+            except ValueError as err:
+                raise PackError(
+                    f"{where} entrypoint {entrypoint!r} cannot register robot "
+                    f"name {item.id!r}: {err}"
+                ) from err
+            alias = next((earlier.id for earlier, factory in validated if factory is target), None)
+            if alias is not None:
+                raise PackError(
+                    f"{where} entrypoint {entrypoint!r} registers the same robot "
+                    f"factory as provider id {alias!r} under a second name {item.id!r}; "
+                    f"one factory owns exactly one name"
+                )
+            validated.append((item, target))
+            continue
+
+        resource = item.resource
+        assert resource is not None  # schema guarantees exactly one locator
         try:
-            target = _resolve_entrypoint(entrypoint)
-        except Exception as err:
-            raise PackError(f"{where} entrypoint {entrypoint!r} failed to import: {err}") from err
+            resource_path = runtime.resource(manifest.name, resource)
+        except PackError as err:
+            raise PackError(f"{where} resource {resource!r} failed to load: {err}") from err
         try:
-            validate_robot_registration(item.id, target)
+            profile = load_robot_profile(resource_path)
+        except ValueError as err:
+            raise PackError(f"{where} resource {resource!r} failed to load: {err}") from err
+        if profile.name != item.id:
+            raise PackError(
+                f"{where} resource {resource!r} declares profile name "
+                f"{profile.name!r}; the resource profile name must equal the "
+                f"provider id {item.id!r}"
+            )
+        factory = _constant_robot_factory(where, profile)
+        try:
+            validate_robot_registration(item.id, factory)
         except ValueError as err:
             raise PackError(
-                f"{where} entrypoint {entrypoint!r} cannot register robot "
-                f"name {item.id!r}: {err}"
+                f"{where} resource {resource!r} cannot register robot " f"name {item.id!r}: {err}"
             ) from err
-        alias = next((earlier.id for earlier, factory in validated if factory is target), None)
-        if alias is not None:
-            raise PackError(
-                f"{where} entrypoint {entrypoint!r} registers the same robot "
-                f"factory as provider id {alias!r} under a second name {item.id!r}; "
-                f"one factory owns exactly one name"
-            )
-        validated.append((item, target))
+        validated.append((item, factory))
 
     for item, target in validated:
+        locator = (
+            f"entrypoint {item.entrypoint!r}"
+            if item.entrypoint is not None
+            else (f"resource {item.resource!r}")
+        )
         try:
             register_robot(item.id, target)
         except Exception as err:
             raise PackError(
-                f"pack {manifest.name!r} provider id {item.id!r} entrypoint "
-                f"{item.entrypoint!r} failed to register: {err}"
+                f"pack {manifest.name!r} provider id {item.id!r} {locator} "
+                f"failed to register: {err}"
             ) from err
     return tuple(item.id for item in items)
 
@@ -406,10 +460,15 @@ class PackRuntime:
         fallback.  After it (or without it), ``providers`` items with
         ``kind: adapter`` are imported and registered under their item id,
         then ``kind: robot`` items are registered through the robot registry.
-        Other provider kinds stay inert.  Failures are wrapped with the pack,
-        item id and entrypoint named; a failed activation restores both the
-        adapter and robot registries to their prior contents, including names
-        a manifest-level entrypoint registered itself.
+        A robot item is either an entrypoint factory or a resource pointing at
+        one ``unigym.robot/1`` document; a resource-only robot list needs no
+        ``python/`` directory and never mutates ``sys.path``, while a mixed
+        list takes its import boundary from the first entrypoint item.  Robot
+        items are validated before any registration.  Other provider kinds
+        stay inert.  Failures are wrapped with the pack, item id and locator
+        named; a failed activation restores both the adapter and robot
+        registries to their prior contents, including names a manifest-level
+        entrypoint registered itself.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -463,7 +522,7 @@ class PackRuntime:
                 target(context)
 
             adapters = _activate_adapter_providers(manifest)
-            robots = _activate_robot_providers(manifest)
+            robots = _activate_robot_providers(manifest, self)
         except PackError:
             rollback_adapters()
             rollback_robots()

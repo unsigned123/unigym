@@ -357,6 +357,26 @@ def _robot_manifest(
     return document
 
 
+def _write_robot_resource(
+    root: Path,
+    rel: str,
+    *,
+    name: str,
+    **overrides: object,
+) -> Path:
+    document: dict[str, object] = {
+        "schema": "unigym.robot/1",
+        "name": name,
+        "joint_sets": {"body": ["shoulder"]},
+        "default_joint_pos": {"shoulder": 0.0},
+    }
+    document.update(overrides)
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def test_manifest_robot_provider_registers_a_factory(tmp_path: Path) -> None:
     """A kind: robot item registers its entrypoint factory under the item id."""
     root = tmp_path / "robot_pack"
@@ -379,28 +399,199 @@ def test_manifest_robot_provider_registers_a_factory(tmp_path: Path) -> None:
     assert build_robot_profile({"name": "acme.arm"}).name == "acme.arm"
 
 
-def test_manifest_robot_item_requires_an_entrypoint(tmp_path: Path) -> None:
-    """A resource-only kind: robot item is a teaching PackError."""
+def test_manifest_robot_resource_registers_without_pack_python(tmp_path: Path) -> None:
+    """A resource robot activates from YAML without a python/ import boundary."""
     root = tmp_path / "robot_resource"
     _write_code_pack(
         root,
         _robot_manifest(
             "robot_resource",
-            [{"id": "acme.arm", "kind": "robot", "resource": "robot.yaml"}],
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
             trust="content",
         ),
         {},
     )
-    (root / "robot.yaml").write_text("kind: robot\n", encoding="utf-8")
+    _write_robot_resource(root, "robots/acme_arm.yaml", name="acme.arm")
+    assert not (root / "python").exists()
+    runtime = discover([root])
+
+    handle = runtime.activate("robot_resource")
+
+    from unigym.robots import ROBOT_REGISTRY, build_robot_profile
+
+    assert handle.robots == ("acme.arm",)
+    assert "acme.arm" in ROBOT_REGISTRY
+    profile = build_robot_profile({"name": "acme.arm"})
+    assert profile.name == "acme.arm"
+    assert profile.joint_order == ["shoulder"]
+    assert str(root.resolve()) not in sys.path
+    assert str((root / "python").resolve()) not in sys.path
+
+
+def test_manifest_robot_resource_missing_yaml_fails_discovery(tmp_path: Path) -> None:
+    """A declared robot resource that is absent fails manifest validation."""
+    root = tmp_path / "robot_resource_missing"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource_missing",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
+            trust="content",
+        ),
+        {},
+    )
+
+    with pytest.raises(PackError, match="does not exist"):
+        discover([root])
+
+
+def test_manifest_robot_resource_rejects_malformed_yaml(tmp_path: Path) -> None:
+    """A malformed robot document fails activation and registers nothing."""
+    root = tmp_path / "robot_resource_bad_yaml"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource_bad_yaml",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
+            trust="content",
+        ),
+        {},
+    )
+    path = root / "robots" / "acme_arm.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text("schema: [unterminated\n", encoding="utf-8")
     runtime = discover([root])
 
     with pytest.raises(PackError) as info:
-        runtime.activate("robot_resource")
+        runtime.activate("robot_resource_bad_yaml")
 
     message = str(info.value)
-    assert "robot_resource" in message
+    assert "robot_resource_bad_yaml" in message
     assert "acme.arm" in message
-    assert "no entrypoint" in message
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.arm" not in ROBOT_REGISTRY
+
+
+def test_manifest_robot_resource_profile_name_must_match_item_id(tmp_path: Path) -> None:
+    """A resource profile name different from the provider id fails before registration."""
+    root = tmp_path / "robot_resource_name"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource_name",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
+            trust="content",
+        ),
+        {},
+    )
+    _write_robot_resource(root, "robots/acme_arm.yaml", name="acme.other")
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("robot_resource_name")
+
+    message = str(info.value)
+    assert "acme.arm" in message
+    assert "acme.other" in message
+    assert "must equal" in message
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.arm" not in ROBOT_REGISTRY
+    assert "acme.other" not in ROBOT_REGISTRY
+
+
+def test_manifest_robot_resource_rejects_non_empty_params(tmp_path: Path) -> None:
+    """A resource profile factory takes no parameters and says so."""
+    root = tmp_path / "robot_resource_params"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource_params",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
+            trust="content",
+        ),
+        {},
+    )
+    _write_robot_resource(root, "robots/acme_arm.yaml", name="acme.arm")
+    runtime = discover([root])
+    runtime.activate("robot_resource_params")
+
+    from unigym.robots import build_robot_profile
+
+    with pytest.raises(PackError, match="takes no parameters"):
+        build_robot_profile({"name": "acme.arm", "params": {"shoulder": 0.5}})
+
+
+def test_manifest_robot_mixed_resources_and_entrypoints_register_in_order(
+    tmp_path: Path,
+) -> None:
+    """A mixed robot list uses the first entrypoint boundary and keeps declaration order."""
+    root = tmp_path / "robot_mixed_success"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_mixed_success",
+            [
+                {"id": "acme.legs", "kind": "robot", "resource": "robots/acme_legs.yaml"},
+                {
+                    "id": "acme.arm",
+                    "kind": "robot",
+                    "entrypoint": "robot_mixed_success_module:make_arm",
+                },
+            ],
+        ),
+        {"robot_mixed_success_module": _ROBOT_SOURCE},
+    )
+    _write_robot_resource(root, "robots/acme_legs.yaml", name="acme.legs")
+    runtime = discover([root])
+
+    handle = runtime.activate("robot_mixed_success")
+
+    from unigym.robots import ROBOT_REGISTRY, build_robot_profile
+
+    assert handle.robots == ("acme.legs", "acme.arm")
+    assert "acme.legs" in ROBOT_REGISTRY
+    assert "acme.arm" in ROBOT_REGISTRY
+    assert build_robot_profile({"name": "acme.legs"}).name == "acme.legs"
+    assert build_robot_profile({"name": "acme.arm"}).name == "acme.arm"
+    assert str((root / "python").resolve()) in sys.path
+
+
+def test_resource_robot_conflict_with_entrypoint_name_rolls_back(tmp_path: Path) -> None:
+    """A resource item that collides with an entrypoint robot restores the registry."""
+    source = _ROBOT_SOURCE + (
+        "\n\nfrom unigym.pack_api import register_robot\n\n\n"
+        "def register(context):\n"
+        "    register_robot('acme.arm', make_arm)\n"
+    )
+    root = tmp_path / "robot_resource_conflict"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "robot_resource_conflict",
+            [{"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}],
+            entrypoint="robot_resource_conflict_module:register",
+        ),
+        {"robot_resource_conflict_module": source},
+    )
+    _write_robot_resource(root, "robots/acme_arm.yaml", name="acme.arm")
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as first:
+        runtime.activate("robot_resource_conflict")
+    assert "acme.arm" in str(first.value)
+    assert "already registered" in str(first.value)
+
+    from unigym.robots import ROBOT_REGISTRY
+
+    assert "acme.arm" not in ROBOT_REGISTRY
+
+    with pytest.raises(PackError) as second:
+        runtime.activate("robot_resource_conflict")
+    assert "already registered" in str(second.value)
 
 
 def test_manifest_robot_target_must_be_callable(tmp_path: Path) -> None:
