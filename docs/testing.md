@@ -558,8 +558,12 @@ through `pack_runtime("isaaclab_cartpole")`; the G1 root and its complete
 environment variable is read. The G1 contact-all test is part of this lane: it
 uses the pre-clone USD inventory (`unigym/backends/isaaclab2/usd.py`),
 materializes one sensor per rigid body, excludes fixed-joint merged palms, and
-resets/reads the per-body rows. A missing Cartpole or G1 pack fails the strict
-lane rather than skipping. The G1 builder tests exercise the generic realizer
+resets/reads the per-body rows. The lane also builds a two-articulation
+Cartpole + G1 env with one `contacts: all` group per articulation: each group
+must read its own inventory (`Robot` vs `Robot_g1` prim scope) and never a
+union, and an explicit G1-scoped group proves the non-first articulation body
+scope. A missing Cartpole or G1 pack fails the strict lane rather than
+skipping. The G1 builder tests exercise the generic realizer
 (any effective profile with a USD or URDF asset plus run-level actuation), not
 a `profile.name` branch. The lane also builds a real `UrdfFileCfg`
 `ArticulationCfg` from the shared primitives-only URDF fixture, so the URDF

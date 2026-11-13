@@ -543,7 +543,59 @@ articulations:
   links excluded and one sensor per body. That inventory walks a USD asset, so
   an articulation that selects its URDF `AssetRef` cannot use `contacts: all`;
   declare explicit contact groups (or provide the USD reference) instead.
- `RobotProfile` carries no backend object and no backend
+
+A run-level `contacts:` group owns exactly one articulation:
+
+```yaml
+contacts:
+  - name: cart_all
+    sensor_bodies: {contact_group: {articulation: cartpole, group: all}}
+    frame: world
+  - name: humanoid_feet
+    articulation: g1              # explicit owner for a native body list
+    sensor_bodies: [left_ankle_roll_link, right_ankle_roll_link]
+    frame: world
+    filter_bodies: {prop: cup}    # backend-neutral: the declared prop
+```
+
+- The `{contact_group: {articulation, group}}` reference records the owner;
+  a direct `articulation: <name>` key may declare the same owner for a native
+  body list. Both must agree when both are present.
+- A run with more than one articulation requires every contact group to name
+  its owner; omission is a teaching error listing the declared articulations.
+  A single-articulation run keeps the historical owner-less group.
+- A bare filter body is a body NAME: the MuJoCo family matches it as a
+  body-name regex (one expression may expand to several bodies, so F grows
+  accordingly), while IsaacLab requires it to match exactly one body (F is
+  one column per declared expression). For an owned group the MuJoCo family
+  resolves a filter in the owner's subtree PLUS the free bodies outside
+  every articulation -- the world body (`world`, whose static floor geoms
+  make `filter_bodies: [world]` a ground-contact filter) and declared prop
+  bodies -- and never another articulation's body. An explicit prim path
+  (`/...` or `{ENV_REGEX_NS}/...`) is IsaacLab-only; it is not a body-name
+  regex on the MuJoCo family (use the native body name, e.g. `world`, or a
+  `{prop: <name>}` reference for a backend-neutral prop).
+- Sensor prim paths are scoped to the owner's scene leaf: `Robot` for the
+  first declared articulation and `Robot_<name>` for the others. The
+  MuJoCo family resolves bare sensor bodies in the same articulation and
+  never matches another articulation's body when the group names an owner.
+- `contacts: all` expands only that articulation's pre-clone inventory, never
+  a union across articulations. With several all-mode assets an omitted owner
+  is ambiguous and fails; reference the articulation explicitly.
+- Duplicate resolved sensor/filter bodies and colliding derived scene field
+  names fail fast instead of silently overwriting or double-counting rows.
+  This is a deliberate tightening shared by BOTH the IsaacLab and MuJoCo-family
+  backends (not a backend quirk): overlapping filter expressions that resolve
+  the same body (including the single-articulation MuJoCo case) used to
+  produce duplicate F rows and are now rejected at bind time. IsaacLab also
+  rejects a bare filter expression matching zero or several bodies, because
+  its filter axis is one column per declared expression.
+- The env binds a constructor-provided manager after compiling the
+  articulation/base-body tables, so `articulation:` owners and
+  `contacts: all` resolve on the normal run path as well as on direct
+  manager construction.
+
+`RobotProfile` carries no backend object and no backend
 switch. There is no `with_isaaclab`, no `articulation_cfg`, no `body_parts`
 and no `RobotAsset` field.
 

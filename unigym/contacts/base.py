@@ -29,6 +29,10 @@ Rules baked in here:
   world-frame semantics;
 * ``component`` defaults to ``mag``; ``x|y|z`` are SIGNED projections
   (``raw`` ignores ``component``);
+* a group may name its owning articulation (``articulation``); the
+  ``{contact_group: {articulation, group}}`` reference records the owner
+  automatically.  A run with more than one articulation requires it, so a
+  body regex can never silently match another articulation;
 * per-group isolation over sharing (one sensor cfg per group / pairwise
   entry), same isolation philosophy as cameras/;
 * baseline protocol: a config without a ``contacts:`` section produces
@@ -102,17 +106,21 @@ class ContactGroupSpec:
             ``contact/<name>`` key; restricted to ``[A-Za-z0-9_-]+`` because
             it also becomes an isaaclab scene-cfg field suffix).
         sensor_bodies: body-name regex list matched (fullmatch) against the
-            robot's body names; the resolved set defines axis B (backend
-            asset order).
+            owning articulation's body names; the resolved set defines axis B
+            (backend asset order).
         frame: ``world`` or ``body`` — REQUIRED, no default.
             ``body`` forces the per-sensor-body frame (isaaclab: v1
             NotImplementedError; mujoco: rotates by the sensor body
             orientation).
+        articulation: owning articulation name.  REQUIRED for every group in
+            a run with more than one articulation; ``None`` means the single
+            declared articulation.  The ``{contact_group: {articulation,
+            group}}`` reference sets it automatically.
         filter_bodies: pairwise filter body-name regex list; a bare entry is
-            resolved under the robot prefix, an entry starting with
-            ``/`` or ``{ENV_REGEX_NS}`` is used as an explicit prim path
-            (props ``Prop_*``).  Presence of a
-            non-empty list makes the group pairwise.
+            resolved in the owning articulation's scope, an entry starting
+            with ``/`` or ``{ENV_REGEX_NS}`` is used as an explicit prim path
+            (props ``Prop_*``).  Presence of a non-empty list makes the group
+            pairwise.
         mode: ``general`` (no filter — net force on the sensor bodies) or
             ``pairwise`` (per-filter force matrix).  Default derived from
             ``filter_bodies``; an explicit value must be consistent.
@@ -138,6 +146,7 @@ class ContactGroupSpec:
     threshold: Optional[float] = None
     aggregate: str = "none"
     history: int = 1
+    articulation: Optional[str] = None
 
     def __post_init__(self):
         if (
@@ -151,6 +160,15 @@ class ContactGroupSpec:
                 f"contact group name {self.name!r} must be non-empty, "
                 f"trimmed, free of '/' and match [A-Za-z0-9_-]+ (it is part "
                 f"of the contact/<name> key and a scene field suffix)"
+            )
+        if self.articulation is not None and (
+            not isinstance(self.articulation, str)
+            or not self.articulation
+            or self.articulation.strip() != self.articulation
+        ):
+            raise ValueError(
+                f"contact {self.name!r}: articulation must be a non-empty, "
+                f"trimmed string or None, got {self.articulation!r}"
             )
         self.sensor_bodies = _str_list(self.sensor_bodies, "sensor_bodies", self.name)
         if ALL_BODIES in self.sensor_bodies and tuple(self.sensor_bodies) != (ALL_BODIES,):
@@ -327,7 +345,12 @@ class _ContactBackendFace(Protocol):
 
     backend_key: ClassVar[str]
 
-    def __init__(self, specs, contact_assets: Mapping[str, str] | None = None) -> None: ...
+    def __init__(
+        self,
+        specs,
+        contact_assets: Mapping[str, str] | None = None,
+        articulation_names: Sequence[str] | None = None,
+    ) -> None: ...
 
     @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]: ...
@@ -359,10 +382,23 @@ def _contact_face(backend: str) -> type[_ContactBackendFace]:
 
 
 def build_contact_backend(
-    backend: str, specs, contact_assets: Mapping[str, str] | None = None
+    backend: str,
+    specs,
+    contact_assets: Mapping[str, str] | None = None,
+    articulation_names: Sequence[str] | None = None,
 ) -> _ContactBackendFace:
-    """Construct the backend contact object for *specs* (registry face)."""
-    return _contact_face(backend)(specs, contact_assets=contact_assets)
+    """Construct the backend contact object for *specs* (registry face).
+
+    ``articulation_names`` is the run's articulation declaration order; the
+    backend uses it to assign the scene prim leaf (``Robot`` first, then
+    ``Robot_<name>``) and to reject a scoped group whose articulation is not
+    declared.
+    """
+    return _contact_face(backend)(
+        specs,
+        contact_assets=contact_assets,
+        articulation_names=articulation_names,
+    )
 
 
 def _available_contact_refs(contact_groups) -> list[str]:
@@ -488,6 +524,19 @@ def resolve_contact_entry(
     if not isinstance(entry, dict):
         raise ValueError(f"contact group entry must be a mapping, got " f"{type(entry).__name__}")
     out = dict(entry)
+    sensor_value = out.get("sensor_bodies")
+    if isinstance(sensor_value, dict) and set(sensor_value) == {"contact_group"}:
+        ref = sensor_value["contact_group"]
+        owner = ref.get("articulation") if isinstance(ref, dict) else None
+        if isinstance(owner, str) and owner:
+            declared = out.get("articulation")
+            if declared is not None and declared != owner:
+                raise ValueError(
+                    f"contact {out.get('name', '?')!r}: articulation "
+                    f"{declared!r} conflicts with the contact_group reference "
+                    f"owner {owner!r}; declare one owner"
+                )
+            out["articulation"] = owner
     if "sensor_bodies" in out:
         out["sensor_bodies"] = _resolve_ref(
             out["sensor_bodies"],

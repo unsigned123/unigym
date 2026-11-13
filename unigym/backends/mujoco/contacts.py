@@ -109,9 +109,12 @@ class MujocoContactBackend:
             return [f"Prop_{name}_.*"]
         return [f"Prop_{name}"]
 
-    def __init__(self, specs: list[ContactGroupSpec], contact_assets=None):
+    def __init__(self, specs: list[ContactGroupSpec], contact_assets=None, articulation_names=None):
         self.specs = list(specs)
         self._contact_assets = dict(contact_assets or {})
+        self._articulation_names = (
+            None if articulation_names is None else tuple(str(n) for n in articulation_names)
+        )
         self._resolved: dict[str, dict] = {}
 
     # typed internal handles: bound by ``bind_env`` before any read.
@@ -143,8 +146,10 @@ class MujocoContactBackend:
 
         body_names = [m.body(i).name for i in range(m.nbody)]
         for spec in self.specs:
+            allowed_ids = self._articulation_body_ids(env, spec, body_names)
+            filter_allowed_ids = self._filter_body_ids(env, allowed_ids)
             if is_all_bodies(spec.sensor_bodies):
-                sensor_ids = self._all_body_ids(env)
+                sensor_ids = self._all_body_ids(env, spec)
             else:
                 sensor_ids = _resolve_bodies(
                     m,
@@ -154,6 +159,7 @@ class MujocoContactBackend:
                     "sensor_bodies",
                     require_geoms=True,
                     inventory_fn=inventory,
+                    allowed_ids=allowed_ids,
                 )
             entry: dict = {"sensor_ids": sensor_ids}
             if spec.mode == "pairwise":
@@ -167,29 +173,29 @@ class MujocoContactBackend:
                         f"filter_bodies[{j}]",
                         require_geoms=True,
                         inventory_fn=inventory,
+                        allowed_ids=filter_allowed_ids,
                     )
                     filter_ids.extend(ids)
+                duplicates = sorted({i for i in filter_ids if filter_ids.count(i) > 1})
+                if duplicates:
+                    names = [body_names[i] for i in duplicates]
+                    raise ValueError(
+                        f"contact group {spec.name!r}: filter_bodies resolve "
+                        f"to duplicate bodies {names} in articulation "
+                        f"{spec.articulation or '<single>'!r}; each resolved "
+                        f"filter body must be distinct"
+                    )
                 entry["filter_ids"] = filter_ids
             self._resolved[spec.name] = entry
 
-    def _all_body_ids(self, env) -> list[int]:
-        """Model body ids under the referenced articulation(s), model order.
-
-        ``all`` means every rigid-body link under the robot asset subtree.
-        The scope comes from the backend articulation bindings (their
-        compiled base bodies): each body is attributed to its nearest
-        articulation root, so world bodies, props and other articulations are
-        excluded.  Collisionless bodies stay in the B axis with zero force
-        channels -- they are never a bind failure.
-        """
+    def _articulation_roots(self, env) -> dict[int, str]:
+        """Model body id -> articulation name for every bound articulation."""
         m = self._model
         import mujoco
 
         bindings = getattr(env, "_mj_articulation_bindings", {}) or {}
-        target_names = list(self._contact_assets) or list(bindings)
         roots: dict[int, str] = {}
-        for articulation in bindings:
-            binding = bindings[articulation]
+        for articulation, binding in bindings.items():
             base = str(getattr(binding, "backend_base_body", "") or "")
             bid = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, base)) if base else -1
             if bid > 0:
@@ -197,29 +203,113 @@ class MujocoContactBackend:
         if not roots:
             fallback = int(getattr(env, "_base_body_id", -1))
             if fallback > 0:
-                roots[fallback] = next(iter(target_names), "robot")
+                name = next(iter(self._articulation_names or ()), None)
+                if name is None:
+                    name = next(iter(self._contact_assets), "robot")
+                roots[fallback] = name
+        return roots
+
+    def _body_ids_under(self, roots: dict[int, str], articulation: str) -> set[int]:
+        """Model body ids attributed to one articulation root subtree."""
+        m = self._model
+        selected = {bid for bid, name in roots.items() if name == articulation}
+        ids: set[int] = set()
+        for i in range(1, m.nbody):
+            p = i
+            while p > 0 and p not in roots:
+                p = int(m.body_parentid[p])
+            if p in selected:
+                ids.add(i)
+        return ids
+
+    def _articulation_body_ids(
+        self, env, spec: ContactGroupSpec, body_names: list[str]
+    ) -> set[int] | None:
+        """Body-id scope for an explicitly owned group (``None`` when implicit)."""
+        if spec.articulation is None:
+            return None
+        roots = self._articulation_roots(env)
+        if spec.articulation not in set(roots.values()):
+            raise ValueError(
+                f"contact group {spec.name!r}: articulation "
+                f"{spec.articulation!r} has no MJ base-body binding "
+                f"(bindings: {sorted(set(roots.values()))})"
+            )
+        ids = self._body_ids_under(roots, spec.articulation)
+        if not ids:
+            declared = [name for name in body_names if name]
+            raise ValueError(
+                f"contact group {spec.name!r}: articulation "
+                f"{spec.articulation!r} resolves no model bodies; declared "
+                f"bodies: {declared}"
+            )
+        return ids
+
+    def _filter_body_ids(self, env, allowed_ids: set[int] | None) -> set[int] | None:
+        """Filter-body scope for an owned group (``None`` when implicit).
+
+        A pairwise filter may name the owner's bodies (prop-free robot
+        contact) or a free body outside every articulation.  Free bodies
+        include the world body (id 0: the floor/static geoms belong to it,
+        so ``filter_bodies: [world]`` is a legal ground-contact filter) and
+        declared props.  It must never silently match a DIFFERENT
+        articulation's body; that keeps the owner declaration meaningful
+        across a composed MJ model.
+        """
+        if allowed_ids is None:
+            return None
+        roots = self._articulation_roots(env)
+        attributed: set[int] = set()
+        for articulation in set(roots.values()):
+            attributed |= self._body_ids_under(roots, articulation)
+        free_ids = set(range(self._model.nbody)) - attributed
+        return allowed_ids | free_ids
+
+    def _all_body_ids(self, env, spec: ContactGroupSpec) -> list[int]:
+        """Model body ids under the referenced articulation, model order.
+
+        ``all`` means every rigid-body link under ONE articulation subtree.
+        The scope comes from the backend articulation bindings (their
+        compiled base bodies): each body is attributed to its nearest
+        articulation root, so world bodies, props and other articulations are
+        excluded.  An omitted owner is legal only when exactly one
+        articulation is bound; otherwise the group must reference its
+        articulation instead of silently unioning inventories.  Collisionless
+        bodies stay in the B axis with zero force channels -- they are never
+        a bind failure.
+        """
+        m = self._model
+        roots = self._articulation_roots(env)
+        names = sorted(set(roots.values()))
         if not roots:
             bodies = [m.body(i).name for i in range(1, m.nbody) if m.body(i).name]
             raise ValueError(
                 f"contacts: all: no articulation base_body binding in the MJ "
                 f"model; declared bodies: {bodies}"
             )
-        targets = {roots[bid] for bid in roots if not target_names or roots[bid] in target_names}
-        if not targets:
-            targets = set(roots.values())
-        selected = {bid for bid, articulation in roots.items() if articulation in targets}
-        ids: list[int] = []
-        for i in range(1, m.nbody):
-            p = i
-            while p > 0 and p not in roots:
-                p = int(m.body_parentid[p])
-            if p in selected:
-                ids.append(i)
+        if spec.articulation is not None:
+            articulation = spec.articulation
+            if articulation not in set(roots.values()):
+                raise ValueError(
+                    f"contact group {spec.name!r}: contacts: all references "
+                    f"articulation {articulation!r}, which has no MJ base-body "
+                    f"binding (bindings: {names})"
+                )
+        elif len(names) == 1:
+            articulation = names[0]
+        else:
+            raise ValueError(
+                f"contact group {spec.name!r}: contacts: all is ambiguous "
+                f"across articulations {names}; reference the owner with "
+                f"sensor_bodies: {{contact_group: {{articulation: <name>, "
+                f"group: all}}}} (or declare articulation: <name>)"
+            )
+        ids = sorted(self._body_ids_under(roots, articulation))
         if not ids:
             bodies = [m.body(i).name for i in range(1, m.nbody) if m.body(i).name]
             raise ValueError(
-                f"contacts: all: resolved no bodies under articulations "
-                f"{sorted(targets)}; declared bodies: {bodies}"
+                f"contacts: all: resolved no bodies under articulation "
+                f"{articulation!r}; declared bodies: {bodies}"
             )
         return ids
 
@@ -404,23 +494,33 @@ def _resolve_bodies(
     arg: str,
     require_geoms: bool,
     inventory_fn=None,
+    allowed_ids: set[int] | None = None,
 ) -> list[int]:
     """Body ids (model order) fullmatching ANY pattern; fail-fast empty.
 
     ``require_geoms`` rejects bodies without COLLISION geoms (zero geoms,
     or geoms with ``contype == 0`` -- visual-only bodies can never appear
     in data.ncon, a silent empty group would be a config bug).
-    Both failure modes refuse with a ``ContactCandidateError`` carrying the
-    discovered body inventory (contacts/discovery.py) instead of
-    a bare list-dump error.
+    ``allowed_ids`` restricts resolution to one articulation's subtree (an
+    explicitly owned group); ``None`` keeps the historical whole-model
+    resolution.  Both failure modes refuse with a
+    ``ContactCandidateError`` carrying the discovered body inventory
+    (contacts/discovery.py) instead of a bare list-dump error.
     """
     compiled = [re.compile(p) for p in patterns]
-    ids = [i for i, n in enumerate(body_names) if any(c.fullmatch(n) for c in compiled)]
+    ids = [
+        i
+        for i, n in enumerate(body_names)
+        if (allowed_ids is None or i in allowed_ids) and any(c.fullmatch(n) for c in compiled)
+    ]
     if not ids:
         inventory = (inventory_fn or (lambda: []))()
-        raise contact_candidate_error(
-            group, arg, patterns, inventory, "mujoco", reason="matched no MJ body"
+        reason = (
+            "matched no MJ body"
+            if allowed_ids is None
+            else "matched no MJ body in the owning articulation scope"
         )
+        raise contact_candidate_error(group, arg, patterns, inventory, "mujoco", reason=reason)
 
     def _no_collision(i: int) -> bool:
         adr, n = int(m.body_geomadr[i]), int(m.body_geomnum[i])

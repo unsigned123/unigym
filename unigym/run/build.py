@@ -982,6 +982,7 @@ def _build_sensing(
             else None
         ),
         contact_assets=dict(contact_assets),
+        articulation_names=tuple(art.name for art in spec.articulations),
     )
     # default lights: a textured usd prop on isaaclab without scene
     # fill light renders as a black silhouette -- when the config declares

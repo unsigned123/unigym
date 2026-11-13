@@ -39,22 +39,54 @@ def test_two_env_fixture_exposes_two_envs(two_env):
     assert two_env.num_envs == 2
 
 
-def test_partitioned_isaaclab_rejects_contact_manager_before_env(simulation_app):
-    """Partitioned IsaacLab keeps its pre-env contact-manager fail-fast."""
+def test_partitioned_isaaclab_accepts_a_contact_manager_before_env(simulation_app):
+    """Partitioned IsaacLab allows per-articulation contact groups."""
     from unigym.backends.isaaclab2.articulation_runtime import validate_options
 
     class _Adapter:
         def get_obs_requests(self):
             return []
 
-    with pytest.raises(NotImplementedError, match="contact_manager"):
-        validate_options(
-            _Adapter(),
-            events_cfg=None,
-            recorder=None,
-            prop_manager=None,
-            camera_manager=None,
-            contact_manager=object(),
-            director_cfg=None,
-            init_pose_cfg=None,
-        )
+    validate_options(
+        _Adapter(),
+        events_cfg=None,
+        recorder=None,
+        prop_manager=None,
+        camera_manager=None,
+        contact_manager=object(),
+        director_cfg=None,
+        init_pose_cfg=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("option", "kwarg"),
+    [
+        ("prop_manager", "prop_manager"),
+        ("camera_manager", "camera_manager"),
+        ("director_cfg", "director_cfg"),
+        ("events_cfg", "events_cfg"),
+        ("init_pose", "init_pose_cfg"),
+    ],
+)
+def test_partitioned_isaaclab_still_rejects_unsupported_options(simulation_app, option, kwarg):
+    """The MVP still rejects every partition option except contacts."""
+    from unigym.backends.isaaclab2.articulation_runtime import validate_options
+
+    class _Adapter:
+        def get_obs_requests(self):
+            return []
+
+    kwargs = {
+        "events_cfg": None,
+        "recorder": None,
+        "prop_manager": None,
+        "camera_manager": None,
+        "contact_manager": None,
+        "director_cfg": None,
+        "init_pose_cfg": None,
+    }
+    kwargs[kwarg] = object()
+
+    with pytest.raises(NotImplementedError, match=option):
+        validate_options(_Adapter(), **kwargs)

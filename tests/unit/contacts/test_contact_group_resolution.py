@@ -39,7 +39,31 @@ def test_contact_entries_resolve_the_reference_without_mutating_input():
         "left_hand_index_0_link",
         "left_hand_index_1_link",
     ]
+    assert resolved[0]["articulation"] == "g1"
     assert entry["sensor_bodies"] == {"contact_group": {"articulation": "g1", "group": "grasp"}}
+    assert "articulation" not in entry
+
+
+def test_contact_entries_reject_a_conflicting_explicit_owner():
+    """An explicit articulation must agree with the contact_group reference."""
+    entry = {
+        "name": "grasp",
+        "articulation": "g2",
+        "sensor_bodies": {"contact_group": {"articulation": "g1", "group": "grasp"}},
+        "frame": "world",
+    }
+
+    with pytest.raises(ValueError, match="conflicts with the contact_group reference owner"):
+        resolve_contact_entries([entry], "mujoco", contact_groups=_table())
+
+
+def test_explicit_articulation_survives_entry_resolution():
+    """A direct articulation key passes through unchanged."""
+    entry = {"name": "feet", "articulation": "g1", "sensor_bodies": ["foot"], "frame": "world"}
+
+    resolved = resolve_contact_entries([entry], "mujoco", contact_groups={})
+
+    assert resolved[0]["articulation"] == "g1"
 
 
 @pytest.mark.parametrize(

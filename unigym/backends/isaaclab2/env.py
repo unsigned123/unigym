@@ -669,6 +669,8 @@ class IsaaclabEnv(ManagerBasedEnv):
                 "with multiple articulations"
             )
         _articulation_runtime.bind_articulations(self)
+        if self.contact_manager is not None:
+            self.contact_manager.bind_env(self)
         self.obs_cache: dict = {}
 
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)

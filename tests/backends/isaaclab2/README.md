@@ -57,7 +57,10 @@ Planned coverage:
 - action-face and kind failure paths;
 - close lifecycle;
 - G1 contact-all per-body sensor rows (nested finger links, merged palms
-  excluded).
+  excluded);
+- two real articulations (Cartpole + G1) with one contact group per
+  articulation: per-articulation `all` inventories and `Robot` /
+  `Robot_<name>` prim scopes, never a global union.
 
 Cartpole is provided by the installed `isaaclab_cartpole` test pack. The test
 plan defines the allowed IsaacLab-provided asset boundary and any

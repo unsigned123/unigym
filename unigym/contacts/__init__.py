@@ -16,7 +16,10 @@ Public surface:
   cracker}`` resolve against the run's per-articulation native-body
   inventory and the run's declared props
   (``contacts.base.resolve_contact_entries``; name-addressing only, zero
-  hardcoded bodies).
+  hardcoded bodies).  The reference records the owning articulation; a
+  group may also declare ``articulation: <name>`` directly.  A run with
+  more than one articulation requires the owner, so a group never matches
+  bodies across articulations.
 
 Record channel: the env backends merge ``manager.read()`` into ``extra`` so
 the keys flow through CollectSink/BenchmarkSink into npz / episode buffers

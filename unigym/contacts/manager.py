@@ -28,7 +28,7 @@ Obs path (plan §4, decoupled from recording): adapters may request
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Callable, Optional, Protocol, cast, runtime_checkable
 
 import numpy as np
@@ -212,6 +212,42 @@ class ContactManager:
         self.backend.close()
 
 
+def _validate_articulation_scope(
+    specs: list[ContactGroupSpec],
+    articulation_names: Optional[Sequence[str]],
+) -> Optional[tuple[str, ...]]:
+    """Validate every group's owner against the run articulations.
+
+    Returns the articulation order forwarded to the backend, or ``None`` when
+    the caller did not supply one (direct manager construction).  An omitted
+    owner means "the only articulation"; it is legal only when the run
+    declares exactly one.
+    """
+    if articulation_names is None:
+        return None
+    names = tuple(str(name) for name in articulation_names)
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate articulation names declared by the run: {duplicates}")
+    for spec in specs:
+        if spec.articulation is None:
+            if len(names) > 1:
+                raise ValueError(
+                    f"contact {spec.name!r}: the run declares articulations "
+                    f"{list(names)}, so the group must name its owner with "
+                    f"articulation: <name> (or "
+                    f"sensor_bodies: {{contact_group: {{articulation: <name>, "
+                    f"group: <group>}}}})"
+                )
+            continue
+        if spec.articulation not in names:
+            raise ValueError(
+                f"contact {spec.name!r}: articulation {spec.articulation!r} "
+                f"is not declared by the run (declared: {list(names)})"
+            )
+    return names
+
+
 def build_contact_manager(
     cfg,
     backend: str,
@@ -221,6 +257,7 @@ def build_contact_manager(
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
     contact_assets: Optional[Mapping[str, str]] = None,
+    articulation_names: Optional[Sequence[str]] = None,
 ) -> Optional[ContactManager]:
     """collect_cli entry point.
 
@@ -251,6 +288,12 @@ def build_contact_manager(
             ``contacts: all``.  Backends use it to scope the all-bodies
             expansion (isaaclab reads the pre-clone USD inventory);
             ``None``/absent means no ``all`` inventory was declared.
+        articulation_names: the run's articulation declaration order.  When
+            given, every explicitly owned group must name a declared
+            articulation and every group in a multi-articulation run must
+            name an owner (no global union and no cross-articulation body
+            regex matching).  ``None`` keeps the historical direct-manager
+            construction path.
     """
     if not cfg:
         return None
@@ -270,7 +313,13 @@ def build_contact_manager(
     if len(set(names)) != len(names):
         dupes = sorted({n for n in names if names.count(n) > 1})
         raise ValueError(f"duplicate contact group names in yaml: {dupes}")
-    be = build_contact_backend(backend, specs, contact_assets=contact_assets)
+    scope_names = _validate_articulation_scope(specs, articulation_names)
+    be = build_contact_backend(
+        backend,
+        specs,
+        contact_assets=contact_assets,
+        articulation_names=scope_names,
+    )
     mgr = ContactManager(specs, be, device=device)
     if adapter_requests:
         mgr.register_obs_requests(adapter_requests)

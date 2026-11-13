@@ -18,6 +18,10 @@ import torch
 import isaaclab.utils.math as math_utils
 from isaaclab.envs.mdp.actions import JointPositionActionCfg
 
+from unigym.backends.isaaclab2.naming import (
+    articulation_prim_leaf,
+    articulation_scene_field,
+)
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.env.obs_catalog import ObsCatalog, ObsSpec, build_obs_catalog
@@ -37,10 +41,6 @@ __all__ = [
 _LABEL = "isaaclab2 backend"
 
 
-def _scene_field(name: str, first: bool, prefix: str = "robot") -> str:
-    return prefix if first else f"{prefix}_{name}"
-
-
 def validate_options(
     adapter,
     *,
@@ -52,7 +52,11 @@ def validate_options(
     director_cfg,
     init_pose_cfg,
 ) -> None:
-    """Reject the partition options this MVP does not implement."""
+    """Reject the partition options this MVP does not implement.
+
+    Contact groups ARE supported with multiple articulations (each group
+    owns one articulation); the remaining options below stay rejected.
+    """
     requests = adapter.get_obs_requests()
     if requests:
         raise NotImplementedError(
@@ -64,7 +68,6 @@ def validate_options(
     for option, value in (
         ("prop_manager", prop_manager),
         ("camera_manager", camera_manager),
-        ("contact_manager", contact_manager),
         ("director_cfg", director_cfg),
         ("events_cfg", events_cfg),
         ("init_pose", init_pose_cfg),
@@ -101,9 +104,8 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
         if profiles.get(spec.name) is None:
             raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no profile")
         asset_cfg = articulation_cfg(robot_realizations, spec.name)
-        first = index == 0
-        field = _scene_field(spec.name, first)
-        leaf = "Robot" if first else f"Robot_{spec.name}"
+        field = articulation_scene_field(spec.name, index)
+        leaf = articulation_prim_leaf(spec.name, index)
         prim_path = f"{ENV_REGEX_NS}/{leaf}"
         init = asset_cfg.init_state
         base_pos = tuple(float(v) for v in (getattr(init, "pos", None) or (0.0, 0.0, 0.0)))

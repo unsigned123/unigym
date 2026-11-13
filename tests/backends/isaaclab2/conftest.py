@@ -120,6 +120,12 @@ def cartpole_usd(pack_runtime) -> Path:
 
 
 @pytest.fixture
+def cartpole_articulation_cfg(cartpole_usd: Path):
+    """The real Cartpole ArticulationCfg with contact sensors enabled."""
+    return _cartpole_articulation_cfg(cartpole_usd)
+
+
+@pytest.fixture
 def g1_pack(pack_runtime):
     """Activate the G1 pack's data-only robot provider once per process."""
     return pack_runtime("g1").activate("g1")

@@ -564,11 +564,11 @@ class MujocoEnv:
         self._fixed_base_quat_w = np.array(
             [np.cos(self._spawn_yaw / 2), 0.0, 0.0, np.sin(self._spawn_yaw / 2)], dtype=np.float64
         )
-        # ---- feat/contact-manager: bind AFTER model/data exist (body ids,
-        # geom tables); no scene elements are needed (setup_scene is a no-op)
+        # ---- feat/contact-manager: the manager is bound AFTER init_tables
+        # builds the articulation/base-body tables (owner resolution and
+        # ``contacts: all`` read those bindings).  The attribute is set here
+        # so the wiring below sees the declared manager.
         self.contact_manager = contact_manager
-        if self.contact_manager is not None:
-            self.contact_manager.bind_env(self)
 
         # ---- feat/object-state: props runtime side (body ids + freejoint
         # addresses resolved against the compiled model, then the initial
@@ -640,6 +640,12 @@ class MujocoEnv:
             self._base_body_id = first.addresses.get("base_body_id", -1)
         else:  # pragma: no cover - the run layer requires articulations
             self._base_body_id = -1
+
+        # ---- contact manager binding: needs the articulation bindings and
+        # base-body aliases built by init_tables above; before the obs catalog
+        # so group_axes resolves the B/F axes.
+        if self.contact_manager is not None:
+            self.contact_manager.bind_env(self)
 
         # ---- obs cache (exactly the adapter's requests) ----
         self._obs_requests = adapter.get_obs_requests()
