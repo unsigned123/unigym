@@ -11,6 +11,7 @@ from unigym.actuators.ir import (
     normalize_actuation_group,
     normalize_actuation_groups,
     resolve_actuation_groups,
+    resolve_group_joints,
     validate_actuation_group,
     validate_actuation_groups,
     validate_drive_law_matrix,
@@ -263,6 +264,48 @@ def test_resolve_actuation_groups_returns_declaration_order_and_joint_set():
     assert [row.group.name for row in resolved] == ["hand", "body"]
     assert [row.joint_names for row in resolved] == [("finger",), ("shoulder", "elbow")]
     assert all(row.articulation == "arm" for row in resolved)
+
+
+def test_resolve_group_joints_expands_joint_sets_and_passes_explicit_joints():
+    """The realizer helper resolves sets and keeps explicit joints in order."""
+    groups = (
+        ActuationGroup(name="legs", law="standard_pd", joint_set="legs"),
+        ActuationGroup(name="arm", law="standard_pd", joints=("shoulder",)),
+    )
+
+    resolved = resolve_group_joints(
+        groups,
+        articulation="g1",
+        joint_sets={"legs": ("hip", "knee"), "arm": ("shoulder", "elbow")},
+    )
+
+    assert [row.group.name for row in resolved] == ["legs", "arm"]
+    assert [row.joint_names for row in resolved] == [("hip", "knee"), ("shoulder",)]
+    assert all(row.articulation == "g1" for row in resolved)
+
+
+def test_resolve_group_joints_unknown_joint_set_names_the_declared_sets():
+    """An unknown joint_set fails with the profile vocabulary in the error."""
+    groups = (ActuationGroup(name="legs", law="standard_pd", joint_set="feet"),)
+
+    with pytest.raises(
+        ActuationError,
+        match=r"joint_set 'feet' is unknown.*\['legs'\]",
+    ):
+        resolve_group_joints(groups, articulation="g1", joint_sets={"legs": ("hip",)})
+
+
+def test_resolve_group_joints_does_not_validate_joint_coverage():
+    """Partial coverage resolves: driven-joint coverage belongs to run/build."""
+    groups = (ActuationGroup(name="one", law="standard_pd", joints=("hip",)),)
+
+    resolved = resolve_group_joints(
+        groups,
+        articulation="g1",
+        joint_sets={"body": ("hip", "knee", "ankle")},
+    )
+
+    assert [row.joint_names for row in resolved] == [("hip",)]
 
 
 def test_validate_actuation_group_law_matrix():

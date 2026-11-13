@@ -482,8 +482,11 @@ naming the clean conda environment, the `UNIGYM_ISAACLAB2_ASSET_CACHE`
 repository variable pointing at the provisioned Cartpole cache, and a `conda`
 executable visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the
 runner). The cache directory must contain `cartpole.usd` and its `Props/`
-dependency; a missing cache fails the strict lane rather than skipping. A
-skipped `isaaclab2`
+dependency; a missing cache fails the strict lane rather than skipping. The
+G1 builder tests additionally read `UNIGYM_ISAACLAB2_G1_ASSET`, which must
+name the provisioned 43-DoF with-hand `g1.usd` root (its `configuration/`
+folder sits beside it); a missing or non-file value fails the strict lane
+rather than skipping. A skipped `isaaclab2`
 job is a visible skip, not a green pass: the job uses neither
 `continue-on-error` nor an echo/`exit 0` stub, and it installs no Isaac
 dependency itself — the external conda environment owns them.

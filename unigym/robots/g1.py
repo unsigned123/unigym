@@ -2,15 +2,17 @@
 
 The profile carries authoring data only (joint sets, standby pose, canonical
 body facts and bindings, declared assets and action faces).  The isaaclab
-``ArticulationCfg`` realization -- asset choice, contact-sensor patch, prim
-path, spawn conversion, actuator groups and gain/effort tables -- lives in
-:mod:`unigym.backends.isaaclab2.robots.g1`; the mujoco family consumes this
-profile as pure constants.
+``ArticulationCfg`` realization is built through the generic backend builder
+from this profile, the run-level ``spec.model`` USD asset and the run-level
+``ArticulationSpec.actuation`` groups; the mujoco family consumes this profile
+as pure constants.
 
-Asset: ``G1_29DOF_CFG`` (the 29-DoF ``g1.usd`` under ISAAC_NUCLEUS_DIR,
-isaaclab_assets/robots/unitree.py:388-536) — NOT ``G1_CFG`` /
-``G1_MINIMAL_CFG`` (those carry the old 37-DoF torso/elbow_roll/finger-joint
-asset whose joint set cannot match the SONIC policy).
+Asset: the isaaclab path takes the 43-DoF with-hand ``g1.usd`` from the
+run-level model reference.  The older 29-DoF single-file ``g1.usd`` (Isaac 4.5)
+and the 43-DoF ``configuration/`` build (Isaac 5.0) are both supported by the
+neutral profile; ``actuate_hands`` opts into the finger action face.  ``G1_CFG``
+/ ``G1_MINIMAL_CFG`` are not used (their old 37-DoF joint set cannot match the
+SONIC policy).
 
 Pure-data constants live in :mod:`unigym.robots.g1_constants`
 (isaaclab-free; the single source of truth for tests + contract doc).
@@ -71,47 +73,29 @@ def _expand_default_q(default_q: Dict[str, float]) -> Dict[str, float]:
 
 
 def make_g1_profile(
-    stiffness: Optional[Dict] = None,
-    damping: Optional[Dict] = None,
-    effort: Optional[Dict] = None,
-    hands_kp: Optional[float] = None,
-    hands_kd: Optional[float] = None,
-    prim_path: str = "{ENV_REGEX_NS}/Robot",
     usd_path: Optional[str] = None,
     actuate_hands: bool = False,
     default_q: Optional[Dict] = None,
 ) -> RobotProfile:
     """Build the neutral G1 29-DoF :class:`RobotProfile`.
 
-    The gain/prim-path parameters are accepted here because the run config
-    declares them on the robot section; they are consumed by the backend
-    realizer, never stored on the neutral profile (only ``usd_path`` and
-    ``actuate_hands`` change profile data: the declared asset and the hand
-    action face).
+    Only neutral profile data is accepted here.  Backend construction values
+    (gains, effort limits, prim path, spawn options, collision group, soft
+    joint-limit factor) are declared at the run level and consumed by the
+    backend realizer.
 
     Args:
-        stiffness/damping/effort: optional per-regex overrides merged into
-            the playground-PD defaults (keys must match existing group
-            regexes).  ``effort`` + hands gains let a foreign task's actuator
-            table be expressible in config without touching the constants.
-        hands_kp/hands_kd: the (non-policy) finger group gains; defaults
-            keep the upstream G1_29DOF_CFG values.
-        prim_path: framework-standard clone regex (asset hardcodes another).
         usd_path: local USD override (Nucleus localization); declared as the
-            profile's ``usd`` asset when present, otherwise the backend's
-            official asset stays in effect.
-        actuate_hands: include the "hands" actuator group and the ``hand``
-            action face.  Set ``True`` ONLY for the 43-DoF
-            ``g1_29dof_with_hand_rev_1_0`` asset (Isaac 5.0
-            ``configuration/`` build / ``G1_with_hand``); the default
-            29-DoF Isaac 4.5 ``g1.usd`` has no finger DOFs.
+            profile's ``usd`` asset when present.  A run-level ``spec.model``
+            still wins over this declared asset.
+        actuate_hands: include the ``hand`` action face.  Set ``True`` ONLY for
+            the 43-DoF ``g1_29dof_with_hand_rev_1_0`` asset (Isaac 5.0
+            ``configuration/`` build / ``G1_with_hand``); the default 29-DoF
+            Isaac 4.5 ``g1.usd`` has no finger DOFs.
         default_q: optional per-joint override of the SONIC standby q0
             (same channel as the built-in profiles; lets a non-SONIC policy
             spawn at its own q0 — drives spawn pose AND the controller q0).
     """
-    # Backend-owned construction params: accepted for config compatibility
-    # and consumed by the backend realizer, never stored on the profile.
-    del stiffness, damping, effort, hands_kp, hands_kd, prim_path
     # default_joint_pos covers the FULL 43-joint articulation —
     # the 29 SONIC policy joints + the 14 finger joints at their rest
     # pose (0).  Drives spawn pose, the controller q0 (policy joints)

@@ -411,23 +411,36 @@ def _profile_section(art: ArticulationSpec) -> dict[str, JsonValue]:
     return section
 
 
+_REALIZER_PARAMS = (
+    "prim_path",
+    "spawn_options",
+    "collision_group",
+    "debug_vis",
+    "soft_joint_pos_limit_factor",
+)
+"""Robot-section params owned by the backend realizer, never the profile."""
+
+
 def _profile_for(art: ArticulationSpec) -> _ProfileBuild:
     """Build the neutral :class:`RobotProfile` of one robot articulation.
 
     ``params.profile`` is the reserved selector for runs whose articulation
     name is not the robot type (e.g. a second ``g1b`` articulation reuses
-    the ``g1`` profile); it never reaches the profile factory.  The factory
-    params are returned alongside the profile because the backend robot
-    realizer owns the construction values that are not neutral profile data.
+    the ``g1`` profile); it never reaches the profile factory.  The
+    realizer-only params (``prim_path``, ``spawn_options``,
+    ``collision_group``, ``debug_vis``, ``soft_joint_pos_limit_factor``) are
+    split off before the neutral factory and returned for the backend robot
+    realizer; they are never profile data.
     """
     section = _profile_section(art)
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
     selector = params.pop("profile", None)
+    realizer_params = {key: params.pop(key) for key in _REALIZER_PARAMS if key in params}
     if selector is not None:
-        section["params"] = params
         section["name"] = str(selector)
-    return {"profile": build_robot_profile(section), "params": params, "spec": art}
+    section["params"] = params
+    return {"profile": build_robot_profile(section), "params": realizer_params, "spec": art}
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
@@ -554,7 +567,7 @@ def _reject_inventory_mode_refs(
     """Fail fast when a run-level contact group references an ``all``/``none``.
 
     D2 resolves only explicit ``declared`` inventory groups; materializing
-    omitted-contacts ``all`` is D5 work.
+    omitted-contacts ``all`` is D6 work.
     """
     if not is_object_sequence(contacts_cfg):
         return
@@ -575,7 +588,7 @@ def _reject_inventory_mode_refs(
                 f"contact_group reference {articulation}.{group} targets an "
                 f"articulation whose contacts mode is {modes[articulation]!r}; "
                 f"D2 requires an explicit declared group (omitted-contacts "
-                f"materialization is D5)"
+                f"materialization is D6)"
             )
 
 

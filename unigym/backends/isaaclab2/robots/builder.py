@@ -10,6 +10,11 @@ callback.
 The module body imports no IsaacLab symbol.  Callers either pass the cfg
 classes through ``classes`` (offline construction) or let the builder import
 the real classes lazily inside :func:`build_articulation_cfg`.
+
+``spawn_options`` merges flat spawn-constructor props verbatim; the nested
+``rigid_props``/``articulation_props`` mappings are constructed through the
+injected :class:`RigidBodyPropertiesCfg` / :class:`ArticulationRootPropertiesCfg`
+schema classes.
 """
 
 from __future__ import annotations
@@ -30,8 +35,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
 
 __all__ = ["build_articulation_cfg"]
 
-_CLASS_KEYS = ("ArticulationCfg", "UsdFileCfg", "UrdfFileCfg")
+_CLASS_KEYS = (
+    "ArticulationCfg",
+    "UsdFileCfg",
+    "UrdfFileCfg",
+    "RigidBodyPropertiesCfg",
+    "ArticulationRootPropertiesCfg",
+)
 """The injected cfg-class keys the builder constructs."""
+
+_NESTED_PROP_KEYS = ("rigid_props", "articulation_props")
+"""Spawn-option keys whose mapping value is a schema cfg, not a flat prop."""
 
 _SUPPORTED_FORMATS = ("usd", "urdf")
 """The asset formats this backend declares for robot articulations."""
@@ -48,18 +62,26 @@ class _CfgClasses:
     init_state: Callable[..., object]
     usd: Callable[..., object]
     urdf: Callable[..., object]
+    rigid_props: Callable[..., object]
+    articulation_props: Callable[..., object]
 
 
 def _resolve_classes(classes: Mapping[str, object] | None) -> _CfgClasses:
     """Return the cfg-class table, lazily importing the real classes."""
     if classes is None:
         from isaaclab.assets import ArticulationCfg
+        from isaaclab.sim.schemas import (
+            ArticulationRootPropertiesCfg,
+            RigidBodyPropertiesCfg,
+        )
         from isaaclab.sim.spawners import UrdfFileCfg, UsdFileCfg
 
         table: Mapping[str, object] = {
             "ArticulationCfg": ArticulationCfg,
             "UsdFileCfg": UsdFileCfg,
             "UrdfFileCfg": UrdfFileCfg,
+            "RigidBodyPropertiesCfg": RigidBodyPropertiesCfg,
+            "ArticulationRootPropertiesCfg": ArticulationRootPropertiesCfg,
         }
     else:
         table = classes
@@ -93,7 +115,26 @@ def _resolve_classes(classes: Mapping[str, object] | None) -> _CfgClasses:
         raise TypeError(
             f"isaaclab2 robot builder: classes['UrdfFileCfg'] must be a class, got {urdf!r}"
         )
-    return _CfgClasses(articulation=articulation, init_state=init_state, usd=usd, urdf=urdf)
+    rigid_props = table["RigidBodyPropertiesCfg"]
+    if not callable(rigid_props):
+        raise TypeError(
+            f"isaaclab2 robot builder: classes['RigidBodyPropertiesCfg'] must be a "
+            f"class, got {rigid_props!r}"
+        )
+    articulation_props = table["ArticulationRootPropertiesCfg"]
+    if not callable(articulation_props):
+        raise TypeError(
+            f"isaaclab2 robot builder: classes['ArticulationRootPropertiesCfg'] must "
+            f"be a class, got {articulation_props!r}"
+        )
+    return _CfgClasses(
+        articulation=articulation,
+        init_state=init_state,
+        usd=usd,
+        urdf=urdf,
+        rigid_props=rigid_props,
+        articulation_props=articulation_props,
+    )
 
 
 def _selected_asset_ref(
@@ -155,6 +196,26 @@ def _merge_spawn_options(
     return merged
 
 
+def _spawn_prop_cfg(classes: _CfgClasses, key: str, value: object) -> object:
+    """Construct one nested schema prop from its mapping (non-mappings pass)."""
+    if not isinstance(value, Mapping):
+        return value
+    cfg_cls = classes.rigid_props if key == "rigid_props" else classes.articulation_props
+    return cfg_cls(**dict(value))
+
+
+def _convert_spawn_options(
+    classes: _CfgClasses,
+    options: dict[str, object],
+) -> dict[str, object]:
+    """Convert nested prop mappings and keep every flat spawn prop verbatim."""
+    converted = dict(options)
+    for key in _NESTED_PROP_KEYS:
+        if key in converted:
+            converted[key] = _spawn_prop_cfg(classes, key, converted[key])
+    return converted
+
+
 def _spawn_cfg(
     classes: _CfgClasses,
     spec: ArticulationSpec,
@@ -168,7 +229,8 @@ def _spawn_cfg(
             "usd_path": ref,
             "activate_contact_sensors": True,
         }
-        return classes.usd(**_merge_spawn_options(spec, base, spawn_options))
+        merged = _merge_spawn_options(spec, base, spawn_options)
+        return classes.usd(**_convert_spawn_options(classes, merged))
     base = {
         "asset_path": ref,
         "fix_base": spec.root in _FIXED_ROOTS,
@@ -176,7 +238,8 @@ def _spawn_cfg(
         "collision_from_visuals": False,
         "make_instanceable": True,
     }
-    return classes.urdf(**_merge_spawn_options(spec, base, spawn_options))
+    merged = _merge_spawn_options(spec, base, spawn_options)
+    return classes.urdf(**_convert_spawn_options(classes, merged))
 
 
 def _finite_number(value: object, spec: ArticulationSpec, field: str) -> float:
@@ -233,6 +296,7 @@ def build_articulation_cfg(
     spawn_options: Mapping[str, object] | None = None,
     collision_group: int = 0,
     debug_vis: bool = False,
+    soft_joint_pos_limit_factor: float = 1.0,
 ) -> object:
     """Build one generic IsaacLab ``ArticulationCfg`` from neutral robot data.
 
@@ -246,9 +310,12 @@ def build_articulation_cfg(
         classes: optional cfg-class table for offline construction; ``None``
             imports the real IsaacLab classes lazily.
         default_pos: explicit root position when ``spec.spawn`` is absent.
-        spawn_options: flat spawn-constructor props merged over the builder's.
+        spawn_options: spawn-constructor props merged over the builder's; flat
+            keys pass verbatim and ``rigid_props``/``articulation_props``
+            mappings become schema cfg objects.
         collision_group: the articulation's collision group.
         debug_vis: whether the articulation prim renders debug visuals.
+        soft_joint_pos_limit_factor: the IsaacLab soft joint-limit scale.
 
     Raises:
         ValueError: A missing/unsupported asset format, a missing asset
@@ -291,4 +358,5 @@ def build_articulation_cfg(
         actuators=dict(planned),
         collision_group=collision_group,
         debug_vis=debug_vis,
+        soft_joint_pos_limit_factor=soft_joint_pos_limit_factor,
     )

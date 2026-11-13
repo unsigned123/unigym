@@ -31,6 +31,7 @@ __all__ = [
     "normalize_actuation_group",
     "normalize_actuation_groups",
     "resolve_actuation_groups",
+    "resolve_group_joints",
     "validate_actuation_group",
     "validate_actuation_groups",
     "validate_drive_law_matrix",
@@ -409,6 +410,59 @@ def resolve_actuation_groups(
         if group.joint_set is not None:
             assert joint_sets is not None
             joint_names = tuple(str(joint) for joint in joint_sets[group.joint_set])
+        else:
+            joint_names = tuple(str(joint) for joint in (group.joints or ()))
+        resolved.append(
+            ResolvedActuationGroup(
+                articulation=str(articulation),
+                group=group,
+                joint_names=joint_names,
+            )
+        )
+    return tuple(resolved)
+
+
+def resolve_group_joints(
+    groups: Sequence[ActuationGroup],
+    *,
+    articulation: str,
+    joint_sets: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[ResolvedActuationGroup, ...]:
+    """Resolve every ``joint_set`` against a vocabulary (no coverage check).
+
+    This is the backend-realizer seam for an articulation whose actuation
+    groups cover a subset of the profile's joints (the G1 IsaacLab path drives
+    the 29 policy joints of a 43-joint asset).  Unlike
+    :func:`resolve_actuation_groups`, it performs no exactly-once coverage
+    validation; the run layer owns driven-joint coverage.  A ``joint_set``
+    must be declared in ``joint_sets``; explicit ``joints`` pass through.
+
+    Raises:
+        ActuationError: A non-group entry or an unknown ``joint_set``.
+    """
+    entries = tuple(groups)
+    for group in entries:
+        if not isinstance(group, ActuationGroup):
+            raise ActuationError(f"actuation groups must be ActuationGroup records, got {group!r}")
+    declared_sets: dict[str, tuple[str, ...]] = (
+        {}
+        if joint_sets is None
+        else {
+            str(set_name): tuple(str(joint) for joint in members)
+            for set_name, members in joint_sets.items()
+        }
+    )
+    known_sets = sorted(declared_sets)
+    resolved: list[ResolvedActuationGroup] = []
+    for group in entries:
+        if group.joint_set is not None:
+            if group.joint_set not in declared_sets:
+                raise ActuationError(
+                    f"actuation group {group.name!r} joint_set "
+                    f"{group.joint_set!r} is unknown; declared joint sets are "
+                    f"{known_sets}"
+                )
+            joint_names = declared_sets[group.joint_set]
         else:
             joint_names = tuple(str(joint) for joint in (group.joints or ()))
         resolved.append(

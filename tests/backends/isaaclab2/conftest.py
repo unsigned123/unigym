@@ -13,6 +13,7 @@ from tests._support.envs import require_optional_module
 
 CACHE_ENV = "UNIGYM_ISAACLAB2_ASSET_CACHE"
 CACHE_FILE = "cartpole.usd"
+G1_ASSET_ENV = "UNIGYM_ISAACLAB2_G1_ASSET"
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
 
@@ -30,6 +31,24 @@ def _cartpole_usd() -> Path:
         pytest.fail(
             f"{CACHE_ENV}={cache!r} has no {CACHE_FILE}; provision the "
             "Cartpole asset cache before running the IsaacLab 2 lane"
+        )
+    return usd
+
+
+def _g1_usd() -> Path:
+    """The provisioned 43-DoF G1 USD; a missing lane asset fails the lane."""
+    value = os.environ.get(G1_ASSET_ENV)
+    if not value:
+        pytest.fail(
+            f"{G1_ASSET_ENV} is not set: point it at the provisioned 43-DoF G1 "
+            f"USD root (g1.usd with its configuration/ folder); the backend "
+            f"lane never downloads assets"
+        )
+    usd = Path(value)
+    if not usd.is_file():
+        pytest.fail(
+            f"{G1_ASSET_ENV}={value!r} is not a file; provision the 43-DoF G1 "
+            "asset before running the IsaacLab 2 lane"
         )
     return usd
 
@@ -136,6 +155,13 @@ def cartpole_usd() -> Path:
     """Resolve the optional lane and cached USD before Kit is launched."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     return _cartpole_usd()
+
+
+@pytest.fixture(scope="session")
+def g1_usd() -> Path:
+    """Resolve the provisioned 43-DoF G1 USD before Kit is launched."""
+    require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
+    return _g1_usd()
 
 
 @pytest.fixture

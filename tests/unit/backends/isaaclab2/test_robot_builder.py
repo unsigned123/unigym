@@ -39,10 +39,20 @@ class _UrdfFileCfg(_Cfg):
     pass
 
 
+class _RigidBodyPropertiesCfg(_Cfg):
+    pass
+
+
+class _ArticulationRootPropertiesCfg(_Cfg):
+    pass
+
+
 _CLASSES = {
     "ArticulationCfg": _ArticulationCfg,
     "UsdFileCfg": _UsdFileCfg,
     "UrdfFileCfg": _UrdfFileCfg,
+    "RigidBodyPropertiesCfg": _RigidBodyPropertiesCfg,
+    "ArticulationRootPropertiesCfg": _ArticulationRootPropertiesCfg,
 }
 
 
@@ -96,6 +106,7 @@ def _build(
     classes=None,
     default_pos=None,
     spawn_options=None,
+    soft_joint_pos_limit_factor=1.0,
 ):
     return build_articulation_cfg(
         _profile() if profile is None else profile,
@@ -107,6 +118,7 @@ def _build(
         classes=_CLASSES if classes is None else classes,
         default_pos=default_pos,
         spawn_options=spawn_options,
+        soft_joint_pos_limit_factor=soft_joint_pos_limit_factor,
     )
 
 
@@ -127,6 +139,7 @@ def test_usd_asset_dispatch_builds_usd_spawn():
     assert state.kwargs["joint_vel"] == {".*": 0.0}
     assert cfg.kwargs["collision_group"] == 0
     assert cfg.kwargs["debug_vis"] is False
+    assert cfg.kwargs["soft_joint_pos_limit_factor"] == 1.0
 
 
 @pytest.mark.parametrize(
@@ -308,6 +321,41 @@ def test_spawn_options_merge_into_the_spawn_constructor():
     }
 
 
+def test_nested_spawn_props_become_schema_cfgs_and_flat_props_stay_verbatim():
+    """rigid_props/articulation_props mappings convert; flat props pass through."""
+    cfg = _build(
+        spawn_options={
+            "rigid_props": {"linear_damping": 0.1, "max_depenetration_velocity": 1.0},
+            "articulation_props": {"enabled_self_collisions": False},
+            "visible": False,
+        }
+    )
+
+    rigid = cfg.kwargs["spawn"].kwargs["rigid_props"]
+    root = cfg.kwargs["spawn"].kwargs["articulation_props"]
+    assert isinstance(rigid, _RigidBodyPropertiesCfg)
+    assert rigid.kwargs == {"linear_damping": 0.1, "max_depenetration_velocity": 1.0}
+    assert isinstance(root, _ArticulationRootPropertiesCfg)
+    assert root.kwargs == {"enabled_self_collisions": False}
+    assert cfg.kwargs["spawn"].kwargs["visible"] is False
+
+
+def test_explicit_soft_joint_pos_limit_factor_reaches_the_cfg():
+    """The builder forwards the soft joint-limit scale to ArticulationCfg."""
+    cfg = _build(soft_joint_pos_limit_factor=0.9)
+
+    assert cfg.kwargs["soft_joint_pos_limit_factor"] == 0.9
+
+
+def test_nested_prop_cfg_objects_pass_through_unchanged():
+    """An already-built schema cfg is not rebuilt from a mapping."""
+    rigid = _RigidBodyPropertiesCfg(linear_damping=0.2)
+
+    cfg = _build(spawn_options={"rigid_props": rigid})
+
+    assert cfg.kwargs["spawn"].kwargs["rigid_props"] is rigid
+
+
 @pytest.mark.parametrize(
     ("asset_format", "key"),
     [("usd", "usd_path"), ("usd", "activate_contact_sensors"), ("urdf", "asset_path")],
@@ -319,7 +367,16 @@ def test_duplicate_spawn_option_fails(asset_format, key):
         _build(asset_format=asset_format, spawn_options={key: "override"})
 
 
-@pytest.mark.parametrize("missing_key", ["ArticulationCfg", "UsdFileCfg", "UrdfFileCfg"])
+@pytest.mark.parametrize(
+    "missing_key",
+    [
+        "ArticulationCfg",
+        "UsdFileCfg",
+        "UrdfFileCfg",
+        "RigidBodyPropertiesCfg",
+        "ArticulationRootPropertiesCfg",
+    ],
+)
 def test_missing_class_key_fails(missing_key):
     """Every declared class key is required."""
     classes = {key: value for key, value in _CLASSES.items() if key != missing_key}
