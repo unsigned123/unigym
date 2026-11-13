@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from unigym.actuators import ActuationGroup
 from unigym.backends.registry import backend_info
-from unigym.robots import build_robot_profile
 from unigym.run.build import _realize_profiles
 from unigym.scenes.articulation import ArticulationSpec
+from tests._support.profiles import fixture_profile
 
 
 def test_mujoco_has_no_robot_realization() -> None:
     """Mujoco consumes neutral profiles and builds no engine robot object."""
     builds = {
-        "g1": {
-            "profile": build_robot_profile({"name": "g1"}),
+        "fixture_arm": {
+            "profile": fixture_profile(),
             "params": {},
             "spec": ArticulationSpec(
-                name="g1",
+                name="fixture_arm",
                 actuation=(
                     ActuationGroup(
                         name="body",
@@ -54,7 +54,7 @@ def test_realizer_receives_profile_spec_params_and_asset_plan() -> None:
     )
     builds = {
         "arm": {
-            "profile": build_robot_profile({"name": "g1"}),
+            "profile": fixture_profile(),
             "params": {"x": 1},
             "spec": spec,
         }

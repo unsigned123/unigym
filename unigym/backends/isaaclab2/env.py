@@ -240,7 +240,7 @@ def _configure_robot_scene(
     # dex3 finger face on with-hand assets) -- one preserve_order term
     # per declared entry, field name == the NamedAction entry key
     # (declaration-becomes-capability, same rule as the prop terms
-    # above).  ``None`` (every profile built without actuate_hands)
+    # above).  ``None`` (a profile without extra action faces)
     # leaves the action surface untouched.
     for term_name, term_joints in (robot_profile.action_faces or {}).items():
         if hasattr(cfg.actions, term_name):

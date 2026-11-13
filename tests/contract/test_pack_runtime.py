@@ -629,13 +629,12 @@ def test_manifest_robot_target_must_be_callable(tmp_path: Path) -> None:
     ("item_id", "reason"),
     [
         ("Acme.Arm", "lowercase snake_case"),
-        ("g1", "reserved"),
     ],
 )
 def test_manifest_robot_name_is_validated_before_registration(
     tmp_path: Path, item_id: str, reason: str
 ) -> None:
-    """The item id uses the external grammar and cannot take a built-in name."""
+    """The item id uses the external grammar."""
     root = tmp_path / "robot_bad_name"
     _write_code_pack(
         root,

@@ -78,36 +78,6 @@ def test_profile_base_height_is_neutral_optional_data():
         _profile(base_height=float("nan"))
 
 
-def test_g1_profile_carries_base_height_and_no_dead_gain_tables():
-    """G1 base height is profile data; dead effort/gain/hand tables are gone."""
-    from unigym.robots import build_robot_profile
-    from unigym.robots import g1_constants as g1c
-
-    profile = build_robot_profile({"name": "g1"})
-    assert profile.base_height == pytest.approx(0.78)
-    removed = (
-        "G1_SPAWN_HEIGHT",
-        "G1_EFFORT_LEGS",
-        "G1_EFFORT_FEET",
-        "G1_EFFORT_WAIST",
-        "G1_EFFORT_ARMS",
-        "G1_KP_LEGS",
-        "G1_KD_LEGS",
-        "G1_KP_FEET",
-        "G1_KD_FEET",
-        "G1_KP_WAIST",
-        "G1_KD_WAIST",
-        "G1_KP_ARMS",
-        "G1_KD_ARMS",
-        "G1_HAND_EXPRS",
-        "G1_KP_HANDS",
-        "G1_KD_HANDS",
-        "G1_EFFORT_HANDS",
-    )
-    for name in removed:
-        assert not hasattr(g1c, name), name
-
-
 def test_profile_has_no_body_parts_or_robot_asset_fields():
     """The hard cutover leaves no compatibility fields."""
     import dataclasses

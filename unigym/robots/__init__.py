@@ -1,14 +1,11 @@
-"""Backend-neutral robot profile registry (lazy-loaded factories).
+"""Backend-neutral robot profile registry.
 
 Every factory returns a :class:`~unigym.robots.base.RobotProfile`; nothing in
-this package imports a backend or an engine.  The shipped factories are loaded
-on first attribute access (PEP 562) so the built-in table stays the single,
-explicit name -> factory map.
-
-``ROBOT_REGISTRY`` is the authoritative *external-only* registry.  It never
-contains the shipped ``g1`` / ``gr1`` factories: those remain in the private
-``_FACTORIES`` table and are consulted first by :func:`build_robot_profile`.
-Pack code registers external factories through :func:`register_robot`.
+this package imports a backend or an engine.  ``ROBOT_REGISTRY`` is the
+authoritative registry: robot data and factories come from external packs, not
+from a hard-coded core table.  Pack code registers through
+:func:`register_robot`; resource-backed profiles are registered by the pack
+runtime.
 """
 
 from __future__ import annotations
@@ -31,19 +28,10 @@ from .base import (
 if TYPE_CHECKING:
     from .data import load_robot_profile
 
-# registry name -> (module, factory function)
-_FACTORIES = {
-    "g1": ("g1", "make_g1_profile"),
-    "gr1": ("gr1", "make_gr1_profile"),
-}
-
 _ROBOT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 
-_BUILTIN_FACTORY_NAMES = frozenset(fn for _module, fn in _FACTORIES.values())
-_RESERVED_NAMES = frozenset(_FACTORIES) | _BUILTIN_FACTORY_NAMES
-
 ROBOT_REGISTRY: dict[str, Callable[..., RobotProfile]] = {}
-"""External robot factories by name; shipped robots are not copied here."""
+"""Registered robot factories by name."""
 
 
 def _load(mod_name: str, fn_name: str) -> Callable[..., RobotProfile]:
@@ -54,18 +42,11 @@ def _load(mod_name: str, fn_name: str) -> Callable[..., RobotProfile]:
 
 
 def _resolve_robot(name: str) -> Callable[..., RobotProfile]:
-    """Resolve one name: shipped factory first, then the external registry."""
-    builtin = _FACTORIES.get(name)
-    if builtin is not None:
-        module, function = builtin
-        return _load(module, function)
+    """Resolve one name from the external robot registry."""
     external = ROBOT_REGISTRY.get(name)
     if external is not None:
         return external
-    raise AttributeError(
-        f"unknown robot {name!r}; built-in robots are {sorted(_FACTORIES)} and "
-        f"registered robots are {sorted(ROBOT_REGISTRY)}"
-    )
+    raise AttributeError(f"unknown robot {name!r}; registered robots are {sorted(ROBOT_REGISTRY)}")
 
 
 def _factory_label(factory: object) -> str:
@@ -85,19 +66,13 @@ def validate_robot_registration(name: str, factory: Callable[..., RobotProfile])
     no earlier registration behind.
 
     Raises:
-        ValueError: The name is malformed, reserved for a shipped robot or
-            factory, already registered, or the factory is not callable or is
-            already registered under another name.
+        ValueError: The name is malformed, already registered, or the factory
+            is not callable or is already registered under another name.
     """
     if not isinstance(name, str) or not _ROBOT_NAME_RE.fullmatch(name):
         raise ValueError(
             f"robot name {name!r} must be lowercase snake_case, optionally "
             f"dot-namespaced (e.g. 'acme.arm')"
-        )
-    if name in _RESERVED_NAMES:
-        raise ValueError(
-            f"robot name {name!r} is reserved for a shipped robot or factory; "
-            f"reserved names are {sorted(_RESERVED_NAMES)}"
         )
     existing = ROBOT_REGISTRY.get(name)
     if existing is not None:
@@ -117,25 +92,14 @@ def validate_robot_registration(name: str, factory: Callable[..., RobotProfile])
             f"{alias!r}; one factory owns exactly one name, so it cannot also "
             f"register as {name!r}"
         )
-    for builtin_name, (module_name, function_name) in _FACTORIES.items():
-        if (
-            getattr(factory, "__module__", None) == f"{__name__}.{module_name}"
-            and getattr(factory, "__qualname__", None) == function_name
-        ):
-            raise ValueError(
-                f"robot factory {_factory_label(factory)} is the shipped factory "
-                f"for {builtin_name!r}; one factory owns exactly one name, so it "
-                f"cannot also register as {name!r}"
-            )
 
 
 def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[..., RobotProfile]:
     """Register one external robot factory in the process-global registry.
 
     The name is the manifest item id used verbatim: lowercase snake_case with
-    optional dot namespacing.  It is never trimmed.  Shipped names and factory
-    function names are reserved, duplicates always fail, and one factory owns
-    exactly one name.
+    optional dot namespacing.  It is never trimmed.  Duplicates always fail,
+    and one factory owns exactly one name.
 
     Args:
         name: Robot name a run config selects in the articulation ``name``.
@@ -167,11 +131,8 @@ def restore_robots(snapshot: Mapping[str, Callable[..., RobotProfile]]) -> None:
 def __getattr__(name: str) -> Any:
     if name == "load_robot_profile":
         return _load("data", "load_robot_profile")
-    if name in _FACTORIES or name in ROBOT_REGISTRY:
+    if name in ROBOT_REGISTRY:
         return _resolve_robot(name)
-    for module, function in _FACTORIES.values():  # also expose make_*_profile directly
-        if name == function:
-            return _load(module, function)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -183,9 +144,9 @@ def build_robot_profile(section: dict[str, JsonValue]) -> RobotProfile:
     data (joint order / q0 / assets / action faces), never a policy and never
     a backend object.
 
-    Resolution goes through one helper: a shipped factory first, then the
-    external registry.  A missing name raises ``AttributeError`` so the
-    existing ``Run(robot=...)`` error path is unchanged.
+    Resolution goes through the external registry.  A missing name raises
+    ``AttributeError`` so the existing ``Run(robot=...)`` error path is
+    unchanged.
     """
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}

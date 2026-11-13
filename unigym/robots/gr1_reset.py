@@ -3,8 +3,8 @@
 The audited GR1 reset is NOT a single qpos0 -- it is a four-stage chain
 (docs/audits/v063_gr1_control_chain_audit.md §7, robocasa stack):
 
-  1. ``init_qpos`` (17 body joints, `GR1_INIT_QPOS`) + zero noise -- the
-     profile q0 the mujoco backend writes on every reset (B7 face).
+  1. ``init_qpos`` (17 body joints from the neutral profile) + zero noise --
+     the profile q0 the mujoco backend writes on every reset (B7 face).
   2. 250 substeps of zero action settle with the PD goal pinned to the
      stage-1 qpos (``composite_controller.reset()`` == our actuator-seam
      targets held at q0); objects re-placed by the placement stage settle
@@ -31,7 +31,25 @@ from typing import Callable, Dict, Optional
 
 import numpy as np
 
-from .gr1_constants import GR1_COTRAIN_POSE
+#: cotrain real-robot arm pose (cotrain_utils.py:7-23; 14 arm joints, the
+#: waist is NOT in the table -- audit §7 stage 4 applies it with per-joint
+#: U(-0.2, 0.2) noise on top).
+GR1_COTRAIN_POSE: Dict[str, float] = {
+    "robot0_r_shoulder_pitch": -0.22963779,
+    "robot0_r_shoulder_roll": -0.38363408,
+    "robot0_r_shoulder_yaw": 0.14360377,
+    "robot0_r_elbow_pitch": -1.5289252,
+    "robot0_r_wrist_yaw": -0.2897802,
+    "robot0_r_wrist_roll": -0.07134621,
+    "robot0_r_wrist_pitch": -0.04550289,
+    "robot0_l_shoulder_pitch": -0.10933163,
+    "robot0_l_shoulder_roll": 0.43292055,
+    "robot0_l_shoulder_yaw": -0.15983289,
+    "robot0_l_elbow_pitch": -1.48233023,
+    "robot0_l_wrist_yaw": 0.2359135,
+    "robot0_l_wrist_roll": 0.26184522,
+    "robot0_l_wrist_pitch": 0.00830735,
+}
 
 # ---------------------------------------------------------------------------
 # stage constants (audit §7)

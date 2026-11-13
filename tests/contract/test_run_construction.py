@@ -5,8 +5,19 @@ from __future__ import annotations
 import pytest
 
 from unigym.errors import ConfigError
+from unigym.robots import register_robot, restore_robots, snapshot_robots
 from unigym.run.api import Run
 from unigym.world import World
+from tests._support.profiles import fixture_profile
+
+
+@pytest.fixture(autouse=True)
+def _fixture_robot():
+    """Expose one real profile to the programmatic builder tests."""
+    snapshot = snapshot_robots()
+    register_robot("fixture_arm", fixture_profile)
+    yield
+    restore_robots(snapshot)
 
 
 def _world() -> World:
@@ -24,9 +35,9 @@ def test_minimal_construction_without_robot_fails():
 
 def test_minimal_construction_accepts_explicit_robot():
     """An explicit registered robot name remains valid."""
-    run = Run(world=_world(), robot="g1")
+    run = Run(world=_world(), robot="fixture_arm")
 
-    assert run.cfg["articulations"][0]["name"] == "g1"
+    assert run.cfg["articulations"][0]["name"] == "fixture_arm"
 
 
 def test_cfg_with_articulations_needs_no_robot_injection():
@@ -66,14 +77,14 @@ def test_robot_declaration_dict_passes_actuation_through():
         }
     ]
 
-    run = Run(world=_world(), robot={"name": "g1", "actuation": actuation})
+    run = Run(world=_world(), robot={"name": "fixture_arm", "actuation": actuation})
 
     assert run.cfg["articulations"][0]["actuation"] == actuation
 
 
 def test_bare_robot_string_live_build_fails_the_actuation_hard_cut():
-    """Run(robot="g1") stays representable but carries no actuation to build."""
-    run = Run(world=_world(), robot="g1")
+    """Run(robot=...) stays representable but carries no actuation to build."""
+    run = Run(world=_world(), robot="fixture_arm")
 
     with pytest.raises(ValueError, match="no `actuation`"):
         run.build()

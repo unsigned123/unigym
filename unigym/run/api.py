@@ -325,8 +325,8 @@ def _controls_entries(
         profile = None
     if profile is not None:
         body["joint_set"] = "body"
-        # Only profile-declared extra faces (``actuate_hands``) are emitted
-        # here: an adapter that emits a face the profile does not declare
+        # Only profile-declared extra faces are emitted here: an adapter that
+        # emits a face the profile does not declare
         # (e.g. the G1 ``hand`` face) must get it from its config's
         # ``controls[]`` -- the partition is the single authority.
         terms: Mapping[str, Sequence[str]] = profile.action_faces or {}

@@ -549,7 +549,7 @@ robot-root spawn authority.
 G1's isaaclab realization is built through the generic builder: the neutral
 profile supplies q0/body facts, the effective USD `AssetRef` (`spec.model` when
 set, otherwise the profile's `assets`) is the spawn asset (the 43-DoF
-with-hand `g1.usd` provisioned outside the repository), and the run-level
+with-hand `g1.usd` from an installed robot/asset pack), and the run-level
 `ArticulationSpec.actuation` groups are the only actuator source.  There is no
 `G1_29DOF_CFG` template and no hardcoded G1 actuator table and no
 `profile.name` dispatch: any effective profile with a USD asset and run-level
@@ -570,9 +570,16 @@ backend realizer rejects it because its effective asset has no USD, not because
 of its name.  Its MJCF remains a scene resource, not a neutral robot asset.
 
 Dynamic `register_robot` / manifest `kind: robot` registration is the explicit
-external-robot path: a pack registers a backend-neutral factory and
-`build_robot_profile(name)` resolves it without editing any core factory table.
-The shipped `g1` / `gr1` factories remain built-ins and are resolved first.
+external-robot path: a pack registers a backend-neutral factory or resource
+and `build_robot_profile(name)` resolves it without a core factory table.
+G1 and GR1 neutral profiles are pack data, not core built-ins.
+
+Migration note: `unigym.robots.g1`, `unigym.robots.gr1`,
+`unigym.robots.g1_constants`, `unigym.robots.gr1_constants` and the
+`make_g1_profile` / `make_gr1_profile` factories are removed. Install and
+activate a robot pack before calling `build_robot_profile` for those names.
+`GR1_COTRAIN_POSE` remains in `unigym.robots.gr1_reset` because it is reset
+semantics, not neutral profile data.
 
 ### Robot data documents
 
@@ -667,10 +674,9 @@ For a manifest `kind: robot` item:
 - activation failures are wrapped with the pack, item id and locator, and
   restore the prior robot registry exactly.
 
-The external registry is authoritative and external-only: names use the
-adapter-style grammar `[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*`, are never
-trimmed, and must be free of duplicate names, built-in names and exposed factory
-function names. One factory owns exactly one name. A factory must be callable.
+The external registry is authoritative: names use the adapter-style grammar
+`[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*`, are never trimmed, and must be free of
+duplicate names. One factory owns exactly one name. A factory must be callable.
 `ROBOT_REGISTRY`, `register_robot`, `snapshot_robots` and `restore_robots` live
 in `unigym.robots`; `unigym.pack_api.register_robot` is the pack-facing wrapper.
 The registry lives for the process lifetime, like `ADAPTER_REGISTRY`.

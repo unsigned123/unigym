@@ -10,7 +10,7 @@ import pytest
 
 pytestmark = [
     pytest.mark.sim,
-    pytest.mark.usefixtures("simulation_app"),
+    pytest.mark.usefixtures("simulation_app", "g1_pack"),
     pytest.mark.requires_test_packs("g1"),
 ]
 
@@ -26,9 +26,8 @@ def _profile():
 def _actuation():
     """Four explicit standard_pd groups covering the 29 policy joints."""
     from unigym.actuators import ActuationGroup
-    from unigym.robots import g1_constants as g1c
 
-    order = list(g1c.G1_JOINT_ORDER_IL)
+    order = list(_profile().joint_sets["body"])
     legs = [name for name in order if "hip" in name or "knee" in name]
     feet = [name for name in order if "ankle" in name]
     waist = [name for name in order if name.startswith("waist_")]
@@ -252,7 +251,6 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
     from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
-    from unigym.robots import g1_constants as g1c
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
 
@@ -274,14 +272,14 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     assert manager is not None
 
     profile = _profile()
-    spec = _spec(g1_usd, passive_joints=g1c.G1_HAND_JOINTS)
+    spec = _spec(g1_usd, passive_joints=profile.joint_sets["hand"])
     realization = _realize(spec)
     group = ControlGroup.from_mapping(
         {
             "name": ARTICULATION,
             "adapter": "manual",
             "articulation": ARTICULATION,
-            "joints": list(g1c.G1_JOINT_ORDER_IL),
+            "joints": list(profile.joint_sets["body"]),
             "drive": "position_pd",
             "target": "position",
         }
@@ -327,19 +325,18 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
-    from unigym.robots import g1_constants as g1c
     from unigym.runtime.controllers import build_control_runtimes
     from unigym.runtime.controls import ControlGroup
 
     profile = _profile()
-    spec = _spec(g1_usd, passive_joints=g1c.G1_HAND_JOINTS)
+    spec = _spec(g1_usd, passive_joints=profile.joint_sets["hand"])
     realization = _realize(spec)
     group = ControlGroup.from_mapping(
         {
             "name": ARTICULATION,
             "adapter": "manual",
             "articulation": ARTICULATION,
-            "joints": list(g1c.G1_JOINT_ORDER_IL),
+            "joints": list(profile.joint_sets["body"]),
             "drive": "position_pd",
             "target": "position",
         }
@@ -366,7 +363,7 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
     try:
         art = env.articulations[ARTICULATION]
         assert len(art.joint_names) == 43
-        assert set(art.joint_names) == set(g1c.G1_JOINT_ORDER_FULL)
+        assert set(art.joint_names) == set(profile.full_joint_names)
         assert len(env.controls[ARTICULATION].joint_names) == 29
 
         bodies = [body.name for body in env.model_set.articulations[ARTICULATION].bodies]

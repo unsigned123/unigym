@@ -120,6 +120,12 @@ def cartpole_usd(pack_runtime) -> Path:
 
 
 @pytest.fixture
+def g1_pack(pack_runtime):
+    """Activate the G1 pack's data-only robot provider once per process."""
+    return pack_runtime("g1").activate("g1")
+
+
+@pytest.fixture
 def g1_usd(pack_runtime) -> Path:
     """Resolve the 43-DoF G1 USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")

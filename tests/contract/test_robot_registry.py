@@ -58,24 +58,6 @@ def test_register_robot_builds_a_non_builtin_profile() -> None:
     assert "acme.arm" in ROBOT_REGISTRY
 
 
-def test_registry_is_external_only_and_builtins_still_resolve() -> None:
-    """Shipped factories stay in the private table, not the external registry."""
-    assert "g1" not in ROBOT_REGISTRY
-    assert "gr1" not in ROBOT_REGISTRY
-
-    assert build_robot_profile({"name": "g1"}).name == "g1"
-    assert build_robot_profile({"name": "gr1"}).name == "gr1"
-
-
-@pytest.mark.parametrize("name", ["g1", "gr1", "make_g1_profile", "make_gr1_profile"])
-def test_register_robot_rejects_reserved_builtin_names(name: str) -> None:
-    """Built-in names and exposed factory names cannot be taken by a pack."""
-    with pytest.raises(ValueError, match="reserved"):
-        register_robot(name, make_arm)
-
-    assert name not in ROBOT_REGISTRY
-
-
 def test_register_robot_rejects_duplicate_external_name() -> None:
     """A duplicate external name fails and keeps the original owner."""
     register_robot("acme.arm", make_arm)
@@ -97,19 +79,6 @@ def test_register_robot_rejects_one_factory_under_two_names() -> None:
     assert "acme.arm" in message
     assert "acme.other" in message
     assert "acme.other" not in ROBOT_REGISTRY
-
-
-def test_register_robot_rejects_a_shipped_factory_under_a_new_name() -> None:
-    """A shipped factory cannot be re-registered under an external name."""
-    from unigym.robots import make_g1_profile
-
-    with pytest.raises(ValueError) as info:
-        register_robot("acme.g1ish", make_g1_profile)
-
-    message = str(info.value)
-    assert "g1" in message
-    assert "acme.g1ish" in message
-    assert "acme.g1ish" not in ROBOT_REGISTRY
 
 
 @pytest.mark.parametrize(

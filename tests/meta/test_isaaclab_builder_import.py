@@ -1,4 +1,4 @@
-"""Import isolation for the generic IsaacLab builder and the GR1 seam."""
+"""Import isolation for the generic IsaacLab builder and asset rejection."""
 
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ def test_builder_import_does_not_load_isaaclab():
     assert result.returncode == 0, result.stderr
 
 
-def test_build_robot_realization_still_rejects_gr1():
-    """GR1 is rejected by its missing effective USD asset, not by name."""
+def test_build_robot_realization_rejects_a_profile_without_usd():
+    """A profile without an effective USD is rejected by asset, not by name."""
     from unigym.backends.isaaclab2.robots import build_robot_realization
-    from unigym.robots import build_robot_profile
     from unigym.scenes.articulation import ArticulationSpec
+    from tests._support.profiles import fixture_profile
 
-    profile = build_robot_profile({"name": "gr1"})
+    profile = fixture_profile(name="arm")
 
     with pytest.raises(NotImplementedError, match="no effective USD"):
-        build_robot_realization(profile, spec=ArticulationSpec(name="gr1"), params={})
+        build_robot_realization(profile, spec=ArticulationSpec(name="arm"), params={})
