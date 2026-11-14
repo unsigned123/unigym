@@ -24,6 +24,7 @@ buffers by name, so ordering is correct by construction.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import torch
@@ -144,6 +145,7 @@ def _compose_asset_scene(
     asset_plan,
     static_shapes,
     artifact_dir: str | Path | None,
+    terrain=None,
 ) -> tuple[ComposedAssetScene | None, dict[str, str]]:
     """Compose + attach the routed scene provider before the scene is cloned.
 
@@ -153,7 +155,11 @@ def _compose_asset_scene(
 
     The neutral scene is built first.  An ``asset_plan`` is required only when
     that scene declares file-backed asset instances; a primitive-only scene
-    composes with ``None``.  The engine owns that guard.
+    composes with ``None``.  The engine owns that guard.  When the run also
+    carries native ``terrain`` IR, that run-level terrain is the single ground
+    owner: the inline/provider scene's duplicate terrain declaration is dropped
+    before composition (the asset-scene engine still refuses a scene terrain
+    when the run declares none).
 
     Raises:
         ValueError: *static_shapes* and a scene provider are both declared,
@@ -177,6 +183,8 @@ def _compose_asset_scene(
         _scene_provider_values(scene_provider_params),
         preset=(str(scene_provider_preset) if scene_provider_preset is not None else None),
     )
+    if terrain is not None and scene.terrain is not None:
+        scene = replace(scene, terrain=None)
     validate_asset_scene(scene)
     engine = _resolve_asset_scene_engine()
     composed = engine.compose(scene, asset_plan)
@@ -604,6 +612,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             asset_plan,
             static_shapes,
             artifact_dir,
+            terrain=terrain,
         )
         # v102b: more than one policy binding switches the scene/action cfg
         # to the multi-articulation layout (independent articulation clones +

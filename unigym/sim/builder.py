@@ -402,12 +402,13 @@ class SimulationBuilder:
         return handle
 
     def _to_cfg(self) -> dict[str, JsonValue]:
-        """Assemble the existing run-config document from these declarations.
+        """Assemble the declaration tables of the existing run-config document.
 
         The builder is the single owner of ``articulations[]`` and
-        ``controls[]``; the world contributes only its own fragment.  The
-        emitted ``dt``/``physics_dt`` arithmetic is re-checked here because
-        this document is the contract handed to ``Run``.
+        ``controls[]``; the world contributes only its own fragment, which
+        ``Run(cfg, world=world)`` merges exactly once.  The emitted
+        ``dt``/``physics_dt`` arithmetic is re-checked here because this
+        document is the contract handed to ``Run``.
         """
         world = self._world
         if world is None:
@@ -452,7 +453,6 @@ class SimulationBuilder:
             "command": {"name": "fixed", "dim": 0, "values": []},
             "collect": {"steps": self._steps, "shard_steps": 1000},
         }
-        world.apply(cfg)
         cfg["articulations"] = _json_objects(self._articulation_entries())
         cfg["controls"] = _json_objects(self._control_entries())
         cameras = self._camera_entries()
@@ -566,6 +566,7 @@ class SimulationBuilder:
 
         run = Run(
             cfg,
+            world=world,
             pack_runtime=self.pack_runtime,
             no_artifacts=not self._artifacts,
             device=self._device,

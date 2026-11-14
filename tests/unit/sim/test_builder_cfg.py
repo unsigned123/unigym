@@ -8,6 +8,10 @@ import pytest
 
 from unigym.camera import Camera
 from unigym.packs.packset import PackSet
+from unigym.run.api import Run
+from unigym.run.spec import RunSpec
+from unigym.scenes import Scene
+from unigym.scenes.terrain import Terrain
 from unigym.sim import (
     Control,
     ControlSpec,
@@ -15,7 +19,7 @@ from unigym.sim import (
     SimulationBuilder,
     SimulationConfigError,
 )
-from unigym.world import World
+from unigym.world import Box, World
 from tests._support.sim_fixtures import write_sim_pack
 
 
@@ -200,8 +204,19 @@ def test_cameras_are_deep_copied_declared_entries(tmp_path: Path) -> None:
     assert cfg["cameras"][0] is not entry
 
 
-def test_world_fragment_is_merged_into_the_config(tmp_path: Path) -> None:
-    """The world half lands on the top-level config through ``world.apply``."""
+def _spec_for(builder: SimulationBuilder) -> RunSpec:
+    """Normalize the builder's declarations through the one ``Run`` seam."""
+    return Run(
+        builder._to_cfg(),
+        world=builder.world,
+        pack_runtime=builder.pack_runtime,
+        discover_runtime=False,
+        no_artifacts=True,
+    ).spec
+
+
+def test_world_fragment_is_merged_by_run_once(tmp_path: Path) -> None:
+    """The builder emits declarations only; ``Run(cfg, world=...)`` merges the world."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
     builder.world = World.base(mjcf="world.xml")
@@ -209,9 +224,45 @@ def test_world_fragment_is_merged_into_the_config(tmp_path: Path) -> None:
 
     cfg = builder._to_cfg()
 
-    assert cfg["world_base"] == {"mjcf": "world.xml"}
-    assert "articulations" in cfg
-    assert "controls" in cfg
+    assert "world_base" not in cfg
+    spec = _spec_for(builder)
+    assert spec.world_base == {"mjcf": "world.xml"}
+    assert [entry.name for entry in spec.articulations] == [ref.id]
+    assert [entry.name for entry in spec.controls] == ["body"]
+
+
+def test_inline_terrain_reaches_the_run_spec_through_the_world_handoff(tmp_path: Path) -> None:
+    """An inline terrain world reaches ``spec.terrain`` via the one Run merge."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = SimulationBuilder(backend="isaaclab2", dt=0.02, physics_dt=0.005, pack_set=pack_set)
+    builder.world = World.inline(Scene(name="hill", terrain=Terrain(size=(4.0, 4.0))))
+    builder.add_articulation(ref, control=_body_control())
+
+    cfg = builder._to_cfg()
+
+    assert "scene_preset" not in cfg
+    spec = _spec_for(builder)
+    assert isinstance(spec.terrain, Terrain)
+    assert spec.terrain.size == (4.0, 4.0)
+
+
+def test_world_objects_are_merged_exactly_once(tmp_path: Path) -> None:
+    """A dynamic world object joins ``objects`` once, with the builder's articulation."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
+    world = World.base(mjcf="world.xml")
+    world.add(Box((0.2, 0.2, 0.2), name="crate", pos=(0.0, 0.0, 0.1)), dynamic=True)
+    builder.world = world
+    builder.add_articulation(ref, control=_body_control())
+
+    spec = _spec_for(builder)
+
+    assert [entry.name for entry in spec.articulations] == [ref.id]
+    props = spec.props
+    assert isinstance(props, dict)
+    types = props["types"]
+    assert isinstance(types, list)
+    assert [entry["name"] for entry in types] == ["crate"]
 
 
 def test_missing_world_is_refused(tmp_path: Path) -> None:
