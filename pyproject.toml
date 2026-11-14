@@ -265,6 +265,7 @@ markers = [
     "domain_scene: scene domain tests",
     "domain_runtime: runtime domain tests",
     "domain_run: run domain tests",
+    "domain_runner: runner domain tests",
     "domain_contacts: contact-group domain tests",
     "domain_terminations: termination domain tests",
     "domain_filters: filter domain tests",

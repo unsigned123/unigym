@@ -9,6 +9,7 @@ objects. This directory is not collected and contains no tests.
 | --- | --- | --- |
 | `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row |
 | `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
+| `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) plus the private reset-time extra seam (`_build_extra`/`_read_state`/`_extra`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `close` is idempotent, `fail_next_tick` raises once after advancing the clock; the `*StateEnv` doubles are stateless apart from call counters |
 
 Every Python module in this directory (except the package marker) must appear
 in the manifest table; `tests/meta/test_stub_policy.py` enforces this.
@@ -58,5 +59,6 @@ Limitations (deliberate, no production seam is added for them):
 
 One fake per external boundary: do not add per-test fakes, a fake hierarchy or
 a configurable universal fake. `backend.py` is the conformance reference;
-`closing.py` is the close-boundary fault injector. Add a new manifest row only
-when a new external boundary appears.
+`closing.py` is the close-boundary fault injector; `runner.py` is the
+single-tick runner seam and the reset-time extra-reader seam family. Add a new
+manifest row only when a new external boundary appears.

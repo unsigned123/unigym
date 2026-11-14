@@ -22,11 +22,11 @@ the action plumbing and the Gymnasium return shapes differ.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
 
 import numpy as np
 import torch
 
+from unigym.runner.state import read_extra
 from unigym.runner.sync import SyncRunner, _adapter_groups
 
 
@@ -71,28 +71,9 @@ def _per_env_values(values: dict, env_id: int) -> dict:
 class _GymBase(SyncRunner):
     """Shared best-effort post-reset 17-key extra reader."""
 
-    def _extra_now(self) -> dict:
-        """Best-effort post-reset 17-key extra (private backend seam).
-
-        The EnvBackend contract exposes ``extra`` only through ``step``;
-        the reset path therefore asks the backend's own builder when it has
-        one (mujoco/isaaclab) and returns ``{}`` for minimal doubles.  The
-        ``_extra`` fallback covers in-process test doubles.
-        """
-        env = self.env
-        build = getattr(env, "_build_extra", None)
-        extra: dict[str, Any]
-        if callable(build):
-            read = getattr(env, "_read_state", None)
-            raw = build(read()) if callable(read) else build()
-            extra = dict(cast("dict[str, Any]", raw))
-        elif callable(getattr(env, "_extra", None)):
-            extra = dict(cast("dict[str, Any]", env._extra()))
-        else:
-            extra = {}
-        extra.setdefault("reset_env_ids", torch.zeros(0, dtype=torch.int64, device=env.device))
-        extra.setdefault("should_reset", False)
-        return extra
+    def _extra_now(self) -> dict[str, object]:
+        """Best-effort post-reset 17-key extra (the shared seam reader)."""
+        return read_extra(self.env)
 
 
 class GymEnvRunner(_GymBase):
