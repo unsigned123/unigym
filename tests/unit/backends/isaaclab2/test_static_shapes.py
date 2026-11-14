@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.isaaclab2.static_shapes import build_static_scene_fields
+from unigym.backends.isaaclab2.static_shapes import (
+    build_static_field,
+    build_static_payload_fields,
+    build_static_scene_fields,
+)
 from unigym.contacts.base import ENV_PREFIX_SENTINEL
+from unigym.scenes.primitives import BoxShape, ShapePayload
 
 
 class _Cfg:
@@ -156,3 +161,108 @@ def test_unknown_primitive_kind_fails_fast_with_known_kinds():
     message = str(excinfo.value)
     assert "kind 'wedge' has no isaaclab static mapping" in message
     assert "known: ['box', 'capsule', 'cylinder', 'plane', 'sphere']" in message
+
+
+def test_build_static_field_extracts_the_prim_override():
+    """The extracted builder assigns the explicit prim name."""
+    field = build_static_field(
+        "crate",
+        "box",
+        {"size": [1.0, 2.0, 3.0]},
+        (1.0, 2.0, 3.0),
+        (0.0, 0.0, 0.0, 1.0),
+        classes=_CLASSES,
+        prim_path=f"{ENV_PREFIX_SENTINEL}/Static/custom",
+    )
+
+    assert isinstance(field, _AssetBaseCfg)
+    assert field.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Static/custom"
+    assert field.kwargs["init_state"].kwargs == {
+        "pos": (1.0, 2.0, 3.0),
+        "rot": (0.0, 0.0, 0.0, 1.0),
+    }
+
+
+def test_build_static_payload_fields_single_shape_keeps_world_add_naming():
+    """A single-shape payload keeps static_<id> and the shape's own pose."""
+    payload = ShapePayload(
+        (
+            BoxShape(
+                name="crate_geom",
+                size=(1.0, 2.0, 3.0),
+                material="wood",
+                pos=(1.0, 2.0, 3.0),
+                quat_wxyz=(0.0, 0.0, 0.0, 1.0),
+                layer="collision",
+            ),
+        )
+    )
+
+    fields = build_static_payload_fields(payload, instance_id="crate", classes=_CLASSES)
+
+    assert set(fields) == {"static_crate"}
+    field = fields["static_crate"]
+    assert field.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Static_crate"
+    spawn = field.kwargs["spawn"]
+    assert isinstance(spawn, _CuboidCfg)
+    assert spawn.kwargs["size"] == (1.0, 2.0, 3.0)
+    assert field.kwargs["init_state"].kwargs == {
+        "pos": (1.0, 2.0, 3.0),
+        "rot": (0.0, 0.0, 0.0, 1.0),
+    }
+
+
+def test_build_static_payload_fields_multi_shape_uses_parent_prim_and_own_poses():
+    """A multi-shape payload gets static_<id>_<shape> under Static_<id>."""
+    payload = ShapePayload(
+        (
+            BoxShape(
+                name="floor",
+                size=(2.0, 2.0, 0.1),
+                material="wood",
+                pos=(0.0, 0.0, -0.05),
+                layer="collision",
+            ),
+            BoxShape(
+                name="wall",
+                size=(0.1, 2.0, 2.0),
+                material="wood",
+                pos=(1.05, 0.0, 1.0),
+                layer="collision",
+            ),
+        )
+    )
+
+    fields = build_static_payload_fields(payload, instance_id="room", classes=_CLASSES)
+
+    assert set(fields) == {"static_room_floor", "static_room_wall"}
+    floor = fields["static_room_floor"]
+    assert floor.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Static_room/floor"
+    assert floor.kwargs["init_state"].kwargs == {
+        "pos": (0.0, 0.0, -0.05),
+        "rot": (1.0, 0.0, 0.0, 0.0),
+    }
+    wall = fields["static_room_wall"]
+    assert wall.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Static_room/wall"
+    assert wall.kwargs["init_state"].kwargs["pos"] == (1.05, 0.0, 1.0)
+
+
+def test_build_static_payload_fields_duplicate_shape_names_fail_fast():
+    """Two payload shapes with one name collide on the generated field."""
+    shape = BoxShape(
+        name="floor",
+        size=(1.0, 1.0, 1.0),
+        material="wood",
+        pos=(0.0, 0.0, 0.0),
+        layer="collision",
+    )
+    payload = ShapePayload((shape, shape))
+
+    with pytest.raises(ValueError, match="duplicate scene field 'static_room_floor'"):
+        build_static_payload_fields(payload, instance_id="room", classes=_CLASSES)
+
+
+def test_build_static_payload_fields_empty_payload_fails_fast():
+    """An empty payload cannot silently produce zero scene fields."""
+    with pytest.raises(ValueError, match="has no shapes"):
+        build_static_payload_fields(ShapePayload(()), instance_id="room", classes=_CLASSES)

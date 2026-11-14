@@ -13,8 +13,8 @@ absolute paths added by the writer.  Two calls with the same view are
 byte-identical, so a run's artifacts can be compared directly.
 
 :func:`asset_instance_rows` is the neutral, stdlib-only row shape both
-engines put in their ``describe`` slice: hex floats, no absolute paths and
-no engine vocabulary.
+engines put in their ``describe`` slice: hex floats, no resolved paths
+(authored asset refs are carried verbatim) and no engine vocabulary.
 
 The engine (S5) owns the compiled scene XML: it captures the composed text
 before compilation and passes it to :func:`write_compile_report`, which
@@ -124,8 +124,8 @@ def asset_instance_rows(
         formats: The engine-selected format per asset-instance id.
 
     Returns:
-        One row per asset instance, sorted by id, with hex-float poses and
-        no absolute paths.
+        One row per asset instance, sorted by id, with hex-float poses,
+        no resolved paths, and the declared asset refs carried verbatim.
 
     Raises:
         TypeError: *scene* is not a Scene or *formats* is not a mapping.

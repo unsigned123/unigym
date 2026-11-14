@@ -77,7 +77,8 @@ class MujocoSceneEngine:
         the whitelisted slice that restores the old XML describe's coverage
         (options, textures, per-geom contact parameters); the
         ``asset_scene`` slice carries the neutral file-asset rows under their
-        own digest tag and never an absolute path.
+        own digest tag with no resolved path; the authored asset refs are
+        carried verbatim.
         """
         declared = MujocoModelProvider().build(composed.spec)
         full = declared.to_dict(include_ext=True, include_meta=False)
