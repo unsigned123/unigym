@@ -486,6 +486,69 @@ Rules:
   live in `unigym.core.paths`, asset path policy lives in `unigym.assets.refs`,
   and the old `unigym.packs.refs` resolver was deleted.
 
+### File-backed asset scenes
+
+A neutral scene may declare `AssetInstance` entries on
+`Scene.asset_instances`; each is one rigid root body whose geometry lives in a
+backend-native file:
+
+```python
+AssetInstance(
+    id="cup",
+    asset=AssetRef(usd="pack:acme/assets/cup.usda"),
+    pose=Pose(xyz=(0.3, 0.0, 0.9)),
+    source="scene.yaml:12",
+    kind="static_rigid",   # or "dynamic_rigid"
+    collision=True,
+)
+```
+
+`kind` is the closed role; `pose.frame` must be `"world"`; `collision` is the
+only geometry toggle. There is no conversion and no fallback to a different
+declared format:
+
+| Asset kind | `mujoco` / `mjwarp` (`mjcf`) | `isaaclab2` (`usd`, `urdf`) |
+| --- | --- | --- |
+| `static_rigid` | one root body, no joints | static USD; static URDF refused |
+| `dynamic_rigid` | one root body + one root freejoint | dynamic USD; jointless URDF best effort |
+
+Resolve one scene's assets through the same boundary helpers:
+
+```python
+from unigym.assets.plan import AssetPlan, resolve_asset_instance
+from unigym.backends.registry import backend_info
+
+fmt, path = resolve_asset_instance(
+    instance.asset,
+    AssetPlan(AssetContext(runtime)),
+    backend_info("isaaclab2").asset_formats,
+)
+```
+
+`select_asset_format` is the underlying per-backend preference rule; call it
+directly when only the selected format name is needed.
+
+`resolve_asset_instance` selects the backend's preferred declared format,
+requires the resolved path to be absolute and to exist, and never converts or
+falls back. MJCF documents with `pack:`/`${...}` leaves use
+`AssetPlan.resolve_document`; a rewritten document must have absolute `file=`
+leaves. USD/URDF relative references stay asset-owned.
+
+Scene-provider routing is unchanged: `scene_preset` resolves to the internal
+`env.params.scene_provider*` keys, the backend composes the neutral scene, and
+`AssetPlan` is required only when `Scene.asset_instances` is non-empty. On
+IsaacLab 2 the engine assigns `asset_<scene>_<id>` fields before
+`InteractiveScene` clones them at `{ENV_REGEX_NS}/Scene_<scene>_<id>`;
+`static_shapes` and a scene provider cannot both be declared. `content` and
+`world_base` still fail on IsaacLab.
+
+`describe` carries the declared refs verbatim and no resolved path; the
+neutral tag is `unigym.scene.asset/1` and is not compared with the MuJoCo
+`unigym.modelir/2` tag. See
+[`contracts/scene_asset_contract.md`](contracts/scene_asset_contract.md) for
+the field rules, backend matrix, resolution policy, digest rules and teaching
+failure matrix.
+
 ### Path tokens and asset path policy (Phase 9)
 
 The generic path helpers have one owner, `unigym.core.paths`:

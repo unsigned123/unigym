@@ -569,6 +569,50 @@ a `profile.name` branch. The lane also builds a real `UrdfFileCfg`
 `ArticulationCfg` from the shared primitives-only URDF fixture, so the URDF
 `AssetRef` path is proved in the actual IsaacLab environment.
 
+The same Cartpole pack ships the file-backed asset-scene fixtures:
+
+- `assets/static_cup.usda` - collision-only static USD, no rigid-body or
+  articulation schema;
+- `assets/dynamic_cube.usda` - passive `PhysicsRigidBodyAPI` plus collision
+  and mass;
+- `assets/jointless_cube.urdf` - one link, no `<joint>`;
+- `assets/jointed_cube.urdf` - the articulation-in-scene refusal fixture.
+
+The tests resolve them through
+`pack_runtime("isaaclab_cartpole").resource_for("assets", <id>)` and pass
+`AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`; they never read an asset
+environment variable and never download assets. The lane is strict
+(`ci/compat.toml` `[lanes.isaaclab2]`, selector `tests/backends/isaaclab2`,
+`pytest_args = ["--strict-test-packs"]`): a missing Cartpole pack or fixture
+fails the lane rather than skipping.
+
+`test_asset_scene_kit.py` covers N=1/N=2 static USD field construction, the
+cloned `{ENV_REGEX_NS}/Scene_<scene>_<id>` prim paths, env-relative declared
+poses (world pose = env origin + declared xyz), static immobility after step,
+the collision-off construction, N=1/N=2 dynamic USD rigid-object construction
+and gravity fall, the static-URDF and jointed-URDF teaching refusals, the
+jointless-URDF best effort (either a `RigidObject` or an honest conversion
+failure naming the URDF/rigid/articulation boundary), the five build artifacts
+(`scene.json`, `resolution.json`, `payload_index.json`, `compose.txt`,
+`describe.json`), and the idempotent clean close.
+
+The dog harness supplies its own local ground fixture instead of a pack asset:
+`tests/backends/isaaclab2/conftest.py::_build_env` builds a 10 m x 10 m x
+0.1 m `CuboidCfg` at `z = -0.05` as the static terrain for every Cartpole env,
+including the asset-scene tests.
+
+The lane command is unchanged:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES \
+UNIGYM_TEST_ENV_STRICT=1 \
+conda run --no-capture-output -n unigym-isaaclab232 \
+  python -m pytest --strict-test-packs tests/backends/isaaclab2 -q
+```
+
+The same lane can be selected through the registry with
+`tools/ci/run_lane.py --lane isaaclab2`.
+
 ### 7.4 Target commands
 
 Once the test Makefile exists:

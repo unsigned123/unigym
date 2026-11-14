@@ -1,11 +1,13 @@
 """Static ``World.add`` primitives -> IsaacLab static colliders (S2b).
 
 The inline mujoco world renders static primitives in the scene-IR payload.
-IsaacLab has no scene-IR composer, but it DOES have a clean static-collider
-path: ``AssetBaseCfg`` + a shape spawner carrying ``CollisionPropertiesCfg``
-and NO ``RigidBodyPropertiesCfg``.  The spawned prim then owns only the USD
-CollisionAPI, so PhysX treats it as a static (non-simulated) collider -- the
-same role the inline static shapes play on mujoco.
+IsaacLab's file-backed scene composer lives in
+``unigym/backends/isaaclab2/asset_scene``; this module remains the primitive
+mapper and keeps the static-collider path: ``AssetBaseCfg`` + a shape spawner
+carrying ``CollisionPropertiesCfg`` and NO ``RigidBodyPropertiesCfg``.  The
+spawned prim then owns only the USD CollisionAPI, so PhysX treats it as a
+static (non-simulated) collider -- the same role the inline static shapes play
+on mujoco.
 
 Each declaration is cloned per environment at its declared world pose
 relative to the env origin (the inline world frame is the env frame).  The

@@ -10,5 +10,7 @@ Process documents:
   reporting.
 - [Testing policy](testing.md) - test layers, markers, operations and red-test
   protocol.
+- [Scene asset contract](contracts/scene_asset_contract.md) - file-backed
+  `AssetInstance` fields, backend matrix, resolution, digest and refusals.
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
