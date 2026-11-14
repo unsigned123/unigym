@@ -392,6 +392,7 @@ class MjwarpEnv(WarpBatchMixin):
         self._mj_path = mj_path
         self.artifact_dir = None if artifact_dir is None else os.fspath(artifact_dir)
         self.artifact_paths: dict = {}
+        self._asset_paths: dict = {}
         self._fill_record = None
         self._closed = False
         self._closing = False
@@ -435,7 +436,7 @@ class MjwarpEnv(WarpBatchMixin):
             spawn_base,
         ):
             from unigym.scenes.providers import build_scene_from_provider
-            from unigym.backends.shared.mjfamily.scene.scene_engine import compose_and_attach
+            from unigym.backends.shared.mjfamily.scene.scene_engine import resolve_scene_engine
 
             mjspec = (
                 composed_spec if composed_spec is not None else mujoco.MjSpec.from_file(mj_path)
@@ -456,7 +457,12 @@ class MjwarpEnv(WarpBatchMixin):
                 scene, self._fill_record = _fill_scene_content(
                     scene, self._content_spec, asset_plan
                 )
-                self._placement_regions = compose_and_attach(mjspec, scene, asset_plan)
+                engine = resolve_scene_engine()
+                composed = engine.compose(scene, asset_plan)
+                self._placement_regions = engine.attach(
+                    mjspec, composed, frame=f"Scene_{scene.name}_attach"
+                )
+                self._asset_paths = dict(composed.asset_paths)
             # the fixed-base spawn declaration (None -> XML-baked pose)
             apply_spawn_base_pose(mjspec, spawn_base)
             # the scene artifact face serializes the SAME chain the A/B
@@ -487,6 +493,7 @@ class MjwarpEnv(WarpBatchMixin):
                 self._scene_provider_params,
                 composed_xml,
                 fill_record=self._fill_record,
+                asset_paths=self._asset_paths or None,
             )
         else:
             self._model = mujoco.MjModel.from_xml_path(mj_path)

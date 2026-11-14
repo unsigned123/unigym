@@ -117,6 +117,33 @@ def test_asset_plan_resolves_document_placeholders_and_pack_leaves(
     assert "${" not in resolved
 
 
+@pytest.mark.parametrize(
+    ("attribute", "quote"),
+    [
+        (f'file = "pack:{PACK}/assets/meshes/cup.stl"', '"'),
+        (f"file='pack:{PACK}/assets/meshes/cup.stl'", "'"),
+        (f"file = 'pack:{PACK}/assets/meshes/cup.stl'", "'"),
+    ],
+    ids=["double-space", "single", "single-space"],
+)
+def test_asset_plan_resolves_tolerantly_spelled_pack_leaves(
+    plan: AssetPlan, runtime: PackRuntime, attribute: str, quote: str
+) -> None:
+    """Whitespace and single/double quotes around ``file=`` all resolve."""
+    document = (
+        f"<mujoco><asset><mesh {attribute}/>"
+        '<texture name="t" type="2d" file = "own.png"/>'
+        "</asset></mujoco>"
+    )
+
+    resolved = plan.resolve_document(document)
+
+    expected = str(runtime.root_by_pack[PACK] / "assets/meshes/cup.stl")
+    assert f"{quote}{expected}{quote}" in resolved
+    assert 'file = "own.png"' in resolved
+    assert "pack:" not in resolved
+
+
 def test_pack_reference_without_context_is_a_teaching_error() -> None:
     """A pack reference cannot resolve without an explicit asset context."""
     with pytest.raises(PlaceholderError, match="explicit asset context"):

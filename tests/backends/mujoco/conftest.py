@@ -27,6 +27,7 @@ def build_tiny_env(
     params: dict | None = None,
     contact_manager=None,
     asset_plan=None,
+    artifact_dir=None,
 ):
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.actuators import ActuationGroup
@@ -99,6 +100,7 @@ def build_tiny_env(
         actuation_plans=actuation_plans,
         contact_manager=contact_manager,
         asset_plan=asset_plan,
+        artifact_dir=artifact_dir,
     )
 
 
@@ -120,6 +122,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         mjcf: Path | None = None,
         contact_manager=None,
         asset_plan=None,
+        artifact_dir=None,
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -133,6 +136,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             params=params,
             contact_manager=contact_manager,
             asset_plan=asset_plan,
+            artifact_dir=artifact_dir,
         )
         created.append(env)
         return env

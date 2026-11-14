@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ..model import MujocoModelProvider
+from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
 from unigym.scenes.engine import register_scene_engine
 from unigym.scenes.scene_ir import Scene
 
@@ -71,17 +72,27 @@ class MujocoSceneEngine:
         contract, not the MuJoCo version.
 
         The mapping is ``{"base": ..., "ext": {"mj": ...},
-        "digest_version": ...}``.  ``base`` is exactly the previous N1
-        shape (no MuJoCo-only fields); ``ext.mj`` carries the whitelisted
-        slice that restores the old XML describe's coverage (options,
-        textures, per-geom contact parameters).
+        "asset_scene": ..., "digest_version": ...}``.  ``base`` is exactly
+        the previous N1 shape (no MuJoCo-only fields); ``ext.mj`` carries
+        the whitelisted slice that restores the old XML describe's coverage
+        (options, textures, per-geom contact parameters); the
+        ``asset_scene`` slice carries the neutral file-asset rows under their
+        own digest tag and never an absolute path.
         """
         declared = MujocoModelProvider().build(composed.spec)
         full = declared.to_dict(include_ext=True, include_meta=False)
         base = {key: value for key, value in full.items() if key != "ext"}
         mj = full.get("ext", {}).get("mj", {})
         ext = {"mj": {key: mj[key] for key in DIGEST_MJ_KEYS if key in mj}}
-        data = {"base": base, "ext": ext}
+        asset_rows = []
+        if composed.scene is not None:
+            formats = {entry.id: "mjcf" for entry in composed.scene.asset_instances}
+            asset_rows = list(asset_instance_rows(composed.scene, formats))
+        asset_scene = {
+            "digest_version": ASSET_SCENE_DIGEST_VERSION,
+            "instances": asset_rows,
+        }
+        data = {"base": base, "ext": ext, "asset_scene": asset_scene}
         data[DIGEST_VERSION_KEY] = DIGEST_VERSION
         return dict(sorted(data.items()))
 

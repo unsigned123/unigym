@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from unigym.packs.runtime import AssetContext
     from unigym.props.asset_ir import AssetDefinition
 
-_FILE_ATTR_RE = re.compile(r'(file=")([^"]*)(")')
+_FILE_ATTR_RE = re.compile(r"""(file\s*=\s*)(["'])(.*?)\2""")
 """MJCF ``file=`` attributes carry the asset leaves of a parsed document."""
 
 
@@ -76,11 +76,12 @@ class AssetPlan:
         return _FILE_ATTR_RE.sub(lambda match: self._resolve_file_attr(match), expanded)
 
     def _resolve_file_attr(self, match: re.Match[str]) -> str:
-        """Resolve one ``file="..."`` attribute of a document."""
-        value = match.group(2)
+        """Resolve one ``file=`` attribute, preserving its exact prefix/quote."""
+        quote = match.group(2)
+        value = match.group(3)
         if value.startswith("pack:"):
             value = self.resolve(value)
-        return match.group(1) + value + match.group(3)
+        return match.group(1) + quote + value + quote
 
 
 def resolve_asset_instance(

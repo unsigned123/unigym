@@ -18,7 +18,11 @@ import random
 from collections.abc import Mapping
 from pathlib import Path
 
-from unigym.scenes.artifacts import write_build_artifacts, write_compile_report
+from unigym.scenes.artifacts import (
+    asset_instance_rows,
+    write_build_artifacts,
+    write_compile_report,
+)
 from unigym.scenes.pipeline import CompiledScene, Draw, PayloadSet, Resolution
 
 __all__ = [
@@ -125,7 +129,33 @@ def _fill_scene_content(scene, spec, asset_plan):
     return merged, filler.last_record
 
 
-def _views_for_scene(scene, pipeline: str | None, provider_params):
+def _with_resolved(row, asset_paths: Mapping[str, str]):
+    """Attach the resolved absolute asset path to one artifact row."""
+    asset_id = row.get("id")
+    if not isinstance(asset_id, str):
+        raise ValueError(f"asset row id must be a string, got {asset_id!r}")
+    if asset_id not in asset_paths:
+        raise ValueError(
+            f"asset instance {asset_id!r}: no resolved path was supplied -- "
+            f"pass the composed asset_paths for every declared asset instance"
+        )
+    return {**row, "resolved": asset_paths[asset_id]}
+
+
+def _asset_entries(rows, asset_paths):
+    """Build the asset payload entries from the neutral asset rows."""
+    if asset_paths is not None:
+        rows = tuple(_with_resolved(row, asset_paths) for row in rows)
+    entries = []
+    for row in rows:
+        entry = {key: row[key] for key in ("id", "kind", "format", "asset", "source")}
+        if "resolved" in row:
+            entry["resolved"] = row["resolved"]
+        entries.append(entry)
+    return rows, tuple(entries)
+
+
+def _views_for_scene(scene, pipeline: str | None, provider_params, asset_paths=None):
     """Build the draw/resolution/payload views for one neutral scene."""
     params = dict(provider_params or {})
     draw = Draw(
@@ -133,6 +163,10 @@ def _views_for_scene(scene, pipeline: str | None, provider_params):
         seed=params.get("seed"),
         recipe_path="",
         params=params,
+    )
+    asset_rows, asset_entries = _asset_entries(
+        asset_instance_rows(scene, {entry.id: "mjcf" for entry in scene.asset_instances}),
+        asset_paths,
     )
     resolution = Resolution(
         instances=tuple(
@@ -151,6 +185,7 @@ def _views_for_scene(scene, pipeline: str | None, provider_params):
             {"name": item.name, "kind": "material"}
             for item in sorted(scene.materials, key=lambda entry: entry.name)
         ),
+        asset_instances=asset_rows,
     )
     payloads = PayloadSet(
         entries=tuple(
@@ -162,11 +197,12 @@ def _views_for_scene(scene, pipeline: str | None, provider_params):
             }
             for item in sorted(scene.instances, key=lambda entry: entry.id)
         )
+        + asset_entries
     )
     return draw, resolution, payloads
 
 
-def build_views(scene, pipeline: str, provider_params):
+def build_views(scene, pipeline: str, provider_params, asset_paths=None):
     """Build the pipeline's draw/resolution/payload views for one scene.
 
     Args:
@@ -176,11 +212,14 @@ def build_views(scene, pipeline: str, provider_params):
             (``env.params.scene_provider``).
         provider_params: The provider parameter mapping
             (``env.params.scene_provider_params``).
+        asset_paths: The composed ``{asset-instance id: absolute path}``
+            table; when supplied, every asset artifact row/entry carries its
+            ``resolved`` path (artifacts only, never ``describe``).
 
     Returns:
         The ``(Draw, Resolution, PayloadSet)`` trio the writers consume.
     """
-    return _views_for_scene(scene, pipeline, provider_params)
+    return _views_for_scene(scene, pipeline, provider_params, asset_paths)
 
 
 def capture_composed_xml(mjspec, out_dir=None, scene=None):
@@ -244,6 +283,7 @@ def write_scene_artifacts(
     provider_params,
     composed_xml=None,
     fill_record=None,
+    asset_paths=None,
 ) -> dict:
     """Write the six build artifacts (plus ``fill.json`` when content ran).
 
@@ -258,13 +298,16 @@ def write_scene_artifacts(
             the artifact face is off and nothing is written.
         fill_record: The content fill record; ``None`` (no content spec)
             leaves ``fill.json`` absent.
+        asset_paths: The composed ``{asset-instance id: absolute path}``
+            table; when supplied, every asset artifact row/entry carries its
+            ``resolved`` path.
 
     Returns:
         A mapping of artifact name to written path (empty when off).
     """
     if composed_xml is None or out_dir is None:
         return {}
-    draw, resolution, payloads = _views_for_scene(scene, pipeline, provider_params)
+    draw, resolution, payloads = _views_for_scene(scene, pipeline, provider_params, asset_paths)
     paths = write_build_artifacts(out_dir, scene, draw, resolution, payloads)
     paths["compile"] = write_compile_report(
         out_dir, compile_report(model), composed_xml=composed_xml

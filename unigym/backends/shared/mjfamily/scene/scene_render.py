@@ -31,7 +31,7 @@ into the env's model-load seam).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Mapping
 from types import MappingProxyType
 from types import SimpleNamespace
@@ -56,7 +56,8 @@ from unigym.scenes.primitives import (
     PlaneShape,
     SphereShape,
 )
-from unigym.scenes.scene_ir import Scene, validate_scene
+from unigym.scenes.pipeline import validate_asset_scene
+from unigym.scenes.scene_ir import AssetInstance, Scene
 
 _SCENE_MODEL = (
     '<mujoco model="unigym_scene_{name}">\n'
@@ -82,13 +83,26 @@ class RegionAttachment:
     height_m: float | None
 
 
+def _empty_asset_paths() -> Mapping[str, str]:
+    """An empty immutable asset-path table (typed dataclass default)."""
+    return MappingProxyType({})
+
+
 @dataclass
 class ComposedScene:
-    """A spec-delegating result with an immutable region metadata table."""
+    """A spec-delegating result with immutable region/asset metadata tables.
+
+    ``scene`` is the declared neutral scene and ``asset_paths`` maps each
+    file-backed asset-instance id to its resolved absolute path; both are
+    absent on a product built without them.  The trailing defaults keep
+    every existing positional construction and consumer working.
+    """
 
     spec: mujoco.MjSpec
     regions: Mapping[str, object]
     terrain: object = None
+    scene: Scene | None = None
+    asset_paths: Mapping[str, str] = field(default_factory=_empty_asset_paths)
 
     def __getattr__(self, name):
         """Delegate reads to the contained compiled-ready spec."""
@@ -356,7 +370,7 @@ def compose_scene(scene, asset_plan: AssetPlan):
             "scene composition requires an asset plan: build a pack runtime "
             "at the composition boundary and pass its AssetPlan"
         )
-    validate_scene(scene)
+    validate_asset_scene(scene)
     spec = mujoco.MjSpec.from_string(_SCENE_MODEL.format(name=scene.name))
     _apply_options(mujoco, spec, scene.engine_hints)
     _add_scene_materials(mujoco, spec, scene.materials, asset_plan)
@@ -381,12 +395,23 @@ def compose_scene(scene, asset_plan: AssetPlan):
             _add_shape_payload(spec, instance, build_payload(instance.generator, params))
         else:
             asset_regions.update(_add_prop_instance(spec, scene.name, instance, asset_plan))
+    asset_paths: dict[str, str] = {}
+    for asset_instance in scene.asset_instances:
+        asset_paths[asset_instance.id] = _add_asset_instance(
+            spec, scene.name, asset_instance, asset_plan
+        )
     regions = _scene_regions(scene)
     for key, region in asset_regions.items():
         if key in regions:
             raise ValueError(f"duplicate composed region name {key!r}")
         regions[key] = region
-    return ComposedScene(spec, MappingProxyType(regions), terrain)
+    return ComposedScene(
+        spec,
+        MappingProxyType(regions),
+        terrain,
+        scene,
+        MappingProxyType(asset_paths),
+    )
 
 
 def _scene_regions(scene: Scene) -> dict:
@@ -579,6 +604,125 @@ def _add_shape_payload(spec, instance, payload) -> None:
         if shape.contact is not None:
             kwargs.update(_contact_kwargs(shape.contact))
         body.add_geom(**kwargs)
+
+
+def _asset_root_body(spec, where: str):
+    """Return the asset's single root body, refusing zero or many roots."""
+    roots = list(spec.worldbody.bodies)
+    if len(roots) != 1:
+        raise ValueError(
+            f"{where}: expected exactly one root body in the asset MJCF, " f"found {len(roots)}"
+        )
+    return roots[0]
+
+
+def _asset_joint_kinds(spec) -> list[int]:
+    """Return every joint type declared anywhere in an asset document."""
+    return [int(joint.type) for joint in spec.joints]
+
+
+def _validate_asset_body(spec, where: str, kind: str):
+    """Validate the single-root-body / joint shape of one asset document."""
+    import mujoco
+
+    if list(spec.worldbody.geoms):
+        raise ValueError(
+            f"{where}: worldbody-level geometry is unsupported; a file asset is "
+            f"exactly one rigid root body, so world-level geoms would escape the "
+            f"collision toggle -- move the geometry under the root body"
+        )
+    for section, entries in (
+        ("actuators", spec.actuators),
+        ("sensors", spec.sensors),
+        ("equalities", spec.equalities),
+        ("tendons", spec.tendons),
+    ):
+        if list(entries):
+            raise ValueError(
+                f"{where}: MJCF section {section!r} is unsupported for file-backed "
+                f"scene assets; the file-asset MVP covers one rigid root body only"
+            )
+    root = _asset_root_body(spec, where)
+    if root.bodies:
+        names = [body.name for body in root.bodies]
+        raise ValueError(
+            f"{where}: nested bodies are unsupported (found {len(root.bodies)} "
+            f"under root {root.name!r}: {names}); a file asset is one root body"
+        )
+    joint_kinds = _asset_joint_kinds(spec)
+    if kind == "static_rigid":
+        if joint_kinds:
+            raise ValueError(
+                f"{where}: static rigid assets declare no joints, found "
+                f"{len(joint_kinds)} joint(s) (types {joint_kinds})"
+            )
+        return root
+    root_joints = list(root.joints)
+    if len(joint_kinds) != 1 or len(root_joints) != 1:
+        raise ValueError(
+            f"{where}: dynamic rigid assets need exactly one root freejoint, "
+            f"found {len(joint_kinds)} joint(s) (types {joint_kinds})"
+        )
+    joint_kind = int(root_joints[0].type)
+    if joint_kind != int(mujoco.mjtJoint.mjJNT_FREE):
+        raise ValueError(
+            f"{where}: dynamic rigid assets need exactly one root freejoint; "
+            f"joint type {joint_kind} is unsupported (articulation-in-scene is "
+            f"unsupported)"
+        )
+    return root
+
+
+def _disable_asset_collision(root) -> None:
+    """Disable collision on every geom of the validated asset root body.
+
+    Traversing the validated root body (rather than filtering by the
+    attached name prefix) covers unnamed geoms too.
+    """
+    for geom in root.geoms:
+        geom.contype = 0
+        geom.conaffinity = 0
+
+
+def _add_asset_instance(
+    spec, scene_name: str, instance: AssetInstance, asset_plan: AssetPlan
+) -> str:
+    """Resolve, validate and attach one file-backed MJCF asset instance.
+
+    The asset's single root body keeps its authored local pose verbatim;
+    the instance pose lands on the attach frame and dissolves at compile.
+    A dynamic asset's root freejoint follows that frame automatically.
+    Asset instances contribute no placement regions.
+
+    Args:
+        spec: The compiled-ready MjSpec being composed.
+        scene_name: The owning scene name (provenance in errors).
+        instance: The file-backed asset instance to resolve and attach.
+        asset_plan: The composition boundary that resolves the asset file.
+
+    Returns:
+        The resolved absolute path of the asset document.
+    """
+    from unigym.assets.plan import resolve_asset_instance
+
+    from .mjcf_io import load_asset_spec
+
+    where = f"scene:{scene_name}/asset_instances/{instance.id}"
+    _fmt, path = resolve_asset_instance(instance.asset, asset_plan, ("mjcf",))
+    child = load_asset_spec(path, asset_plan)
+    root = _validate_asset_body(child, where, instance.kind)
+    if instance.collision is False:
+        _disable_asset_collision(root)
+    frame = spec.worldbody.add_frame(name=f"Scene_{scene_name}_{instance.id}_attach")
+    spec.attach(
+        child,
+        prefix=f"Asset_{instance.id}_",
+        suffix="",
+        frame=frame,
+    )
+    frame.pos = [float(value) for value in instance.pose.xyz]
+    frame.quat = [float(value) for value in instance.pose.quat_wxyz]
+    return path
 
 
 def _add_prop_instance(spec, scene_name, instance, asset_plan: AssetPlan) -> dict:
