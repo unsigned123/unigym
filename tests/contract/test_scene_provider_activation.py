@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.adapters import ADAPTER_REGISTRY
+from unigym.adapters import (
+    ADAPTER_REGISTRY,
+    adapter_origin,
+    restore_adapter_registry,
+    snapshot_adapter_registry,
+)
 from unigym.pack_api import (
     ActivationHandle,
     PackCatalog,
@@ -25,7 +30,12 @@ from unigym.pack_api import (
     discover,
 )
 from unigym.packs import PackError
-from unigym.robots import ROBOT_REGISTRY, restore_robots, snapshot_robots
+from unigym.robots import (
+    ROBOT_REGISTRY,
+    restore_robot_registry,
+    robot_origin,
+    snapshot_robot_registry,
+)
 from unigym.scenes.provider_params import ProviderParamSpec, SceneProviderParamError
 from unigym.scenes.providers import (
     ProviderOrigin,
@@ -49,15 +59,14 @@ def _isolate_scene_provider_state():
     """Keep fixture imports, ``sys.path`` and all provider registries isolated."""
     path_snapshot = list(sys.path)
     scene_snapshot = snapshot_scene_providers()
-    adapter_snapshot = dict(ADAPTER_REGISTRY)
-    robots_snapshot = snapshot_robots()
+    adapter_snapshot = snapshot_adapter_registry()
+    robots_snapshot = snapshot_robot_registry()
     _drop_modules()
     yield
     sys.path[:] = path_snapshot
     restore_scene_providers(scene_snapshot)
-    ADAPTER_REGISTRY.clear()
-    ADAPTER_REGISTRY.update(adapter_snapshot)
-    restore_robots(robots_snapshot)
+    restore_adapter_registry(adapter_snapshot)
+    restore_robot_registry(robots_snapshot)
     _drop_modules()
 
 
@@ -314,6 +323,10 @@ def test_scene_only_pack_import_side_effects_are_rolled_back(tmp_path: Path) -> 
     assert set(ROBOT_REGISTRY) == robots_before
     assert "acme.imported_robot" not in ROBOT_REGISTRY
     assert registered_scene_providers() == []
+    with pytest.raises(ValueError, match="acme.imported_adapter"):
+        adapter_origin("acme.imported_adapter")
+    with pytest.raises(AttributeError, match="unknown robot"):
+        robot_origin("acme.imported_robot")
 
 
 def test_scene_provider_target_requires_a_docstring(tmp_path: Path) -> None:

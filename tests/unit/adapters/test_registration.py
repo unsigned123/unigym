@@ -5,11 +5,12 @@ from __future__ import annotations
 import pytest
 
 from unigym.adapters import (
-    ADAPTER_REGISTRY,
     Adapter,
     ManualAdapter,
     adapter_params_registry,
     register_adapter,
+    restore_adapter_registry,
+    snapshot_adapter_registry,
 )
 
 
@@ -44,11 +45,10 @@ class _NotAdapter:
 
 @pytest.fixture(autouse=True)
 def _restore_registry():
-    """Restore the process-global registry after every test."""
-    snapshot = dict(ADAPTER_REGISTRY)
+    """Restore the process-global registry and origins after every test."""
+    snapshot = snapshot_adapter_registry()
     yield
-    ADAPTER_REGISTRY.clear()
-    ADAPTER_REGISTRY.update(snapshot)
+    restore_adapter_registry(snapshot)
 
 
 @pytest.mark.parametrize(
@@ -91,6 +91,13 @@ def test_adapter_params_registry_sees_dynamic_registration() -> None:
     register_adapter("acme.params", _NamedAdapter)
 
     assert adapter_params_registry()["acme.params"]["declared"] is False
+
+
+def test_manual_adapter_has_a_core_origin() -> None:
+    from unigym.adapters import adapter_origin
+    from unigym.provenance import ProviderOrigin
+
+    assert adapter_origin("manual") == ProviderOrigin(kind="core")
 
 
 @pytest.mark.parametrize(

@@ -67,6 +67,24 @@ def test_scene_import_chain_stays_lazy() -> None:
 
 
 @pytest.mark.subprocess
+def test_provenance_module_is_stdlib_only() -> None:
+    """The shared provenance owner imports no engine and no pack/scene layer."""
+    code = (
+        "import sys\n"
+        "import unigym.provenance\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+        "assert 'unigym.packs' not in sys.modules, 'packs layer imported'\n"
+        "assert 'unigym.scenes' not in sys.modules, 'scene layer imported'\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
 def test_pack_object_construction_imports_no_engine_or_pack_code(tmp_path: Path) -> None:
     """Minting preset handles never imports an engine or the pack's Python."""
     root = tmp_path / "acme"

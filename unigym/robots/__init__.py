@@ -15,6 +15,12 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from unigym._typing import JsonValue
+from unigym.provenance import (
+    OriginTable,
+    ProviderInfo,
+    ProviderOrigin,
+    RegistrySnapshot,
+)
 
 from .base import (
     BodyBinding,
@@ -32,6 +38,12 @@ _ROBOT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 
 ROBOT_REGISTRY: dict[str, Callable[..., RobotProfile]] = {}
 """Registered robot factories by name."""
+
+_ROBOT_ORIGINS = OriginTable()
+"""Private provenance side table beside :data:`ROBOT_REGISTRY`."""
+
+RobotRegistrySnapshot = RegistrySnapshot[Callable[..., RobotProfile]]
+"""The origin-aware robot registry snapshot type."""
 
 
 def _load(mod_name: str, fn_name: str) -> Callable[..., RobotProfile]:
@@ -94,7 +106,12 @@ def validate_robot_registration(name: str, factory: Callable[..., RobotProfile])
         )
 
 
-def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[..., RobotProfile]:
+def register_robot(
+    name: str,
+    factory: Callable[..., RobotProfile],
+    *,
+    origin: ProviderOrigin | None = None,
+) -> Callable[..., RobotProfile]:
     """Register one external robot factory in the process-global registry.
 
     The name is the manifest item id used verbatim: lowercase snake_case with
@@ -105,6 +122,9 @@ def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[
         name: Robot name a run config selects in the articulation ``name``.
         factory: A callable factory (function or class) returning a
             :class:`RobotProfile`; a profile instance is not a factory.
+        origin: Internal/runtime-only provenance; pack authors never pass it.
+            A registration without an origin reports
+            :meth:`ProviderOrigin.unknown`.
 
     Returns:
         *factory*, so the helper can be used as a decorator.
@@ -113,19 +133,111 @@ def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[
         ValueError: The name or factory violates the registration contract.
     """
     validate_robot_registration(name, factory)
+    if origin is not None and not isinstance(origin, ProviderOrigin):
+        raise TypeError(
+            f"robot {name!r}: origin must be a ProviderOrigin, got {type(origin).__name__}"
+        )
     ROBOT_REGISTRY[name] = factory
+    if origin is None:
+        _ROBOT_ORIGINS.remove(name)
+    else:
+        _ROBOT_ORIGINS.set(name, origin)
     return factory
 
 
+def robot_origin(name: str) -> ProviderOrigin:
+    """Return the origin of one registered robot (never ``None``).
+
+    A registered robot with no recorded origin returns
+    :meth:`ProviderOrigin.unknown`.  An unknown name raises the existing
+    unknown-robot ``AttributeError``.
+    """
+    if name not in ROBOT_REGISTRY:
+        raise AttributeError(
+            f"unknown robot {name!r}; registered robots are {sorted(ROBOT_REGISTRY)}"
+        )
+    return _ROBOT_ORIGINS.origin(name)
+
+
+def robot_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
+    """Return the registered robots as live :class:`ProviderInfo` records.
+
+    ``kind`` selects the provider kind; the robot registry owns only
+    ``"robot"``, so any other kind returns an empty tuple (``None`` returns
+    every record).  Records are ordered by name.
+    """
+    if kind is not None and kind != "robot":
+        return ()
+    return tuple(
+        ProviderInfo(name=name, kind="robot", origin=_ROBOT_ORIGINS.origin(name))
+        for name in sorted(ROBOT_REGISTRY)
+    )
+
+
+def attribute_robot(name: str, origin: ProviderOrigin) -> None:
+    """Attach runtime-owned provenance to an already-registered robot.
+
+    This is the pack runtime's activation-window attribution boundary, not
+    pack-author API: pack code registers through :func:`register_robot` and
+    never passes an origin here.  It may only label an entry whose current
+    origin is absent or ``unknown``; a ``manifest`` or ``core`` origin is never
+    relabeled.
+
+    Raises:
+        ValueError: The robot is unknown, or its current origin must not be
+            relabeled.
+        TypeError: *origin* is not a :class:`ProviderOrigin`.
+    """
+    if name not in ROBOT_REGISTRY:
+        raise ValueError(
+            f"robot {name!r} is not registered (registered robots: {sorted(ROBOT_REGISTRY)})"
+        )
+    if not isinstance(origin, ProviderOrigin):
+        raise TypeError(
+            f"robot {name!r}: origin must be a ProviderOrigin, got {type(origin).__name__}"
+        )
+    existing = _ROBOT_ORIGINS.get(name)
+    if existing is not None and existing.kind != "unknown":
+        raise ValueError(
+            f"robot {name!r} already has a {existing.kind!r} origin; "
+            "only an unattributed registration may be labeled"
+        )
+    _ROBOT_ORIGINS.set(name, origin)
+
+
 def snapshot_robots() -> dict[str, Callable[..., RobotProfile]]:
-    """Return a shallow copy of the current external robot registry."""
+    """Return a shallow copy of the current robot factories.
+
+    This is the legacy factory-only snapshot: the origin side table is not
+    captured.  Use :func:`snapshot_robot_registry` when rollback must restore
+    provenance as well.
+    """
     return dict(ROBOT_REGISTRY)
 
 
 def restore_robots(snapshot: Mapping[str, Callable[..., RobotProfile]]) -> None:
-    """Restore the external robot registry to exactly *snapshot*."""
+    """Restore the robot factories to exactly *snapshot*.
+
+    This is the legacy factory-only restore: the origin side table is left
+    unchanged.  Use :func:`restore_robot_registry` for an origin-aware,
+    total restore.
+    """
     ROBOT_REGISTRY.clear()
     ROBOT_REGISTRY.update(snapshot)
+
+
+def snapshot_robot_registry() -> RobotRegistrySnapshot:
+    """Return a total snapshot of the robot factories and their origins."""
+    return RegistrySnapshot.capture(ROBOT_REGISTRY, _ROBOT_ORIGINS)
+
+
+def restore_robot_registry(snapshot: RobotRegistrySnapshot) -> None:
+    """Restore the robot factories and origins to exactly *snapshot*."""
+    if not isinstance(snapshot, RegistrySnapshot):
+        raise TypeError(
+            f"restore_robot_registry expects a RobotRegistrySnapshot, got {type(snapshot).__name__}"
+        )
+    snapshot.restore(ROBOT_REGISTRY, _ROBOT_ORIGINS)
 
 
 def __getattr__(name: str) -> Any:
@@ -173,12 +285,20 @@ __all__ = [
     "BodyBinding",
     "BodyBindingError",
     "CanonicalBodyId",
+    "ProviderInfo",
+    "ProviderOrigin",
     "RobotProfile",
+    "RobotRegistrySnapshot",
+    "attribute_robot",
     "build_robot_profile",
     "load_robot_profile",
     "normalize_canonical_body_id",
     "register_robot",
+    "restore_robot_registry",
     "restore_robots",
+    "robot_origin",
+    "robot_providers",
+    "snapshot_robot_registry",
     "snapshot_robots",
     "validate_body_bindings",
 ]

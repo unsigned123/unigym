@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.adapters import ADAPTER_REGISTRY
+from unigym.adapters import (
+    ADAPTER_REGISTRY,
+    restore_adapter_registry,
+    snapshot_adapter_registry,
+)
 from unigym.run.api import Run
 
 _ADAPTER_SOURCE = (
@@ -39,13 +43,12 @@ _ADAPTER_SOURCE = (
 
 @pytest.fixture(autouse=True)
 def _isolate_run_activation():
-    """Restore the adapter registry, ``sys.path`` and imported pack modules."""
+    """Restore the adapter registry/origins, ``sys.path`` and pack modules."""
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
-    registry_snapshot = set(ADAPTER_REGISTRY)
+    registry_snapshot = snapshot_adapter_registry()
     yield
-    for name in set(ADAPTER_REGISTRY) - registry_snapshot:
-        del ADAPTER_REGISTRY[name]
+    restore_adapter_registry(registry_snapshot)
     sys.path[:] = path_snapshot
     for name in set(sys.modules) - modules_snapshot:
         del sys.modules[name]

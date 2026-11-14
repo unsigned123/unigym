@@ -8,7 +8,12 @@ import sys
 import pytest
 
 from unigym.backends.registry import BackendInfo, backend_info
-from unigym.robots import build_robot_profile, register_robot, restore_robots, snapshot_robots
+from unigym.robots import (
+    build_robot_profile,
+    register_robot,
+    restore_robot_registry,
+    snapshot_robot_registry,
+)
 from unigym.robots.base import RobotProfile
 from tests._support.profiles import fixture_profile
 
@@ -18,10 +23,10 @@ _ENGINE_ROOTS = ("isaaclab", "isaaclab_assets", "omni", "isaacsim", "mujoco", "m
 @pytest.fixture(autouse=True)
 def _fixture_robot():
     """Register one neutral factory for the resolution path."""
-    snapshot = snapshot_robots()
+    snapshot = snapshot_robot_registry()
     register_robot("fixture_arm", fixture_profile)
     yield
-    restore_robots(snapshot)
+    restore_robot_registry(snapshot)
 
 
 def test_building_a_neutral_profile_imports_no_engine():

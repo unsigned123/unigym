@@ -47,12 +47,12 @@ def _isolate_pack_modules() -> None:
 
 @pytest.fixture(autouse=True)
 def _isolate_robot_registry():
-    """Restore the process-global external robot registry after every test."""
-    from unigym.robots import restore_robots, snapshot_robots
+    """Restore the process-global robot registry and origins after every test."""
+    from unigym.robots import restore_robot_registry, snapshot_robot_registry
 
-    snapshot = snapshot_robots()
+    snapshot = snapshot_robot_registry()
     yield
-    restore_robots(snapshot)
+    restore_robot_registry(snapshot)
 
 
 @pytest.fixture(autouse=True)
@@ -925,9 +925,14 @@ def test_mixed_adapter_robot_and_scene_failure_rolls_back_every_registry(
     tmp_path: Path,
 ) -> None:
     """A failing scene item restores the adapter, robot and scene registries."""
-    from unigym.adapters import ADAPTER_REGISTRY
+    from unigym.adapters import (
+        ADAPTER_REGISTRY,
+        adapter_origin,
+        restore_adapter_registry,
+        snapshot_adapter_registry,
+    )
 
-    adapters_before = set(ADAPTER_REGISTRY)
+    adapters_snapshot = snapshot_adapter_registry()
     adapter_bases = (
         "    def __init__(self, num_envs=1, device='cpu', **kwargs):\n"
         "        pass\n\n"
@@ -1025,6 +1030,7 @@ def test_mixed_adapter_robot_and_scene_failure_rolls_back_every_registry(
         assert "acme.dynamic_robot" not in ROBOT_REGISTRY
         assert "acme.arm" not in ROBOT_REGISTRY
         assert registered_scene_providers() == []
+        with pytest.raises(ValueError, match="acme.dynamic_adapter"):
+            adapter_origin("acme.dynamic_adapter")
     finally:
-        for name in set(ADAPTER_REGISTRY) - adapters_before:
-            del ADAPTER_REGISTRY[name]
+        restore_adapter_registry(adapters_snapshot)

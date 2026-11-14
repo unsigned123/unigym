@@ -11,17 +11,21 @@ from unigym.robots import (
     RobotProfile,
     build_robot_profile,
     register_robot,
+    restore_robot_registry,
     restore_robots,
+    robot_origin,
+    snapshot_robot_registry,
     snapshot_robots,
 )
+from unigym.provenance import ProviderOrigin
 
 
 @pytest.fixture(autouse=True)
 def _isolate_robot_registry():
-    """Restore the process-global external registry after every test."""
-    snapshot = snapshot_robots()
+    """Restore the process-global registry and its origins after every test."""
+    snapshot = snapshot_robot_registry()
     yield
-    restore_robots(snapshot)
+    restore_robot_registry(snapshot)
 
 
 def _arm_profile(name: str = "acme.arm", *, shoulder: float = 0.0) -> RobotProfile:
@@ -167,3 +171,23 @@ def test_snapshot_is_an_independent_copy() -> None:
 
     assert snapshot == {}
     assert "acme.arm" in ROBOT_REGISTRY
+
+
+def test_origin_aware_snapshot_restores_values_and_origins_together() -> None:
+    """The origin-aware pair is total; the legacy pair stays factory-only."""
+    origin = ProviderOrigin(kind="manifest", pack="acme", pack_version="1.0.0", item_id="acme.arm")
+    register_robot("acme.arm", make_arm, origin=origin)
+    snapshot = snapshot_robot_registry()
+    register_robot("acme.extra", make_other)
+
+    restore_robot_registry(snapshot)
+
+    assert ROBOT_REGISTRY == {"acme.arm": make_arm}
+    assert robot_origin("acme.arm") == origin
+
+    legacy = snapshot_robots()
+    register_robot("acme.extra", make_other)
+    restore_robots(legacy)
+
+    assert ROBOT_REGISTRY == {"acme.arm": make_arm}
+    assert robot_origin("acme.arm") == origin

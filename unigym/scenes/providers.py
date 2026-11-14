@@ -36,6 +36,8 @@ from types import MappingProxyType
 from typing import cast
 
 from unigym._typing import JsonValue
+from unigym.provenance import ProviderInfo as _ProviderInfo
+from unigym.provenance import ProviderOrigin
 
 from .provider_params import (
     ProviderParamSpec,
@@ -89,44 +91,14 @@ class SceneProviderContext:
 
 
 @dataclass(frozen=True)
-class ProviderOrigin:
-    """Where one live scene provider registration came from.
+class ProviderInfo(_ProviderInfo):
+    """One registered scene provider, with origin and parameter schema.
 
-    Origins are process/diagnostic data and are never serialized into a run
-    config, ledger, shard or ``to_config`` output.  ``kind`` is ``manifest``
-    (a declared ``providers`` item), ``pack-code`` (registered by pack Python
-    during an activation window), ``inline`` (a ``World.inline`` provider) or
-    ``unknown`` (registered outside any attributable window).
+    ``ProviderOrigin`` and the live-record base class are owned by
+    :mod:`unigym.provenance`; this specialization adds the scene provider's
+    normalized parameter declaration.
     """
 
-    kind: str
-    pack: str | None = None
-    pack_version: str | None = None
-    root: str | None = None
-    discovered_by: str | None = None
-    face: str | None = None
-    item_id: str | None = None
-    entrypoint: str | None = None
-    activation_entrypoint: str | None = None
-
-    @classmethod
-    def unknown(cls) -> "ProviderOrigin":
-        """The explicit unattributed-registration origin."""
-        return cls(kind="unknown")
-
-    @classmethod
-    def inline(cls) -> "ProviderOrigin":
-        """The ``World.inline`` private-provider origin."""
-        return cls(kind="inline")
-
-
-@dataclass(frozen=True)
-class ProviderInfo:
-    """One registered scene provider, with origin and parameter schema."""
-
-    name: str
-    kind: str
-    origin: ProviderOrigin
     params_schema: Mapping[str, ProviderParamSpec] | None = None
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from unigym.errors import ConfigError
-from unigym.robots import register_robot, restore_robots, snapshot_robots
+from unigym.robots import register_robot, restore_robot_registry, snapshot_robot_registry
 from unigym.run.api import Run
 from unigym.world import World
 from tests._support.profiles import fixture_profile
@@ -14,10 +14,10 @@ from tests._support.profiles import fixture_profile
 @pytest.fixture(autouse=True)
 def _fixture_robot():
     """Expose one real profile to the programmatic builder tests."""
-    snapshot = snapshot_robots()
+    snapshot = snapshot_robot_registry()
     register_robot("fixture_arm", fixture_profile)
     yield
-    restore_robots(snapshot)
+    restore_robot_registry(snapshot)
 
 
 def _world() -> World:

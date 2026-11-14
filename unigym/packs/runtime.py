@@ -28,6 +28,7 @@ import yaml
 
 from unigym.assets.refs import canonical_asset_path
 from unigym.core.paths import repo_root
+from unigym.provenance import ProviderOrigin, RegistrySnapshot, attribution
 
 from . import PackError
 from .catalog import PackCatalog
@@ -37,11 +38,7 @@ if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
     from unigym.robots import RobotProfile
     from unigym.scenes.provider_params import ProviderParamSpec
-    from unigym.scenes.providers import (
-        ProviderOrigin,
-        SceneProvider,
-        SceneProviderRegistrySnapshot,
-    )
+    from unigym.scenes.providers import SceneProvider, SceneProviderRegistrySnapshot
 
 _ASSET_PACK_PREFIX = "pack:"
 
@@ -145,7 +142,10 @@ def _resolve_entrypoint(entrypoint: str) -> Callable[..., Any]:
     return target
 
 
-def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
+def _activate_adapter_providers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+) -> tuple[str, ...]:
     """Import and register manifest-declared ``kind: adapter`` providers.
 
     The item id becomes the adapter name a run config selects.  Validation is
@@ -153,9 +153,10 @@ def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
     resolve to an ``Adapter`` subclass class and name a free registry slot.
     A later invalid item therefore leaves no earlier registration behind, and
     retrying the same pack fails on the original defect rather than on a
-    leaked duplicate.  The adapter package imports torch, so it is imported
-    lazily here and never at runtime-module import time.  Other provider kinds
-    stay inert in this phase.
+    leaked duplicate.  Each registration records its exact manifest origin.
+    The adapter package imports torch, so it is imported lazily here and never
+    at runtime-module import time.  Other provider kinds stay inert in this
+    phase.
     """
     items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "adapter")
     if not items:
@@ -178,21 +179,25 @@ def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
     proposed: set[str] = set()
     for item in items:
         where = f"pack {manifest.name!r} provider id {item.id!r}"
-        try:
-            target = _resolve_entrypoint(item.entrypoint)
-        except Exception as err:
+        entrypoint = item.entrypoint
+        if entrypoint is None:
             raise PackError(
-                f"{where} entrypoint {item.entrypoint!r} failed to import: {err}"
-            ) from err
+                f"{where} declares kind 'adapter' but no entrypoint; declare "
+                f"'entrypoint: module:AdapterClass'"
+            )
+        try:
+            target = _resolve_entrypoint(entrypoint)
+        except Exception as err:
+            raise PackError(f"{where} entrypoint {entrypoint!r} failed to import: {err}") from err
         if not isinstance(target, type) or not issubclass(target, Adapter):
             raise PackError(
-                f"{where} entrypoint {item.entrypoint!r} target {target!r} must be "
+                f"{where} entrypoint {entrypoint!r} target {target!r} must be "
                 f"an Adapter subclass class, not an instance or factory"
             )
         existing = ADAPTER_REGISTRY.get(item.id)
         if existing is not None:
             raise PackError(
-                f"{where} entrypoint {item.entrypoint!r} cannot register adapter "
+                f"{where} entrypoint {entrypoint!r} cannot register adapter "
                 f"name {item.id!r}: already registered to "
                 f"{existing.__module__}.{existing.__qualname__}"
             )
@@ -202,16 +207,24 @@ def _activate_adapter_providers(manifest: PackManifestV1) -> tuple[str, ...]:
         validated.append((item, target))
 
     registered: list[str] = []
+    failed_item = validated[0][0]
     try:
-        for item, target in validated:
-            register_adapter(item.id, target)
-            registered.append(item.id)
+        for current_item, target in validated:
+            failed_item = current_item
+            register_adapter(
+                current_item.id,
+                target,
+                origin=_manifest_provider_origin(manifest, runtime, current_item),
+            )
+            registered.append(current_item.id)
     except Exception as err:
+        # Origins are restored by the activation transaction in ``activate``;
+        # this local rollback only preserves the precise error message.
         for name in registered:
             ADAPTER_REGISTRY.pop(name, None)
         raise PackError(
-            f"pack {manifest.name!r} provider id {item.id!r} entrypoint "
-            f"{item.entrypoint!r} failed to register: {err}"
+            f"pack {manifest.name!r} provider id {failed_item.id!r} entrypoint "
+            f"{failed_item.entrypoint!r} failed to register: {err}"
         ) from err
     return tuple(item.id for item in items)
 
@@ -326,7 +339,11 @@ def _activate_robot_providers(manifest: PackManifestV1, runtime: PackRuntime) ->
             else (f"resource {item.resource!r}")
         )
         try:
-            register_robot(item.id, target)
+            register_robot(
+                item.id,
+                target,
+                origin=_manifest_provider_origin(manifest, runtime, item),
+            )
         except Exception as err:
             raise PackError(
                 f"pack {manifest.name!r} provider id {item.id!r} {locator} "
@@ -346,25 +363,72 @@ def _provider_schema_diff(
     return [key for key in keys if left_map.get(key) != right_map.get(key)]
 
 
-def _manifest_scene_provider_origin(
+def _manifest_provider_origin(
     manifest: PackManifestV1,
     runtime: PackRuntime,
     item: ProvidedItem,
 ) -> ProviderOrigin:
-    """Build the exact provenance record for one manifest ``kind: scene`` item."""
-    from unigym.scenes.providers import ProviderOrigin
-
+    """Build the exact provenance record for one manifest provider item."""
+    discovered_by = runtime.origins.get(manifest.name, "unknown")
     return ProviderOrigin(
         kind="manifest",
         pack=manifest.name,
         pack_version=manifest.version,
         root=str(manifest.root),
-        discovered_by=runtime.origins.get(manifest.name, "unknown"),
+        discovered_by=discovered_by,
         face="providers",
         item_id=item.id,
+        resource=item.resource,
         entrypoint=item.entrypoint,
         activation_entrypoint=manifest.entrypoint,
+        # An entry-point root may load its target during discovery (§2.1).
+        location_imported=discovered_by == "entry-point",
     )
+
+
+def _pack_code_origin(manifest: PackManifestV1, runtime: PackRuntime) -> ProviderOrigin:
+    """Build the activation-window origin for pack-code registrations."""
+    discovered_by = runtime.origins.get(manifest.name, "unknown")
+    return ProviderOrigin(
+        kind="pack-code",
+        pack=manifest.name,
+        pack_version=manifest.version,
+        root=str(manifest.root),
+        discovered_by=discovered_by,
+        item_id=None,
+        activation_entrypoint=manifest.entrypoint,
+        location_imported=discovered_by == "entry-point",
+    )
+
+
+def _attribute_pack_code_robots(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: RegistrySnapshot[Callable[..., RobotProfile]],
+) -> None:
+    """Label robots the pack registered itself during the activation window."""
+    from unigym.robots import ROBOT_REGISTRY, attribute_robot, robot_origin
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in attribution(before.entries, ROBOT_REGISTRY, origin):
+        # A manifest item already recorded the exact manifest origin; only
+        # unattributed registrations are pack-code.
+        if robot_origin(name).kind == "unknown":
+            attribute_robot(name, origin)
+
+
+def _attribute_pack_code_adapters(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: RegistrySnapshot[type[Adapter]],
+) -> None:
+    """Label adapters the pack registered itself during the activation window."""
+    from unigym.adapters import ADAPTER_REGISTRY, adapter_origin, attribute_adapter
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in attribution(before.entries, ADAPTER_REGISTRY, origin):
+        if adapter_origin(name).kind == "unknown":
+            attribute_adapter(name, origin)
 
 
 def _attribute_pack_code_scene_providers(
@@ -374,21 +438,12 @@ def _attribute_pack_code_scene_providers(
 ) -> None:
     """Label scene providers the pack registered itself during activation."""
     from unigym.scenes.providers import (
-        ProviderOrigin,
         attribute_scene_provider,
         registered_scene_providers,
         scene_provider_origin,
     )
 
-    origin = ProviderOrigin(
-        kind="pack-code",
-        pack=manifest.name,
-        pack_version=manifest.version,
-        root=str(manifest.root),
-        discovered_by=runtime.origins.get(manifest.name, "unknown"),
-        item_id=None,
-        activation_entrypoint=manifest.entrypoint,
-    )
+    origin = _pack_code_origin(manifest, runtime)
     for name in registered_scene_providers():
         if name in before.providers:
             continue
@@ -544,7 +599,7 @@ def _activate_scene_provider_providers(
         validated.append((item, target, manifest_schema, adopted))
 
     for item, target, manifest_schema, adopted in validated:
-        origin = _manifest_scene_provider_origin(manifest, runtime, item)
+        origin = _manifest_provider_origin(manifest, runtime, item)
         if adopted:
             attribute_scene_provider(item.id, origin, params=manifest_schema)
         else:
@@ -723,7 +778,10 @@ class PackRuntime:
         snapshotted before the first import or provider registration.  Failures
         are wrapped with the pack, item id and locator named; a failed
         activation restores all three registries to their prior contents,
-        including names pack code registered itself.
+        including names and origins pack code registered itself.  Manifest
+        provider items write exact ``kind="manifest"`` origins; names a pack
+        registered itself during this activation window are labeled
+        ``kind="pack-code"`` with ``item_id=None``.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -757,39 +815,35 @@ class PackRuntime:
         imports_pack_code = entrypoint is not None or any(
             item.entrypoint is not None for item in (*adapter_items, *robot_items, *scene_items)
         )
-        adapter_registry = None
-        adapters_before: set[str] | None = None
-        robots_before: dict[str, Callable[..., RobotProfile]] | None = None
+        adapters_before: RegistrySnapshot[type[Adapter]] | None = None
+        robots_before: RegistrySnapshot[Callable[..., RobotProfile]] | None = None
         scene_before: SceneProviderRegistrySnapshot | None = None
         if activation_surface:
             if imports_pack_code:
-                from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
+                from unigym.adapters import snapshot_adapter_registry
 
-                adapters_before = set(adapter_registry)
-            from unigym.robots import snapshot_robots
+                adapters_before = snapshot_adapter_registry()
+            from unigym.robots import snapshot_robot_registry
             from unigym.scenes.providers import snapshot_scene_providers
 
-            robots_before = snapshot_robots()
+            robots_before = snapshot_robot_registry()
             scene_before = snapshot_scene_providers()
 
         def rollback_adapters() -> None:
-            """Remove adapter names a failed activation added to the registry.
-
-            ``register_adapter`` rejects an existing name, so activation can
-            only add entries; removing the additions restores the registry.
-            """
-            if adapter_registry is None or adapters_before is None:
+            """Restore the adapter classes and origins a failed activation changed."""
+            if adapters_before is None:
                 return
-            for name in set(adapter_registry) - adapters_before:
-                adapter_registry.pop(name, None)
+            from unigym.adapters import restore_adapter_registry
+
+            restore_adapter_registry(adapters_before)
 
         def rollback_robots() -> None:
-            """Restore the external robot registry a failed activation changed."""
+            """Restore the robot factories and origins a failed activation changed."""
             if robots_before is None:
                 return
-            from unigym.robots import restore_robots
+            from unigym.robots import restore_robot_registry
 
-            restore_robots(robots_before)
+            restore_robot_registry(robots_before)
 
         def rollback_scene_providers() -> None:
             """Restore the scene-provider registries a failed activation changed."""
@@ -815,11 +869,15 @@ class PackRuntime:
                     set(registered_scene_providers()) - set(scene_before.providers)
                 )
 
-            adapters = _activate_adapter_providers(manifest)
+            adapters = _activate_adapter_providers(manifest, self)
             robots = _activate_robot_providers(manifest, self)
             scene_providers = _activate_scene_provider_providers(
                 manifest, self, window_names=window_names
             )
+            if adapters_before is not None:
+                _attribute_pack_code_adapters(manifest, self, adapters_before)
+            if robots_before is not None:
+                _attribute_pack_code_robots(manifest, self, robots_before)
             if scene_before is not None:
                 _attribute_pack_code_scene_providers(manifest, self, scene_before)
         except PackError:
@@ -989,7 +1047,7 @@ def _configured_roots(
     Order: ``UNIGYM_PACKS``, the local overlay, installed ``unigym.packs``
     entry points (name-sorted) when opted in, then ``<UNIGYM_DEPS_ROOT>``
     packs.  The label map keys canonical roots to their discovery label for
-    :class:`~unigym.scenes.providers.ProviderOrigin.discovered_by`; the name
+    :class:`~unigym.provenance.ProviderOrigin.discovered_by`; the name
     map keys canonical entry-point roots to their entry-point name so a
     manifest failure can name the entry point.
     """

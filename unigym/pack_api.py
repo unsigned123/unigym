@@ -26,8 +26,8 @@ from unigym.packs.runtime import (
     discover,
 )
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
+from unigym.provenance import ProviderOrigin
 from unigym.scenes.providers import (
-    ProviderOrigin,
     SceneProvider,
     SceneProviderContext,
     build_scene_from_provider,

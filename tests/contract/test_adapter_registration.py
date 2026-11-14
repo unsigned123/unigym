@@ -15,23 +15,30 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.adapters import ADAPTER_REGISTRY, Adapter, build_adapter
+from unigym.adapters import (
+    ADAPTER_REGISTRY,
+    Adapter,
+    adapter_origin,
+    build_adapter,
+    restore_adapter_registry,
+    snapshot_adapter_registry,
+)
 from unigym.pack_api import discover
 from unigym.packs import PackError
-from unigym.robots import ROBOT_REGISTRY, restore_robots, snapshot_robots
+from unigym.provenance import ProviderOrigin
+from unigym.robots import ROBOT_REGISTRY, restore_robot_registry, snapshot_robot_registry
 
 
 @pytest.fixture(autouse=True)
 def _isolate_adapter_registration():
-    """Restore the adapter and robot registries, ``sys.path`` and pack modules."""
+    """Restore adapter/robot values, origins, ``sys.path`` and pack modules."""
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
-    registry_snapshot = set(ADAPTER_REGISTRY)
-    robots_snapshot = snapshot_robots()
+    adapters_snapshot = snapshot_adapter_registry()
+    robots_snapshot = snapshot_robot_registry()
     yield
-    for name in set(ADAPTER_REGISTRY) - registry_snapshot:
-        del ADAPTER_REGISTRY[name]
-    restore_robots(robots_snapshot)
+    restore_adapter_registry(adapters_snapshot)
+    restore_robot_registry(robots_snapshot)
     sys.path[:] = path_snapshot
     for name in set(sys.modules) - modules_snapshot:
         del sys.modules[name]
@@ -119,6 +126,15 @@ def test_dynamic_code_pack_registers_adapter(tmp_path: Path) -> None:
     assert issubclass(registered, Adapter)
     adapter = build_adapter({"name": "acme.dynamic"}, num_envs=1, device="cpu")
     assert isinstance(adapter, Adapter)
+    assert adapter_origin("acme.dynamic") == ProviderOrigin(
+        kind="pack-code",
+        pack="adapter_dynamic",
+        pack_version="1.0.0",
+        root=str(root.resolve()),
+        discovered_by="explicit-root",
+        item_id=None,
+        activation_entrypoint="adapter_dynamic_pack:register",
+    )
 
 
 def test_manifest_adapter_provider_registers_under_item_id(tmp_path: Path) -> None:
@@ -147,6 +163,11 @@ def test_manifest_adapter_provider_registers_under_item_id(tmp_path: Path) -> No
     assert issubclass(registered, Adapter)
     adapter = build_adapter({"name": "acme.static"}, num_envs=1, device="cpu")
     assert isinstance(adapter, Adapter)
+    origin = adapter_origin("acme.static")
+    assert origin.kind == "manifest"
+    assert origin.pack == "adapter_static"
+    assert origin.item_id == "acme.static"
+    assert origin.entrypoint == "adapter_static_pack:StaticAdapter"
 
 
 def test_manifest_adapter_target_must_subclass_adapter(tmp_path: Path) -> None:

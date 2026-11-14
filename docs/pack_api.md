@@ -853,6 +853,32 @@ duplicate names. One factory owns exactly one name. A factory must be callable.
 in `unigym.robots`; `unigym.pack_api.register_robot` is the pack-facing wrapper.
 The registry lives for the process lifetime, like `ADAPTER_REGISTRY`.
 
+Registry provenance is process/diagnostic data and is never serialized into a
+run config, ledger, shard or `to_config` output.  `ROBOT_REGISTRY` stays the
+authoritative name -> factory mapping; origins live in a private side table:
+
+- `register_robot(name, factory, *, origin=None)` keeps the legacy call shape.
+  Pack code never passes `origin`; a registration without one reports
+  `ProviderOrigin.unknown()`.
+- a manifest `kind: robot` item writes the exact
+  `ProviderOrigin(kind="manifest", pack, pack_version, root, discovered_by,
+  face="providers", item_id, resource | entrypoint,
+  activation_entrypoint)`;
+- a robot registered by pack code during an activation window is
+  `kind="pack-code"` with `item_id=None` and that manifest entrypoint; outside
+  a window it is `unknown()`.  Attribution is window-level; there is no
+  contextvar, stack inspection or import hook;
+- `robot_origin(name)` returns the recorded origin (unknown names keep the
+  existing unknown-robot `AttributeError`); `robot_providers(kind=None)`
+  returns live `ProviderInfo(name=..., kind="robot", origin=..., active=True)`
+  records;
+- `snapshot_robot_registry()` / `restore_robot_registry()` capture and restore
+  factories **and** origins; activation rollback uses this pair.  The legacy
+  `snapshot_robots()` / `restore_robots()` stay factory-only and are documented
+  as such; callers that care about provenance must migrate to the origin-aware
+  pair.
+
+
 Manifest robot providers are processed after the pack-level entrypoint and
 after adapter providers (or without a pack-level entrypoint). The activation
 handle's `robots` field records the manifest `kind: robot` item ids in
@@ -1129,7 +1155,12 @@ schema is valid. A later invalid item leaves no earlier scene provider
 registered.
 
 Provenance is process/diagnostic data and is never serialized into a run
-config, ledger, shard or `to_config` output:
+config, ledger, shard or `to_config` output.  `ProviderOrigin` is the shared
+record owned by `unigym.provenance`; the scene, robot and adapter registries
+reuse it rather than defining their own.  It also carries the declared
+`resource` locator and the `location_imported` entry-point seam flag (an
+entry-point root may import its target module before any manifest is read;
+explicit and configured content sources do not).
 
 - a manifest item yields the exact
   `ProviderOrigin(kind="manifest", pack, pack_version, root, discovered_by,
@@ -1150,8 +1181,8 @@ one-sided declaration (only the manifest or only the code registration declares
 differing keys.
 
 `scene_provider_providers(kind="scene")` returns `ProviderInfo(name, kind,
-origin, params_schema)` records; `scene_provider_origin(name)` returns one
-provider's origin. `PackRuntime.origins` carries the discovery label per pack
+origin, params_schema, *, active=True)` records; `scene_provider_origin(name)`
+returns one provider's origin. `PackRuntime.origins` carries the discovery label per pack
 (`explicit-root`, `env:UNIGYM_PACKS`, `local-yaml`, `entry-point`, `deps-root`);
 a hand-built runtime reports `unknown`. A failed activation restores the
 adapter, robot and scene-provider registries to their prior contents, including
@@ -1210,6 +1241,21 @@ Activation is idempotent per runtime through `ActivationHandle`, whose
 `adapters` field records the manifest adapter ids that activation registered.
 A dynamic registration and a manifest registration for the same name still
 fail loudly on the second registration.
+
+Adapter registry provenance uses the same side-table model as robots:
+
+- the built-in `manual` adapter is seeded with `ProviderOrigin(kind="core")`;
+- a manifest `kind: adapter` item writes the exact `kind="manifest"` origin
+  (`face="providers"`, item id, entrypoint, `activation_entrypoint`);
+- a pack-code registration during an activation window gets
+  `kind="pack-code"` with `item_id=None`; outside a window it is
+  `unknown()`;
+- `adapter_origin(name)` returns the recorded origin and
+  `adapter_providers(kind=None)` returns live
+  `ProviderInfo(name=..., kind="adapter", origin=..., active=True)` records;
+- `snapshot_adapter_registry()` / `restore_adapter_registry()` restore classes
+  **and** origins together; activation rollback uses this pair.
+
 
 Manifest adapter activation is transactional within one pack: every
 `kind: adapter` item is validated (entrypoint present, target importable, a
