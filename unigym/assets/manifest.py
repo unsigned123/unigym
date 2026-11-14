@@ -27,7 +27,7 @@ SCHEMA = "unigym.asset/1"
 KINDS = frozenset({"model", "texture_set", "mesh", "material"})
 
 #: keys that would smuggle L1 scene knowledge into an L0 manifest (R3).
-FORBIDDEN_KEYS = frozenset({"scene", "layout", "style", "engine"})
+FORBIDDEN_KEYS = frozenset({"scene", "scene_preset", "scene_provider", "layout", "style", "engine"})
 
 #: keys every manifest must carry.
 REQUIRED_KEYS = ("schema", "id", "kind", "files", "capabilities", "license", "provenance")

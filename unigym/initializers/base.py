@@ -54,6 +54,7 @@ __all__ = [
     "register",
     "build_initializer",
     "normalize_initializer_spec",
+    "validate_initializer_shape",
 ]
 
 
@@ -242,13 +243,44 @@ def _resolve_factory(spec: str):
     return getattr(mod, attr)
 
 
+def validate_initializer_shape(cfg: object) -> None:
+    """Validate the closed initializer shape without resolving the registry.
+
+    ``cfg`` must be a mapping declaring exactly one of ``type`` (a registered
+    builtin) or ``module`` (``pkg.mod:factory``) plus an optional mapping
+    ``params``; the removed ``name`` key fails even when ``type`` / ``module``
+    is also present.  The preset loader calls this at document validation time
+    so a legacy block fails before any backend is constructed.
+    """
+    if not isinstance(cfg, dict):
+        raise ValueError(f"initializer block must be a mapping, got {type(cfg).__name__}")
+    if "name" in cfg:
+        raise ValueError(
+            "initializer block declares the removed key 'name'; declare 'type' "
+            "(builtin registry) or 'module' (pkg.mod:factory mount) -- there "
+            "is no name alias"
+        )
+    has_type = "type" in cfg
+    has_module = "module" in cfg
+    if has_type == has_module:
+        raise ValueError(
+            "initializer block must declare exactly one of 'type' "
+            f"(builtin registry) or 'module' (pkg.mod:factory mount), "
+            f"got keys {sorted(cfg)}"
+        )
+    params = cfg.get("params") or {}
+    if not isinstance(params, dict):
+        raise ValueError(f"initializer.params must be a mapping, got {type(params).__name__}")
+
+
 def build_initializer(cfg: dict, profile, primitives) -> InitializerBase:
     """Registry/factory dispatch + construction + ``validate()``.
 
     ``cfg`` is the normalized ``initializer`` block: either
-    ``{"type": <registry name>, "params": {...}}`` or the external
-    mount ``{"module": "pkg.mod:factory", "params": {...}}``.  Fail-fast
-    on unknown types and on schema errors (the load-time validate phase).
+    ``{"type": <registry name>}`` or the external mount
+    ``{"module": "pkg.mod:factory"}``, each with an optional ``params``
+    mapping.  Fail-fast on unknown types and on schema errors (the
+    load-time validate phase).
     """
     if not isinstance(cfg, dict):
         raise ValueError(f"initializer block must be a mapping, got " f"{type(cfg).__name__}")
@@ -291,7 +323,7 @@ def normalize_initializer_spec(params: dict) -> Optional[dict]:
     or ``None`` when the config declares no initializer (the legacy
     no-initializer reset, bit-identical).  Two sources, one output:
 
-    * ``params["initializer"]`` -- the scene-bundle face (wins);
+    * ``params["initializer"]`` -- the scene-preset face (wins);
     * ``params["reset"]`` -- the legacy T1.4 block (protocol + optional
       placement), transposed to an ANONYMOUS INLINE initializer of the
       ``splita_tabletop`` builtin: placement fields hoist to the top

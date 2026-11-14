@@ -8,6 +8,20 @@ DR events) stays inside this module / this package.
 from __future__ import annotations
 
 
+def _reject_scene_params(env_cfg: dict) -> None:
+    """Reject scene-provider/content routing keys at the isaaclab boundary."""
+    params = env_cfg.get("params")
+    if not isinstance(params, dict):
+        return
+    for key in ("scene_provider", "scene_provider_params", "scene_provider_preset", "content"):
+        if key in params:
+            raise ValueError(
+                f"isaaclab backend: env.params.{key} has no consumer here; "
+                "the run layer must reject a scene preset on this backend "
+                "before construction"
+            )
+
+
 def env_kwargs(
     env_cfg: dict,
     artifacts_dir,
@@ -32,6 +46,7 @@ def env_kwargs(
     for the common run-layer contract and ignored here: D4 does not wire the
     generic Isaac Lab actuator plan into the G1 realizer (D5 does).
     """
+    _reject_scene_params(env_cfg)
     del (env_cfg, artifacts_dir, world_base, actuation_plans)
     return {
         "terrain": getattr(spec, "terrain", None),

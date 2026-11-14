@@ -445,7 +445,7 @@ def main():
     from unigym.core.spawn import load_cfg as _launch_cfg
 
     runtime_dirs.ensure_tree(_launch_cfg())
-    # normalization / scene bundle / placeholder expansion / CLI overrides:
+    # normalization / scene preset / placeholder expansion / CLI overrides:
     # the pure-data half of the old inline path (unigym/run/spec.py).
     from unigym.run.spec import build_spec
 

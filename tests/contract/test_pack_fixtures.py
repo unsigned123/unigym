@@ -30,7 +30,7 @@ EXPECTED_YAML_FILES = {
     "acme_code/unigym.pack.yaml",
     "acme_content/assets/cup/asset.yaml",
     "acme_content/runs/demo.yaml",
-    "acme_content/scenes/tabletop.yaml",
+    "acme_content/scene_presets/tabletop.yaml",
     "acme_content/unigym.pack.yaml",
 }
 
@@ -76,10 +76,10 @@ def test_content_fixture_loads_with_exact_entries() -> None:
                 kind=None,
             ),
         ),
-        "scenes": (
+        "scene_presets": (
             ProvidedItem(
                 id="acme_content.tabletop",
-                resource="scenes/tabletop.yaml",
+                resource="scene_presets/tabletop.yaml",
                 entrypoint=None,
                 kind=None,
             ),
@@ -137,9 +137,9 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
         ),
         CatalogEntry(
             pack="acme_content",
-            face="scenes",
+            face="scene_presets",
             id="acme_content.tabletop",
-            resource="scenes/tabletop.yaml",
+            resource="scene_presets/tabletop.yaml",
             entrypoint=None,
             kind=None,
         ),
@@ -160,12 +160,12 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             kind="asset_generator",
         ),
     )
-    assert catalog.entries(face="scenes") == (
+    assert catalog.entries(face="scene_presets") == (
         CatalogEntry(
             pack="acme_content",
-            face="scenes",
+            face="scene_presets",
             id="acme_content.tabletop",
-            resource="scenes/tabletop.yaml",
+            resource="scene_presets/tabletop.yaml",
             entrypoint=None,
             kind=None,
         ),

@@ -239,12 +239,12 @@ class BackendInfo:
     """Cameras require the kit ``--enable_cameras`` pipeline."""
     bind_all_declared_cameras: bool = False
     """Bind every declared camera rig (vs request-driven instantiation)."""
-    world_base_required: bool = False
-    """A run-level ``world_base: {mjcf: ...}`` declaration is mandatory."""
-    mj_scene_consumer: bool = False
-    """Consumes the ``env.params.mj_scene`` / scene-IR fill."""
-    inline_static_scene: bool = False
-    """Consumes the inline world scene as ``env.params.mj_scene`` (mujoco)."""
+    world_base_consumer: bool = False
+    """Consumes the run-level ``world_base: {mjcf|urdf|usd: ...}`` asset."""
+    scene_provider_consumer: bool = False
+    """Consumes ``env.params.scene_provider`` and composes its neutral scene."""
+    backend_param_keys: frozenset[str] = frozenset()
+    """Keys a backend accepts under ``backend_params.<backend>``."""
     probe_in_host: bool = False
     """``unigym probe`` runs in the host venv (vs the container lane)."""
     probe_env: tuple[tuple[str, str], ...] = ()
@@ -267,6 +267,12 @@ class BackendInfo:
         if len(set(formats)) != len(formats):
             raise ValueError(f"backend {self.name!r} repeats an asset format: {list(formats)}")
         object.__setattr__(self, "asset_formats", formats)
+        keys = frozenset(str(key) for key in self.backend_param_keys)
+        if any(not key.replace("_", "").isalnum() or key != key.lower() for key in keys):
+            raise ValueError(
+                f"backend {self.name!r} backend_param_keys must be snake_case: {sorted(keys)}"
+            )
+        object.__setattr__(self, "backend_param_keys", keys)
 
     def has(self, *traits: Trait) -> bool:
         """Every listed trait present?"""
@@ -889,9 +895,9 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         content_router=_mujoco_content_router,
         scene_ops=_mujoco_scene_ops,
         bind_all_declared_cameras=True,
-        world_base_required=True,
-        mj_scene_consumer=True,
-        inline_static_scene=True,
+        world_base_consumer=True,
+        scene_provider_consumer=True,
+        backend_param_keys=frozenset({"base", "initializer"}),
         probe_in_host=True,
         probe_env=(("MUJOCO_GL", "egl"),),
     ),
@@ -913,10 +919,12 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         contact_backend=_mujoco_contact_backend,
         gripper_backend=_mujoco_gripper_backend,
         env_kwargs=_mjwarp_env_kwargs,
+        content_router=_mujoco_content_router,
         scene_ops=_mujoco_scene_ops,
         bind_all_declared_cameras=True,
-        world_base_required=True,
-        mj_scene_consumer=True,
+        world_base_consumer=True,
+        scene_provider_consumer=True,
+        backend_param_keys=frozenset({"base", "initializer"}),
         probe_in_host=True,
         probe_env=(("MUJOCO_GL", "egl"),),
     ),

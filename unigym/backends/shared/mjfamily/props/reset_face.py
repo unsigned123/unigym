@@ -1,6 +1,6 @@
-"""Mujoco scene-bundle reset face: base semantics + initializer wiring.
+"""Mujoco scene-preset reset face: base semantics + initializer wiring.
 
-The scene-bundle consumption helpers for the mujoco backend.  An
+The scene-preset consumption helpers for the mujoco backend.  An
 initializer never touches engine handles directly: sampling reads the
 model and every mutation goes through a :class:`ResetPrimitives`
 primitive built here (``write_freejoint`` is the existing prop
@@ -87,7 +87,7 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
 
 
 def resolve_base_height(params: dict, profile) -> float:
-    """The free-base spawn height in metres (scene-bundle §3 semantics).
+    """The free-base spawn height in metres (scene-preset §3 semantics).
 
     Precedence: an explicit ``env.params.spawn_height`` wins over the
     effective profile's ``base_height``; with neither the fallback is
@@ -108,12 +108,18 @@ def resolve_base_height(params: dict, profile) -> float:
             f"mujoco backend: env.params.base must be a mapping "
             f"({{joint: fixed}}), got {type(base_decl).__name__}"
         )
+    unknown = sorted(str(key) for key in base_decl if key != "joint")
+    if unknown:
+        raise ValueError(
+            f"mujoco backend: env.params.base declares unsupported key(s) {unknown}; "
+            "the only supported key is 'joint' (currently only 'joint: fixed')"
+        )
     base_joint = str(base_decl.get("joint", "fixed"))
     if base_joint != "fixed":
         raise NotImplementedError(
             f"mujoco backend: env.params.base.joint {base_joint!r} is "
             f"not implemented yet (free-base spawning arrives with the "
-            f"scene-bundle base migration) | hint: declare joint: fixed"
+            f"scene-preset base migration) | hint: declare joint: fixed"
         )
     return 0.0
 

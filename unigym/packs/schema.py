@@ -30,7 +30,7 @@ SCHEMA_ID = "unigym.pack/1"
 
 FACE_NAMES = (
     "runs",
-    "scenes",
+    "scene_presets",
     "tasks",
     "assets",
     "benchmarks",
@@ -202,6 +202,20 @@ def _provided_item(
             raise PackError(f"{where} (id {item_id!r}) kind must be a non-empty string")
         kind = raw_kind
 
+    if face == "scene_presets":
+        if entrypoint is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene preset item and must be "
+                "resource-backed only; declare 'resource: scene_presets/<file>.yaml' "
+                "(scene providers are declared on the 'providers' face with kind: scene)"
+            )
+        if kind is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene preset item and must be "
+                "resource-backed only; drop 'kind:' (scene providers are declared "
+                "on the 'providers' face with kind: scene)"
+            )
+
     return ProvidedItem(id=item_id, resource=resource, entrypoint=entrypoint, kind=kind)
 
 
@@ -217,6 +231,12 @@ def _provides(
     provides: dict[str, tuple[ProvidedItem, ...]] = {}
     for face, raw_items in raw.items():
         if face not in FACE_NAMES:
+            if face == "scenes":
+                raise PackError(
+                    f"unknown pack face 'scenes' in {path}; scene presets are declared "
+                    "under 'scene_presets'; scene providers are declared under "
+                    "'providers' with kind: scene"
+                )
             raise PackError(
                 f"unknown pack face {face!r} in {path}; known faces: {list(FACE_NAMES)}"
             )

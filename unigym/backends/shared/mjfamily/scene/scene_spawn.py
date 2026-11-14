@@ -3,11 +3,11 @@
 Two seams of :class:`~unigym.backends.mujoco.env.MujocoEnv` live
 here so the constructor stays a thin dispatcher:
 
-* :func:`compose_declared_scene` -- the ``env.params.mj_scene`` slot
-  names a REGISTERED scene provider; the provider dispatch (with the
-  ``mj_scene_params`` slot dict passed through VERBATIM) is composed and
-  attached into the base spec before the camera/prop/director
-  injections.  Slots are the provider's own fail-closed gates; this
+* :func:`compose_scene_provider` -- ``env.params.scene_provider`` names a
+  REGISTERED scene provider; the provider dispatch (with the
+  ``scene_provider_params`` mapping passed through VERBATIM) is composed
+  and attached into the base spec before the camera/prop/director
+  injections.  Params are the provider's own fail-closed gates; this
   helper only hands them over.
 * :func:`apply_spawn_base_pose` -- the ``env.params.spawn_base_pose``
   fixed-base spawn face.  A world-fixed robot model welds its base into
@@ -30,7 +30,7 @@ import numpy as np
 
 
 def needs_spec(
-    camera_manager=None, prop_manager=None, director_cfg=None, mj_scene=None, spawn_base=None
+    camera_manager=None, prop_manager=None, director_cfg=None, scene_provider=None, spawn_base=None
 ) -> bool:
     """True when the base model must be loaded as an editable MjSpec.
 
@@ -41,26 +41,32 @@ def needs_spec(
     """
     return any(
         item is not None
-        for item in (camera_manager, prop_manager, director_cfg, mj_scene, spawn_base)
+        for item in (camera_manager, prop_manager, director_cfg, scene_provider, spawn_base)
     )
 
 
-def compose_declared_scene(mjspec, name: str, slots, asset_plan) -> Mapping[str, object]:
+def compose_scene_provider(
+    mjspec, name: str, params, asset_plan, *, preset: str | None = None
+) -> Mapping[str, object]:
     """Compose + attach one registered scene provider into *mjspec*.
 
     The provider dispatch is the registry's closed face
-    (:func:`unigym.scenes.providers.build_scene_from_provider`); ``slots`` is
-    the run's ``mj_scene_params`` mapping, passed through verbatim
-    (``None`` -> ``{}`` so the provider's own required-slot gates stay
-    the single truth).  ``asset_plan`` is the composition boundary for every
-    scene asset.  The scene engine is resolved through the backend registry,
-    then composes and attaches at the conventional frame.  Returns the
-    composed placement-region table.
+    (:func:`unigym.scenes.providers.build_scene_from_provider`); ``params`` is
+    the run's ``scene_provider_params`` mapping, passed through verbatim
+    (``None`` -> ``{}`` so the provider's own gates stay the single truth).
+    ``asset_plan`` is the composition boundary for every scene asset.  The
+    scene engine is resolved through the backend registry, then composes and
+    attaches at the conventional frame.  Returns the composed placement-region
+    table.
     """
     from unigym.scenes.providers import build_scene_from_provider
     from .scene_engine import compose_and_attach
 
-    return compose_and_attach(mjspec, build_scene_from_provider(name, slots or {}), asset_plan)
+    return compose_and_attach(
+        mjspec,
+        build_scene_from_provider(name, params or {}, preset=preset),
+        asset_plan,
+    )
 
 
 def apply_spawn_base_pose(mjspec, declaration) -> None:

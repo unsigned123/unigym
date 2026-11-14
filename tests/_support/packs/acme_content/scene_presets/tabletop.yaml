@@ -1,0 +1,22 @@
+schema: unigym.scene_preset/1
+name: tabletop
+world:
+  mjcf: pack:acme_content/worlds/table.xml
+objects:
+  types:
+    - name: table_plate
+backend_params:
+  mujoco:
+    base:
+      joint: fixed
+    initializer:
+      type: tabletop_initializer
+      params:
+        seed: 1
+  mjwarp:
+    base:
+      joint: fixed
+    initializer:
+      type: tabletop_initializer
+      params:
+        seed: 1

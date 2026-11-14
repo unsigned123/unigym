@@ -49,12 +49,12 @@ def _scene_generator_exists(name: str) -> bool:
     return True
 
 
-def _require_content_scene(spec, scene_name) -> None:
+def _require_content_scene(spec, scene_provider) -> None:
     """Fail closed when a content spec has no composed scene to fill."""
-    if spec is not None and scene_name is None:
+    if spec is not None and scene_provider is None:
         raise ValueError(
             "mujoco backend: env.params.content needs a composed scene "
-            "(env.params.mj_scene) to fill -- declare the scene or "
+            "(env.params.scene_provider) to fill -- declare the scene or "
             "drop the content spec"
         )
 
@@ -125,9 +125,9 @@ def _fill_scene_content(scene, spec, asset_plan):
     return merged, filler.last_record
 
 
-def _views_for_scene(scene, pipeline: str | None, slots):
+def _views_for_scene(scene, pipeline: str | None, provider_params):
     """Build the draw/resolution/payload views for one neutral scene."""
-    params = dict(slots or {})
+    params = dict(provider_params or {})
     draw = Draw(
         pipeline=str(pipeline),
         seed=params.get("seed"),
@@ -166,19 +166,21 @@ def _views_for_scene(scene, pipeline: str | None, slots):
     return draw, resolution, payloads
 
 
-def build_views(scene, pipeline: str, slots):
+def build_views(scene, pipeline: str, provider_params):
     """Build the pipeline's draw/resolution/payload views for one scene.
 
     Args:
         scene: The validated :class:`~unigym.scenes.scene_ir.Scene` the
             env composed.
-        pipeline: The registered scene-provider name (``env.params.mj_scene``).
-        slots: The provider slot dict (``env.params.mj_scene_params``).
+        pipeline: The registered scene-provider name
+            (``env.params.scene_provider``).
+        provider_params: The provider parameter mapping
+            (``env.params.scene_provider_params``).
 
     Returns:
         The ``(Draw, Resolution, PayloadSet)`` trio the writers consume.
     """
-    return _views_for_scene(scene, pipeline, slots)
+    return _views_for_scene(scene, pipeline, provider_params)
 
 
 def capture_composed_xml(mjspec, out_dir=None, scene=None):
@@ -235,7 +237,13 @@ def write_fill_record(out_dir, record) -> str:
 
 
 def write_scene_artifacts(
-    out_dir, scene, pipeline: str | None, model, slots, composed_xml=None, fill_record=None
+    out_dir,
+    scene,
+    pipeline: str | None,
+    model,
+    provider_params,
+    composed_xml=None,
+    fill_record=None,
 ) -> dict:
     """Write the six build artifacts (plus ``fill.json`` when content ran).
 
@@ -245,7 +253,7 @@ def write_scene_artifacts(
             env composed.
         pipeline: The registered scene-provider name.
         model: The compiled ``MjModel`` carrying the structural facts.
-        slots: The provider slot dict.
+        provider_params: The provider parameter mapping.
         composed_xml: The pre-compile composed scene text; ``None`` means
             the artifact face is off and nothing is written.
         fill_record: The content fill record; ``None`` (no content spec)
@@ -256,7 +264,7 @@ def write_scene_artifacts(
     """
     if composed_xml is None or out_dir is None:
         return {}
-    draw, resolution, payloads = _views_for_scene(scene, pipeline, slots)
+    draw, resolution, payloads = _views_for_scene(scene, pipeline, provider_params)
     paths = write_build_artifacts(out_dir, scene, draw, resolution, payloads)
     paths["compile"] = write_compile_report(
         out_dir, compile_report(model), composed_xml=composed_xml

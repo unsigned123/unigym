@@ -1,4 +1,4 @@
-"""Reset initializers (scene-bundle face): registry + generic primitives.
+"""Reset initializers (scene-preset face): registry + generic primitives.
 
 The registry, the three-phase contract and the generic placement
 primitives.

@@ -1,4 +1,4 @@
-"""Content-key normalization for run configs and scene bundles.
+"""Content-key normalization for run configs and scene presets.
 
 The yaml content block migrates from ``props:`` to ``objects:``; the old
 spelling stays a long-lived alias.  :func:`normalize_content_keys` is the
@@ -15,8 +15,8 @@ The internal vocabulary does not move: ``PropManager``,
 config key surface changes.
 
 Callers: the collector's config-load point (a run yaml) and
-:func:`unigym.scene_packs.apply_scene_bundle` (a bundle's own block), so a
-run config and its scene bundle both migrate through this function.
+:func:`unigym.scene_presets.apply_scene_preset` (a preset's own block), so a
+run config and its scene preset both migrate through this function.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def normalize_content_keys(
     (the run's new surface beats the legacy block).
 
     Args:
-        cfg: A parsed run config or scene bundle mapping.
+        cfg: A parsed run config or scene preset mapping.
         source: The file the mapping came from, named in the warning (an
             anonymous label when empty).
 

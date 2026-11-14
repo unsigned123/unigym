@@ -32,6 +32,7 @@ def build_tiny_env(
     plans: bool = True,
     params: dict | None = None,
     contact_manager=None,
+    asset_plan=None,
 ):
     """Construct the real warp backend from the fixture MJCF (CPU, no managers)."""
     for module_name in ("mujoco_warp", "warp"):
@@ -106,6 +107,7 @@ def build_tiny_env(
         profiles={ARTICULATION: profile},
         actuation_plans=actuation_plans,
         contact_manager=contact_manager,
+        asset_plan=asset_plan,
     )
 
 
@@ -126,6 +128,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         params: dict | None = None,
         mjcf: Path | None = None,
         contact_manager=None,
+        asset_plan=None,
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -138,6 +141,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             plans=plans,
             params=params,
             contact_manager=contact_manager,
+            asset_plan=asset_plan,
         )
         created.append(env)
         return env

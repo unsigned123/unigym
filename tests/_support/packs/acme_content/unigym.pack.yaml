@@ -7,9 +7,9 @@ provides:
   runs:
     - id: acme_content.demo
       resource: runs/demo.yaml
-  scenes:
+  scene_presets:
     - id: acme_content.tabletop
-      resource: scenes/tabletop.yaml
+      resource: scene_presets/tabletop.yaml
   assets:
     - id: acme_content.cup
       resource: assets/cup/asset.yaml

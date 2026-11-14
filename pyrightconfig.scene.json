@@ -2,6 +2,7 @@
   "extends": "./pyrightconfig.json",
   "include": [
     "unigym/scenes",
+    "unigym/scene_presets.py",
     "unigym/world.py",
     "unigym/world_primitives.py"
   ],

@@ -64,11 +64,13 @@ def test_content_manifest_loads(tmp_path: Path) -> None:
         root,
         _document(
             provides={
-                "scenes": [{"id": "acme.tabletop", "resource": "scenes/tabletop.yaml"}],
+                "scene_presets": [
+                    {"id": "acme.tabletop", "resource": "scene_presets/tabletop.yaml"}
+                ],
             }
         ),
     )
-    _touch(root, "scenes/tabletop.yaml")
+    _touch(root, "scene_presets/tabletop.yaml")
 
     manifest = load_manifest_v1(root)
 
@@ -80,10 +82,10 @@ def test_content_manifest_loads(tmp_path: Path) -> None:
     assert manifest.trust == "content"
     assert manifest.entrypoint is None
     assert dict(manifest.requires) == {}
-    assert manifest.provides["scenes"] == (
+    assert manifest.provides["scene_presets"] == (
         ProvidedItem(
             id="acme.tabletop",
-            resource="scenes/tabletop.yaml",
+            resource="scene_presets/tabletop.yaml",
             entrypoint=None,
             kind=None,
         ),
@@ -262,6 +264,39 @@ def test_unknown_face_rejected(tmp_path: Path) -> None:
         load_manifest_v1(root)
 
 
+def test_removed_scenes_face_names_scene_presets_and_providers(tmp_path: Path) -> None:
+    root = tmp_path / "acme"
+    _write(root, _document(provides={"scenes": []}))
+
+    with pytest.raises(PackError) as info:
+        load_manifest_v1(root)
+
+    message = str(info.value)
+    assert "unknown pack face 'scenes'" in message
+    assert "scene_presets" in message
+    assert "providers" in message
+    assert "kind: scene" in message
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"id": "acme.tabletop", "entrypoint": "acme_scenes:tabletop"},
+        {"id": "acme.tabletop", "resource": "scene_presets/x.yaml", "kind": "scene"},
+    ],
+    ids=["entrypoint", "kind"],
+)
+def test_scene_preset_items_are_resource_backed_only(
+    tmp_path: Path, item: dict[str, object]
+) -> None:
+    root = tmp_path / "acme"
+    _touch(root, "scene_presets/x.yaml")
+    _write(root, _document(trust="code", provides={"scene_presets": [item]}))
+
+    with pytest.raises(PackError, match="resource-backed only"):
+        load_manifest_v1(root)
+
+
 def test_provides_must_be_declared(tmp_path: Path) -> None:
     root = tmp_path / "acme"
     document = _document()
@@ -276,7 +311,7 @@ def test_item_requires_non_empty_id(tmp_path: Path) -> None:
     root = tmp_path / "acme"
     _write(
         root,
-        _document(provides={"scenes": [{"id": "  ", "resource": "scenes/x.yaml"}]}),
+        _document(provides={"scene_presets": [{"id": "  ", "resource": "scene_presets/x.yaml"}]}),
     )
 
     with pytest.raises(PackError, match="non-empty string id"):
@@ -285,11 +320,15 @@ def test_item_requires_non_empty_id(tmp_path: Path) -> None:
 
 def test_unknown_item_key_rejected(tmp_path: Path) -> None:
     root = tmp_path / "acme"
-    _touch(root, "scenes/x.yaml")
+    _touch(root, "scene_presets/x.yaml")
     _write(
         root,
         _document(
-            provides={"scenes": [{"id": "acme.x", "resource": "scenes/x.yaml", "manifest": "x"}]}
+            provides={
+                "scene_presets": [
+                    {"id": "acme.x", "resource": "scene_presets/x.yaml", "manifest": "x"}
+                ]
+            }
         ),
     )
 
@@ -302,7 +341,7 @@ def test_unknown_item_key_rejected(tmp_path: Path) -> None:
     [
         "/tmp/absolute.yaml",
         "../escape.yaml",
-        "scenes/missing.yaml",
+        "scene_presets/missing.yaml",
         "",
     ],
 )
@@ -310,7 +349,7 @@ def test_resource_must_stay_inside_manifest_root(tmp_path: Path, resource: str) 
     root = tmp_path / "acme"
     _write(
         root,
-        _document(provides={"scenes": [{"id": "acme.scene", "resource": resource}]}),
+        _document(provides={"scene_presets": [{"id": "acme.scene", "resource": resource}]}),
     )
 
     with pytest.raises(PackError):
@@ -322,7 +361,7 @@ def test_catalog_preserves_order_and_filters(tmp_path: Path) -> None:
         tmp_path,
         "alpha",
         {
-            "scenes": [
+            "scene_presets": [
                 {"id": "alpha.one", "resource": "one.yaml"},
                 {"id": "alpha.two", "resource": "two.yaml"},
             ],
@@ -332,7 +371,7 @@ def test_catalog_preserves_order_and_filters(tmp_path: Path) -> None:
     beta = _pack(
         tmp_path,
         "beta",
-        {"scenes": [{"id": "beta.one", "resource": "one.yaml"}]},
+        {"scene_presets": [{"id": "beta.one", "resource": "one.yaml"}]},
     )
 
     catalog = PackCatalog((alpha, beta))
@@ -344,7 +383,7 @@ def test_catalog_preserves_order_and_filters(tmp_path: Path) -> None:
         "alpha.demo",
         "beta.one",
     ]
-    assert [entry.id for entry in catalog.entries("scenes")] == [
+    assert [entry.id for entry in catalog.entries("scene_presets")] == [
         "alpha.one",
         "alpha.two",
         "beta.one",
@@ -379,15 +418,15 @@ def test_catalog_rejects_duplicate_face_id(tmp_path: Path) -> None:
     first = _pack(
         tmp_path / "left",
         "alpha",
-        {"scenes": [{"id": "shared.item", "resource": "x.yaml"}]},
+        {"scene_presets": [{"id": "shared.item", "resource": "x.yaml"}]},
     )
     second = _pack(
         tmp_path / "right",
         "beta",
-        {"scenes": [{"id": "shared.item", "resource": "x.yaml"}]},
+        {"scene_presets": [{"id": "shared.item", "resource": "x.yaml"}]},
     )
 
-    with pytest.raises(PackError, match="duplicate 'scenes' id"):
+    with pytest.raises(PackError, match="duplicate 'scene_presets' id"):
         PackCatalog((first, second))
 
 
@@ -395,7 +434,7 @@ def test_catalog_and_manifest_are_immutable(tmp_path: Path) -> None:
     manifest = _pack(
         tmp_path,
         "alpha",
-        {"scenes": [{"id": "alpha.one", "resource": "one.yaml"}]},
+        {"scene_presets": [{"id": "alpha.one", "resource": "one.yaml"}]},
     )
     catalog = PackCatalog((manifest,))
 
@@ -407,7 +446,7 @@ def test_catalog_and_manifest_are_immutable(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         operator.setitem(manifest.requires, "unigym", ">=0")
     with pytest.raises(TypeError):
-        operator.setitem(manifest.provides, "scenes", ())
+        operator.setitem(manifest.provides, "scene_presets", ())
 
 
 def test_public_pack_api_exports() -> None:

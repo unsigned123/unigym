@@ -52,6 +52,17 @@ def test_build_spec_normalizes_minimal_run_config():
     assert spec.output.out_dir == "data_out/r"
 
 
+def test_build_spec_rejects_a_content_fill_without_a_scene():
+    """A run-level objects fill needs a preset/provider scene before env construction."""
+    cfg = _cfg(
+        env={"backend": "mujoco", "num_envs": 1},
+        objects={"filler": "acme_filler", "sets": {"cup": 1}},
+    )
+
+    with pytest.raises(ConfigError, match="needs a composed scene"):
+        build_spec(cfg, _args())
+
+
 def test_build_spec_applies_cli_overrides_without_mutating_input():
     """CLI overrides win and the caller's config document stays untouched."""
     cfg = _cfg()
@@ -63,11 +74,11 @@ def test_build_spec_applies_cli_overrides_without_mutating_input():
     assert cfg == before
 
 
-def test_build_spec_scene_without_runtime_fails_fast():
-    """A scene-bearing config without a pack runtime is a teaching error."""
-    cfg = _cfg(scene="acme_scene.tabletop")
+def test_build_spec_scene_preset_without_runtime_fails_fast():
+    """A catalog scene-preset config without a pack runtime is a teaching error."""
+    cfg = _cfg(scene_preset="acme_scene.tabletop")
 
-    with pytest.raises(ValueError, match="acme_scene.tabletop.*requires a pack runtime"):
+    with pytest.raises(ConfigError, match="acme_scene.tabletop.*requires a pack runtime"):
         build_spec(cfg, _args())
 
 
@@ -103,6 +114,14 @@ def test_build_spec_requires_valid_world_base_for_mujoco(world_base, match):
 
     with pytest.raises(ConfigError, match=match):
         build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_world_base_for_a_backend_that_does_not_consume_it():
+    """isaaclab2 has no world_base consumer, so a declared world base is refused."""
+    spec_cfg = _cfg(world_base={"usd": "w.usd"})
+
+    with pytest.raises(ConfigError, match="does not consume a world base"):
+        build_spec(spec_cfg, _args())
 
 
 @pytest.mark.parametrize("section", ["env", "collect", "run_name"])
@@ -226,7 +245,7 @@ def test_build_spec_rejects_benchmark_packs():
     ("overrides", "expected"),
     [
         ({}, False),
-        ({"scene": "acme.tabletop"}, True),
+        ({"scene_preset": "acme.tabletop"}, True),
         ({"mode": "benchmark"}, True),
         ({"mode": "both"}, True),
         ({"props": {"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]}}, True),
@@ -238,7 +257,7 @@ def test_build_spec_rejects_benchmark_packs():
     ],
     ids=[
         "plain",
-        "scene",
+        "scene_preset",
         "benchmark",
         "both",
         "pack",
@@ -254,28 +273,70 @@ def test_requires_pack_runtime_boundary_decision(overrides, expected):
     assert requires_pack_runtime(_cfg(**overrides)) is expected
 
 
-@pytest.mark.parametrize(
-    "params",
-    [
-        {"mj_scene": "acme.tabletop"},
-        {"mj_scene": "acme.tabletop", "mj_scene_params": {"seed": 1}},
-    ],
-    ids=["mj_scene", "mj_scene_params"],
-)
-def test_requires_pack_runtime_detects_env_params_mj_scene(params):
-    """A provider/inline world routed through env.params.mj_scene needs a runtime."""
-    cfg = _cfg()
-    cfg["env"]["params"] = params
+def test_requires_pack_runtime_detects_an_unregistered_inline_provider():
+    """An inline provider that is not process-local needs the pack runtime."""
+    cfg = _cfg(scene_preset={"provider": "acme.tabletop", "params": {"seed": 1}})
 
     assert requires_pack_runtime(cfg) is True
 
 
-def test_requires_pack_runtime_detects_world_from_generator_fragment():
-    """A World.from_generator fragment lands env.params.mj_scene and is detected."""
+def test_requires_pack_runtime_detects_a_world_provider_fragment():
+    """A World.from_provider fragment lands the scene_preset inline form."""
     from unigym.world import World
 
     cfg = _cfg()
-    World.from_generator("acme.tabletop", seed=1).apply(cfg)
+    World.from_provider("acme.tabletop", params={"seed": 1}).apply(cfg)
 
-    assert cfg["env"]["params"]["mj_scene"] == "acme.tabletop"
+    assert cfg["scene_preset"] == {"provider": "acme.tabletop", "params": {"seed": 1}}
     assert requires_pack_runtime(cfg) is True
+
+
+def test_run_spec_has_no_legacy_scene_field():
+    """RunSpec no longer exposes a dead/mistyped ``scene`` mapping."""
+    spec = build_spec(_cfg(), _args())
+
+    assert not hasattr(spec, "scene")
+
+
+def test_build_spec_selects_the_backend_before_preset_resolution():
+    """Backend-specific preset blocks resolve against the selected backend."""
+    cfg = _cfg(
+        env={"backend": "mjwarp", "num_envs": 1},
+        scene_preset={
+            "provider": "acme.tabletop",
+            "world": {"mjcf": "scene.xml"},
+            "backend_params": {
+                "mujoco": {"initializer": {"type": "a", "params": {"seed": 1}}},
+                "mjwarp": {"initializer": {"type": "b", "params": {"seed": 2}}},
+            },
+        },
+    )
+
+    spec = build_spec(cfg, _args())
+
+    assert spec.backend_params["initializer"]["type"] == "b"
+    assert spec.backend_params["initializer"]["params"] == {"seed": 2}
+
+
+def test_build_spec_rejects_an_unknown_backend_param_key():
+    """The selected backend block is gated by backend_param_keys (no fallback)."""
+    cfg = _cfg(
+        env={"backend": "mujoco", "num_envs": 1},
+        scene_preset={
+            "provider": "acme.tabletop",
+            "world": {"mjcf": "scene.xml"},
+            "backend_params": {"mujoco": {"nope": 1}},
+        },
+    )
+
+    with pytest.raises(ConfigError, match="unsupported key"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_direct_internal_scene_key_declaration():
+    """scene_provider* are internal routing keys, not authoring keys."""
+    cfg = _cfg()
+    cfg["env"]["params"] = {"scene_provider": "acme.tabletop"}
+
+    with pytest.raises(ConfigError, match="scene_preset"):
+        build_spec(cfg, _args())

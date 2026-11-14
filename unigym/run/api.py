@@ -387,13 +387,18 @@ def _minimal_cfg(
 
 
 def _world_base_section(world_base: JsonValue) -> dict[str, JsonValue]:
-    """Normalize a ``world_base=`` constructor value into the config shape."""
+    """Normalize a ``world_base=`` constructor value into the config shape.
+
+    The string convenience is normalized to ``{"mjcf": <path>}``; a mapping
+    carries the format-neutral ``mjcf`` / ``urdf`` / ``usd`` keys the spec
+    validates.  A bare path in a yaml document is rejected by the spec.
+    """
     if isinstance(world_base, str):
         return {"mjcf": world_base}
     if isinstance(world_base, dict):
         return copy.deepcopy(world_base)
     raise TypeError(
-        "world_base= expects a path string or a mapping {mjcf: <path>}, "
+        "world_base= expects a path string or a mapping {mjcf|urdf|usd: <path>}, "
         f"got {type(world_base).__name__}"
     )
 
@@ -462,8 +467,9 @@ class Run:
         cfg: An existing run config mapping (``None`` selects the
             programmatic form; a world/base is then required).
         world: A :class:`unigym.world.World` declaration.
-        world_base: An explicit world asset (``{mjcf: <path>}`` or a path
-            string) merged into the run config top level.
+        world_base: An explicit world asset (``{mjcf|urdf|usd: <path>}`` or a
+            path string normalized to ``mjcf``) merged into the run config top
+            level.
         cameras: Camera-spec dicts (``unigym.Camera.*``) or a ``CameraSet``.
         adapter: ``None`` (ManualAdapter) / a registered adapter name.
         robot: A registered robot name or robot declaration mapping
@@ -805,17 +811,21 @@ class Run:
             _section(cfg, "env")["backend"] = self._backend
         backend = str(_existing_section(cfg, "env").get("backend", "isaaclab"))
         static_shapes: tuple[JsonValue, ...] = ()
-        if self._world is not None and not backend_info(backend).inline_static_scene:
+        if self._world is not None and not backend_info(backend).scene_provider_consumer:
             if not self._world.unmapped_static_scene:
                 static_shapes = tuple(self._world.static_declarations())
                 if static_shapes:
-                    # The inline world scene is the mujoco-only fill of these
-                    # SAME primitives.  The isaaclab run receives them as
-                    # native static colliders instead (no silent drop).
+                    # The inline world scene is the scene-provider fill of these
+                    # SAME primitives.  A backend without a scene-provider
+                    # consumer receives them as native static colliders instead
+                    # (no silent drop).
                     cfg = copy.deepcopy(cfg)
-                    params = _section(_section(cfg, "env"), "params")
-                    params.pop("mj_scene", None)
-                    params.pop("mj_scene_params", None)
+                    # This world's inline scene_preset is the source of the
+                    # SAME primitives now mapped as static colliders, so the
+                    # preset is dropped before build_spec resolves it.  (The
+                    # scene_provider* routing keys do not exist yet: only
+                    # apply_scene_preset writes them.)
+                    cfg.pop("scene_preset", None)
         runtime: PackRuntime | None = None
         from unigym.run.spec import requires_pack_runtime
 
@@ -976,7 +986,13 @@ class Run:
 
     @property
     def cfg(self) -> dict[str, JsonValue]:
-        """The normalized effective config mapping."""
+        """The normalized effective config mapping.
+
+        This is the config the engine consumes: it carries the internal
+        ``env.params.scene_provider*`` routing keys a preset resolution
+        writes.  Use :meth:`to_config` for the authoring surface a reload
+        accepts (internal keys stripped, ``scene_preset:`` re-emitted).
+        """
         return self.spec.cfg
 
     @property
@@ -1102,10 +1118,15 @@ class Run:
         return self.build().adapter
 
     def to_config(self, path: str | os.PathLike[str]) -> str:
-        """Write the normalized effective config as yaml; return its path.
+        """Write the run's authoring config as yaml; return its path.
 
-        The world asset serializes as the run-level ``world_base: {mjcf:
-        <path>}`` declaration; it is never an ``env.params`` key.
+        The document is the *authoring* surface, not the effective
+        ``spec.cfg``: the internal ``env.params.scene_provider*`` routing keys
+        are removed and the run's original ``scene_preset:`` declaration is
+        re-emitted, so the file reloads through ``reject_legacy_scene_keys``
+        and resolves to the same run.  The world asset serializes as the
+        run-level ``world_base: {mjcf: <path>}`` declaration; it is never an
+        ``env.params`` key.
 
         Args:
             path: Destination file (parent directories are created).
@@ -1113,11 +1134,12 @@ class Run:
         out = Path(path)
         if out.parent and not out.parent.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
-        cfg = self.spec.cfg
+        from unigym.scene_presets import serialize_scene_preset
+
+        cfg = serialize_scene_preset(self.spec.cfg, self.spec.scene_preset)
         if "props" in cfg:
             # Serialize the content block on its current surface spelling
             # (``objects:``); the long-lived alias reloads it identically.
-            cfg = copy.deepcopy(cfg)
             cfg["objects"] = cfg.pop("props")
         out.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
         return str(out)

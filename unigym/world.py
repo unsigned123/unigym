@@ -4,11 +4,11 @@ A :class:`World` is a *declaration* of the world half of a run, not a live
 engine object.  It produces only the existing config schema consumed by
 :func:`unigym.run.spec.build_spec`:
 
-* a scene reference (``scene: <catalog id>``) for
-  :meth:`World.from_pack` / :meth:`World.from_config`, resolved through a
+* a ``scene_preset`` catalog reference for
+  :meth:`World.from_preset` / :meth:`World.from_config`, resolved through a
   :class:`~unigym.packs.runtime.PackRuntime`;
-* the ``env.params.mj_scene`` + ``mj_scene_params`` pair for
-  :meth:`World.from_generator`;
+* the inline ``scene_preset: {provider: ..., params: ...}`` form for
+  :meth:`World.from_provider`;
 * a unique runtime scene provider for :meth:`World.inline`;
 * the ``objects.types`` content block for dynamic free bodies added with
   ``World.add(..., dynamic=True)``.
@@ -18,8 +18,8 @@ through :func:`unigym.scenes.providers.register_inline_scene_provider`.  That
 registration is **prototype-only**: inline providers never appear in the
 public ``registered_scene_providers()`` list or provider-info query, their
 origin is ``kind="inline"``, the registry lives for the process lifetime and
-is never serialized into a config.  Use :meth:`World.from_generator` or
-:meth:`World.from_pack` for reproducible worlds.
+is never serialized into a config.  Use :meth:`World.from_provider` or
+:meth:`World.from_preset` for reproducible worlds.
 
 The builder adds static instances to the closed scene IR
 (:mod:`unigym.scenes.scene_ir`) through the registered payload generators.
@@ -70,9 +70,8 @@ __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
 class WorldFragment(TypedDict, total=False):
     """The run-config fragment a :class:`World` contributes."""
 
-    scene: str
+    scene_preset: str | dict[str, JsonValue]
     world_base: dict[str, JsonValue]
-    params: dict[str, JsonValue]
     articulations: list[dict[str, JsonValue]]
     controls: list[dict[str, JsonValue]]
     objects: dict[str, JsonValue]
@@ -111,10 +110,10 @@ class _TerrainBuilder:
                 "World.terrain: the world is already built; terrain "
                 "declarations are pre-build only"
             )
-        if world._scene_ref is not None or world._mj_scene is not None:
+        if world._scene_preset_ref is not None or world._scene_provider is not None:
             raise RuntimeError(
                 "World.terrain requires an inline world (World() / "
-                "World.inline(scene)); bundle/generator worlds own their "
+                "World.inline(scene)); preset/provider worlds own their "
                 "ground"
             )
         world._ensure_inline()
@@ -193,7 +192,7 @@ class _TerrainBuilder:
 
 
 class World:
-    """A declarative world (scene bundle / generator / inline objects).
+    """A declarative world (scene preset / provider / inline objects).
 
     Construct one through the factories; the object is cheap and mutable
     until a :class:`~unigym.run.api.Run` consumes it.  ``Run(world=...)``
@@ -202,9 +201,9 @@ class World:
     """
 
     def __init__(self):
-        self._scene_ref: str | None = None
-        self._mj_scene: str | None = None
-        self._mj_scene_params: dict[str, JsonValue] = {}
+        self._scene_preset_ref: str | dict[str, JsonValue] | None = None
+        self._scene_provider: str | None = None
+        self._scene_provider_params: dict[str, JsonValue] = {}
         self._world_base: dict[str, JsonValue] | None = None
         self._base_scene: Scene | None = None
         self._inline_name: str | None = None
@@ -225,40 +224,50 @@ class World:
     # factories
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_pack(
+    def from_preset(
         cls,
         ref: str,
         *,
         runtime: PackRuntime,
     ) -> World:
-        """Use a scene reference by its exact ``scenes`` catalog id.
+        """Use a scene preset by its exact ``scene_presets`` catalog id.
 
         Args:
-            ref: The catalog id declared on the runtime's ``scenes`` face.
+            ref: The catalog id declared on the runtime's ``scene_presets`` face.
             runtime: The pack runtime owning the catalog; there is no
                 fallback scan when it is absent.
         """
-        from unigym.scene_packs import load_scene_bundle
+        from unigym.scene_presets import load_scene_preset
 
-        load_scene_bundle(ref, runtime)
+        load_scene_preset(ref, runtime)
         world = cls()
-        world._scene_ref = ref
+        world._scene_preset_ref = ref
         return world
 
     @classmethod
-    def base(cls, *, mjcf: str | Path) -> World:
-        """Declare an explicit world asset (emits top-level ``world_base``).
+    def base(
+        cls,
+        *,
+        mjcf: str | Path | None = None,
+        urdf: str | Path | None = None,
+        usd: str | Path | None = None,
+    ) -> World:
+        """Declare an explicit format-neutral world asset (``world_base``).
 
-        Args:
-            mjcf: Path to the world MJCF (the run-level
-                ``world_base: {mjcf: <path>}`` declaration).
-
-        Returns:
-            A :class:`World` whose :meth:`fragment` carries
-            ``{"world_base": {"mjcf": <path>}}``.
+        At least one format path is required.  The run layer selects the first
+        format the backend supports; there is no format fallback.
         """
+        mapping: dict[str, JsonValue] = {}
+        for key, value in (("mjcf", mjcf), ("urdf", urdf), ("usd", usd)):
+            if value is not None:
+                text = str(value)
+                if not text:
+                    raise ValueError(f"World.base {key}= must be a non-empty path")
+                mapping[key] = text
+        if not mapping:
+            raise ValueError("World.base requires at least one of mjcf=, urdf= or usd=")
         world = cls()
-        world._world_base = {"mjcf": str(mjcf)}
+        world._world_base = mapping
         return world
 
     @classmethod
@@ -268,21 +277,17 @@ class World:
         *,
         runtime: PackRuntime | None = None,
     ) -> World:
-        """Extract the world half of a run config or scene catalog id.
+        """Extract the world half of a run config or scene preset catalog id.
 
         Args:
             source: A parsed run-config mapping, a path to a run yaml, or a
-                bare scene catalog id (``"acme.tabletop"``).
-            runtime: The pack runtime resolving a declared ``scene:``
-                reference; required when *source* declares one.
+                bare scene preset catalog id (``"acme.tabletop"``).
+            runtime: The pack runtime resolving a declared ``scene_preset``;
+                required when *source* declares a catalog preset.
 
         Raises:
-            ValueError: A ``scene.yaml`` bundle file is passed directly.
-                Scene refs are exact catalog ids, so a direct bundle file is
-                no longer a reference.
-
-        A path to a scene bundle file fails with a teaching error: the file's
-        family directory name and ``name:`` key are not a catalog id.
+            ValueError: A scene preset file is passed directly.  Preset refs
+                are exact catalog ids, so a direct document is not a reference.
         """
         if isinstance(source, dict):
             return cls._from_run_cfg(source, runtime)
@@ -300,21 +305,21 @@ class World:
             doc = loaded
             if "run_name" in doc or "env" in doc:
                 return cls._from_run_cfg(doc, runtime)
-            if path.name == "scene.yaml" or (doc.get("name") and "backend" in doc):
+            if path.name == "scene.yaml" or doc.get("schema") == "unigym.scene_preset/1":
                 raise ValueError(
-                    f"World.from_config: {str(source)!r} is a scene bundle "
+                    f"World.from_config: {str(source)!r} is a scene preset "
                     f"file, not a scene reference; scene refs are exact "
-                    f"PackRuntime 'scenes' catalog ids (e.g. "
+                    f"PackRuntime 'scene_presets' catalog ids (e.g. "
                     f"'acme.tabletop') resolved with runtime=..."
                 )
             return cls._from_run_cfg(doc, runtime)
         if runtime is None:
             raise ValueError(
-                f"World.from_config: scene ref {str(source)!r} requires a pack "
-                f"runtime | hint: scene refs are exact PackRuntime 'scenes' "
-                f"catalog ids"
+                f"World.from_config: scene preset ref {str(source)!r} requires a pack "
+                f"runtime | hint: scene preset refs are exact PackRuntime "
+                f"'scene_presets' catalog ids"
             )
-        return cls.from_pack(str(source), runtime=runtime)
+        return cls.from_preset(str(source), runtime=runtime)
 
     @classmethod
     def _from_run_cfg(
@@ -323,63 +328,60 @@ class World:
         runtime: PackRuntime | None = None,
     ) -> World:
         """Extract a world declaration from a run-config mapping."""
-        from unigym.scene_packs import load_scene_bundle
+        from unigym.scene_presets import load_scene_preset
 
-        ref = cfg.get("scene")
+        ref = cfg.get("scene_preset")
         if ref is not None:
-            if not isinstance(ref, str) or not ref:
+            if isinstance(ref, str):
+                if not ref:
+                    raise ValueError(
+                        "World.from_config: scene_preset ref must be a non-empty "
+                        "pack catalog id string"
+                    )
+                if runtime is None:
+                    raise ValueError(
+                        f"World.from_config: scene preset ref {ref!r} requires a pack "
+                        f"runtime | hint: scene preset refs are exact PackRuntime "
+                        f"'scene_presets' catalog ids"
+                    )
+                load_scene_preset(ref, runtime)
+                world = cls()
+                world._scene_preset_ref = ref
+                return world
+            if not isinstance(ref, dict):
                 raise ValueError(
-                    f"World.from_config: scene ref must be a non-empty pack "
-                    f"catalog id string, got {ref!r}"
+                    f"World.from_config: scene_preset must be a catalog id string "
+                    f"or a mapping, got {type(ref).__name__}"
                 )
-            if runtime is None:
-                raise ValueError(
-                    f"World.from_config: scene ref {ref!r} requires a pack "
-                    f"runtime | hint: scene refs are exact PackRuntime "
-                    f"'scenes' catalog ids"
-                )
-            load_scene_bundle(ref, runtime)
             world = cls()
-            world._scene_ref = ref
+            world._scene_preset_ref = copy.deepcopy(ref)
             return world
-        env = cfg.get("env")
-        params: Mapping[str, JsonValue] = {}
-        if isinstance(env, dict):
-            raw_params = env.get("params")
-            if isinstance(raw_params, dict):
-                params = raw_params
-        if "mj_model" in params:
-            from unigym.errors import ConfigError
-
-            raise ConfigError(
-                "World.from_config: env.params.mj_model was removed in v101 "
-                "A1; declare the run-level `world_base: {mjcf: <path>}` "
-                "(scene bundles: `backend.mujoco.world_base`)"
-            )
-        mj_scene = params.get("mj_scene")
         world_base = cfg.get("world_base")
-        if mj_scene is None and world_base is None:
+        if world_base is None:
             raise ValueError(
                 "World.from_config: the config declares no world (expected "
-                "a top-level 'scene:' reference, 'world_base:', or "
-                "env.params.mj_scene)"
+                "a top-level 'scene_preset:' reference or 'world_base:')"
             )
         world = cls()
-        world._mj_scene = None if mj_scene is None else str(mj_scene)
-        raw_scene_params = params.get("mj_scene_params")
-        world._mj_scene_params = (
-            dict(raw_scene_params) if isinstance(raw_scene_params, dict) else {}
-        )
-        if isinstance(world_base, dict):
-            world._world_base = copy.deepcopy(world_base)
+        if not isinstance(world_base, dict):
+            raise ValueError(
+                "World.from_config: world_base must be a mapping "
+                "{mjcf|urdf|usd: <path>}; a bare path is constructor-only"
+            )
+        world._world_base = copy.deepcopy(world_base)
         return world
 
     @classmethod
-    def from_generator(cls, name: str, **params: JsonValue) -> World:
-        """Use a registered scene provider with its slot params."""
+    def from_provider(
+        cls,
+        name: str,
+        *,
+        params: Mapping[str, JsonValue] | None = None,
+    ) -> World:
+        """Use a registered scene provider with its explicit params."""
         world = cls()
-        world._mj_scene = str(name)
-        world._mj_scene_params = dict(params)
+        world._scene_provider = str(name)
+        world._scene_provider_params = dict(params or {})
         return world
 
     @classmethod
@@ -405,13 +407,13 @@ class World:
         bundle/generator worlds own their ground and return ``None``.  This
         is the one read the run spec uses to carry the IR to a backend.
         """
-        if self._scene_ref is not None or self._mj_scene is not None:
+        if self._scene_preset_ref is not None or self._scene_provider is not None:
             return None
         return self.to_scene().terrain
 
     def to_scene(self) -> Scene:
         """The inline :class:`Scene` this world currently declares."""
-        if self._scene_ref is not None or self._mj_scene is not None:
+        if self._scene_preset_ref is not None or self._scene_provider is not None:
             raise RuntimeError(
                 "World.to_scene requires an inline world (World() / "
                 "World.inline(scene)); bundle/generator worlds are owned by "
@@ -545,9 +547,9 @@ class World:
             raise TypeError(
                 f"World.add expects Box/Sphere/Cylinder/Capsule/Plane, " f"got {type(obj).__name__}"
             )
-        if self._scene_ref is not None or self._mj_scene is not None:
+        if self._scene_preset_ref is not None or self._scene_provider is not None:
             raise RuntimeError(
-                "World.add requires an inline world; from_pack/from_generator "
+                "World.add requires an inline world; from_preset/from_provider "
                 "worlds are immutable declarations. Start with World() / "
                 "World.inline(scene) to compose primitives"
             )
@@ -737,7 +739,7 @@ class World:
         that lacks one.  Bundle/generator worlds own their own ground, so
         the call is a no-op there.
         """
-        if self._scene_ref is None and self._mj_scene is None:
+        if self._scene_preset_ref is None and self._scene_provider is None:
             self.add(
                 Box((20.0, 20.0, 0.1), name=_unique_name(self, "ground"), pos=(0.0, 0.0, -0.05))
             )
@@ -806,27 +808,25 @@ class World:
     def fragment(self) -> WorldFragment:
         """The run-config fragment this world contributes.
 
-        Returns either ``{"scene": "<catalog id>"}``,
-        ``{"world_base": {"mjcf": ...}}``, or
-        ``{"params": {"mj_scene": ..., "mj_scene_params": ...}}``, plus an
-        ``objects:`` block when the world declared dynamic free bodies and
-        an ``articulations:`` block when :meth:`articulation` was called.
-        ``world_base`` is a TOP-LEVEL run config key; it never
-        rides ``env.params``.
+        Returns either ``{"scene_preset": "<catalog id>"}``, the inline
+        ``{"scene_preset": {"provider": ..., "params": ...}}`` form, or
+        ``{"world_base": {mjcf|urdf|usd: ...}}``, plus an ``objects:`` block
+        when the world declared dynamic free bodies and an
+        ``articulations:`` block when :meth:`articulation` was called.
+        ``world_base`` is a TOP-LEVEL run config key; it never rides
+        ``env.params``.
         """
         fragment = WorldFragment()
-        if self._scene_ref is not None:
-            fragment["scene"] = self._scene_ref
+        if self._scene_preset_ref is not None:
+            fragment["scene_preset"] = copy.deepcopy(self._scene_preset_ref)
         else:
-            params: dict[str, JsonValue] = {}
             if self._inline_name is not None:
-                params["mj_scene"] = self._inline_name
-                params["mj_scene_params"] = {}
-            elif self._mj_scene is not None:
-                params["mj_scene"] = self._mj_scene
-                params["mj_scene_params"] = dict(self._mj_scene_params)
-            if params:
-                fragment["params"] = params
+                fragment["scene_preset"] = {"provider": self._inline_name, "params": {}}
+            elif self._scene_provider is not None:
+                fragment["scene_preset"] = {
+                    "provider": self._scene_provider,
+                    "params": copy.deepcopy(self._scene_provider_params),
+                }
             if self._world_base is not None:
                 fragment["world_base"] = copy.deepcopy(self._world_base)
         if self._articulations:
@@ -841,18 +841,14 @@ class World:
     def apply(self, cfg: dict[str, JsonValue]) -> dict[str, JsonValue]:
         """Merge this world's fragment into a run config (in place)."""
         fragment = self.fragment()
-        if "scene" in fragment:
-            cfg["scene"] = fragment["scene"]
+        if "scene_preset" in fragment:
+            cfg["scene_preset"] = copy.deepcopy(fragment["scene_preset"])
         if "world_base" in fragment:
             cfg["world_base"] = copy.deepcopy(fragment["world_base"])
         if "articulations" in fragment:
             _merge_articulations(cfg, fragment["articulations"])
         if "controls" in fragment:
             _merge_controls(cfg, fragment["controls"])
-        params = fragment.get("params")
-        if params:
-            params_section = _mapping_section(_mapping_section(cfg, "env"), "params")
-            params_section.update(params)
         dynamic = fragment.get("objects")
         if dynamic:
             # Preserve the config's own spelling (objects: surface wins,

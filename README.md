@@ -5,7 +5,7 @@ repository is the **public core**: the importable `unigym` package, the
 MuJoCo / MuJoCo-Warp / Isaac Lab backend code, the declarative run/control
 contract, and one built-in adapter (`manual`) for external drivers.
 
-It intentionally does **not** bundle robot assets, task packs, scene packs,
+It intentionally does **not** bundle robot assets, task packs, scene preset packs,
 reference data, policy adapters, or the previous CI and documentation tree.
 Those are separate artifacts; the public docs are being rewritten.
 

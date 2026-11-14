@@ -159,7 +159,7 @@ def test_inline_world_provider_stays_out_of_the_public_registry() -> None:
     """``World.inline`` registers privately, dispatches and reports its origin."""
     register_scene_provider("acme.table_top", _table_top)
     inline_world = World.inline(Scene(name="inline_scene"))
-    inline_name = (inline_world.fragment().get("params") or {})["mj_scene"]
+    inline_name = inline_world.fragment()["scene_preset"]["provider"]
     assert isinstance(inline_name, str)
 
     assert registered_scene_providers() == ["acme.table_top"]
@@ -210,7 +210,7 @@ def test_snapshot_and_restore_are_total() -> None:
         origin=origin,
     )
     inline_world = World.inline(Scene(name="inline_scene"))
-    inline_name = (inline_world.fragment().get("params") or {})["mj_scene"]
+    inline_name = inline_world.fragment()["scene_preset"]["provider"]
     assert isinstance(inline_name, str)
 
     before = snapshot_scene_providers()

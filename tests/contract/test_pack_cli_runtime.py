@@ -56,9 +56,11 @@ def _isolate_runtime(monkeypatch: pytest.MonkeyPatch):
 def _content_pack(root: Path) -> Path:
     """Write a content pack with one resource on two faces."""
     (root / "runs").mkdir(parents=True)
-    (root / "scenes").mkdir()
+    (root / "scene_presets").mkdir()
     (root / "runs" / "demo.yaml").write_text("run: demo\n", encoding="utf-8")
-    (root / "scenes" / "tabletop.yaml").write_text("scene: tabletop\n", encoding="utf-8")
+    (root / "scene_presets" / "tabletop.yaml").write_text(
+        "scene preset: tabletop\n", encoding="utf-8"
+    )
     (root / MANIFEST_NAME).write_text(
         "schema: unigym.pack/1\n"
         "name: cli_content\n"
@@ -69,9 +71,9 @@ def _content_pack(root: Path) -> Path:
         "  runs:\n"
         "    - id: cli_content.demo\n"
         "      resource: runs/demo.yaml\n"
-        "  scenes:\n"
+        "  scene_presets:\n"
         "    - id: cli_content.tabletop\n"
-        "      resource: scenes/tabletop.yaml\n",
+        "      resource: scene_presets/tabletop.yaml\n",
         encoding="utf-8",
     )
     return root
@@ -149,7 +151,7 @@ def test_pack_cli_list_reports_runtime_manifest_fields(
         "version": "1.0.0",
         "api": 1,
         "trust": "content",
-        "provides": {"runs": 1, "scenes": 1},
+        "provides": {"runs": 1, "scene_presets": 1},
         "root": str(root.resolve()),
     }
     assert "repo" not in rows
@@ -165,9 +167,12 @@ def test_pack_cli_path_prints_root_and_face_resources(
     assert code == 0
     assert out.strip() == str(root.resolve())
 
-    code, out = _run_cli(capsys, "path", "cli_content", "scenes")
+    code, out = _run_cli(capsys, "path", "cli_content", "scene_presets")
     assert code == 0
-    assert out.strip() == f"cli_content.tabletop: {(root / 'scenes' / 'tabletop.yaml').resolve()}"
+    assert (
+        out.strip()
+        == f"cli_content.tabletop: {(root / 'scene_presets' / 'tabletop.yaml').resolve()}"
+    )
 
 
 def test_pack_cli_path_prints_code_entrypoints(

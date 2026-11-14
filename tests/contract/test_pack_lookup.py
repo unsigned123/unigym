@@ -44,13 +44,13 @@ def _runtime() -> PackRuntime:
 def test_catalog_entry_returns_the_immutable_declared_entry() -> None:
     catalog = _runtime().catalog
 
-    entry = catalog.entry("scenes", "acme_content.tabletop")
+    entry = catalog.entry("scene_presets", "acme_content.tabletop")
 
     assert entry == CatalogEntry(
         pack="acme_content",
-        face="scenes",
+        face="scene_presets",
         id="acme_content.tabletop",
-        resource="scenes/tabletop.yaml",
+        resource="scene_presets/tabletop.yaml",
         entrypoint=None,
         kind=None,
     )
@@ -66,7 +66,7 @@ def test_catalog_entry_unknown_face_names_the_known_faces() -> None:
 
     message = str(info.value)
     assert "unknown pack face 'widgets'" in message
-    assert "scenes" in message
+    assert "scene_presets" in message
 
 
 def test_catalog_entry_rejects_none_face_and_resource_for_delegates() -> None:
@@ -76,7 +76,7 @@ def test_catalog_entry_rejects_none_face_and_resource_for_delegates() -> None:
         runtime.catalog.entry(None, "acme_content.tabletop")
 
     assert "unknown pack face None" in str(info.value)
-    assert "scenes" in str(info.value)
+    assert "scene_presets" in str(info.value)
 
     with pytest.raises(PackError, match="unknown pack face None"):
         runtime.resource_for(None, "acme_content.tabletop")
@@ -86,11 +86,11 @@ def test_catalog_entry_unknown_id_names_the_face_id_and_known_ids() -> None:
     catalog = _runtime().catalog
 
     with pytest.raises(PackError) as info:
-        catalog.entry("scenes", "acme_content.missing")
+        catalog.entry("scene_presets", "acme_content.missing")
 
     message = str(info.value)
     assert "unknown id 'acme_content.missing'" in message
-    assert "pack face 'scenes'" in message
+    assert "pack face 'scene_presets'" in message
     assert "acme_content.tabletop" in message
 
 
@@ -98,7 +98,7 @@ def test_catalog_entry_unknown_id_names_the_face_id_and_known_ids() -> None:
     ("face", "item_id", "rel"),
     [
         ("runs", "acme_content.demo", "runs/demo.yaml"),
-        ("scenes", "acme_content.tabletop", "scenes/tabletop.yaml"),
+        ("scene_presets", "acme_content.tabletop", "scene_presets/tabletop.yaml"),
         ("assets", "acme_content.cup", "assets/cup/asset.yaml"),
     ],
 )
@@ -146,7 +146,7 @@ def test_lookup_does_not_import_pack_python() -> None:
     assert "acme_pack" not in sys.modules
 
     runtime.catalog.entry("providers", "acme_code.dynamic_assets")
-    runtime.resource_for("scenes", "acme_content.tabletop")
+    runtime.resource_for("scene_presets", "acme_content.tabletop")
     with pytest.raises(PackError):
         runtime.resource_for("providers", "acme_code.dynamic_assets")
 

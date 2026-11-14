@@ -1,8 +1,8 @@
 """RunSpec: the pure-data construction intent of one run.
 
 ``build_spec(cfg, args)`` performs the pre-engine half of the old inline
-``collect_cli.main`` path -- content-key normalization, scene-bundle
-application, placeholder expansion, label/override validation and the CLI
+``collect_cli.main`` path -- content-key normalization, scene-preset
+resolution, placeholder expansion, label/override validation and the CLI
 overrides -- and freezes the result into a :class:`RunSpec`.  It never
 builds an engine object: profiles, adapters, managers, envs, sinks and the
 bridge are all constructed by :func:`unigym.run.build.build_instance`.
@@ -28,7 +28,12 @@ from unigym._typing import (
     is_json_object,
     is_pair,
 )
-from unigym.backends.registry import backend_info, validate_backend_options
+from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
+from unigym.backends.registry import (
+    backend_info,
+    known_backends,
+    validate_backend_options,
+)
 from unigym.core.paths import expand_placeholders
 from unigym.runtime.controls import (
     ControlError,
@@ -42,7 +47,11 @@ from unigym.scenes.articulation import (
     normalize_articulations,
 )
 from unigym.scenes.recipe import normalize_content_keys
-from unigym.scene_packs import apply_scene_bundle
+from unigym.scene_presets import (
+    BackendBinding,
+    apply_scene_preset,
+    reject_legacy_scene_keys,
+)
 
 #: Placeholder spellings that make a config an asset-bearing document.  They
 #: are resolved (or rejected as removed) by ``expand_placeholders``; the
@@ -92,6 +101,12 @@ class RunSpec:
     #: the run-level world declaration (``{mjcf: <path>}``), kept OUT of
     #: ``backend_params``.  Required for mujoco-family backends.
     world_base: JsonValue
+    #: the raw ``scene_preset:`` *declaration* this run was constructed from
+    #: (a catalog id string or the inline provider mapping).  Build never
+    #: reads it: the effective routing lives in ``cfg``.  It is kept so
+    #: :meth:`Run.to_config` can re-emit the authoring surface instead of the
+    #: internal ``env.params.scene_provider*`` keys.
+    scene_preset: JsonValue
     #: the normalized articulation list (the old ``robot:`` block
     #: was removed).  Articulations are pure authoring data (no control mode).
     articulations: tuple[ArticulationSpec, ...]
@@ -102,7 +117,6 @@ class RunSpec:
     adapter_name: str | None
     adapter_params: dict[str, JsonValue]
     adapter_overrides: tuple[str, ...]
-    scene: dict[str, JsonValue] | None
     props: JsonValue
     cameras: JsonValue
     contacts: JsonValue
@@ -140,23 +154,35 @@ def _route_content(
     env_cfg: dict[str, JsonValue],
     backend_label: str,
 ) -> None:
-    """Route the run's content spec into ``env.params.content`` (mujoco).
+    """Route the run's content spec into ``env.params.content``.
 
     The spec was split out of the run's ``objects:`` block by
-    :func:`unigym.scenes.recipe.normalize_content_keys`; the mujoco scene
-    build consumes it.  Other backends have no scene fill, so a declared
-    spec fails closed instead of being silently dropped.
+    :func:`unigym.scenes.recipe.normalize_content_keys`; a backend with a
+    ``content_router`` consumes it.  A fill always needs a composed scene
+    (``env.params.scene_provider``, written only by
+    :func:`unigym.scene_presets.apply_scene_preset`) and a backend with a
+    ``content_router``; either missing fails closed here, before any env is
+    constructed, instead of being silently dropped.
     """
+    from unigym.errors import ConfigError
+
     spec = cfg.get("content")
     if spec is None:
         return
+    params = env_cfg.get("params")
+    scene_provider = params.get("scene_provider") if isinstance(params, dict) else None
+    if scene_provider is None:
+        raise ConfigError(
+            "the 'objects:' content fill (filler/sets/demands) needs a composed "
+            "scene | hint: declare 'scene_preset:' with a provider or drop the "
+            "content keys (objects.filler)"
+        )
     info = backend_info(backend_label)
     if info.content_router is None:
-        raise SystemExit(
-            f"[collect] error: the 'objects:' content spec "
-            f"(sets/demands) is not supported by the {backend_label!r} "
-            f"backend | hint: declare a backend with a content fill or "
-            f"drop the content keys"
+        raise ConfigError(
+            f"the 'objects:' content spec is not supported by the {backend_label!r} "
+            f"backend | hint: declare a backend with a content fill or drop the "
+            f"content keys (objects.filler)"
         )
     info.content_router()(spec, env_cfg)
 
@@ -167,30 +193,22 @@ _STATIC_SHAPE_HINT = (
 )
 
 
-def _guard_mujoco_only_scene(
+def _guard_scene_provider_support(
     env_cfg: dict[str, JsonValue],
     backend_label: str,
 ) -> None:
-    """Fail fast when a run declares a scene fill its backend cannot consume.
-
-    ``env.params.mj_scene`` names a registered/inline MuJoCo scene composer.
-    The isaaclab backend has no scene-IR consumer, so without this gate the
-    geometry would silently disappear.  Programmatic ``World.add`` static
-    primitives are mapped to native static colliders before this point
-    (the run layer strips ``mj_scene``); anything still carrying it here is
-    an unmapped inline scene or a registered mujoco scene.
-    """
-    if backend_info(backend_label).mj_scene_consumer:
-        return  # the backend has a scene-IR / mj_scene consumer
+    """Fail fast when a run declares a scene provider its backend cannot consume."""
+    if backend_info(backend_label).scene_provider_consumer:
+        return
     params = env_cfg.get("params")
-    scene_name = params.get("mj_scene") if isinstance(params, dict) else None
+    scene_name = params.get("scene_provider") if isinstance(params, dict) else None
     if scene_name is None:
         return
     from unigym.errors import ConfigError
 
     raise ConfigError(
-        f"env.params.mj_scene={scene_name!r} is a mujoco-only scene fill "
-        f"({backend_label!r} backend has no scene-IR consumer) | hint: "
+        f"env.params.scene_provider={scene_name!r} is not supported by the "
+        f"{backend_label!r} backend (no scene-provider consumer) | hint: "
         f"{_STATIC_SHAPE_HINT}"
     )
 
@@ -200,41 +218,54 @@ def _validate_world_base(
     env_cfg: dict[str, JsonValue],
     backend_label: str,
 ) -> JsonValue:
-    """Resolve/validate the run-level ``world_base`` declaration (A1).
+    """Resolve/validate the run-level format-neutral ``world_base``.
 
-    The declaration lives at the run config TOP LEVEL (scene bundles put
-    it under ``backend.mujoco.world_base`` and :func:`apply_scene_bundle`
-    routes it here).  ``env.params.mj_model`` is deleted -- no alias, no
-    fallback -- and a mujoco-family run without ``world_base.mjcf`` fails
-    fast.  Other backends keep the declaration untouched (they do not
-    consume it today).
+    ``world_base`` is one ``AssetRef`` mapping (``mjcf`` / ``urdf`` / ``usd``).
+    The run layer selects the first format the backend supports; there is no
+    format fallback and no bare-path form in a yaml document.  Backends that
+    do not declare ``world_base_consumer`` reject a declared world base.
     """
     from unigym.errors import ConfigError
 
     params = env_cfg.get("params") or {}
     if isinstance(params, dict) and "mj_model" in params:
         raise ConfigError(
-            "env.params.mj_model was removed in v101 A1; declare the "
-            "run-level `world_base: {mjcf: <path>}` instead (scene "
-            "bundles: `backend.mujoco.world_base`) -- there is no alias "
-            "and no fallback"
+            "env.params.mj_model was removed; declare the run-level "
+            "`world_base: {mjcf: <path>}` or a scene preset `world:` instead "
+            "-- there is no alias and no fallback"
         )
+    info = backend_info(backend_label)
     world_base = cfg.get("world_base")
-    if not backend_info(backend_label).world_base_required:
-        return world_base
     if world_base is None:
+        if info.world_base_consumer:
+            raise ConfigError(
+                f"world_base is required for the {backend_label!r} backend: "
+                "declare `world_base: {mjcf: <path>}` at the run config top "
+                "level or a scene preset `world:`; env.params.mj_model was "
+                "removed and there is no default model"
+            )
+        return None
+    if not info.world_base_consumer:
         raise ConfigError(
-            f"world_base is required for the {backend_label!r} backend: "
-            "declare `world_base: {mjcf: <path>}` at the run config top "
-            "level (or `backend.mujoco.world_base` in a scene bundle); "
-            "env.params.mj_model was removed and there is no default model"
+            f"the {backend_label!r} backend does not consume a world base; "
+            f"got world_base={world_base!r} | hint: declare a native terrain "
+            "or drop the world_base/scene preset world"
         )
-    if not isinstance(world_base, dict) or not world_base.get("mjcf"):
+    if not isinstance(world_base, dict) or not any(
+        isinstance(world_base.get(key), str) and world_base.get(key)
+        for key in ("mjcf", "urdf", "usd")
+    ):
         raise ConfigError(
-            "world_base must be a mapping declaring `mjcf: <path>` for the "
-            f"{backend_label!r} backend; got {world_base!r}"
+            "world_base must be a mapping declaring at least one non-empty "
+            f"`mjcf` / `urdf` / `usd` path for the {backend_label!r} backend; "
+            f"got {world_base!r}"
         )
-    return {"mjcf": str(world_base["mjcf"])}
+    try:
+        ref = AssetRef.from_mapping(world_base, "world_base")
+        world_format = select_asset_format(ref, info.asset_formats)
+    except AssetRefError as err:
+        raise ConfigError(f"world_base: {err}") from err
+    return {world_format: str(getattr(ref, world_format))}
 
 
 def _normalize_articulations(
@@ -327,20 +358,22 @@ def _declares_prop_template(value: JsonValue) -> bool:
     return False
 
 
-def _declares_mj_scene(cfg: dict[str, JsonValue]) -> bool:
-    """True when the config declares a registered or inline ``mj_scene``.
+def _scene_preset_needs_runtime(value: JsonValue) -> bool:
+    """True when a ``scene_preset`` value needs a pack runtime to resolve."""
+    if isinstance(value, str):
+        return True
+    if not isinstance(value, dict):
+        return False
+    if value.get("id") is not None:
+        return True
+    provider = value.get("provider")
+    if not isinstance(provider, str) or not provider:
+        return False
+    if provider.startswith("_inline_"):
+        return False
+    from unigym.scenes.providers import registered_scene_providers
 
-    ``World.from_generator`` / ``World.inline`` route the scene through
-    ``env.params.mj_scene`` (and ``mj_scene_params``), not the catalog
-    ``scene:`` key; composing it still resolves assets at the boundary.
-    """
-    env = cfg.get("env")
-    if not isinstance(env, dict):
-        return False
-    params = env.get("params")
-    if not isinstance(params, dict):
-        return False
-    return params.get("mj_scene") is not None
+    return provider not in registered_scene_providers()
 
 
 def _declared_adapter_name(cfg: dict[str, JsonValue]) -> str | None:
@@ -355,19 +388,17 @@ def _declared_adapter_name(cfg: dict[str, JsonValue]) -> str | None:
 def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) -> bool:
     """True when a run config needs an explicit runtime at its boundary.
 
-    A scene reference, an ``env.params.mj_scene`` declaration, a
+    A catalog ``scene_preset`` (or an unregistered inline provider), a
     benchmark/both run, an adapter other than the built-in ``manual``, any
     pack/asset reference string or a prop-template selection needs the
     runtime.  The helper is the one composition-boundary decision shared by
     ``Run``, ``collect_cli`` and ``describe_cli``; it does not build or cache a
     runtime.
     """
-    if cfg.get("scene") is not None:
+    if "scene_preset" in cfg and _scene_preset_needs_runtime(cfg.get("scene_preset")):
         return True
     run_mode = cfg.get("mode", "collect") if mode is None else mode
     if run_mode in ("benchmark", "both"):
-        return True
-    if _declares_mj_scene(cfg):
         return True
     adapter_name = _declared_adapter_name(cfg)
     if adapter_name is not None and adapter_name != "manual":
@@ -458,22 +489,43 @@ def build_spec(
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec.
 
-    A config declaring ``scene:`` resolves that exact catalog id through
-    *runtime*, and a ``pack:`` / asset reference expands through an
+    The run's ``scene_preset`` resolves through *runtime* after the backend is
+    selected (its ``BackendBinding`` drives world-format and backend-param
+    selection).  A ``pack:`` / asset reference expands through an
     :class:`~unigym.packs.runtime.AssetContext` built from the same runtime.
     A ``benchmark`` / ``both`` run stores *runtime* on the spec for benchmark
     pack discovery.  A legacy ``benchmark.packs`` list is rejected: packs are
     declared on the runtime ``benchmarks`` face.
     """
+    from unigym.errors import ConfigError
+
     raw_cfg = copy.deepcopy(cfg)
-    # The content key surface ('objects:') normalizes onto the
-    # internal name BEFORE the scene merge, so a run config and the bundle
-    # it references both migrate through the one function.
-    cfg = _require_config(normalize_content_keys(raw_cfg, source=args.config), "content keys")
-    # scene bundle: the `scene:` reference resolves BEFORE placeholder expansion
-    # so the pack's ${UNIGYM_REPO} tokens ride the same single
-    # expansion point as the run yaml
-    cfg = _require_config(apply_scene_bundle(cfg, runtime=runtime), "scene bundle")
+    reject_legacy_scene_keys(raw_cfg, source=args.config)
+    # The content key surface ('objects:') normalizes onto the internal name
+    # BEFORE preset resolution; an ``objects.provider`` rejection is a config
+    # error at this boundary.
+    try:
+        cfg = _require_config(normalize_content_keys(raw_cfg, source=args.config), "content keys")
+    except ValueError as exc:
+        raise ConfigError(f"{args.config}: {exc}") from exc
+    early_env = _require_config(cfg.get("env"), "env")
+    backend_label = str(early_env.get("backend", "isaaclab"))
+    info = backend_info(backend_label)
+    binding = BackendBinding(
+        name=info.name,
+        asset_formats=info.asset_formats,
+        backend_param_keys=info.backend_param_keys,
+        known_backends=tuple(known_backends()),
+    )
+    # The declaration is the authoring surface to_config re-emits; the
+    # resolved config below carries only the internal routing keys.
+    scene_preset = copy.deepcopy(cfg.get("scene_preset"))
+    # The preset resolves BEFORE placeholder expansion so the pack's
+    # ${UNIGYM_REPO} tokens ride the same single expansion point as the run yaml.
+    cfg = _require_config(
+        apply_scene_preset(cfg, runtime=runtime, binding=binding, source=args.config),
+        "scene preset",
+    )
     context = None
     if runtime is not None:
         from unigym.packs.runtime import AssetContext
@@ -537,8 +589,6 @@ def build_spec(
             f"mode '{mode_value}' is not implemented " "(one of: collect | benchmark | both)"
         )
     mode = mode_value
-    from unigym.errors import ConfigError
-
     benchmark_cfg = _require_config(cfg.get("benchmark") or {}, "benchmark")
     if "camera_depth" in cfg:
         raise ConfigError(
@@ -575,9 +625,9 @@ def build_spec(
     # torch device follows --device (AppLauncher); the env backend also sets
     # cfg.sim.device so SimulationContext lands on the same GPU.
     device = args.device if getattr(args, "device", "cpu") != "cpu" else "cpu"
-    # The run's ``objects:`` content spec (split out by the
-    # normalizer) rides env.params into the mujoco scene build.
-    backend_label = str(env_cfg.get("backend", "isaaclab"))
+    # The run's content spec rides env.params into a backend with a content
+    # router; the scene provider keys were routed by apply_scene_preset.
+    env_cfg = _require_config(cfg.get("env"), "env")
 
     raw_backend_options = env_cfg.get("backend_options")
     if raw_backend_options is not None and not is_json_object(raw_backend_options):
@@ -588,7 +638,7 @@ def build_spec(
         )
     except ValueError as exc:
         raise ConfigError(f"{args.config}: {exc}") from exc
-    _guard_mujoco_only_scene(env_cfg, backend_label)
+    _guard_scene_provider_support(env_cfg, backend_label)
     _route_content(cfg, env_cfg, backend_label)
     world_base = _validate_world_base(cfg, env_cfg, backend_label)
     articulations = _normalize_articulations(cfg, args.config)
@@ -605,8 +655,6 @@ def build_spec(
     requested_out = getattr(args, "output_dir", None)
     if requested_out is None:
         requested_out = os.path.join(output_root, run_name)
-    scene_value = cfg.get("scene")
-    scene = None if scene_value is None else _require_config(scene_value, "scene")
     director_value = cfg.get("director")
     director = None if director_value is None else _require_config(director_value, "director")
     adapter_name_value = adapter_cfg.get("name")
@@ -621,13 +669,13 @@ def build_spec(
         backend_params=_require_config(env_cfg.get("params") or {}, "env.params"),
         backend_options=backend_options,
         world_base=world_base,
+        scene_preset=scene_preset,
         articulations=articulations,
         controls=controls,
         adapter=adapter_cfg,
         adapter_name=adapter_name,
         adapter_params=adapter_params,
         adapter_overrides=tuple(adapter_overrides),
-        scene=scene,
         props=cfg.get("props"),
         cameras=cfg.get("cameras"),
         contacts=cfg.get("contacts"),

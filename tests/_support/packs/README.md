@@ -6,11 +6,14 @@ and contains no `test_*.py` files.
 
 ## `acme_content`
 
-A `trust: content` pack with one item on each of the `runs`, `scenes` and
-`assets` faces. Each item points at a tiny placeholder YAML resource. The
-resources are not full domain schemas; the pack schema only validates the
-resource path and its existence, so the run/scene/asset parsers own their own
-documents in later phases.
+A `trust: content` pack with one item on each of the `runs`, `scene_presets` and
+`assets` faces. The run and asset resources are tiny placeholders; the
+`scene_presets/tabletop.yaml` document is a real content-only
+`unigym.scene_preset/1` preset (world asset, static `objects.types`, and
+per-backend `backend_params`). It declares no provider and no content-fill keys.
+
+`worlds/table.xml` is the minimal MJCF the preset world path names, so a
+`pack:` world reference can be expanded by the run layer.
 
 ## `acme_code`
 

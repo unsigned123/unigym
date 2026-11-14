@@ -147,6 +147,7 @@ from unigym.backends.shared.mjfamily.scene.scene_artifacts import (
 )
 from unigym.backends.shared.mjfamily.world_base import (
     reject_legacy_mj_model,
+    reject_legacy_scene_params,
     resolve_world_base_mjcf,
 )
 from unigym.runtime.actions import MujocoJointResolver
@@ -205,13 +206,11 @@ class MjwarpEnv(WarpBatchMixin):
         asset_plan: the composition boundary that resolves the declared
             scene's assets; the backend never resolves asset references.
         backend_params: yaml ``env.params`` dict.  Keys:
-            mj_scene_params: optional slot dict passed through to the
-                registered ``mj_scene`` provider's dispatch verbatim
-                (e.g. ``{seed: 2026}`` for
-                robocasa_kitchen_random).  ABSENT -> ``{}`` -- the
-                provider's own fail-closed slot gates stay the single
-                truth.  Ignored (and validated nowhere) when
-                ``mj_scene`` is not declared.
+            scene_provider_params: optional provider parameter mapping
+                passed through to the registered ``scene_provider``
+                dispatch verbatim.  ABSENT -> ``{}`` -- the provider's own
+                fail-closed gates stay the single truth.  Ignored when
+                ``scene_provider`` is not declared.
             spawn_base_pose: optional fixed-base spawn declaration
                 -- ``{body: <name>, pos: [x, y, z], yaw: rad}``
                 rewrites the declared body's SPEC pose before compile
@@ -239,7 +238,7 @@ class MjwarpEnv(WarpBatchMixin):
                 removed ``env.params.actuators`` / ``kp`` / ``kd`` /
                 ``hand_kp`` / ``hand_kd`` keys fail fast.
             reset: optional reset-protocol block (legacy face; the
-                scene-bundle wiring declares ``initializer`` instead --
+                scene-preset wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
                 at dispatch, see ``initializer``).  ABSENT -> the legacy
                 reset, bit-identical.  Keys: protocol ("gr1_cotrain");
@@ -248,7 +247,7 @@ class MjwarpEnv(WarpBatchMixin):
                 0.2); elbow_joints / elbow_mix (defaults = the audit's
                 r/l_elbow_pitch 0.7/0.3); placement (SplitA declarative
                 range table, requires wired props).
-            initializer: scene-bundle reset face:
+            initializer: scene-preset reset face:
                 {type: <registry name> | module: "pkg.mod:factory",
                 params: {...}} dispatched through INITIALIZER_REGISTRY
                 (validate -> resolve -> per-episode apply -> the sampled
@@ -258,7 +257,7 @@ class MjwarpEnv(WarpBatchMixin):
                 the robot-stage keys; the GR1 stage chain runs after
                 apply() in the unchanged order over the SAME stream.
                 Declaring both initializer and reset is an error.
-            base: scene-bundle base declaration ({joint: fixed}); fixed
+            base: scene-preset base declaration ({joint: fixed}); fixed
                 absorbs the legacy spawn_height param (height 0.0, no
                 freejoint, no spawn drop).  No declaration -> the
                 legacy spawn_height semantics.
@@ -271,7 +270,7 @@ class MjwarpEnv(WarpBatchMixin):
                 ``fill.json`` is written only when artifacts are on.
                 Build-time fill uses ``spec.seed`` (default 0).
         artifact_dir: optional run artifact directory.  When declared and
-            the env composes a scene (``env.params.mj_scene``), the six
+            the env composes a scene (``env.params.scene_provider``), the six
             build artifacts land here: ``draw.json`` / ``resolution.json``
             / ``scene.json`` / ``payload_index.json`` / ``composed.xml`` /
             ``compile.json``.  ``None`` -> no artifact IO (the historical
@@ -384,6 +383,7 @@ class MjwarpEnv(WarpBatchMixin):
         _reject_removed_gain_params(params, source="env.params")
         auto_prefix = bool((options.get("compose") or {}).get("auto_prefix", False))
         reject_legacy_mj_model(params, source="env.params")
+        reject_legacy_scene_params(params, source="env.params")
 
         # ---- model load (flat-ground scene; timestep -> sim_dt) ----
         mj_path = resolve_world_base_mjcf(world_base)
@@ -404,17 +404,18 @@ class MjwarpEnv(WarpBatchMixin):
         # pre-compile; None -> the model is byte-identical (regression red
         # line)
         self.director_cfg = director_cfg
-        # Scene-chain: env.params.mj_scene names a REGISTERED
+        # Scene-chain: env.params.scene_provider names a REGISTERED
         # scene provider (build_scene_from_provider) composed + attached
         # into the base spec (the robot world-part XML -- it owns the
         # world-level option/size/visual settings; attach never
         # transfers child options).  The composed content joins the
         # spec BEFORE the camera/prop/director injections.
-        self.mj_scene = params.get("mj_scene")
-        self._mj_scene_params = dict(params.get("mj_scene_params") or {})
+        self.scene_provider = params.get("scene_provider")
+        self._scene_provider_params = dict(params.get("scene_provider_params") or {})
+        self._scene_provider_preset = params.get("scene_provider_preset")
         self._content_spec = params.get("content")
         self._placement_regions = {}
-        _require_content_scene(self._content_spec, self.mj_scene)
+        _require_content_scene(self._content_spec, self.scene_provider)
         spawn_base = params.get("spawn_base_pose")
         # Compose the declared articulation assets into the world
         # base BEFORE the scene/props/camera/director injections.  None
@@ -427,7 +428,11 @@ class MjwarpEnv(WarpBatchMixin):
         )
         composed_spec = composition.spec if composition is not None else None
         if composed_spec is not None or needs_spec(
-            self.camera_manager, self.prop_manager, self.director_cfg, self.mj_scene, spawn_base
+            self.camera_manager,
+            self.prop_manager,
+            self.director_cfg,
+            self.scene_provider,
+            spawn_base,
         ):
             from unigym.scenes.providers import build_scene_from_provider
             from unigym.backends.shared.mjfamily.scene.scene_engine import compose_and_attach
@@ -436,10 +441,18 @@ class MjwarpEnv(WarpBatchMixin):
                 composed_spec if composed_spec is not None else mujoco.MjSpec.from_file(mj_path)
             )
             scene = None
-            if self.mj_scene is not None:
-                # the mj_scene_params slot dict rides the provider
+            if self.scene_provider is not None:
+                # the scene_provider_params mapping rides the provider
                 # dispatch verbatim; absent -> the provider's own gates
-                scene = build_scene_from_provider(str(self.mj_scene), self._mj_scene_params)
+                scene = build_scene_from_provider(
+                    str(self.scene_provider),
+                    self._scene_provider_params,
+                    preset=(
+                        str(self._scene_provider_preset)
+                        if self._scene_provider_preset is not None
+                        else None
+                    ),
+                )
                 scene, self._fill_record = _fill_scene_content(
                     scene, self._content_spec, asset_plan
                 )
@@ -469,9 +482,9 @@ class MjwarpEnv(WarpBatchMixin):
             self.artifact_paths = write_scene_artifacts(
                 self.artifact_dir,
                 scene,
-                self.mj_scene,
+                self.scene_provider,
                 self._model,
-                self._mj_scene_params,
+                self._scene_provider_params,
                 composed_xml,
                 fill_record=self._fill_record,
             )
@@ -566,7 +579,7 @@ class MjwarpEnv(WarpBatchMixin):
         # torch caches (obs/extra) stay CPU; ``sim_device`` is warp's world.
         self.device = "cpu"
         self.sim_device = self.warp_device
-        # base declaration (scene bundles): ``base.joint: fixed``
+        # base declaration (scene presets): ``base.joint: fixed``
         # absorbs the legacy spawn_height param (no freejoint, no drop
         # -> 0.0); no declaration -> the explicit spawn_height param, else
         # the effective profile base_height (then 0.0)
@@ -652,7 +665,7 @@ class MjwarpEnv(WarpBatchMixin):
         # driven controls but no plan fails fast.
         self._setup_actuator_seam(actuation_plans)
 
-        # ---- reset dispatch (scene bundles): the declared initializer
+        # ---- reset dispatch (scene presets): the declared initializer
         # block resolves through INITIALIZER_REGISTRY (six-step
         # contract); the legacy ``reset`` block rides the compat sugar
         # and the GR1 robot-body stages keep their engine-side call
@@ -1258,7 +1271,7 @@ class MjwarpEnv(WarpBatchMixin):
                 # forward)
                 self.prop_backend.on_reset([e], self)
             if self._initializer is not None:
-                # scene-bundle initializer: placement apply -> the GR1
+                # scene-preset initializer: placement apply -> the GR1
                 # robot-body stages (unchanged order), all inside one
                 # shared stream; the tail forward below covers the writes.
                 # The settle chain advances the WARP world, so the device

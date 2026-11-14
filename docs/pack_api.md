@@ -9,7 +9,7 @@ discover -> catalog -> resource/asset -> activate
 
 The legacy `unigym.packs` mount, manifest, resolve and load modules are
 deleted; there is no dual-read period, compatibility shim or implicit
-repository mount. Scene references resolve only through the runtime `scenes`
+repository mount. Scene presets resolve only through the runtime `scene_presets`
 face; run config references resolve only as absolute file paths or exact
 runtime `runs` catalog ids; benchmark pack discovery reads only resource-backed
 entries of the runtime `benchmarks` face. Asset references resolve once at the
@@ -66,6 +66,17 @@ from unigym.pack_api import (
     register_termination,
     registered_scene_providers,
 )
+
+from unigym.scene_presets import (
+    BackendBinding,
+    ScenePlan,
+    ScenePreset,
+    ScenePresetError,
+    apply_scene_preset,
+    load_scene_preset,
+    resolve_scene_plan,
+)
+from unigym.world import World
 ```
 
 The removed helper exports `find`, `resolve`, `code_pack_root`, `load_table`
@@ -91,9 +102,9 @@ requires:
   unigym: ">=0.107,<0.108"
 
 provides:
-  scenes:
+  scene_presets:
     - id: acme.tabletop
-      resource: scenes/tabletop.yaml
+      resource: scene_presets/tabletop.yaml
   runs:
     - id: acme.demo
       resource: runs/demo.yaml
@@ -145,7 +156,7 @@ resolution belongs to a later loader phase and is not part of the runtime.
 The face vocabulary is explicit:
 
 ```text
-runs  scenes  tasks  assets  benchmarks  props  terminations  providers  selection
+runs  scene_presets  tasks  assets  benchmarks  props  terminations  providers  selection
 ```
 
 Each item is a mapping with:
@@ -197,8 +208,8 @@ catalog = PackCatalog((manifest_a, manifest_b))
 catalog.packs()               # ("alpha", "beta"), declaration order
 catalog.get("alpha")          # PackManifestV1
 catalog.entries()             # every CatalogEntry, declaration order
-catalog.entries(face="scenes")  # filtered by face
-catalog.entry("scenes", "alpha.tabletop")  # one CatalogEntry by exact id
+catalog.entries(face="scene_presets")  # filtered by face
+catalog.entry("scene_presets", "alpha.tabletop")  # one CatalogEntry by exact id
 ```
 
 `CatalogEntry` carries `pack`, `face`, `id`, `resource`, `entrypoint` and
@@ -820,38 +831,88 @@ runtime discovery is needed. There is no module-level runtime or cache.
   reimplement the collector; an absent collector fails with the existing
   teaching error.
 
-### Scene resources
+### Scene presets
 
-A run config's `scene:` value is an exact `scenes` catalog id, not a directory
-scan:
+A run config's `scene_preset:` value is an exact `scene_presets` catalog id:
 
 ```yaml
-scene: acme.tabletop
+scene_preset: acme.tabletop
 ```
 
-Resolution goes through `runtime.resource_for("scenes", <id>)`, parses the
-declared YAML mapping and keeps the existing content-key normalization and
-three-layer merge (`scene defaults -> task overrides -> run overrides`). The
-consumed `scene:` ref is removed after the merge, so `RunSpec.scene` is not a
-leftover catalog-id string. The legacy `<family>/<name>` form and a direct
-`scene.yaml` file are not scene references; both fail instead of falling back.
+The inline provider form has no catalog preset:
+
+```yaml
+scene_preset:
+  provider: acme.table_top
+  params: {style: 2}
+  world: {mjcf: scene.xml}
+```
+
+A mapping value requires exactly one of `id` / `provider`; `params`, `world`,
+`objects` and `backend_params` merge key-wise over the preset. The run's
+top-level `world_base`, `objects` and `env.params.initializer` / `base` merge
+last and win. The consumed `scene_preset:` key is removed after resolution;
+there is no `RunSpec.scene` field and no `scene:` alias. The resolved routing
+lives on the effective config (`RunSpec.cfg` / `Run.cfg`) as the internal
+`env.params.scene_provider*` keys, which are never authoring keys.
+`Run.to_config` writes the authoring surface instead: it drops those internal
+keys and re-emits the run's original `scene_preset:` declaration (a catalog id
+or the inline mapping), so a provider-backed preset round-trips through
+`Run.from_config` -> build with its semantics preserved. A catalog declaration
+needs its pack runtime on reload, exactly like the original document.
+
+A preset document is a closed `unigym.scene_preset/1` mapping:
+
+```yaml
+schema: unigym.scene_preset/1
+name: tabletop
+provider: acme.table_top          # optional (same-pack provider)
+params: {style: 1}                # only with provider
+world:                            # format-neutral AssetRef
+  mjcf: pack:acme/worlds/table.xml
+objects:                          # static types + optional fill spec
+  types: [{name: table_plate}]
+backend_params:                   # selected by the run backend
+  mujoco:
+    base: {joint: fixed}
+    initializer: {type: tabletop_initializer, params: {seed: 1}}
+  mjwarp:
+    base: {joint: fixed}
+    initializer: {type: tabletop_initializer, params: {seed: 1}}
+```
+
+The core never hard-codes `backend_params.mujoco`: the selected run backend's
+block is merged into `env.params`, and each backend validates its own keys.
+Content-only presets (no provider) may declare static `objects.types` but not a
+content-fill spec; a fill needs a composed scene. `backend_params.<backend>.initializer`
+must use the runtime shape (`type:` or `module:`, with an optional `params:`
+mapping), and `base` currently accepts only `joint: fixed`.
+
+Resolution goes through `runtime.resource_for("scene_presets", <id>)` and
+`unigym.scene_presets` (`load_scene_preset`, `resolve_scene_plan`,
+`apply_scene_preset`). The legacy `scenes` face, `scene:` / `scene_pack:` /
+`scenes:` run keys, `env.params.mj_scene` / `mj_scene_params`, preset
+`backend.mujoco`, and top-level preset `backend:` / `initializer:` fail with
+teaching errors naming the replacement.
 
 The runtime is required at the boundary:
 
-- `apply_scene_bundle(cfg, runtime=None)` returns a config without a `scene:`
-  key (or with `scene: null`) unchanged and needs no runtime;
-- a present `scene:` ref without a runtime raises a teaching `ValueError`
-  naming the ref;
+- `apply_scene_preset(cfg)` returns a config without `scene_preset` unchanged
+  and needs no runtime;
+- a catalog id without a runtime raises a teaching `ConfigError` naming the id;
+  an inline `provider:` mapping resolves against the process-wide provider
+  registry, so it needs no runtime (an unregistered provider makes the run
+  boundary build `discover(entry_points=True)` instead);
 - an unknown id raises the catalog `PackError` with the face and known ids;
 - a resource that is not valid YAML or not a mapping fails at resolution.
 
-`build_spec(cfg, args, *, runtime=None)`, `World.from_pack(ref, *,
-runtime=...)` and a scene-bearing `World.from_config(source, *,
-runtime=...)` follow the same boundary. `Run`, `collect_cli` and `describe_cli`
-build `discover(entry_points=True)` at their composition boundary when the
-config declares `scene:`, its mode is `benchmark`/`both`, or it carries a
-`pack:`/asset reference string; there is no module-level default runtime or
-cache.
+`build_spec(cfg, args, *, runtime=None)`, `World.from_preset(ref, *,
+runtime=...)` and `World.from_config(source, *, runtime=...)` follow the same
+boundary. `Run`, `collect_cli` and `describe_cli` build
+`discover(entry_points=True)` at their composition boundary when the config
+declares a catalog `scene_preset`, an unregistered inline provider, mode
+`benchmark`/`both`, or a `pack:`/asset reference string; there is no
+module-level default runtime or cache.
 
 ### Run resources
 
@@ -926,8 +987,8 @@ runtime; `<pack>/<task>` resolution, unique-bare names and `<pack>/*` wildcard
 expansion are unchanged. `RunSpec.pack_runtime` carries the runtime to
 `build_instance` and is never serialized into the config or ledger. A
 benchmark/both run without a runtime fails at build; `Run`, `collect_cli` and
-`describe_cli` build `discover(entry_points=True)` when the config declares
-`scene:` or its mode is `benchmark`/`both`.
+`describe_cli` build `discover(entry_points=True)` when the config declares a
+`scene_preset` or its mode is `benchmark`/`both`.
 
 `benchmark.packs` in a run config is rejected with a teaching `ConfigError`:
 packs are declared on the runtime `benchmarks` face. `benchmark.tasks`
