@@ -167,9 +167,13 @@ tests/
 │   ├── envs.py                  # backend environment resolution
 │   ├── factories.py
 │   ├── assertions.py
-│   └── fakes/
-│       ├── backend.py
-│       └── transport.py         # only when a real boundary needs it
+│   ├── fakes/
+│   │   ├── backend.py
+│   │   ├── runner.py            # shared fake Runner seam
+│   │   └── transport.py         # only when a real boundary needs it
+│   ├── packs/
+│   │   └── facade_mjcf/         # simulation-facade MJCF fixture pack
+│   └── sim_facade_script.py     # shared facade acceptance script
 ├── smoke/
 ├── unit/
 │   ├── core/
@@ -184,7 +188,8 @@ tests/
 │   ├── robots/
 │   ├── assets/
 │   ├── adapters/
-│   └── backends/                # framework-level registry tests only
+│   ├── backends/                # framework-level registry tests only
+│   └── sim/                     # experimental simulation facade
 ├── backends/
 │   ├── mujoco/
 │   ├── mjwarp/
@@ -241,6 +246,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_adapters` | `tests/unit/adapters/**` |
 | `domain_assets` | `tests/unit/assets/**` |
 | `domain_backends` | `tests/unit/backends/**` |
+| `domain_sim` | `tests/unit/sim/**` |
 | `backend_agnostic` | no specific backend |
 | `backend_mujoco` | `tests/backends/mujoco/**` or conformance fixture |
 | `backend_mjwarp` | `tests/backends/mjwarp/**` or conformance fixture |

@@ -14,7 +14,7 @@ import copy
 import math
 import os
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 from unigym._typing import JsonValue
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
@@ -85,6 +85,11 @@ def _json_float_map(values: Mapping[str, float]) -> dict[str, JsonValue]:
 def _json_objects(entries: list[dict[str, JsonValue]]) -> list[JsonValue]:
     """A list of JSON objects as a JSON list."""
     return [entry for entry in entries]
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Whether *value* is a mapping with opaque keys and values."""
+    return isinstance(value, Mapping)
 
 
 class SimulationBuilder:
@@ -664,12 +669,12 @@ class SimulationBuilder:
 
         articulations = getattr(env, "articulations", None)
         controls = getattr(env, "controls", None)
-        if not isinstance(articulations, Mapping) or not articulations:
+        if not _is_object_mapping(articulations) or not articulations:
             raise SimulationConfigError(
                 "config-mode build needs a non-empty env.articulations mapping; "
                 f"got {type(articulations).__name__}"
             )
-        if not isinstance(controls, Mapping) or not controls:
+        if not _is_object_mapping(controls) or not controls:
             raise SimulationConfigError(
                 "config-mode build needs a non-empty env.controls mapping; "
                 f"got {type(controls).__name__}"

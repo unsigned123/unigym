@@ -14,3 +14,8 @@ Process documents:
   `AssetInstance` fields, backend matrix, resolution, digest and refusals.
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
+
+Usage documents:
+
+- [Simulation facade](sim_facade.md) - experimental `unigym.sim` usage, scope,
+  error taxonomy and residual limits.

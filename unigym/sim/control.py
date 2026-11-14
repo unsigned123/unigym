@@ -18,6 +18,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TypeGuard
 
 from unigym.runtime.controls import DRIVE_TARGET
 
@@ -45,9 +46,19 @@ def _non_empty_name(value: object, what: str) -> str:
     return value
 
 
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Whether *value* is a mapping with opaque keys and values."""
+    return isinstance(value, Mapping)
+
+
+def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    """Whether *value* is a non-string sequence of opaque items."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
 def _gain(value: object, what: str) -> float | Mapping[str, float]:
     """Normalize one scalar-or-name-mapped gain (non-empty map, finite values)."""
-    if isinstance(value, Mapping):
+    if _is_object_mapping(value):
         if not value:
             raise SimulationConfigError(f"{what} must not be an empty mapping")
         gains: dict[str, float] = {}
@@ -67,13 +78,11 @@ def _limit(value: object, what: str) -> float | Mapping[str, float] | None:
 
 def _joint_names(value: object, what: str) -> tuple[str, ...]:
     """Normalize explicit joint names (non-empty, duplicate-free)."""
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+    if not _is_object_sequence(value):
         raise SimulationConfigError(f"{what} must be a sequence of joint names, got {value!r}")
-    names = tuple(value)
+    names = tuple(_non_empty_name(name, f"{what} entry") for name in value)
     if not names:
         raise SimulationConfigError(f"{what} must not be empty")
-    for name in names:
-        _non_empty_name(name, f"{what} entry")
     if len(set(names)) != len(names):
         duplicates = sorted({name for name in names if names.count(name) > 1})
         raise SimulationConfigError(f"{what} contains duplicate joint names {duplicates}")

@@ -21,7 +21,7 @@ the action plumbing and the Gymnasium return shapes differ.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import numpy as np
 import torch
@@ -56,7 +56,7 @@ def _batch_infos(extra: dict, num_envs: int) -> dict:
     return infos
 
 
-def _per_env_values(values: dict, env_id: int) -> dict:
+def _per_env_values(values: Mapping[str, object], env_id: int) -> dict:
     """One env's slice of a batched dict (pre-reset final_* values)."""
     out: dict = {}
     for key, value in values.items():

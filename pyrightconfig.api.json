@@ -7,7 +7,8 @@
     "unigym/runtime/actions.py",
     "unigym/adapters/base.py",
     "unigym/scenes/articulation.py",
-    "unigym/env/backends/base.py"
+    "unigym/env/backends/base.py",
+    "unigym/sim"
   ],
   "reportUnknownParameterType": "error",
   "reportUnknownArgumentType": "error",

@@ -11,7 +11,7 @@ four methods only, no ownership of the underlying ``RunInstance``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -26,8 +26,8 @@ class StepResult:
     """One policy tick's product (see module docstring)."""
 
     t: int
-    obs: dict
-    extra: dict
+    obs: Mapping[str, object]
+    extra: Mapping[str, object]
     reset_env_ids: torch.Tensor
     terminated: torch.Tensor | None
 
