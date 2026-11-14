@@ -188,7 +188,7 @@ def test_compose_static_usd_builds_field_and_neutral_rows(tmp_path):
     assert composed.scene is scene
     (spec,) = composed.fields
     assert spec.field == "asset_bench_cup"
-    assert spec.prim_path == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert spec.prim_path == f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup"
     assert spec.cfg_kind == "static_usd"
     assert spec.kind == "static_rigid"
     assert spec.format == "usd"
@@ -250,7 +250,7 @@ def test_attach_static_usd_builds_asset_base_cfg_without_rigid_props(tmp_path, c
     assert attached == {}
     cfg = base.asset_bench_cup
     assert isinstance(cfg, _AssetBaseCfg)
-    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup"
     spawn = cfg.kwargs["spawn"]
     assert isinstance(spawn, _UsdFileCfg)
     assert spawn.kwargs["usd_path"] == str(path)
@@ -300,7 +300,7 @@ def test_describe_is_deterministic_and_has_no_cfg_names_or_resolved_path(tmp_pat
     assert first["ext"]["scene"]["fields"] == [
         {
             "field": "asset_bench_cup",
-            "prim_path": f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup",
+            "prim_path": f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup",
             "kind": "static_rigid",
             "format": "usd",
         }
@@ -336,7 +336,7 @@ def test_to_xml_is_canonical_json_and_may_carry_the_absolute_path(tmp_path):
     assert text == json.dumps(payload, sort_keys=True, indent=2)
     (field,) = payload["fields"]
     assert field["field"] == "asset_bench_cup"
-    assert field["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert field["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup"
     assert field["kind"] == "static_rigid"
     assert field["format"] == "usd"
     assert field["asset"] == {"usd": str(path)}
@@ -419,7 +419,7 @@ def test_attach_dynamic_usd_builds_rigid_object_cfg(tmp_path, collision, expecte
 
     cfg = base.asset_bench_cup
     assert isinstance(cfg, _RigidObjectCfg)
-    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup"
     assert cfg.kwargs["collision_group"] == 0
     spawn = cfg.kwargs["spawn"]
     assert isinstance(spawn, _UsdFileCfg)
@@ -510,7 +510,7 @@ def test_attach_dynamic_urdf_builds_rigid_object_with_urdf_spawn(tmp_path, colli
     assert calls == []
     cfg = base.asset_bench_cup
     assert isinstance(cfg, _RigidObjectCfg)
-    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench_cup"
     assert cfg.kwargs["collision_group"] == 0
     spawn = cfg.kwargs["spawn"]
     assert isinstance(spawn, _UrdfFileCfg)

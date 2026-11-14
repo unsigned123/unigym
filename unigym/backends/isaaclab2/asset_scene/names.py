@@ -26,8 +26,13 @@ def asset_field(scene: str, instance_id: str) -> str:
 
 
 def asset_prim_path(scene: str, instance_id: str) -> str:
-    """Return the prim path of one file-backed asset instance."""
-    return f"{ENV_PREFIX_SENTINEL}/Scene_{scene}/{instance_id}"
+    """Return the prim path of one file-backed asset instance.
+
+    The path is flat (``Scene_<scene>_<id>``) because IsaacLab spawners do not
+    create intermediate parent prims: a nested ``Scene_<scene>/<id>`` leaf would
+    fail with ``Unable to find source prim path``.
+    """
+    return f"{ENV_PREFIX_SENTINEL}/Scene_{scene}_{instance_id}"
 
 
 def static_field(instance_id: str) -> str:

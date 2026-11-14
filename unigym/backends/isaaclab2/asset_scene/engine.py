@@ -246,7 +246,13 @@ class AssetSceneEngine:
 
         ``frame`` is a namespace label only: IsaacLab has no transform frame
         at this seam, and the MVP composes one scene per run.  The fixed
-        ``{ENV_REGEX_NS}/Scene_<scene>/<id>`` prim paths stay authoritative.
+        ``{ENV_REGEX_NS}/Scene_<scene>_<id>`` prim paths stay authoritative.
+
+        The prim path is flat (the asset id is part of the leaf prim name,
+        ``Scene_<scene>_<id>``) because IsaacLab spawners (``UsdFileCfg`` /
+        ``RigidObjectCfg``) do not create intermediate parent prims: a nested
+        ``Scene_<scene>/<id>`` leaf fails at spawn with ``Unable to find source
+        prim path``.
 
         Args:
             base: The scene config object fields are assigned to.
