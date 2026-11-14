@@ -420,15 +420,20 @@ def test_public_pack_api_exports() -> None:
         "PackManifestV1",
         "PackRuntime",
         "ProvidedItem",
+        "ProviderOrigin",
+        "SceneProvider",
+        "SceneProviderContext",
+        "build_scene_from_provider",
         "discover",
         "load_asset_manifest",
         "load_manifest_v1",
         "register_adapter",
-        "register_content_provider",
         "register_prop_template",
         "register_robot",
-        "register_scene",
+        "register_scene_content_filler",
+        "register_scene_provider",
         "register_termination",
+        "registered_scene_providers",
     }
     removed = {"asset_path", "code_pack_root", "find", "load_table", "resolve"}
 

@@ -5,9 +5,10 @@ spelling stays a long-lived alias.  :func:`normalize_content_keys` is the
 ONE place the alias resolves: it maps ``objects:`` onto the internal
 ``props`` name the runtime consumes and warns -- never errors -- when the
 legacy key is still spelled.  An ``objects:`` block may additionally carry
-a content-fill spec (``sets`` / ``demands`` / ``policy`` / ``provider`` /
+a content-fill spec (``sets`` / ``demands`` / ``policy`` / ``filler`` /
 ``seed``); those keys split into ``cfg["content"]`` while ``types:`` (the
-static props) stays in ``cfg["props"]``.
+static props) stays in ``cfg["props"]``.  The old ``objects.provider`` key
+was renamed to ``objects.filler`` and now fails with a teaching error.
 
 The internal vocabulary does not move: ``PropManager``,
 ``build_prop_manager`` and the prop templates keep their names; only the
@@ -32,8 +33,10 @@ _SURFACE_KEY = "objects"
 """The yaml surface spelling every config migrates to."""
 _CONTENT_KEY = "content"
 """The run's content-fill spec (split out of the ``objects:`` block)."""
-_CONTENT_SPEC_KEYS = ("demands", "policy", "provider", "seed", "sets")
+_CONTENT_SPEC_KEYS = ("demands", "filler", "policy", "seed", "sets")
 """The keys an ``objects:`` content spec carries (``types`` stays props)."""
+_LEGACY_PROVIDER_KEY = "provider"
+"""The removed content-filler spelling (``objects.provider``)."""
 
 _MIGRATION = (
     "{source}: 'props:' is the legacy spelling of the content block; "
@@ -96,6 +99,12 @@ def normalize_content_keys(
         content = None
         if isinstance(block, dict):
             block = dict(block)
+            if _LEGACY_PROVIDER_KEY in block:
+                raise ValueError(
+                    f"{_label(source)}: 'objects.provider' was renamed to "
+                    f"'objects.filler' -- declare the content filler with the "
+                    f"'filler' key"
+                )
             content = {key: block.pop(key) for key in _CONTENT_SPEC_KEYS if key in block} or None
         cfg[_INTERNAL_KEY] = block
         if content is not None:

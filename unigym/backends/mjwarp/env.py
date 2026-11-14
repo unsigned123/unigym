@@ -405,7 +405,7 @@ class MjwarpEnv(WarpBatchMixin):
         # line)
         self.director_cfg = director_cfg
         # Scene-chain: env.params.mj_scene names a REGISTERED
-        # scene definition (build_scene_definition) composed + attached
+        # scene provider (build_scene_from_provider) composed + attached
         # into the base spec (the robot world-part XML -- it owns the
         # world-level option/size/visual settings; attach never
         # transfers child options).  The composed content joins the
@@ -429,7 +429,7 @@ class MjwarpEnv(WarpBatchMixin):
         if composed_spec is not None or needs_spec(
             self.camera_manager, self.prop_manager, self.director_cfg, self.mj_scene, spawn_base
         ):
-            from unigym.scenes.registry import build_scene_definition
+            from unigym.scenes.providers import build_scene_from_provider
             from unigym.backends.shared.mjfamily.scene.scene_engine import compose_and_attach
 
             mjspec = (
@@ -439,7 +439,7 @@ class MjwarpEnv(WarpBatchMixin):
             if self.mj_scene is not None:
                 # the mj_scene_params slot dict rides the provider
                 # dispatch verbatim; absent -> the provider's own gates
-                scene = build_scene_definition(str(self.mj_scene), self._mj_scene_params)
+                scene = build_scene_from_provider(str(self.mj_scene), self._mj_scene_params)
                 scene, self._fill_record = _fill_scene_content(
                     scene, self._content_spec, asset_plan
                 )

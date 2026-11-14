@@ -6,7 +6,7 @@ whole bridge design section 4 asks for:
 
 * :class:`ScenePipeline` builds one :class:`~unigym.scenes.scene_ir.Scene`
   from a :class:`BuildContext` (data, never a handle);
-* :class:`ContentProvider` fills a built scene and declares ``when``
+* :class:`SceneContentFiller` fills a built scene and declares ``when``
   (``"build"`` joins the compiled product, ``"reset"`` re-fills per
   episode; the core supports both and never picks a side);
 * :func:`validate_binding` is the FOUR core checks -- generator
@@ -34,17 +34,17 @@ from unigym._typing import JsonValue
 from .generators import registered_generators
 from .scene_ir import Instance, Scene, validate_scene
 
-#: legal content-provider timings (declared by the engine, never chosen here).
-PROVIDER_WHENS = ("build", "reset")
+#: legal content-filler timings (declared by the engine, never chosen here).
+FILLER_WHENS = ("build", "reset")
 
 #: the neutral parameter keys through which an instance's params cite a slot.
 SLOT_REFERENCE_KEYS = ("slot", "slot_id")
 
-#: a content-provider factory (called by an engine with its own keyword facts).
-_ContentFactory = Callable[..., "ContentProvider"]
+#: a content-filler factory (called by an engine with its own keyword facts).
+_SceneContentFillerFactory = Callable[..., "SceneContentFiller"]
 
-#: the closed content-provider registry (name -> factory callable).
-_CONTENT_PROVIDERS: dict[str, _ContentFactory] = {}
+#: the closed content-filler registry (name -> factory callable).
+_SCENE_CONTENT_FILLERS: dict[str, _SceneContentFillerFactory] = {}
 _CONTENT_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -163,13 +163,13 @@ class ScenePipeline(Protocol):
         ...
 
 
-class ContentProvider(Protocol):
+class SceneContentFiller(Protocol):
     """Fill a built scene with instances (content code)."""
 
     name: str
     when: str
     last_record: object
-    """Opaque fill record the provider exposes after :meth:`fill`."""
+    """Opaque fill record the filler exposes after :meth:`fill`."""
 
     def fill(
         self,
@@ -177,28 +177,28 @@ class ContentProvider(Protocol):
         spec: Mapping[str, JsonValue],
         rng: random.Random,
     ) -> tuple[Instance, ...]:
-        """Return the instances this provider adds to *scene*."""
+        """Return the instances this filler adds to *scene*."""
         ...
 
 
-def register_content_provider(
+def register_scene_content_filler(
     name: str,
-    factory: _ContentFactory,
-) -> _ContentFactory:
-    """Register one content-provider factory under a snake_case name.
+    factory: _SceneContentFillerFactory,
+) -> _SceneContentFillerFactory:
+    """Register one content-filler factory under a snake_case name.
 
     The core owns the PROTOCOL, never the content: a pack declares its
-    provider through this closed registry.  A factory is called as
+    filler through this closed registry.  A factory is called as
     ``factory(catalog=..., generator_exists=...)`` and returns an object
-    satisfying :class:`ContentProvider`; an optional ``catalog_ref``
+    satisfying :class:`SceneContentFiller`; an optional ``catalog_ref``
     attribute names the pack reference the engine loads the catalog from.
 
     Args:
-        name: The provider name (lowercase snake_case, unique).
-        factory: The callable that builds a provider instance.
+        name: The filler name (lowercase snake_case, unique).
+        factory: The callable that builds a filler instance.
 
     Returns:
-        The registered factory (decorator-friendly).
+        The registered factory.
 
     Raises:
         SceneBindingError: The name is illegal or already registered, or
@@ -206,26 +206,26 @@ def register_content_provider(
     """
     if not isinstance(name, str) or _CONTENT_NAME_RE.fullmatch(name) is None:
         raise SceneBindingError(
-            f"content provider name {name!r} must be lowercase snake_case "
+            f"content filler name {name!r} must be lowercase snake_case "
             f"(path-like spellings are rejected)"
         )
     if not callable(factory):
         raise SceneBindingError(
-            f"content provider {name!r} factory must be callable, got " f"{type(factory).__name__}"
+            f"content filler {name!r} factory must be callable, got " f"{type(factory).__name__}"
         )
-    if name in _CONTENT_PROVIDERS:
+    if name in _SCENE_CONTENT_FILLERS:
         raise SceneBindingError(
-            f"content provider {name!r} is registered twice -- give each " f"provider a unique name"
+            f"content filler {name!r} is registered twice -- give each " f"filler a unique name"
         )
-    _CONTENT_PROVIDERS[name] = factory
+    _SCENE_CONTENT_FILLERS[name] = factory
     return factory
 
 
-def content_provider(name: str) -> _ContentFactory:
+def scene_content_filler(name: str) -> _SceneContentFillerFactory:
     """Return the registered factory for *name* (fail closed, teaching).
 
     Args:
-        name: The provider name declared by the content spec.
+        name: The filler name declared by the content spec.
 
     Returns:
         The factory registered under *name*.
@@ -235,20 +235,37 @@ def content_provider(name: str) -> _ContentFactory:
             legal set.
     """
     if not isinstance(name, str) or not name:
-        raise SceneBindingError(f"content provider name must be a non-empty string, got {name!r}")
+        raise SceneBindingError(f"content filler name must be a non-empty string, got {name!r}")
     try:
-        return _CONTENT_PROVIDERS[name]
+        return _SCENE_CONTENT_FILLERS[name]
     except KeyError:
         raise SceneBindingError(
-            f"content provider {name!r} is not registered (registered: "
-            f"{sorted(_CONTENT_PROVIDERS)}) -- mount the pack that owns it "
+            f"content filler {name!r} is not registered (registered: "
+            f"{sorted(_SCENE_CONTENT_FILLERS)}) -- mount the pack that owns it "
             f"and import its content face"
         ) from None
 
 
-def registered_content_providers() -> list[str]:
-    """Return the registered content-provider names, sorted."""
-    return sorted(_CONTENT_PROVIDERS)
+def registered_scene_content_fillers() -> list[str]:
+    """Return the registered content-filler names, sorted."""
+    return sorted(_SCENE_CONTENT_FILLERS)
+
+
+def snapshot_scene_content_fillers() -> dict[str, _SceneContentFillerFactory]:
+    """Return a copy of the content-filler registry (isolation/restore face)."""
+    return dict(_SCENE_CONTENT_FILLERS)
+
+
+def restore_scene_content_fillers(
+    snapshot: Mapping[str, _SceneContentFillerFactory],
+) -> None:
+    """Restore the content-filler registry to exactly *snapshot*."""
+    if not isinstance(snapshot, Mapping):
+        raise TypeError(
+            "restore_scene_content_fillers expects a mapping, " f"got {type(snapshot).__name__}"
+        )
+    _SCENE_CONTENT_FILLERS.clear()
+    _SCENE_CONTENT_FILLERS.update(snapshot)
 
 
 @dataclass(frozen=True)
@@ -402,10 +419,10 @@ class Scaffold:
     def __init__(
         self,
         pipeline: ScenePipeline,
-        providers: Iterable[ContentProvider] = (),
+        fillers: Iterable[SceneContentFiller] = (),
         generator_exists: Callable[[str], bool] | None = None,
     ):
-        """Validate the pipeline and providers; the closed timing set is checked."""
+        """Validate the pipeline and fillers; the closed timing set is checked."""
         name = getattr(pipeline, "name", None)
         if not isinstance(name, str) or not name:
             raise SceneBindingError(
@@ -425,48 +442,47 @@ class Scaffold:
                 "scaffold: generator_exists must be callable -- pass a registry "
                 "predicate (a wider one may include the prop-template registry)"
             )
-        self._build_providers: list[ContentProvider] = []
-        self._reset_providers: list[ContentProvider] = []
+        self._build_fillers: list[SceneContentFiller] = []
+        self._reset_fillers: list[SceneContentFiller] = []
         seen: set[str] = set()
-        for provider in providers:
-            provider_name = getattr(provider, "name", None)
-            when = getattr(provider, "when", None)
-            if not isinstance(provider_name, str) or not provider_name:
+        for filler in fillers:
+            filler_name = getattr(filler, "name", None)
+            when = getattr(filler, "when", None)
+            if not isinstance(filler_name, str) or not filler_name:
                 raise SceneBindingError(
-                    "scaffold: every provider needs a non-empty name -- the fill "
+                    "scaffold: every filler needs a non-empty name -- the fill "
                     "record must name who added each instance"
                 )
-            if when not in PROVIDER_WHENS:
+            if when not in FILLER_WHENS:
                 raise SceneBindingError(
-                    f"provider {provider_name!r}: when {when!r} must be one of "
-                    f"{PROVIDER_WHENS} -- declare whether the fill joins the build "
+                    f"filler {filler_name!r}: when {when!r} must be one of "
+                    f"{FILLER_WHENS} -- declare whether the fill joins the build "
                     f"or re-runs per reset"
                 )
-            if not callable(getattr(provider, "fill", None)):
+            if not callable(getattr(filler, "fill", None)):
                 raise SceneBindingError(
-                    f"provider {provider_name!r}: fill must be callable as "
-                    f"fill(scene, spec, rng)"
+                    f"filler {filler_name!r}: fill must be callable as " f"fill(scene, spec, rng)"
                 )
-            if provider_name in seen:
+            if filler_name in seen:
                 raise SceneBindingError(
-                    f"provider {provider_name!r} is registered twice -- give each "
-                    f"provider a unique name"
+                    f"filler {filler_name!r} is registered twice -- give each "
+                    f"filler a unique name"
                 )
-            seen.add(provider_name)
+            seen.add(filler_name)
             if when == "build":
-                self._build_providers.append(provider)
+                self._build_fillers.append(filler)
             else:
-                self._reset_providers.append(provider)
+                self._reset_fillers.append(filler)
 
     def build(self, context: BuildContext) -> tuple[Scene, Draw, Resolution, PayloadSet]:
-        """Build the scene, validate, fill the build providers, validate again.
+        """Build the scene, validate, fill the build fillers, validate again.
 
         Args:
             context: The :class:`BuildContext` handed to the pipeline.
 
         Returns:
             The built scene, its draw inputs, its id-level resolution and
-            its instance -> payload view.  Reset-timed providers are NOT
+            its instance -> payload view.  Reset-timed fillers are NOT
             run here; they are reserved for the engine's reset phase.
 
         Raises:
@@ -479,8 +495,8 @@ class Scaffold:
         scene = self._pipeline.build(context)
         validate_scene(scene)
         validate_binding(scene, self._generator_exists)
-        for provider in self._build_providers:
-            scene = self._fill(scene, provider, context)
+        for filler in self._build_fillers:
+            scene = self._fill(scene, filler, context)
         validate_scene(scene)
         validate_binding(scene, self._generator_exists)
         draw = Draw(
@@ -492,26 +508,26 @@ class Scaffold:
         return scene, draw, _resolution(scene), _payload_set(scene)
 
     @staticmethod
-    def _fill(scene: Scene, provider: ContentProvider, context: BuildContext) -> Scene:
-        """Run one build-timed provider and merge its instances (additive)."""
-        seed = None if context.seed is None else f"{context.seed}:{provider.name}:build"
+    def _fill(scene: Scene, filler: SceneContentFiller, context: BuildContext) -> Scene:
+        """Run one build-timed filler and merge its instances (additive)."""
+        seed = None if context.seed is None else f"{context.seed}:{filler.name}:build"
         rng = random.Random(seed)
-        added = provider.fill(scene, context.recipe, rng)
+        added = filler.fill(scene, context.recipe, rng)
         if isinstance(added, (str, bytes)) or not isinstance(added, (list, tuple)):
             raise SceneBindingError(
-                f"provider {provider.name!r}: fill must return a tuple of "
+                f"filler {filler.name!r}: fill must return a tuple of "
                 f"Instance, got {type(added).__name__}"
             )
         existing = {entry.id for entry in scene.instances}
         for entry in added:
             if not isinstance(entry, Instance):
                 raise SceneBindingError(
-                    f"provider {provider.name!r}: fill returned "
+                    f"filler {filler.name!r}: fill returned "
                     f"{type(entry).__name__}, expected Instance"
                 )
             if entry.id in existing:
                 raise SceneBindingError(
-                    f"provider {provider.name!r}: duplicate instance id "
+                    f"filler {filler.name!r}: duplicate instance id "
                     f"{entry.id!r} -- the scene already declares that id; give "
                     f"each instance a unique id"
                 )
@@ -557,19 +573,21 @@ def _payload_set(scene: Scene) -> PayloadSet:
 
 
 __all__ = [
-    "PROVIDER_WHENS",
+    "FILLER_WHENS",
     "SLOT_REFERENCE_KEYS",
     "BuildContext",
     "CompiledScene",
-    "ContentProvider",
+    "SceneContentFiller",
     "Draw",
     "PayloadSet",
     "Resolution",
     "Scaffold",
     "SceneBindingError",
     "ScenePipeline",
-    "content_provider",
-    "register_content_provider",
-    "registered_content_providers",
+    "scene_content_filler",
+    "register_scene_content_filler",
+    "registered_scene_content_fillers",
+    "restore_scene_content_fillers",
+    "snapshot_scene_content_fillers",
     "validate_binding",
 ]

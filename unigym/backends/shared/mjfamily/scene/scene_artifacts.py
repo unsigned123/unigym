@@ -62,62 +62,67 @@ def _require_content_scene(spec, scene_name) -> None:
 def _fill_scene_content(scene, spec, asset_plan):
     """Fill *scene* with the declared content spec and merge the instances.
 
-    The catalog is loaded from the provider factory's declared
+    The catalog is loaded from the content filler factory's declared
     ``catalog_ref`` (shipped with the pack; never rebuilt per run) and resolved
     through the run's explicit :class:`~unigym.assets.plan.AssetPlan`.  The
     build-time fill uses ``spec.seed`` (default 0); a per-episode refill is
     reserved for the reset stage and is not wired here yet.
 
     Args:
-        scene: The built neutral scene the provider fills.
+        scene: The built neutral scene the filler fills.
         spec: The content spec, or ``None`` (the scene passes through).
-        asset_plan: The composition boundary that resolves the provider's
+        asset_plan: The composition boundary that resolves the filler's
             ``catalog_ref``; ``None`` when the run declared no pack runtime.
 
     Returns:
-        The scene with the provider's instances appended, plus the fill
-        record (``None`` when no spec was declared or the provider
+        The scene with the filler's instances appended, plus the fill
+        record (``None`` when no spec was declared or the filler
         declined to record).
 
     Raises:
-        ValueError: The spec is not a mapping, the provider is unknown or
+        ValueError: The spec is not a mapping, the filler is unknown or
             carries no ``catalog_ref``, no asset plan is available, or a
             binding rule fails.
     """
     from dataclasses import replace
 
     from unigym.assets.catalog import load_catalog
-    from unigym.scenes.pipeline import content_provider, validate_binding
+    from unigym.scenes.pipeline import scene_content_filler, validate_binding
 
     if spec is None:
         return scene, None
     if not isinstance(spec, Mapping):
         raise ValueError(f"content spec must be a mapping, got {type(spec).__name__}")
-    name = spec.get("provider", "robocasa")
-    factory = content_provider(name)
+    name = spec.get("filler")
+    if not isinstance(name, str) or not name:
+        raise ValueError(
+            "content spec requires a non-empty 'filler' name -- declare the "
+            "content filler with the 'filler' key"
+        )
+    factory = scene_content_filler(name)
     catalog_ref = getattr(factory, "catalog_ref", None)
     if not isinstance(catalog_ref, str) or not catalog_ref:
         raise ValueError(
-            f"content provider {name!r} declares no catalog_ref -- the "
+            f"content filler {name!r} declares no catalog_ref -- the "
             f"runtime loads the shipped catalog from the pack"
         )
     if asset_plan is None:
         raise ValueError(
-            f"content provider {name!r} catalog_ref {catalog_ref!r} needs an "
+            f"content filler {name!r} catalog_ref {catalog_ref!r} needs an "
             f"explicit AssetPlan; build the run with a pack runtime"
         )
-    provider = factory(
+    filler = factory(
         catalog=load_catalog(asset_plan.resolve(catalog_ref)),
         generator_exists=_scene_generator_exists,
     )
     fill_spec = dict(spec)
-    fill_spec.pop("provider", None)
+    fill_spec.pop("filler", None)
     if fill_spec.get("seed") is None:
         fill_spec["seed"] = 0
-    added = provider.fill(scene, fill_spec, random.Random(fill_spec["seed"]))
+    added = filler.fill(scene, fill_spec, random.Random(fill_spec["seed"]))
     merged = replace(scene, instances=scene.instances + tuple(added))
     validate_binding(merged, _scene_generator_exists)
-    return merged, provider.last_record
+    return merged, filler.last_record
 
 
 def _views_for_scene(scene, pipeline: str | None, slots):
@@ -220,7 +225,7 @@ def write_fill_record(out_dir, record) -> str:
 
     Args:
         out_dir: Artifact directory.
-        record: A record exposing ``write(path)`` (the content provider's
+        record: A record exposing ``write(path)`` (the content filler's
             ``FillRecord``).
 
     Returns:

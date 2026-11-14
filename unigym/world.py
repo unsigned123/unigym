@@ -14,9 +14,11 @@ engine object.  It produces only the existing config schema consumed by
   ``World.add(..., dynamic=True)``.
 
 The inline form registers a provider in the process-wide scene registry
-(``register_scene("_inline_<uuid>", provider)``).  That registry is
-**prototype-only**: it lives for the process lifetime and is never
-serialized into a config.  Use :meth:`World.from_generator` or
+through :func:`unigym.scenes.providers.register_inline_scene_provider`.  That
+registration is **prototype-only**: inline providers never appear in the
+public ``registered_scene_providers()`` list or provider-info query, their
+origin is ``kind="inline"``, the registry lives for the process lifetime and
+is never serialized into a config.  Use :meth:`World.from_generator` or
 :meth:`World.from_pack` for reproducible worlds.
 
 The builder adds static instances to the closed scene IR
@@ -40,7 +42,7 @@ import yaml
 
 from unigym._typing import JsonValue, is_json_object
 from unigym.scenes.generators import build_payload
-from unigym.scenes.registry import SceneContext, register_scene
+from unigym.scenes.providers import SceneProviderContext, register_inline_scene_provider
 from unigym.scenes.scene_ir import (
     Instance,
     Material,
@@ -437,12 +439,12 @@ class World:
 
         def provider(
             slots: Mapping[str, JsonValue],
-            context: SceneContext,
+            context: SceneProviderContext,
         ) -> Scene:
             """Return this World's current inline scene (runtime provider)."""
             return world._scene_now()
 
-        register_scene(self._inline_name)(provider)
+        register_inline_scene_provider(self._inline_name, provider)
 
     def _material(self) -> Material:
         """The inline world's declared material (one texture declaration)."""

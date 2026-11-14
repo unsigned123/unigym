@@ -1,4 +1,4 @@
-"""Scene definitions: the neutral IR vocabulary + the scene registry.
+"""Scene definitions: the neutral IR vocabulary + the scene provider registry.
 
 :mod:`.scene_ir` is the closed neutral vocabulary (``Pose`` / ``Instance``
 / ``Region`` / ``Slot`` / ``Material`` / ``Scene``; standard library
@@ -8,14 +8,14 @@ only), :mod:`.primitives` is the built-in generators' neutral payload
 is the closed built-in generator registry (``room_shell`` / ``box`` /
 ``sphere`` / ``cylinder`` / ``capsule`` / ``plane`` -> payload),
 :mod:`.pipeline`
-is the two-protocol bridge (pipeline / content provider) with the four
-binding checks and the build scaffold, and :mod:`.registry` is the
+is the two-protocol bridge (pipeline / content filler) with the four
+binding checks and the build scaffold, and :mod:`.providers` is the
 closed scene-provider registry.  The composer (the L1 mechanism that
 turns a scene into engine elements) lives on the backend side
 (:mod:`unigym.backends.shared.mjfamily.scene.scene_render`) -- this package never
 imports backends (the import-linter contract pins the direction).
 
-The production registry stays empty here: content providers ship with
+The production registry stays empty here: content fillers ship with
 the robocasa pack's code face and self-register when that
 pack is imported, so this package is importable with no pack mounted.
 """
@@ -42,16 +42,21 @@ from .generators import (
     registered_generators,
 )
 from .pipeline import (
-    PROVIDER_WHENS,
+    FILLER_WHENS,
     BuildContext,
     CompiledScene,
-    ContentProvider,
     Draw,
     PayloadSet,
     Resolution,
     Scaffold,
     SceneBindingError,
+    SceneContentFiller,
     ScenePipeline,
+    register_scene_content_filler,
+    registered_scene_content_fillers,
+    restore_scene_content_fillers,
+    scene_content_filler,
+    snapshot_scene_content_fillers,
     validate_binding,
 )
 from .primitives import (
@@ -64,11 +69,18 @@ from .primitives import (
     ShapePayload,
     SphereShape,
 )
-from .registry import (
-    SceneContext,
-    build_scene_definition,
-    register_scene,
-    registered_scenes,
+from .providers import (
+    ProviderInfo,
+    ProviderOrigin,
+    SceneProvider,
+    SceneProviderContext,
+    build_scene_from_provider,
+    register_scene_provider,
+    registered_scene_providers,
+    restore_scene_providers,
+    scene_provider_origin,
+    scene_provider_providers,
+    snapshot_scene_providers,
 )
 from .scene_ir import (
     INSTANCE_ROLES,
@@ -97,15 +109,16 @@ __all__ = [
     "ContactSensorGroup",
     "ContactSensorInventory",
     "ContactSpec",
-    "ContentProvider",
     "Draw",
+    "FILLER_WHENS",
     "INSTANCE_ROLES",
     "Instance",
     "Material",
-    "PROVIDER_WHENS",
     "PayloadSet",
     "PlaneShape",
     "Pose",
+    "ProviderInfo",
+    "ProviderOrigin",
     "Region",
     "RegionDefinition",
     "Resolution",
@@ -113,23 +126,34 @@ __all__ = [
     "Scaffold",
     "Scene",
     "SceneBindingError",
-    "SceneContext",
+    "SceneContentFiller",
     "ScenePipeline",
+    "SceneProvider",
+    "SceneProviderContext",
     "ShapePayload",
     "Slot",
     "SphereShape",
     "Terrain",
     "build_payload",
-    "build_scene_definition",
+    "build_scene_from_provider",
     "normalize_articulation",
     "normalize_articulations",
     "normalize_contact_sensor_inventory",
     "validate_contact_sensor_inventory",
     "generator_schema",
     "register_generator",
-    "register_scene",
+    "register_scene_content_filler",
+    "register_scene_provider",
     "registered_generators",
-    "registered_scenes",
+    "registered_scene_content_fillers",
+    "registered_scene_providers",
+    "restore_scene_content_fillers",
+    "restore_scene_providers",
+    "scene_content_filler",
+    "scene_provider_origin",
+    "scene_provider_providers",
+    "snapshot_scene_content_fillers",
+    "snapshot_scene_providers",
     "validate_binding",
     "validate_scene",
 ]

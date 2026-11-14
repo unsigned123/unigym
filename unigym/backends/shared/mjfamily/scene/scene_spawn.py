@@ -4,7 +4,7 @@ Two seams of :class:`~unigym.backends.mujoco.env.MujocoEnv` live
 here so the constructor stays a thin dispatcher:
 
 * :func:`compose_declared_scene` -- the ``env.params.mj_scene`` slot
-  names a REGISTERED scene definition; the provider dispatch (with the
+  names a REGISTERED scene provider; the provider dispatch (with the
   ``mj_scene_params`` slot dict passed through VERBATIM) is composed and
   attached into the base spec before the camera/prop/director
   injections.  Slots are the provider's own fail-closed gates; this
@@ -46,10 +46,10 @@ def needs_spec(
 
 
 def compose_declared_scene(mjspec, name: str, slots, asset_plan) -> Mapping[str, object]:
-    """Compose + attach one registered scene definition into *mjspec*.
+    """Compose + attach one registered scene provider into *mjspec*.
 
     The provider dispatch is the registry's closed face
-    (:func:`unigym.scenes.registry.build_scene_definition`); ``slots`` is
+    (:func:`unigym.scenes.providers.build_scene_from_provider`); ``slots`` is
     the run's ``mj_scene_params`` mapping, passed through verbatim
     (``None`` -> ``{}`` so the provider's own required-slot gates stay
     the single truth).  ``asset_plan`` is the composition boundary for every
@@ -57,10 +57,10 @@ def compose_declared_scene(mjspec, name: str, slots, asset_plan) -> Mapping[str,
     then composes and attaches at the conventional frame.  Returns the
     composed placement-region table.
     """
-    from unigym.scenes.registry import build_scene_definition
+    from unigym.scenes.providers import build_scene_from_provider
     from .scene_engine import compose_and_attach
 
-    return compose_and_attach(mjspec, build_scene_definition(name, slots or {}), asset_plan)
+    return compose_and_attach(mjspec, build_scene_from_provider(name, slots or {}), asset_plan)
 
 
 def apply_spawn_base_pose(mjspec, declaration) -> None:

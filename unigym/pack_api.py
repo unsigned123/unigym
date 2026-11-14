@@ -26,8 +26,17 @@ from unigym.packs.runtime import (
     discover,
 )
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
+from unigym.scenes.providers import (
+    ProviderOrigin,
+    SceneProvider,
+    SceneProviderContext,
+    build_scene_from_provider,
+    registered_scene_providers,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from unigym.adapters.base import Adapter
     from unigym.robots import RobotProfile
 
@@ -44,16 +53,21 @@ def load_asset_manifest(path: str | Path) -> dict:
     return load_manifest(path)
 
 
-def register_scene(name: str):
-    """Register a scene provider through the core scene registry."""
-    from unigym.scenes.registry import register_scene as register
+def register_scene_provider(
+    name: str,
+    factory: SceneProvider,
+    *,
+    params: Mapping[str, object] | None = None,
+) -> SceneProvider:
+    """Register a scene provider through the core provider registry."""
+    from unigym.scenes.providers import register_scene_provider as register
 
-    return register(name)
+    return register(name, factory, params=params)
 
 
-def register_content_provider(name: str, factory):
-    """Register one content-provider factory through the core registry."""
-    from unigym.scenes.pipeline import register_content_provider as register
+def register_scene_content_filler(name: str, factory):
+    """Register one content-filler factory through the core registry."""
+    from unigym.scenes.pipeline import register_scene_content_filler as register
 
     return register(name, factory)
 
@@ -110,13 +124,18 @@ __all__ = [
     "PackManifestV1",
     "PackRuntime",
     "ProvidedItem",
+    "ProviderOrigin",
+    "SceneProvider",
+    "SceneProviderContext",
+    "build_scene_from_provider",
     "discover",
     "load_asset_manifest",
     "load_manifest_v1",
     "register_adapter",
-    "register_content_provider",
     "register_prop_template",
     "register_robot",
-    "register_scene",
+    "register_scene_content_filler",
+    "register_scene_provider",
     "register_termination",
+    "registered_scene_providers",
 ]

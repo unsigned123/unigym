@@ -6,6 +6,8 @@ lazy factories; the backend-name knowledge lives here, not there.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 
 def env_kwargs(
     env_cfg: dict,
@@ -47,11 +49,19 @@ def env_kwargs(
 def route_content(spec, env_cfg: dict) -> None:
     """Route an ``objects:`` content spec into ``env.params.content``.
 
-    The mujoco scene build consumes it (robocasa provider scene fill).
+    The mujoco scene build consumes it (content filler scene fill).  The spec
+    must name its ``filler``: there is no hidden fallback name.
     """
+    if not isinstance(spec, Mapping):
+        raise ValueError(f"content spec must be a mapping, got {type(spec).__name__}")
+    filler = spec.get("filler")
+    if not isinstance(filler, str) or not filler:
+        raise ValueError(
+            "content spec requires a non-empty 'filler' name -- declare the "
+            "content filler with the 'filler' key"
+        )
     env_cfg.setdefault("params", {})["content"] = spec
-    provider = spec.get("provider", "robocasa") if isinstance(spec, dict) else spec
-    print(f"[collect] content fill: provider={provider}", flush=True)
+    print(f"[collect] content fill: filler={filler}", flush=True)
 
 
 __all__ = ["env_kwargs", "route_content"]
