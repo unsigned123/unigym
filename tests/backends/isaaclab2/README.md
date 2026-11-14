@@ -25,6 +25,15 @@ pack ships the complete `configuration/**` tree. Tests never read an asset
 environment variable and never download assets. A missing Cartpole or G1 pack
 fails the lane (strict); it is not skipped.
 
+The same Cartpole pack also ships the tiny file-backed asset-scene fixtures:
+`assets/static_cup.usda` (collision-only, no rigid-body/articulation schema),
+`assets/dynamic_cube.usda` (`PhysicsRigidBodyAPI` plus collision and mass),
+`assets/jointless_cube.urdf` (one link, no `<joint>`) and
+`assets/jointed_cube.urdf` (the articulation-in-scene refusal). The asset-scene
+tests resolve them through
+`pack_runtime("isaaclab_cartpole").resource_for("assets", <id>)` and pass
+`AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`.
+
 ```bash
 conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pip install --no-deps \
@@ -37,6 +46,16 @@ UNIGYM_TEST_ENV_STRICT=1 \
 conda run --no-capture-output -n unigym-isaaclab232 \
   python -m pytest --strict-test-packs tests/backends/isaaclab2 -q
 ```
+
+`test_asset_scene_kit.py` covers N=1/N=2 static and dynamic USD construction,
+the cloned prim paths and poses, dynamic gravity motion through the
+`RigidObject` data face, static/jointed URDF refusal, the jointless-URDF best
+effort, the five build artifacts and the clean close lifecycle. It does not add
+camera or contact managers; the existing manager tests remain that coverage. A
+jointless URDF may either construct or fail during IsaacLab's URDF conversion;
+the test accepts only an outcome whose error names the URDF/rigid/articulation
+boundary. That conversion outcome is the dog-lane risk the fast lane cannot
+prove.
 
 ## Contact inventory and ``contacts: all``
 

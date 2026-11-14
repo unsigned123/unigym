@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,17 @@ def _cartpole_articulation_cfg(usd: Path):
     )
 
 
-def _build_env(usd: Path, *, num_envs: int = 1):
+def _build_env(
+    usd: Path,
+    *,
+    num_envs: int = 1,
+    scene_provider: str | None = None,
+    scene_provider_params: Mapping[str, object] | None = None,
+    scene_provider_preset: str | None = None,
+    asset_plan=None,
+    artifact_dir: str | Path | None = None,
+    static_shapes=None,
+):
     """Construct the single-articulation backend over the Cartpole asset."""
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
@@ -92,7 +102,15 @@ def _build_env(usd: Path, *, num_envs: int = 1):
     )
     controls = build_control_runtimes((group,), (articulation,), {ARTICULATION: profile})
     terrain_cfg = {
-        "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
+        "ground": AssetBaseCfg(
+            prim_path="/World/ground",
+            spawn=sim_utils.CuboidCfg(
+                size=(10.0, 10.0, 0.1),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.4, 0.4, 0.4)),
+            ),
+            init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.05)),
+        )
     }
     sim_utils.create_new_stage()
     return IsaaclabEnv(
@@ -108,6 +126,12 @@ def _build_env(usd: Path, *, num_envs: int = 1):
         controls=controls,
         profiles={ARTICULATION: profile},
         robot_realizations={ARTICULATION: articulation_cfg},
+        scene_provider=scene_provider,
+        scene_provider_params=scene_provider_params,
+        scene_provider_preset=scene_provider_preset,
+        asset_plan=asset_plan,
+        artifact_dir=artifact_dir,
+        static_shapes=static_shapes,
     )
 
 
@@ -117,6 +141,13 @@ def cartpole_usd(pack_runtime) -> Path:
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     runtime = pack_runtime("isaaclab_cartpole")
     return runtime.resource_for("assets", "isaaclab_cartpole.usd")
+
+
+@pytest.fixture
+def cartpole_pack(pack_runtime):
+    """The installed Cartpole pack runtime for file-backed asset fixtures."""
+    require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
+    return pack_runtime("isaaclab_cartpole")
 
 
 @pytest.fixture
@@ -144,8 +175,8 @@ def env_factory(cartpole_usd: Path, simulation_app: object) -> Callable[..., obj
     """Build real backends and close every one of them at teardown."""
     created = []
 
-    def make(num_envs: int = 1):
-        env = _build_env(cartpole_usd, num_envs=num_envs)
+    def make(num_envs: int = 1, **kwargs):
+        env = _build_env(cartpole_usd, num_envs=num_envs, **kwargs)
         created.append(env)
         return env
 
