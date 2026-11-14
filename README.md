@@ -16,6 +16,10 @@ Those are separate artifacts; the public docs are being rewritten.
 - One adapter: `unigym.adapters.manual.ManualAdapter` for user-driven loops.
 - Three backends: `mujoco`, `mjwarp` (optional extra), `isaaclab2`.
   `isaaclab3` is an early-access skeleton and is incomplete.
+- Scene data uses the `scene_presets` pack face (provider code is declared on
+  the `providers` face with `kind: scene`); run configs reference it with the
+  `scene_preset:` key. The removed `scenes` face and `scene:` key have no
+  aliases; see [`docs/pack_api.md`](docs/pack_api.md#removed-scene-vocabulary).
 - No bundled robot model: pass your own MJCF through `world_base` or direct
   backend construction.
 

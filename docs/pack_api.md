@@ -1,7 +1,7 @@
 # Pack API: manifest schema, catalog and runtime
 
-Status: Phases 1 through 9 are implemented. `unigym.pack/1` plus
-`PackRuntime` is the only pack loader:
+Status: Phases 1 through 9 and the ScenePreset/SceneProvider cutover are
+implemented. `unigym.pack/1` plus `PackRuntime` is the only pack loader:
 
 ```text
 discover -> catalog -> resource/asset -> activate
@@ -1326,6 +1326,37 @@ or known faces, never with an implicit checkout fallback.
   accepts one `PackContext`.
 - Out-of-tree importers of the removed helpers must migrate to the runtime and
   `PackContext`.
+
+### Removed scene vocabulary
+
+The ScenePreset/SceneProvider cutover has no compatibility window: there is no
+alias, dual-read, deprecation shim or silent fallback for any name below. A
+removed module raises `ModuleNotFoundError`; a removed attribute raises
+`AttributeError`; a removed manifest face raises `PackError`; a removed run key
+raises `ConfigError`; a removed preset key raises `ScenePresetError`. Every
+message names the replacement.
+
+| Removed | Replacement |
+| --- | --- |
+| `unigym.scene_packs` module | `unigym.scene_presets` |
+| `unigym.scenes.registry` module | `unigym.scenes.providers` |
+| manifest face `provides.scenes` | `provides.scene_presets` (data) or `providers` with `kind: scene` (code) |
+| run key `scene:` | `scene_preset:` |
+| run keys `scene_pack:`, `scene_bundle:`, `scenes:` | `scene_preset:` |
+| `env.params.mj_scene`, `env.params.mj_scene_params` | `scene_preset:` with provider `params:` |
+| `env.params.mj_model` | run `world_base: {mjcf: <path>}` or preset `world:` |
+| preset `backend:`, top-level `initializer:`, top-level `scene:` | `backend_params.<backend>`, `provider:` + `params:` |
+| preset `backend.<name>.mj_scene`, `.mj_scene_params`, `.mj_model` | preset `provider:`/`params:` and top-level `world:` |
+| `objects.provider` | `objects.filler` |
+| `SceneContext`, `register_scene`, `registered_scenes`, `build_scene_definition` | `SceneProviderContext`, `register_scene_provider`, `registered_scene_providers`, `build_scene_from_provider` |
+| `ContentProvider`, `register_content_provider`, `content_provider`, `registered_content_providers`, `PROVIDER_WHENS` | `SceneContentFiller`, `register_scene_content_filler`, `scene_content_filler`, `registered_scene_content_fillers`, `FILLER_WHENS` |
+| `World.from_pack`, `World.from_generator` | `World.from_preset`, `World.from_provider` |
+| `BackendInfo.mj_scene_consumer` | `BackendInfo.scene_provider_consumer` |
+| `RunSpec.scene` field | the `scene_preset:` declaration; routed keys remain internal |
+
+`unigym_packs/robocasa` still uses the removed `faces:` schema and
+`@register_scene`; it does not load against this release and is outside the
+core release wheelhouse until its own repository migrates.
 
 ## Non-goals
 

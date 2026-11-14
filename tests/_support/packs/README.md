@@ -31,6 +31,9 @@ asserts it stays absent from `sys.modules` after both fixtures load.
 
 ## Rules
 
+- Fixtures use only the current vocabulary: the `scene_presets` manifest face,
+  the `scene_preset:` run key and `objects.filler`. The removed `scenes` face,
+  `scene:` key and `objects.provider` are intentionally absent.
 - Fixtures are self-contained: no external assets, downloads or machine-local
   paths. Resource references stay pack-relative and must not use `..`.
 - The code fixture is trust-`code` data. Phase 3 uses it for explicit static-root

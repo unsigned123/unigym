@@ -747,19 +747,28 @@ class PackRuntime:
         # not only modules pulled in by their own provider kind: a scene item
         # import may register an adapter or robot.  Snapshot every registry
         # before the first import so a failed activation can restore all three.
+        # The adapter registry lives in the torch-only adapters package, so
+        # snapshot it only when activation can actually execute pack code
+        # (an entrypoint, or an adapter / robot / scene provider entrypoint).
+        # A resource-only robot pack imports nothing and stays engine-free.
         activation_surface = entrypoint is not None or bool(
             adapter_items or robot_items or scene_items
+        )
+        imports_pack_code = entrypoint is not None or any(
+            item.entrypoint is not None for item in (*adapter_items, *robot_items, *scene_items)
         )
         adapter_registry = None
         adapters_before: set[str] | None = None
         robots_before: dict[str, Callable[..., RobotProfile]] | None = None
         scene_before: SceneProviderRegistrySnapshot | None = None
         if activation_surface:
-            from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
+            if imports_pack_code:
+                from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
+
+                adapters_before = set(adapter_registry)
             from unigym.robots import snapshot_robots
             from unigym.scenes.providers import snapshot_scene_providers
 
-            adapters_before = set(adapter_registry)
             robots_before = snapshot_robots()
             scene_before = snapshot_scene_providers()
 

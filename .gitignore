@@ -13,4 +13,5 @@ runs/
 !tests/_support/packs/**/runs/
 !tests/_support/packs/**/runs/**
 *.log
+MUJOCO_LOG.TXT
 .DS_Store
