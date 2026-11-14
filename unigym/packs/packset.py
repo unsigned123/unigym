@@ -152,7 +152,18 @@ def _require_face(face: str) -> None:
 
 def _pack_origin(manifest: PackManifestV1, runtime: PackRuntime) -> ProviderOrigin:
     """Build the pack-level origin from the runtime discovery label."""
-    discovered_by = str(runtime.origins.get(manifest.name, "unknown"))
+    label = runtime.origins.get(manifest.name)
+    return _pack_origin_from_label(manifest, None if label is None else str(label))
+
+
+def _pack_origin_from_label(manifest: PackManifestV1, label: str | None) -> ProviderOrigin:
+    """Build a pack-level origin from an explicit discovery label.
+
+    ``None`` is the honest unattributed case: the pack identity and root are
+    facts from the manifest, while the discovery source is reported as
+    ``"unknown"`` rather than guessed.
+    """
+    discovered_by = "unknown" if label is None else label
     return ProviderOrigin(
         kind="pack",
         pack=manifest.name,
@@ -160,6 +171,38 @@ def _pack_origin(manifest: PackManifestV1, runtime: PackRuntime) -> ProviderOrig
         root=str(manifest.root),
         discovered_by=discovered_by,
         location_imported=discovered_by == "entry-point",
+    )
+
+
+def _normalize_origin_override(
+    manifest: PackManifestV1, value: ProviderOrigin | str
+) -> ProviderOrigin:
+    """Normalize one ``from_runtime(origins=...)`` value to a pack origin."""
+    if isinstance(value, str):
+        return _pack_origin_from_label(manifest, value)
+    if not isinstance(value, ProviderOrigin):
+        raise PackError(
+            f"origin for pack {manifest.name!r} must be a ProviderOrigin or a "
+            f"discovery label string, got {type(value).__name__}"
+        )
+    if value.kind == "pack":
+        facts = (
+            ("pack", value.pack, manifest.name),
+            ("pack_version", value.pack_version, manifest.version),
+            ("root", value.root, str(manifest.root)),
+        )
+        for field_name, actual, expected in facts:
+            if actual != expected:
+                raise PackError(
+                    f"origin for pack {manifest.name!r} has {field_name} "
+                    f"{actual!r}, expected {expected!r}"
+                )
+        return value
+    if value.kind == "unknown":
+        return _pack_origin_from_label(manifest, None)
+    raise PackError(
+        f"origin for pack {manifest.name!r} must be a pack-level ProviderOrigin "
+        f"(kind='pack'), got kind {value.kind!r}"
     )
 
 
@@ -407,10 +450,14 @@ def _catalog_entries(manifest: PackManifestV1) -> tuple[CatalogEntry, ...]:
     )
 
 
-def _pack_info(manifest: PackManifestV1, runtime: PackRuntime) -> PackInfo:
+def _pack_info(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    origin_override: ProviderOrigin | None = None,
+) -> PackInfo:
     """Build one :class:`PackInfo` from a runtime manifest."""
     entries = _catalog_entries(manifest)
-    origin = _pack_origin(manifest, runtime)
+    origin = origin_override or _pack_origin(manifest, runtime)
     resources = tuple(
         ResourceInfo(
             pack=manifest.name,
@@ -483,6 +530,9 @@ class PackSet:
     """
 
     _runtime: PackRuntime = field(repr=False, compare=False)
+    _pack_origins: Mapping[str, ProviderOrigin] | None = field(
+        default=None, repr=False, compare=False
+    )
     _packs: tuple[PackInfo, ...] = field(init=False, repr=False)
     _resources: tuple[ResourceInfo, ...] = field(init=False, repr=False, compare=False)
     _providers: tuple[ProviderInfo, ...] = field(init=False, repr=False, compare=False)
@@ -490,10 +540,48 @@ class PackSet:
     def __post_init__(self) -> None:
         """Build the immutable per-pack handles in discovery order."""
         manifests = self._runtime.catalog.manifests
-        packs = tuple(_pack_info(manifest, self._runtime) for manifest in manifests)
+        overrides = self._pack_origins or {}
+        packs = tuple(
+            _pack_info(manifest, self._runtime, overrides.get(manifest.name))
+            for manifest in manifests
+        )
         object.__setattr__(self, "_packs", packs)
         object.__setattr__(self, "_resources", tuple(r for pack in packs for r in pack._resources))
         object.__setattr__(self, "_providers", tuple(p for pack in packs for p in pack._providers))
+
+    @classmethod
+    def from_runtime(
+        cls,
+        runtime: PackRuntime,
+        *,
+        origins: Mapping[str, ProviderOrigin | str] | None = None,
+    ) -> PackSet:
+        """Build a pack set over an existing runtime without rediscovering roots.
+
+        ``origins`` overrides the pack-level discovery origin per pack name.
+        A string is a discovery label (``discovered_by``); a
+        :class:`~unigym.provenance.ProviderOrigin` must be pack-level
+        (``kind="pack"``) or the explicit ``unknown()`` record.  Omitted packs
+        keep the runtime's own label, so a runtime built without labels reports
+        the honest ``discovered_by="unknown"`` instead of a fabricated source.
+
+        Construction is pure: it reads the runtime catalog and mints handles; it
+        never resolves entry points, imports pack Python or activates a pack.
+        """
+        overrides: dict[str, ProviderOrigin] = {}
+        if origins is not None:
+            names = set(runtime.catalog.packs())
+            unknown = sorted(set(origins) - names)
+            if unknown:
+                raise PackError(
+                    f"origins name unknown packs {unknown}; known packs: {sorted(names)}"
+                )
+            for name, value in origins.items():
+                overrides[name] = _normalize_origin_override(runtime.catalog.get(name), value)
+        return cls(
+            runtime,
+            MappingProxyType(overrides) if overrides else None,
+        )
 
     def packs(self) -> tuple[PackInfo, ...]:
         """Every pack in this set, in discovery order."""

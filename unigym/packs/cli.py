@@ -17,9 +17,11 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
+from dataclasses import asdict
 from pathlib import Path
 
 from . import PackError
+from .packset import PackSet
 from .runtime import PackRuntime, discover
 from .schema import FACE_NAMES, MANIFEST_NAME, PackManifestV1, load_manifest_v1
 
@@ -38,34 +40,34 @@ def _runtime() -> PackRuntime:
     return discover(entry_points=True)
 
 
-def _provides_counts(manifest: PackManifestV1) -> dict[str, int]:
-    """Declared item counts per provided face, in face vocabulary order."""
-    return {face: len(manifest.provides[face]) for face in FACE_NAMES if face in manifest.provides}
-
-
 def _provides_text(counts: Mapping[str, int]) -> str:
     """``face=count`` cells for every face the manifest provides."""
     return " ".join(f"{face}={count}" for face, count in counts.items()) or "-"
 
 
 def cmd_list(a, extra: list[str] | None = None) -> int:
-    """``unigym pack list`` -- runtime manifests with provided-item counts."""
+    """``unigym pack list`` -- packs with counts; ``--json`` adds provenance.
+
+    The rows are a projection of :class:`~unigym.packs.packset.PackSet` over
+    the CLI runtime; there is no second discovery or provenance path.
+    """
     try:
         runtime = _runtime()
     except PackError as err:
         print(f"[unigym pack] FAIL discovery: {err}")
         return 1
+    pack_set = PackSet.from_runtime(runtime)
     rows = []
-    for manifest in runtime.catalog.manifests:
-        counts = _provides_counts(manifest)
+    for pack in pack_set.packs():
         rows.append(
             {
-                "name": manifest.name,
-                "version": manifest.version,
-                "api": manifest.api,
-                "trust": manifest.trust,
-                "provides": counts,
-                "root": str(manifest.root),
+                "name": pack.name,
+                "version": pack.version,
+                "api": pack.api,
+                "trust": pack.trust,
+                "provides": dict(pack.face_counts),
+                "root": str(pack.root),
+                "origin": asdict(pack.origin),
             }
         )
     if getattr(a, "json", False):
@@ -259,7 +261,9 @@ def add_pack_subparser(sub) -> None:
     pack_sub = pack.add_subparsers(dest="pack_cmd", required=True)
 
     listing = pack_sub.add_parser(
-        "list", help="runtime packs: name, version, api, trust, provided-item counts, root"
+        "list",
+        help="runtime packs: name, version, api, trust, provided-item counts, "
+        "root (--json adds pack-level origin)",
     )
     listing.add_argument("--json", action="store_true", help="single JSON document on stdout")
     listing.set_defaults(fn=cmd_list)

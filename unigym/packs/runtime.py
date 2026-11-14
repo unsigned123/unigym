@@ -31,7 +31,7 @@ from unigym.core.paths import repo_root
 from unigym.provenance import ProviderOrigin, RegistrySnapshot, attribution
 
 from . import PackError
-from .catalog import PackCatalog
+from .catalog import PackCatalog, validate_unique
 from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_v1
 
 if TYPE_CHECKING:
@@ -1252,13 +1252,16 @@ def discover(
             raise PackError(f"pack entry point {entry_name!r} resolved to {root}: {err}") from err
         owner = root_by_pack.get(manifest.name)
         if owner is not None:
+            label = labels.get(root, default_label)
             raise PackError(
-                f"duplicate pack name {manifest.name!r} discovered at "
-                f"roots {owner} and {manifest.root}"
+                f"duplicate pack name {manifest.name!r} discovered at roots "
+                f"{owner} and {manifest.root} (discovered_by "
+                f"{origin_by_pack[manifest.name]!r} and {label!r})"
             )
         root_by_pack[manifest.name] = manifest.root
         origin_by_pack[manifest.name] = labels.get(root, default_label)
         manifests.append(manifest)
+    validate_unique(manifests, origin_by_pack)
     return PackRuntime(
         catalog=PackCatalog(tuple(manifests)),
         root_by_pack=root_by_pack,

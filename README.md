@@ -23,6 +23,26 @@ Those are separate artifacts; the public docs are being rewritten.
 - No bundled robot model: pass your own MJCF through `world_base` or direct
   backend construction.
 
+## Pack objects
+
+Packs are acquired explicitly; there is no attribute sugar.
+
+```python
+import unigym.packs
+
+packs = unigym.packs.require("acme_robots")   # filtered scope, or installed()
+pack = packs.pack("acme_robots")              # the only pack handle
+robot = pack.robot("acme.arm")                # RobotRef, no activation
+path = packs.resource_path(robot)             # declared resource path
+```
+
+`packs.pack(name).robot(id)` / `.asset(id)` / `.scene_preset(id)` /
+`.scene_provider(id)` mint refs from manifests without importing pack Python or
+mutating a registry. `packs.robots()` / `.scene_presets()` / `.providers()` are
+the cross-pack views; `packs.origins()` reports where each pack was discovered.
+See [`docs/pack_api.md`](docs/pack_api.md#pack-objects) for the full query
+surface.
+
 ## Backend support levels
 
 | Backend | State | Notes |

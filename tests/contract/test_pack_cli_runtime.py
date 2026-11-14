@@ -153,6 +153,19 @@ def test_pack_cli_list_reports_runtime_manifest_fields(
         "trust": "content",
         "provides": {"runs": 1, "scene_presets": 1},
         "root": str(root.resolve()),
+        "origin": {
+            "kind": "pack",
+            "pack": "cli_content",
+            "pack_version": "1.0.0",
+            "root": str(root.resolve()),
+            "discovered_by": "env:UNIGYM_PACKS",
+            "face": None,
+            "item_id": None,
+            "resource": None,
+            "entrypoint": None,
+            "activation_entrypoint": None,
+            "location_imported": False,
+        },
     }
     assert "repo" not in rows
 

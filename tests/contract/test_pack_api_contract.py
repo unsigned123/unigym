@@ -19,6 +19,7 @@ from unigym.pack_api import (
     load_manifest_v1,
 )
 from unigym.packs import PackError
+from unigym.packs.catalog import validate_unique
 
 
 def _document(**overrides: object) -> dict[str, object]:
@@ -654,6 +655,23 @@ def test_catalog_rejects_duplicate_face_id(tmp_path: Path) -> None:
 
     with pytest.raises(PackError, match="duplicate 'scene_presets' id"):
         PackCatalog((first, second))
+
+
+def test_validate_unique_materializes_one_shot_iterables(tmp_path: Path) -> None:
+    """A generator is consumed once, so the second item pass still sees duplicates."""
+    first = _pack(
+        tmp_path / "left",
+        "alpha",
+        {"scene_presets": [{"id": "shared.item", "resource": "x.yaml"}]},
+    )
+    second = _pack(
+        tmp_path / "right",
+        "beta",
+        {"scene_presets": [{"id": "shared.item", "resource": "x.yaml"}]},
+    )
+
+    with pytest.raises(PackError, match="duplicate 'scene_presets' id"):
+        validate_unique(iter((first, second)))
 
 
 def test_catalog_and_manifest_are_immutable(tmp_path: Path) -> None:

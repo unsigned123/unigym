@@ -8,7 +8,7 @@ pack.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from unigym._typing import JsonValue
@@ -59,6 +59,53 @@ def _require_face(face: str) -> None:
         raise PackError(f"unknown pack face {face!r}; known faces: {list(FACE_NAMES)}")
 
 
+def _label(origins: Mapping[str, str] | None, name: str) -> str:
+    """The discovery label for *name*, or ``"unknown"`` when not recorded."""
+    if origins is None:
+        return "unknown"
+    return origins.get(name, "unknown")
+
+
+def validate_unique(
+    manifests: Iterable[PackManifestV1], origins: Mapping[str, str] | None = None
+) -> None:
+    """Reject duplicate pack names and duplicate ``(face, id)`` pairs.
+
+    The error names both packs, both pack roots and both discovery labels
+    (``origins`` keys pack names; ``None`` reports ``"unknown"``).  There is no
+    first-match resolution.  This is the one ambiguity check shared by
+    :class:`PackCatalog` and :func:`unigym.packs.runtime.discover`.
+    """
+    manifests = tuple(manifests)
+    seen_packs: dict[str, PackManifestV1] = {}
+    for manifest in manifests:
+        owner = seen_packs.get(manifest.name)
+        if owner is not None:
+            raise PackError(
+                f"duplicate pack name {manifest.name!r} discovered at roots "
+                f"{owner.root} and {manifest.root} (discovered_by "
+                f"{_label(origins, owner.name)!r} and "
+                f"{_label(origins, manifest.name)!r})"
+            )
+        seen_packs[manifest.name] = manifest
+    seen_items: dict[tuple[str, str], tuple[str, PackManifestV1]] = {}
+    for manifest in manifests:
+        for face, items in manifest.provides.items():
+            for item in items:
+                key = (face, item.id)
+                owner = seen_items.get(key)
+                if owner is not None:
+                    owner_pack, owner_manifest = owner
+                    raise PackError(
+                        f"duplicate {face!r} id {item.id!r} in catalog: provided by "
+                        f"packs {owner_pack!r} (root {owner_manifest.root}, "
+                        f"discovered_by {_label(origins, owner_pack)!r}) and "
+                        f"{manifest.name!r} (root {manifest.root}, discovered_by "
+                        f"{_label(origins, manifest.name)!r})"
+                    )
+                seen_items[key] = (manifest.name, manifest)
+
+
 @dataclass(frozen=True)
 class PackCatalog:
     """An ordered, duplicate-free view over validated manifests."""
@@ -68,22 +115,7 @@ class PackCatalog:
     def __post_init__(self) -> None:
         """Freeze the manifest tuple and validate catalog uniqueness."""
         object.__setattr__(self, "manifests", tuple(self.manifests))
-        seen_packs: set[str] = set()
-        seen_items: dict[tuple[str, str], str] = {}
-        for manifest in self.manifests:
-            if manifest.name in seen_packs:
-                raise PackError(f"duplicate pack name {manifest.name!r} in catalog")
-            seen_packs.add(manifest.name)
-            for face, items in manifest.provides.items():
-                for item in items:
-                    key = (face, item.id)
-                    owner = seen_items.get(key)
-                    if owner is not None:
-                        raise PackError(
-                            f"duplicate {face!r} id {item.id!r} in catalog: "
-                            f"provided by packs {owner!r} and {manifest.name!r}"
-                        )
-                    seen_items[key] = manifest.name
+        validate_unique(self.manifests)
 
     def packs(self) -> tuple[str, ...]:
         """Return pack names in declaration order."""
@@ -131,4 +163,4 @@ class PackCatalog:
         raise PackError(f"unknown id {id!r} on pack face {face!r}; known ids: {known}")
 
 
-__all__ = ["CatalogEntry", "PackCatalog"]
+__all__ = ["CatalogEntry", "PackCatalog", "validate_unique"]

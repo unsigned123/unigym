@@ -1393,6 +1393,14 @@ under its pack root with the usual inside-root and existence rules.
 entrypoint-backed `RobotRef`) raises the "activate the pack" teaching error.
 `PackSet.to_runtime()` returns an activation-capable runtime over the same
 catalog and does not activate.
+`PackSet.from_runtime(runtime, *, origins=None)` builds the same read-only set
+over an existing runtime without rediscovering roots or re-reading manifests.
+`origins` overrides the pack-level discovery origin per pack name: a string is
+a discovery label, and a `ProviderOrigin` must be pack-level (`kind="pack"`) or
+the explicit `unknown()` record. Packs omitted from `origins` keep the runtime's
+own label; a runtime built without labels reports `discovered_by="unknown"`
+rather than a fabricated source. Construction never imports pack Python,
+resolves entry points or activates a pack.
 
 `World.from_preset(ref, runtime=...)` and `World.from_provider(ref, params=...)`
 accept either the string form or the corresponding handle:
@@ -1413,7 +1421,12 @@ Requirement (`requires`) resolution and attribute sugar are not implemented.
 `unigym pack` is backed by the runtime and `discover(entry_points=True)`:
 
 - `pack list [--json]` prints each runtime manifest's name, version, api,
-  trust, declared provided-item counts per face and root;
+  trust, declared provided-item counts per face and root. `--json` adds the
+  pack-level provenance (`origin`: kind, pack, `pack_version`, root,
+  `discovered_by`, face, `item_id`, resource, entrypoint,
+  `activation_entrypoint`, `location_imported`). The rows are a projection of
+  `PackSet.from_runtime(discover(entry_points=True))`; the CLI owns no second
+  discovery or provenance path;
 - `pack path <name> [face]` prints the pack root, or for one declared face
   prints each item's absolute resource path or its entrypoint;
 - `pack doctor [--name NAME] [--json]` revalidates the manifest schema,
