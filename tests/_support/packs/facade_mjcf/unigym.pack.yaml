@@ -1,0 +1,10 @@
+schema: unigym.pack/1
+name: facade_mjcf
+version: 1.0.0
+api: 1
+trust: content
+provides:
+  providers:
+    - id: facade_mjcf.tiny_arm
+      kind: robot
+      resource: robots/tiny_arm.yaml

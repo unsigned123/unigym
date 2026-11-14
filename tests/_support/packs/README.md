@@ -29,6 +29,16 @@ Manifest and catalog loading must never import `acme_pack`: the module is
 deliberately outside the import path, and `tests/contract/test_pack_fixtures.py`
 asserts it stays absent from `sys.modules` after both fixtures load.
 
+## `facade_mjcf`
+
+A `trust: content` pack with one `robot` provider, `facade_mjcf.tiny_arm`,
+declaring the two-joint `body` set (`shoulder`, `elbow`) of the shared
+`tests/_support/data/tiny_arm.xml` MJCF. It declares no `assets`: the MuJoCo
+lane's world owns the model (`World.base(mjcf=...)`), and a profile without an
+asset reference is a legal run-level case for the MuJoCo family. It exists so
+the shared simulation-facade acceptance script runs in the pack-free base
+environment; it ships no binary asset and no download.
+
 ## Rules
 
 - Fixtures use only the current vocabulary: the `scene_presets` manifest face,

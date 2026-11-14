@@ -32,6 +32,8 @@ EXPECTED_YAML_FILES = {
     "acme_content/runs/demo.yaml",
     "acme_content/scene_presets/tabletop.yaml",
     "acme_content/unigym.pack.yaml",
+    "facade_mjcf/robots/tiny_arm.yaml",
+    "facade_mjcf/unigym.pack.yaml",
 }
 
 

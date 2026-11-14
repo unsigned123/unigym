@@ -1,0 +1,22 @@
+schema: unigym.robot/1
+name: facade_mjcf.tiny_arm
+joint_sets:
+  body:
+    - shoulder
+    - elbow
+default_joint_pos:
+  shoulder: 0.0
+  elbow: 0.0
+base_body: base
+foot_bodies:
+  - left_foot
+body_sets: {}
+body_bindings:
+  base:
+    mjcf: base
+  left_foot:
+    mjcf: left_foot
+action_faces: {}
+full_joint_order:
+  - shoulder
+  - elbow
