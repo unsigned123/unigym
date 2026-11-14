@@ -15,9 +15,12 @@ There is no module-level or ambient runtime.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
 from unigym.core.paths import expand_placeholders
 
 if TYPE_CHECKING:
@@ -80,4 +83,56 @@ class AssetPlan:
         return match.group(1) + value + match.group(3)
 
 
-__all__ = ["AssetPlan"]
+def resolve_asset_instance(
+    asset: AssetRef,
+    asset_plan: AssetPlan,
+    formats: Sequence[str],
+) -> tuple[str, str]:
+    """Resolve one file-backed asset instance to ``(format, absolute path)``.
+
+    The format follows the backend's declared preference order, never the
+    ``AssetRef`` declaration order.  The selected reference resolves through
+    *asset_plan* and must name an existing file: there is no conversion and
+    no fallback to another declared format.
+
+    Args:
+        asset: The effective neutral asset reference.
+        asset_plan: The boundary that resolves ``pack:``/absolute references.
+        formats: The backend's declared format preference order.
+
+    Returns:
+        ``(format, absolute path)``, with *format* the selected member of
+        :data:`~unigym.assets.asset_ref.ASSET_FORMATS`.
+
+    Raises:
+        AssetRefError: The preference list is invalid, no format is declared,
+            the selected format's reference is empty or whitespace-only, or the
+            resolved path is relative; there is no CWD-relative fallback.
+        FileNotFoundError: The resolved path is not an existing file; the
+            message names the declared reference, the resolved path and the
+            selected format.
+    """
+    fmt = select_asset_format(asset, formats)
+    raw = getattr(asset, fmt)
+    if not isinstance(raw, str) or not raw.strip():
+        raise AssetRefError(
+            f"asset reference declares selected format {fmt!r} with an empty or "
+            f"whitespace-only path; declare a real {fmt} path"
+        )
+    path = asset_plan.resolve(raw)
+    if not Path(path).is_absolute():
+        raise AssetRefError(
+            f"asset reference {raw!r} ({fmt}) resolved to the relative path "
+            f"{path!r}; the boundary must resolve to an absolute path -- there "
+            f"is no CWD-relative fallback"
+        )
+    if not Path(path).is_file():
+        raise FileNotFoundError(
+            f"asset reference {raw!r} ({fmt}) resolved to {path!r}, which is not an "
+            f"existing file; file-backed assets must name an existing file "
+            f"(no conversion, no fallback to another declared format)"
+        )
+    return fmt, path
+
+
+__all__ = ["AssetPlan", "resolve_asset_instance"]
