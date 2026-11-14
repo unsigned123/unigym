@@ -226,7 +226,16 @@ def test_pack_cli_doctor_fails_on_inventory_mismatch(
 def test_legacy_pack_modules_are_not_importable() -> None:
     import unigym.packs
 
-    assert unigym.packs.__all__ == ["PackError"]
+    assert unigym.packs.__all__ == [
+        "PackError",
+        "PackInfo",
+        "PackItemOrigin",
+        "PackSet",
+        "ScenePresetRef",
+        "SceneProviderRef",
+        "installed",
+        "require",
+    ]
     for name in _DELETED_MODULES:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(name)

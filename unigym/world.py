@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, TypedDict
 import yaml
 
 from unigym._typing import JsonValue, is_json_object
+from unigym.packs.packset import ScenePresetRef, SceneProviderRef
 from unigym.scenes.generators import build_payload
 from unigym.scenes.providers import SceneProviderContext, register_inline_scene_provider
 from unigym.scenes.scene_ir import (
@@ -226,22 +227,25 @@ class World:
     @classmethod
     def from_preset(
         cls,
-        ref: str,
+        ref: str | ScenePresetRef,
         *,
         runtime: PackRuntime,
     ) -> World:
-        """Use a scene preset by its exact ``scene_presets`` catalog id.
+        """Use a scene preset by catalog id or pack-object handle.
 
         Args:
-            ref: The catalog id declared on the runtime's ``scene_presets`` face.
+            ref: The catalog id declared on the runtime's ``scene_presets``
+                face, or a :class:`ScenePresetRef` minted by a
+                :class:`~unigym.packs.packset.PackSet`.
             runtime: The pack runtime owning the catalog; there is no
                 fallback scan when it is absent.
         """
         from unigym.scene_presets import load_scene_preset
 
-        load_scene_preset(ref, runtime)
+        preset = load_scene_preset(ref, runtime)
+        assert preset.catalog_id is not None  # a loaded preset is a catalog preset
         world = cls()
-        world._scene_preset_ref = ref
+        world._scene_preset_ref = preset.catalog_id
         return world
 
     @classmethod
@@ -374,13 +378,21 @@ class World:
     @classmethod
     def from_provider(
         cls,
-        name: str,
+        name: str | SceneProviderRef,
         *,
         params: Mapping[str, JsonValue] | None = None,
     ) -> World:
-        """Use a registered scene provider with its explicit params."""
+        """Use a scene provider by name or pack-object handle with explicit params.
+
+        Args:
+            name: A registered provider id, or a :class:`SceneProviderRef`
+                minted by a :class:`~unigym.packs.packset.PackSet`.
+            params: Values validated against the provider's parameter schema
+                at dispatch; a handle does not import or activate the pack.
+        """
+        provider = name.id if isinstance(name, SceneProviderRef) else str(name)
         world = cls()
-        world._scene_provider = str(name)
+        world._scene_provider = provider
         world._scene_provider_params = dict(params or {})
         return world
 

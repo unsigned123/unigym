@@ -67,6 +67,15 @@ from unigym.pack_api import (
     registered_scene_providers,
 )
 
+from unigym.packs import (
+    PackInfo,
+    PackItemOrigin,
+    PackSet,
+    ScenePresetRef,
+    SceneProviderRef,
+    installed,
+    require,
+)
 from unigym.scene_presets import (
     BackendBinding,
     ScenePlan,
@@ -82,9 +91,11 @@ from unigym.world import World
 The removed helper exports `find`, `resolve`, `code_pack_root`, `load_table`
 and `asset_path` no longer exist. Pack code reaches its own resources only
 through `PackContext`, and every resource resolves through `PackRuntime`.
-`unigym.packs` exports only `PackError`; `MANIFEST_NAME`, `FACE_NAMES` and the
-manifest types live in `unigym.packs.schema`. Importing `unigym.pack_api`
-never imports pack Python.
+`unigym.packs` exports `PackError` and the read-only pack-object front door
+(`installed`, `require`, `PackSet`, `PackInfo`, `PackItemOrigin`,
+`ScenePresetRef`, `SceneProviderRef`); `MANIFEST_NAME`, `FACE_NAMES` and the
+manifest types live in `unigym.packs.schema`. Importing `unigym.pack_api` or
+`unigym.packs` never imports pack Python.
 
 ## Manifest document
 
@@ -1231,6 +1242,60 @@ cache:
   name other than the built-in `manual`;
 - the launcher does not load code packs globally; command modules own their
   activation at their composition boundary.
+
+## Pack objects
+
+`unigym.packs.installed()` enumerates the configured manifest-only discovery
+scope; `unigym.packs.require(*names)` returns the filtered view over exactly
+the named packs and fails before a handle exists when a name is missing. Both
+return a read-only `PackSet`. Neither resolves installed entry points, imports
+pack Python, activates a pack or mutates a registry.
+
+```python
+import unigym.packs
+
+packs = unigym.packs.require("acme")          # filtered explicit dependency
+all_packs = unigym.packs.installed()           # whole configured scope
+pack = packs.pack("acme")                      # PackInfo (canonical)
+preset = pack.scene_preset("acme.tabletop")    # ScenePresetRef
+provider = pack.scene_provider("acme.table_top")  # SceneProviderRef
+```
+
+There is no attribute sugar: `packs.acme` never resolves a pack, and
+`packs.pack(name)` is the only guaranteed acquisition form. `PackInfo` also
+provides `scene_presets()` / `scene_providers()` for its own items.
+`PackSet.scene_preset(id)` / `PackSet.scene_provider(id)` are the cross-pack
+edge lookups and `PackSet.scene_presets()` / `PackSet.scene_providers()` are
+the aggregates.
+
+`ScenePresetRef` and `SceneProviderRef` are frozen dataclasses, equal by value,
+holding `pack`, `pack_version`, `id` and a `PackItemOrigin` (manifest, root,
+face, item id, locator). `ScenePresetRef.resource` names the declared resource;
+`SceneProviderRef.entrypoint` names the declared entrypoint and
+`SceneProviderRef.params_schema` is the normalized manifest parameter schema
+(or `None` when the provider declares no parameters). Minting, comparing and
+reading these handles never activates, imports or reads the filesystem.
+
+`PackSet.resource_path(preset_ref)` resolves the preset resource under its pack
+root with the usual inside-root and existence rules.
+`PackSet.resource_path(provider_ref)` raises the "activate the pack" teaching
+error because a scene provider is entrypoint-backed and has no resource path.
+`PackSet.to_runtime()` returns an activation-capable runtime over the same
+catalog and does not activate.
+
+`World.from_preset(ref, runtime=...)` and `World.from_provider(ref, params=...)`
+accept either the string form or the corresponding handle:
+
+```python
+world = World.from_preset(pack.scene_preset("acme.tabletop"), runtime=packs.to_runtime())
+world = World.from_provider(pack.scene_provider("acme.table_top"), params={"style": 2})
+```
+
+`load_scene_preset(ref, runtime)` likewise accepts a catalog id string or a
+`ScenePresetRef`. A handle's `pack` must match the pack that declares the
+catalog id; a mismatch is a teaching error. A preset still names its provider
+as a same-pack string; handles never carry a cross-pack provider reference.
+Requirement (`requires`) resolution and attribute sugar are not implemented.
 
 ## Pack CLI
 

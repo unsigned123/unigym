@@ -34,6 +34,7 @@ from unigym.scenes.provider_params import (
 from unigym.scenes.recipe import normalize_content_keys
 
 if TYPE_CHECKING:
+    from unigym.packs.packset import ScenePresetRef
     from unigym.packs.runtime import PackRuntime
 
 __all__ = [
@@ -425,32 +426,50 @@ def _validate_provider_reference(
         raise ScenePresetError(f"scene preset {ref!r}: {err}") from err
 
 
-def load_scene_preset(ref: str, runtime: PackRuntime) -> ScenePreset:
-    """Resolve one exact ``scene_presets`` catalog id to its parsed preset."""
+def _scene_preset_identity(ref: object) -> tuple[str, str | None]:
+    """Normalize a string catalog id or preset handle to ``(id, declared_pack)``."""
+    from unigym.packs.packset import ScenePresetRef
+
+    if isinstance(ref, ScenePresetRef):
+        return ref.id, ref.pack
     if not isinstance(ref, str) or not ref:
         raise ScenePresetError(
-            f"scene preset ref must be a non-empty pack catalog id string, got {ref!r}"
+            "scene preset ref must be a non-empty pack catalog id string or a "
+            f"ScenePresetRef, got {ref!r}"
         )
+    return ref, None
+
+
+def load_scene_preset(ref: str | ScenePresetRef, runtime: PackRuntime) -> ScenePreset:
+    """Resolve one exact ``scene_presets`` catalog id or handle to its preset."""
+    ref_id, declared_pack = _scene_preset_identity(ref)
     if runtime is None:
         raise ScenePresetError(
-            f"scene preset ref {ref!r} requires a pack runtime: pass runtime=... | "
+            f"scene preset ref {ref_id!r} requires a pack runtime: pass runtime=... | "
             "hint: scene preset refs are exact PackRuntime 'scene_presets' catalog ids"
         )
-    entry = runtime.catalog.entry("scene_presets", ref)
-    path: Path = runtime.resource_for("scene_presets", ref)
+    entry = runtime.catalog.entry("scene_presets", ref_id)
+    if declared_pack is not None and entry.pack != declared_pack:
+        raise ScenePresetError(
+            f"scene preset id {ref_id!r} is declared by pack {entry.pack!r}, "
+            f"not {declared_pack!r}"
+        )
+    path: Path = runtime.resource_for("scene_presets", ref_id)
     try:
         raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as err:
-        raise ScenePresetError(f"scene preset {ref!r} at {path} is not readable: {err}") from err
+        raise ScenePresetError(f"scene preset {ref_id!r} at {path} is not readable: {err}") from err
     except yaml.YAMLError as err:
-        raise ScenePresetError(f"scene preset {ref!r} at {path} is not valid YAML: {err}") from err
+        raise ScenePresetError(
+            f"scene preset {ref_id!r} at {path} is not valid YAML: {err}"
+        ) from err
     doc: object = {} if raw_doc is None else raw_doc
     if not _is_mapping(doc):
         raise ScenePresetError(
-            f"scene preset {ref!r} at {path} must be a mapping, got {type(doc).__name__}"
+            f"scene preset {ref_id!r} at {path} must be a mapping, got {type(doc).__name__}"
         )
-    preset = _parse_document(doc, source=f"scene preset {ref!r}", catalog_id=ref)
-    _validate_provider_reference(preset, ref=ref, pack=entry.pack, runtime=runtime)
+    preset = _parse_document(doc, source=f"scene preset {ref_id!r}", catalog_id=ref_id)
+    _validate_provider_reference(preset, ref=ref_id, pack=entry.pack, runtime=runtime)
     return preset
 
 
