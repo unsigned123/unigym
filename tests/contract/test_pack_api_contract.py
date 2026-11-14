@@ -127,6 +127,231 @@ def test_provider_item_with_kind_and_entrypoint_loads(tmp_path: Path) -> None:
     assert item.resource is None
     assert item.entrypoint == "acme_unigym.assets:register"
     assert item.kind == "asset_generator"
+    assert item.params is None
+
+
+def test_scene_provider_item_loads_with_an_inline_params_schema(tmp_path: Path) -> None:
+    """A providers item with kind: scene accepts and deep-freezes params."""
+    root = tmp_path / "acme"
+    _write(
+        root,
+        _document(
+            trust="code",
+            provides={
+                "providers": [
+                    {
+                        "id": "acme.table_top",
+                        "kind": "scene",
+                        "entrypoint": "acme_scenes:table_top",
+                        "params": {
+                            "style": {"type": "int", "default": 1},
+                            "seed": {"type": "int"},
+                        },
+                    }
+                ]
+            },
+        ),
+    )
+
+    manifest = load_manifest_v1(root)
+
+    item = manifest.provides["providers"][0]
+    assert item.params == {
+        "style": {"type": "int", "default": 1},
+        "seed": {"type": "int"},
+    }
+    assert item.params is not None
+    with pytest.raises(TypeError):
+        item.params["style"]["type"] = "str"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("face", "item", "resource", "match"),
+    [
+        (
+            "providers",
+            {
+                "id": "acme.table_top",
+                "kind": "scene",
+                "resource": "value.yaml",
+            },
+            "value.yaml",
+            "entrypoint-backed only",
+        ),
+        (
+            "providers",
+            {"id": "acme.table_top", "kind": "scene"},
+            None,
+            "entrypoint-backed",
+        ),
+        (
+            "providers",
+            {
+                "id": "acme.dynamic_assets",
+                "kind": "asset_generator",
+                "entrypoint": "acme_assets:register",
+                "params": {"style": {"type": "int"}},
+            },
+            None,
+            "unknown provided-item key",
+        ),
+        (
+            "scene_presets",
+            {
+                "id": "acme.tabletop",
+                "resource": "value.yaml",
+                "params": {"style": {"type": "int"}},
+            },
+            "value.yaml",
+            "cannot declare",
+        ),
+        (
+            "providers",
+            {
+                "id": "Acme.TableTop",
+                "kind": "scene",
+                "entrypoint": "acme_scenes:table_top",
+            },
+            None,
+            "adapter/robot grammar",
+        ),
+        (
+            "providers",
+            {
+                "id": "acme.table_top",
+                "kind": "scene",
+                "entrypoint": "acme_scenes:table_top",
+                "params": {"style": {"type": "object"}},
+            },
+            None,
+            "params are invalid",
+        ),
+    ],
+)
+def test_face_specific_item_rules(
+    tmp_path: Path,
+    face: str,
+    item: dict[str, object],
+    resource: str | None,
+    match: str,
+) -> None:
+    """Face, kind, locator, grammar and params rules fail at manifest load."""
+    root = tmp_path / "acme"
+    if resource is not None:
+        _touch(root, resource)
+    _write(root, _document(trust="code", provides={face: [item]}))
+
+    with pytest.raises(PackError, match=match):
+        load_manifest_v1(root)
+
+
+def test_catalog_entry_carries_the_provider_params_schema(tmp_path: Path) -> None:
+    """The flattened catalog keeps the scene-provider schema."""
+    root = tmp_path / "acme"
+    _write(
+        root,
+        _document(
+            trust="code",
+            provides={
+                "providers": [
+                    {
+                        "id": "acme.table_top",
+                        "kind": "scene",
+                        "entrypoint": "acme_scenes:table_top",
+                        "params": {"style": {"type": "int", "default": 1}},
+                    }
+                ]
+            },
+        ),
+    )
+    manifest = load_manifest_v1(root)
+
+    catalog = PackCatalog((manifest,))
+
+    entry = catalog.entry("providers", "acme.table_top")
+    assert entry.params == {"style": {"type": "int", "default": 1}}
+
+
+def test_scene_provider_params_nested_sequences_are_deep_frozen(tmp_path: Path) -> None:
+    """Nested list/tuple declarations freeze to tuples that cannot be mutated."""
+    root = tmp_path / "acme"
+    _write(
+        root,
+        _document(
+            trust="code",
+            provides={
+                "providers": [
+                    {
+                        "id": "acme.table_top",
+                        "kind": "scene",
+                        "entrypoint": "acme_scenes:table_top",
+                        "params": {
+                            "layout": {
+                                "type": "list",
+                                "default": [["a"], "b"],
+                                "choices": [[["a"], "b"], ["c"]],
+                            }
+                        },
+                    }
+                ]
+            },
+        ),
+    )
+
+    manifest = load_manifest_v1(root)
+
+    item = manifest.provides["providers"][0]
+    assert item.params is not None
+    declaration = item.params["layout"]
+    assert declaration["default"] == (("a",), "b")
+    assert isinstance(declaration["default"], tuple)
+    assert declaration["choices"] == ((("a",), "b"), ("c",))
+    assert isinstance(declaration["choices"], tuple)
+
+    with pytest.raises(TypeError):
+        declaration["default"][0][0] = "z"  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        declaration["choices"].append(("d",))  # type: ignore[union-attr]
+    assert item.params["layout"]["default"] == (("a",), "b")
+
+
+def test_catalog_entry_params_are_deep_frozen(tmp_path: Path) -> None:
+    """The catalog re-freezes nested sequences and never exposes a mutable list."""
+    root = tmp_path / "acme"
+    _write(
+        root,
+        _document(
+            trust="code",
+            provides={
+                "providers": [
+                    {
+                        "id": "acme.table_top",
+                        "kind": "scene",
+                        "entrypoint": "acme_scenes:table_top",
+                        "params": {
+                            "layout": {
+                                "type": "list",
+                                "default": ["a", ["b"]],
+                                "choices": [["a", ["b"]]],
+                            }
+                        },
+                    }
+                ]
+            },
+        ),
+    )
+    catalog = PackCatalog((load_manifest_v1(root),))
+
+    entry = catalog.entry("providers", "acme.table_top")
+
+    assert entry.params is not None
+    declaration = entry.params["layout"]
+    assert declaration["default"] == ("a", ("b",))
+    with pytest.raises(TypeError):
+        declaration["default"][1][0] = "c"  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        declaration["choices"].append(())  # type: ignore[union-attr]
+    assert declaration["default"] == ("a", ("b",))
 
 
 def test_requires_is_stored_not_evaluated(tmp_path: Path) -> None:
@@ -396,6 +621,7 @@ def test_catalog_preserves_order_and_filters(tmp_path: Path) -> None:
             resource="demo.yaml",
             entrypoint=None,
             kind=None,
+            params=None,
         ),
     )
     assert catalog.get("beta") is beta

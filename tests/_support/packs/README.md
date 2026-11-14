@@ -17,10 +17,13 @@ per-backend `backend_params`). It declares no provider and no content-fill keys.
 
 ## `acme_code`
 
-A `trust: code` pack with a manifest `entrypoint` (`acme_pack:register`) and a
-`providers` item (`acme_code.dynamic_assets`, kind `asset_generator`) that uses
-the same entrypoint. `python/acme_pack/__init__.py` holds a harmless
-no-argument `register()` callable.
+A `trust: code` pack with a manifest `entrypoint` (`acme_pack:register`) and two
+`providers` items: `acme_code.dynamic_assets` (kind `asset_generator`, using the
+same entrypoint) and `acme_code.table_top` (kind `scene`, entrypoint
+`acme_pack:table_top`, with an inline `params` schema). The scene provider's
+fixture factory returns a neutral `Scene`; activation registers it under the
+item id. `python/acme_pack/__init__.py` also holds a harmless one-argument
+`register(context)` callable.
 
 Manifest and catalog loading must never import `acme_pack`: the module is
 deliberately outside the import path, and `tests/contract/test_pack_fixtures.py`

@@ -277,7 +277,8 @@ def test_manifest_adapter_partial_failure_leaves_no_registration(tmp_path: Path)
     assert "acme.good" not in ADAPTER_REGISTRY
 
 
-def test_manifest_adapter_registration_rolls_back_on_bad_name(tmp_path: Path) -> None:
+def test_manifest_provider_bad_name_fails_at_discovery(tmp_path: Path) -> None:
+    """The adapter/provider grammar is enforced at manifest load, before registration."""
     root = tmp_path / "adapter_rollback"
     _write_pack(
         root,
@@ -299,17 +300,13 @@ def test_manifest_adapter_registration_rolls_back_on_bad_name(tmp_path: Path) ->
         {"adapter_rollback_pack": _adapter_source("GoodAdapter")},
     )
 
-    runtime = discover([root])
+    with pytest.raises(PackError) as info:
+        discover([root])
 
-    with pytest.raises(PackError):
-        runtime.activate_all()
+    assert "acme-bad" in str(info.value)
+    assert "adapter/robot grammar" in str(info.value)
     assert "acme.good" not in ADAPTER_REGISTRY
-
-    with pytest.raises(PackError) as second:
-        runtime.activate_all()
-    assert "acme-bad" in str(second.value)
-    assert "already registered" not in str(second.value)
-    assert "acme.good" not in ADAPTER_REGISTRY
+    assert "acme-bad" not in ADAPTER_REGISTRY
 
 
 def test_mixed_entrypoint_and_provider_failure_rolls_back_adapters(tmp_path: Path) -> None:

@@ -31,11 +31,17 @@ from unigym.core.paths import repo_root
 
 from . import PackError
 from .catalog import PackCatalog
-from .schema import PackManifestV1, ProvidedItem, load_manifest_v1
+from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_v1
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
     from unigym.robots import RobotProfile
+    from unigym.scenes.provider_params import ProviderParamSpec
+    from unigym.scenes.providers import (
+        ProviderOrigin,
+        SceneProvider,
+        SceneProviderRegistrySnapshot,
+    )
 
 _ASSET_PACK_PREFIX = "pack:"
 
@@ -75,7 +81,9 @@ class ActivationHandle:
     ``kind: adapter`` items this activation registered, in declaration order.
     ``robots`` names the manifest ``kind: robot`` items this activation
     registered, in declaration order; robots registered by the manifest-level
-    entrypoint itself are not recorded here.  Manifest providers are still
+    entrypoint itself are not recorded here.  ``scene_providers`` names the
+    manifest ``kind: scene`` items this activation registered or adopted from
+    a pack-code mirror, in declaration order.  Manifest providers are still
     activated when the manifest-level entrypoint is absent; this handle caches
     the whole activation, not one entrypoint.
     """
@@ -84,6 +92,7 @@ class ActivationHandle:
     entrypoint: str | None
     adapters: tuple[str, ...] = ()
     robots: tuple[str, ...] = ()
+    scene_providers: tuple[str, ...] = ()
 
 
 def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) -> Path:
@@ -326,23 +335,255 @@ def _activate_robot_providers(manifest: PackManifestV1, runtime: PackRuntime) ->
     return tuple(item.id for item in items)
 
 
+def _provider_schema_diff(
+    left: Mapping[str, ProviderParamSpec] | None,
+    right: Mapping[str, ProviderParamSpec] | None,
+) -> list[str]:
+    """Return the parameter names whose normalized declarations differ."""
+    left_map = dict(left or {})
+    right_map = dict(right or {})
+    keys = sorted(set(left_map) | set(right_map))
+    return [key for key in keys if left_map.get(key) != right_map.get(key)]
+
+
+def _manifest_scene_provider_origin(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    item: ProvidedItem,
+) -> ProviderOrigin:
+    """Build the exact provenance record for one manifest ``kind: scene`` item."""
+    from unigym.scenes.providers import ProviderOrigin
+
+    return ProviderOrigin(
+        kind="manifest",
+        pack=manifest.name,
+        pack_version=manifest.version,
+        root=str(manifest.root),
+        discovered_by=runtime.origins.get(manifest.name, "unknown"),
+        face="providers",
+        item_id=item.id,
+        entrypoint=item.entrypoint,
+        activation_entrypoint=manifest.entrypoint,
+    )
+
+
+def _attribute_pack_code_scene_providers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: SceneProviderRegistrySnapshot,
+) -> None:
+    """Label scene providers the pack registered itself during activation."""
+    from unigym.scenes.providers import (
+        ProviderOrigin,
+        attribute_scene_provider,
+        registered_scene_providers,
+        scene_provider_origin,
+    )
+
+    origin = ProviderOrigin(
+        kind="pack-code",
+        pack=manifest.name,
+        pack_version=manifest.version,
+        root=str(manifest.root),
+        discovered_by=runtime.origins.get(manifest.name, "unknown"),
+        item_id=None,
+        activation_entrypoint=manifest.entrypoint,
+    )
+    for name in registered_scene_providers():
+        if name in before.providers:
+            continue
+        # A manifest item adopted this name and already recorded the exact
+        # manifest origin; only unattributed registrations are pack-code.
+        if scene_provider_origin(name).kind != "unknown":
+            continue
+        attribute_scene_provider(name, origin)
+
+
+def _activate_scene_provider_providers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    *,
+    window_names: frozenset[str],
+) -> tuple[str, ...]:
+    """Import and register manifest-declared ``kind: scene`` providers.
+
+    A scene provider item is entrypoint-backed: the item id becomes the
+    provider name and the entrypoint resolves to the pure provider factory.
+    Validation is complete before any registration: every entrypoint imports,
+    every target is a documented callable that is not a ``Scene`` instance,
+    every id uses the adapter/robot grammar and is free (unless this pack's
+    entrypoint already registered that exact factory as its code mirror), and
+    every manifest ``params`` declaration is a valid schema.  When a manifest
+    item adopts a pack-code registration, the two parameter schemas must match
+    exactly: a one-sided declaration (manifest only or code only) is forbidden
+    just like a differing value, and the manifest schema is authoritative.
+
+    Args:
+        manifest: The pack being activated.
+        runtime: The runtime that owns discovery provenance labels.
+        window_names: Public provider names the pack's entrypoint registered
+            during this activation window.  Those names may be adopted by a
+            manifest item; any other pre-existing name is a duplicate.
+
+    Returns:
+        The manifest ``kind: scene`` item ids, in declaration order.
+
+    Raises:
+        PackError: A scene provider item or its parameter schema is invalid.
+    """
+    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "scene")
+    if not items:
+        return ()
+
+    from unigym.scenes.provider_params import (
+        SceneProviderParamError,
+        normalize_manifest_params,
+        schemas_equal,
+    )
+    from unigym.scenes.providers import (
+        attribute_scene_provider,
+        register_scene_provider,
+        snapshot_scene_providers,
+    )
+    from unigym.scenes.scene_ir import Scene
+
+    first_entrypoint = next(
+        (item.entrypoint for item in items if item.entrypoint is not None), None
+    )
+    if first_entrypoint is not None:
+        python_dir = _import_boundary(manifest, first_entrypoint)
+        _add_to_sys_path(python_dir)
+
+    snapshot = snapshot_scene_providers()
+    validated: list[
+        tuple[ProvidedItem, SceneProvider, Mapping[str, ProviderParamSpec] | None, bool]
+    ] = []
+    proposed: set[str] = set()
+    for item in items:
+        where = f"pack {manifest.name!r} scene provider id {item.id!r}"
+        if item.id in proposed:
+            raise PackError(f"{where} appears more than once in the scene provider list")
+        proposed.add(item.id)
+        if PROVIDER_ID_RE.fullmatch(item.id) is None:
+            raise PackError(
+                f"{where} id must use the adapter/robot grammar "
+                "[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*"
+            )
+        # The manifest schema already rejects a resource-backed scene item; this
+        # re-check keeps activation honest for a hand-built manifest object.
+        if item.resource is not None:
+            raise PackError(
+                f"{where} is entrypoint-backed and must not declare "
+                f"resource {item.resource!r}; drop 'resource:'"
+            )
+        if item.entrypoint is None:
+            raise PackError(f"{where} requires an entrypoint; declare 'entrypoint: module:factory'")
+        try:
+            target = _resolve_entrypoint(item.entrypoint)
+        except Exception as err:
+            raise PackError(
+                f"{where} entrypoint {item.entrypoint!r} failed to import: {err}"
+            ) from err
+        if isinstance(target, Scene):
+            raise PackError(
+                f"{where} entrypoint {item.entrypoint!r} target is a Scene instance, "
+                "not a provider factory"
+            )
+        if not (getattr(target, "__doc__", "") or "").strip():
+            raise PackError(f"{where} entrypoint {item.entrypoint!r} target must have a docstring")
+        try:
+            manifest_schema = (
+                normalize_manifest_params(item.params) if item.params is not None else None
+            )
+        except SceneProviderParamError as err:
+            raise PackError(f"{where} params declaration is invalid: {err}") from err
+
+        adopted = item.id in snapshot.providers
+        if adopted:
+            if item.id not in window_names:
+                raise PackError(
+                    f"{where} name {item.id!r} is already registered; a manifest "
+                    "scene provider id must be free"
+                )
+            if snapshot.providers[item.id] is not target:
+                raise PackError(
+                    f"{where} entrypoint {item.entrypoint!r} names a different factory "
+                    f"than the one pack code registered under {item.id!r}"
+                )
+            code_schema = snapshot.params.get(item.id)
+            if not schemas_equal(manifest_schema, code_schema):
+                differing = _provider_schema_diff(manifest_schema, code_schema)
+                one_sided = (manifest_schema is None) != (code_schema is None)
+                hint = (
+                    "; declare the schema on both the manifest item and the pack-code "
+                    "registration, or on neither"
+                    if one_sided
+                    else "; the manifest schema is authoritative"
+                )
+                raise PackError(
+                    f"{where} manifest params {manifest_schema!r} disagree with the "
+                    f"pack-code registration schema {code_schema!r} "
+                    f"(differing keys: {differing}){hint}"
+                )
+        else:
+            alias = next(
+                (name for name, factory in snapshot.providers.items() if factory is target),
+                None,
+            )
+            if alias is None:
+                alias = next(
+                    (name for name, factory in snapshot.inline.items() if factory is target),
+                    None,
+                )
+            if alias is not None:
+                raise PackError(
+                    f"{where} entrypoint {item.entrypoint!r} registers the same factory "
+                    f"as scene provider {alias!r} under a second name {item.id!r}; "
+                    "one factory owns exactly one name"
+                )
+        validated.append((item, target, manifest_schema, adopted))
+
+    for item, target, manifest_schema, adopted in validated:
+        origin = _manifest_scene_provider_origin(manifest, runtime, item)
+        if adopted:
+            attribute_scene_provider(item.id, origin, params=manifest_schema)
+        else:
+            try:
+                register_scene_provider(
+                    item.id,
+                    target,
+                    params=item.params,
+                    origin=origin,
+                )
+            except Exception as err:
+                raise PackError(
+                    f"pack {manifest.name!r} scene provider id {item.id!r} entrypoint "
+                    f"{item.entrypoint!r} failed to register: {err}"
+                ) from err
+    return tuple(item.id for item in items)
+
+
 @dataclass(frozen=True)
 class PackRuntime:
     """An immutable catalog plus the resolved root of every discovered pack.
 
     ``root_by_pack`` must name exactly the catalog's packs; the constructor
     fails fast instead of letting a later resource or activation lookup miss.
+    ``origins`` is the discovery label per pack (``explicit-root``,
+    ``env:UNIGYM_PACKS``, ``local-yaml``, ``entry-point`` or ``deps-root``);
+    a hand-built runtime without labels reports ``unknown`` provenance.
     ``_handles`` is the private per-runtime activation cache.
     """
 
     catalog: PackCatalog
     root_by_pack: Mapping[str, Path]
+    origins: Mapping[str, str] = field(default_factory=dict)
     _handles: dict[str, ActivationHandle] = field(
         default_factory=dict, init=False, compare=False, repr=False
     )
 
     def __post_init__(self) -> None:
-        """Freeze the root mapping and verify it matches the catalog."""
+        """Freeze the root/origin mappings and verify they match the catalog."""
         names = self.catalog.packs()
         provided = set(self.root_by_pack)
         expected = set(names)
@@ -352,7 +593,15 @@ class PackRuntime:
                 f"catalog packs {sorted(expected)}"
             )
         roots = {name: Path(self.root_by_pack[name]).resolve() for name in names}
+        labels = {str(name): str(label) for name, label in self.origins.items()}
+        unknown = sorted(set(labels) - expected)
+        if unknown:
+            raise PackError(
+                f"pack runtime origin labels {unknown} do not match "
+                f"catalog packs {sorted(expected)}"
+            )
         object.__setattr__(self, "root_by_pack", MappingProxyType(roots))
+        object.__setattr__(self, "origins", MappingProxyType(labels))
         object.__setattr__(self, "_handles", {})
 
     def resource(self, pack: str, rel: str) -> Path:
@@ -459,16 +708,22 @@ class PackRuntime:
         exactly one :class:`PackContext` argument; there is no zero-argument
         fallback.  After it (or without it), ``providers`` items with
         ``kind: adapter`` are imported and registered under their item id,
-        then ``kind: robot`` items are registered through the robot registry.
-        A robot item is either an entrypoint factory or a resource pointing at
-        one ``unigym.robot/1`` document; a resource-only robot list needs no
-        ``python/`` directory and never mutates ``sys.path``, while a mixed
-        list takes its import boundary from the first entrypoint item.  Robot
-        items are validated before any registration.  Other provider kinds
-        stay inert.  Failures are wrapped with the pack, item id and locator
-        named; a failed activation restores both the adapter and robot
-        registries to their prior contents, including names a manifest-level
-        entrypoint registered itself.
+        then ``kind: robot`` items are registered through the robot registry,
+        then ``kind: scene`` items are registered through the scene-provider
+        registry.  A robot item is either an entrypoint factory or a resource
+        pointing at one ``unigym.robot/1`` document; a resource-only robot list
+        needs no ``python/`` directory and never mutates ``sys.path``, while a
+        mixed list takes its import boundary from the first entrypoint item.
+        Scene provider items are entrypoint-only; their manifest ``params``
+        schema is authoritative and must not drift from a pack-code mirror.
+        Every item set is validated before any registration.  Other provider
+        kinds stay inert.  Any imported pack module can register through
+        ``unigym.pack_api`` at import time, regardless of the kind that pulled
+        it in, so the adapter, robot and scene-provider registries are all
+        snapshotted before the first import or provider registration.  Failures
+        are wrapped with the pack, item id and locator named; a failed
+        activation restores all three registries to their prior contents,
+        including names pack code registered itself.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -485,22 +740,36 @@ class PackRuntime:
         robot_items = tuple(
             item for item in manifest.provides.get("providers", ()) if item.kind == "robot"
         )
+        scene_items = tuple(
+            item for item in manifest.provides.get("providers", ()) if item.kind == "scene"
+        )
+        # Importing any pack module can register through ``unigym.pack_api``,
+        # not only modules pulled in by their own provider kind: a scene item
+        # import may register an adapter or robot.  Snapshot every registry
+        # before the first import so a failed activation can restore all three.
+        activation_surface = entrypoint is not None or bool(
+            adapter_items or robot_items or scene_items
+        )
         adapter_registry = None
-        adapters_before: set[str] = set()
-        if entrypoint is not None or adapter_items:
+        adapters_before: set[str] | None = None
+        robots_before: dict[str, Callable[..., RobotProfile]] | None = None
+        scene_before: SceneProviderRegistrySnapshot | None = None
+        if activation_surface:
             from unigym.adapters import ADAPTER_REGISTRY as adapter_registry
+            from unigym.robots import snapshot_robots
+            from unigym.scenes.providers import snapshot_scene_providers
 
             adapters_before = set(adapter_registry)
-
-        robots_before: dict[str, Callable[..., RobotProfile]] | None = None
-        if entrypoint is not None or robot_items:
-            from unigym.robots import snapshot_robots
-
             robots_before = snapshot_robots()
+            scene_before = snapshot_scene_providers()
 
         def rollback_adapters() -> None:
-            """Remove adapter names a failed activation added to the global registry."""
-            if adapter_registry is None:
+            """Remove adapter names a failed activation added to the registry.
+
+            ``register_adapter`` rejects an existing name, so activation can
+            only add entries; removing the additions restores the registry.
+            """
+            if adapter_registry is None or adapters_before is None:
                 return
             for name in set(adapter_registry) - adapters_before:
                 adapter_registry.pop(name, None)
@@ -513,6 +782,14 @@ class PackRuntime:
 
             restore_robots(robots_before)
 
+        def rollback_scene_providers() -> None:
+            """Restore the scene-provider registries a failed activation changed."""
+            if scene_before is None:
+                return
+            from unigym.scenes.providers import restore_scene_providers
+
+            restore_scene_providers(scene_before)
+
         try:
             if entrypoint is not None:
                 context = PackContext(pack=pack, root=manifest.root, runtime=self)
@@ -521,15 +798,30 @@ class PackRuntime:
                 target = _resolve_entrypoint(entrypoint)
                 target(context)
 
+            window_names: frozenset[str] = frozenset()
+            if scene_before is not None:
+                from unigym.scenes.providers import registered_scene_providers
+
+                window_names = frozenset(
+                    set(registered_scene_providers()) - set(scene_before.providers)
+                )
+
             adapters = _activate_adapter_providers(manifest)
             robots = _activate_robot_providers(manifest, self)
+            scene_providers = _activate_scene_provider_providers(
+                manifest, self, window_names=window_names
+            )
+            if scene_before is not None:
+                _attribute_pack_code_scene_providers(manifest, self, scene_before)
         except PackError:
             rollback_adapters()
             rollback_robots()
+            rollback_scene_providers()
             raise
         except Exception as err:
             rollback_adapters()
             rollback_robots()
+            rollback_scene_providers()
             if entrypoint is None:
                 raise PackError(f"pack {pack!r} provider activation failed: {err}") from err
             raise PackError(
@@ -541,6 +833,7 @@ class PackRuntime:
             entrypoint=entrypoint,
             adapters=adapters,
             robots=robots,
+            scene_providers=scene_providers,
         )
         self._handles[pack] = handle
         return handle
@@ -681,25 +974,38 @@ def _entry_point_roots() -> list[tuple[Path, str]]:
 
 def _configured_roots(
     config_path: str | Path | None, *, entry_points: bool
-) -> tuple[list[Path], dict[Path, str]]:
-    """Configured roots in source order, plus each entry-point root's origin.
+) -> tuple[list[Path], dict[Path, str], dict[Path, str]]:
+    """Configured roots in source order, with discovery labels and entry-point names.
 
     Order: ``UNIGYM_PACKS``, the local overlay, installed ``unigym.packs``
     entry points (name-sorted) when opted in, then ``<UNIGYM_DEPS_ROOT>``
-    packs.  The origin map keys canonical roots to their entry-point name so a
+    packs.  The label map keys canonical roots to their discovery label for
+    :class:`~unigym.scenes.providers.ProviderOrigin.discovered_by`; the name
+    map keys canonical entry-point roots to their entry-point name so a
     manifest failure can name the entry point.
     """
     local_yaml = (
         Path(config_path) if config_path is not None else Path(repo_root()) / _LOCAL_YAML_NAME
     )
-    roots = [*_env_pack_roots(), *_local_yaml_roots(local_yaml)]
-    origins: dict[Path, str] = {}
+    roots: list[Path] = []
+    labels: dict[Path, str] = {}
+    entry_names: dict[Path, str] = {}
+
+    def add(root: Path, label: str) -> None:
+        roots.append(root)
+        labels.setdefault(root.resolve(), label)
+
+    for root in _env_pack_roots():
+        add(root, "env:UNIGYM_PACKS")
+    for root in _local_yaml_roots(local_yaml):
+        add(root, "local-yaml")
     if entry_points:
         for root, name in _entry_point_roots():
-            origins.setdefault(root.resolve(), name)
-            roots.append(root)
-    roots.extend(_deps_pack_roots())
-    return roots, origins
+            add(root, "entry-point")
+            entry_names.setdefault(root.resolve(), name)
+    for root in _deps_pack_roots():
+        add(root, "deps-root")
+    return roots, labels, entry_names
 
 
 def discover(
@@ -743,12 +1049,15 @@ def discover(
         )
 
     if roots is None:
-        selected, origins = _configured_roots(config_path, entry_points=entry_points)
+        selected, labels, entry_names = _configured_roots(config_path, entry_points=entry_points)
+        default_label = "unknown"
     else:
-        selected, origins = roots, {}
+        selected, labels, entry_names = roots, {}, {}
+        default_label = "explicit-root"
 
     manifests: list[PackManifestV1] = []
     root_by_pack: dict[str, Path] = {}
+    origin_by_pack: dict[str, str] = {}
     seen: set[Path] = set()
     for raw in selected:
         root = Path(raw).resolve()
@@ -758,10 +1067,10 @@ def discover(
         try:
             manifest = load_manifest_v1(root)
         except PackError as err:
-            origin = origins.get(root)
-            if origin is None:
+            entry_name = entry_names.get(root)
+            if entry_name is None:
                 raise
-            raise PackError(f"pack entry point {origin!r} resolved to {root}: {err}") from err
+            raise PackError(f"pack entry point {entry_name!r} resolved to {root}: {err}") from err
         owner = root_by_pack.get(manifest.name)
         if owner is not None:
             raise PackError(
@@ -769,8 +1078,13 @@ def discover(
                 f"roots {owner} and {manifest.root}"
             )
         root_by_pack[manifest.name] = manifest.root
+        origin_by_pack[manifest.name] = labels.get(root, default_label)
         manifests.append(manifest)
-    return PackRuntime(catalog=PackCatalog(tuple(manifests)), root_by_pack=root_by_pack)
+    return PackRuntime(
+        catalog=PackCatalog(tuple(manifests)),
+        root_by_pack=root_by_pack,
+        origins=origin_by_pack,
+    )
 
 
 __all__ = ["ActivationHandle", "AssetContext", "PackContext", "PackRuntime", "discover"]

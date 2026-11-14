@@ -17,8 +17,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 
 import yaml
+
+from unigym._typing import JsonValue
 
 from . import PackError
 
@@ -56,12 +59,75 @@ _TOP_LEVEL_KEYS = frozenset(
         "provides",
     }
 )
-_ITEM_KEYS = frozenset({"id", "resource", "entrypoint", "kind"})
+_ITEM_KEYS = frozenset({"id", "resource", "entrypoint", "kind", "params"})
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 _ENTRYPOINT_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
 )
+
+#: provider ids use the adapter/robot grammar: dotted lowercase snake_case.
+PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+
+
+def _freeze_json(value: object) -> JsonValue:
+    """Freeze one validated JSON value into read-only data, recursively.
+
+    Nested mappings become ``MappingProxyType`` proxies and nested sequences
+    become tuples, so no caller can mutate a declared provider parameter
+    schema after the manifest (or catalog) is validated.  ``JsonValue`` spells
+    mutable containers, so the frozen containers cross that boundary cast.
+    """
+    if isinstance(value, Mapping):
+        proxy = MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+        return cast(JsonValue, proxy)
+    if isinstance(value, (list, tuple)):
+        frozen = tuple(_freeze_json(item) for item in value)
+        return cast(JsonValue, frozen)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise PackError(f"provider params value {value!r} is not JSON data")
+
+
+def freeze_provider_params(
+    params: Mapping[str, Mapping[str, JsonValue]],
+) -> Mapping[str, Mapping[str, JsonValue]]:
+    """Deep-freeze one provider parameter-schema declaration mapping.
+
+    This is the one freeze boundary shared by :class:`ProvidedItem` and
+    :class:`~unigym.packs.catalog.CatalogEntry`; both expose the schema
+    read-only (mappings are proxies, sequences are tuples).
+    """
+    frozen: dict[str, Mapping[str, JsonValue]] = {}
+    for name, declaration in params.items():
+        value = _freeze_json(declaration)
+        if not isinstance(value, Mapping):
+            raise PackError(f"provider params[{name!r}] must be a mapping")
+        frozen[str(name)] = value
+    return MappingProxyType(frozen)
+
+
+def _scene_provider_params(
+    raw: object, *, where: str, item_id: str
+) -> Mapping[str, Mapping[str, JsonValue]] | None:
+    """Validate one manifest ``params:`` declaration and deep-freeze it."""
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise PackError(
+            f"{where} (id {item_id!r}) params must be a mapping of "
+            f"parameter declarations, got {type(raw).__name__}"
+        )
+    # The normalizer is the one parameter-schema truth.  It validates the
+    # declaration shape while this loader owns the manifest-level wrapping.
+    from unigym.scenes.provider_params import SceneProviderParamError, normalize_manifest_params
+
+    declarations = cast(Mapping[str, Mapping[str, JsonValue]], raw)
+    try:
+        normalize_manifest_params(declarations)
+    except SceneProviderParamError as err:
+        raise PackError(f"{where} (id {item_id!r}) params are invalid: {err}") from err
+    return freeze_provider_params(declarations)
 
 
 @dataclass(frozen=True)
@@ -69,8 +135,10 @@ class ProvidedItem:
     """One item a pack provides under a declared face.
 
     Exactly one of ``resource`` and ``entrypoint`` is set; ``kind`` optionally
-    names a provider kind (for example ``asset_generator``, ``adapter`` or
-    ``robot``).
+    names a provider kind (for example ``asset_generator``, ``adapter``,
+    ``robot`` or ``scene``).  ``params`` is the inline parameter schema of a
+    ``providers`` item with ``kind: scene``; it is deep-frozen and ``None`` for
+    every other item.
 
     A robot provider is resource-backed or entrypoint-backed::
 
@@ -81,12 +149,29 @@ class ProvidedItem:
         - id: acme.factory
           kind: robot
           entrypoint: acme_robot:make_profile
+
+    A scene provider is entrypoint-backed and may declare an inline parameter
+    schema.  That schema is deep-frozen recursively: mappings are read-only
+    proxies and sequences are tuples, so neither the outer item nor a nested
+    ``choices``/``default`` sequence can be mutated after validation::
+
+        - id: acme.table_top
+          kind: scene
+          entrypoint: acme_scenes:table_top
+          params:
+            style: {type: int, default: 1}
     """
 
     id: str
     resource: str | None
     entrypoint: str | None
     kind: str | None
+    params: Mapping[str, Mapping[str, JsonValue]] | None = None
+
+    def __post_init__(self) -> None:
+        """Deep-freeze the optional provider parameter schema."""
+        if self.params is not None:
+            object.__setattr__(self, "params", freeze_provider_params(self.params))
 
 
 @dataclass(frozen=True)
@@ -165,10 +250,16 @@ def _provided_item(
     item_id = raw.get("id")
     if not isinstance(item_id, str) or not item_id.strip():
         raise PackError(f"{where} requires a non-empty string id")
+    if face == "providers" and PROVIDER_ID_RE.fullmatch(item_id) is None:
+        raise PackError(
+            f"{where} provider id {item_id!r} must use the adapter/robot grammar "
+            "[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*"
+        )
 
     raw_resource = raw.get("resource")
     raw_entrypoint = raw.get("entrypoint")
     raw_kind = raw.get("kind")
+    raw_params = raw.get("params")
 
     resource: str | None = None
     if raw_resource is not None:
@@ -191,17 +282,13 @@ def _provided_item(
             )
         entrypoint = raw_entrypoint
 
-    if (resource is None) == (entrypoint is None):
-        raise PackError(
-            f"{where} (id {item_id!r}) must declare exactly one of " f"'resource' or 'entrypoint'"
-        )
-
     kind: str | None = None
     if raw_kind is not None:
         if not isinstance(raw_kind, str) or not raw_kind.strip():
             raise PackError(f"{where} (id {item_id!r}) kind must be a non-empty string")
         kind = raw_kind
 
+    params: Mapping[str, Mapping[str, JsonValue]] | None = None
     if face == "scene_presets":
         if entrypoint is not None:
             raise PackError(
@@ -215,8 +302,48 @@ def _provided_item(
                 "resource-backed only; drop 'kind:' (scene providers are declared "
                 "on the 'providers' face with kind: scene)"
             )
+        if raw_params is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene preset item and cannot declare "
+                "'params:'; provider parameter schemas belong to a 'providers' item "
+                "with kind: scene"
+            )
+        if resource is None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene preset item and must be "
+                "resource-backed; declare 'resource: scene_presets/<file>.yaml'"
+            )
+    elif face == "providers" and kind == "scene":
+        if resource is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene provider item and must be "
+                "entrypoint-backed only; declare 'entrypoint: module:factory' and "
+                "drop 'resource:'"
+            )
+        if entrypoint is None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is a scene provider item and must be "
+                "entrypoint-backed; declare 'entrypoint: module:factory'"
+            )
+        params = _scene_provider_params(raw_params, where=where, item_id=item_id)
+    elif raw_params is not None:
+        raise PackError(
+            f"unknown provided-item key(s) ['params'] in {where} (id {item_id!r}); "
+            "'params' is legal only on a 'providers' item with kind: scene"
+        )
 
-    return ProvidedItem(id=item_id, resource=resource, entrypoint=entrypoint, kind=kind)
+    if (resource is None) == (entrypoint is None):
+        raise PackError(
+            f"{where} (id {item_id!r}) must declare exactly one of " f"'resource' or 'entrypoint'"
+        )
+
+    return ProvidedItem(
+        id=item_id,
+        resource=resource,
+        entrypoint=entrypoint,
+        kind=kind,
+        params=params,
+    )
 
 
 def _provides(
@@ -346,9 +473,11 @@ def load_manifest_v1(root: str | Path) -> PackManifestV1:
 __all__ = [
     "FACE_NAMES",
     "MANIFEST_NAME",
+    "PROVIDER_ID_RE",
     "SCHEMA_ID",
     "TRUST_LEVELS",
     "PackManifestV1",
     "ProvidedItem",
+    "freeze_provider_params",
     "load_manifest_v1",
 ]

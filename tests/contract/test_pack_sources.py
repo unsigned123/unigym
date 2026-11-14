@@ -118,6 +118,11 @@ def test_configured_sources_are_collected_in_documented_order(
 
     assert runtime.catalog.packs() == ("env_pack", "yaml_pack", "deps_pack")
     assert runtime.root_by_pack["yaml_pack"] == yaml_root.resolve()
+    assert runtime.origins == {
+        "env_pack": "env:UNIGYM_PACKS",
+        "yaml_pack": "local-yaml",
+        "deps_pack": "deps-root",
+    }
 
 
 def test_explicit_roots_ignore_configured_sources(
@@ -331,6 +336,13 @@ def test_entry_point_opt_in_joins_the_configured_order(
     )
     assert runtime.root_by_pack["yaml_pack"] == yaml_root.resolve()
     assert runtime.root_by_pack["alpha_pack"] == alpha_root.resolve()
+    assert runtime.origins == {
+        "env_pack": "env:UNIGYM_PACKS",
+        "yaml_pack": "local-yaml",
+        "alpha_pack": "entry-point",
+        "zeta_pack": "entry-point",
+        "deps_pack": "deps-root",
+    }
 
 
 def test_explicit_roots_reject_entry_point_opt_in(

@@ -8,15 +8,23 @@ pack.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
+from unigym._typing import JsonValue
+
 from . import PackError
-from .schema import FACE_NAMES, PackManifestV1, ProvidedItem
+from .schema import FACE_NAMES, PackManifestV1, ProvidedItem, freeze_provider_params
 
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """One provided item flattened into the cross-pack catalog."""
+    """One provided item flattened into the cross-pack catalog.
+
+    ``params`` is the scene-provider parameter schema, deep-frozen by the same
+    boundary the manifest uses (read-only mappings, tuple sequences); it is
+    ``None`` for every other item.
+    """
 
     pack: str
     face: str
@@ -24,6 +32,12 @@ class CatalogEntry:
     resource: str | None
     entrypoint: str | None
     kind: str | None
+    params: Mapping[str, Mapping[str, JsonValue]] | None = None
+
+    def __post_init__(self) -> None:
+        """Deep-freeze the optional provider parameter schema (defense in depth)."""
+        if self.params is not None:
+            object.__setattr__(self, "params", freeze_provider_params(self.params))
 
 
 def _entry(pack: str, face: str, item: ProvidedItem) -> CatalogEntry:
@@ -35,6 +49,7 @@ def _entry(pack: str, face: str, item: ProvidedItem) -> CatalogEntry:
         resource=item.resource,
         entrypoint=item.entrypoint,
         kind=item.kind,
+        params=item.params,
     )
 
 

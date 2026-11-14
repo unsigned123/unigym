@@ -53,6 +53,7 @@ def test_catalog_entry_returns_the_immutable_declared_entry() -> None:
         resource="scene_presets/tabletop.yaml",
         entrypoint=None,
         kind=None,
+        params=None,
     )
     with pytest.raises(FrozenInstanceError):
         setattr(entry, "id", "changed")

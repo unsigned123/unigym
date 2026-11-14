@@ -50,6 +50,7 @@ __all__ = [
     "SceneProvider",
     "SceneProviderContext",
     "SceneProviderRegistrySnapshot",
+    "attribute_scene_provider",
     "build_scene_from_provider",
     "register_inline_scene_provider",
     "register_scene_provider",
@@ -218,6 +219,47 @@ def register_scene_provider(
     if origin is not None:
         _SCENE_PROVIDER_ORIGINS[name] = origin
     return checked
+
+
+def attribute_scene_provider(
+    name: str,
+    origin: ProviderOrigin,
+    *,
+    params: Mapping[str, ProviderParamSpec] | None = None,
+) -> None:
+    """Attach runtime-owned provenance (and an authoritative schema) to a provider.
+
+    This is the pack runtime's attribution boundary, not pack-author API: pack
+    code registers through :func:`register_scene_provider` and never passes an
+    origin.  It may only label an already-registered public provider whose
+    current origin is absent, ``unknown`` or ``pack-code``; a ``manifest`` or
+    ``inline`` origin is never relabeled.  ``params`` is an already-normalized
+    manifest schema; the manifest is authoritative, so it replaces an absent or
+    matching code mirror.
+
+    Raises:
+        ValueError: The provider is unknown, *origin* is not a
+            :class:`ProviderOrigin`, or the current origin must not be relabeled.
+    """
+    if name not in _SCENE_PROVIDERS:
+        raise ValueError(
+            f"scene provider {name!r} is not registered "
+            f"(registered: {registered_scene_providers()})"
+        )
+    if not isinstance(origin, ProviderOrigin):
+        raise ValueError(
+            f"scene provider {name!r}: origin must be a ProviderOrigin, "
+            f"got {type(origin).__name__}"
+        )
+    existing = _SCENE_PROVIDER_ORIGINS.get(name)
+    if existing is not None and existing.kind not in ("unknown", "pack-code"):
+        raise ValueError(
+            f"scene provider {name!r} already has a {existing.kind!r} origin; "
+            "only an unattributed or pack-code registration may be labeled"
+        )
+    _SCENE_PROVIDER_ORIGINS[name] = origin
+    if params is not None:
+        _SCENE_PROVIDER_PARAMS[name] = MappingProxyType(dict(params))
 
 
 def register_inline_scene_provider(name: str, factory: SceneProvider) -> SceneProvider:

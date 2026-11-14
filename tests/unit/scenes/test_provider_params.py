@@ -131,6 +131,27 @@ def test_fill_and_validate_fills_defaults_and_rejects_bad_values() -> None:
         )
 
 
+def test_partial_validation_supports_preset_load_before_run_overrides() -> None:
+    """Preset load validates declared values but may defer a required parameter."""
+    schema = normalize_manifest_params(
+        {
+            "style": {"type": "int", "default": 1},
+            "seed": {"type": "int"},
+        }
+    )
+
+    assert fill_and_validate(schema, {}, provider="acme.table_top", require_all=False) == {
+        "style": 1
+    }
+
+    with pytest.raises(SceneProviderParamError, match="missing required parameter"):
+        fill_and_validate(schema, {}, provider="acme.table_top")
+    with pytest.raises(SceneProviderParamError, match="unknown parameter"):
+        fill_and_validate(schema, {"extra": 1}, provider="acme.table_top", require_all=False)
+    with pytest.raises(SceneProviderParamError, match="must be int"):
+        fill_and_validate(schema, {"seed": True}, provider="acme.table_top", require_all=False)
+
+
 def test_mutable_defaults_are_fresh_per_dispatch() -> None:
     """Each dispatch deep-copies list/dict defaults instead of sharing them."""
     schema = normalize_code_params({"tare": (list, [1, [2]]), "table": (dict, {"a": {"b": 1}})})

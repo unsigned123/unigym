@@ -24,7 +24,6 @@ types/choices BEFORE calling the provider.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import TypeGuard, cast
 
@@ -101,7 +100,12 @@ def _type_name(value: object, *, where: str) -> str:
 
 
 def _matches(type_name: str, value: object) -> bool:
-    """Whether *value* is a legal JSON value of *type_name*."""
+    """Whether *value* is a legal JSON value of *type_name*.
+
+    A ``list`` also accepts a tuple: a manifest declaration is deep-frozen to
+    tuples, and the value normalizer below copies any sequence back to a fresh
+    mutable JSON list.
+    """
     if type_name == "null":
         return value is None
     if type_name == "bool":
@@ -113,8 +117,25 @@ def _matches(type_name: str, value: object) -> bool:
     if type_name == "str":
         return isinstance(value, str)
     if type_name == "list":
-        return isinstance(value, list)
+        return isinstance(value, (list, tuple))
     return isinstance(value, Mapping)
+
+
+def _fresh_json(value: object) -> JsonValue:
+    """Copy one validated JSON value into fresh mutable JSON containers.
+
+    Declarations may be frozen (``MappingProxyType`` mappings, tuple
+    sequences), so :func:`copy.deepcopy` cannot be used.  This walk rebuilds
+    dicts/lists and returns scalars unchanged, keeping every dispatch's filled
+    value independent of the stored schema.
+    """
+    if _is_mapping(value):
+        return {str(key): _fresh_json(item) for key, item in value.items()}
+    if _is_sequence(value):
+        return [_fresh_json(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise SceneProviderParamError(f"parameter value {value!r} is not JSON data")
 
 
 def _validate_value(type_name: str, parameter: str, value: object, *, where: str) -> JsonValue:
@@ -124,10 +145,10 @@ def _validate_value(type_name: str, parameter: str, value: object, *, where: str
             f"{where}: parameter {parameter!r} must be {type_name}, got " f"{type(value).__name__}"
         )
     if type_name in ("dict", "list"):
-        # ``_matches`` proved a Mapping/list at runtime; the deep copy keeps a
-        # validated default from aliasing the declaration, the stored schema or
-        # another dispatch's filled mapping.
-        return cast(JsonValue, deepcopy(value))
+        # ``_matches`` proved a Mapping/sequence at runtime; the fresh copy
+        # keeps a validated default from aliasing the declaration, the stored
+        # schema or another dispatch's filled mapping.
+        return _fresh_json(value)
     # ``_matches`` proved the scalar type; this cast records the validated fact.
     return cast(JsonValue, value)
 
@@ -295,6 +316,7 @@ def fill_and_validate(
     *,
     provider: str,
     preset: str | None = None,
+    require_all: bool = True,
 ) -> dict[str, JsonValue]:
     """Fill defaults and validate supplied values against *schema*.
 
@@ -307,9 +329,13 @@ def fill_and_validate(
         params: The supplied parameter mapping.
         provider: The provider name named in every error.
         preset: The preset catalog id when the dispatch came from a preset.
+        require_all: When false, missing required parameters are allowed.  A
+            preset loader uses this to validate the values it declares before a
+            run-level override can supply a required parameter; the dispatch
+            call still requires the complete mapping.
 
     Returns:
-        A fresh mapping with defaults filled and every value validated.
+        A fresh mapping with defaults filled and every supplied value validated.
 
     Raises:
         SceneProviderParamError: The supplied mapping is not a mapping, names
@@ -327,17 +353,24 @@ def fill_and_validate(
             f"(declared: {sorted(schema)})"
         )
     missing = [name for name, spec in schema.items() if spec.required and name not in params]
-    if missing:
+    if require_all and missing:
         raise SceneProviderParamError(
             f"{where}: missing required parameter(s) {sorted(missing)} "
             f"(declared: {sorted(schema)})"
         )
     filled: dict[str, JsonValue] = {}
     for name, spec in schema.items():
+        if name not in params:
+            if spec.required:
+                # Only reachable with ``require_all=False``: the value is
+                # supplied by a run-level override before dispatch.
+                continue
+            supplied = spec.default
+        else:
+            supplied = params[name]
         # Every dispatch validates its value, including the default branch:
-        # validation deep-copies mutable defaults so no two dispatches (or the
+        # validation rebuilds mutable containers so no two dispatches (or the
         # stored schema) ever share one list/dict instance.
-        supplied = params[name] if name in params else spec.default
         value = _validate_value(spec.type, name, supplied, where=where)
         if spec.choices is not None and not any(value == choice for choice in spec.choices):
             raise SceneProviderParamError(

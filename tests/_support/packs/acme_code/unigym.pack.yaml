@@ -9,3 +9,12 @@ provides:
     - id: acme_code.dynamic_assets
       kind: asset_generator
       entrypoint: acme_pack:register
+    - id: acme_code.table_top
+      kind: scene
+      entrypoint: acme_pack:table_top
+      params:
+        style:
+          type: int
+          default: 1
+        seed:
+          type: int

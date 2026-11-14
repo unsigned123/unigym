@@ -74,6 +74,7 @@ def test_content_fixture_loads_with_exact_entries() -> None:
                 resource="runs/demo.yaml",
                 entrypoint=None,
                 kind=None,
+                params=None,
             ),
         ),
         "scene_presets": (
@@ -82,6 +83,7 @@ def test_content_fixture_loads_with_exact_entries() -> None:
                 resource="scene_presets/tabletop.yaml",
                 entrypoint=None,
                 kind=None,
+                params=None,
             ),
         ),
         "assets": (
@@ -90,6 +92,7 @@ def test_content_fixture_loads_with_exact_entries() -> None:
                 resource="assets/cup/asset.yaml",
                 entrypoint=None,
                 kind=None,
+                params=None,
             ),
         ),
     }
@@ -112,6 +115,17 @@ def test_code_fixture_loads_with_trust_and_provider_entrypoint() -> None:
                 resource=None,
                 entrypoint="acme_pack:register",
                 kind="asset_generator",
+                params=None,
+            ),
+            ProvidedItem(
+                id="acme_code.table_top",
+                resource=None,
+                entrypoint="acme_pack:table_top",
+                kind="scene",
+                params={
+                    "style": {"type": "int", "default": 1},
+                    "seed": {"type": "int"},
+                },
             ),
         )
     }
@@ -134,6 +148,7 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             resource="runs/demo.yaml",
             entrypoint=None,
             kind=None,
+            params=None,
         ),
         CatalogEntry(
             pack="acme_content",
@@ -142,6 +157,7 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             resource="scene_presets/tabletop.yaml",
             entrypoint=None,
             kind=None,
+            params=None,
         ),
         CatalogEntry(
             pack="acme_content",
@@ -150,6 +166,7 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             resource="assets/cup/asset.yaml",
             entrypoint=None,
             kind=None,
+            params=None,
         ),
         CatalogEntry(
             pack="acme_code",
@@ -158,6 +175,19 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             resource=None,
             entrypoint="acme_pack:register",
             kind="asset_generator",
+            params=None,
+        ),
+        CatalogEntry(
+            pack="acme_code",
+            face="providers",
+            id="acme_code.table_top",
+            resource=None,
+            entrypoint="acme_pack:table_top",
+            kind="scene",
+            params={
+                "style": {"type": "int", "default": 1},
+                "seed": {"type": "int"},
+            },
         ),
     )
     assert catalog.entries(face="scene_presets") == (
@@ -168,9 +198,13 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
             resource="scene_presets/tabletop.yaml",
             entrypoint=None,
             kind=None,
+            params=None,
         ),
     )
-    assert [entry.id for entry in catalog.entries(face="providers")] == ["acme_code.dynamic_assets"]
+    assert [entry.id for entry in catalog.entries(face="providers")] == [
+        "acme_code.dynamic_assets",
+        "acme_code.table_top",
+    ]
     assert catalog.entries(face="tasks") == ()
 
 
@@ -179,7 +213,7 @@ def test_catalog_fixture_entries_are_unique_by_face_and_id() -> None:
 
     keys = [(entry.face, entry.id) for entry in catalog.entries()]
 
-    assert len(keys) == len(set(keys)) == 4
+    assert len(keys) == len(set(keys)) == 5
 
 
 def test_manifest_and_catalog_loading_does_not_import_pack_python() -> None:

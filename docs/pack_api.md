@@ -121,6 +121,12 @@ provides:
     - id: acme.arm
       kind: robot
       resource: robots/acme_arm.yaml
+    - id: acme.table_top
+      kind: scene
+      entrypoint: acme_scenes:table_top
+      params:
+        style: {type: int, default: 1}
+        seed: {type: int}
 ```
 
 ### Required fields
@@ -163,16 +169,54 @@ Each item is a mapping with:
 
 | Key | Rule |
 | --- | --- |
-| `id` | required, non-empty string; namespaced by convention as `<pack>.<item>` |
+| `id` | required, non-empty string; namespaced by convention as `<pack>.<item>`; every `providers` id uses the adapter/robot grammar `[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*` |
 | `resource` | exactly one of `resource` / `entrypoint` |
 | `entrypoint` | exactly one of `resource` / `entrypoint`; `module:attribute` |
-| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator`, `adapter` or `robot` |
+| `kind` | optional non-empty string naming a provider kind, e.g. `asset_generator`, `adapter`, `robot` or `scene` |
+| `params` | optional inline provider parameter schema; legal only on a `providers` item with `kind: scene` |
 
 An item with neither locator or with both locators is rejected. An
 `entrypoint` on any item requires the manifest `trust: code`. Unknown item keys
 are rejected. A `kind: robot` provider is either entrypoint-backed (a factory)
 or resource-backed (one `unigym.robot/1` document); a `kind: adapter` provider
-is entrypoint-only.
+is entrypoint-only. A `kind: scene` provider is entrypoint-only, may declare
+`params`, and requires `trust: code`. A `scene_presets` item is resource-only:
+`entrypoint`, `kind` and `params` are rejected on that face.
+
+### Provider parameter schema
+
+A `kind: scene` provider item may declare its parameter schema inline:
+
+```yaml
+params:
+  style:  {type: int, default: 1}
+  seed:   {type: int}                  # no default -> required
+  layout: {type: str, default: default, choices: [default, dense]}
+```
+
+One declaration carries `type` and `default` together; there is no separate
+defaults table. The declaration keys are `type` (required), `default`
+(optional) and `choices` (optional); unknown keys are rejected. `type` is one
+of `int`, `float`, `str`, `bool`, `list`, `dict`, `null`. Python `bool` is not
+an `int`; `float` accepts JSON integers and floats but not booleans. A parameter
+without a default is required; one with a default is optional and filled at
+dispatch. `choices` is a non-empty list of distinct values compatible with the
+type, and an explicit default must be one of them.
+
+The manifest schema is the public authority. Provider code may mirror it at
+registration (the `register_scene_provider(..., params=...)` compact form); the
+mirror must normalize equal. A differing schema, and equally a one-sided
+declaration (the manifest item declares `params` but the code registration does
+not, or the reverse), is an activation `PackError` naming the provider, both
+schemas and the differing keys. Declare the schema on both sides or on neither.
+An empty `params: {}` mapping declares zero parameters: dispatch then rejects
+every supplied key. It is therefore a declaration on that side, not
+interchangeable with omitting `params`, so it drifts against a code mirror that
+declares no schema (and the reverse). The stored schema is deep-frozen:
+mappings are read-only and sequences are tuples, so callers cannot mutate a
+validated declaration. At dispatch the runtime fills defaults, rejects unknown
+supplied keys and validates types/choices before calling the provider; the
+provider may still reject a value semantically.
 
 ### Resource rules
 
@@ -212,8 +256,8 @@ catalog.entries(face="scene_presets")  # filtered by face
 catalog.entry("scene_presets", "alpha.tabletop")  # one CatalogEntry by exact id
 ```
 
-`CatalogEntry` carries `pack`, `face`, `id`, `resource`, `entrypoint` and
-`kind`.
+`CatalogEntry` carries `pack`, `face`, `id`, `resource`, `entrypoint`, `kind`
+and `params` (the deep-frozen scene-provider schema, `None` otherwise).
 
 `catalog.entry(face, id)` is an exact lookup of one already-loaded item. It
 validates `face` against the declared vocabulary, then matches `id` on that
@@ -888,6 +932,15 @@ content-fill spec; a fill needs a composed scene. `backend_params.<backend>.init
 must use the runtime shape (`type:` or `module:`, with an optional `params:`
 mapping), and `base` currently accepts only `joint: fixed`.
 
+A catalog preset's `provider:` must name a `kind: scene` item declared by the
+**same pack**. A provider owned by another pack is a teaching error naming both
+packs; a provider only registered dynamically by pack code has no declarable
+owner and is not referenceable from a catalog preset. When the manifest item
+declares a `params` schema, `load_scene_preset` validates the preset's declared
+values (unknown keys, types and choices) at load. A required parameter may be
+omitted from the preset and supplied by a run-level `scene_preset` override;
+dispatch still requires the complete mapping.
+
 Resolution goes through `runtime.resource_for("scene_presets", <id>)` and
 `unigym.scene_presets` (`load_scene_preset`, `resolve_scene_plan`,
 `apply_scene_preset`). The legacy `scenes` face, `scene:` / `scene_pack:` /
@@ -1028,11 +1081,14 @@ and it does not inspect the caller's frame.
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
   normal `importlib`, and called with one `PackContext` argument;
 - after the manifest entrypoint (or without it), manifest `kind: adapter` items
-  are imported and registered, then `kind: robot` items are registered. A robot
+  are imported and registered, then `kind: robot` items are registered, then
+  `kind: scene` items are registered. A robot
   item is entrypoint-backed or resource-backed; a resource-only robot list
   needs no `python/` directory and never mutates `sys.path`, while a mixed list
   adds the first entrypoint item's `python/` boundary. All robot items are
-  loaded and validated before registration;
+  loaded and validated before registration. Scene provider items are
+  entrypoint-only; all of them are validated before any registration and a
+  manifest/code schema drift is an activation error;
 - there is no zero-argument fallback: a legacy `register()` entrypoint fails
   to activate and is not supported;
 - the pack root's `python/` directory is the explicit import boundary. It is
@@ -1049,6 +1105,51 @@ and it does not inspect the caller's frame.
 returns a `tuple[ActivationHandle, ...]`. It uses the same per-runtime cache,
 so a repeated call returns the same handles without re-running an entrypoint.
 Content packs remain no-ops.
+
+### Scene provider activation and provenance
+
+Manifest `kind: scene` items are the declarable scene-provider face. Activation
+imports each item entrypoint through the pack `python/` boundary and registers
+the target under the item id (`ActivationHandle.scene_providers` records the
+item ids in declaration order). Validation happens before any registration:
+the entrypoint resolves, the target is a documented callable and not a `Scene`
+instance, the id is a free adapter-grammar name, and the inline parameter
+schema is valid. A later invalid item leaves no earlier scene provider
+registered.
+
+Provenance is process/diagnostic data and is never serialized into a run
+config, ledger, shard or `to_config` output:
+
+- a manifest item yields the exact
+  `ProviderOrigin(kind="manifest", pack, pack_version, root, discovered_by,
+  face="providers", item_id, entrypoint, activation_entrypoint)`;
+- a provider registered by the pack's own entrypoint without a manifest item is
+  `kind="pack-code"` with `item_id=None`;
+- a registration outside any activation window reports
+  `ProviderOrigin.unknown()` and is never relabeled;
+- an inline `World.inline` provider is `kind="inline"` and is excluded from the
+  public provider queries.
+
+A manifest item may adopt a provider the pack entrypoint already registered
+under the same name: the two schemas must normalize equal (the manifest schema
+is authoritative), the registered factory must be the item entrypoint target,
+and the origin becomes the exact manifest origin. A differing schema, or a
+one-sided declaration (only the manifest or only the code registration declares
+`params`), is a teaching `PackError` naming the provider, both schemas and the
+differing keys.
+
+`scene_provider_providers(kind="scene")` returns `ProviderInfo(name, kind,
+origin, params_schema)` records; `scene_provider_origin(name)` returns one
+provider's origin. `PackRuntime.origins` carries the discovery label per pack
+(`explicit-root`, `env:UNIGYM_PACKS`, `local-yaml`, `entry-point`, `deps-root`);
+a hand-built runtime reports `unknown`. A failed activation restores the
+adapter, robot and scene-provider registries to their prior contents, including
+names the pack-level entrypoint registered itself.
+
+`unigym.scenes.providers.attribute_scene_provider(name, origin, *, params=None)`
+is the runtime-owned attribution boundary behind those origins. It is not
+re-exported from `unigym.pack_api`: pack code registers through
+`register_scene_provider` and never passes an origin.
 
 ### Adapter registration
 

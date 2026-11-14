@@ -28,7 +28,9 @@ CODE_PYTHON_ROOT = (CODE_ROOT / "python").resolve()
 def _drop_pack_modules() -> None:
     """Remove fixture pack modules so every test observes a fresh import."""
     for name in [
-        name for name in sys.modules if name == "acme_pack" or name.startswith("acme_pack.")
+        name
+        for name in sys.modules
+        if name == "acme_pack" or name.startswith("acme_pack.") or name.startswith("scene_")
     ]:
         del sys.modules[name]
 
@@ -51,6 +53,16 @@ def _isolate_robot_registry():
     snapshot = snapshot_robots()
     yield
     restore_robots(snapshot)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_scene_providers():
+    """Restore the process-global scene-provider registry after every test."""
+    from unigym.scenes.providers import restore_scene_providers, snapshot_scene_providers
+
+    snapshot = snapshot_scene_providers()
+    yield
+    restore_scene_providers(snapshot)
 
 
 def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[object]:
@@ -83,7 +95,12 @@ def test_discover_content_and_code_roots_in_order() -> None:
         "acme_content.tabletop",
         "acme_content.cup",
         "acme_code.dynamic_assets",
+        "acme_code.table_top",
     ]
+    assert runtime.origins == {
+        "acme_content": "explicit-root",
+        "acme_code": "explicit-root",
+    }
     assert runtime.root_by_pack["acme_content"] == CONTENT_ROOT.resolve()
     assert runtime.root_by_pack["acme_code"] == CODE_ROOT.resolve()
 
@@ -182,7 +199,11 @@ def test_code_activation_imports_and_calls_entrypoint(
 
     handle = runtime.activate("acme_code")
 
-    assert handle == ActivationHandle(pack="acme_code", entrypoint="acme_pack:register")
+    assert handle == ActivationHandle(
+        pack="acme_code",
+        entrypoint="acme_pack:register",
+        scene_providers=("acme_code.table_top",),
+    )
     assert len(contexts) == 1
     context = contexts[0]
     assert isinstance(context, PackContext)
@@ -212,7 +233,11 @@ def test_fixture_code_entrypoint_accepts_a_pack_context() -> None:
 
     handle = runtime.activate("acme_code")
 
-    assert handle == ActivationHandle(pack="acme_code", entrypoint="acme_pack:register")
+    assert handle == ActivationHandle(
+        pack="acme_code",
+        entrypoint="acme_pack:register",
+        scene_providers=("acme_code.table_top",),
+    )
 
 
 def test_content_activation_is_a_noop() -> None:
@@ -628,7 +653,7 @@ def test_manifest_robot_target_must_be_callable(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("item_id", "reason"),
     [
-        ("Acme.Arm", "lowercase snake_case"),
+        ("Acme.Arm", "adapter/robot grammar"),
     ],
 )
 def test_manifest_robot_name_is_validated_before_registration(
@@ -644,10 +669,9 @@ def test_manifest_robot_name_is_validated_before_registration(
         ),
         {"robot_name_module": _ROBOT_SOURCE},
     )
-    runtime = discover([root])
 
     with pytest.raises(PackError) as info:
-        runtime.activate("robot_bad_name")
+        discover([root])
 
     message = str(info.value)
     assert item_id in message
@@ -805,3 +829,202 @@ def test_entrypoint_registered_robot_does_not_appear_in_the_handle(tmp_path: Pat
 
     assert "acme.dynamic" in ROBOT_REGISTRY
     assert "acme.arm" in ROBOT_REGISTRY
+
+
+_SCENE_PROVIDER_SOURCE = (
+    '"""Scene provider fixture."""\n\n'
+    "from __future__ import annotations\n\n"
+    "from unigym.scenes.scene_ir import Scene\n\n\n"
+    "def table_top(params, context):\n"
+    '    """Build the tabletop scene."""\n'
+    '    return Scene(name="tabletop")\n'
+)
+
+
+def _scene_manifest(
+    name: str,
+    providers: list[dict[str, object]],
+    *,
+    entrypoint: str | None = None,
+) -> dict[str, object]:
+    document: dict[str, object] = {
+        "schema": "unigym.pack/1",
+        "name": name,
+        "version": "1.0.0",
+        "api": 1,
+        "trust": "code",
+        "provides": {"providers": providers},
+    }
+    if entrypoint is not None:
+        document["entrypoint"] = entrypoint
+    return document
+
+
+def test_manifest_scene_provider_registers_and_reports_the_handle(tmp_path: Path) -> None:
+    """A kind: scene item registers its entrypoint factory and is recorded."""
+    root = tmp_path / "scene_pack"
+    _write_code_pack(
+        root,
+        _scene_manifest(
+            "scene_pack",
+            [
+                {
+                    "id": "acme.table_top",
+                    "kind": "scene",
+                    "entrypoint": "scene_module:table_top",
+                    "params": {"style": {"type": "int", "default": 1}},
+                }
+            ],
+        ),
+        {"scene_module": _SCENE_PROVIDER_SOURCE},
+    )
+    runtime = discover([root])
+
+    handle = runtime.activate("scene_pack")
+
+    from unigym.scenes.providers import build_scene_from_provider, registered_scene_providers
+
+    assert handle.scene_providers == ("acme.table_top",)
+    assert "acme.table_top" in registered_scene_providers()
+    assert build_scene_from_provider("acme.table_top", {}).name == "tabletop"
+
+
+def test_scene_provider_rollback_removes_entrypoint_registrations(tmp_path: Path) -> None:
+    """A later bad scene item restores the registry exactly (no dynamic leak)."""
+    source = _SCENE_PROVIDER_SOURCE + (
+        "\n\nfrom unigym.pack_api import register_scene_provider\n\n\n"
+        "def dynamic(params, context):\n"
+        '    """Build the dynamic scene."""\n'
+        '    return Scene(name="dynamic")\n\n\n'
+        "def register(context):\n"
+        "    register_scene_provider('acme.dynamic', dynamic)\n"
+    )
+    root = tmp_path / "scene_rollback"
+    _write_code_pack(
+        root,
+        _scene_manifest(
+            "scene_rollback",
+            [{"id": "acme.broken", "kind": "scene", "entrypoint": "scene_rollback_module:missing"}],
+            entrypoint="scene_rollback_module:register",
+        ),
+        {"scene_rollback_module": source},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError) as info:
+        runtime.activate("scene_rollback")
+
+    assert "acme.broken" in str(info.value)
+    from unigym.scenes.providers import registered_scene_providers
+
+    assert "acme.dynamic" not in registered_scene_providers()
+    assert "acme.broken" not in registered_scene_providers()
+
+
+def test_mixed_adapter_robot_and_scene_failure_rolls_back_every_registry(
+    tmp_path: Path,
+) -> None:
+    """A failing scene item restores the adapter, robot and scene registries."""
+    from unigym.adapters import ADAPTER_REGISTRY
+
+    adapters_before = set(ADAPTER_REGISTRY)
+    adapter_bases = (
+        "    def __init__(self, num_envs=1, device='cpu', **kwargs):\n"
+        "        pass\n\n"
+        "    def get_obs_requests(self):\n"
+        "        return []\n\n"
+        "    @property\n"
+        "    def obs_dim(self):\n"
+        "        return 0\n\n"
+        "    @property\n"
+        "    def control_dt(self):\n"
+        "        return 0.02\n\n"
+        "    def compute_obs(self, obs_cache, cmd, env):\n"
+        "        return None\n\n"
+        "    def act(self, obs):\n"
+        "        return None\n\n"
+        "    def postprocess_action(self, raw):\n"
+        "        return {}\n"
+    )
+    source = (
+        "from __future__ import annotations\n\n"
+        "from unigym.adapters import Adapter\n"
+        "from unigym.pack_api import register_adapter, register_robot\n"
+        "from unigym.robots.base import RobotProfile\n\n\n"
+        "class MixedAdapter(Adapter):\n"
+        + adapter_bases
+        + "\n\nclass DynamicAdapter(Adapter):\n"
+        + adapter_bases
+        + "\n\n"
+        "def make_arm():\n"
+        "    return RobotProfile(\n"
+        "        name='acme.arm',\n"
+        "        joint_sets={'body': ('shoulder',)},\n"
+        "        default_joint_pos={'shoulder': 0.0},\n"
+        "        assets=None,\n"
+        "        action_faces={},\n"
+        "        base_body=None,\n"
+        "        foot_bodies=(),\n"
+        "        body_sets={},\n"
+        "        body_bindings={},\n"
+        "    )\n\n\n"
+        "def make_dynamic():\n"
+        "    return RobotProfile(\n"
+        "        name='acme.dynamic_robot',\n"
+        "        joint_sets={'body': ('shoulder',)},\n"
+        "        default_joint_pos={'shoulder': 0.0},\n"
+        "        assets=None,\n"
+        "        action_faces={},\n"
+        "        base_body=None,\n"
+        "        foot_bodies=(),\n"
+        "        body_sets={},\n"
+        "        body_bindings={},\n"
+        "    )\n\n\n"
+        "def register(context):\n"
+        "    register_adapter('acme.dynamic_adapter', DynamicAdapter)\n"
+        "    register_robot('acme.dynamic_robot', make_dynamic)\n"
+    )
+    root = tmp_path / "mixed_rollback"
+    _write_code_pack(
+        root,
+        _robot_manifest(
+            "mixed_rollback",
+            [
+                {
+                    "id": "acme.mixed_adapter",
+                    "kind": "adapter",
+                    "entrypoint": "mixed_rollback_module:MixedAdapter",
+                },
+                {
+                    "id": "acme.arm",
+                    "kind": "robot",
+                    "entrypoint": "mixed_rollback_module:make_arm",
+                },
+                {
+                    "id": "acme.broken",
+                    "kind": "scene",
+                    "entrypoint": "mixed_rollback_module:missing",
+                },
+            ],
+            entrypoint="mixed_rollback_module:register",
+        ),
+        {"mixed_rollback_module": source},
+    )
+    runtime = discover([root])
+
+    try:
+        with pytest.raises(PackError) as info:
+            runtime.activate("mixed_rollback")
+        assert "acme.broken" in str(info.value)
+
+        from unigym.robots import ROBOT_REGISTRY
+        from unigym.scenes.providers import registered_scene_providers
+
+        assert "acme.dynamic_adapter" not in ADAPTER_REGISTRY
+        assert "acme.mixed_adapter" not in ADAPTER_REGISTRY
+        assert "acme.dynamic_robot" not in ROBOT_REGISTRY
+        assert "acme.arm" not in ROBOT_REGISTRY
+        assert registered_scene_providers() == []
+    finally:
+        for name in set(ADAPTER_REGISTRY) - adapters_before:
+            del ADAPTER_REGISTRY[name]

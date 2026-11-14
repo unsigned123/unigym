@@ -26,6 +26,11 @@ import yaml
 
 from unigym._typing import JsonValue
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
+from unigym.scenes.provider_params import (
+    SceneProviderParamError,
+    fill_and_validate,
+    normalize_manifest_params,
+)
 from unigym.scenes.recipe import normalize_content_keys
 
 if TYPE_CHECKING:
@@ -353,6 +358,73 @@ def _parse_document(
     )
 
 
+def _validate_provider_reference(
+    preset: ScenePreset,
+    *,
+    ref: str,
+    pack: str,
+    runtime: PackRuntime,
+) -> None:
+    """Enforce same-pack ownership and manifest-schema validation at load.
+
+    A catalog preset may name only a ``kind: scene`` provider declared by its
+    own pack.  A dynamically registered pack provider has no declarable owner
+    and is not referenceable from a catalog preset.  When the manifest item
+    carries a ``params`` schema, the preset's declared values are validated
+    (unknown keys, types and choices) here; a required parameter may still be
+    supplied by a run-level override before dispatch.
+    """
+    provider = preset.provider
+    if provider is None:
+        return
+    manifest = runtime.catalog.get(pack)
+    match = next(
+        (
+            item
+            for item in manifest.provides.get("providers", ())
+            if item.kind == "scene" and item.id == provider
+        ),
+        None,
+    )
+    if match is None:
+        owners = sorted(
+            {
+                entry.pack
+                for entry in runtime.catalog.entries("providers")
+                if entry.kind == "scene" and entry.id == provider
+            }
+        )
+        if owners:
+            raise ScenePresetError(
+                f"scene preset {ref!r} declares provider {provider!r} owned by pack "
+                f"{owners[0]!r}; a catalog preset may reference only a kind: scene "
+                f"provider declared by its own pack {pack!r}"
+            )
+        raise ScenePresetError(
+            f"scene preset {ref!r} declares provider {provider!r}, which pack {pack!r} "
+            "does not declare as a kind: scene provider; catalog presets may reference "
+            "only a manifest-declared same-pack scene provider"
+        )
+    if match.params is None:
+        return
+    try:
+        schema = normalize_manifest_params(match.params)
+    except SceneProviderParamError as err:
+        raise ScenePresetError(
+            f"scene preset {ref!r}: provider {provider!r} manifest params are invalid: {err}"
+        ) from err
+    try:
+        fill_and_validate(
+            schema,
+            preset.params,
+            provider=provider,
+            preset=ref,
+            require_all=False,
+        )
+    except SceneProviderParamError as err:
+        raise ScenePresetError(f"scene preset {ref!r}: {err}") from err
+
+
 def load_scene_preset(ref: str, runtime: PackRuntime) -> ScenePreset:
     """Resolve one exact ``scene_presets`` catalog id to its parsed preset."""
     if not isinstance(ref, str) or not ref:
@@ -364,6 +436,7 @@ def load_scene_preset(ref: str, runtime: PackRuntime) -> ScenePreset:
             f"scene preset ref {ref!r} requires a pack runtime: pass runtime=... | "
             "hint: scene preset refs are exact PackRuntime 'scene_presets' catalog ids"
         )
+    entry = runtime.catalog.entry("scene_presets", ref)
     path: Path = runtime.resource_for("scene_presets", ref)
     try:
         raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -376,7 +449,9 @@ def load_scene_preset(ref: str, runtime: PackRuntime) -> ScenePreset:
         raise ScenePresetError(
             f"scene preset {ref!r} at {path} must be a mapping, got {type(doc).__name__}"
         )
-    return _parse_document(doc, source=f"scene preset {ref!r}", catalog_id=ref)
+    preset = _parse_document(doc, source=f"scene preset {ref!r}", catalog_id=ref)
+    _validate_provider_reference(preset, ref=ref, pack=entry.pack, runtime=runtime)
+    return preset
 
 
 def _merge(base: object, override: object) -> JsonValue:

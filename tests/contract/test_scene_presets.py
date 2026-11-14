@@ -77,11 +77,18 @@ def _pack_root(tmp_path: Path, preset_text: str) -> Path:
         "name: acme_scene\n"
         "version: 1.0.0\n"
         "api: 1\n"
-        "trust: content\n"
+        "trust: code\n"
         "provides:\n"
         "  scene_presets:\n"
         "    - id: acme_scene.tabletop\n"
-        "      resource: scene_presets/tabletop.yaml\n",
+        "      resource: scene_presets/tabletop.yaml\n"
+        "  providers:\n"
+        "    - id: acme.table_top\n"
+        "      kind: scene\n"
+        "      entrypoint: acme_scenes:table_top\n"
+        "      params:\n"
+        "        style: {type: int, default: 1}\n"
+        "        seed: {type: int}\n",
         encoding="utf-8",
     )
     (pack / "scene_presets" / "tabletop.yaml").write_text(preset_text, encoding="utf-8")
@@ -518,3 +525,77 @@ def test_content_only_fixture_preset_builds_without_activation() -> None:
     assert spec.cfg["world_base"]["mjcf"].endswith("acme_content/worlds/table.xml")
     assert spec.props == {"types": [{"name": "table_plate"}]}
     assert "scene_provider" not in spec.backend_params
+
+
+def test_catalog_preset_provider_must_be_declared_by_the_same_pack(tmp_path: Path) -> None:
+    """A dynamically registered provider is not referenceable from a preset."""
+    text = PROVIDER_BACKED.replace("provider: acme.table_top", "provider: acme.other")
+    runtime = _runtime(tmp_path, text)
+
+    with pytest.raises(ScenePresetError, match="does not declare as a kind: scene provider"):
+        load_scene_preset("acme_scene.tabletop", runtime)
+
+
+def test_catalog_preset_provider_owned_by_another_pack_names_both(tmp_path: Path) -> None:
+    """A cross-pack provider reference names the preset pack and the owner."""
+    preset_pack = tmp_path / "preset_pack"
+    (preset_pack / "scene_presets").mkdir(parents=True)
+    (preset_pack / "unigym.pack.yaml").write_text(
+        "schema: unigym.pack/1\n"
+        "name: preset_pack\n"
+        "version: 1.0.0\n"
+        "api: 1\n"
+        "trust: content\n"
+        "provides:\n"
+        "  scene_presets:\n"
+        "    - id: preset_pack.tabletop\n"
+        "      resource: scene_presets/tabletop.yaml\n",
+        encoding="utf-8",
+    )
+    (preset_pack / "scene_presets" / "tabletop.yaml").write_text(PROVIDER_BACKED, encoding="utf-8")
+    other_pack = tmp_path / "other_pack"
+    other_pack.mkdir()
+    (other_pack / "unigym.pack.yaml").write_text(
+        "schema: unigym.pack/1\n"
+        "name: other_pack\n"
+        "version: 1.0.0\n"
+        "api: 1\n"
+        "trust: code\n"
+        "provides:\n"
+        "  providers:\n"
+        "    - id: acme.table_top\n"
+        "      kind: scene\n"
+        "      entrypoint: acme_scenes:table_top\n",
+        encoding="utf-8",
+    )
+    runtime = discover([preset_pack, other_pack])
+
+    with pytest.raises(ScenePresetError) as info:
+        load_scene_preset("preset_pack.tabletop", runtime)
+
+    message = str(info.value)
+    assert "preset_pack" in message
+    assert "other_pack" in message
+    assert "acme.table_top" in message
+
+
+def test_catalog_preset_params_are_validated_against_the_manifest_schema(
+    tmp_path: Path,
+) -> None:
+    """Declared preset values are checked for type and unknown keys at load."""
+    bad_type = PROVIDER_BACKED.replace("  style: 1", '  style: "one"')
+    with pytest.raises(ScenePresetError, match="must be int"):
+        load_scene_preset("acme_scene.tabletop", _runtime(tmp_path, bad_type))
+
+    unknown = PROVIDER_BACKED.replace("  style: 1", "  style: 1\n  extra: 2")
+    with pytest.raises(ScenePresetError, match="unknown parameter"):
+        load_scene_preset("acme_scene.tabletop", _runtime(tmp_path, unknown))
+
+
+def test_catalog_preset_may_defer_a_required_param_to_a_run_override(tmp_path: Path) -> None:
+    """Load validates declared values but a required parameter may come later."""
+    runtime = _runtime(tmp_path, PROVIDER_BACKED)
+
+    preset = load_scene_preset("acme_scene.tabletop", runtime)
+
+    assert dict(preset.params) == {"style": 1}
