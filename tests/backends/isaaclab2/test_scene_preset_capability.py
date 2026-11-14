@@ -1,4 +1,4 @@
-"""IsaacLab rejects scene-preset/scene-provider requests before env construction."""
+"""IsaacLab consumes asset scene providers but refuses content and world_base."""
 
 from __future__ import annotations
 
@@ -33,12 +33,15 @@ def _cfg(scene_preset: object) -> dict:
     }
 
 
-def test_scene_provider_fails_before_env_construction() -> None:
-    with pytest.raises(ConfigError, match="no scene-provider consumer"):
-        build_spec(
-            _cfg({"provider": "acme.table_top", "params": {}}),
-            Namespace(config="run.yaml"),
-        )
+def test_scene_provider_is_accepted_for_isaaclab2() -> None:
+    """A provider-only preset routes the scene keys and no static shapes."""
+    spec = build_spec(
+        _cfg({"provider": "acme.table_top", "params": {}}),
+        Namespace(config="run.yaml"),
+    )
+
+    assert spec.backend_params["scene_provider"] == "acme.table_top"
+    assert spec.static_shapes == ()
 
 
 def test_world_preset_without_a_compatible_format_fails_at_resolution() -> None:
@@ -49,13 +52,33 @@ def test_world_preset_without_a_compatible_format_fails_at_resolution() -> None:
         )
 
 
-def test_env_kwargs_rejects_internal_scene_routing_keys() -> None:
+def test_content_fill_is_still_refused_by_isaaclab2() -> None:
+    """The content fill keeps failing: this backend declares no router."""
+    cfg = _cfg({"provider": "acme.table_top", "params": {}})
+    cfg["objects"] = {"filler": "acme.fill"}
+
+    with pytest.raises(ConfigError, match="content spec is not supported"):
+        build_spec(cfg, Namespace(config="run.yaml"))
+
+
+def test_world_base_is_still_refused_by_isaaclab2() -> None:
+    """The backend declares no world_base consumer."""
+    cfg = _cfg(None)
+    cfg["world_base"] = {"usd": "table.usd"}
+
+    with pytest.raises(ConfigError, match="does not consume a world base"):
+        build_spec(cfg, Namespace(config="run.yaml"))
+
+
+def test_env_kwargs_forwards_internal_scene_routing_keys() -> None:
+    """The backend boundary forwards the routed provider keys, not a reject."""
     from unigym.backends.isaaclab2.build import env_kwargs
 
-    with pytest.raises(ValueError, match="scene_provider"):
-        env_kwargs(
-            {"params": {"scene_provider": "acme.table_top"}},
-            None,
-            None,
-            spec=None,
-        )
+    result = env_kwargs(
+        {"params": {"scene_provider": "acme.table_top"}},
+        None,
+        None,
+        spec=None,
+    )
+
+    assert result["scene_provider"] == "acme.table_top"

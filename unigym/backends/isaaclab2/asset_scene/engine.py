@@ -157,12 +157,14 @@ class AssetSceneEngine:
             _inspect_usd_authoring if inspect_usd_authoring is None else inspect_usd_authoring
         )
 
-    def compose(self, scene: Scene, asset_plan: AssetPlan) -> ComposedAssetScene:
+    def compose(self, scene: Scene, asset_plan: AssetPlan | None) -> ComposedAssetScene:
         """Compose one neutral scene into IsaacLab asset fields and rows.
 
         Args:
             scene: The neutral scene to compose.
-            asset_plan: The boundary that resolves file-backed asset paths.
+            asset_plan: The boundary that resolves file-backed asset paths;
+                ``None`` is accepted for a primitive-only scene.  A scene
+                with asset instances names the missing boundary.
 
         Returns:
             The composed asset scene.

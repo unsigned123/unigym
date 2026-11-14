@@ -8,18 +8,33 @@ DR events) stays inside this module / this package.
 from __future__ import annotations
 
 
-def _reject_scene_params(env_cfg: dict) -> None:
-    """Reject scene-provider/content routing keys at the isaaclab boundary."""
+def _forward_scene_params(env_cfg: dict) -> dict:
+    """Forward the scene-provider routing keys; reject a content fill.
+
+    ``env.params.scene_provider*`` is the internal routing
+    ``apply_scene_preset`` writes; the env composes that neutral scene.  A
+    ``content`` fill has no consumer on this backend (there is no content
+    router), so it stays a teaching rejection.  ``world_base`` is not a
+    routing param: the run layer rejects/omits it for this backend.
+    """
     params = env_cfg.get("params")
     if not isinstance(params, dict):
-        return
-    for key in ("scene_provider", "scene_provider_params", "scene_provider_preset", "content"):
-        if key in params:
-            raise ValueError(
-                f"isaaclab backend: env.params.{key} has no consumer here; "
-                "the run layer must reject a scene preset on this backend "
-                "before construction"
-            )
+        return {
+            "scene_provider": None,
+            "scene_provider_params": None,
+            "scene_provider_preset": None,
+        }
+    if "content" in params:
+        raise ValueError(
+            "isaaclab backend: env.params.content has no consumer here; a "
+            "scene preset is accepted through env.params.scene_provider, but "
+            "its content fill cannot be routed -- remove env.params.content"
+        )
+    return {
+        "scene_provider": params.get("scene_provider"),
+        "scene_provider_params": params.get("scene_provider_params"),
+        "scene_provider_preset": params.get("scene_provider_preset"),
+    }
 
 
 def env_kwargs(
@@ -37,8 +52,13 @@ def env_kwargs(
     """Builder kwargs ``IsaaclabEnv`` accepts.
 
     The isaaclab env takes neither ``backend_params`` nor ``world_base``
-    (the world is the cloned scene); it takes the native ``terrain`` IR
-    and the ``static_shapes`` declarations from the run spec.
+    (the world is the cloned scene); it takes the native ``terrain`` IR,
+    the ``static_shapes`` declarations from the run spec, and the routed
+    scene-provider keys an asset scene composes from.  The per-run
+    ``artifact_dir`` is forwarded: with a composed scene the env writes the
+    deterministic scene artifacts there.  ``asset_plan`` never rides these
+    kwargs (the run layer passes it separately), so no literal path table
+    is serialized here.
     ``controls`` / ``profiles`` carry the neutral control runtimes and the
     per-articulation :class:`~unigym.robots.base.RobotProfile` objects;
     ``robot_realizations`` carries the backend-owned articulation configs
@@ -46,8 +66,8 @@ def env_kwargs(
     for the common run-layer contract and ignored here: D4 does not wire the
     generic Isaac Lab actuator plan into the G1 realizer (D5 does).
     """
-    _reject_scene_params(env_cfg)
-    del (env_cfg, artifacts_dir, world_base, actuation_plans)
+    scene_params = _forward_scene_params(env_cfg)
+    del (env_cfg, world_base, actuation_plans)
     return {
         "terrain": getattr(spec, "terrain", None),
         "static_shapes": getattr(spec, "static_shapes", None),
@@ -56,6 +76,8 @@ def env_kwargs(
         "profiles": profiles,
         "robot_realizations": robot_realizations,
         "backend_options": backend_options,
+        **scene_params,
+        "artifact_dir": artifacts_dir,
     }
 
 

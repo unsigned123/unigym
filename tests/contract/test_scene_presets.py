@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from unigym.assets.asset_ref import AssetRef
 from unigym.errors import ConfigError
 from unigym.pack_api import discover
 from unigym.packs import PackError
@@ -24,8 +25,8 @@ from unigym.scenes.providers import (
     restore_scene_providers,
     snapshot_scene_providers,
 )
-from unigym.scenes.scene_ir import Scene
-from unigym.world import World
+from unigym.scenes.scene_ir import AssetInstance, Instance, Pose, Scene
+from unigym.world import Box, World
 
 WORLD = "world.xml"
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -599,3 +600,78 @@ def test_catalog_preset_may_defer_a_required_param_to_a_run_override(tmp_path: P
     preset = load_scene_preset("acme_scene.tabletop", runtime)
 
     assert dict(preset.params) == {"style": 1}
+
+
+def _consumer_run_cfg() -> dict:
+    """A minimal isaaclab2 run config an inline World fragment merges into."""
+    return {
+        "run_name": "inline_world",
+        "seed": 1,
+        "env": {"backend": "isaaclab2", "num_envs": 1},
+        "collect": {"steps": 1},
+        "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
+        "controls": [
+            {
+                "name": "arm",
+                "adapter": "manual",
+                "articulation": "arm",
+                "joints": ["shoulder"],
+                "drive": "position_pd",
+                "target": "position",
+            }
+        ],
+    }
+
+
+def test_world_add_isaaclab2_routes_through_the_scene_provider() -> None:
+    """``World.add`` keeps its inline preset on a scene-provider consumer."""
+    world = World()
+    world.add(Box((0.2, 0.2, 0.2), name="crate", pos=(0.0, 0.0, 0.1)))
+
+    spec = Run(_consumer_run_cfg(), world=world).spec
+
+    assert spec.static_shapes == ()
+    provider = spec.backend_params["scene_provider"]
+    assert isinstance(provider, str) and provider.startswith("_inline_")
+    assert spec.cfg["env"]["params"]["scene_provider"] == provider
+
+
+def test_world_inline_primitives_isaaclab2_route_through_the_consumer() -> None:
+    """An inline primitive scene is not downgraded to static shapes."""
+    scene = Scene(
+        name="prims",
+        instances=(
+            Instance(
+                id="crate",
+                generator="box",
+                params={"size": (0.2, 0.2, 0.2)},
+                pose=Pose(),
+                source="scene.yaml:1",
+            ),
+        ),
+    )
+
+    spec = Run(_consumer_run_cfg(), world=World.inline(scene)).spec
+
+    assert spec.static_shapes == ()
+    assert spec.backend_params["scene_provider"].startswith("_inline_")
+
+
+def test_world_inline_asset_instances_isaaclab2_route_through_the_consumer() -> None:
+    """An inline asset scene is not silently mapped to static shapes."""
+    scene = Scene(
+        name="assets",
+        asset_instances=(
+            AssetInstance(
+                id="cup",
+                asset=AssetRef(usd="pack:acme/assets/cup.usd"),
+                pose=Pose(),
+                source="scene.yaml:1",
+            ),
+        ),
+    )
+
+    spec = Run(_consumer_run_cfg(), world=World.inline(scene)).spec
+
+    assert spec.static_shapes == ()
+    assert spec.backend_params["scene_provider"].startswith("_inline_")

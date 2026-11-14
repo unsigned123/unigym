@@ -1503,6 +1503,35 @@ def _build_bridge_and_wiring(
     }
 
 
+def _boundary_asset_plan(
+    pack_runtime: PackRuntime | None,
+    env_cfg: Mapping[str, JsonValue],
+) -> AssetPlan | None:
+    """Resolve the run's one asset boundary.
+
+    A pack runtime owns every reference.  Without one, a routed scene provider
+    still needs a boundary so absolute asset references resolve; an empty
+    discovery does that and fails ``pack:`` references honestly at resolution.
+    A run with neither has nothing to resolve, so the plan stays ``None``.
+
+    Args:
+        pack_runtime: The run's pack runtime, or ``None``.
+        env_cfg: The run's ``env`` config section.
+
+    Returns:
+        The boundary :class:`AssetPlan`, or ``None``.
+    """
+    from unigym.assets.plan import AssetPlan
+    from unigym.packs.runtime import AssetContext, discover
+
+    if pack_runtime is not None:
+        return AssetPlan(AssetContext(pack_runtime))
+    params = env_cfg.get("params")
+    if isinstance(params, dict) and params.get("scene_provider") is not None:
+        return AssetPlan(AssetContext(discover([])))
+    return None
+
+
 def build_instance(spec: RunSpec) -> RunInstance:
     """Construct every live resource of one run from ``spec`` (no driving)."""
     cfg = spec.cfg
@@ -1537,10 +1566,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
     reset_on_termination = bool(spec.runner.get("reset_on_termination", False))
     env_spacing = _config_float(env_cfg.get("env_spacing", 4.0))
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
-    from unigym.assets.plan import AssetPlan
-    from unigym.packs.runtime import AssetContext
 
-    asset_plan = AssetPlan(AssetContext(pack_runtime)) if pack_runtime is not None else None
+    asset_plan = _boundary_asset_plan(pack_runtime, env_cfg)
 
     robot = _build_robot_and_props(
         spec, cfg, info, device, num_envs, env_spacing, config_dir, asset_plan

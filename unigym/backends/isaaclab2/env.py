@@ -23,6 +23,9 @@ buffers by name, so ordering is correct by construction.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
 import torch
 
 import isaaclab.sim as sim_utils
@@ -35,6 +38,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
+from unigym._typing import JsonValue, is_json_object
 from unigym.cameras.manager import validate_image_frame
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.core import quat
@@ -51,6 +55,10 @@ from unigym.env.obs_catalog import (
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
+    from unigym.backends.isaaclab2.asset_scene.engine import (
+        AssetSceneEngine,
+        ComposedAssetScene,
+    )
     from unigym.cameras import CameraManager
     from unigym.contacts import ContactManager
 
@@ -76,6 +84,110 @@ def _resolve_terrain_cfg(terrain_cfg, terrain, num_envs, env_spacing):
             "(yaml terrain) or terrain=<Terrain>"
         )
     return terrain_cfg
+
+
+def _scene_provider_values(params: Mapping[str, object] | None) -> dict[str, JsonValue]:
+    """Narrow the routed scene-provider params to the JSON tree providers take.
+
+    The run layer routes ``env.params.scene_provider_params`` straight from
+    the config, so every value is a JSON tree by construction; the copy keeps
+    the provider dispatch from observing the caller's mapping.
+
+    Args:
+        params: The routed provider parameter mapping, or ``None``.
+
+    Returns:
+        A plain JSON mapping (empty when *params* is ``None``).
+
+    Raises:
+        ValueError: *params* is not a string-keyed mapping.
+    """
+    value: object = {} if params is None else dict(params)
+    if not is_json_object(value):
+        raise ValueError(
+            f"env.params.scene_provider_params must be a JSON mapping, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
+def _resolve_asset_scene_engine() -> AssetSceneEngine:
+    """Resolve ``isaaclab2`` through the neutral engine registry.
+
+    The registry returns the protocol view; this env can only attach the
+    backend's own engine, so the concrete check runs here and the caller
+    receives the typed product (no cast).
+
+    Raises:
+        ValueError: The neutral registry does not return an
+            :class:`AssetSceneEngine` for ``isaaclab2``.
+    """
+    from unigym.scenes.engine import scene_engine
+
+    from .asset_scene.engine import AssetSceneEngine
+
+    engine = scene_engine("isaaclab2")
+    if not isinstance(engine, AssetSceneEngine):
+        raise ValueError(
+            f"the neutral scene-engine registry returned {type(engine).__name__} "
+            f"for 'isaaclab2'; this env can only attach the backend's own "
+            f"AssetSceneEngine"
+        )
+    return engine
+
+
+def _compose_asset_scene(
+    cfg,
+    scene_provider: str | None,
+    scene_provider_params: Mapping[str, object] | None,
+    scene_provider_preset: str | None,
+    asset_plan,
+    static_shapes,
+    artifact_dir: str | Path | None,
+) -> tuple[ComposedAssetScene | None, dict[str, str]]:
+    """Compose + attach the routed scene provider before the scene is cloned.
+
+    Returns the composed product and the written artifact paths, or
+    ``(None, {})`` when the run declares no scene provider (the historical
+    build path stays untouched).
+
+    The neutral scene is built first.  An ``asset_plan`` is required only when
+    that scene declares file-backed asset instances; a primitive-only scene
+    composes with ``None``.  The engine owns that guard.
+
+    Raises:
+        ValueError: *static_shapes* and a scene provider are both declared,
+            the provider/scene validation fails, the composed scene has asset
+            instances but no asset plan, or the neutral registry does not
+            return this backend's engine.
+    """
+    if scene_provider is None:
+        return None, {}
+    if static_shapes:
+        raise ValueError(
+            "isaaclab backend: env.params.scene_provider and static_shapes "
+            f"cannot both be declared ({len(static_shapes)} static "
+            "declaration(s) plus a composed scene); declare one or the other"
+        )
+    from unigym.scenes.pipeline import validate_asset_scene
+    from unigym.scenes.providers import build_scene_from_provider
+
+    scene = build_scene_from_provider(
+        str(scene_provider),
+        _scene_provider_values(scene_provider_params),
+        preset=(str(scene_provider_preset) if scene_provider_preset is not None else None),
+    )
+    validate_asset_scene(scene)
+    engine = _resolve_asset_scene_engine()
+    composed = engine.compose(scene, asset_plan)
+    engine.attach(cfg.scene, composed, frame=f"Scene_{scene.name}_attach")
+    artifact_paths: dict[str, str] = {}
+    if artifact_dir is not None:
+        from .asset_scene.artifacts import write_asset_scene_artifacts
+
+        Path(artifact_dir).mkdir(parents=True, exist_ok=True)
+        artifact_paths = write_asset_scene_artifacts(artifact_dir, scene, composed, engine)
+    return composed, artifact_paths
 
 
 def _add_static_shape_fields(scene, static_shapes) -> None:
@@ -350,6 +462,10 @@ class IsaaclabEnv(ManagerBasedEnv):
         robot_realizations=None,
         backend_options=None,
         asset_plan=None,
+        scene_provider: str | None = None,
+        scene_provider_params: Mapping[str, object] | None = None,
+        scene_provider_preset: str | None = None,
+        artifact_dir: str | Path | None = None,
     ):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
@@ -425,14 +541,29 @@ class IsaaclabEnv(ManagerBasedEnv):
                 built by this backend's robot realizer.
             backend_options: backend-private options; isaaclab declares none
                 (``env.backend_options.isaaclab`` fails fast before build).
-            asset_plan: accepted for the shared build face; the isaaclab
-                backend has no scene-IR asset composer, so scene assets do
-                not reach it.
+            asset_plan: the composition boundary that resolves every
+                file-backed asset reference of the routed scene; required
+                only when that scene declares asset instances (a
+                primitive-only scene composes without one).
+            scene_provider: the registered scene provider whose neutral
+                :class:`~unigym.scenes.scene_ir.Scene` is composed into
+                IsaacLab asset fields (``env.params.scene_provider``).
+                ``None`` keeps the historical build path byte-identical.
+            scene_provider_params: the provider parameter mapping routed by
+                ``apply_scene_preset``; ``None`` means no params.
+            scene_provider_preset: the preset catalog id when the dispatch
+                came from a preset, else ``None``.
+            artifact_dir: optional run artifact directory; with a composed
+                scene the env writes ``scene.json`` / ``resolution.json`` /
+                ``payload_index.json`` / ``compose.txt`` / ``describe.json``
+                there.  ``None`` disables the write.
         """
         # teardown state is initialised before the parent constructor so a
         # failure there still leaves close()/the guards well-defined
         self._closed = False
         self._closing = False
+        self._asset_scene: ComposedAssetScene | None = None
+        self.artifact_paths: dict[str, str] = {}
         self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
         self._init_pose = build_init_pose_cfg(init_pose)
         self._articulation_specs = tuple(articulations or ())
@@ -456,6 +587,24 @@ class IsaaclabEnv(ManagerBasedEnv):
         terrain_cfg = _resolve_terrain_cfg(terrain_cfg, terrain, num_envs, env_spacing)
         for key, value in terrain_cfg.items():  # merge terrain preset fields
             setattr(cfg.scene, key, value)
+        # scene-provider composition: one neutral scene -> IsaacLab asset
+        # fields, attached to the real InteractiveSceneCfg BEFORE the robot/
+        # prop/camera/contact fields are merged, so the engine's collision
+        # check covers the base cfg fields and the reserved names only --
+        # not the robot/prop/camera/contact fields added after this point.
+        # The fields clone natively.  Composing and attaching before
+        # ``super().__init__`` is the whole contract: the engine never
+        # touches sim state.  No provider -> the historical path stays
+        # untouched.
+        self._asset_scene, self.artifact_paths = _compose_asset_scene(
+            cfg,
+            scene_provider,
+            scene_provider_params,
+            scene_provider_preset,
+            asset_plan,
+            static_shapes,
+            artifact_dir,
+        )
         # v102b: more than one policy binding switches the scene/action cfg
         # to the multi-articulation layout (independent articulation clones +
         # one action term per binding).  One binding (or none) keeps the
@@ -482,8 +631,11 @@ class IsaaclabEnv(ManagerBasedEnv):
             for key, value in prop_manager.setup_scene().items():
                 setattr(cfg.scene, key, value)
         # static World primitives (S2b): the same declarations the mujoco
-        # inline scene renders become native static colliders here.
-        _add_static_shape_fields(cfg.scene, static_shapes)
+        # inline scene renders become native static colliders here.  A
+        # composed asset scene already attached its primitives through the
+        # engine, so the two mappings never run against the same scene.
+        if self._asset_scene is None:
+            _add_static_shape_fields(cfg.scene, static_shapes)
         # director: the virtual gripper joins the scene as a fixed-
         # base KINEMATIC rigid body (--direct only; director_contract §4.3)
         self.director_cfg = director_cfg

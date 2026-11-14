@@ -42,7 +42,9 @@ __all__ = [
     "asset_instance_rows",
     "write_build_artifacts",
     "write_compile_report",
+    "write_composed_text",
     "write_composed_xml",
+    "write_describe",
     "write_draw",
     "write_payload_index",
     "write_resolution",
@@ -261,6 +263,47 @@ def write_composed_xml(out_dir: str | os.PathLike[str], composed_xml: str) -> st
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(composed_xml)
     return path
+
+
+def write_composed_text(out_dir: str | os.PathLike[str], text: str) -> str:
+    """Write ``compose.txt`` (the composed product the engine serialized).
+
+    IsaacLab has no scene XML; the engine's ``to_xml`` face returns canonical
+    text for artifact capture and A/B comparison.  The neutral writer keeps
+    that text out of ``composed.xml`` so the two artifact names never alias.
+
+    Args:
+        out_dir: Artifact directory.
+        text: The composed text produced by the engine.
+
+    Returns:
+        The written path.
+
+    Raises:
+        TypeError: *text* is not text.
+    """
+    if not isinstance(text, str):
+        raise TypeError(f"composed scene text must be a string, got {type(text).__name__}")
+    out = os.fspath(out_dir)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, "compose.txt")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    return path
+
+
+def write_describe(out_dir: str | os.PathLike[str], describe: object) -> str:
+    """Write ``describe.json`` (the engine's neutral description mapping).
+
+    Args:
+        out_dir: Artifact directory.
+        describe: The mapping returned by an engine's ``describe`` face (a
+            DTO, a plain mapping, or a dataclass).
+
+    Returns:
+        The written path.
+    """
+    return _write_json(out_dir, "describe.json", _artifact_mapping(describe))
 
 
 def write_compile_report(

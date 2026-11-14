@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import fields as dataclass_fields
+from pathlib import Path
 
 import pytest
 
 from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.assets.plan import AssetPlan
+from unigym.backends.isaaclab2.asset_scene.artifacts import write_asset_scene_artifacts
 from unigym.backends.isaaclab2.asset_scene.engine import (
     AssetFieldSpec,
     AssetSceneEngine,
@@ -198,6 +200,36 @@ def test_compose_static_usd_builds_field_and_neutral_rows(tmp_path):
     assert spec.source == "scene.yaml:1"
     assert composed.rows == asset_instance_rows(scene, {"cup": "usd"})
     assert composed.rows[0]["pose"]["xyz"][0] == (0.1).hex()
+
+
+def test_compose_primitive_only_scene_without_an_asset_plan():
+    """A primitive-only scene composes with no asset plan."""
+    scene = Scene(
+        name="bench",
+        instances=(
+            Instance(
+                id="crate",
+                generator="box",
+                params={"size": (1.0, 2.0, 3.0)},
+                pose=Pose(),
+                source="scene.yaml:1",
+            ),
+        ),
+    )
+
+    composed = _engine().compose(scene, None)
+
+    assert composed.scene is scene
+    assert composed.fields == ()
+    assert composed.rows == asset_instance_rows(scene, {})
+
+
+def test_compose_asset_scene_without_an_asset_plan_fails_clearly(tmp_path):
+    """An asset scene needs a plan; the engine names the missing boundary."""
+    path = _usd_file(tmp_path)
+
+    with pytest.raises(ValueError, match="scene composition requires an asset plan"):
+        _engine().compose(_asset_scene(path), None)
 
 
 @pytest.mark.parametrize(
@@ -691,3 +723,63 @@ def test_scene_engine_registry_returns_the_isaaclab2_engine():
     assert isinstance(engine, SceneEngine)
     assert isinstance(engine, AssetSceneEngine)
     assert engine.name == "isaaclab2"
+
+
+def test_asset_scene_artifacts_write_the_five_build_files(tmp_path):
+    """The artifact face writes scene/resolution/payload/compose/describe."""
+    path = _usd_file(tmp_path)
+    scene = _asset_scene(path)
+    engine = _engine()
+    composed = engine.compose(scene, _asset_plan())
+    out = tmp_path / "artifacts"
+
+    paths = write_asset_scene_artifacts(out, scene, composed, engine)
+
+    assert set(paths) == {"scene", "resolution", "payload_index", "compose", "describe"}
+    assert all(Path(written).is_file() for written in paths.values())
+    assert Path(paths["compose"]).read_text(encoding="utf-8") == engine.to_xml(composed)
+    assert json.loads(Path(paths["describe"]).read_text(encoding="utf-8")) == json.loads(
+        json.dumps(engine.describe(composed))
+    )
+
+
+def test_asset_scene_artifacts_keep_resolved_paths_out_of_describe(tmp_path):
+    """Resolution/payload carry the resolved path; describe keeps the ref only."""
+    path = _usd_file(tmp_path)
+    scene = _asset_scene(path)
+    engine = _engine()
+    composed = engine.compose(scene, _asset_plan())
+    out = tmp_path / "artifacts"
+
+    paths = write_asset_scene_artifacts(out, scene, composed, engine)
+
+    resolution = json.loads(Path(paths["resolution"]).read_text(encoding="utf-8"))
+    assert resolution["asset_instances"][0]["resolved"] == str(path)
+    payloads = json.loads(Path(paths["payload_index"]).read_text(encoding="utf-8"))
+    (asset_entry,) = [entry for entry in payloads["entries"] if entry["id"] == "cup"]
+    assert asset_entry["resolved"] == str(path)
+    describe = json.loads(Path(paths["describe"]).read_text(encoding="utf-8"))
+    (row,) = describe["asset_scene"]["instances"]
+    assert "resolved" not in row
+    # The declared ref is carried verbatim; only the resolved-path key is
+    # artifact-only.
+    assert row["asset"] == {"usd": str(path)}
+
+
+def test_asset_scene_artifacts_are_byte_identical_across_runs(tmp_path):
+    """Two captures of the same composed scene are byte-identical."""
+    path = _usd_file(tmp_path)
+    scene = _asset_scene(path)
+    engine = _engine()
+    composed = engine.compose(scene, _asset_plan())
+
+    first = write_asset_scene_artifacts(tmp_path / "first", scene, composed, engine)
+    second = write_asset_scene_artifacts(tmp_path / "second", scene, composed, engine)
+
+    assert {name: Path(written).name for name, written in first.items()} == {
+        name: Path(written).name for name, written in second.items()
+    }
+    for name, written in first.items():
+        assert (
+            Path(written).read_bytes() == Path(second[name]).read_bytes()
+        ), f"artifact {name!r} differs between runs"

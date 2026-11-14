@@ -610,6 +610,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
         Trait.DIRECTOR_SETVEL,
         Trait.DIRECTOR_ATTACH_SLAVE,
         Trait.DIRECTOR_GRIPPER,
+        Trait.SCENE_COMPOSE,
         Trait.TERRAIN,
         Trait.EVENTS_DR,
         Trait.INIT_POSE,
@@ -831,6 +832,13 @@ def _mujoco_content_router() -> Callable[..., object]:
     return route_content
 
 
+def _isaaclab2_scene_engine() -> object:
+    """Construct the IsaacLab asset-scene engine (lazy: no engine import here)."""
+    from unigym.backends.isaaclab2.asset_scene.engine import AssetSceneEngine
+
+    return AssetSceneEngine()
+
+
 def _isaaclab2_env_kwargs() -> object:
     from unigym.backends.isaaclab2.build import env_kwargs
 
@@ -933,6 +941,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         (2, 3),
         ISAACLAB2_TRAITS,
         asset_formats=("usd", "urdf"),
+        scene_engine=_isaaclab2_scene_engine,
         env_class=_isaaclab2_env,
         model_provider=_isaaclab2_model_provider,
         prop_backend=_isaaclab2_prop_backend,
@@ -948,6 +957,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         robot_realizer=_isaaclab2_robot_realizer,
         default_lighting={"dome_intensity": 600.0},
         camera_enable_required=True,
+        scene_provider_consumer=True,
     ),
     "isaaclab3": BackendInfo(
         "isaaclab3",

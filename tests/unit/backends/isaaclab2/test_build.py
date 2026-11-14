@@ -1,4 +1,4 @@
-"""IsaacLab2 builder kwargs forwarding and terrain error boundary."""
+"""IsaacLab2 builder kwargs forwarding, artifact dir and terrain errors."""
 
 from __future__ import annotations
 
@@ -7,6 +7,20 @@ from dataclasses import dataclass
 import pytest
 
 from unigym.backends.isaaclab2.build import build_terrain, env_kwargs
+
+_EXPECTED_KEYS = {
+    "terrain",
+    "static_shapes",
+    "articulations",
+    "controls",
+    "profiles",
+    "robot_realizations",
+    "backend_options",
+    "scene_provider",
+    "scene_provider_params",
+    "scene_provider_preset",
+    "artifact_dir",
+}
 
 
 @dataclass
@@ -47,19 +61,44 @@ def test_env_kwargs_forwards_backend_payload():
     assert result["backend_options"] is backend_options
 
 
+def test_env_kwargs_forwards_scene_provider_keys_and_artifact_dir():
+    """The routed scene-provider keys and the artifact dir reach the env."""
+    params = {
+        "scene_provider": "acme.table_top",
+        "scene_provider_params": {"rows": 2},
+        "scene_provider_preset": "tabletop",
+    }
+
+    result = env_kwargs({"params": params}, "artifacts-out", None, _RunSpec())
+
+    assert result["scene_provider"] == "acme.table_top"
+    assert result["scene_provider_params"] == {"rows": 2}
+    assert result["scene_provider_preset"] == "tabletop"
+    assert result["artifact_dir"] == "artifacts-out"
+
+
+def test_env_kwargs_defaults_scene_provider_keys_to_none():
+    """A run without a scene provider forwards explicit ``None`` values."""
+    result = env_kwargs({"env": 1}, None, object(), _RunSpec())
+
+    assert result["scene_provider"] is None
+    assert result["scene_provider_params"] is None
+    assert result["scene_provider_preset"] is None
+    assert result["artifact_dir"] is None
+
+
 def test_env_kwargs_does_not_leak_builder_only_arguments():
-    """env_cfg, artifacts_dir and world_base are consumed, not forwarded."""
+    """env_cfg and world_base are consumed, not forwarded."""
     result = env_kwargs({"env": 1}, "artifacts", object(), _RunSpec())
 
-    assert set(result) == {
-        "terrain",
-        "static_shapes",
-        "articulations",
-        "controls",
-        "profiles",
-        "robot_realizations",
-        "backend_options",
-    }
+    assert set(result) == _EXPECTED_KEYS
+    assert "world_base" not in result
+
+
+def test_env_kwargs_rejects_content_with_the_existing_teaching_error():
+    """A content fill has no consumer on this backend."""
+    with pytest.raises(ValueError, match="env.params.content has no consumer"):
+        env_kwargs({"params": {"content": {"filler": "any"}}}, None, None, _RunSpec())
 
 
 def test_build_terrain_without_any_terrain_raises_teaching_error():
@@ -75,12 +114,4 @@ def test_env_kwargs_accepts_and_ignores_actuation_plans():
     result = env_kwargs({}, None, None, _RunSpec(), actuation_plans=plans)
 
     assert "actuation_plans" not in result
-    assert set(result) == {
-        "terrain",
-        "static_shapes",
-        "articulations",
-        "controls",
-        "profiles",
-        "robot_realizations",
-        "backend_options",
-    }
+    assert set(result) == _EXPECTED_KEYS
