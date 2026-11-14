@@ -28,6 +28,7 @@ only, so importing ``unigym.sim`` stays torch-free.
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, overload, runtime_checkable
@@ -109,6 +110,9 @@ class Simulation:
         obs_cache: the spawn observation cache (copied verbatim; entries need
             not be tensors).
         t: the policy tick that produced ``state`` (``0`` at spawn).
+        face_targets: explicit action kinds for config-mode handles whose
+            ``control`` is ``None``; the kind comes from the live
+            ``ControlRuntime.target``.
     """
 
     def __init__(
@@ -126,6 +130,7 @@ class Simulation:
         state: Mapping[str, object],
         obs_cache: Mapping[str, object],
         t: int,
+        face_targets: Mapping[str, str] | None = None,
     ) -> None:
         if not isinstance(runner, _StepRunner):
             raise SimulationConfigError(
@@ -153,23 +158,28 @@ class Simulation:
                     f"builder/simulation; handles are scoped to their owner"
                 )
             control = handle.control
-            if control is None:
-                raise SimulationConfigError(
-                    f"articulation {handle.name!r} has no control declaration; "
-                    f"the facade drives declared control faces only"
-                )
             for face_name, joints in handle.faces.items():
                 if face_name in faces:
                     raise SimulationConfigError(
                         f"control face {face_name!r} is declared twice; face names are global"
                     )
-                face = control.faces.get(face_name)
-                if face is None:
-                    raise SimulationConfigError(
-                        f"articulation {handle.name!r} face {face_name!r} has no "
-                        f"control-face declaration"
-                    )
-                faces[face_name] = (handle, tuple(joints), face.target)
+                if control is not None:
+                    face = control.faces.get(face_name)
+                    if face is None:
+                        raise SimulationConfigError(
+                            f"articulation {handle.name!r} face {face_name!r} has no "
+                            f"control-face declaration"
+                        )
+                    target = face.target
+                else:
+                    target = None if face_targets is None else face_targets.get(face_name)
+                    if target is None:
+                        raise SimulationConfigError(
+                            f"articulation {handle.name!r} face {face_name!r} has no "
+                            f"control declaration and no runtime target; config-mode "
+                            f"handles need the live ControlRuntime.target"
+                        )
+                faces[face_name] = (handle, tuple(joints), target)
 
         self.backend = backend
         self.num_envs = num_envs
@@ -507,6 +517,10 @@ class Simulation:
         self._state_t = int(self._runner.ticks_done)
         self._clock = int(self._runner.ticks_done)
         return self._observation()
+
+    def to_config(self, path: str | os.PathLike[str]) -> str:
+        """Write the owning run's authoring config; repeated calls are safe."""
+        return self._run.to_config(path)
 
     def close(self) -> None:
         """Close the owned run (and its runner/instance); idempotent."""

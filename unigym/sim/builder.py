@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import math
+import os
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, cast
 
@@ -21,6 +22,7 @@ from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from .control import ControlSpec
 from .errors import (
     BuilderSealedError,
+    ConfigModeError,
     DeferredFeatureError,
     NoControlError,
     NoWorldError,
@@ -36,8 +38,11 @@ from .profile import load_profile_for_ref
 from .simulation import Simulation
 
 if TYPE_CHECKING:
+    from unigym.env.backends.base import EnvBackend
     from unigym.packs.packset import PackRuntime, PackSet, RobotRef
     from unigym.robots.base import RobotProfile
+    from unigym.run.api import Run
+    from unigym.run.spec import RunSpec
     from unigym.world import World, _TerrainBuilder
 
 __all__ = ["SimulationBuilder"]
@@ -179,7 +184,7 @@ class SimulationBuilder:
         self._substeps = decimation
         self._seed = seed
         self._num_envs = _positive_int(num_envs, "SimulationBuilder num_envs")
-        self._pack_set = pack_set
+        self._pack_set: PackSet | None = pack_set
         self._name = name
         self._steps = _positive_int(steps, "SimulationBuilder steps")
         self._episode_length_s = _positive_float(
@@ -193,6 +198,84 @@ class SimulationBuilder:
         self._owner = object()
         self._sealed = False
         self._sim: Simulation | None = None
+        self._pack_runtime: PackRuntime | None = pack_set.to_runtime()
+        self._config_mode = False
+        self._run: Run | None = None
+        self._spec: RunSpec | None = None
+
+    @classmethod
+    def from_config(
+        cls,
+        path: str | os.PathLike[str],
+        *,
+        pack_set: PackSet | None = None,
+        backend: str | None = None,
+        device: str | None = None,
+    ) -> SimulationBuilder:
+        """Load a run config and return a config-mode builder.
+
+        The document is parsed and normalized by the one existing
+        ``Run.from_config`` path.  A config-mode builder declares nothing:
+        its handles are re-adopted from the live instance after ``build()``.
+        """
+        from unigym.run.api import Run
+
+        runtime = None if pack_set is None else pack_set.to_runtime()
+        run = Run.from_config(
+            path,
+            pack_runtime=runtime,
+            discover_runtime=False,
+            backend=backend,
+            device=device,
+        )
+        spec = run.spec
+        manual_controls = [control for control in spec.controls if control.adapter == "manual"]
+        if not manual_controls:
+            control_adapters = sorted({control.adapter for control in spec.controls})
+            adapter_label = spec.adapter_name or (control_adapters[0] if control_adapters else None)
+            raise SimulationConfigError(
+                "SimulationBuilder.from_config needs at least one manual control face "
+                f"to expose an external action table; this config declares adapter "
+                f"{adapter_label!r} with control adapter(s) "
+                f"{control_adapters or ['<none>']}. Declare a controls[] group with "
+                "adapter: manual -- the facade is not a policy-adapter driver."
+            )
+        env_cfg = spec.cfg.get("env")
+        if not isinstance(env_cfg, Mapping):
+            raise SimulationConfigError(
+                "a config-mode builder needs an 'env' mapping in the run config, "
+                f"got {type(env_cfg).__name__}"
+            )
+        physics_dt = _positive_float(env_cfg.get("sim_dt"), "run config env.sim_dt")
+        decimation = _positive_int(env_cfg.get("decimation"), "run config env.decimation")
+        dt = _positive_float(physics_dt * decimation, "run config env.sim_dt * env.decimation")
+        episode_length_s = _positive_float(
+            env_cfg.get("episode_length_s"), "run config env.episode_length_s"
+        )
+        builder = cls.__new__(cls)
+        builder._backend = spec.backend
+        builder._dt = dt
+        builder._physics_dt = physics_dt
+        builder._substeps = decimation
+        builder._seed = spec.seed
+        builder._num_envs = spec.num_envs
+        builder._pack_set = pack_set
+        builder._pack_runtime = runtime
+        builder._name = spec.run_name
+        builder._steps = spec.total_steps
+        builder._episode_length_s = episode_length_s
+        builder._artifacts = spec.output.artifacts
+        builder._device = spec.device
+        builder._world = None
+        builder._articulations = []
+        builder._cameras = []
+        builder._owner = object()
+        builder._sealed = False
+        builder._sim = None
+        builder._config_mode = True
+        builder._run = run
+        builder._spec = spec
+        return builder
 
     @property
     def world(self) -> World | None:
@@ -201,7 +284,7 @@ class SimulationBuilder:
 
     @world.setter
     def world(self, world: World) -> None:
-        self._check_unsealed("world")
+        self._check_declarable("world")
         self._world = world
 
     @property
@@ -214,16 +297,22 @@ class SimulationBuilder:
     @property
     def pack_runtime(self) -> PackRuntime:
         """The activation-capable runtime over this builder's explicit pack set."""
-        return self._pack_set.to_runtime()
+        runtime = self._pack_runtime
+        if runtime is None:
+            raise SimulationConfigError(
+                "this config-mode builder has no pack runtime; pass pack_set= to "
+                "SimulationBuilder.from_config for a config that references a pack"
+            )
+        return runtime
 
     @property
     def articulations(self) -> tuple[ArticulationHandle, ...]:
-        """Declared articulations in declaration order."""
+        """Declared articulations; config-mode handles arrive after ``build()``."""
         return tuple(self._articulations)
 
     @property
     def cameras(self) -> tuple[CameraHandle, ...]:
-        """Declared cameras in declaration order."""
+        """Declared cameras; config-mode handles arrive after ``build()``."""
         return tuple(self._cameras)
 
     def add_articulation(
@@ -234,7 +323,7 @@ class SimulationBuilder:
         control: ControlSpec | None = None,
     ) -> ArticulationHandle:
         """Declare one pack robot and resolve every control face against its profile."""
-        self._check_unsealed("add_articulation")
+        self._check_declarable("add_articulation")
         if control is None:
             raise NoControlError(
                 f"add_articulation(ref={getattr(ref, 'id', ref)!r}) needs control=; "
@@ -249,7 +338,13 @@ class SimulationBuilder:
             raise SimulationConfigError(
                 f"articulation label {label!r} is already declared; labels must be unique"
             )
-        profile = load_profile_for_ref(self._pack_set, ref)
+        pack_set = self._pack_set
+        if pack_set is None:
+            raise SimulationConfigError(
+                "a declaration-mode builder needs an explicit pack_set; "
+                "there is no ambient pack discovery"
+            )
+        profile = load_profile_for_ref(pack_set, ref)
         faces = self._resolve_faces(label, profile, control)
         self._check_face_names_available(label, control)
         handle = ArticulationHandle(
@@ -271,7 +366,7 @@ class SimulationBuilder:
         attach: BodyHandle | None = None,
     ) -> CameraHandle:
         """Declare one camera entry from the existing ``unigym.Camera`` schema."""
-        self._check_unsealed("add_camera")
+        self._check_declarable("add_camera")
         if attach is not None:
             if not isinstance(attach, BodyHandle):
                 raise SimulationConfigError(
@@ -437,6 +532,15 @@ class SimulationBuilder:
         """The declared ``cameras[]`` entries (deep copies)."""
         return [copy.deepcopy(dict(handle.entry)) for handle in self._cameras]
 
+    def _check_declarable(self, what: str) -> None:
+        """Refuse a declaration on a config-mode or sealed builder."""
+        if self._config_mode:
+            raise ConfigModeError(
+                f"this builder was created by from_config(); {what} is a "
+                f"declaration-mode operation and cannot mutate a loaded run config"
+            )
+        self._check_unsealed(what)
+
     def _check_unsealed(self, what: str) -> None:
         """Refuse a declaration after the first successful build."""
         if self._sealed:
@@ -452,6 +556,8 @@ class SimulationBuilder:
         """Build the live simulation once and return the cached instance."""
         if self._sim is not None:
             return self._sim
+        if self._config_mode:
+            return self._build_from_config()
         cfg = self._to_cfg()
         world = cast("World", self._world)
         from unigym.run.api import Run
@@ -493,6 +599,164 @@ class SimulationBuilder:
         self._sim = sim
         self._seal()
         return sim
+
+    def _build_from_config(self) -> Simulation:
+        """Build from the stored Run and re-adopt handles from the live env."""
+        run = self._run
+        spec = self._spec
+        if run is None or spec is None:
+            raise SimulationConfigError(
+                "a config-mode builder needs its stored Run and RunSpec; "
+                "create it with SimulationBuilder.from_config(path)"
+            )
+        from unigym.runner.external import ExternalRunner
+        from unigym.runner.state import read_extra
+        from unigym.world import World
+
+        try:
+            instance = run.build()
+            runner = run.runner("external")
+            if not isinstance(runner, ExternalRunner):
+                raise RuntimeError(
+                    f"SimulationBuilder.runner('external') returned "
+                    f"{type(runner).__name__}, expected ExternalRunner"
+                )
+            articulations, face_targets = self._adopt_config_articulations(instance.env)
+            cameras = self._adopt_config_cameras(spec)
+            try:
+                world = World.from_config(spec.cfg, runtime=spec.pack_runtime)
+            except ValueError as err:
+                raise SimulationConfigError(
+                    f"config-mode simulation cannot resolve its world from the run "
+                    f"config: {err}"
+                ) from err
+            sim = Simulation(
+                backend=self._backend,
+                num_envs=self._num_envs,
+                world=world,
+                articulations=articulations,
+                cameras=cameras,
+                runner=runner,
+                env=instance.env,
+                run=run,
+                owner=self._owner,
+                state=read_extra(instance.env),
+                obs_cache=dict(instance.env.obs_cache),
+                t=0,
+                face_targets=face_targets,
+            )
+        except BaseException:
+            run.close()
+            raise
+        self._articulations = list(articulations)
+        self._cameras = list(cameras)
+        self._sim = sim
+        self._seal()
+        return sim
+
+    def _adopt_config_articulations(
+        self,
+        env: EnvBackend,
+    ) -> tuple[tuple[ArticulationHandle, ...], dict[str, str]]:
+        """Re-adopt config-mode articulation handles from the live runtime."""
+        from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+
+        articulations = getattr(env, "articulations", None)
+        controls = getattr(env, "controls", None)
+        if not isinstance(articulations, Mapping) or not articulations:
+            raise SimulationConfigError(
+                "config-mode build needs a non-empty env.articulations mapping; "
+                f"got {type(articulations).__name__}"
+            )
+        if not isinstance(controls, Mapping) or not controls:
+            raise SimulationConfigError(
+                "config-mode build needs a non-empty env.controls mapping; "
+                f"got {type(controls).__name__}"
+            )
+        manual_controls: list[ControlRuntime] = []
+        for key, runtime in controls.items():
+            if not isinstance(runtime, ControlRuntime):
+                raise SimulationConfigError(
+                    f"env.controls[{key!r}] is {type(runtime).__name__}, "
+                    f"expected ControlRuntime"
+                )
+            if runtime.adapter == "manual" and not runtime.prop:
+                manual_controls.append(runtime)
+
+        handles: list[ArticulationHandle] = []
+        face_targets: dict[str, str] = {}
+        for key, runtime in articulations.items():
+            if not isinstance(runtime, ArticulationRuntime):
+                raise SimulationConfigError(
+                    f"env.articulations[{key!r}] is {type(runtime).__name__}, "
+                    f"expected ArticulationRuntime"
+                )
+            name = str(runtime.name)
+            profile = runtime.profile
+            if profile is None:
+                raise SimulationConfigError(
+                    f"config-mode articulation {name!r} has no RobotProfile; "
+                    f"the facade re-adopts profile-backed handles only"
+                )
+            faces: dict[str, tuple[str, ...]] = {}
+            for control in manual_controls:
+                if control.articulation != name:
+                    continue
+                face = control.name
+                if face in face_targets:
+                    raise SimulationConfigError(
+                        f"control face {face!r} is declared by more than one "
+                        f"manual control group; face names are global"
+                    )
+                faces[face] = tuple(control.joint_names)
+                face_targets[face] = control.target
+            handles.append(
+                ArticulationHandle(
+                    name=name,
+                    ref=None,
+                    profile=profile,
+                    control=None,
+                    faces=faces,
+                    _owner=self._owner,
+                )
+            )
+        return tuple(handles), face_targets
+
+    def _adopt_config_cameras(self, spec: RunSpec) -> tuple[CameraHandle, ...]:
+        """Re-adopt config-mode camera handles from the normalized config table."""
+        declared = spec.cameras
+        if declared is None:
+            return ()
+        if not isinstance(declared, (list, tuple)):
+            raise SimulationConfigError(
+                "a config-mode builder needs 'cameras' to be a list of entries, "
+                f"got {type(declared).__name__}"
+            )
+        handles: list[CameraHandle] = []
+        seen: set[str] = set()
+        for index, entry in enumerate(declared):
+            if not isinstance(entry, Mapping):
+                raise SimulationConfigError(
+                    f"cameras[{index}] is {type(entry).__name__}, expected a mapping"
+                )
+            name = entry.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise SimulationConfigError(
+                    f"cameras[{index}] needs a non-empty 'name', got {name!r}"
+                )
+            if name in seen:
+                raise SimulationConfigError(
+                    f"camera name {name!r} is declared twice; camera names must be unique"
+                )
+            seen.add(name)
+            handles.append(
+                CameraHandle(
+                    name=name,
+                    entry=copy.deepcopy(dict(entry)),
+                    _owner=self._owner,
+                )
+            )
+        return tuple(handles)
 
     def _check_face_names_available(self, label: str, control: ControlSpec) -> None:
         """Refuse control-face names another articulation already owns.
