@@ -20,7 +20,9 @@ and no timestamps, so two runs over the same scene are byte-identical.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
+from unigym._typing import JsonValue
 from unigym.scenes.artifacts import (
     asset_instance_rows,
     write_composed_text,
@@ -98,8 +100,10 @@ def write_asset_scene_artifacts(
             f"asset-scene artifacts expect a ComposedAssetScene, got " f"{type(composed).__name__}"
         )
     formats, resolved = _formats_and_paths(scene, composed)
-    rows = asset_instance_rows(scene, formats)
-    asset_rows = tuple({**row, "resolved": resolved[str(row["id"])]} for row in rows)
+    rows: tuple[dict[str, JsonValue], ...] = asset_instance_rows(scene, formats)
+    asset_rows: tuple[dict[str, JsonValue], ...] = tuple(
+        {**row, "resolved": resolved[str(row["id"])]} for row in rows
+    )
     resolution = Resolution(
         instances=tuple(
             {"id": item.id, "generator": item.generator, "source": item.source}
@@ -119,28 +123,28 @@ def write_asset_scene_artifacts(
         ),
         asset_instances=asset_rows,
     )
-    payloads = PayloadSet(
-        entries=tuple(
-            {
-                "id": item.id,
-                "generator": item.generator,
-                "source": item.source,
-                "kind": item.role,
-            }
-            for item in sorted(scene.instances, key=lambda entry: entry.id)
-        )
-        + tuple(
-            {
-                "id": str(row["id"]),
-                "kind": str(row["kind"]),
-                "format": str(row["format"]),
-                "asset": row["asset"],
-                "source": str(row["source"]),
-                "resolved": resolved[str(row["id"])],
-            }
-            for row in asset_rows
-        )
+    instance_entries: tuple[Mapping[str, JsonValue], ...] = tuple(
+        {
+            "id": item.id,
+            "generator": item.generator,
+            "source": item.source,
+            "kind": item.role,
+        }
+        for item in sorted(scene.instances, key=lambda entry: entry.id)
     )
+    asset_entries: tuple[Mapping[str, JsonValue], ...] = tuple(
+        {
+            "id": str(row["id"]),
+            "kind": str(row["kind"]),
+            "format": str(row["format"]),
+            "asset": row["asset"],
+            "source": str(row["source"]),
+            "resolved": resolved[str(row["id"])],
+        }
+        for row in asset_rows
+    )
+    entries = instance_entries + asset_entries
+    payloads = PayloadSet(entries=entries)
     return {
         "scene": write_scene_json(out_dir, scene),
         "resolution": write_resolution(out_dir, resolution),

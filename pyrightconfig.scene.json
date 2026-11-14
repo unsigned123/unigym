@@ -1,6 +1,9 @@
 {
   "extends": "./pyrightconfig.json",
   "include": [
+    "unigym/backends/isaaclab2/cfg_classes.py",
+    "unigym/backends/isaaclab2/asset_scene",
+    "unigym/backends/isaaclab2/static_shapes.py",
     "unigym/scenes",
     "unigym/scene_presets.py",
     "unigym/world.py",

@@ -18,8 +18,10 @@ teaching error -- never an assumption that the asset is static.
 
 from __future__ import annotations
 
+import importlib
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
+from typing import Any
 
 from unigym._optional import MissingExtraError
 
@@ -88,10 +90,16 @@ def urdf_joint_names(path: str) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _usd_modules():
-    """Import the OpenUSD modules at the function boundary."""
+def _usd_modules() -> tuple[Any, Any]:
+    """Import the OpenUSD modules at the function boundary.
+
+    OpenUSD is an opaque external boundary: it ships no usable stubs here, so
+    the two module handles stay ``Any``.  Nothing outside this boundary uses
+    ``Any``.
+    """
     try:
-        from pxr import Usd, UsdPhysics
+        Usd = importlib.import_module("pxr.Usd")
+        UsdPhysics = importlib.import_module("pxr.UsdPhysics")
     except ImportError as exc:
         raise MissingExtraError(
             "pxr", "usd", "USD asset inspection for static file-backed assets"
@@ -114,6 +122,7 @@ def inspect_usd_authoring(path: str) -> UsdAuthoring:
             names the asset and the failure, and never assumes static.
     """
     Usd, UsdPhysics = _usd_modules()
+    stage: Any
     try:
         stage = Usd.Stage.Open(path)
     except Exception as exc:  # noqa: BLE001 — OpenUSD raises its own hierarchy
@@ -128,6 +137,7 @@ def inspect_usd_authoring(path: str) -> UsdAuthoring:
         )
     rigid: list[str] = []
     articulation: list[str] = []
+    prim: Any
     try:
         for prim in stage.Traverse():
             prim_path = str(prim.GetPath())

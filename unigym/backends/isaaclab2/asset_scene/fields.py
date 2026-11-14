@@ -10,7 +10,10 @@ Three field forms exist: the static USD ``AssetBaseCfg`` form and the dynamic
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
+
+from unigym.backends.isaaclab2.cfg_classes import IsaacLabCfgClasses, cfg_class
 
 if TYPE_CHECKING:
     from .engine import AssetFieldSpec
@@ -19,7 +22,7 @@ __all__ = ["build_field"]
 
 #: The cfg classes each field form requires.  A missing entry is a version
 #: mismatch against the pinned ``isaaclab2`` lane, never a silent fallback.
-_REQUIRED_CLASSES = {
+_REQUIRED_CLASSES: Mapping[str, tuple[str, ...]] = {
     "static_usd": ("AssetBaseCfg", "UsdFileCfg", "CollisionPropertiesCfg"),
     "dynamic_usd": (
         "RigidObjectCfg",
@@ -31,28 +34,33 @@ _REQUIRED_CLASSES = {
 }
 
 
-def _resolve(classes):
-    """Return the cfg-class table (real isaaclab when ``classes`` is None)."""
+def _resolve(classes: IsaacLabCfgClasses | None) -> IsaacLabCfgClasses:
+    """Return the cfg-class table (real isaaclab when ``classes`` is None).
+
+    The module handles are concrete; the opaque class attributes are read at
+    this external class boundary because IsaacLab ships no usable stubs.
+    """
     if classes is not None:
         return classes
+    import isaaclab.assets as isaaclab_assets
     import isaaclab.sim as sim_utils
-    from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
-    from isaaclab.sim import schemas
-    from isaaclab.sim.spawners import UrdfFileCfg, UsdFileCfg
+    import isaaclab.sim.schemas as schemas
+    import isaaclab.sim.spawners as spawners
 
-    return {
-        "AssetBaseCfg": AssetBaseCfg,
-        "RigidObjectCfg": RigidObjectCfg,
-        "UsdFileCfg": UsdFileCfg,
-        "UrdfFileCfg": UrdfFileCfg,
-        "CollisionPropertiesCfg": sim_utils.CollisionPropertiesCfg,
-        "RigidBodyPropertiesCfg": schemas.RigidBodyPropertiesCfg,
-        "MassPropertiesCfg": schemas.MassPropertiesCfg,
-        "ArticulationRootPropertiesCfg": schemas.ArticulationRootPropertiesCfg,
+    table: IsaacLabCfgClasses = {
+        "AssetBaseCfg": getattr(isaaclab_assets, "AssetBaseCfg"),
+        "RigidObjectCfg": getattr(isaaclab_assets, "RigidObjectCfg"),
+        "UsdFileCfg": getattr(spawners, "UsdFileCfg"),
+        "UrdfFileCfg": getattr(spawners, "UrdfFileCfg"),
+        "CollisionPropertiesCfg": getattr(sim_utils, "CollisionPropertiesCfg"),
+        "RigidBodyPropertiesCfg": getattr(schemas, "RigidBodyPropertiesCfg"),
+        "MassPropertiesCfg": getattr(schemas, "MassPropertiesCfg"),
+        "ArticulationRootPropertiesCfg": getattr(schemas, "ArticulationRootPropertiesCfg"),
     }
+    return table
 
 
-def _require_classes(spec: AssetFieldSpec, c) -> None:
+def _require_classes(spec: AssetFieldSpec, c: IsaacLabCfgClasses) -> None:
     """Reject a class table that cannot build the spec's cfg form."""
     missing = sorted(key for key in _REQUIRED_CLASSES[spec.cfg_kind] if key not in c)
     if missing:
@@ -63,29 +71,33 @@ def _require_classes(spec: AssetFieldSpec, c) -> None:
         )
 
 
-def _build_static_usd(spec: AssetFieldSpec, c) -> object:
+def _build_static_usd(spec: AssetFieldSpec, c: IsaacLabCfgClasses) -> object:
     """Build the static USD ``AssetBaseCfg`` field (no ``rigid_props``)."""
-    collision_props = c["CollisionPropertiesCfg"](collision_enabled=spec.collision)
-    spawn = c["UsdFileCfg"](usd_path=spec.resolved_path, collision_props=collision_props)
-    init_state = c["AssetBaseCfg"].InitialStateCfg(pos=spec.pos, rot=spec.rot)
-    return c["AssetBaseCfg"](prim_path=spec.prim_path, spawn=spawn, init_state=init_state)
+    collision_props = cfg_class(c, "CollisionPropertiesCfg")(collision_enabled=spec.collision)
+    spawn = cfg_class(c, "UsdFileCfg")(usd_path=spec.resolved_path, collision_props=collision_props)
+    init_state = cfg_class(c, "AssetBaseCfg").InitialStateCfg(pos=spec.pos, rot=spec.rot)
+    return cfg_class(c, "AssetBaseCfg")(
+        prim_path=spec.prim_path,
+        spawn=spawn,
+        init_state=init_state,
+    )
 
 
-def _build_dynamic_usd(spec: AssetFieldSpec, c) -> object:
+def _build_dynamic_usd(spec: AssetFieldSpec, c: IsaacLabCfgClasses) -> object:
     """Build the dynamic USD ``RigidObjectCfg`` field.
 
     ``rigid_props`` is always passed: SIMPLE-authored USDs carry their rigid
     and collision APIs on inner prims, so the reference root has no
     ``RigidBodyAPI`` and ``RigidObject`` initialization fails without it.
     """
-    collision_props = c["CollisionPropertiesCfg"](collision_enabled=spec.collision)
-    spawn = c["UsdFileCfg"](
+    collision_props = cfg_class(c, "CollisionPropertiesCfg")(collision_enabled=spec.collision)
+    spawn = cfg_class(c, "UsdFileCfg")(
         usd_path=spec.resolved_path,
-        rigid_props=c["RigidBodyPropertiesCfg"](),
+        rigid_props=cfg_class(c, "RigidBodyPropertiesCfg")(),
         collision_props=collision_props,
     )
-    init_state = c["RigidObjectCfg"].InitialStateCfg(pos=spec.pos, rot=spec.rot)
-    return c["RigidObjectCfg"](
+    init_state = cfg_class(c, "RigidObjectCfg").InitialStateCfg(pos=spec.pos, rot=spec.rot)
+    return cfg_class(c, "RigidObjectCfg")(
         prim_path=spec.prim_path,
         spawn=spawn,
         init_state=init_state,
@@ -93,24 +105,24 @@ def _build_dynamic_usd(spec: AssetFieldSpec, c) -> object:
     )
 
 
-def _build_dynamic_urdf(spec: AssetFieldSpec, c) -> object:
+def _build_dynamic_urdf(spec: AssetFieldSpec, c: IsaacLabCfgClasses) -> object:
     """Build the jointless-URDF ``RigidObjectCfg`` field.
 
     The explicit builder mirrors the prop spawner's non-anchored URDF form
     (``props/spawn.py``): free base, unmerged fixed joints, collision from
     visuals, instanceable, no joint drive, and the instance collision toggle.
     """
-    spawn = c["UrdfFileCfg"](
+    spawn = cfg_class(c, "UrdfFileCfg")(
         asset_path=spec.resolved_path,
         fix_base=False,
         merge_fixed_joints=False,
         collision_from_visuals=True,
         make_instanceable=True,
         joint_drive=None,
-        collision_props=c["CollisionPropertiesCfg"](collision_enabled=spec.collision),
+        collision_props=cfg_class(c, "CollisionPropertiesCfg")(collision_enabled=spec.collision),
     )
-    init_state = c["RigidObjectCfg"].InitialStateCfg(pos=spec.pos, rot=spec.rot)
-    return c["RigidObjectCfg"](
+    init_state = cfg_class(c, "RigidObjectCfg").InitialStateCfg(pos=spec.pos, rot=spec.rot)
+    return cfg_class(c, "RigidObjectCfg")(
         prim_path=spec.prim_path,
         spawn=spawn,
         init_state=init_state,
@@ -118,14 +130,14 @@ def _build_dynamic_urdf(spec: AssetFieldSpec, c) -> object:
     )
 
 
-_BUILDERS = {
+_BUILDERS: Mapping[str, Callable[[AssetFieldSpec, IsaacLabCfgClasses], object]] = {
     "static_usd": _build_static_usd,
     "dynamic_usd": _build_dynamic_usd,
     "dynamic_urdf": _build_dynamic_urdf,
 }
 
 
-def build_field(spec: AssetFieldSpec, classes=None) -> object:
+def build_field(spec: AssetFieldSpec, classes: IsaacLabCfgClasses | None = None) -> object:
     """Build the IsaacLab scene field for one composed asset-field spec.
 
     Dispatches on ``spec.cfg_kind``:

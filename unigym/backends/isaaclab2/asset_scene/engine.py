@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from unigym.assets.asset_ref import AssetRef
 from unigym.assets.plan import AssetPlan, resolve_asset_instance
+from unigym.backends.isaaclab2.cfg_classes import IsaacLabCfgClasses
 from unigym.backends.isaaclab2.static_shapes import build_static_payload_fields
 from unigym.backends.registry import backend_info
 from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
@@ -141,7 +142,7 @@ class AssetSceneEngine:
     def __init__(
         self,
         *,
-        classes: Mapping[str, type] | None = None,
+        classes: IsaacLabCfgClasses | None = None,
         inspect_usd_authoring: Callable[[str], UsdAuthoring] | None = None,
     ) -> None:
         """Store the offline cfg-class table and USD inspector seams.
@@ -200,33 +201,35 @@ class AssetSceneEngine:
                     f"mujoco-only)"
                 )
 
-        if scene.asset_instances and asset_plan is None:
-            raise ValueError(
-                "scene composition requires an asset plan: build a pack "
-                "runtime at the composition boundary and pass its AssetPlan"
-            )
         formats = tuple(backend_info("isaaclab2").asset_formats)
         selected: dict[str, str] = {}
         fields: list[AssetFieldSpec] = []
-        for entry in sorted(scene.asset_instances, key=lambda item: item.id):
-            asset_format, resolved_path = resolve_asset_instance(entry.asset, asset_plan, formats)
-            cfg_kind = _asset_cfg_kind(entry, asset_format, resolved_path)
-            selected[entry.id] = asset_format
-            fields.append(
-                AssetFieldSpec(
-                    field=asset_field(scene.name, entry.id),
-                    prim_path=asset_prim_path(scene.name, entry.id),
-                    cfg_kind=cfg_kind,
-                    kind=entry.kind,
-                    format=asset_format,
-                    asset=entry.asset,
-                    resolved_path=resolved_path,
-                    pos=entry.pose.xyz,
-                    rot=entry.pose.quat_wxyz,
-                    collision=entry.collision,
-                    source=entry.source,
+        if scene.asset_instances:
+            if asset_plan is None:
+                raise ValueError(
+                    "scene composition requires an asset plan: build a pack "
+                    "runtime at the composition boundary and pass its AssetPlan"
                 )
-            )
+            plan = asset_plan
+            for entry in sorted(scene.asset_instances, key=lambda item: item.id):
+                asset_format, resolved_path = resolve_asset_instance(entry.asset, plan, formats)
+                cfg_kind = _asset_cfg_kind(entry, asset_format, resolved_path)
+                selected[entry.id] = asset_format
+                fields.append(
+                    AssetFieldSpec(
+                        field=asset_field(scene.name, entry.id),
+                        prim_path=asset_prim_path(scene.name, entry.id),
+                        cfg_kind=cfg_kind,
+                        kind=entry.kind,
+                        format=asset_format,
+                        asset=entry.asset,
+                        resolved_path=resolved_path,
+                        pos=entry.pose.xyz,
+                        rot=entry.pose.quat_wxyz,
+                        collision=entry.collision,
+                        source=entry.source,
+                    )
+                )
         rows = asset_instance_rows(scene, selected)
         return ComposedAssetScene(
             scene_name=scene.name,
@@ -374,9 +377,9 @@ class AssetSceneEngine:
             "digest_version": ASSET_SCENE_DIGEST_VERSION,
         }
 
-    def _primitive_fields(self, composed: ComposedAssetScene) -> dict:
+    def _primitive_fields(self, composed: ComposedAssetScene) -> dict[str, object]:
         """Build the ``World.add`` primitive passthrough fields."""
-        fields: dict = {}
+        fields: dict[str, object] = {}
         for instance in composed.scene.instances:
             schema = generator_schema(instance.generator)
             params = dict(instance.params)
