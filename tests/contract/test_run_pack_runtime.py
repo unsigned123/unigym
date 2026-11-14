@@ -8,6 +8,7 @@ from typing import NoReturn
 import pytest
 
 from unigym._typing import JsonValue
+from unigym.errors import ConfigError
 from unigym.pack_api import PackRuntime, discover
 from unigym.packs import PackError
 from unigym.run.api import Run, load
@@ -112,10 +113,18 @@ def test_none_preserves_the_ambient_discovery_fallback(
     assert calls == [True]
 
 
-def test_load_forwards_the_injected_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_discover_runtime_false_raises_the_teaching_error_without_discovery(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``load(path, pack_runtime=...)`` reaches the same injected seam."""
+    """The facade owner boundary refuses instead of discovering."""
+    monkeypatch.setattr("unigym.pack_api.discover", _forbidden_discovery)
+
+    with pytest.raises(ConfigError, match="pack_set=.*pack_runtime="):
+        _ = Run(dict(_runtime_cfg()), discover_runtime=False).spec
+
+
+def _write_runtime_config(tmp_path: Path) -> Path:
+    """Write the pack-needing yaml the ``load`` seams read."""
     config = tmp_path / "run.yaml"
     config.write_text(
         "\n".join(
@@ -130,8 +139,27 @@ def test_load_forwards_the_injected_runtime(
         ),
         encoding="utf-8",
     )
+    return config
+
+
+def test_load_forwards_the_injected_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load(path, pack_runtime=...)`` reaches the same injected seam."""
+    config = _write_runtime_config(tmp_path)
     runtime = _runtime_lacking_the_preset()
     monkeypatch.setattr("unigym.pack_api.discover", _forbidden_discovery)
 
     with pytest.raises(PackError, match="missing.preset"):
         _ = load(config, pack_runtime=runtime).spec
+
+
+def test_load_forwards_discover_runtime_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load(path, discover_runtime=False)`` refuses without discovery."""
+    config = _write_runtime_config(tmp_path)
+    monkeypatch.setattr("unigym.pack_api.discover", _forbidden_discovery)
+
+    with pytest.raises(ConfigError, match="pack_set=.*pack_runtime="):
+        _ = load(config, discover_runtime=False).spec

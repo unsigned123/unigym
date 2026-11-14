@@ -98,6 +98,7 @@ class _FromConfigKwargs(TypedDict, total=False):
     no_artifacts: bool
     inspect: bool
     pack_runtime: PackRuntime | None
+    discover_runtime: bool
 
 
 def _task_name(task: dict[str, JsonValue]) -> str | None:
@@ -492,6 +493,9 @@ class Run:
         pack_runtime: An explicit pack runtime for a config that needs one;
             ``None`` keeps the ambient discovery fallback.  The injected
             runtime is used as-is and is never replaced by discovery.
+        discover_runtime: Allow ambient entry-point discovery when the config
+            needs a runtime and none was injected (default ``True``).  The
+            facade passes ``False`` so its owner boundary never discovers.
         **overrides: Extra top-level config keys (existing schema only).
     """
 
@@ -518,6 +522,7 @@ class Run:
         no_artifacts: bool = False,
         inspect: bool = False,
         pack_runtime: PackRuntime | None = None,
+        discover_runtime: bool = True,
         _config_path: str | None = None,
         **overrides: JsonValue,
     ) -> None:
@@ -610,6 +615,7 @@ class Run:
         )
         self._spec: RunSpec | None = None
         self._pack_runtime: PackRuntime | None = pack_runtime
+        self._discover_runtime = bool(discover_runtime)
         self._instance: RunInstance | None = None
         self._runner: Runner | None = None
         self._runner_kind: str | None = None
@@ -722,6 +728,7 @@ class Run:
         no_artifacts: bool = False,
         inspect: bool = False,
         pack_runtime: PackRuntime | None = None,
+        discover_runtime: bool = True,
     ) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
@@ -741,6 +748,10 @@ class Run:
             inspect: Build quietly with a temp output dir.
             pack_runtime: The explicit pack runtime for a config that needs
                 one; ``None`` keeps the ambient discovery fallback.
+            discover_runtime: Allow ambient entry-point discovery when the
+                config needs a runtime and none was injected (default
+                ``True``).  ``False`` raises a teaching ``ConfigError``
+                naming ``pack_set=`` / ``pack_runtime=`` instead.
 
         Returns:
             A lazy ``Run`` whose spec is built on first access.
@@ -766,6 +777,7 @@ class Run:
             no_artifacts=no_artifacts,
             inspect=inspect,
             pack_runtime=pack_runtime,
+            discover_runtime=discover_runtime,
             _config_path=os.path.abspath(os.fspath(path)),
         )
 
@@ -839,6 +851,15 @@ class Run:
         from unigym.run.spec import requires_pack_runtime
 
         if runtime is None and requires_pack_runtime(cfg):
+            if not self._discover_runtime:
+                from unigym.errors import ConfigError
+
+                raise ConfigError(
+                    "this run config needs a pack runtime (a scene_preset, pack or "
+                    "asset reference) but none was supplied and ambient discovery "
+                    "is disabled (discover_runtime=False); pass an explicit "
+                    "pack_set= / pack_runtime= runtime at the facade boundary"
+                )
             from unigym.pack_api import discover
 
             runtime = discover(entry_points=True)
