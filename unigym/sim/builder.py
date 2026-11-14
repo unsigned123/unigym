@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import copy
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NoReturn
 
 from unigym._typing import JsonValue
+from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 
 from .control import ControlSpec
 from .errors import (
+    BuilderSealedError,
     DeferredFeatureError,
     NoControlError,
     NoWorldError,
@@ -55,6 +57,28 @@ def _positive_int(value: object, what: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise SimulationConfigError(f"{what} must be an int >= 1, got {value!r}")
     return value
+
+
+def _json_limit(value: float | Mapping[str, float]) -> float | dict[str, JsonValue]:
+    """A validated gain/limit as the JSON shape the run config accepts."""
+    if isinstance(value, Mapping):
+        return {str(name): float(amount) for name, amount in value.items()}
+    return float(value)
+
+
+def _json_names(names: Iterable[str]) -> list[JsonValue]:
+    """A joint-name sequence as a JSON list."""
+    return [name for name in names]
+
+
+def _json_float_map(values: Mapping[str, float]) -> dict[str, JsonValue]:
+    """A finite float mapping as a JSON mapping."""
+    return {str(name): float(amount) for name, amount in values.items()}
+
+
+def _json_objects(entries: list[dict[str, JsonValue]]) -> list[JsonValue]:
+    """A list of JSON objects as a JSON list."""
+    return [entry for entry in entries]
 
 
 class SimulationBuilder:
@@ -166,6 +190,7 @@ class SimulationBuilder:
         self._articulations: list[ArticulationHandle] = []
         self._cameras: list[CameraHandle] = []
         self._owner = object()
+        self._sealed = False
 
     @property
     def world(self) -> World | None:
@@ -174,6 +199,7 @@ class SimulationBuilder:
 
     @world.setter
     def world(self, world: World) -> None:
+        self._check_unsealed("world")
         self._world = world
 
     @property
@@ -206,6 +232,7 @@ class SimulationBuilder:
         control: ControlSpec | None = None,
     ) -> ArticulationHandle:
         """Declare one pack robot and resolve every control face against its profile."""
+        self._check_unsealed("add_articulation")
         if control is None:
             raise NoControlError(
                 f"add_articulation(ref={getattr(ref, 'id', ref)!r}) needs control=; "
@@ -222,6 +249,7 @@ class SimulationBuilder:
             )
         profile = load_profile_for_ref(self._pack_set, ref)
         faces = self._resolve_faces(label, profile, control)
+        self._check_face_names_available(label, control)
         handle = ArticulationHandle(
             name=label,
             ref=ref,
@@ -241,6 +269,7 @@ class SimulationBuilder:
         attach: BodyHandle | None = None,
     ) -> CameraHandle:
         """Declare one camera entry from the existing ``unigym.Camera`` schema."""
+        self._check_unsealed("add_camera")
         if attach is not None:
             if not isinstance(attach, BodyHandle):
                 raise SimulationConfigError(
@@ -275,11 +304,180 @@ class SimulationBuilder:
         self._cameras.append(handle)
         return handle
 
+    def _to_cfg(self) -> dict[str, JsonValue]:
+        """Assemble the existing run-config document from these declarations.
+
+        The builder is the single owner of ``articulations[]`` and
+        ``controls[]``; the world contributes only its own fragment.  The
+        emitted ``dt``/``physics_dt`` arithmetic is re-checked here because
+        this document is the contract handed to ``Run``.
+        """
+        world = self._world
+        if world is None:
+            raise NoWorldError("build() needs builder.world; set builder.world first")
+        fragment = world.fragment()
+        if not fragment:
+            raise NoWorldError(
+                "builder.world declares no world asset; set a scene_preset or world_base"
+            )
+        for key in ("articulations", "controls"):
+            if key in fragment:
+                raise SimulationConfigError(
+                    f"the world fragment must not declare {key!r}; "
+                    f"use builder.add_articulation for every articulation and control"
+                )
+        if not self._articulations:
+            raise SimulationConfigError(
+                "SimulationBuilder needs at least one articulation; call add_articulation"
+            )
+        sim_dt = self._physics_dt
+        decimation = self._substeps
+        if not math.isclose(self._dt, sim_dt * decimation, rel_tol=0.0, abs_tol=1e-12):
+            raise SimulationConfigError(
+                "SimulationBuilder dt must equal physics_dt * substeps exactly "
+                f"(dt={self._dt!r}, physics_dt={sim_dt!r}, substeps={decimation})"
+            )
+
+        cfg: dict[str, JsonValue] = {
+            "run_name": self._name,
+            "output_root": "data_out",
+            "seed": self._seed,
+            "mode": "collect",
+            "adapter": {"name": "manual"},
+            "env": {
+                "backend": self._backend,
+                "num_envs": self._num_envs,
+                "episode_length_s": self._episode_length_s,
+                "decimation": decimation,
+                "sim_dt": sim_dt,
+                "params": {},
+            },
+            "command": {"name": "fixed", "dim": 0, "values": []},
+            "collect": {"steps": self._steps, "shard_steps": 1000},
+        }
+        world.apply(cfg)
+        cfg["articulations"] = _json_objects(self._articulation_entries())
+        cfg["controls"] = _json_objects(self._control_entries())
+        cameras = self._camera_entries()
+        if cameras:
+            cfg["cameras"] = _json_objects(cameras)
+        return cfg
+
+    def _articulation_entries(self) -> list[dict[str, JsonValue]]:
+        """The ``articulations[]`` table with explicit actuation groups."""
+        controls = self._control_entries()
+        entries: list[dict[str, JsonValue]] = []
+        for handle in self._articulations:
+            control = handle.control
+            if control is None:
+                raise SimulationConfigError(
+                    f"articulation {handle.name!r} has no control declaration; "
+                    f"config-mode builders are not implemented in this slice"
+                )
+            entry: dict[str, JsonValue] = {"name": handle.name}
+            ref = handle.ref
+            if ref is not None and handle.name != ref.id:
+                entry["params"] = {"profile": ref.id}
+            entry["actuation"] = self._actuation_entries(control, handle)
+            _declare_passive_joints(entry, controls)
+            entries.append(entry)
+        return entries
+
+    def _actuation_entries(
+        self,
+        control: ControlSpec,
+        handle: ArticulationHandle,
+    ) -> list[JsonValue]:
+        """One ``standard_pd`` actuation group per resolved control face."""
+        groups: list[JsonValue] = []
+        for face_name, face in control.faces.items():
+            group: dict[str, JsonValue] = {
+                "name": face.name,
+                "law": "standard_pd",
+                "joints": _json_names(handle.faces[face_name]),
+                "gains": {
+                    "kp": _json_limit(face.gains["kp"]),
+                    "kd": _json_limit(face.gains["kd"]),
+                },
+            }
+            if face.effort_limit is not None:
+                group["effort_limit"] = _json_limit(face.effort_limit)
+            if face.velocity_limit is not None:
+                group["velocity_limit"] = _json_limit(face.velocity_limit)
+            groups.append(group)
+        return groups
+
+    def _control_entries(self) -> list[dict[str, JsonValue]]:
+        """The ``controls[]`` table with explicit joints and q0 overrides."""
+        entries: list[dict[str, JsonValue]] = []
+        for handle in self._articulations:
+            control = handle.control
+            if control is None:
+                raise SimulationConfigError(
+                    f"articulation {handle.name!r} has no control declaration; "
+                    f"config-mode builders are not implemented in this slice"
+                )
+            for face_name, face in control.faces.items():
+                group: dict[str, JsonValue] = {
+                    "name": face.name,
+                    "adapter": "manual",
+                    "articulation": handle.name,
+                    "joints": _json_names(handle.faces[face_name]),
+                    "drive": face.drive,
+                    "target": face.target,
+                }
+                if face.q0:
+                    group["q0"] = _json_float_map(face.q0)
+                entries.append(group)
+        return entries
+
+    def _camera_entries(self) -> list[dict[str, JsonValue]]:
+        """The declared ``cameras[]`` entries (deep copies)."""
+        return [copy.deepcopy(dict(handle.entry)) for handle in self._cameras]
+
+    def _check_unsealed(self, what: str) -> None:
+        """Refuse a declaration after the first successful build."""
+        if self._sealed:
+            raise BuilderSealedError(
+                f"SimulationBuilder is sealed after build(); {what} is a pre-build declaration"
+            )
+
+    def _seal(self) -> None:
+        """Seal this builder; the live transition (A3) calls this once."""
+        self._sealed = True
+
     def build(self) -> NoReturn:
         """Transition to live state (implemented by the next facade slice)."""
         raise NotImplementedError(
             "SimulationBuilder.build is implemented by the simulation slice; "
             "this builder is declaration-only"
+        )
+
+    def _check_face_names_available(self, label: str, control: ControlSpec) -> None:
+        """Refuse control-face names another articulation already owns.
+
+        ``controls[].name`` is a global group key, so two articulations that
+        both fall back to the same default face name (for example
+        ``joint_set="body"`` -> face ``"body"``) would collide in
+        ``build_spec``.  Refuse here, while the caller can still name the face.
+        """
+        declared = {
+            face_name: handle.name
+            for handle in self._articulations
+            if handle.control is not None
+            for face_name in handle.control.faces
+        }
+        overlaps = sorted(face_name for face_name in control.faces if face_name in declared)
+        if not overlaps:
+            return
+        names = ", ".join(repr(face_name) for face_name in overlaps)
+        owners = ", ".join(
+            f"{face_name!r} (articulation {declared[face_name]!r})" for face_name in overlaps
+        )
+        raise SimulationConfigError(
+            f"articulation {label!r} reuses control face(s) {names} already declared by "
+            f"{owners}; control-face names are global, so declare a distinct face= for "
+            f"this articulation"
         )
 
     def _resolve_faces(
