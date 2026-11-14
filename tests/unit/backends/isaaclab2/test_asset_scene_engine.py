@@ -1,4 +1,4 @@
-"""The IsaacLab asset-scene engine composes and attaches static USD fields."""
+"""The IsaacLab asset-scene engine composes and attaches static/dynamic fields."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from unigym.backends.isaaclab2.asset_scene.engine import (
     AssetFieldSpec,
     AssetSceneEngine,
 )
-from unigym.backends.isaaclab2.asset_scene.inspect import UsdAuthoring
+from unigym.backends.isaaclab2.asset_scene.inspect import UsdAuthoring, urdf_joint_names
 from unigym.contacts.base import ENV_PREFIX_SENTINEL
 from unigym.packs.runtime import AssetContext, discover
 from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
@@ -56,6 +56,27 @@ class _UsdFileCfg(_Cfg):
     pass
 
 
+class _UrdfFileCfg(_Cfg):
+    pass
+
+
+class _RigidObjectCfg(_Cfg):
+    class InitialStateCfg(_Cfg):
+        pass
+
+
+class _RigidBodyPropertiesCfg(_Cfg):
+    pass
+
+
+class _MassPropertiesCfg(_Cfg):
+    pass
+
+
+class _ArticulationRootPropertiesCfg(_Cfg):
+    pass
+
+
 class _CollisionPropertiesCfg(_Cfg):
     pass
 
@@ -72,6 +93,11 @@ _CLASSES = {
     "CapsuleCfg": _CapsuleCfg,
     "GroundPlaneCfg": _GroundPlaneCfg,
     "UsdFileCfg": _UsdFileCfg,
+    "UrdfFileCfg": _UrdfFileCfg,
+    "RigidObjectCfg": _RigidObjectCfg,
+    "RigidBodyPropertiesCfg": _RigidBodyPropertiesCfg,
+    "MassPropertiesCfg": _MassPropertiesCfg,
+    "ArticulationRootPropertiesCfg": _ArticulationRootPropertiesCfg,
     "CollisionPropertiesCfg": _CollisionPropertiesCfg,
     "PreviewSurfaceCfg": _PreviewSurfaceCfg,
 }
@@ -88,6 +114,12 @@ def _asset_plan() -> AssetPlan:
 def _usd_file(tmp_path, name: str = "cup.usd"):
     path = tmp_path / name
     path.write_text("#usda 1.0\n", encoding="utf-8")
+    return path
+
+
+def _urdf_file(tmp_path, body: str, name: str = "cup.urdf"):
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
     return path
 
 
@@ -323,16 +355,198 @@ def test_compose_refuses_static_urdf(tmp_path):
         _engine().compose(scene, _asset_plan())
 
 
-def test_compose_refuses_dynamic_assets_as_c5(tmp_path):
-    """Dynamic file-backed assets are refused by the static-only scaffold."""
+def test_compose_dynamic_usd_selects_dynamic_usd_cfg_kind(tmp_path):
+    """A dynamic USD composes to a dynamic_usd field."""
     path = _usd_file(tmp_path)
     scene = _asset_scene(path, kind="dynamic_rigid")
 
-    with pytest.raises(
-        ValueError,
-        match="dynamic file-backed assets are not supported by the static asset-scene scaffold yet",
-    ):
+    composed = _engine().compose(scene, _asset_plan())
+
+    (spec,) = composed.fields
+    assert spec.cfg_kind == "dynamic_usd"
+    assert spec.kind == "dynamic_rigid"
+    assert spec.format == "usd"
+    assert spec.resolved_path == str(path)
+
+
+@pytest.mark.parametrize(
+    ("collision", "expected"),
+    [(True, {"collision_enabled": True}), (False, {"collision_enabled": False})],
+    ids=["collision-on", "collision-off"],
+)
+def test_attach_dynamic_usd_builds_rigid_object_cfg(tmp_path, collision, expected):
+    """Dynamic USD attach builds RigidObjectCfg + UsdFileCfg with rigid_props."""
+    path = _usd_file(tmp_path)
+    engine = _engine()
+    composed = engine.compose(
+        _asset_scene(path, kind="dynamic_rigid", collision=collision), _asset_plan()
+    )
+    base = _SceneCfg()
+
+    engine.attach(base, composed, frame="world")
+
+    cfg = base.asset_bench_cup
+    assert isinstance(cfg, _RigidObjectCfg)
+    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert cfg.kwargs["collision_group"] == 0
+    spawn = cfg.kwargs["spawn"]
+    assert isinstance(spawn, _UsdFileCfg)
+    assert spawn.kwargs["usd_path"] == str(path)
+    rigid_props = spawn.kwargs["rigid_props"]
+    assert isinstance(rigid_props, _RigidBodyPropertiesCfg)
+    assert rigid_props.kwargs == {}
+    collision_props = spawn.kwargs["collision_props"]
+    assert isinstance(collision_props, _CollisionPropertiesCfg)
+    assert collision_props.kwargs == expected
+    init_state = cfg.kwargs["init_state"]
+    assert isinstance(init_state, _RigidObjectCfg.InitialStateCfg)
+    assert init_state.kwargs == {
+        "pos": (0.1, 0.2, 0.3),
+        "rot": (0.0, 0.0, 0.0, 1.0),
+    }
+
+
+def test_attach_refuses_a_dynamic_usd_that_authors_an_articulation(tmp_path):
+    """A dynamic USD with an articulation root is articulation-in-scene."""
+    path = _usd_file(tmp_path)
+    engine = _engine(lambda value: UsdAuthoring(articulation_root_paths=("/World/Cup",)))
+    composed = engine.compose(_asset_scene(path, kind="dynamic_rigid"), _asset_plan())
+    base = _SceneCfg()
+
+    with pytest.raises(ValueError, match="ArticulationRootAPI"):
+        engine.attach(base, composed, frame="world")
+
+    assert not hasattr(base, "asset_bench_cup")
+
+
+def test_attach_allows_a_dynamic_usd_that_authors_a_rigid_body(tmp_path):
+    """A dynamic USD may author RigidBodyAPI; only an articulation is refused."""
+    path = _usd_file(tmp_path)
+    engine = _engine(lambda value: UsdAuthoring(rigid_body_paths=("/World/Cup",)))
+    composed = engine.compose(_asset_scene(path, kind="dynamic_rigid"), _asset_plan())
+    base = _SceneCfg()
+
+    engine.attach(base, composed, frame="world")
+
+    assert isinstance(base.asset_bench_cup, _RigidObjectCfg)
+
+
+def test_compose_jointless_urdf_selects_dynamic_urdf(tmp_path):
+    """A jointless dynamic URDF composes to a dynamic_urdf field."""
+    path = _urdf_file(tmp_path, "<robot name='cup'/>")
+    scene = _asset_scene(path, kind="dynamic_rigid", asset=AssetRef(urdf=str(path)))
+
+    composed = _engine().compose(scene, _asset_plan())
+
+    (spec,) = composed.fields
+    assert spec.cfg_kind == "dynamic_urdf"
+    assert spec.kind == "dynamic_rigid"
+    assert spec.format == "urdf"
+    assert spec.resolved_path == str(path)
+
+
+@pytest.mark.parametrize(
+    ("collision", "expected"),
+    [(True, {"collision_enabled": True}), (False, {"collision_enabled": False})],
+    ids=["collision-on", "collision-off"],
+)
+def test_attach_dynamic_urdf_builds_rigid_object_with_urdf_spawn(tmp_path, collision, expected):
+    """A jointless URDF attaches as RigidObjectCfg + UrdfFileCfg, unconverted."""
+    path = _urdf_file(tmp_path, "<robot name='cup'/>")
+    calls = []
+
+    def inspector(value):
+        calls.append(value)
+        raise AssertionError("dynamic URDF has no pre-convert USD inspection")
+
+    engine = _engine(inspector)
+    composed = engine.compose(
+        _asset_scene(
+            path,
+            kind="dynamic_rigid",
+            collision=collision,
+            asset=AssetRef(urdf=str(path)),
+        ),
+        _asset_plan(),
+    )
+    base = _SceneCfg()
+
+    engine.attach(base, composed, frame="world")
+
+    # attach does not claim a post-convert articulation check for URDF: the
+    # converter spawns inside InteractiveScene.__init__, past this seam.
+    assert calls == []
+    cfg = base.asset_bench_cup
+    assert isinstance(cfg, _RigidObjectCfg)
+    assert cfg.kwargs["prim_path"] == f"{ENV_PREFIX_SENTINEL}/Scene_bench/cup"
+    assert cfg.kwargs["collision_group"] == 0
+    spawn = cfg.kwargs["spawn"]
+    assert isinstance(spawn, _UrdfFileCfg)
+    collision_props = spawn.kwargs["collision_props"]
+    assert isinstance(collision_props, _CollisionPropertiesCfg)
+    assert collision_props.kwargs == expected
+    assert spawn.kwargs == {
+        "asset_path": str(path),
+        "fix_base": False,
+        "merge_fixed_joints": False,
+        "collision_from_visuals": True,
+        "make_instanceable": True,
+        "joint_drive": None,
+        "collision_props": collision_props,
+    }
+    assert cfg.kwargs["init_state"].kwargs == {
+        "pos": (0.1, 0.2, 0.3),
+        "rot": (0.0, 0.0, 0.0, 1.0),
+    }
+
+
+def test_compose_refuses_a_dynamic_urdf_with_joints(tmp_path):
+    """A URDF declaring any joint is refused, naming the joints."""
+    path = _urdf_file(
+        tmp_path,
+        "<robot name='cup'><link name='base'/><link name='tip'/>"
+        "<joint name='slider' type='prismatic'/></robot>",
+    )
+    scene = _asset_scene(path, kind="dynamic_rigid", asset=AssetRef(urdf=str(path)))
+
+    with pytest.raises(ValueError, match=r"slider.*jointless URDF"):
         _engine().compose(scene, _asset_plan())
+
+
+def test_compose_refuses_a_malformed_urdf(tmp_path):
+    """A malformed URDF fails closed instead of assuming it is jointless."""
+    path = _urdf_file(tmp_path, "<robot name='cup'")
+    scene = _asset_scene(path, kind="dynamic_rigid", asset=AssetRef(urdf=str(path)))
+
+    with pytest.raises(ValueError, match="malformed URDF XML"):
+        _engine().compose(scene, _asset_plan())
+
+
+def test_urdf_joint_names_reads_namespaced_joints(tmp_path):
+    """Joint discovery ignores the URDF XML namespace and keeps document order."""
+    path = _urdf_file(
+        tmp_path,
+        "<robot xmlns='http://wiki.ros.org/urdf' name='cup'>"
+        "<link name='base'/>"
+        "<joint name='alpha' type='fixed'/>"
+        "<joint name='beta' type='revolute'/>"
+        "</robot>",
+    )
+
+    assert urdf_joint_names(str(path)) == ("alpha", "beta")
+
+
+def test_urdf_joint_names_returns_empty_for_a_jointless_urdf(tmp_path):
+    """A jointless URDF yields no joint names."""
+    path = _urdf_file(tmp_path, "<robot name='cup'><link name='base'/></robot>")
+
+    assert urdf_joint_names(str(path)) == ()
+
+
+def test_urdf_joint_names_refuses_an_unreadable_file(tmp_path):
+    """A missing URDF file fails closed with a teaching error."""
+    with pytest.raises(ValueError, match="cannot read the file"):
+        urdf_joint_names(str(tmp_path / "missing.urdf"))
 
 
 def test_compose_rejects_mjcf_only_asset_from_format_selection(tmp_path):

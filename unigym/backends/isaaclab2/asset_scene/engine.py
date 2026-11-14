@@ -1,13 +1,13 @@
 """IsaacLab 2 scene engine: composed file-backed asset fields.
 
-This is the C4 scaffold: it composes the neutral scene into IsaacLab scene
-fields, keeps the ``World.add`` primitive passthrough byte-compatible, and
-supports ``static_rigid`` USD assets.  Dynamic and URDF forms are refused
-here and belong to C5.
+Composes the neutral scene into IsaacLab scene fields, keeps the ``World.add``
+primitive passthrough byte-compatible, and supports static USD, dynamic USD and
+jointless-URDF ``RigidObjectCfg`` assets.  A static URDF, an articulating URDF
+and an articulation-authored USD are refused with teaching errors.
 
 ``compose``, ``describe`` and ``to_xml`` are Kit-free: they do not import
 ``isaaclab``, ``pxr`` or ``omni``.  Only ``attach`` builds cfg objects (with
-lazily resolved classes) and inspects a static USD stage.
+lazily resolved classes) and inspects a USD stage.
 """
 
 from __future__ import annotations
@@ -24,10 +24,14 @@ from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_r
 from unigym.scenes.engine import register_scene_engine
 from unigym.scenes.generators import build_payload, generator_schema, registered_generators
 from unigym.scenes.pipeline import validate_asset_scene
-from unigym.scenes.scene_ir import Scene
+from unigym.scenes.scene_ir import AssetInstance, Scene
 
 from .fields import build_field
-from .inspect import UsdAuthoring, inspect_usd_authoring as _inspect_usd_authoring
+from .inspect import (
+    UsdAuthoring,
+    inspect_usd_authoring as _inspect_usd_authoring,
+    urdf_joint_names,
+)
 from .names import asset_field, asset_prim_path
 
 #: ``_IsaaclabSceneCfg`` fields an asset-scene field may never shadow.  The
@@ -45,7 +49,8 @@ class AssetFieldSpec:
     Attributes:
         field: The scene config field name (``asset_<scene>_<id>``).
         prim_path: The env-relative prim path.
-        cfg_kind: The cfg form (C4: ``static_usd``).
+        cfg_kind: The cfg form (``static_usd`` / ``dynamic_usd`` /
+            ``dynamic_urdf``).
         kind: The neutral asset role (``static_rigid`` / ``dynamic_rigid``).
         format: The selected asset format (``usd`` / ``urdf``).
         asset: The effective neutral asset reference.
@@ -77,6 +82,55 @@ class ComposedAssetScene:
     fields: tuple[AssetFieldSpec, ...]
     rows: tuple[Mapping[str, object], ...]
     scene: Scene
+
+
+def _asset_cfg_kind(entry: AssetInstance, asset_format: str, resolved_path: str) -> str:
+    """Select the cfg form for one asset instance, or refuse it.
+
+    The Kit-free jointless guard runs here for a dynamic URDF: any declared
+    ``<joint>`` converts to an articulation, which has no passive
+    ``RigidObjectCfg`` form.
+
+    Args:
+        entry: The declared asset instance (kind/id for the teaching errors).
+        asset_format: The resolved asset format (``usd`` / ``urdf``).
+        resolved_path: The resolved absolute asset path (URDF joint check).
+
+    Returns:
+        ``static_usd``, ``dynamic_usd`` or ``dynamic_urdf``.
+
+    Raises:
+        ValueError: The kind/format pair has no field form, a static URDF is
+            declared, or a dynamic URDF declares joints (or cannot be read).
+    """
+    if entry.kind == "static_rigid":
+        if asset_format == "usd":
+            return "static_usd"
+        if asset_format == "urdf":
+            raise ValueError(
+                f"static_rigid URDF {resolved_path!r} is not supported on "
+                f"IsaacLab; provide a static USD or use kind: "
+                f"dynamic_rigid with a jointless URDF (URDF conversion "
+                f"yields an articulation/anchored root)"
+            )
+    elif entry.kind == "dynamic_rigid":
+        if asset_format == "usd":
+            return "dynamic_usd"
+        if asset_format == "urdf":
+            joints = urdf_joint_names(resolved_path)
+            if joints:
+                raise ValueError(
+                    f"dynamic_rigid URDF {resolved_path!r} declares joints "
+                    f"{list(joints)}; only a jointless URDF maps to "
+                    f"RigidObjectCfg; articulation-in-scene is unsupported"
+                )
+            return "dynamic_urdf"
+    raise ValueError(
+        f"asset instance {entry.id!r}: kind {entry.kind!r} with format "
+        f"{asset_format!r} has no IsaacLab asset-scene field form "
+        f"(supported: static_rigid/dynamic_rigid with usd/urdf; URDF must be "
+        f"jointless for dynamic_rigid)"
+    )
 
 
 class AssetSceneEngine:
@@ -117,7 +171,7 @@ class AssetSceneEngine:
             SceneBindingError: The scene fails ``validate_asset_scene``.
             AssetRefError: No asset format is compatible with IsaacLab.
             ValueError: A scene semantic (terrain, engine hints, a
-                non-primitive generator, a C5-only asset form, a static
+                non-primitive generator, a static URDF, or an articulating
                 URDF) is unsupported.
         """
         validate_asset_scene(scene)
@@ -154,29 +208,13 @@ class AssetSceneEngine:
         fields: list[AssetFieldSpec] = []
         for entry in sorted(scene.asset_instances, key=lambda item: item.id):
             asset_format, resolved_path = resolve_asset_instance(entry.asset, asset_plan, formats)
-            if entry.kind == "dynamic_rigid":
-                raise ValueError(
-                    f"asset instance {entry.id!r}: dynamic file-backed assets "
-                    f"are not supported by the static asset-scene scaffold yet"
-                )
-            if asset_format == "urdf":
-                raise ValueError(
-                    f"static_rigid URDF {resolved_path!r} is not supported on "
-                    f"IsaacLab; provide a static USD or use kind: "
-                    f"dynamic_rigid with a jointless URDF (URDF conversion "
-                    f"yields an articulation/anchored root)"
-                )
-            if asset_format != "usd":
-                raise ValueError(
-                    f"asset instance {entry.id!r}: format {asset_format!r} has "
-                    f"no IsaacLab asset-scene field form (supported: 'usd')"
-                )
+            cfg_kind = _asset_cfg_kind(entry, asset_format, resolved_path)
             selected[entry.id] = asset_format
             fields.append(
                 AssetFieldSpec(
                     field=asset_field(scene.name, entry.id),
                     prim_path=asset_prim_path(scene.name, entry.id),
-                    cfg_kind="static_usd",
+                    cfg_kind=cfg_kind,
                     kind=entry.kind,
                     format=asset_format,
                     asset=entry.asset,
@@ -218,7 +256,8 @@ class AssetSceneEngine:
 
         Raises:
             ValueError: The base is not a settable scene config, a field
-                collides, or a static USD authors rigid/articulation schemas.
+                collides, a static USD authors rigid/articulation schemas, or
+                a dynamic USD authors an articulation root.
         """
         del frame
         if base is None or not callable(getattr(base, "__setattr__", None)):
@@ -241,6 +280,15 @@ class AssetSceneEngine:
             if spec.cfg_kind == "static_usd":
                 authored = self._inspect_usd_authoring(spec.resolved_path)
                 self._require_authored_static(spec, authored)
+            elif spec.cfg_kind == "dynamic_usd":
+                authored = self._inspect_usd_authoring(spec.resolved_path)
+                self._require_no_articulation(spec, authored)
+            # dynamic_urdf: the URDF converter spawns inside
+            # ``InteractiveScene.__init__`` (after this attach returns), so the
+            # converted articulation root does not exist yet.  There is no
+            # honest pre-convert check here beyond the Kit-free jointless guard
+            # in ``compose``; the post-convert articulation refusal is verified
+            # only in the real IsaacLab dog lane.
             pending.append((spec.field, build_field(spec, self._classes)))
         for field, cfg in pending:
             setattr(base, field, cfg)
@@ -381,6 +429,23 @@ class AssetSceneEngine:
                 f"authors {' and '.join(authored_schemas)}; a static USD must "
                 f"not carry authored rigid/articulation schemas -- provide a "
                 f"truly static USD or declare kind: dynamic_rigid"
+            )
+
+    @staticmethod
+    def _require_no_articulation(spec: AssetFieldSpec, authored: UsdAuthoring) -> None:
+        """Reject a dynamic USD that authors an articulation root.
+
+        A ``RigidBodyAPI`` is expected on a passive rigid-body USD and is
+        allowed; an ``ArticulationRootAPI`` is an articulation-in-scene and is
+        unsupported.
+        """
+        if authored.articulation_root_paths:
+            raise ValueError(
+                f"asset field {spec.field!r}: dynamic USD {spec.resolved_path!r} "
+                f"authors ArticulationRootAPI at "
+                f"{list(authored.articulation_root_paths)}; "
+                f"articulation-in-scene is unsupported -- provide a passive "
+                f"rigid-body USD"
             )
 
 
