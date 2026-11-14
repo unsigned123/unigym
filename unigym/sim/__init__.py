@@ -2,10 +2,9 @@
 
 The facade is a thin, additive surface over the existing ``Run`` / runner /
 backend stack.  This namespace ships the explicit-pack builder, identity-scoped
-handles, the ``Control.position_pd`` preset, the error taxonomy and the live
-:class:`Simulation` with its minimal :class:`Observation` record.  The typed
-per-articulation observation projection arrives in a later slice; the current
-observation record does not claim it.
+handles, the ``Control.position_pd`` preset, the error taxonomy, the live
+:class:`Simulation` and its typed :class:`Observation` projection (articulation
+records, published camera frames and ``contact/`` tensors).
 
 ``import unigym.sim`` stays torch/mujoco/isaaclab-free: backend and action
 modules are imported lazily at the function boundary.
@@ -35,7 +34,7 @@ from .errors import (
     StaleStateError,
 )
 from .handles import ActionBinding, ArticulationHandle, BodyHandle, CameraHandle
-from .observation import Observation
+from .observation import ArticulationObservation, CameraFrame, Observation
 from .simulation import Simulation
 
 SIM_API_VERSION: Final[int] = 1
@@ -45,7 +44,9 @@ __all__ = [
     "SIM_API_VERSION",
     "ActionBinding",
     "ArticulationHandle",
+    "ArticulationObservation",
     "BodyHandle",
+    "CameraFrame",
     "CameraHandle",
     "Control",
     "ControlFaceSpec",

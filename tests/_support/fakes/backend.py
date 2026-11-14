@@ -9,6 +9,7 @@ or any asset.  It is intentionally not a physics engine.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import torch
 
@@ -33,19 +34,32 @@ class FakeBackend(EnvBackend):
     position target, publishes ``joint_pos``/``prev_action`` in the observation
     cache and the full extra-info record set, and advances the episode clock by
     one second.  There is no physics, contact, camera, prop or event model.
+    ``joint_names`` defaults to the one-joint contract fixture; a caller that
+    needs a multi-joint action face may declare more names (identity order).
     """
 
-    def __init__(self, num_envs: int = 1, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        num_envs: int = 1,
+        device: str = "cpu",
+        joint_names: Sequence[str] = (JOINT_NAME,),
+    ) -> None:
         if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
             raise ValueError(f"num_envs must be a positive int, got {num_envs!r}")
         requested = torch.device(device)
         if requested.type != "cpu":
             raise ValueError(f"FakeBackend is CPU-only, got device {device!r}")
+        names = tuple(joint_names)
+        if not names or any(not isinstance(name, str) or not name for name in names):
+            raise ValueError(f"joint_names must be non-empty strings, got {joint_names!r}")
+        if len(set(names)) != len(names):
+            raise ValueError(f"joint_names must be unique, got {joint_names!r}")
 
         self.num_envs = num_envs
         self.device = "cpu"
+        self.joint_names = names
         self._closed = False
-        self._joint_pos = torch.zeros(num_envs, 1, dtype=torch.float32, device=self.device)
+        self._joint_pos = torch.zeros(num_envs, len(names), dtype=torch.float32, device=self.device)
         self._prev_action = torch.zeros_like(self._joint_pos)
         self._time_in_episode = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
@@ -55,8 +69,8 @@ class FakeBackend(EnvBackend):
             ARTICULATION_NAME: ArticulationRuntime(
                 name=ARTICULATION_NAME,
                 root="fixed",
-                joint_names=(JOINT_NAME,),
-                q0=(0.0,),
+                joint_names=self.joint_names,
+                q0=tuple(0.0 for _ in self.joint_names),
                 foot_bodies=(),
             )
         }
@@ -66,8 +80,8 @@ class FakeBackend(EnvBackend):
                 action_face=ARTICULATION_NAME,
                 adapter="manual",
                 articulation=ARTICULATION_NAME,
-                joint_names=(JOINT_NAME,),
-                q0=(0.0,),
+                joint_names=self.joint_names,
+                q0=tuple(0.0 for _ in self.joint_names),
                 drive="position_pd",
                 target="position",
                 required=True,

@@ -30,13 +30,23 @@ class FakeRunner:
     backend's row reset and does not advance the clock, matching the
     synchronous runner contract.  ``reset_t`` overrides only the tick reported
     by the reset result, so callers can prove the facade clock follows
-    ``ticks_done`` rather than a stale result tick.
+    ``ticks_done`` rather than a stale result tick.  ``last_actions`` is the
+    exact mapping of the most recent ``step``/``tick`` call (the lowered
+    action contract read by facade tests).  ``cache_extra`` is merged into the
+    returned observation cache, so callers can publish non-tensor record
+    entries without adding a production seam.
     """
 
-    def __init__(self, num_envs: int = 1) -> None:
-        self.env = FakeBackend(num_envs=num_envs)
+    def __init__(self, num_envs: int = 1, joint_names: Sequence[str] | None = None) -> None:
+        self.env = (
+            FakeBackend(num_envs=num_envs)
+            if joint_names is None
+            else FakeBackend(num_envs=num_envs, joint_names=joint_names)
+        )
         self.fail_next_tick = False
         self.reset_t: int | None = None
+        self.last_actions: dict[str, NamedAction] | None = None
+        self.cache_extra: dict[str, object] = {}
         self._ticks = 0
         self._closed = False
 
@@ -55,11 +65,14 @@ class FakeRunner:
             raise RuntimeError("FakeRunner is closed")
         if actions_override is None:
             raise RuntimeError("FakeRunner has no adapter path; pass named actions")
+        self.last_actions = dict(actions_override)
         if self.fail_next_tick:
             self.fail_next_tick = False
             self._ticks += 1
             raise RuntimeError("FakeRunner engine failure")
         obs, extra = self.env.step(actions_override)
+        if self.cache_extra:
+            obs = {**obs, **self.cache_extra}
         reset_ids = extra["reset_env_ids"]
         if not isinstance(reset_ids, torch.Tensor):
             raise RuntimeError("FakeBackend extra reset_env_ids is not a tensor")

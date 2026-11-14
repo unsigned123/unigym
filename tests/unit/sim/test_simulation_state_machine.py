@@ -16,6 +16,7 @@ from unigym.sim import (
     Control,
     ForeignHandleError,
     MissingActionError,
+    ObservationError,
     PendingActionError,
     Simulation,
     SimulationClosedError,
@@ -116,7 +117,8 @@ def test_act_stages_without_ticking_and_observe_serves_the_cache() -> None:
     """act changes no clock/state; observe builds the cached spawn observation."""
     runner = FakeRunner()
     sim = _sim(runner=runner)
-    binding = _binding(sim.articulations[0])
+    handle = sim.articulations[0]
+    binding = _binding(handle)
 
     sim.act(binding, _values())
     obs = sim.observe()
@@ -126,7 +128,9 @@ def test_act_stages_without_ticking_and_observe_serves_the_cache() -> None:
     assert "reset_env_ids" not in obs.raw
     assert "should_reset" not in obs.raw
     assert obs.obs_cache["joint_pos"].tolist() == [[0.0]]
-    assert dict(obs.articulations) == {}
+    record = obs.articulations[handle]
+    assert record.joint_names == ("shoulder",)
+    assert record.joint_pos.tolist() == [[0.0]]
     assert dict(obs.cameras) == {}
     assert dict(obs.contacts) == {}
 
@@ -298,6 +302,47 @@ def test_reset_uses_runner_ticks_done_not_the_result_tick() -> None:
     assert runner.ticks_done == 0
     assert obs.t == 0
     assert sim.t == 0
+
+
+def test_reset_reports_the_rows_the_runner_reset() -> None:
+    """reset_env_ids is the reset StepResult's rows, not the extra empty default."""
+    sim = _sim()
+
+    obs = sim.reset()
+
+    assert obs.reset_env_ids.tolist() == [0]
+    assert obs.terminated is None
+
+
+def test_step_keeps_a_non_tensor_cache_entry_exactly() -> None:
+    """A record-like obs entry crosses the step cache boundary verbatim."""
+    runner = FakeRunner()
+    payload = {"probe": [1, 2]}
+    runner.cache_extra = {"contact_ops/foo": payload}
+    sim = _sim(runner=runner)
+    sim.act(_binding(sim.articulations[0]), _values(0.5))
+
+    obs = sim.step()
+
+    assert obs.obs_cache["contact_ops/foo"] is payload
+    assert dict(obs.obs_cache)["contact_ops/foo"] == {"probe": [1, 2]}
+
+
+def test_bad_expected_cache_key_is_reported_after_the_tick_is_adopted() -> None:
+    """A non-tensor projected key fails without faulting or rewinding the clock."""
+    runner = FakeRunner()
+    runner.cache_extra = {"articulation/arm/prev_action": "not-a-tensor"}
+    sim = _sim(runner=runner)
+    sim.act(_binding(sim.articulations[0]), _values(0.5))
+
+    with pytest.raises(ObservationError, match="articulation/arm/prev_action"):
+        sim.step()
+
+    assert sim.faulted is False
+    assert sim.t == 0
+    assert sim.runner.ticks_done == 1
+    with pytest.raises(ObservationError, match="articulation/arm/prev_action"):
+        sim.observe()
 
 
 def test_close_is_idempotent_and_refuses_live_calls() -> None:

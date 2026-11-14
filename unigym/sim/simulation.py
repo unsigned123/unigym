@@ -27,14 +27,16 @@ only, so importing ``unigym.sim`` stays torch-free.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from types import TracebackType
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, overload, runtime_checkable
 
 from .errors import (
     BindingError,
     ForeignHandleError,
     MissingActionError,
+    ObservationError,
     PendingActionError,
     SimulationClosedError,
     SimulationConfigError,
@@ -42,7 +44,7 @@ from .errors import (
     StaleStateError,
 )
 from .handles import ActionBinding, ArticulationHandle, CameraHandle
-from .observation import Observation
+from .observation import Observation, build_observation
 from .pending import PendingActions, StagedAction
 
 if TYPE_CHECKING:
@@ -56,8 +58,6 @@ if TYPE_CHECKING:
 
 __all__ = ["Simulation"]
 
-_STATE_BOOKKEEPING_KEYS = frozenset({"reset_env_ids", "should_reset"})
-
 
 @runtime_checkable
 class _StepRunner(Protocol):
@@ -69,6 +69,27 @@ class _StepRunner(Protocol):
     """
 
     def step(self, actions: dict[str, NamedAction]) -> StepResult: ...
+
+
+def _reset_ids(value: object, what: str) -> torch.Tensor:
+    """Copy one reset-id vector, validating the runner's tensor contract."""
+    import torch
+
+    if not isinstance(value, torch.Tensor):
+        raise ObservationError(
+            f"{what} reset_env_ids must be a torch.Tensor, got {type(value).__name__}"
+        )
+    return value.clone()
+
+
+def _spawn_reset_env_ids(state: Mapping[str, object], device: str | torch.device) -> torch.Tensor:
+    """The spawn reset rows: the state value, or the empty-id fallback."""
+    import torch
+
+    value = state.get("reset_env_ids")
+    if value is None:
+        return torch.zeros(0, dtype=torch.int64, device=device)
+    return _reset_ids(value, "spawn state")
 
 
 class Simulation:
@@ -85,7 +106,8 @@ class Simulation:
         run: the run that owns the instance and the runner.
         owner: the identity token the handles carry.
         state: the spawn state record from the request-free extra reader.
-        obs_cache: the spawn observation cache.
+        obs_cache: the spawn observation cache (copied verbatim; entries need
+            not be tensors).
         t: the policy tick that produced ``state`` (``0`` at spawn).
     """
 
@@ -162,6 +184,8 @@ class Simulation:
         self._pending = PendingActions()
         self._state: dict[str, object] = dict(state)
         self._obs_cache: dict[str, object] = dict(obs_cache)
+        self._reset_env_ids = _spawn_reset_env_ids(self._state, env.device)
+        self._terminated: torch.Tensor | None = None
         self._state_t = t
         self._clock = int(runner.ticks_done)
         self._closed = False
@@ -212,21 +236,150 @@ class Simulation:
     # ------------------------------------------------------------------ #
     # action staging
     # ------------------------------------------------------------------ #
+    @overload
     def act(
         self,
         target: ActionBinding,
         values: torch.Tensor,
         *,
         face: str | None = None,
+    ) -> None: ...
+
+    @overload
+    def act(
+        self,
+        target: ArticulationHandle,
+        values: Mapping[str, float],
+        *,
+        face: str | None = None,
+    ) -> None: ...
+
+    def act(
+        self,
+        target: ActionBinding | ArticulationHandle,
+        values: torch.Tensor | Mapping[str, float],
+        *,
+        face: str | None = None,
     ) -> None:
-        """Validate and stage one action face; never advances time."""
+        """Validate and stage one action face; never advances time.
+
+        Two forms are accepted:
+
+        * ``act(binding, tensor)``: the explicit :class:`ActionBinding` path.
+          ``tensor`` is a floating ``(N, dim)`` tensor, or ``(dim,)`` when
+          ``N == 1``.
+        * ``act(handle, mapping)``: the named sugar.  ``mapping`` keys must
+          equal the face's joints exactly; key order becomes the
+          ``NamedAction`` column order.  This is a single-env form: the
+          scalar-per-joint mapping is lowered to a float32 ``(1, dim)``
+          tensor.  With more than one declared face on the handle, ``face=``
+          selects one; omitting it is an ambiguous-face error.
+        """
         self._ensure_operable()
         self._check_clock()
-        if not isinstance(target, ActionBinding):
-            raise BindingError(
-                "act target must be an ActionBinding bound from this simulation, "
-                f"got {type(target).__name__}"
+        import torch
+
+        if isinstance(target, ActionBinding):
+            if not isinstance(values, torch.Tensor):
+                raise BindingError(
+                    "act(binding, values) requires a torch.Tensor, " f"got {type(values).__name__}"
+                )
+            self._stage_binding(target, values, face)
+            return
+        if isinstance(target, ArticulationHandle):
+            self._act_named(target, values, face)
+            return
+        raise BindingError(
+            "act target must be an ActionBinding or an ArticulationHandle from this "
+            f"simulation, got {type(target).__name__}"
+        )
+
+    def _act_named(
+        self,
+        handle: ArticulationHandle,
+        values: torch.Tensor | Mapping[str, float],
+        face: str | None,
+    ) -> None:
+        """Validate and stage the ``handle -> {joint: value}`` sugar form."""
+        if handle._owner is not self._owner or handle not in self.articulations:
+            raise ForeignHandleError(
+                f"articulation handle {handle.name!r} belongs to another "
+                f"builder/simulation; handles are scoped to their owner"
             )
+        if not isinstance(values, Mapping):
+            raise BindingError(
+                f"act(handle, values) requires a mapping of joint name -> value, "
+                f"got {type(values).__name__}"
+            )
+        if self.num_envs != 1:
+            raise BindingError(
+                "act(handle, mapping) is the single-env named form; "
+                f"num_envs is {self.num_envs}, so use an ActionBinding and a "
+                "(num_envs, dim) tensor"
+            )
+        declared_faces = tuple(handle.faces)
+        if face is None:
+            if len(declared_faces) != 1:
+                raise BindingError(
+                    f"articulation {handle.name!r} declares {len(declared_faces)} "
+                    f"control faces {list(declared_faces)}; act(handle, mapping) "
+                    f"needs face= to choose one"
+                )
+            face = declared_faces[0]
+        elif face not in handle.faces:
+            raise BindingError(
+                f"articulation {handle.name!r} has no action face {face!r}; "
+                f"declared faces: {list(declared_faces)}"
+            )
+        joints = handle.faces[face]
+        provided = tuple(values)
+        missing = [joint for joint in joints if joint not in values]
+        extra = [joint for joint in provided if joint not in joints]
+        if missing or extra:
+            raise BindingError(
+                f"act(handle, mapping) for face {face!r} must cover exactly the "
+                f"face joints {list(joints)}; missing {missing}, unexpected {extra}"
+            )
+        import torch
+
+        for joint in provided:
+            value = values[joint]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise BindingError(
+                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
+                    f"must be a finite number, got {value!r}"
+                )
+            if not math.isfinite(float(value)):
+                raise BindingError(
+                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
+                    f"must be finite, got {value!r}"
+                )
+        declared = self._faces.get(face)
+        if declared is None:
+            raise BindingError(
+                f"action face {face!r} is not a declared control face; "
+                f"declared faces: {sorted(self._faces)}"
+            )
+        declared_handle, _, kind = declared
+        if declared_handle is not handle:
+            raise ForeignHandleError(
+                f"action face {face!r} belongs to articulation "
+                f"{declared_handle.name!r}, not {handle.name!r}"
+            )
+        binding = handle.bind_action(face, kind=kind, order=provided)
+        tensor = torch.tensor(
+            [[float(values[joint]) for joint in provided]],
+            dtype=torch.float32,
+        )
+        self._stage_binding(binding, tensor, face)
+
+    def _stage_binding(
+        self,
+        target: ActionBinding,
+        values: torch.Tensor,
+        face: str | None,
+    ) -> None:
+        """Validate one explicit binding and stage its normalized values."""
         if target._owner is not self._owner or target.articulation._owner is not self._owner:
             raise ForeignHandleError(
                 f"action binding for face {target.face!r} belongs to another "
@@ -331,18 +484,26 @@ class Simulation:
     # reset / close
     # ------------------------------------------------------------------ #
     def reset(self) -> Observation:
-        """Reset every env, clear pending and refresh the cached spawn state."""
+        """Reset every env, clear pending and refresh the cached spawn state.
+
+        The reset rows are the rows the runner actually reset: ``reset`` keeps
+        the returned ``StepResult`` and copies its ``reset_env_ids``, never the
+        request-free extra reader's empty default.
+        """
         self._ensure_operable()
         self._pending.clear()
         try:
-            self._runner.reset(None)
+            result = self._runner.reset(None)
             state = self._read_extra()
+            reset_env_ids = _reset_ids(result.reset_env_ids, "runner reset")
         except Exception:
             self._pending.clear()
             self._faulted = True
             raise
         self._state = dict(state)
         self._obs_cache = dict(self._env.obs_cache)
+        self._reset_env_ids = reset_env_ids
+        self._terminated = None
         self._state_t = int(self._runner.ticks_done)
         self._clock = int(self._runner.ticks_done)
         return self._observation()
@@ -372,23 +533,37 @@ class Simulation:
     # internal
     # ------------------------------------------------------------------ #
     def _observation(self) -> Observation:
-        """Build the A3 observation record from the cached state."""
-        raw = {
-            key: value for key, value in self._state.items() if key not in _STATE_BOOKKEEPING_KEYS
-        }
-        return Observation(
+        """Project the cached state through the typed observation builder."""
+        return build_observation(
             t=self._state_t,
-            raw=raw,
+            state=self._state,
             obs_cache=self._obs_cache,
-            articulations={},
-            cameras={},
-            contacts={},
+            handles=self.articulations,
+            cameras=self.cameras,
+            reset_env_ids=self._reset_env_ids,
+            terminated=self._terminated,
         )
 
     def _cache_step(self, result: StepResult) -> None:
-        """Adopt one successful step result as the cached state."""
+        """Adopt one successful step result as the cached state.
+
+        The runner tick already happened, so the state, the exact
+        ``dict(result.obs)`` copy, the reset rows and the clock are committed
+        together before the observation is projected.  A projection failure
+        (for example an expected optional cache key present but not a tensor)
+        then propagates as ``ObservationError`` while ``t`` and the facade
+        clock still name the producing tick: the facade stays synchronised with
+        the engine, is not faulted, and repeating ``observe`` reports the same
+        honest error until a reset.  The reset rows and termination mask are
+        validated and copied before any field is assigned, so a rejected
+        ``StepResult`` never leaves a partial adoption.
+        """
+        reset_env_ids = _reset_ids(result.reset_env_ids, "StepResult")
+        terminated = None if result.terminated is None else result.terminated.clone()
         self._state = dict(result.extra)
         self._obs_cache = dict(result.obs)
+        self._reset_env_ids = reset_env_ids
+        self._terminated = terminated
         self._state_t = int(result.t)
         self._clock = int(self._runner.ticks_done)
 

@@ -9,7 +9,7 @@ objects. This directory is not collected and contains no tests.
 | --- | --- | --- |
 | `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row |
 | `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
-| `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) plus the private reset-time extra seam (`_build_extra`/`_read_state`/`_extra`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `close` is idempotent, `fail_next_tick` raises once after advancing the clock; the `*StateEnv` doubles are stateless apart from call counters |
+| `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) plus the private reset-time extra seam (`_build_extra`/`_read_state`/`_extra`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `last_actions` records the lowered action mapping of the last tick, `cache_extra` merges record-like entries into the returned observation cache, `close` is idempotent, `fail_next_tick` raises once after advancing the clock; the `*StateEnv` doubles are stateless apart from call counters |
 
 Every Python module in this directory (except the package marker) must appear
 in the manifest table; `tests/meta/test_stub_policy.py` enforces this.
@@ -19,9 +19,10 @@ in the manifest table; `tests/meta/test_stub_policy.py` enforces this.
 Purpose: prove the backend-neutral `EnvBackend` contract and the conformance
 layer without MuJoCo, IsaacLab, MJWarp, assets, network, subprocesses or a GPU.
 
-Boundary: one articulation `arm` with one joint `shoulder`; one body control
-group `body` driving that articulation (`position_pd` / `position`). The action
-face is the articulation name `arm`, because the contract body-face rule is
+Boundary: one articulation `arm` with a configurable identity joint list
+(default one joint `shoulder`); one body control group `body` driving that
+articulation (`position_pd` / `position`). The action face is the articulation
+name `arm`, because the contract body-face rule is
 `action_face == articulation`.
 
 Behavior:
@@ -54,7 +55,8 @@ Limitations (deliberate, no production seam is added for them):
   always `False`);
 - no cameras, depth, props, events, recorder, contacts, snapshots or actuator
   seam; no optional capability is advertised or silently faked;
-- one articulation, one joint, CPU only, fixed identity joint order;
+- one articulation, CPU only, fixed identity joint order (the joint list is
+  configurable, the order is declaration order);
 - episode time advances by one second per step and carries no sim-time meaning.
 
 One fake per external boundary: do not add per-test fakes, a fake hierarchy or
