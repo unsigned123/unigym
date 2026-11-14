@@ -227,12 +227,17 @@ def test_legacy_pack_modules_are_not_importable() -> None:
     import unigym.packs
 
     assert unigym.packs.__all__ == [
+        "AssetResourceRef",
         "PackError",
         "PackInfo",
-        "PackItemOrigin",
         "PackSet",
+        "ProviderInfo",
+        "ProviderOrigin",
+        "ResourceInfo",
+        "RobotRef",
         "ScenePresetRef",
         "SceneProviderRef",
+        "discover_set",
         "installed",
         "require",
     ]

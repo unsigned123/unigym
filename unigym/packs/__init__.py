@@ -7,11 +7,14 @@ A pack root carries a ``unigym.pack.yaml`` document validated by
 mount order: every resource belongs to an explicitly discovered pack.
 
 :func:`require` and :func:`installed` are the read-only pack-object front door.
-They return a :class:`PackSet`; scene preset and scene provider handles are
-minted through ``packs.pack(name).scene_preset(id)`` / ``.scene_provider(id)``.
+They return a :class:`PackSet`; robot, asset, scene preset and scene provider
+handles are minted through ``packs.pack(name).robot(id)`` / ``.asset(id)`` /
+``.scene_preset(id)`` / ``.scene_provider(id)``.
 """
 
 from __future__ import annotations
+
+from unigym.provenance import ProviderInfo, ProviderOrigin
 
 
 class PackError(ValueError):
@@ -20,22 +23,30 @@ class PackError(ValueError):
 
 # PackError must exist before packset imports it back through ``from . import``.
 from .packset import (
+    AssetResourceRef,
     PackInfo,
-    PackItemOrigin,
     PackSet,
+    ResourceInfo,
+    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
+    discover_set,
     installed,
     require,
 )
 
 __all__ = [
+    "AssetResourceRef",
     "PackError",
     "PackInfo",
-    "PackItemOrigin",
     "PackSet",
+    "ProviderInfo",
+    "ProviderOrigin",
+    "ResourceInfo",
+    "RobotRef",
     "ScenePresetRef",
     "SceneProviderRef",
+    "discover_set",
     "installed",
     "require",
 ]

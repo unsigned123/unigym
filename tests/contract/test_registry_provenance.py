@@ -26,7 +26,14 @@ from unigym.adapters import (
 )
 from unigym.pack_api import PackRuntime, discover
 from unigym.packs import PackError
-from unigym.provenance import ProviderOrigin
+from unigym.props.templates import (
+    prop_template_origin,
+    prop_template_providers,
+    register_prop_template,
+    restore_prop_templates,
+    snapshot_prop_templates,
+)
+from unigym.provenance import ProviderInfo, ProviderOrigin
 from unigym.robots import (
     ROBOT_REGISTRY,
     register_robot,
@@ -35,18 +42,39 @@ from unigym.robots import (
     robot_providers,
     snapshot_robot_registry,
 )
+from unigym.scenes.pipeline import (
+    register_scene_content_filler,
+    restore_scene_content_fillers,
+    scene_content_filler_origin,
+    scene_content_filler_providers,
+    snapshot_scene_content_fillers,
+)
+from unigym.terminations import (
+    TERMINATION_REGISTRY,
+    register_termination,
+    restore_termination_registry,
+    snapshot_termination_registry,
+    termination_origin,
+    termination_providers,
+)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_registries() -> None:
-    """Restore robot/adapter values, origins, ``sys.path`` and pack modules."""
+    """Restore every registry, ``sys.path`` and pack modules around each test."""
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
     robots_snapshot = snapshot_robot_registry()
     adapters_snapshot = snapshot_adapter_registry()
+    content_snapshot = snapshot_scene_content_fillers()
+    templates_snapshot = snapshot_prop_templates()
+    terminations_snapshot = snapshot_termination_registry()
     yield
     restore_robot_registry(robots_snapshot)
     restore_adapter_registry(adapters_snapshot)
+    restore_scene_content_fillers(content_snapshot)
+    restore_prop_templates(templates_snapshot)
+    restore_termination_registry(terminations_snapshot)
     sys.path[:] = path_snapshot
     for name in set(sys.modules) - modules_snapshot:
         del sys.modules[name]
@@ -180,6 +208,68 @@ def test_manual_adapter_is_a_core_origin() -> None:
     assert manual.kind == "adapter"
     assert manual.origin == ProviderOrigin(kind="core")
     assert manual.active is True
+
+
+def test_core_termination_seeds_are_core_origins() -> None:
+    """The built-in terminations report ``kind="core"``."""
+    assert set(TERMINATION_REGISTRY) >= {"fall", "base_contact", "joint_limits"}
+    for name in ("fall", "base_contact", "joint_limits"):
+        assert termination_origin(name) == ProviderOrigin(kind="core")
+        info = next(info for info in termination_providers() if info.name == name)
+        assert info.kind == "termination"
+        assert info.origin == ProviderOrigin(kind="core")
+    assert termination_providers(kind="robot") == ()
+
+
+def test_live_registry_origins_round_trip_and_unknown_fallback() -> None:
+    """Content fillers, prop templates and terminations follow the shared origin shape."""
+
+    def filler(**_kwargs: object) -> object:
+        return object()
+
+    def builder(prop_name: str, params: object) -> dict[str, object]:
+        """Build one fixture prop."""
+        return {"name": prop_name}
+
+    class AcmeTermination:
+        def __init__(self, params: object, name: str | None = None) -> None:
+            pass
+
+    filler_origin = ProviderOrigin(kind="pack-code", pack="acme", item_id=None)
+    template_origin = ProviderOrigin(kind="manifest", pack="acme", item_id="acme_prop")
+    termination_origin_value = ProviderOrigin(kind="pack-code", pack="acme", item_id=None)
+
+    register_scene_content_filler("acme_filler", filler, origin=filler_origin)
+    register_scene_content_filler("acme_loose_filler", filler)
+    register_prop_template(
+        "acme_prop",
+        params={"size": {"type": "string"}},
+        origin=template_origin,
+    )(builder)
+    register_termination("acme_term", AcmeTermination, origin=termination_origin_value)
+    register_termination("acme_loose_term", AcmeTermination)
+
+    assert scene_content_filler_origin("acme_filler") == filler_origin
+    assert scene_content_filler_origin("acme_loose_filler") == ProviderOrigin.unknown()
+    assert prop_template_origin("acme_prop") == template_origin
+    assert termination_origin("acme_term") == termination_origin_value
+    assert termination_origin("acme_loose_term") == ProviderOrigin.unknown()
+
+    assert [info.name for info in scene_content_filler_providers()] == [
+        "acme_filler",
+        "acme_loose_filler",
+    ]
+    assert [info.name for info in prop_template_providers()] == ["acme_prop"]
+    assert [info.name for info in termination_providers("termination")] == [
+        "acme_loose_term",
+        "acme_term",
+        "base_contact",
+        "fall",
+        "joint_limits",
+    ]
+    assert scene_content_filler_providers("robot") == ()
+    assert prop_template_providers("robot") == ()
+    assert all(isinstance(info, ProviderInfo) for info in termination_providers())
 
 
 def test_robot_origin_round_trip_and_unknown_fallback() -> None:
@@ -324,6 +414,88 @@ def test_registration_outside_an_activation_window_is_unknown() -> None:
     register_adapter("acme.policy", _TestAdapter)
     assert robot_origin("acme.robot").kind == "unknown"
     assert adapter_origin("acme.policy").kind == "unknown"
+
+
+_WINDOW_REGISTRY_SOURCE = (
+    '"""Window-attribution fixture for filler/template/termination registries."""\n\n'
+    "from __future__ import annotations\n\n"
+    "from unigym.pack_api import (\n"
+    "    register_prop_template,\n"
+    "    register_scene_content_filler,\n"
+    "    register_termination,\n"
+    ")\n\n\n"
+    "def acme_filler(**_kwargs):\n"
+    "    return object()\n\n\n"
+    "def acme_prop(prop_name, params):\n"
+    '    """Build a fixture prop."""\n'
+    "    return {'name': prop_name}\n\n\n"
+    "class AcmeTermination:\n"
+    "    def __init__(self, params, name=None):\n"
+    "        pass\n\n\n"
+    "def register(context):\n"
+    "    register_scene_content_filler('acme_filler', acme_filler)\n"
+    "    register_prop_template('acme_prop', params={'size': {'type': 'string'}})(acme_prop)\n"
+    "    register_termination('acme_term', AcmeTermination)\n"
+)
+
+
+def test_pack_code_registries_get_window_attribution(tmp_path: Path) -> None:
+    """Filler, template and termination registrations get ``kind="pack-code"``."""
+    root = tmp_path / "acme_window_registries"
+    _write_pack(
+        root,
+        _manifest("acme_window_registries", [], entrypoint="acme_window_pack:register"),
+        {"acme_window_pack": _WINDOW_REGISTRY_SOURCE},
+    )
+    runtime = discover([root])
+
+    runtime.activate("acme_window_registries")
+
+    expected = ProviderOrigin(
+        kind="pack-code",
+        pack="acme_window_registries",
+        pack_version="1.0.0",
+        root=str(root.resolve()),
+        discovered_by="explicit-root",
+        item_id=None,
+        activation_entrypoint="acme_window_pack:register",
+    )
+    assert scene_content_filler_origin("acme_filler") == expected
+    assert prop_template_origin("acme_prop") == expected
+    assert termination_origin("acme_term") == expected
+
+
+def test_failed_activation_restores_filler_template_and_termination_registries(
+    tmp_path: Path,
+) -> None:
+    """A failed activation rolls the three pack-code registries back exactly."""
+    content_before = snapshot_scene_content_fillers()
+    templates_before = snapshot_prop_templates()
+    terminations_before = snapshot_termination_registry()
+    root = tmp_path / "acme_window_rollback"
+    _write_pack(
+        root,
+        _manifest(
+            "acme_window_rollback",
+            [{"id": "acme.broken", "kind": "robot", "entrypoint": "acme_window_pack:missing"}],
+            entrypoint="acme_window_pack:register",
+        ),
+        {"acme_window_pack": _WINDOW_REGISTRY_SOURCE},
+    )
+    runtime = discover([root])
+
+    with pytest.raises(PackError, match="acme.broken"):
+        runtime.activate("acme_window_rollback")
+
+    assert snapshot_scene_content_fillers() == content_before
+    assert snapshot_prop_templates() == templates_before
+    assert snapshot_termination_registry() == terminations_before
+    with pytest.raises(ValueError, match="acme_filler"):
+        scene_content_filler_origin("acme_filler")
+    with pytest.raises(ValueError, match="acme_prop"):
+        prop_template_origin("acme_prop")
+    with pytest.raises(ValueError, match="acme_term"):
+        termination_origin("acme_term")
 
 
 def test_failed_activation_restores_values_and_origins(tmp_path: Path) -> None:

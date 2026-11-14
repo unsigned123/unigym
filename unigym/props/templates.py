@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..assets.manifest import SCHEMA, validate_manifest
+from ..provenance import ProviderInfo, ProviderOrigin
 from .asset_ir import AssetDefinition, validate_asset_definition
 
 if TYPE_CHECKING:
@@ -30,6 +31,16 @@ _TEMPLATES: dict[str, tuple[dict[str, dict], PropTemplate]] = {}
 #: asset metadata per registered template (tags / uses / variants); the
 #: registry stores it for the asset catalog to consume, nothing reads it yet
 _TEMPLATE_METADATA: dict[str, dict[str, Any]] = {}
+_TEMPLATE_ORIGINS: dict[str, ProviderOrigin] = {}
+
+
+@dataclass(frozen=True)
+class PropTemplateRegistrySnapshot:
+    """A total snapshot of the prop-template registries (restore is exact)."""
+
+    templates: Mapping[str, tuple[dict[str, dict], PropTemplate]]
+    metadata: Mapping[str, dict[str, Any]]
+    origins: Mapping[str, ProviderOrigin]
 
 
 def _metadata_list(name: str, key: str, value: Any) -> list[str]:
@@ -109,14 +120,27 @@ def register_prop_template(
     tags: list[str] | None = None,
     uses: list[str] | None = None,
     variants: list[str] | None = None,
+    origin: ProviderOrigin | None = None,
 ):
     """Register a closed PropSpec builder, its params and asset metadata.
 
-    ``tags`` are namespaced manifest tags (``pack:<ns>/tag=<name>``) and
-    ``uses`` are asset ids; both follow ``unigym.asset/1`` (R4/R7).
-    ``variants`` is the sorted index of generated variant names (the facts
-    stay in the ``_data`` tables).  The registry stores the three fields
-    for the asset catalog; the build path never reads them.
+    ``tags`` and ``uses`` follow ``unigym.asset/1`` (R4/R7); ``variants`` is
+    the sorted index of generated variant names (the facts stay in the
+    ``_data`` tables).  The registry stores the three fields for the asset
+    catalog; the build path never reads them.
+
+    Args:
+        name: The lowercase snake_case template name.
+        params: The non-empty parameter schema mapping.
+        tags: Namespaced manifest tags (``pack:<ns>/tag=<name>``).
+        uses: Asset ids the template uses (``unigym.asset/1``).
+        variants: The generated variant names the template exposes.
+        origin: Internal/runtime-only provenance; pack authors never pass it.
+            A registration without an origin reports
+            :meth:`ProviderOrigin.unknown`.
+
+    Returns:
+        A decorator that stores the provider and returns it unchanged.
     """
     if (
         not isinstance(name, str)
@@ -128,6 +152,11 @@ def register_prop_template(
         raise ValueError(f"prop template {name!r} registered twice")
     if not isinstance(params, dict) or not params:
         raise ValueError(f"prop template {name!r} needs a non-empty params schema")
+    if origin is not None and not isinstance(origin, ProviderOrigin):
+        raise TypeError(
+            f"prop template {name!r}: origin must be a ProviderOrigin, "
+            f"got {type(origin).__name__}"
+        )
     metadata = _validate_template_metadata(name, tags, uses, variants)
 
     def decorate(fn: PropTemplate) -> PropTemplate:
@@ -137,9 +166,96 @@ def register_prop_template(
             raise ValueError(f"prop template {name!r} requires a docstring")
         _TEMPLATES[name] = (params, fn)
         _TEMPLATE_METADATA[name] = metadata
+        if origin is None:
+            _TEMPLATE_ORIGINS.pop(name, None)
+        else:
+            _TEMPLATE_ORIGINS[name] = origin
         return fn
 
     return decorate
+
+
+def attribute_prop_template(name: str, origin: ProviderOrigin) -> None:
+    """Attach runtime-owned provenance to an already-registered prop template.
+
+    This is the pack runtime's activation-window attribution boundary, not
+    pack-author API: pack code registers through :func:`register_prop_template`
+    and never passes an origin.  It may only label an entry whose current
+    origin is absent or ``unknown``.
+
+    Raises:
+        ValueError: The template is unknown or already has an attributed origin.
+        TypeError: *origin* is not a :class:`ProviderOrigin`.
+    """
+    if name not in _TEMPLATES:
+        raise ValueError(f"unknown prop template {name!r} (registered: {sorted(_TEMPLATES)})")
+    if not isinstance(origin, ProviderOrigin):
+        raise TypeError(
+            f"prop template {name!r}: origin must be a ProviderOrigin, "
+            f"got {type(origin).__name__}"
+        )
+    existing = _TEMPLATE_ORIGINS.get(name)
+    if existing is not None and existing.kind != "unknown":
+        raise ValueError(
+            f"prop template {name!r} already has a {existing.kind!r} origin; "
+            "only an unattributed registration may be labeled"
+        )
+    _TEMPLATE_ORIGINS[name] = origin
+
+
+def prop_template_origin(name: str) -> ProviderOrigin:
+    """Return the origin of one registered prop template (never ``None``).
+
+    A registered template with no recorded origin returns
+    :meth:`ProviderOrigin.unknown`; an unknown name raises the registry error
+    listing the registered set.
+    """
+    if name not in _TEMPLATES:
+        raise ValueError(f"unknown prop template {name!r} (registered: {sorted(_TEMPLATES)})")
+    return _TEMPLATE_ORIGINS.get(name, ProviderOrigin.unknown())
+
+
+def prop_template_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
+    """Return the registered prop templates as live :class:`ProviderInfo` records.
+
+    ``kind`` selects the provider kind; the prop-template registry owns only
+    ``"prop_template"``, so any other kind returns an empty tuple (``None``
+    returns every record).  Records are ordered by name.
+    """
+    if kind is not None and kind != "prop_template":
+        return ()
+    return tuple(
+        ProviderInfo(
+            name=name,
+            kind="prop_template",
+            origin=_TEMPLATE_ORIGINS.get(name, ProviderOrigin.unknown()),
+        )
+        for name in sorted(_TEMPLATES)
+    )
+
+
+def snapshot_prop_templates() -> PropTemplateRegistrySnapshot:
+    """Return a total snapshot of the prop-template templates, metadata and origins."""
+    return PropTemplateRegistrySnapshot(
+        templates=dict(_TEMPLATES),
+        metadata={name: dict(value) for name, value in _TEMPLATE_METADATA.items()},
+        origins=dict(_TEMPLATE_ORIGINS),
+    )
+
+
+def restore_prop_templates(snapshot: PropTemplateRegistrySnapshot) -> None:
+    """Restore the prop-template registries to exactly *snapshot*."""
+    if not isinstance(snapshot, PropTemplateRegistrySnapshot):
+        raise TypeError(
+            "restore_prop_templates expects a PropTemplateRegistrySnapshot, "
+            f"got {type(snapshot).__name__}"
+        )
+    _TEMPLATES.clear()
+    _TEMPLATES.update(snapshot.templates)
+    _TEMPLATE_METADATA.clear()
+    _TEMPLATE_METADATA.update({name: dict(value) for name, value in snapshot.metadata.items()})
+    _TEMPLATE_ORIGINS.clear()
+    _TEMPLATE_ORIGINS.update(snapshot.origins)
 
 
 def prop_template_metadata(name: str) -> dict[str, Any]:

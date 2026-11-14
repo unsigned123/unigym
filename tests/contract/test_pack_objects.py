@@ -18,8 +18,13 @@ import pytest
 import yaml
 
 from unigym.packs import (
+    AssetResourceRef,
     PackError,
     PackSet,
+    ProviderInfo,
+    ProviderOrigin,
+    ResourceInfo,
+    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
     installed,
@@ -102,7 +107,11 @@ def test_scene_preset_ref_is_a_value_with_manifest_origin(packs: PackSet) -> Non
     pack = packs.pack("acme_content")
     assert pack.name == "acme_content"
     assert pack.version == "1.0.0"
-    assert pack.origin == "env:UNIGYM_PACKS"
+    assert pack.origin.kind == "pack"
+    assert pack.origin.discovered_by == "env:UNIGYM_PACKS"
+    assert pack.origin.pack == "acme_content"
+    assert pack.origin.pack_version == "1.0.0"
+    assert pack.root == CONTENT_ROOT.resolve()
 
     ref = pack.scene_preset("acme_content.tabletop")
     assert isinstance(ref, ScenePresetRef)
@@ -115,7 +124,8 @@ def test_scene_preset_ref_is_a_value_with_manifest_origin(packs: PackSet) -> Non
     assert ref.origin.kind == "manifest"
     assert ref.origin.face == "scene_presets"
     assert ref.origin.item_id == ref.id
-    assert ref.origin.locator == ref.resource
+    assert ref.origin.resource == ref.resource
+    assert ref.origin.entrypoint is None
     assert ref.origin.root == str(CONTENT_ROOT.resolve())
 
     assert ref == packs.scene_preset("acme_content.tabletop")
@@ -137,7 +147,8 @@ def test_scene_provider_ref_carries_normalized_params(packs: PackSet) -> None:
     assert ref.entrypoint == "acme_pack:table_top"
     assert not hasattr(ref, "resource")
     assert ref.origin.face == "providers"
-    assert ref.origin.locator == ref.entrypoint
+    assert ref.origin.entrypoint == ref.entrypoint
+    assert ref.origin.resource is None
 
     assert ref.params_schema is not None
     assert ref.params_schema["style"] == ProviderParamSpec(type="int", required=False, default=1)
@@ -246,7 +257,7 @@ def test_resource_path_preset_and_provider(packs: PackSet) -> None:
     with pytest.raises(PackError, match="declared by pack 'acme_content', not 'acme_code'"):
         packs.resource_path(foreign)
 
-    with pytest.raises(PackError, match="requires a ScenePresetRef or SceneProviderRef"):
+    with pytest.raises(PackError, match="requires a RobotRef, ScenePresetRef, SceneProviderRef"):
         packs.resource_path("acme_content.tabletop")  # type: ignore[arg-type]
 
 
@@ -267,3 +278,152 @@ def test_world_and_loader_accept_refs(packs: PackSet) -> None:
     foreign = replace(preset, pack="acme_code")
     with pytest.raises(ScenePresetError, match="declared by pack 'acme_content', not 'acme_code'"):
         load_scene_preset(foreign, runtime)
+
+
+def test_pack_and_set_provider_resource_queries(packs: PackSet) -> None:
+    """Providers, resources and face counts expose the declared catalog items."""
+    content = packs.pack("acme_content")
+    assert content.face_counts == {"runs": 1, "scene_presets": 1, "assets": 1}
+    assert content.providers() == ()
+    asset_infos = content.resources(face="assets")
+    assert len(asset_infos) == 1
+    assert isinstance(asset_infos[0], ResourceInfo)
+    assert asset_infos[0].id == "acme_content.cup"
+    assert asset_infos[0].path == (CONTENT_ROOT / "assets" / "cup" / "asset.yaml").resolve()
+    assert asset_infos[0].origin.face == "assets"
+    assert asset_infos[0].origin.item_id == "acme_content.cup"
+
+    code = packs.pack("acme_code")
+    provider_ids = [info.name for info in code.providers()]
+    assert provider_ids == ["acme_code.dynamic_assets", "acme_code.table_top"]
+    assert all(isinstance(info, ProviderInfo) for info in code.providers())
+    assert all(info.active is None for info in code.providers())
+    assert [info.name for info in code.providers(kind="scene")] == ["acme_code.table_top"]
+    assert [info.name for info in packs.providers(kind="scene")] == ["acme_code.table_top"]
+
+    assert [info.id for info in packs.resources(face="scene_presets")] == ["acme_content.tabletop"]
+    with pytest.raises(PackError, match="scene presets are declared under 'scene_presets'"):
+        packs.resources(face="scenes")
+
+
+def test_robot_and_asset_refs_are_minted_from_the_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resource robot and an asset mint equal refs with resolved paths."""
+    root = tmp_path / "acme_robot"
+    (root / "robots").mkdir(parents=True)
+    (root / "assets").mkdir()
+    (root / "robots" / "acme_arm.yaml").write_text(
+        "schema: unigym.robot/1\n"
+        "name: acme.arm\n"
+        "joint_sets:\n"
+        "  body: [shoulder]\n"
+        "default_joint_pos:\n"
+        "  shoulder: 0.0\n",
+        encoding="utf-8",
+    )
+    (root / "assets" / "cup.yaml").write_text("kind: fixture\n", encoding="utf-8")
+    (root / "unigym.pack.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema": "unigym.pack/1",
+                "name": "acme_robot",
+                "version": "2.1.0",
+                "api": 1,
+                "trust": "content",
+                "provides": {
+                    "providers": [
+                        {"id": "acme.arm", "kind": "robot", "resource": "robots/acme_arm.yaml"}
+                    ],
+                    "assets": [{"id": "acme.cup", "resource": "assets/cup.yaml"}],
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNIGYM_PACKS", str(root))
+    monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
+
+    packs = require("acme_robot")
+    pack = packs.pack("acme_robot")
+    robot = pack.robot("acme.arm")
+    assert isinstance(robot, RobotRef)
+    assert robot.is_data is True
+    assert (robot.pack, robot.pack_version, robot.id) == ("acme_robot", "2.1.0", "acme.arm")
+    assert robot.resource == "robots/acme_arm.yaml"
+    assert robot.entrypoint is None
+    assert robot.origin.kind == "manifest"
+    assert robot.origin.item_id == "acme.arm"
+    assert robot.origin.resource == "robots/acme_arm.yaml"
+    assert packs.robot("acme.arm") == robot
+    assert packs.robots() == (robot,)
+    assert packs.resource_path(robot) == (root / "robots" / "acme_arm.yaml").resolve()
+
+    asset = pack.asset("acme.cup")
+    assert isinstance(asset, AssetResourceRef)
+    assert asset.origin.face == "assets"
+    assert packs.asset("acme.cup") == asset
+    assert packs.assets() == (asset,)
+    assert packs.resource_path(asset) == (root / "assets" / "cup.yaml").resolve()
+    assert pack.face_counts == {"providers": 1, "assets": 1}
+
+    with pytest.raises(PackError, match="has no robot id 'acme.missing'"):
+        pack.robot("acme.missing")
+    with pytest.raises(PackError, match="unknown robot id 'acme.missing'"):
+        packs.robot("acme.missing")
+    with pytest.raises(PackError, match="unknown asset id 'acme.missing'"):
+        packs.asset("acme.missing")
+
+
+def test_pack_set_equality_origins_and_require_strings(
+    packs: PackSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pack sets compare by ordered packs; origins are pack-level values."""
+    whole = installed()
+    assert whole == packs
+    assert whole != require("acme_content")
+    assert [origin.pack for origin in packs.origins()] == ["acme_content", "acme_code"]
+    assert packs.origins(pack="acme_code") == (packs.pack("acme_code").origin,)
+    assert all(isinstance(origin, ProviderOrigin) for origin in packs.origins())
+    assert packs.pack("acme_content").origin.kind == "pack"
+
+    with pytest.raises(PackError, match="non-empty strings"):
+        require(1)  # type: ignore[arg-type]
+    with pytest.raises(PackError, match="unknown pack"):
+        packs.origins(pack="missing_pack")
+
+
+def test_duplicate_catalog_ids_fail_at_pack_set_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two packs declaring the same ``(face, id)`` fail instead of first-match."""
+    roots = []
+    for name in ("left", "right"):
+        root = tmp_path / name
+        (root / "scene_presets").mkdir(parents=True)
+        (root / "scene_presets" / "shared.yaml").write_text("name: shared\n", encoding="utf-8")
+        (root / "unigym.pack.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "unigym.pack/1",
+                    "name": name,
+                    "version": "1.0.0",
+                    "api": 1,
+                    "trust": "content",
+                    "provides": {
+                        "scene_presets": [
+                            {"id": "shared.item", "resource": "scene_presets/shared.yaml"}
+                        ]
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        roots.append(str(root))
+    monkeypatch.setenv("UNIGYM_PACKS", os.pathsep.join(roots))
+    monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
+
+    with pytest.raises(PackError, match="duplicate 'scene_presets' id 'shared.item'"):
+        installed()

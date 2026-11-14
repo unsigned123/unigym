@@ -45,17 +45,27 @@ The pack contract is exported from `unigym.pack_api`:
 from unigym.pack_api import (
     ActivationHandle,
     AssetContext,
+    AssetResourceRef,
     CatalogEntry,
     PackCatalog,
     PackContext,
+    PackInfo,
     PackManifestV1,
     PackRuntime,
+    PackSet,
     ProvidedItem,
+    ProviderInfo,
     ProviderOrigin,
+    ResourceInfo,
+    RobotRef,
+    ScenePresetRef,
     SceneProvider,
     SceneProviderContext,
+    SceneProviderRef,
     build_scene_from_provider,
     discover,
+    discover_set,
+    installed,
     load_asset_manifest,
     load_manifest_v1,
     register_adapter,
@@ -65,14 +75,20 @@ from unigym.pack_api import (
     register_scene_provider,
     register_termination,
     registered_scene_providers,
+    require,
 )
 
 from unigym.packs import (
+    AssetResourceRef,
     PackInfo,
-    PackItemOrigin,
     PackSet,
+    ProviderInfo,
+    ProviderOrigin,
+    ResourceInfo,
+    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
+    discover_set,
     installed,
     require,
 )
@@ -92,7 +108,8 @@ The removed helper exports `find`, `resolve`, `code_pack_root`, `load_table`
 and `asset_path` no longer exist. Pack code reaches its own resources only
 through `PackContext`, and every resource resolves through `PackRuntime`.
 `unigym.packs` exports `PackError` and the read-only pack-object front door
-(`installed`, `require`, `PackSet`, `PackInfo`, `PackItemOrigin`,
+(`installed`, `require`, `discover_set`, `PackSet`, `PackInfo`, `ProviderInfo`,
+`ResourceInfo`, `ProviderOrigin`, `RobotRef`, `AssetResourceRef`,
 `ScenePresetRef`, `SceneProviderRef`); `MANIFEST_NAME`, `FACE_NAMES` and the
 manifest types live in `unigym.packs.schema`. Importing `unigym.pack_api` or
 `unigym.packs` never imports pack Python.
@@ -1257,6 +1274,29 @@ Adapter registry provenance uses the same side-table model as robots:
   **and** origins together; activation rollback uses this pair.
 
 
+The content-filler (`unigym.scenes.pipeline`), prop-template
+(`unigym.props.templates`) and termination (`unigym.terminations`) registries
+use the same side-table model:
+
+- core seeds no content fillers or prop templates; the built-in terminations
+  `fall`, `base_contact` and `joint_limits` are `ProviderOrigin(kind="core")`;
+- `scene_content_filler_origin(name)`, `prop_template_origin(name)` and
+  `termination_origin(name)` never return `None`; an unknown name raises the
+  registry's teaching error, and an unattributed entry reports `unknown()`;
+- `scene_content_filler_providers(kind=None)`, `prop_template_providers(kind=None)`
+  and `termination_providers(kind=None)` return live `ProviderInfo` records;
+- a registration made by pack code during an activation window gets
+  `kind="pack-code"` with `item_id=None`; outside any window it is `unknown()`;
+- `snapshot_scene_content_fillers()` / `restore_scene_content_fillers()`,
+  `snapshot_prop_templates()` / `restore_prop_templates()` (templates, metadata
+  and origins) and `snapshot_termination_registry()` /
+  `restore_termination_registry()` are origin-aware; activation rollback uses
+  them;
+- `unigym.pack_api.register_scene_content_filler` / `register_prop_template` /
+  `register_termination` keep the pack-author signature and never expose
+  `origin`; only the owner functions accept that internal keyword.
+
+
 Manifest adapter activation is transactional within one pack: every
 `kind: adapter` item is validated (entrypoint present, target importable, a
 class that subclasses `Adapter`, and a free registry name) before any of them is
@@ -1293,9 +1333,11 @@ cache:
 
 `unigym.packs.installed()` enumerates the configured manifest-only discovery
 scope; `unigym.packs.require(*names)` returns the filtered view over exactly
-the named packs and fails before a handle exists when a name is missing. Both
-return a read-only `PackSet`. Neither resolves installed entry points, imports
-pack Python, activates a pack or mutates a registry.
+the named packs and fails before a handle exists when a name is missing or is
+not a non-empty string. `unigym.packs.discover_set(roots)` is the lower-level
+explicit-root constructor over the same data. All return a read-only `PackSet`.
+None resolves installed entry points, imports pack Python, activates a pack or
+mutates a registry.
 
 ```python
 import unigym.packs
@@ -1303,29 +1345,52 @@ import unigym.packs
 packs = unigym.packs.require("acme")          # filtered explicit dependency
 all_packs = unigym.packs.installed()           # whole configured scope
 pack = packs.pack("acme")                      # PackInfo (canonical)
+robot = pack.robot("acme.arm")                 # RobotRef
+asset = pack.asset("acme.cup")                 # AssetResourceRef
 preset = pack.scene_preset("acme.tabletop")    # ScenePresetRef
 provider = pack.scene_provider("acme.table_top")  # SceneProviderRef
 ```
 
 There is no attribute sugar: `packs.acme` never resolves a pack, and
-`packs.pack(name)` is the only guaranteed acquisition form. `PackInfo` also
-provides `scene_presets()` / `scene_providers()` for its own items.
-`PackSet.scene_preset(id)` / `PackSet.scene_provider(id)` are the cross-pack
-edge lookups and `PackSet.scene_presets()` / `PackSet.scene_providers()` are
-the aggregates.
+`packs.pack(name)` is the only guaranteed acquisition form.
 
-`ScenePresetRef` and `SceneProviderRef` are frozen dataclasses, equal by value,
-holding `pack`, `pack_version`, `id` and a `PackItemOrigin` (manifest, root,
-face, item id, locator). `ScenePresetRef.resource` names the declared resource;
+`PackInfo` is a frozen value; equality is by `name`, `version`, `root` and
+`origin` (the private item views are catalog-derived and do not participate).
+It exposes `api`, `trust`, `requires` (reported, not evaluated), a `face_counts`
+declaration-count mapping, `providers(kind=None)`, `resources(face=None)` and
+the pack-scoped handles `robot(s)`, `asset(s)`, `scene_preset(s)` and
+`scene_provider(s)`.
+
+`PackSet` is equal by its ordered `PackInfo` tuple; the runtime is not part of
+the value. Its cross-pack views are `packs()`, `robots()`, `assets()`,
+`scene_presets()`, `scene_providers()`, `providers(kind=None)`,
+`resources(face=None)` and `origins(*, pack=None)` (one pack-level origin per
+pack). `PackSet.robot(id)` / `.asset(id)` / `.scene_preset(id)` /
+`.scene_provider(id)` are the edge string lookups; a missing id lists the known
+ids and an ambiguous id names every owning pack. `resources(face="scenes")`
+fails with the `scene_presets` replacement hint.
+
+`RobotRef`, `AssetResourceRef`, `ScenePresetRef` and `SceneProviderRef` are
+frozen dataclasses, equal by value, holding `pack`, `pack_version`, `id` and a
+`ProviderOrigin` (kind `manifest`, pack/version/root, face, item id, resource
+or entrypoint). A `RobotRef` also exposes `is_data` (resource-backed, no pack
+Python needed). `ScenePresetRef.resource` names the declared resource;
 `SceneProviderRef.entrypoint` names the declared entrypoint and
 `SceneProviderRef.params_schema` is the normalized manifest parameter schema
 (or `None` when the provider declares no parameters). Minting, comparing and
 reading these handles never activates, imports or reads the filesystem.
 
-`PackSet.resource_path(preset_ref)` resolves the preset resource under its pack
-root with the usual inside-root and existence rules.
-`PackSet.resource_path(provider_ref)` raises the "activate the pack" teaching
-error because a scene provider is entrypoint-backed and has no resource path.
+`ResourceInfo` is the resource-backed catalog record (`pack`, `pack_version`,
+`face`, `id`, `kind`, `resource`, resolved `path`, `origin`); entrypoint-only
+items are represented by `ProviderInfo` (with `active=None`, `pack`,
+`pack_version`, `face`, `resource`/`entrypoint` and `origin`) and appear in
+`face_counts` but never fabricate a path. `active` is `True` only on live
+registry queries (`robot_providers()`, `adapter_providers()`, ...).
+
+`PackSet.resource_path(ref)` resolves a robot, asset or scene-preset resource
+under its pack root with the usual inside-root and existence rules.
+`resource_path` on an entrypoint-backed handle (a `SceneProviderRef` or an
+entrypoint-backed `RobotRef`) raises the "activate the pack" teaching error.
 `PackSet.to_runtime()` returns an activation-capable runtime over the same
 catalog and does not activate.
 

@@ -124,6 +124,79 @@ def test_pack_object_construction_imports_no_engine_or_pack_code(tmp_path: Path)
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.subprocess
+def test_pack_set_queries_import_no_engine_or_pack_code(tmp_path: Path) -> None:
+    """Robot/asset/provider/resource queries stay catalog-only and engine-free."""
+    root = tmp_path / "acme_robot"
+    (root / "robots").mkdir(parents=True)
+    (root / "assets").mkdir()
+    (root / "robots" / "acme_arm.yaml").write_text(
+        "schema: unigym.robot/1\n"
+        "name: acme.arm\n"
+        "joint_sets:\n"
+        "  body: [shoulder]\n"
+        "default_joint_pos:\n"
+        "  shoulder: 0.0\n",
+        encoding="utf-8",
+    )
+    (root / "assets" / "cup.yaml").write_text("kind: fixture\n", encoding="utf-8")
+    (root / "unigym.pack.yaml").write_text(
+        "schema: unigym.pack/1\n"
+        "name: acme_robot\n"
+        "version: 1.0.0\n"
+        "api: 1\n"
+        "trust: content\n"
+        "provides:\n"
+        "  providers:\n"
+        "    - id: acme.arm\n"
+        "      kind: robot\n"
+        "      resource: robots/acme_arm.yaml\n"
+        "  assets:\n"
+        "    - id: acme.cup\n"
+        "      resource: assets/cup.yaml\n",
+        encoding="utf-8",
+    )
+    code = (
+        "import sys\n"
+        "import unigym.packs as packs\n"
+        "view = packs.require('acme_robot')\n"
+        "assert view.robots() and view.assets() and view.origins()\n"
+        "assert view.pack('acme_robot').face_counts == {'providers': 1, 'assets': 1}\n"
+        "assert view.resources(face='assets')[0].path.is_file()\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+        "pack_mods = sorted(m for m in sys.modules if m.startswith("
+        f"{_PACK_PREFIXES!r}) or m == 'unigym_packs')\n"
+        "assert not pack_mods, pack_mods\n"
+    )
+    env = dict(os.environ, UNIGYM_PACKS=str(root), UNIGYM_DEPS_ROOT="")
+
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_registry_provenance_modules_are_engine_free() -> None:
+    """The scene/prop/termination origin side tables import no engine module."""
+    code = (
+        "import sys\n"
+        "import unigym.scenes.pipeline\n"
+        "import unigym.props.templates\n"
+        "import unigym.terminations\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("name", _LEGACY_NAMES)
 def test_public_facades_advertise_no_legacy_scene_names(name: str) -> None:
     """The repository's public facades expose no removed scene vocabulary."""

@@ -75,17 +75,24 @@ class ProviderOrigin:
 
 @dataclass(frozen=True)
 class ProviderInfo:
-    """One live registry entry, its provider kind and its origin.
+    """One provider entry: its kind, origin and (for installed items) catalog facts.
 
-    ``active`` describes a live registry query; it is always ``True`` for an
-    entry returned by a registry query.  Installed-catalog queries use their
-    own record and leave ``active`` unset.
+    ``active`` describes a live registry query: ``True`` for an entry returned
+    by a registry query and ``None`` for an installed-catalog query.  A live
+    entry leaves the installed-only fields (``pack``, ``pack_version``,
+    ``face``, ``resource``, ``entrypoint``) unset; an installed entry fills
+    them from the manifest and leaves ``active=None``.
     """
 
     name: str
-    kind: str
+    kind: str | None
     origin: ProviderOrigin
-    active: bool = field(default=True, kw_only=True)
+    active: bool | None = field(default=True, kw_only=True)
+    pack: str | None = None
+    pack_version: str | None = None
+    face: str | None = None
+    resource: str | None = None
+    entrypoint: str | None = None
 
 
 class OriginTable:

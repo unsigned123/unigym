@@ -27,9 +27,11 @@ import random
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Protocol, TypeGuard, overload
 
 from unigym._typing import JsonValue
+from unigym.provenance import OriginTable, ProviderInfo, ProviderOrigin, RegistrySnapshot
 
 from .generators import registered_generators
 from .scene_ir import Instance, Scene, validate_scene
@@ -40,11 +42,7 @@ FILLER_WHENS = ("build", "reset")
 #: the neutral parameter keys through which an instance's params cite a slot.
 SLOT_REFERENCE_KEYS = ("slot", "slot_id")
 
-#: a content-filler factory (called by an engine with its own keyword facts).
-_SceneContentFillerFactory = Callable[..., "SceneContentFiller"]
-
-#: the closed content-filler registry (name -> factory callable).
-_SCENE_CONTENT_FILLERS: dict[str, _SceneContentFillerFactory] = {}
+_SCENE_CONTENT_FILLER_ORIGINS = OriginTable()
 _CONTENT_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -181,9 +179,21 @@ class SceneContentFiller(Protocol):
         ...
 
 
+#: a content-filler factory (called by an engine with its own keyword facts).
+_SceneContentFillerFactory = Callable[..., SceneContentFiller]
+
+#: the closed content-filler registry (name -> factory callable).
+_SCENE_CONTENT_FILLERS: dict[str, _SceneContentFillerFactory] = {}
+
+SceneContentFillerRegistrySnapshot = RegistrySnapshot[_SceneContentFillerFactory]
+"""The origin-aware content-filler registry snapshot type."""
+
+
 def register_scene_content_filler(
     name: str,
     factory: _SceneContentFillerFactory,
+    *,
+    origin: ProviderOrigin | None = None,
 ) -> _SceneContentFillerFactory:
     """Register one content-filler factory under a snake_case name.
 
@@ -196,13 +206,17 @@ def register_scene_content_filler(
     Args:
         name: The filler name (lowercase snake_case, unique).
         factory: The callable that builds a filler instance.
+        origin: Internal/runtime-only provenance; pack authors never pass it.
+            A registration without an origin reports
+            :meth:`ProviderOrigin.unknown`.
 
     Returns:
         The registered factory.
 
     Raises:
-        SceneBindingError: The name is illegal or already registered, or
-            the factory is not callable.
+        SceneBindingError: The name is illegal or already registered, the
+            factory is not callable, or *origin* is not a
+            :class:`ProviderOrigin`.
     """
     if not isinstance(name, str) or _CONTENT_NAME_RE.fullmatch(name) is None:
         raise SceneBindingError(
@@ -217,8 +231,49 @@ def register_scene_content_filler(
         raise SceneBindingError(
             f"content filler {name!r} is registered twice -- give each " f"filler a unique name"
         )
+    if origin is not None and not isinstance(origin, ProviderOrigin):
+        raise SceneBindingError(
+            f"content filler {name!r}: origin must be a ProviderOrigin, "
+            f"got {type(origin).__name__}"
+        )
     _SCENE_CONTENT_FILLERS[name] = factory
+    if origin is None:
+        _SCENE_CONTENT_FILLER_ORIGINS.remove(name)
+    else:
+        _SCENE_CONTENT_FILLER_ORIGINS.set(name, origin)
     return factory
+
+
+def attribute_scene_content_filler(name: str, origin: ProviderOrigin) -> None:
+    """Attach runtime-owned provenance to an already-registered content filler.
+
+    This is the pack runtime's activation-window attribution boundary, not
+    pack-author API: pack code registers through
+    :func:`register_scene_content_filler` and never passes an origin.  It may
+    only label an entry whose current origin is absent or ``unknown``.
+
+    Raises:
+        SceneBindingError: The filler is unknown or already has an attributed
+            origin.
+        TypeError: *origin* is not a :class:`ProviderOrigin`.
+    """
+    if name not in _SCENE_CONTENT_FILLERS:
+        raise SceneBindingError(
+            f"content filler {name!r} is not registered "
+            f"(registered: {registered_scene_content_fillers()})"
+        )
+    if not isinstance(origin, ProviderOrigin):
+        raise TypeError(
+            f"content filler {name!r}: origin must be a ProviderOrigin, "
+            f"got {type(origin).__name__}"
+        )
+    existing = _SCENE_CONTENT_FILLER_ORIGINS.get(name)
+    if existing is not None and existing.kind != "unknown":
+        raise SceneBindingError(
+            f"content filler {name!r} already has a {existing.kind!r} origin; "
+            "only an unattributed registration may be labeled"
+        )
+    _SCENE_CONTENT_FILLER_ORIGINS.set(name, origin)
 
 
 def scene_content_filler(name: str) -> _SceneContentFillerFactory:
@@ -251,21 +306,58 @@ def registered_scene_content_fillers() -> list[str]:
     return sorted(_SCENE_CONTENT_FILLERS)
 
 
-def snapshot_scene_content_fillers() -> dict[str, _SceneContentFillerFactory]:
-    """Return a copy of the content-filler registry (isolation/restore face)."""
-    return dict(_SCENE_CONTENT_FILLERS)
+def scene_content_filler_origin(name: str) -> ProviderOrigin:
+    """Return the origin of one registered content filler (never ``None``).
+
+    A registered filler with no recorded origin returns
+    :meth:`ProviderOrigin.unknown`; an unknown name raises the registry error
+    listing the registered set.
+    """
+    if name not in _SCENE_CONTENT_FILLERS:
+        raise SceneBindingError(
+            f"content filler {name!r} is not registered "
+            f"(registered: {registered_scene_content_fillers()})"
+        )
+    return _SCENE_CONTENT_FILLER_ORIGINS.origin(name)
+
+
+def scene_content_filler_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
+    """Return the registered content fillers as live :class:`ProviderInfo` records.
+
+    ``kind`` selects the provider kind; the content-filler registry owns only
+    ``"content_filler"``, so any other kind returns an empty tuple (``None``
+    returns every record).  Records are ordered by name.
+    """
+    if kind is not None and kind != "content_filler":
+        return ()
+    return tuple(
+        ProviderInfo(
+            name=name,
+            kind="content_filler",
+            origin=_SCENE_CONTENT_FILLER_ORIGINS.origin(name),
+        )
+        for name in sorted(_SCENE_CONTENT_FILLERS)
+    )
+
+
+def snapshot_scene_content_fillers() -> SceneContentFillerRegistrySnapshot:
+    """Return a total snapshot of the content-filler factories and origins."""
+    return SceneContentFillerRegistrySnapshot(
+        entries=MappingProxyType(dict(_SCENE_CONTENT_FILLERS)),
+        origins=MappingProxyType(_SCENE_CONTENT_FILLER_ORIGINS.snapshot()),
+    )
 
 
 def restore_scene_content_fillers(
-    snapshot: Mapping[str, _SceneContentFillerFactory],
+    snapshot: SceneContentFillerRegistrySnapshot,
 ) -> None:
-    """Restore the content-filler registry to exactly *snapshot*."""
-    if not isinstance(snapshot, Mapping):
+    """Restore the content-filler factories and origins to exactly *snapshot*."""
+    if not isinstance(snapshot, RegistrySnapshot):
         raise TypeError(
-            "restore_scene_content_fillers expects a mapping, " f"got {type(snapshot).__name__}"
+            "restore_scene_content_fillers expects a "
+            f"SceneContentFillerRegistrySnapshot, got {type(snapshot).__name__}"
         )
-    _SCENE_CONTENT_FILLERS.clear()
-    _SCENE_CONTENT_FILLERS.update(snapshot)
+    snapshot.restore(_SCENE_CONTENT_FILLERS, _SCENE_CONTENT_FILLER_ORIGINS)
 
 
 @dataclass(frozen=True)
@@ -578,13 +670,17 @@ __all__ = [
     "BuildContext",
     "CompiledScene",
     "SceneContentFiller",
+    "SceneContentFillerRegistrySnapshot",
     "Draw",
     "PayloadSet",
     "Resolution",
     "Scaffold",
     "SceneBindingError",
     "ScenePipeline",
+    "attribute_scene_content_filler",
     "scene_content_filler",
+    "scene_content_filler_origin",
+    "scene_content_filler_providers",
     "register_scene_content_filler",
     "registered_scene_content_fillers",
     "restore_scene_content_fillers",

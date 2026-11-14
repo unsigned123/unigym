@@ -36,9 +36,12 @@ from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
+    from unigym.props.templates import PropTemplateRegistrySnapshot
     from unigym.robots import RobotProfile
+    from unigym.scenes.pipeline import SceneContentFillerRegistrySnapshot
     from unigym.scenes.provider_params import ProviderParamSpec
     from unigym.scenes.providers import SceneProvider, SceneProviderRegistrySnapshot
+    from unigym.terminations import TerminationRegistrySnapshot
 
 _ASSET_PACK_PREFIX = "pack:"
 
@@ -454,6 +457,69 @@ def _attribute_pack_code_scene_providers(
         attribute_scene_provider(name, origin)
 
 
+def _attribute_pack_code_content_fillers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: SceneContentFillerRegistrySnapshot,
+) -> None:
+    """Label content fillers the pack registered itself during activation."""
+    from unigym.scenes.pipeline import (
+        attribute_scene_content_filler,
+        registered_scene_content_fillers,
+        scene_content_filler_origin,
+    )
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in registered_scene_content_fillers():
+        if name in before.entries:
+            continue
+        if scene_content_filler_origin(name).kind != "unknown":
+            continue
+        attribute_scene_content_filler(name, origin)
+
+
+def _attribute_pack_code_prop_templates(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: PropTemplateRegistrySnapshot,
+) -> None:
+    """Label prop templates the pack registered itself during activation."""
+    from unigym.props.templates import (
+        attribute_prop_template,
+        prop_template_origin,
+        prop_template_providers,
+    )
+
+    origin = _pack_code_origin(manifest, runtime)
+    for info in prop_template_providers():
+        if info.name in before.templates:
+            continue
+        if prop_template_origin(info.name).kind != "unknown":
+            continue
+        attribute_prop_template(info.name, origin)
+
+
+def _attribute_pack_code_terminations(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: TerminationRegistrySnapshot,
+) -> None:
+    """Label terminations the pack registered itself during activation."""
+    from unigym.terminations import (
+        TERMINATION_REGISTRY,
+        attribute_termination,
+        termination_origin,
+    )
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in sorted(TERMINATION_REGISTRY):
+        if name in before.entries:
+            continue
+        if termination_origin(name).kind != "unknown":
+            continue
+        attribute_termination(name, origin)
+
+
 def _activate_scene_provider_providers(
     manifest: PackManifestV1,
     runtime: PackRuntime,
@@ -774,14 +840,15 @@ class PackRuntime:
         Every item set is validated before any registration.  Other provider
         kinds stay inert.  Any imported pack module can register through
         ``unigym.pack_api`` at import time, regardless of the kind that pulled
-        it in, so the adapter, robot and scene-provider registries are all
-        snapshotted before the first import or provider registration.  Failures
-        are wrapped with the pack, item id and locator named; a failed
-        activation restores all three registries to their prior contents,
-        including names and origins pack code registered itself.  Manifest
-        provider items write exact ``kind="manifest"`` origins; names a pack
-        registered itself during this activation window are labeled
-        ``kind="pack-code"`` with ``item_id=None``.
+        it in, so the adapter, robot, scene-provider, content-filler,
+        prop-template and termination registries are all snapshotted before
+        the first import or provider registration.  Failures are wrapped with
+        the pack, item id and locator named; a failed activation restores all
+        of those registries to their prior contents, including names and
+        origins pack code registered itself.  Manifest provider items write
+        exact ``kind="manifest"`` origins; names a pack registered itself
+        during this activation window are labeled ``kind="pack-code"`` with
+        ``item_id=None``.
 
         Raises:
             PackError: The pack is unknown or activation failed.
@@ -818,16 +885,25 @@ class PackRuntime:
         adapters_before: RegistrySnapshot[type[Adapter]] | None = None
         robots_before: RegistrySnapshot[Callable[..., RobotProfile]] | None = None
         scene_before: SceneProviderRegistrySnapshot | None = None
+        content_before: SceneContentFillerRegistrySnapshot | None = None
+        templates_before: PropTemplateRegistrySnapshot | None = None
+        terminations_before: TerminationRegistrySnapshot | None = None
         if activation_surface:
             if imports_pack_code:
                 from unigym.adapters import snapshot_adapter_registry
 
                 adapters_before = snapshot_adapter_registry()
+            from unigym.props.templates import snapshot_prop_templates
             from unigym.robots import snapshot_robot_registry
+            from unigym.scenes.pipeline import snapshot_scene_content_fillers
             from unigym.scenes.providers import snapshot_scene_providers
+            from unigym.terminations import snapshot_termination_registry
 
             robots_before = snapshot_robot_registry()
             scene_before = snapshot_scene_providers()
+            content_before = snapshot_scene_content_fillers()
+            templates_before = snapshot_prop_templates()
+            terminations_before = snapshot_termination_registry()
 
         def rollback_adapters() -> None:
             """Restore the adapter classes and origins a failed activation changed."""
@@ -852,6 +928,30 @@ class PackRuntime:
             from unigym.scenes.providers import restore_scene_providers
 
             restore_scene_providers(scene_before)
+
+        def rollback_content_fillers() -> None:
+            """Restore the content-filler factories and origins a failed activation changed."""
+            if content_before is None:
+                return
+            from unigym.scenes.pipeline import restore_scene_content_fillers
+
+            restore_scene_content_fillers(content_before)
+
+        def rollback_prop_templates() -> None:
+            """Restore the prop-template registries a failed activation changed."""
+            if templates_before is None:
+                return
+            from unigym.props.templates import restore_prop_templates
+
+            restore_prop_templates(templates_before)
+
+        def rollback_terminations() -> None:
+            """Restore the termination classes and origins a failed activation changed."""
+            if terminations_before is None:
+                return
+            from unigym.terminations import restore_termination_registry
+
+            restore_termination_registry(terminations_before)
 
         try:
             if entrypoint is not None:
@@ -880,15 +980,27 @@ class PackRuntime:
                 _attribute_pack_code_robots(manifest, self, robots_before)
             if scene_before is not None:
                 _attribute_pack_code_scene_providers(manifest, self, scene_before)
+            if content_before is not None:
+                _attribute_pack_code_content_fillers(manifest, self, content_before)
+            if templates_before is not None:
+                _attribute_pack_code_prop_templates(manifest, self, templates_before)
+            if terminations_before is not None:
+                _attribute_pack_code_terminations(manifest, self, terminations_before)
         except PackError:
             rollback_adapters()
             rollback_robots()
             rollback_scene_providers()
+            rollback_content_fillers()
+            rollback_prop_templates()
+            rollback_terminations()
             raise
         except Exception as err:
             rollback_adapters()
             rollback_robots()
             rollback_scene_providers()
+            rollback_content_fillers()
+            rollback_prop_templates()
+            rollback_terminations()
             if entrypoint is None:
                 raise PackError(f"pack {pack!r} provider activation failed: {err}") from err
             raise PackError(

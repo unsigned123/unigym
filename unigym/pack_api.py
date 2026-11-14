@@ -18,6 +18,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from unigym.packs.catalog import CatalogEntry, PackCatalog
+from unigym.packs.packset import (
+    AssetResourceRef,
+    PackInfo,
+    PackSet,
+    ResourceInfo,
+    RobotRef,
+    ScenePresetRef,
+    SceneProviderRef,
+    discover_set,
+    installed,
+    require,
+)
 from unigym.packs.runtime import (
     ActivationHandle,
     AssetContext,
@@ -26,7 +38,7 @@ from unigym.packs.runtime import (
     discover,
 )
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
-from unigym.provenance import ProviderOrigin
+from unigym.provenance import ProviderInfo, ProviderOrigin
 from unigym.scenes.providers import (
     SceneProvider,
     SceneProviderContext,
@@ -99,36 +111,35 @@ def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[
 
 def register_termination(name: str, cls):
     """Register a termination class in the core termination registry."""
-    from unigym.terminations import TERMINATION_REGISTRY
+    from unigym.terminations import register_termination as register
 
-    if (
-        not isinstance(name, str)
-        or not name
-        or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in name)
-    ):
-        raise ValueError(f"termination name {name!r} must be lowercase snake_case")
-    if name in TERMINATION_REGISTRY:
-        raise ValueError(f"termination {name!r} registered twice")
-    if not callable(cls):
-        raise ValueError(f"termination {name!r} must be callable")
-    TERMINATION_REGISTRY[name] = cls
-    return cls
+    return register(name, cls)
 
 
 __all__ = [
     "ActivationHandle",
     "AssetContext",
+    "AssetResourceRef",
     "CatalogEntry",
     "PackCatalog",
     "PackContext",
+    "PackInfo",
     "PackManifestV1",
     "PackRuntime",
+    "PackSet",
     "ProvidedItem",
+    "ProviderInfo",
     "ProviderOrigin",
+    "ResourceInfo",
+    "RobotRef",
+    "ScenePresetRef",
     "SceneProvider",
     "SceneProviderContext",
+    "SceneProviderRef",
     "build_scene_from_provider",
     "discover",
+    "discover_set",
+    "installed",
     "load_asset_manifest",
     "load_manifest_v1",
     "register_adapter",
@@ -138,4 +149,5 @@ __all__ = [
     "register_scene_provider",
     "register_termination",
     "registered_scene_providers",
+    "require",
 ]
