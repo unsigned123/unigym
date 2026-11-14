@@ -97,6 +97,7 @@ class _FromConfigKwargs(TypedDict, total=False):
     adapter_params: dict[str, JsonValue] | None
     no_artifacts: bool
     inspect: bool
+    pack_runtime: PackRuntime | None
 
 
 def _task_name(task: dict[str, JsonValue]) -> str | None:
@@ -488,6 +489,9 @@ class Run:
         seed: Run seed (default 0).
         inspect: Build quietly (stdout captured into :attr:`logs`, no
             artifacts, temp output dir).
+        pack_runtime: An explicit pack runtime for a config that needs one;
+            ``None`` keeps the ambient discovery fallback.  The injected
+            runtime is used as-is and is never replaced by discovery.
         **overrides: Extra top-level config keys (existing schema only).
     """
 
@@ -513,6 +517,7 @@ class Run:
         adapter_params: dict[str, JsonValue] | None = None,
         no_artifacts: bool = False,
         inspect: bool = False,
+        pack_runtime: PackRuntime | None = None,
         _config_path: str | None = None,
         **overrides: JsonValue,
     ) -> None:
@@ -604,7 +609,7 @@ class Run:
             self._benchmark_tasks(raw), on_add=self._on_benchmark_add
         )
         self._spec: RunSpec | None = None
-        self._pack_runtime: PackRuntime | None = None
+        self._pack_runtime: PackRuntime | None = pack_runtime
         self._instance: RunInstance | None = None
         self._runner: Runner | None = None
         self._runner_kind: str | None = None
@@ -716,6 +721,7 @@ class Run:
         adapter_params: dict[str, JsonValue] | None = None,
         no_artifacts: bool = False,
         inspect: bool = False,
+        pack_runtime: PackRuntime | None = None,
     ) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
@@ -733,6 +739,8 @@ class Run:
             adapter_params: Adapter-section overlay mapping.
             no_artifacts: Disable per-run scene artifacts.
             inspect: Build quietly with a temp output dir.
+            pack_runtime: The explicit pack runtime for a config that needs
+                one; ``None`` keeps the ambient discovery fallback.
 
         Returns:
             A lazy ``Run`` whose spec is built on first access.
@@ -757,6 +765,7 @@ class Run:
             adapter_params=adapter_params,
             no_artifacts=no_artifacts,
             inspect=inspect,
+            pack_runtime=pack_runtime,
             _config_path=os.path.abspath(os.fspath(path)),
         )
 
@@ -826,17 +835,15 @@ class Run:
                     # scene_provider* routing keys do not exist yet: only
                     # apply_scene_preset writes them.)
                     cfg.pop("scene_preset", None)
-        runtime: PackRuntime | None = None
+        runtime: PackRuntime | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
-        if requires_pack_runtime(cfg):
-            runtime = self._pack_runtime
-            if runtime is None:
-                from unigym.pack_api import discover
+        if runtime is None and requires_pack_runtime(cfg):
+            from unigym.pack_api import discover
 
-                runtime = discover(entry_points=True)
-                runtime.activate_all()
-                self._pack_runtime = runtime
+            runtime = discover(entry_points=True)
+            runtime.activate_all()
+            self._pack_runtime = runtime
         spec = build_spec(cfg, self._args(), runtime=runtime)
         if self._world is not None:
             terrain = self._world.terrain_value()
