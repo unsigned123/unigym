@@ -34,7 +34,7 @@ from unigym._typing import JsonValue
 from unigym.provenance import OriginTable, ProviderInfo, ProviderOrigin, RegistrySnapshot
 
 from .generators import registered_generators
-from .scene_ir import Instance, Scene, validate_scene
+from .scene_ir import AssetInstance, Instance, Scene, validate_scene
 
 #: legal content-filler timings (declared by the engine, never chosen here).
 FILLER_WHENS = ("build", "reset")
@@ -387,6 +387,7 @@ class Resolution:
     regions: tuple[Mapping[str, JsonValue], ...] = ()
     slots: tuple[Mapping[str, JsonValue], ...] = ()
     materials: tuple[Mapping[str, JsonValue], ...] = ()
+    asset_instances: tuple[Mapping[str, JsonValue], ...] = ()
 
     def to_mapping(self) -> dict[str, JsonValue]:
         """Return the JSON-ready artifact view of this resolution."""
@@ -395,6 +396,7 @@ class Resolution:
             "regions": [dict(entry) for entry in self.regions],
             "slots": [dict(entry) for entry in self.slots],
             "materials": [dict(entry) for entry in self.materials],
+            "asset_instances": [dict(entry) for entry in self.asset_instances],
         }
 
 
@@ -441,6 +443,59 @@ def _slot_references(instance: Instance) -> list[str]:
     return references
 
 
+def validate_asset_scene(scene: Scene) -> None:
+    """Re-assert the file-asset contract and refuse unsupported semantics.
+
+    Runs the scene-level checks, re-asserts every :class:`AssetInstance`
+    field contract at the consumer boundary, and rejects region/slot
+    semantics a file-backed asset scene does not support.  Materials and
+    terrain stay legal here.
+
+    Args:
+        scene: The scene a consumer is about to compose.
+
+    Raises:
+        ValueError: The value is not a Scene or a scene tuple member is
+            malformed (owned by :func:`validate_scene`).
+        SceneBindingError: An asset instance breaks its field contract, or
+            the scene carries region/slot semantics asset instances cannot
+            honour.
+    """
+    validate_scene(scene)
+    for entry in scene.asset_instances:
+        try:
+            # Rebuild through the owner type to re-run its construction rules
+            # without duplicating them at this boundary; the runtime class is
+            # not trusted to re-validate.
+            AssetInstance(
+                id=entry.id,
+                asset=entry.asset,
+                pose=entry.pose,
+                source=entry.source,
+                kind=entry.kind,
+                collision=entry.collision,
+            )
+        except ValueError as exc:
+            raise SceneBindingError(str(exc)) from exc
+    if not scene.asset_instances:
+        return
+    if scene.regions:
+        raise SceneBindingError(
+            f"scene {scene.name!r}: regions are not supported with file-backed "
+            f"asset instances -- remove the region declarations or the asset instances"
+        )
+    if scene.slots:
+        raise SceneBindingError(
+            f"scene {scene.name!r}: slots are not supported with file-backed "
+            f"asset instances -- remove the slot declarations or the asset instances"
+        )
+    if scene.engine_hints.get("regions"):
+        raise SceneBindingError(
+            f"scene {scene.name!r}: engine_hints['regions'] is not supported with "
+            f"file-backed asset instances -- remove the hint or the asset instances"
+        )
+
+
 def validate_binding(
     scene: Scene,
     generator_exists: Callable[[str], bool],
@@ -460,9 +515,10 @@ def validate_binding(
     Raises:
         SceneBindingError: A generator is unknown, a referenced slot is
             undeclared, a pose frame names no declared slot/region frame,
-            or an instance carries no provenance.
+            an instance carries no provenance, or the scene carries an
+            asset-instance contract/unsupported-semantics violation.
     """
-    validate_scene(scene)
+    validate_asset_scene(scene)
     if not callable(generator_exists):
         raise SceneBindingError(
             "validate_binding: generator_exists must be callable, got "
@@ -685,5 +741,6 @@ __all__ = [
     "registered_scene_content_fillers",
     "restore_scene_content_fillers",
     "snapshot_scene_content_fillers",
+    "validate_asset_scene",
     "validate_binding",
 ]

@@ -1,11 +1,14 @@
-"""Neutral scene IR: the closed five-type vocabulary and its container.
+"""Neutral scene IR: the closed vocabulary and its container.
 
-Pure data + validation -- standard library only (``dataclasses``,
-``typing``, ``math``): no engine import, no content import, no IO.  The
-vocabulary is the closed IR:
+Pure data + validation -- the standard library plus the stdlib-light
+:mod:`unigym.assets.asset_ref` leaf (``dataclasses``, ``typing``,
+``math``): no engine import, no content import, no IO.  The vocabulary is
+the closed IR:
 
-* :class:`Instance` -- the ONLY geometry carrier (``generator`` +
+* :class:`Instance` -- a generated geometry carrier (``generator`` +
   ``params`` + ``pose``), with a mandatory provenance ``source``;
+* :class:`AssetInstance` -- a file-backed asset (``asset`` + ``kind``)
+  placed in the world, with a mandatory provenance ``source``;
 * :class:`Region` -- a named owner-local extent;
 * :class:`Slot` -- the only scene/content shared object (id + frame +
   extent + free tags); the core stores it and never interprets the tags;
@@ -16,10 +19,10 @@ vocabulary is the closed IR:
 the ONE explicitly NON-neutral member: it is the engine's escape hatch
 (solver/gravity/... knobs) and no other member may carry engine policy.
 
-The neutral-name guard mirrors the asset-IR neutral-name guard without
-importing it: one mechanical rule, a local copy, so this module stays
-standard-library only (the rule is shared between the asset and scene
-vocabularies).
+The neutral-name guard mirrors the asset-IR neutral-name guard: one
+mechanical rule, a local copy, so this module is standard library plus the
+stdlib-light asset-reference leaf (the rule is shared between the asset and
+scene vocabularies).
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from unigym._typing import JsonValue
+from unigym.assets.asset_ref import ASSET_FORMATS, AssetRef
 
 if TYPE_CHECKING:
     from .terrain import Terrain
@@ -60,6 +64,9 @@ _EngineHints: TypeAlias = Mapping[str, Any]
 #: the closed instance-role vocabulary (a hint, never a dispatch branch).
 INSTANCE_ROLES = ("rigid", "articulated", "terrain", "sensor")
 
+#: the closed file-asset instance role vocabulary (the load-bearing role).
+ASSET_INSTANCE_KINDS = ("static_rigid", "dynamic_rigid")
+
 CORE_SLOT_TAGS = ("support", "interior", "opening")
 """The slot tags the CORE itself understands.
 
@@ -71,8 +78,9 @@ generic consumer may count on; treat the list as a convention, not a gate.
 """
 
 #: engine element names an IR element may never be NAMED after (the
-#: mechanical anti-leak rule shared with the asset IR, copied here so the
-#: scenes package imports nothing from the asset-IR package).
+#: mechanical anti-leak rule shared with the asset IR; the local copy keeps
+#: this module on the standard library plus the stdlib-light asset-reference
+#: leaf).
 _ENGINE_ELEMENT_NAMES = frozenset(
     {
         "body",
@@ -262,6 +270,61 @@ class Instance:
 
 
 @dataclass(frozen=True)
+class AssetInstance:
+    """One file-backed asset: an :class:`AssetRef` role at a world pose.
+
+    ``asset`` is authored data (the IR never coerces a mapping into it);
+    ``kind`` is the closed role (see :data:`ASSET_INSTANCE_KINDS`);
+    ``collision`` is the exact collision toggle; ``source`` is the
+    mandatory ``file:line`` provenance of the declaration.  File-backed
+    assets resolve in the ``"world"`` frame only.
+    """
+
+    id: str
+    asset: AssetRef
+    pose: Pose
+    source: str
+    kind: str = "static_rigid"
+    collision: bool = True
+
+    def __post_init__(self):
+        """Validate the id, asset, pose, source, kind and collision."""
+        object.__setattr__(self, "id", require_neutral_name("asset instance", self.id))
+        if not isinstance(self.asset, AssetRef):
+            raise ValueError(
+                f"asset instance {self.id!r}: asset must be an AssetRef, got "
+                f"{type(self.asset).__name__}"
+            )
+        if not any((getattr(self.asset, fmt) or "").strip() for fmt in ASSET_FORMATS):
+            raise ValueError(
+                f"asset instance {self.id!r}: asset declares no format; allowed "
+                f"formats are {list(ASSET_FORMATS)}"
+            )
+        if not isinstance(self.pose, Pose):
+            raise ValueError(
+                f"asset instance {self.id!r}: pose must be a Pose, got "
+                f"{type(self.pose).__name__}"
+            )
+        if self.pose.frame != "world":
+            raise ValueError(
+                f"asset instance {self.id!r}: pose frame {self.pose.frame!r} is not "
+                f"'world'; file-backed asset instances resolve in world only"
+            )
+        object.__setattr__(
+            self, "source", _require_source(f"asset instance {self.id!r}", self.source)
+        )
+        if self.kind not in ASSET_INSTANCE_KINDS:
+            raise ValueError(
+                f"asset instance {self.id!r}: kind {self.kind!r} must be one of "
+                f"{ASSET_INSTANCE_KINDS}"
+            )
+        if not isinstance(self.collision, bool):
+            raise ValueError(
+                f"asset instance {self.id!r}: collision must be a bool, got " f"{self.collision!r}"
+            )
+
+
+@dataclass(frozen=True)
 class Region:
     """One named owner-local extent (a support, interior or opening fact).
 
@@ -354,11 +417,12 @@ class Material:
 
 @dataclass(frozen=True)
 class Scene:
-    """The scene container: instances + regions + slots + materials.
+    """The scene container: all neutral scene entries.
 
-    Sequence members are tuples of their typed entry.  ``engine_hints``
-    is deliberately NOT neutral: it is the engine's escape hatch for
-    solver/gravity/... knobs, kept out of every other member so the
+    Entries are generated instances, file-backed asset instances, regions,
+    slots and materials.  Sequence members are tuples of their typed entry.
+    ``engine_hints`` is deliberately NOT neutral: it is the engine's escape
+    hatch for solver/gravity/... knobs, kept out of every other member so the
     closed IR stays portable.
     """
 
@@ -369,6 +433,7 @@ class Scene:
     materials: tuple[Material, ...] = ()
     engine_hints: _EngineHints = field(default_factory=_empty_hints)
     terrain: Terrain | None = None
+    asset_instances: tuple[AssetInstance, ...] = ()
 
     def __post_init__(self):
         """Validate the name, the typed sequences, hints, terrain and uniqueness."""
@@ -377,6 +442,7 @@ class Scene:
         _require_entries("regions", self.regions, Region)
         _require_entries("slots", self.slots, Slot)
         _require_entries("materials", self.materials, Material)
+        _require_entries("asset_instances", self.asset_instances, AssetInstance)
         if not isinstance(self.engine_hints, Mapping):
             raise ValueError(
                 f"scene engine_hints must be a mapping, got " f"{type(self.engine_hints).__name__}"
@@ -430,11 +496,24 @@ def _check_unique(
 
 
 def _validate_uniqueness(scene: Scene) -> None:
-    """Reject duplicate instance ids, region names, slot ids and materials."""
+    """Reject duplicate ids/names and instance/asset-instance id collisions."""
     _check_unique("instance", "id", (entry.id for entry in scene.instances), scene.name)
     _check_unique("region", "name", (entry.name for entry in scene.regions), scene.name)
     _check_unique("slot", "id", (entry.id for entry in scene.slots), scene.name)
     _check_unique("material", "name", (entry.name for entry in scene.materials), scene.name)
+    _check_unique(
+        "asset instance",
+        "id",
+        (entry.id for entry in scene.asset_instances),
+        scene.name,
+    )
+    instance_ids = {entry.id for entry in scene.instances}
+    for entry in scene.asset_instances:
+        if entry.id in instance_ids:
+            raise ValueError(
+                f"asset instance {entry.id!r} collides with instance {entry.id!r} "
+                f"in scene {scene.name!r}; ids are one namespace"
+            )
 
 
 def validate_scene(scene: Scene) -> None:
@@ -452,6 +531,7 @@ def validate_scene(scene: Scene) -> None:
     """
     if not isinstance(scene, Scene):
         raise ValueError(f"scene expected, got {type(scene).__name__}")
+    _require_entries("asset_instances", scene.asset_instances, AssetInstance)
     if scene.terrain is not None:
         from .terrain import Terrain
 
@@ -463,8 +543,10 @@ def validate_scene(scene: Scene) -> None:
 
 
 __all__ = [
+    "ASSET_INSTANCE_KINDS",
     "CORE_SLOT_TAGS",
     "INSTANCE_ROLES",
+    "AssetInstance",
     "Instance",
     "Material",
     "Pose",

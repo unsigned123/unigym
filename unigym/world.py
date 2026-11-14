@@ -500,6 +500,7 @@ class World:
             materials=tuple(materials),
             engine_hints=dict(base.engine_hints) if base is not None else {},
             terrain=terrain,
+            asset_instances=tuple(base.asset_instances) if base is not None else (),
         )
         validate_scene(scene)
         return scene
@@ -513,6 +514,7 @@ class World:
         used |= {o.name for o in self._dynamic}
         if self._base_scene is not None:
             used |= {inst.id for inst in self._base_scene.instances}
+            used |= {asset.id for asset in self._base_scene.asset_instances}
         return used
 
     def _assign_name(self, obj: _Primitive, used: set[str | None]) -> None:
@@ -791,15 +793,18 @@ class World:
 
     @property
     def unmapped_static_scene(self) -> bool:
-        """True when an inline base scene carries instances no backend maps.
+        """True when an inline base scene carries declarations no backend maps.
 
         ``World.add`` primitives are the closed vocabulary a static backend
         can translate (:meth:`static_declarations`); a ``World.inline(scene)``
-        base scene can carry arbitrary scene-IR generators, so it has no
-        backend-neutral static mapping.  Callers use this to fail fast
-        instead of silently dropping the geometry.
+        base scene can carry arbitrary scene-IR generators or file-backed
+        asset instances, so it has no backend-neutral static mapping.
+        Callers use this to fail fast instead of silently dropping the
+        geometry.
         """
-        return self._base_scene is not None and bool(self._base_scene.instances)
+        return self._base_scene is not None and bool(
+            self._base_scene.instances or self._base_scene.asset_instances
+        )
 
     def dynamic_declarations(self) -> dict[str, JsonValue]:
         """The ``objects:`` content block for this world's dynamic objects.
@@ -975,6 +980,7 @@ def _unique_name(world: World, stem: str) -> str:
     used |= {o.name for o in world._dynamic}
     if world._base_scene is not None:
         used |= {inst.id for inst in world._base_scene.instances}
+        used |= {asset.id for asset in world._base_scene.asset_instances}
     index = len(world._objects) + len(world._dynamic) + 1
     name = f"{stem}_{index}"
     while name in used:

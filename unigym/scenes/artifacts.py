@@ -1,4 +1,4 @@
-"""Deterministic scene artifact writers (neutral, standard library only).
+"""Deterministic scene artifact writers (neutral, stdlib-only dependencies).
 
 The run-side half of the scene bridge: every build stage already produces
 a JSON-ready view (:class:`~unigym.scenes.pipeline.Draw`,
@@ -11,6 +11,10 @@ Every file is a pure function of the view it is handed: sorted object keys,
 two-space indent, UTF-8 with a trailing newline, no timestamps and no
 absolute paths added by the writer.  Two calls with the same view are
 byte-identical, so a run's artifacts can be compared directly.
+
+:func:`asset_instance_rows` is the neutral, stdlib-only row shape both
+engines put in their ``describe`` slice: hex floats, no absolute paths and
+no engine vocabulary.
 
 The engine (S5) owns the compiled scene XML: it captures the composed text
 before compilation and passes it to :func:`write_compile_report`, which
@@ -26,8 +30,16 @@ from collections.abc import Mapping
 from typing import TypeGuard
 
 from unigym._typing import JsonValue
+from unigym.assets.asset_ref import ASSET_FORMATS
+
+from .scene_ir import Scene
+
+#: digest tag for the neutral file-asset scene slice both engines share.
+ASSET_SCENE_DIGEST_VERSION = "unigym.scene.asset/1"
 
 __all__ = [
+    "ASSET_SCENE_DIGEST_VERSION",
+    "asset_instance_rows",
     "write_build_artifacts",
     "write_compile_report",
     "write_composed_xml",
@@ -99,6 +111,76 @@ def _write_json(
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
     return path
+
+
+def asset_instance_rows(
+    scene: Scene,
+    formats: Mapping[str, str],
+) -> tuple[dict[str, JsonValue], ...]:
+    """Return the deterministic neutral asset rows shared by both engines.
+
+    Args:
+        scene: The scene whose file-backed asset instances are described.
+        formats: The engine-selected format per asset-instance id.
+
+    Returns:
+        One row per asset instance, sorted by id, with hex-float poses and
+        no absolute paths.
+
+    Raises:
+        TypeError: *scene* is not a Scene or *formats* is not a mapping.
+        ValueError: An id has no selected format or a format the asset does
+            not declare.
+    """
+    if not isinstance(scene, Scene):
+        raise TypeError(f"asset_instance_rows expects a Scene, got {type(scene).__name__}")
+    if not isinstance(formats, Mapping):
+        raise TypeError(
+            f"asset_instance_rows: formats must be a mapping of asset-instance id "
+            f"to format, got {type(formats).__name__}"
+        )
+    declared_ids = sorted(entry.id for entry in scene.asset_instances)
+    unknown = sorted(set(formats) - set(declared_ids))
+    if unknown:
+        raise ValueError(
+            f"asset_instance_rows: formats names undeclared asset instance(s) "
+            f"{unknown}; declared ids are {declared_ids}"
+        )
+    rows: list[dict[str, JsonValue]] = []
+    for entry in sorted(scene.asset_instances, key=lambda item: item.id):
+        selected = formats.get(entry.id)
+        if selected is None:
+            raise ValueError(
+                f"asset instance {entry.id!r}: no format was selected -- declare "
+                f"exactly one of {list(ASSET_FORMATS)} in formats"
+            )
+        if selected not in ASSET_FORMATS:
+            raise ValueError(
+                f"asset instance {entry.id!r}: format {selected!r} must be one of "
+                f"{list(ASSET_FORMATS)}"
+            )
+        if not getattr(entry.asset, selected):
+            declared = sorted(fmt for fmt in ASSET_FORMATS if getattr(entry.asset, fmt))
+            raise ValueError(
+                f"asset instance {entry.id!r}: asset declares format(s) "
+                f"{declared} but format {selected!r} was selected -- no "
+                f"compatible format"
+            )
+        rows.append(
+            {
+                "id": entry.id,
+                "kind": entry.kind,
+                "format": selected,
+                "asset": {key: value for key, value in entry.asset.to_dict().items()},
+                "pose": {
+                    "xyz": [value.hex() for value in entry.pose.xyz],
+                    "quat_wxyz": [value.hex() for value in entry.pose.quat_wxyz],
+                },
+                "collision": entry.collision,
+                "source": entry.source,
+            }
+        )
+    return tuple(rows)
 
 
 def write_draw(out_dir: str | os.PathLike[str], draw: object) -> str:

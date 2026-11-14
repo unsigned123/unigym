@@ -1,15 +1,17 @@
 """Scene definitions: the neutral IR vocabulary + the scene provider registry.
 
 :mod:`.scene_ir` is the closed neutral vocabulary (``Pose`` / ``Instance``
-/ ``Region`` / ``Slot`` / ``Material`` / ``Scene``; standard library
-only), :mod:`.primitives` is the built-in generators' neutral payload
+/ ``AssetInstance`` / ``Region`` / ``Slot`` / ``Material`` / ``Scene``;
+standard library plus the stdlib-light asset-reference leaf),
+:mod:`.primitives` is the built-in generators' neutral payload
 (``BoxShape`` / ``SphereShape`` / ``CylinderShape`` / ``CapsuleShape`` /
 ``PlaneShape`` / ``ShapePayload`` / ``ContactSpec``), :mod:`.generators`
 is the closed built-in generator registry (``room_shell`` / ``box`` /
 ``sphere`` / ``cylinder`` / ``capsule`` / ``plane`` -> payload),
 :mod:`.pipeline`
 is the two-protocol bridge (pipeline / content filler) with the four
-binding checks and the build scaffold, and :mod:`.providers` is the
+binding checks and the build scaffold, :mod:`.artifacts` is the
+deterministic neutral artifact/row writer, and :mod:`.providers` is the
 closed scene-provider registry.  The composer (the L1 mechanism that
 turns a scene into engine elements) lives on the backend side
 (:mod:`unigym.backends.shared.mjfamily.scene.scene_render`) -- this package never
@@ -20,12 +22,13 @@ the robocasa pack's code face and self-register when that
 pack is imported, so this package is importable with no pack mounted.
 
 Import lightness: the neutral vocabulary (``scene_ir`` / ``primitives`` /
-``generators`` / ``providers`` / ``RegionDefinition``) is eager because it is
-standard-library-only.  The engine-facing names -- ``articulation`` (which
-pulls the actuator chain and therefore numpy), ``pipeline`` and ``terrain``
-(which imports numpy) -- re-export lazily through PEP 562, so importing a
-light sibling (``unigym.pack_api`` / ``unigym.packs`` /
-``unigym.scene_presets``) never drags numpy/torch/mujoco into the process.
+``generators`` / ``artifacts`` / ``providers`` / ``RegionDefinition``) is
+eager because it is standard-library-only.  The engine-facing names --
+``articulation`` (which pulls the actuator chain and therefore numpy),
+``pipeline`` and ``terrain`` (which imports numpy) -- re-export lazily
+through PEP 562, so importing a light sibling (``unigym.pack_api`` /
+``unigym.packs`` / ``unigym.scene_presets``) never drags numpy/torch/mujoco
+into the process.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+from .artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
 from .generators import (
     build_payload,
     generator_schema,
@@ -63,7 +67,9 @@ from .providers import (
     snapshot_scene_providers,
 )
 from .scene_ir import (
+    ASSET_INSTANCE_KINDS,
     INSTANCE_ROLES,
+    AssetInstance,
     Instance,
     Material,
     Pose,
@@ -110,6 +116,7 @@ if TYPE_CHECKING:
         scene_content_filler_origin,
         scene_content_filler_providers,
         snapshot_scene_content_fillers,
+        validate_asset_scene,
         validate_binding,
     )
     from .terrain import Terrain
@@ -158,6 +165,7 @@ _LAZY = {
     "scene_content_filler_origin": ("pipeline", "scene_content_filler_origin"),
     "scene_content_filler_providers": ("pipeline", "scene_content_filler_providers"),
     "snapshot_scene_content_fillers": ("pipeline", "snapshot_scene_content_fillers"),
+    "validate_asset_scene": ("pipeline", "validate_asset_scene"),
     "validate_binding": ("pipeline", "validate_binding"),
     "Terrain": ("terrain", "Terrain"),
 }
@@ -192,6 +200,9 @@ def __dir__() -> list[str]:
 __all__ = [
     "ArticulationError",
     "ArticulationSpec",
+    "ASSET_INSTANCE_KINDS",
+    "ASSET_SCENE_DIGEST_VERSION",
+    "AssetInstance",
     "AssetRef",
     "JointSpec",
     "ROOT_MODES",
@@ -232,6 +243,7 @@ __all__ = [
     "build_payload",
     "build_scene_from_provider",
     "attribute_scene_content_filler",
+    "asset_instance_rows",
     "normalize_articulation",
     "normalize_articulations",
     "normalize_contact_sensor_inventory",
@@ -252,6 +264,7 @@ __all__ = [
     "scene_provider_providers",
     "snapshot_scene_content_fillers",
     "snapshot_scene_providers",
+    "validate_asset_scene",
     "validate_binding",
     "validate_scene",
 ]
