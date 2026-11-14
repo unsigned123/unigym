@@ -13,7 +13,7 @@ from __future__ import annotations
 import copy
 import math
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, cast
 
 from unigym._typing import JsonValue
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
@@ -33,6 +33,7 @@ from .handles import (
     _check_owner,
 )
 from .profile import load_profile_for_ref
+from .simulation import Simulation
 
 if TYPE_CHECKING:
     from unigym.packs.packset import PackRuntime, PackSet, RobotRef
@@ -191,6 +192,7 @@ class SimulationBuilder:
         self._cameras: list[CameraHandle] = []
         self._owner = object()
         self._sealed = False
+        self._sim: Simulation | None = None
 
     @property
     def world(self) -> World | None:
@@ -446,12 +448,51 @@ class SimulationBuilder:
         """Seal this builder; the live transition (A3) calls this once."""
         self._sealed = True
 
-    def build(self) -> NoReturn:
-        """Transition to live state (implemented by the next facade slice)."""
-        raise NotImplementedError(
-            "SimulationBuilder.build is implemented by the simulation slice; "
-            "this builder is declaration-only"
+    def build(self) -> Simulation:
+        """Build the live simulation once and return the cached instance."""
+        if self._sim is not None:
+            return self._sim
+        cfg = self._to_cfg()
+        world = cast("World", self._world)
+        from unigym.run.api import Run
+        from unigym.runner.external import ExternalRunner
+        from unigym.runner.state import read_extra
+
+        run = Run(
+            cfg,
+            pack_runtime=self.pack_runtime,
+            no_artifacts=not self._artifacts,
+            device=self._device,
         )
+        try:
+            instance = run.build()
+            runner = run.runner("external")
+            if not isinstance(runner, ExternalRunner):
+                raise RuntimeError(
+                    f"SimulationBuilder.runner('external') returned "
+                    f"{type(runner).__name__}, expected ExternalRunner"
+                )
+            state = read_extra(instance.env)
+            sim = Simulation(
+                backend=self._backend,
+                num_envs=self._num_envs,
+                world=world,
+                articulations=tuple(self._articulations),
+                cameras=tuple(self._cameras),
+                runner=runner,
+                env=instance.env,
+                run=run,
+                owner=self._owner,
+                state=state,
+                obs_cache=dict(instance.env.obs_cache),
+                t=0,
+            )
+        except BaseException:
+            run.close()
+            raise
+        self._sim = sim
+        self._seal()
+        return sim
 
     def _check_face_names_available(self, label: str, control: ControlSpec) -> None:
         """Refuse control-face names another articulation already owns.

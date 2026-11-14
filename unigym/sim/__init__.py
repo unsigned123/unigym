@@ -1,11 +1,11 @@
 """Experimental simulation facade (``SIM_API_VERSION = 1``).
 
-The facade is a thin, additive, declaration-first surface over the existing
-``Run`` / runner / backend stack.  This namespace currently ships the
-declaration half only: an explicit-pack builder, identity-scoped handles, the
-``Control.position_pd`` preset and the facade error taxonomy.  ``Simulation``
-and the typed ``Observation`` arrive in later slices; they are not exported
-before they exist.
+The facade is a thin, additive surface over the existing ``Run`` / runner /
+backend stack.  This namespace ships the explicit-pack builder, identity-scoped
+handles, the ``Control.position_pd`` preset, the error taxonomy and the live
+:class:`Simulation` with its minimal :class:`Observation` record.  The typed
+per-articulation observation projection arrives in a later slice; the current
+observation record does not claim it.
 
 ``import unigym.sim`` stays torch/mujoco/isaaclab-free: backend and action
 modules are imported lazily at the function boundary.
@@ -35,6 +35,8 @@ from .errors import (
     StaleStateError,
 )
 from .handles import ActionBinding, ArticulationHandle, BodyHandle, CameraHandle
+from .observation import Observation
+from .simulation import Simulation
 
 SIM_API_VERSION: Final[int] = 1
 """The experimental facade API version."""
@@ -48,6 +50,8 @@ __all__ = [
     "Control",
     "ControlFaceSpec",
     "ControlSpec",
+    "Observation",
+    "Simulation",
     "SimulationBuilder",
     "SimulationError",
     "SimulationConfigError",

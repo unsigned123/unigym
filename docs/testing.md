@@ -177,6 +177,7 @@ tests/
 │   ├── scenes/
 │   ├── runtime/
 │   ├── run/
+│   ├── runner/
 │   ├── contacts/
 │   ├── terminations/
 │   ├── filters/
@@ -232,6 +233,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_scene` | `tests/unit/scenes/**` |
 | `domain_runtime` | `tests/unit/runtime/**` |
 | `domain_run` | `tests/unit/run/**` |
+| `domain_runner` | `tests/unit/runner/**` |
 | `domain_contacts` | `tests/unit/contacts/**` |
 | `domain_terminations` | `tests/unit/terminations/**` |
 | `domain_filters` | `tests/unit/filters/**` |

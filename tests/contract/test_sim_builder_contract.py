@@ -253,14 +253,17 @@ def test_body_attach_is_deferred(tmp_path: Path) -> None:
         builder.add_camera(entry, attach=body)
 
 
-def test_build_is_not_implemented_in_this_slice(tmp_path: Path) -> None:
-    """The live transition belongs to the next slice and never half-builds."""
+def test_build_without_world_is_refused_without_sealing(tmp_path: Path) -> None:
+    """The live transition never half-builds; the builder stays declarable."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     builder.add_articulation(ref, control=_control())
 
-    with pytest.raises(NotImplementedError, match="declaration-only"):
+    with pytest.raises(NoWorldError, match="builder.world"):
         builder.build()
+
+    builder.world = World.base(mjcf="world.xml")
+    assert builder.world is not None
 
 
 def test_fixture_pack_set_is_explicit(tmp_path: Path) -> None:
