@@ -1315,11 +1315,20 @@ class IsaaclabEnv(ManagerBasedEnv):
         unusable and is propagated unchanged.  ``_closed`` is set in
         ``finally`` so a failed close cannot be retried as if nothing had
         been released.
+
+        The public ``pause()`` runs first so close leaves the Kit timeline
+        non-playing.  A subsequent build in the same process then constructs a
+        clean ``SimulationContext``: the new context registers its STOP
+        callback before the parent constructor, and the parent only stops a
+        playing timeline, so a non-playing timeline never re-enters that
+        callback.  Pausing before the inherited teardown also covers a close
+        that raises after the pause.
         """
         if self._closed:
             return
         self._closing = True
         try:
+            self.sim.pause()
             super().close()
         finally:
             self._closed = True

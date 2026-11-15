@@ -27,13 +27,12 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def _fresh_stage(simulation_app: object) -> Iterator[None]:
-    """Start every test from a new USD stage (the lane's per-build idiom).
+    """Start every test from a fresh USD stage (lane stage provisioning).
 
-    Kit keeps one app for the whole lane process.  The facade build does not
-    create a stage itself, while the lane's other env fixtures open a fresh
-    stage per construction; without one, a second facade build in the same
-    process reuses the playing stage and IsaacLab's second SimulationContext
-    stops the timeline from inside the previous context's stop callback.
+    Kit keeps one app for the whole lane process, and the facade build does not
+    create a stage itself, so each test needs one to spawn into.  This fixture
+    is stage provisioning only: it is not the sequential-build fix, and the
+    same-process rebuild test below deliberately builds twice without it.
     """
     import isaaclab.sim as sim_utils
 
@@ -199,3 +198,78 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
         )
     finally:
         sim.close()
+
+
+def _clear_scene_prims() -> None:
+    """Remove the previous build's scene prims so the same declarations respawn.
+
+    The facade does not own stage teardown, and Isaac Lab's shape and terrain
+    spawners refuse a prim path that already exists.  This is a stage content
+    reset only: it never opens a new stage and never touches the Kit timeline,
+    so a ``close()`` that left the timeline playing would still hang the next
+    build in ``SimulationContext.__init__``.
+    """
+    import omni.usd
+
+    stage = omni.usd.get_context().get_stage()
+    world = stage.GetPrimAtPath("/World")
+    for child in list(world.GetChildren()):
+        stage.RemovePrim(child.GetPath())
+
+
+def test_isaaclab2_rebuilds_the_facade_in_one_process(
+    tmp_path: Path,
+    pack_runtime,
+    g1_usd: Path,
+) -> None:
+    """A closed facade build leaves the Kit timeline paused, so a rebuild works.
+
+    IsaacLab's ``SimulationContext.__init__`` registers its STOP callback
+    before the Isaac Sim parent constructor, and the parent stops a playing
+    timeline.  If ``IsaaclabEnv.close()`` left the timeline playing, the second
+    build in this process would fire that fresh callback and spin in
+    ``render()`` forever in headless mode.  The assertion after the first close
+    is the fast failure guard; the second build is the proof.  No new stage is
+    created between the builds.
+    """
+    import omni.timeline
+
+    source_robot = pack_runtime("g1").resource_for("providers", "g1")
+    pack_set, robot, body_order = _write_fixture_pack(
+        tmp_path, source_robot=source_robot, usd=g1_usd
+    )
+    world = _world(tmp_path)
+
+    first = run_facade_acceptance(
+        pack_set=pack_set,
+        robot_id=robot.id,
+        world=world,
+        backend="isaaclab2",
+        expected_joint_names=body_order,
+        steps=1,
+        device="cuda:0",
+        num_envs=1,
+    )
+    timeline = omni.timeline.get_timeline_interface()
+    assert first["t"] == 0
+    assert not timeline.is_playing(), (
+        "IsaaclabEnv.close() left the Kit timeline playing; the second build in "
+        "this process would hang in SimulationContext.__init__"
+    )
+
+    _clear_scene_prims()
+    second = run_facade_acceptance(
+        pack_set=pack_set,
+        robot_id=robot.id,
+        world=world,
+        backend="isaaclab2",
+        expected_joint_names=body_order,
+        steps=1,
+        device="cuda:0",
+        num_envs=1,
+    )
+
+    assert second["backend"] == "isaaclab2"
+    assert second["joint_names"] == list(body_order)
+    assert second["t"] == 0
+    assert not timeline.is_playing(), "the rebuilt env's close left the Kit timeline playing"
