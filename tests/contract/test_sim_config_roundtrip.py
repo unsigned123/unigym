@@ -74,14 +74,14 @@ def _handle(owner: object) -> ArticulationHandle:
     )
 
 
-def _simulation(source: Path) -> Simulation:
+def _simulation(source: Path, *, num_envs: int = 1) -> Simulation:
     """A pure Simulation seam over the source Run (no engine is started)."""
     run = Run.from_config(source)
-    runner = FakeRunner()
+    runner = FakeRunner(num_envs=num_envs)
     owner = object()
     return Simulation(
         backend="mujoco",
-        num_envs=1,
+        num_envs=num_envs,
         world=World.from_config(yaml.safe_load(source.read_text(encoding="utf-8"))),
         articulations=(_handle(owner),),
         cameras=(),
@@ -127,6 +127,27 @@ def test_to_config_round_trips_the_authoring_tables(tmp_path: Path) -> None:
     builder = SimulationBuilder.from_config(written)
     assert builder.articulations == ()
     assert builder.cameras == ()
+
+
+def test_multienv_and_reset_policy_round_trip(tmp_path: Path) -> None:
+    """num_envs=2 and runner.auto_reset: false survive to_config -> from_config."""
+    cfg = {key: value for key, value in _CONFIG.items() if key != "cameras"}
+    cfg["env"] = {**_CONFIG["env"], "num_envs": 2}
+    cfg["runner"] = {"auto_reset": False}
+    source = tmp_path / "multienv.yaml"
+    source.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    sim = _simulation(source, num_envs=2)
+    try:
+        written = sim.to_config(tmp_path / "multienv-written.yaml")
+    finally:
+        sim.close()
+
+    document = yaml.safe_load(Path(written).read_text(encoding="utf-8"))
+    assert document["env"]["num_envs"] == 2
+    assert document["runner"] == {"auto_reset": False}
+    reloaded = Run.from_config(written).spec
+    assert reloaded.num_envs == 2
+    assert reloaded.runner == {"auto_reset": False}
 
 
 def test_to_config_serializes_no_facade_handles(tmp_path: Path) -> None:

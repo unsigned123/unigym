@@ -60,11 +60,13 @@ def _observation() -> tuple[Observation, ArticulationHandle, CameraHandle]:
     cache = {"cam/cam/rgb": torch.zeros(1, 4, 4, 3)}
     obs = build_observation(
         t=2,
+        num_envs=1,
         state=_state(),
         obs_cache=cache,
         handles=(handle,),
         cameras=(camera,),
         reset_env_ids=torch.tensor([0], dtype=torch.int64),
+        reset_due_env_ids=torch.zeros(0, dtype=torch.int64),
         terminated=torch.tensor([False]),
     )
     return obs, handle, camera
@@ -111,6 +113,35 @@ def test_raw_and_obs_cache_stay_distinguishable() -> None:
     assert obs.articulations[handle].joint_pos is obs.raw["articulation/arm/joint_pos"]
 
 
+def test_reset_masks_are_distinct_frozen_fields() -> None:
+    """The performed and due masks are separate immutable Observation fields."""
+    obs, _, _ = _observation()
+
+    assert obs.num_envs == 1
+    assert obs.reset_env_ids.tolist() == [0]
+    assert obs.reset_due_env_ids.tolist() == []
+    assert obs.reset_env_ids is not obs.reset_due_env_ids
+    with pytest.raises(FrozenInstanceError):
+        setattr(obs, "reset_due_env_ids", torch.zeros(0, dtype=torch.int64))
+
+
+@pytest.mark.parametrize("num_envs", [0, -1, True, 1.5, "1"])
+def test_num_envs_is_validated(num_envs: object) -> None:
+    """num_envs is a positive int at the observation boundary."""
+    with pytest.raises(ObservationError, match="num_envs"):
+        build_observation(
+            t=0,
+            num_envs=num_envs,
+            state=_state(),
+            obs_cache={},
+            handles=(_handle(),),
+            cameras=(),
+            reset_env_ids=torch.zeros(0, dtype=torch.int64),
+            reset_due_env_ids=torch.zeros(0, dtype=torch.int64),
+            terminated=None,
+        )
+
+
 def test_projection_does_not_build_a_second_observation_catalog() -> None:
     """The projection adds no keys to raw or obs_cache beyond the two sources."""
     state = _state()
@@ -120,11 +151,13 @@ def test_projection_does_not_build_a_second_observation_catalog() -> None:
 
     obs = build_observation(
         t=0,
+        num_envs=1,
         state=state,
         obs_cache=cache,
         handles=(handle,),
         cameras=(camera,),
         reset_env_ids=torch.zeros(0, dtype=torch.int64),
+        reset_due_env_ids=torch.zeros(0, dtype=torch.int64),
         terminated=None,
     )
 
@@ -154,10 +187,12 @@ def test_missing_state_key_raises_the_public_observation_error() -> None:
     with pytest.raises(ObservationError, match="articulation/arm/joint_pos"):
         build_observation(
             t=0,
+            num_envs=1,
             state=state,
             obs_cache={},
             handles=(handle,),
             cameras=(),
             reset_env_ids=torch.zeros(0, dtype=torch.int64),
+            reset_due_env_ids=torch.zeros(0, dtype=torch.int64),
             terminated=None,
         )

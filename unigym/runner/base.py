@@ -59,8 +59,8 @@ class Runner(Protocol):
         """Drive ticks until the run ends; return the sink summary."""
         ...
 
-    def reset(self, env_ids: Sequence[int] | None = None) -> StepResult:
-        """Reset the named envs (all when None)."""
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> StepResult:
+        """Reset the named envs (all when None); ids may be a 1-D int tensor."""
         ...
 
     def close(self) -> None:

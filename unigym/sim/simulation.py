@@ -14,7 +14,12 @@ The pending-state rules are the facade contract:
   tick/state untouched.
 * ``observe`` is read-only and serves the cached state.
 * ``reset`` clears pending and refreshes the state through the runner reset
-  chain plus the shared request-free extra reader.
+  chain plus the shared request-free extra reader; ``env_ids`` selects the
+  rows the runner resets (``None`` resets every row).  A reset never advances
+  the policy tick.
+* ``step`` never resets a row: the producing ``StepResult`` reports the
+  episode-clock due rows and the termination mask, and the caller decides
+  which rows to reset next.
 * an engine exception is fatal for the live simulation: the pending table is
   cleared, the simulation is marked faulted and the exception propagates.
 * out-of-band runner ticks are detected through ``ticks_done`` drift and
@@ -72,25 +77,63 @@ class _StepRunner(Protocol):
     def step(self, actions: dict[str, NamedAction]) -> StepResult: ...
 
 
-def _reset_ids(value: object, what: str) -> torch.Tensor:
-    """Copy one reset-id vector, validating the runner's tensor contract."""
+def _reset_ids(
+    value: object,
+    what: str,
+    *,
+    num_envs: int,
+    request: torch.Tensor | None,
+) -> torch.Tensor:
+    """Copy one runner reset-id vector, validating its contract.
+
+    A runner result is a 1-D ``int64`` tensor of unique ids in ``[0, N)``.
+    When ``request`` is given the result must also be a subset of the rows the
+    caller asked for; a runner that quietly resets more or fewer rows is a
+    contract breach, never a repaired value.
+    """
     import torch
 
     if not isinstance(value, torch.Tensor):
         raise ObservationError(
             f"{what} reset_env_ids must be a torch.Tensor, got {type(value).__name__}"
         )
-    return value.clone()
+    if value.ndim != 1:
+        raise ObservationError(f"{what} reset_env_ids must be 1-D, got shape {tuple(value.shape)}")
+    if value.dtype != torch.int64:
+        raise ObservationError(f"{what} reset_env_ids must be int64, got dtype {value.dtype}")
+    ids = value.clone()
+    if ids.numel() > 0 and bool(((ids < 0) | (ids >= num_envs)).any()):
+        raise ObservationError(
+            f"{what} reset_env_ids {ids} are outside the legal range [0, {num_envs})"
+        )
+    if ids.numel() > 1:
+        ordered = ids.sort().values
+        if bool((ordered[1:] == ordered[:-1]).any()):
+            raise ObservationError(f"{what} reset_env_ids {ids} contain duplicate ids")
+    if request is not None and not bool(torch.isin(ids, request.to(device=ids.device)).all()):
+        raise ObservationError(
+            f"{what} reset_env_ids {ids} are not a subset of the requested ids {request}"
+        )
+    return ids
 
 
-def _spawn_reset_env_ids(state: Mapping[str, object], device: str | torch.device) -> torch.Tensor:
-    """The spawn reset rows: the state value, or the empty-id fallback."""
+def _terminated_mask(value: object, num_envs: int) -> torch.Tensor | None:
+    """Copy one runner termination mask, validating its ``(N,)`` bool contract."""
     import torch
 
-    value = state.get("reset_env_ids")
     if value is None:
-        return torch.zeros(0, dtype=torch.int64, device=device)
-    return _reset_ids(value, "spawn state")
+        return None
+    if not isinstance(value, torch.Tensor):
+        raise ObservationError(
+            f"StepResult terminated must be a torch.Tensor or None, " f"got {type(value).__name__}"
+        )
+    if value.dtype != torch.bool:
+        raise ObservationError(f"StepResult terminated must be bool, got dtype {value.dtype}")
+    if value.ndim != 1 or value.shape[0] != num_envs:
+        raise ObservationError(
+            f"StepResult terminated must have shape ({num_envs},), " f"got {tuple(value.shape)}"
+        )
+    return value.clone()
 
 
 class Simulation:
@@ -132,6 +175,8 @@ class Simulation:
         t: int,
         face_targets: Mapping[str, str] | None = None,
     ) -> None:
+        import torch
+
         if not isinstance(runner, _StepRunner):
             raise SimulationConfigError(
                 "Simulation needs a runner whose step(actions) face is the explicit "
@@ -194,7 +239,8 @@ class Simulation:
         self._pending = PendingActions()
         self._state: dict[str, object] = dict(state)
         self._obs_cache: dict[str, object] = dict(obs_cache)
-        self._reset_env_ids = _spawn_reset_env_ids(self._state, env.device)
+        self._reset_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
+        self._reset_due_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
         self._terminated: torch.Tensor | None = None
         self._state_t = t
         self._clock = int(runner.ticks_done)
@@ -562,19 +608,35 @@ class Simulation:
     # ------------------------------------------------------------------ #
     # reset / close
     # ------------------------------------------------------------------ #
-    def reset(self) -> Observation:
-        """Reset every env, clear pending and refresh the cached spawn state.
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> Observation:
+        """Reset every env (``None``) or the named rows, clearing pending.
 
-        The reset rows are the rows the runner actually reset: ``reset`` keeps
-        the returned ``StepResult`` and copies its ``reset_env_ids``, never the
-        request-free extra reader's empty default.
+        The reset ids are validated at the boundary and handed to
+        ``runner.reset(ids)``; the runner owns the reset chain and the RNG
+        order.  A reset never consumes an action and never advances the tick:
+        ``t`` follows ``runner.ticks_done``.  The whole pending table is
+        cleared because a staged action may belong to a row reset here.
+
+        The reported ``reset_env_ids`` are the rows the runner actually reset
+        (a unique ``int64`` subset of the request); ``reset_due_env_ids`` is
+        empty and ``terminated`` is ``None`` because the previous tick's due
+        and termination masks are no longer meaningful.
         """
         self._ensure_operable()
+        ids = self._normalize_reset_ids(env_ids)
         self._pending.clear()
+        import torch
+
+        request = torch.arange(self.num_envs, dtype=torch.int64) if ids is None else ids
         try:
-            result = self._runner.reset(None)
+            result = self._runner.reset(None if ids is None else ids)
             state = self._read_extra()
-            reset_env_ids = _reset_ids(result.reset_env_ids, "runner reset")
+            reset_env_ids = _reset_ids(
+                result.reset_env_ids,
+                "runner reset",
+                num_envs=self.num_envs,
+                request=request,
+            )
         except Exception:
             self._pending.clear()
             self._faulted = True
@@ -582,10 +644,83 @@ class Simulation:
         self._state = dict(state)
         self._obs_cache = dict(self._env.obs_cache)
         self._reset_env_ids = reset_env_ids
+        self._reset_due_env_ids = torch.empty(0, dtype=torch.int64, device=self._env.device)
         self._terminated = None
         self._state_t = int(self._runner.ticks_done)
         self._clock = int(self._runner.ticks_done)
         return self._observation()
+
+    def _normalize_reset_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | None
+    ) -> torch.Tensor | None:
+        """Normalize one caller id argument to a 1-D ``int64`` CPU tensor.
+
+        ``None`` means every row and stays ``None`` (the runner's v1 all-rows
+        path).  An explicit set is validated as non-empty ints in ``[0, N)``
+        with no duplicates; bools, floats and other non-int values are
+        refused.  There is no silent dedupe, sort or truncation.
+        """
+        import torch
+
+        if env_ids is None:
+            return None
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.dtype == torch.bool or env_ids.is_floating_point() or env_ids.is_complex():
+                raise SimulationConfigError(
+                    f"reset(env_ids=...) must be an integer id tensor, got dtype "
+                    f"{env_ids.dtype}; field 'env_ids', ids {env_ids}, "
+                    f"legal ids [0, {self.num_envs})"
+                )
+            if env_ids.ndim != 1:
+                raise SimulationConfigError(
+                    f"reset(env_ids=...) must be a 1-D id tensor, got shape "
+                    f"{tuple(env_ids.shape)}; field 'env_ids', legal ids "
+                    f"[0, {self.num_envs})"
+                )
+            ids = env_ids.detach().to(device="cpu", dtype=torch.int64).clone()
+            return self._validate_reset_ids(ids)
+        if isinstance(env_ids, (str, bytes, bytearray)):
+            raise SimulationConfigError(
+                f"reset(env_ids=...) must be a sequence of ints, got "
+                f"{type(env_ids).__name__}; field 'env_ids', legal ids "
+                f"[0, {self.num_envs})"
+            )
+        try:
+            values = list(env_ids)
+        except TypeError as err:
+            raise SimulationConfigError(
+                f"reset(env_ids=...) must be a sequence of ints or a tensor, got "
+                f"{type(env_ids).__name__}; field 'env_ids', legal ids "
+                f"[0, {self.num_envs})"
+            ) from err
+        for value in values:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise SimulationConfigError(
+                    f"reset(env_ids=...) ids must be ints, got {values!r}; field "
+                    f"'env_ids', legal ids [0, {self.num_envs})"
+                )
+        return self._validate_reset_ids(torch.tensor(values, dtype=torch.int64))
+
+    def _validate_reset_ids(self, ids: torch.Tensor) -> torch.Tensor:
+        """Validate one normalized reset-id vector against the env count."""
+        if ids.numel() == 0:
+            raise SimulationConfigError(
+                f"reset(env_ids=...) must name at least one row, got an empty id "
+                f"set; field 'env_ids', legal ids [0, {self.num_envs})"
+            )
+        if bool(((ids < 0) | (ids >= self.num_envs)).any()):
+            raise SimulationConfigError(
+                f"reset(env_ids=...) ids {ids} are outside the legal range "
+                f"[0, {self.num_envs}); field 'env_ids'"
+            )
+        if ids.numel() > 1:
+            ordered = ids.sort().values
+            if bool((ordered[1:] == ordered[:-1]).any()):
+                raise SimulationConfigError(
+                    f"reset(env_ids=...) ids {ids} contain duplicates; field "
+                    f"'env_ids'; legal ids [0, {self.num_envs})"
+                )
+        return ids
 
     def to_config(self, path: str | os.PathLike[str]) -> str:
         """Write the owning run's authoring config; repeated calls are safe."""
@@ -619,11 +754,13 @@ class Simulation:
         """Project the cached state through the typed observation builder."""
         return build_observation(
             t=self._state_t,
+            num_envs=self.num_envs,
             state=self._state,
             obs_cache=self._obs_cache,
             handles=self.articulations,
             cameras=self.cameras,
             reset_env_ids=self._reset_env_ids,
+            reset_due_env_ids=self._reset_due_env_ids,
             terminated=self._terminated,
         )
 
@@ -631,21 +768,35 @@ class Simulation:
         """Adopt one successful step result as the cached state.
 
         The runner tick already happened, so the state, the exact
-        ``dict(result.obs)`` copy, the reset rows and the clock are committed
+        ``dict(result.obs)`` copy, the due rows and the clock are committed
         together before the observation is projected.  A projection failure
         (for example an expected optional cache key present but not a tensor)
         then propagates as ``ObservationError`` while ``t`` and the facade
         clock still name the producing tick: the facade stays synchronised with
         the engine, is not faulted, and repeating ``observe`` reports the same
-        honest error until a reset.  The reset rows and termination mask are
+        honest error until a reset.  The due rows and termination mask are
         validated and copied before any field is assigned, so a rejected
         ``StepResult`` never leaves a partial adoption.
+
+        A step performs no reset, so ``reset_env_ids`` is empty and
+        ``reset_due_env_ids`` carries the producing tick's episode-clock due
+        rows: they are what the caller should reset next, not what this tick
+        reset.
         """
-        reset_env_ids = _reset_ids(result.reset_env_ids, "StepResult")
-        terminated = None if result.terminated is None else result.terminated.clone()
+        import torch
+
+        reset_due_env_ids = _reset_ids(
+            result.reset_env_ids,
+            "StepResult",
+            num_envs=self.num_envs,
+            request=None,
+        )
+        terminated = _terminated_mask(result.terminated, self.num_envs)
+        reset_env_ids = torch.empty(0, dtype=torch.int64, device=self._env.device)
         self._state = dict(result.extra)
         self._obs_cache = dict(result.obs)
         self._reset_env_ids = reset_env_ids
+        self._reset_due_env_ids = reset_due_env_ids
         self._terminated = terminated
         self._state_t = int(result.t)
         self._clock = int(self._runner.ticks_done)

@@ -7,6 +7,13 @@ the typed fields are projections of ``raw``: every typed tensor is the backend
 tensor itself, never a re-derived catalog entry.  A missing required state key
 is an :class:`~unigym.sim.errors.ObservationError`; there is no zero-fill.
 
+Every projected tensor has exactly ``num_envs`` rows: the row count is the
+declared env count, never inferred from one field, so a state with a wrong row
+count fails as an :class:`~unigym.sim.errors.ObservationError` before any
+field is returned.  The two id masks are distinct: ``reset_env_ids`` names the
+rows the producing operation reset, ``reset_due_env_ids`` names the
+episode-clock due rows at the producing tick.
+
 The cache copy is value-preserving, not tensor-typed: a backend may publish
 record-like entries (for example ``contact_ops/...``) alongside tensors, so
 ``obs_cache`` keeps every entry exactly as produced.  Only the keys this module
@@ -45,11 +52,15 @@ class Observation:
 
     Attributes:
         t: the policy tick that produced the cached state (``0`` at spawn).
+        num_envs: the declared env count; every projected tensor has this
+            many rows.
         articulations: handle-keyed typed articulation projections.
         cameras: handle-keyed published camera frames (only cameras whose
             ``cam/<name>/rgb`` or ``cam/<name>/depth`` key is in the cache).
         contacts: ``contact/`` record tensors carried by the live state.
-        reset_env_ids: the env rows reset by the producing tick.
+        reset_env_ids: the env rows this operation reset (empty after a step).
+        reset_due_env_ids: the episode-clock due rows at the producing tick
+            (empty after a reset).
         terminated: the producing tick's termination mask, or ``None`` when
             the tick was a spawn/reset read.
         raw: the live state mapping without ``reset_env_ids`` /
@@ -59,10 +70,12 @@ class Observation:
     """
 
     t: int
+    num_envs: int
     articulations: Mapping[ArticulationHandle, ArticulationObservation]
     cameras: Mapping[CameraHandle, CameraFrame]
     contacts: Mapping[str, torch.Tensor]
     reset_env_ids: torch.Tensor
+    reset_due_env_ids: torch.Tensor
     terminated: torch.Tensor | None
     raw: Mapping[str, torch.Tensor | bool]
     obs_cache: Mapping[str, object]
@@ -165,8 +178,10 @@ def _vector(state: Mapping[str, object], key: str, width: int, rows: int) -> tor
     return value
 
 
-def _optional_cached(obs_cache: Mapping[str, object], key: str) -> torch.Tensor | None:
-    """Read one optional projected cached tensor (absent -> ``None``)."""
+def _optional_cached(
+    obs_cache: Mapping[str, object], key: str, num_envs: int
+) -> torch.Tensor | None:
+    """Read one optional projected ``(N, ...)`` cached tensor (absent -> ``None``)."""
     import torch
 
     if key not in obs_cache:
@@ -175,6 +190,11 @@ def _optional_cached(obs_cache: Mapping[str, object], key: str) -> torch.Tensor 
     if not isinstance(value, torch.Tensor):
         raise ObservationError(
             f"observation cache key {key!r} must be a torch.Tensor, " f"got {type(value).__name__}"
+        )
+    if value.ndim == 0 or value.shape[0] != num_envs:
+        raise ObservationError(
+            f"observation cache key {key!r} must have {num_envs} env rows, "
+            f"got shape {tuple(value.shape)}"
         )
     return value
 
@@ -213,12 +233,13 @@ def _articulation_record(
     handle: ArticulationHandle,
     state: Mapping[str, object],
     obs_cache: Mapping[str, object],
+    num_envs: int,
 ) -> ArticulationObservation:
     """Project one articulation's namespaced state into its typed record."""
     joint_names = tuple(handle.profile.joint_order)
     prefix = f"articulation/{handle.name}"
-    joint_pos = _matrix(state, f"{prefix}/joint_pos", len(joint_names), None)
-    rows = joint_pos.shape[0]
+    rows = num_envs
+    joint_pos = _matrix(state, f"{prefix}/joint_pos", len(joint_names), rows)
     joint_vel = _matrix(state, f"{prefix}/joint_vel", len(joint_names), rows)
     applied_torque = _matrix(state, f"{prefix}/applied_torque", len(joint_names), rows)
     gravity_b = _vector(state, f"{prefix}/gravity_b", 3, rows)
@@ -239,52 +260,95 @@ def _articulation_record(
         base_quat_w=base_quat_w,
         base_lin_vel_b=base_lin_vel_b,
         base_ang_vel_b=base_ang_vel_b,
-        prev_action=_optional_cached(obs_cache, f"{prefix}/prev_action"),
-        command=_optional_cached(obs_cache, f"{prefix}/command"),
+        prev_action=_optional_cached(obs_cache, f"{prefix}/prev_action", num_envs),
+        command=_optional_cached(obs_cache, f"{prefix}/command", num_envs),
     )
+
+
+def _mask(value: object, key: str, num_envs: int) -> torch.Tensor:
+    """Validate one reset-id mask: 1-D ``int64``, unique, ids in ``[0, N)``."""
+    import torch
+
+    if not isinstance(value, torch.Tensor):
+        raise ObservationError(
+            f"observation {key} must be a torch.Tensor, got {type(value).__name__}"
+        )
+    if value.dtype != torch.int64 or value.ndim != 1:
+        raise ObservationError(
+            f"observation {key} must be a 1-D int64 tensor, got dtype "
+            f"{value.dtype} and shape {tuple(value.shape)}"
+        )
+    if value.numel() > 0 and bool(((value < 0) | (value >= num_envs)).any()):
+        raise ObservationError(
+            f"observation {key} {value} are outside the legal range [0, {num_envs})"
+        )
+    if value.numel() > 1:
+        ordered = value.sort().values
+        if bool((ordered[1:] == ordered[:-1]).any()):
+            raise ObservationError(f"observation {key} {value} contain duplicate ids")
+    return value
+
+
+def _terminated(value: object, num_envs: int) -> torch.Tensor | None:
+    """Validate the termination mask: ``None`` or a ``(N,)`` bool tensor."""
+    import torch
+
+    if value is None:
+        return None
+    if not isinstance(value, torch.Tensor):
+        raise ObservationError(
+            f"observation terminated must be a torch.Tensor or None, " f"got {type(value).__name__}"
+        )
+    if value.dtype != torch.bool or value.ndim != 1 or value.shape[0] != num_envs:
+        raise ObservationError(
+            f"observation terminated must be a ({num_envs},) bool tensor, got "
+            f"dtype {value.dtype} and shape {tuple(value.shape)}"
+        )
+    return value
 
 
 def build_observation(
     *,
     t: int,
+    num_envs: int,
     state: Mapping[str, object],
     obs_cache: Mapping[str, object],
     handles: Sequence[ArticulationHandle],
     cameras: Sequence[CameraHandle],
     reset_env_ids: torch.Tensor,
+    reset_due_env_ids: torch.Tensor,
     terminated: torch.Tensor | None,
 ) -> Observation:
     """Project one state mapping and its observation cache into a record.
 
     Args:
         t: the policy tick that produced ``state``.
+        num_envs: the declared env count; every projected tensor must have
+            exactly this many rows.
         state: the live state mapping (the step ``extra``).
         obs_cache: the exact ``StepResult.obs`` copy (values kept verbatim;
             only projected keys are required to be tensors).
         handles: the declared articulation handles, in declaration order.
         cameras: the declared camera handles, in declaration order.
-        reset_env_ids: the env rows reset by the producing tick.
+        reset_env_ids: the env rows this operation reset.
+        reset_due_env_ids: the episode-clock due rows at the producing tick.
         terminated: the producing tick's termination mask, or ``None``.
 
     Raises:
-        ObservationError: a required state key is missing, has the wrong type
-            or shape, a joint has no valid default position, or ``raw``
+        ObservationError: ``num_envs``, a mask or ``terminated`` violates its
+            contract, a required state key is missing, has the wrong type or
+            row count, a joint has no valid default position, or ``raw``
             carries a value that is neither a tensor nor a bool.
     """
     import torch
 
     if isinstance(t, bool) or not isinstance(t, int) or t < 0:
         raise ObservationError(f"observation t must be an int >= 0, got {t!r}")
-    if not isinstance(reset_env_ids, torch.Tensor):
-        raise ObservationError(
-            f"observation reset_env_ids must be a torch.Tensor, "
-            f"got {type(reset_env_ids).__name__}"
-        )
-    if terminated is not None and not isinstance(terminated, torch.Tensor):
-        raise ObservationError(
-            f"observation terminated must be a torch.Tensor or None, "
-            f"got {type(terminated).__name__}"
-        )
+    if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
+        raise ObservationError(f"observation num_envs must be an int >= 1, got {num_envs!r}")
+    _mask(reset_env_ids, "reset_env_ids", num_envs)
+    _mask(reset_due_env_ids, "reset_due_env_ids", num_envs)
+    _terminated(terminated, num_envs)
 
     raw: dict[str, torch.Tensor | bool] = {}
     for key, value in state.items():
@@ -312,21 +376,25 @@ def build_observation(
             )
         contacts[key] = value
 
-    records = {handle: _articulation_record(handle, state, obs_cache) for handle in handles}
+    records = {
+        handle: _articulation_record(handle, state, obs_cache, num_envs) for handle in handles
+    }
     frames: dict[CameraHandle, CameraFrame] = {}
     for camera in cameras:
-        rgb = _optional_cached(obs_cache, f"cam/{camera.name}/rgb")
-        depth = _optional_cached(obs_cache, f"cam/{camera.name}/depth")
+        rgb = _optional_cached(obs_cache, f"cam/{camera.name}/rgb", num_envs)
+        depth = _optional_cached(obs_cache, f"cam/{camera.name}/depth", num_envs)
         if rgb is None and depth is None:
             continue
         frames[camera] = CameraFrame(handle=camera, t=t, rgb=rgb, depth=depth)
 
     return Observation(
         t=t,
+        num_envs=num_envs,
         articulations=records,
         cameras=frames,
         contacts=contacts,
         reset_env_ids=reset_env_ids,
+        reset_due_env_ids=reset_due_env_ids,
         terminated=terminated,
         raw=raw,
         obs_cache=obs_cache,

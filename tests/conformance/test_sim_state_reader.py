@@ -65,11 +65,13 @@ def _observe(env: FakeBackend, handle: ArticulationHandle, *, t: int = 0) -> Obs
     """Project the fake backend's live state through the shared reader."""
     return build_observation(
         t=t,
+        num_envs=env.num_envs,
         state=read_extra(env),
         obs_cache=env.obs_cache,
         handles=(handle,),
         cameras=(),
         reset_env_ids=torch.zeros(0, dtype=torch.int64),
+        reset_due_env_ids=torch.zeros(0, dtype=torch.int64),
         terminated=None,
     )
 

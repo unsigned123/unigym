@@ -74,16 +74,26 @@ def _build(
     obs_cache: dict[str, object] | None = None,
     cameras: tuple[CameraHandle, ...] = (),
     t: int = 0,
+    num_envs: int = 1,
+    reset_env_ids: torch.Tensor | None = None,
+    reset_due_env_ids: torch.Tensor | None = None,
+    terminated: torch.Tensor | None = None,
 ):
     """Project one synthetic state into an observation record."""
     return build_observation(
         t=t,
+        num_envs=num_envs,
         state=state,
         obs_cache={} if obs_cache is None else obs_cache,
         handles=(handle,),
         cameras=cameras,
-        reset_env_ids=torch.zeros(0, dtype=torch.int64),
-        terminated=None,
+        reset_env_ids=(
+            torch.zeros(0, dtype=torch.int64) if reset_env_ids is None else reset_env_ids
+        ),
+        reset_due_env_ids=(
+            torch.zeros(0, dtype=torch.int64) if reset_due_env_ids is None else reset_due_env_ids
+        ),
+        terminated=terminated,
     )
 
 
@@ -248,3 +258,123 @@ def test_raw_rejects_a_value_that_is_neither_tensor_nor_bool() -> None:
 
     with pytest.raises(ObservationError, match="time_in_episode"):
         _build(state, handle)
+
+
+def test_multienv_projection_has_num_envs_rows() -> None:
+    """Every projected record carries the declared env count, not one row."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+
+    obs = _build(state, handle, num_envs=2)
+
+    record = obs.articulations[handle]
+    assert obs.num_envs == 2
+    assert record.joint_pos.shape == (2, 2)
+    assert record.joint_pos_rel.shape == (2, 2)
+    assert record.joint_vel.shape == (2, 2)
+    assert record.applied_torque.shape == (2, 2)
+    assert record.gravity_b.shape == (2, 3)
+    assert record.base_quat_w.shape == (2, 4)
+
+
+def test_joint_pos_row_count_is_the_declared_num_envs() -> None:
+    """joint_pos is validated against num_envs, never used to infer the rows."""
+    handle = _handle()
+    state = _state(handle, num_envs=1)
+
+    with pytest.raises(ObservationError, match="expected 2"):
+        _build(state, handle, num_envs=2)
+
+
+def test_reset_due_env_ids_crosses_as_its_own_field() -> None:
+    """The performed and due masks are distinct fields with their own ids."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+
+    obs = _build(
+        state,
+        handle,
+        num_envs=2,
+        reset_env_ids=torch.tensor([0], dtype=torch.int64),
+        reset_due_env_ids=torch.tensor([1], dtype=torch.int64),
+    )
+
+    assert obs.reset_env_ids.tolist() == [0]
+    assert obs.reset_due_env_ids.tolist() == [1]
+    assert obs.reset_due_env_ids.dtype == torch.int64
+
+
+def test_terminated_mask_is_copied_when_valid() -> None:
+    """A (N,) bool termination mask is carried into the record."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+
+    obs = _build(state, handle, num_envs=2, terminated=torch.tensor([False, True]))
+
+    assert obs.terminated is not None
+    assert obs.terminated.tolist() == [False, True]
+
+
+@pytest.mark.parametrize("num_envs", [0, -1, True, 1.5])
+def test_num_envs_is_validated(num_envs: int) -> None:
+    """The declared env count is a positive int, never a bool or a float."""
+    handle = _handle()
+    state = _state(handle)
+
+    with pytest.raises(ObservationError, match="num_envs"):
+        _build(state, handle, num_envs=num_envs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"reset_env_ids": [0]}, "must be a torch.Tensor"),
+        ({"reset_env_ids": torch.tensor([0, 0], dtype=torch.int64)}, "duplicate"),
+        ({"reset_env_ids": torch.tensor([2], dtype=torch.int64)}, "outside the legal range"),
+        ({"reset_env_ids": torch.tensor([0], dtype=torch.int32)}, "1-D int64"),
+        ({"reset_env_ids": torch.tensor([[0]], dtype=torch.int64)}, "1-D int64"),
+        ({"reset_due_env_ids": torch.tensor([2], dtype=torch.int64)}, "reset_due_env_ids"),
+    ],
+)
+def test_reset_masks_are_validated(kwargs: dict[str, object], match: str) -> None:
+    """Both id masks are 1-D int64, unique and inside [0, num_envs)."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+
+    with pytest.raises(ObservationError, match=match):
+        _build(state, handle, num_envs=2, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("terminated", "match"),
+    [
+        (torch.tensor([0.0, 0.0]), "must be a \\(2,\\) bool tensor"),
+        (torch.zeros(1, dtype=torch.bool), "must be a \\(2,\\) bool tensor"),
+        (torch.zeros(2, 2, dtype=torch.bool), "must be a \\(2,\\) bool tensor"),
+        (torch.zeros(2, dtype=torch.int64), "must be a \\(2,\\) bool tensor"),
+    ],
+)
+def test_terminated_mask_shape_and_dtype_are_validated(
+    terminated: torch.Tensor, match: str
+) -> None:
+    """The termination mask is None or exactly (num_envs,) bool."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+
+    with pytest.raises(ObservationError, match=match):
+        _build(state, handle, num_envs=2, terminated=terminated)
+
+
+def test_optional_cached_rows_follow_num_envs() -> None:
+    """A projected optional cache tensor also carries num_envs rows."""
+    handle = _handle()
+    state = _state(handle, num_envs=2)
+    prefix = f"articulation/{handle.name}"
+
+    with pytest.raises(ObservationError, match="env rows"):
+        _build(
+            state,
+            handle,
+            num_envs=2,
+            obs_cache={f"{prefix}/prev_action": torch.zeros(1, 2)},
+        )
