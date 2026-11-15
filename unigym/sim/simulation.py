@@ -259,7 +259,7 @@ class Simulation:
     def act(
         self,
         target: ArticulationHandle,
-        values: Mapping[str, float],
+        values: Mapping[str, float | torch.Tensor],
         *,
         face: str | None = None,
     ) -> None: ...
@@ -267,7 +267,7 @@ class Simulation:
     def act(
         self,
         target: ActionBinding | ArticulationHandle,
-        values: torch.Tensor | Mapping[str, float],
+        values: torch.Tensor | Mapping[str, float | torch.Tensor],
         *,
         face: str | None = None,
     ) -> None:
@@ -280,9 +280,11 @@ class Simulation:
           ``N == 1``.
         * ``act(handle, mapping)``: the named sugar.  ``mapping`` keys must
           equal the face's joints exactly; key order becomes the
-          ``NamedAction`` column order.  This is a single-env form: the
-          scalar-per-joint mapping is lowered to a float32 ``(1, dim)``
-          tensor.  With more than one declared face on the handle, ``face=``
+          ``NamedAction`` column order.  With ``N == 1`` a value may be a
+          finite number or a floating ``(1,)`` tensor, and the forms may mix.
+          With ``N > 1`` every value must be a floating ``(N,)`` tensor; the
+          columns are stacked in key order into the same ``(N, dim)`` staging
+          path.  With more than one declared face on the handle, ``face=``
           selects one; omitting it is an ambiguous-face error.
         """
         self._ensure_operable()
@@ -307,7 +309,7 @@ class Simulation:
     def _act_named(
         self,
         handle: ArticulationHandle,
-        values: torch.Tensor | Mapping[str, float],
+        values: torch.Tensor | Mapping[str, float | torch.Tensor],
         face: str | None,
     ) -> None:
         """Validate and stage the ``handle -> {joint: value}`` sugar form."""
@@ -320,12 +322,6 @@ class Simulation:
             raise BindingError(
                 f"act(handle, values) requires a mapping of joint name -> value, "
                 f"got {type(values).__name__}"
-            )
-        if self.num_envs != 1:
-            raise BindingError(
-                "act(handle, mapping) is the single-env named form; "
-                f"num_envs is {self.num_envs}, so use an ActionBinding and a "
-                "(num_envs, dim) tensor"
             )
         declared_faces = tuple(handle.faces)
         if face is None:
@@ -342,28 +338,7 @@ class Simulation:
                 f"declared faces: {list(declared_faces)}"
             )
         joints = handle.faces[face]
-        provided = tuple(values)
-        missing = [joint for joint in joints if joint not in values]
-        extra = [joint for joint in provided if joint not in joints]
-        if missing or extra:
-            raise BindingError(
-                f"act(handle, mapping) for face {face!r} must cover exactly the "
-                f"face joints {list(joints)}; missing {missing}, unexpected {extra}"
-            )
-        import torch
-
-        for joint in provided:
-            value = values[joint]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise BindingError(
-                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
-                    f"must be a finite number, got {value!r}"
-                )
-            if not math.isfinite(float(value)):
-                raise BindingError(
-                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
-                    f"must be finite, got {value!r}"
-                )
+        tensor = self._named_values(face, values, joints)
         declared = self._faces.get(face)
         if declared is None:
             raise BindingError(
@@ -376,12 +351,106 @@ class Simulation:
                 f"action face {face!r} belongs to articulation "
                 f"{declared_handle.name!r}, not {handle.name!r}"
             )
-        binding = handle.bind_action(face, kind=kind, order=provided)
-        tensor = torch.tensor(
-            [[float(values[joint]) for joint in provided]],
-            dtype=torch.float32,
-        )
+        binding = handle.bind_action(face, kind=kind, order=tuple(values))
         self._stage_binding(binding, tensor, face)
+
+    def _named_values(
+        self,
+        face: str,
+        values: Mapping[str, float | torch.Tensor],
+        joints: tuple[str, ...],
+    ) -> torch.Tensor:
+        """Lower one named mapping to the explicit ``(N, dim)`` value tensor.
+
+        ``N == 1`` accepts finite numbers and floating ``(1,)`` tensors in any
+        mix; numbers lower to float32 columns.  ``N > 1`` requires one floating
+        ``(N,)`` tensor per joint with a uniform dtype and device.  Columns are
+        stacked in mapping key order, cloned, and then staged through the same
+        ``_stage_binding`` path as the explicit tensor form.
+        """
+        import torch
+
+        provided = tuple(values)
+        missing = [joint for joint in joints if joint not in values]
+        extra = [joint for joint in provided if joint not in joints]
+        if missing or extra:
+            raise BindingError(
+                f"act(handle, mapping) for face {face!r} must cover exactly the "
+                f"face joints {list(joints)}; missing {missing}, unexpected {extra}"
+            )
+        columns: list[float | torch.Tensor] = []
+        tensor_device: torch.device | None = None
+        reference: tuple[str, torch.dtype, torch.device] | None = None
+        for joint in values:
+            value = values[joint]
+            if isinstance(value, torch.Tensor):
+                if not value.is_floating_point():
+                    raise BindingError(
+                        f"act(handle, mapping) face {face!r} joint {joint!r} value "
+                        f"must be a floating tensor, got dtype {value.dtype}"
+                    )
+                if self.num_envs == 1:
+                    if tuple(value.shape) != (1,):
+                        raise BindingError(
+                            f"act(handle, mapping) face {face!r} joint {joint!r} "
+                            f"value shape {tuple(value.shape)} is not a legal (1,) "
+                            f"vector for num_envs=1"
+                        )
+                else:
+                    expected = (self.num_envs,)
+                    if tuple(value.shape) != expected:
+                        raise BindingError(
+                            f"act(handle, mapping) face {face!r} joint {joint!r} "
+                            f"value shape {tuple(value.shape)} does not match the "
+                            f"expected (num_envs,)={expected}"
+                        )
+                    if reference is None:
+                        reference = (joint, value.dtype, value.device)
+                    else:
+                        first_joint, first_dtype, first_device = reference
+                        if value.dtype != first_dtype:
+                            raise BindingError(
+                                f"act(handle, mapping) face {face!r} joint {joint!r} "
+                                f"value dtype {value.dtype} does not match joint "
+                                f"{first_joint!r} dtype {first_dtype}; all per-env "
+                                f"values must share one dtype"
+                            )
+                        if value.device != first_device:
+                            raise BindingError(
+                                f"act(handle, mapping) face {face!r} joint {joint!r} "
+                                f"value device {value.device} does not match joint "
+                                f"{first_joint!r} device {first_device}; all per-env "
+                                f"values must share one device"
+                            )
+                if tensor_device is None:
+                    tensor_device = value.device
+                columns.append(value)
+                continue
+            if self.num_envs != 1:
+                raise BindingError(
+                    f"act(handle, mapping) face {face!r} joint {joint!r} value must "
+                    f"be a floating torch.Tensor of shape ({self.num_envs},) for "
+                    f"num_envs={self.num_envs}; use torch.full(({self.num_envs},), "
+                    f"{value!r}) for a constant"
+                )
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise BindingError(
+                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
+                    f"must be a finite number, got {value!r}"
+                )
+            if not math.isfinite(float(value)):
+                raise BindingError(
+                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
+                    f"must be finite, got {value!r}"
+                )
+            columns.append(float(value))
+        stacked: list[torch.Tensor] = []
+        for column in columns:
+            if isinstance(column, torch.Tensor):
+                stacked.append(column)
+            else:
+                stacked.append(torch.tensor([column], dtype=torch.float32, device=tensor_device))
+        return torch.stack(stacked, dim=1).clone()
 
     def _stage_binding(
         self,

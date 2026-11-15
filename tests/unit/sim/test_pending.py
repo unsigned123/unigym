@@ -43,14 +43,16 @@ def test_duplicate_face_is_refused_and_keeps_the_first_entry(tmp_path: Path) -> 
     pack_set, ref = write_sim_pack(tmp_path)
     bindings = _bindings(pack_set, ref)
     pending = PendingActions()
-    first = _staged(bindings["a"], [[0.25, -0.5]])
+    first = _staged(bindings["a"], [[0.25, -0.5], [0.75, -0.25]])
     pending.stage("a", first)
 
     with pytest.raises(PendingActionError, match="already staged"):
-        pending.stage("a", _staged(bindings["a"], [[9.0, 9.0]]))
+        pending.stage("a", _staged(bindings["a"], [[9.0, 9.0], [9.0, 9.0]]))
 
     assert pending.faces() == frozenset({"a"})
     lowered = pending.lower()
+    assert lowered["a"].values is first.values
+    assert lowered["a"].values.shape == (2, 2)
     assert torch.equal(lowered["a"].values, first.values)
 
 

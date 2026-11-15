@@ -59,15 +59,16 @@ def _sim(
     *,
     runner: FakeRunner | None = None,
     owner: object | None = None,
+    num_envs: int = 1,
 ) -> Simulation:
     """Construct the facade directly over the typed runner double."""
     token = object() if owner is None else owner
     declared = (_handle(token),) if handles is None else handles
-    live = FakeRunner() if runner is None else runner
-    run = Run({"run_name": "facade-unit", "env": {"backend": "mujoco", "num_envs": 1}})
+    live = FakeRunner(num_envs=num_envs) if runner is None else runner
+    run = Run({"run_name": "facade-unit", "env": {"backend": "mujoco", "num_envs": num_envs}})
     return Simulation(
         backend="mujoco",
-        num_envs=1,
+        num_envs=num_envs,
         world=World.base(mjcf="world.xml"),
         articulations=declared,
         cameras=(),
@@ -401,3 +402,30 @@ def test_act_rejects_bad_kind_shape_or_dtype(binding_kind, values, match) -> Non
         sim.act(binding, values)
 
     assert sim.runner.ticks_done == 0
+
+
+def test_tensor_action_applies_every_row_at_n2() -> None:
+    """A (2, 1) action lands in both rows and still stages once per face."""
+    runner = FakeRunner(num_envs=2)
+    sim = _sim(num_envs=2, runner=runner)
+    binding = _binding(sim.articulations[0])
+
+    sim.act(binding, torch.tensor([[0.25], [0.75]], dtype=torch.float32))
+    with pytest.raises(PendingActionError, match="already staged"):
+        sim.act(binding, torch.tensor([[9.0], [9.0]], dtype=torch.float32))
+    obs = sim.step()
+
+    assert obs.obs_cache["joint_pos"].tolist() == [[0.25], [0.75]]
+
+
+def test_tensor_action_refuses_a_single_row_at_n2() -> None:
+    """A (1, 1) action is refused against the exact (num_envs, dim)."""
+    runner = FakeRunner(num_envs=2)
+    sim = _sim(num_envs=2, runner=runner)
+    binding = _binding(sim.articulations[0])
+
+    with pytest.raises(BindingError, match=r"expected \(num_envs, dim\)=\(2, 1\)") as excinfo:
+        sim.act(binding, torch.zeros(1, 1))
+
+    assert "(1, 1)" in str(excinfo.value)
+    assert runner.ticks_done == 0

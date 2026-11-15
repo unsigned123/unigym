@@ -164,6 +164,8 @@ def test_explicit_face_is_accepted_on_the_single_face_form() -> None:
         ({"shoulder": "high", "elbow": 0.1}, "must be a finite number"),
         ({"shoulder": float("nan"), "elbow": 0.1}, "must be finite"),
         ({"shoulder": True, "elbow": 0.1}, "must be a finite number"),
+        ({"shoulder": torch.tensor([[0.1]]), "elbow": 0.1}, r"not a legal \(1,\)"),
+        ({"shoulder": torch.tensor([True]), "elbow": 0.1}, "must be a floating tensor"),
     ],
 )
 def test_named_mapping_values_must_be_finite_numbers(values: dict[str, object], match: str) -> None:
@@ -174,13 +176,88 @@ def test_named_mapping_values_must_be_finite_numbers(values: dict[str, object], 
         _sim(handle, FakeRunner(joint_names=("shoulder", "elbow"))).act(handle, values)
 
 
-def test_named_mapping_is_single_env_only() -> None:
-    """The scalar-per-joint mapping documents and enforces its N == 1 scope."""
+def test_named_mapping_accepts_numbers_and_vectors_at_one_env() -> None:
+    """N == 1 mixes finite numbers with floating (1,) tensors."""
+    handle = _handle()
+    runner = FakeRunner(joint_names=("shoulder", "elbow"))
+    sim = _sim(handle, runner)
+
+    sim.act(handle, {"shoulder": 0.3, "elbow": torch.tensor([0.7])})
+    obs = sim.step()
+
+    assert torch.allclose(obs.articulations[handle].joint_pos, torch.tensor([[0.3, 0.7]]))
+
+
+def test_named_mapping_requires_per_env_tensors() -> None:
+    """At N > 1 every joint needs a floating (N,) tensor, never a number."""
+    handle = _handle()
+    runner = FakeRunner(num_envs=2, joint_names=("shoulder", "elbow"))
+    sim = _sim(handle, runner)
+
+    with pytest.raises(
+        BindingError, match=r"joint 'shoulder'.*torch\.full\(\(2,\), 0\.1\)"
+    ) as excinfo:
+        sim.act(handle, {"shoulder": 0.1, "elbow": torch.zeros(2)})
+
+    assert "num_envs=2" in str(excinfo.value)
+    with pytest.raises(
+        BindingError,
+        match=r"joint 'shoulder'.*shape \(1,\).*expected \(num_envs,\)=\(2,\)",
+    ):
+        sim.act(handle, {"shoulder": torch.zeros(1), "elbow": torch.zeros(2)})
+    with pytest.raises(
+        BindingError,
+        match=r"joint 'elbow'.*shape \(2, 1\).*expected \(num_envs,\)=\(2,\)",
+    ):
+        sim.act(handle, {"shoulder": torch.zeros(2), "elbow": torch.zeros(2, 1)})
+    assert runner.ticks_done == 0
+
+
+def test_named_mapping_requires_uniform_dtype_at_many_envs() -> None:
+    """A mixed per-env dtype is refused naming the joint and both dtypes."""
     handle = _handle()
     sim = _sim(handle, FakeRunner(num_envs=2, joint_names=("shoulder", "elbow")))
 
-    with pytest.raises(BindingError, match="single-env"):
-        sim.act(handle, {"shoulder": 0.1, "elbow": 0.2})
+    with pytest.raises(
+        BindingError,
+        match=r"joint 'elbow'.*dtype torch\.float64.*joint 'shoulder'.*dtype torch\.float32",
+    ):
+        sim.act(
+            handle,
+            {
+                "shoulder": torch.zeros(2, dtype=torch.float32),
+                "elbow": torch.zeros(2, dtype=torch.float64),
+            },
+        )
+
+
+def test_named_mapping_applies_per_env_values() -> None:
+    """Each column lands in the same row across the whole mapping."""
+    handle = _handle()
+    runner = FakeRunner(num_envs=2, joint_names=("shoulder", "elbow"))
+    sim = _sim(handle, runner)
+
+    sim.act(
+        handle,
+        {
+            "elbow": torch.tensor([0.3, 0.4]),
+            "shoulder": torch.tensor([0.1, 0.2]),
+        },
+    )
+    obs = sim.step()
+
+    action = runner.last_actions
+    assert action is not None
+    assert action["arm"].joint_names == ["elbow", "shoulder"]
+    assert action["arm"].values.shape == (2, 2)
+    assert torch.allclose(
+        action["arm"].values,
+        torch.tensor([[0.3, 0.1], [0.4, 0.2]]),
+    )
+    assert torch.allclose(
+        obs.articulations[handle].joint_pos,
+        torch.tensor([[0.1, 0.3], [0.2, 0.4]]),
+    )
 
 
 def test_foreign_handle_is_refused_before_staging() -> None:
