@@ -24,8 +24,8 @@ carries, "equivalent combination").  Runtime:
   to the robot base (pelvis), mirroring the isaaclab handlers' obs
   semantics for adapters that request prop keys.
 
-N is always 1 (MujocoEnv is single-env); record tensors are batched
-to (1, ...) so the object layer is backend-agnostic.
+Record tensors are batched to ``(num_envs, ...)`` (one row per env
+``MjData``) so the object layer is backend-agnostic.
 """
 
 from __future__ import annotations

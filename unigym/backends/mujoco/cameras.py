@@ -8,7 +8,8 @@ through ``mujoco.Renderer``.  Only this module (plus ``env/backends/
 mujoco_env.py``) may import mujoco in the cameras package; the module is
 import-safe without mujoco (lazy import inside functions).
 
-Scope: N=1 (the mujoco backend is single-env; every frame is ``(1, ...)``).
+Scope: N=1 (camera rigs are model-global, so the env refuses them at
+``num_envs > 1``; every frame is ``(1, ...)``).
 
 ⚠️ Camera convention bridge (the module's core hazard)
 =====================================================
@@ -950,7 +951,7 @@ class MjWorldRig(_MjRigBase):
         exact :meth:`begin_world_pose` write minus the save/restore
         protocol -- model slots stick until the next pose write (a
         later offset-keyed ``apply_properties`` recomputes from the
-        mount, last write wins).  mujoco is single-env: ``env_idx``
+        mount, last write wins).  Camera rigs are N=1-scoped: ``env_idx``
         must be None or 0.
         """
         if env_idx not in (None, 0):

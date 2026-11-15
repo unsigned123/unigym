@@ -102,7 +102,8 @@ class SimulationBuilder:
         substeps: the integer decimation; exactly one of this and
             ``physics_dt``.
         seed: the deterministic seed (>= 0).
-        num_envs: the environment count (>= 1; the spike accepts ``N == 1``).
+        num_envs: the environment count (>= 1; the first-spike acceptance is
+            ``N == 1``; the ``N > 1`` contract is a separate plan).
         pack_set: the explicit pack scope every robot ref is validated against.
         name: the run label.
         steps: the collect budget (>= 1).

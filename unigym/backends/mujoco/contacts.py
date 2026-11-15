@@ -27,8 +27,9 @@ Semantics (measured, probe ``scripts/probe_contact_sign.py``):
 * ``frame: body``: the world force is rotated into the SENSOR body frame
   (``R_b^T @ f_world``, ``R_b`` from ``data.xquat[body_id]``, wxyz).
   ``frame: world`` is direct.
-* N is always 1 (MujocoEnv is single-env); read_raw returns the
-  batched (1, B, ...) array so the manager layer is backend-agnostic.
+* read_raw scans every per-env ``MjData`` (``env.mj_datas``) and returns the
+  batched ``(N, B, ...)`` array, so the manager layer is backend-agnostic and
+  ``MujocoEnv`` at ``N > 1`` is served per env.
 """
 
 from __future__ import annotations

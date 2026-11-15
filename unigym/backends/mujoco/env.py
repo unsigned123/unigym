@@ -1,10 +1,13 @@
-"""MuJoCo single-environment backend (flat-ground benchmark; cameras).
+"""MuJoCo backend (flat-ground benchmark; cameras; ``num_envs >= 1``).
 
-Implements the EnvBackend contract (``env/backends/base.py``) on top of a
-plain MuJoCo ``MjModel``/``MjData`` pair, for N=1 flat-ground benchmark runs
-on the host ``.venv_sim`` (no isaaclab, no kit).  N>1, depth-encoder obs,
-DR events and init-pose are OUT OF SCOPE (capability bits False).  The
-the ``cameras`` capability is ON: a wired ``CameraManager`` gets its rigs
+Implements the EnvBackend contract (``env/backends/base.py``) on one shared
+MuJoCo ``MjModel`` and one independent ``MjData`` per env, for flat-ground
+benchmark runs on the host ``.venv_sim`` (no isaaclab, no kit).
+``num_envs >= 1`` is supported natively (per-env ``reset_envs`` and
+snapshot/restore); only the model-global features (camera rigs, director,
+anchored articulation props) are N=1-scoped.  Depth-encoder obs, DR events
+and init-pose are OUT OF SCOPE (capability bits False).  The
+``cameras`` capability is ON: a wired ``CameraManager`` gets its rigs
 injected into the MJ model (MjSpec) and
 renders rgb/depth in-process (``cameras/mujoco_backend.py``); the recorder
 consumes those frames through ``camera_ref`` with zero env-side coupling.
@@ -200,14 +203,22 @@ def _mj_enum(val):
 
 
 class MujocoEnv:
-    """Single-env MuJoCo backend implementing the EnvBackend contract.
+    """MuJoCo backend implementing the EnvBackend contract (``num_envs >= 1``).
+
+    Every env owns an independent ``MjData`` over the one shared ``MjModel``
+    (``mj_datas``), so per-env ``reset_envs`` and snapshot/restore are native.
+    Model-global state has no per-env write face and is refused at ``N > 1``
+    by ``multienv.reject_model_global_unsupported``: camera rigs, director
+    edits and anchored articulation props are the N=1 scope, not the env.
 
     Args (``build_env_backend`` kwargs; backend-specific keys come from the
     yaml ``env.params`` section via collect.py's ``backend_params``):
         robot_profile: RobotProfile (pure neutral constants; the
             simulator model is the MJ XML).
         adapter: Adapter (declares obs requests / orders).
-        num_envs: must be 1 (fail-fast on larger configs).
+        num_envs: env count (``>= 1``); ``N > 1`` builds one independent
+            ``MjData`` per env.  Model-global features (cameras, director,
+            anchored props) are refused at ``N > 1``.
         episode_length_s: scalar or [lo, hi] (``env.episode_length_s``).
         decimation / sim_dt: policy/sim rate chain (4 x 0.005 -> 50 Hz).
             The XML default timestep (0.002) is overridden to ``sim_dt``.

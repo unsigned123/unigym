@@ -13,9 +13,13 @@ SimulationBuilder -> Simulation -> Run / ExternalRunner / backend
 
 - `unigym.sim.SIM_API_VERSION` is `1`. There is no stable-API promise; an
   incompatible facade change bumps the version.
-- The first spike is proven for a **single env, one articulation** on
-  `mujoco` and `isaaclab2`. Multi-env, camera frames, contact parity and
-  object/prop handles are deferred (see [Scope and non-goals](#scope-and-non-goals)).
+- The first spike is proven for **one env, one articulation** on `mujoco` and
+  `isaaclab2`; its acceptance is `N == 1`. Multi-env (`N > 1`) is a backend
+  capability — `mujoco` native per-env `MjData`, `mjwarp` one batched warp
+  `Data` plus `N` CPU mirrors, `isaaclab2` native scene cloning — but the
+  facade's `N > 1` contract is a separate, not-yet-landed plan (see
+  [Scope and non-goals](#scope-and-non-goals)). Camera frames, contact parity
+  and object/prop handles are deferred.
 - `import unigym` stays torch/MuJoCo/IsaacLab-free. `unigym.sim` imports
   `torch` lazily at the action/observation boundary, so importing the facade
   is also torch-free.
@@ -306,10 +310,12 @@ In scope for `SIM_API_VERSION = 1`:
 - One explicit `PackSet`, explicit world/control declarations, identity-scoped
   handles.
 - `Control.position_pd` only.
-- Single-env, one-articulation acceptance; the builder and handles support
-  more, but only one is tested.
+- `N == 1` acceptance (the first-spike scope); the builder and handles keep
+  the leading env axis, and `mujoco`/`mjwarp`/`isaaclab2` have `N > 1`
+  backends (the `N > 1` facade plan is separate).
 - `mujoco` and `isaaclab2` backend acceptance; `mjwarp` and `isaaclab3` are
-  not part of the spike claim.
+  not part of the spike claim (`mjwarp` supports `N > 1`; it is out of this
+  spike's lane/fixture scope, not out of capability).
 - Explicit `to_config` / `from_config` semantic round-trip.
 
 Non-goals:
@@ -324,7 +330,7 @@ Deferred (exact follow-up, not open questions):
 
 | Deferred | Reason |
 | --- | --- |
-| Multi-env acceptance / `N > 1` promises | Single-env spike scope; action/observation code preserves the leading axis but `N > 1` is untested. |
+| Multi-env acceptance / `N > 1` promises | First-spike acceptance is `N == 1`; `mujoco` (native per-env `MjData`), `mjwarp` (batched warp + CPU mirrors) and `isaaclab2` (scene cloning) have `N > 1` backends, and the facade `N > 1` plan is separate. |
 | Camera frames / rendering | `Run` hard-codes `enable_cameras=False`; the manual adapter requests no images. |
 | `attach=BodyHandle` cameras | A canonical body id needs the build-selected native asset name. |
 | Typed contacts / props / object handles | `contact/` keys are not backend-symmetric in `extra`. |
