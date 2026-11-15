@@ -6,6 +6,12 @@ handles, the ``Control.position_pd`` preset, the error taxonomy, the live
 :class:`Simulation` and its typed :class:`Observation` projection (articulation
 records, published camera frames and ``contact/`` tensors).
 
+The tested coverage extends to ``num_envs`` in ``{1, 2, 3}`` on ``mujoco``
+and targeted ``{1, 2}`` on ``isaaclab2`` (full dog lane unverified): explicit
+``(N, dim)`` actions, per-env named values, ``reset(env_ids=...)`` and reported
+due/terminated rows; ``step`` never resets a row.  Cameras at ``N > 1`` remain
+deferred.
+
 ``import unigym.sim`` stays torch/mujoco/isaaclab-free: backend and action
 modules are imported lazily at the function boundary.
 """

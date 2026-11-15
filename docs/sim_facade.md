@@ -11,15 +11,13 @@ SimulationBuilder -> Simulation -> Run / ExternalRunner / backend
 
 ## Experimental status
 
-- `unigym.sim.SIM_API_VERSION` is `1`. There is no stable-API promise; an
+- `unigym.sim.SIM_API_VERSION` is `2`. There is no stable-API promise; an
   incompatible facade change bumps the version.
-- The first spike is proven for **one env, one articulation** on `mujoco` and
-  `isaaclab2`; its acceptance is `N == 1`. Multi-env (`N > 1`) is a backend
-  capability — `mujoco` native per-env `MjData`, `mjwarp` one batched warp
-  `Data` plus `N` CPU mirrors, `isaaclab2` native scene cloning — but the
-  facade's `N > 1` contract is a separate, not-yet-landed plan (see
-  [Scope and non-goals](#scope-and-non-goals)). Camera frames, contact parity
-  and object/prop handles are deferred.
+- The facade is proven for **one articulation** on the tested coverage:
+  `mujoco` at `N ∈ {1, 2, 3}` and `isaaclab2` at targeted `N ∈ {1, 2}` (full
+  dog lane unverified); see [Multi-env](#multi-env). `mjwarp` has an `N > 1`
+  backend, but its lane and fixtures are outside this spike; camera frames,
+  contact parity and object/prop handles remain deferred.
 - `import unigym` stays torch/MuJoCo/IsaacLab-free. `unigym.sim` imports
   `torch` lazily at the action/observation boundary, so importing the facade
   is also torch-free.
@@ -85,7 +83,10 @@ obs = sim.step()
 `step(actions={binding: values, ...})` is sugar: it stages every entry
 atomically and then runs the normal `step()`. A failed entry clears the pending
 table and leaves the tick/state untouched. The canonical path is `act` +
-`step()`.
+`step()`. Entries are currently dispatched through `act`, so the same
+binding-tensor and handle-mapping forms are accepted at runtime even though the
+typed annotation is binding-keyed tensors. Finiteness is checked for Python
+numbers only; a tensor's `NaN`/`inf` values are not inspected in v2.
 
 ## Builder
 
@@ -170,15 +171,62 @@ An `ActionBinding` is one face lowered to the existing `NamedAction` surface:
 - `act(binding, values)` requires a floating `torch.Tensor` of shape
   `(num_envs, binding.dim)`, or `(binding.dim,)` when `num_envs == 1`. Values
   are normalized to `(N, dim)` and cloned.
-- `act(handle, {joint: value})` is the single-env named form. Its keys must
-  cover exactly the face joints; key order becomes the action column order.
-  With more than one declared face, `face=` selects one.
+- `act(handle, {joint: value})` is the named form. Its keys must cover exactly
+  the face joints; key order becomes the action column order. With more than
+  one declared face, `face=` selects one. At `N == 1` a value may be a finite
+  number or a floating `(1,)` tensor; the per-env rules are in
+  [Multi-env](#multi-env).
 - At most one pending entry per face. `step()` requires **every** declared
   control face to be staged; an unstaged face is `MissingActionError`. The
   previous action is never reused.
 - All validation happens before the tick. An engine exception clears pending,
   marks the simulation `faulted`, and propagates; later live calls raise
   `SimulationFaultedError` until `close()`.
+
+## Multi-env
+
+`num_envs=N` builds `N` rows on `mujoco` and `isaaclab2`. The leading env axis
+is explicit: every action is `(N, dim)` and every projected tensor is
+`(N, ...)`. The facade never broadcasts, fills or skips a row.
+
+```python
+sim.act(binding, torch.zeros((N, binding.dim), dtype=torch.float32))  # exact (N, dim)
+sim.act(robot, {"shoulder": torch.full((N,), 0.1), "elbow": torch.zeros(N)})
+```
+
+- `act(binding, tensor)` requires an exact `(N, dim)` floating tensor; the
+  `(dim,)` short form remains legal only at `N == 1`. A `(1, dim)` tensor,
+  a `(dim,)` vector or a 3-D tensor at `N > 1` is a `BindingError` naming the
+  actual and the expected `(num_envs, dim)`.
+- `act(handle, {joint: value})` is the per-env named form. At `N > 1` every
+  value must be a floating `(N,)` tensor with one dtype and device; a Python
+  number is refused with a `BindingError` naming the joint and the explicit
+  broadcast, `torch.full((N,), value)`. The columns are stacked in key order
+  into the same `(N, dim)` staging path. At `N == 1` finite numbers and `(1,)`
+  tensors may mix, exactly as before.
+- `reset(env_ids=...)` resets exactly the named rows; `reset()` (or
+  `env_ids=None`) resets all rows. Ids are ints in `[0, N)`, non-empty and
+  unique; a subset reset does not touch the other rows.
+- `step()` never resets a row. It advances all rows one tick and reports:
+  `obs.reset_env_ids` is empty, `obs.reset_due_env_ids` names the
+  episode-clock due rows, and `obs.terminated` is the `(N,)` termination mask
+  (`None` at spawn and after `reset()`). A due or terminated row keeps
+  stepping until the caller resets it:
+
+  ```python
+  obs = sim.step()
+  ids = torch.cat([obs.reset_due_env_ids,
+                   torch.nonzero(obs.terminated).flatten()]).unique()
+  if ids.numel():
+      obs = sim.reset(env_ids=ids)
+  ```
+
+- The builder emits `runner.auto_reset: false`, which is how `step` keeps that
+  promise. A config-mode build of a foreign config that leaves
+  `runner.auto_reset` true is refused with a `SimulationConfigError` naming the
+  key, rather than silently overriding the user's config.
+- `num_envs > 1` together with a declared camera is a
+  `DeferredFeatureError`; cameras at `N > 1` are not part of this contract.
 
 ## Observations
 
@@ -188,11 +236,13 @@ the first `step()` also returns `t == 0`, and after `N` steps `t == N - 1`.
 | Field | Meaning |
 | --- | --- |
 | `t` | The 0-based policy tick that produced the cached state (`N - 1` after `N` steps). |
+| `num_envs` | The declared env count; every projected tensor has this many rows. |
 | `articulations` | `Mapping[ArticulationHandle, ArticulationObservation]`. |
 | `cameras` | `Mapping[CameraHandle, CameraFrame]` for published frames only. |
 | `contacts` | `contact/...` tensors present in the live state (no backend parity claim). |
-| `reset_env_ids` | Env rows reset by the producing tick. |
-| `terminated` | The producing tick's termination mask; `None` at spawn/reset. |
+| `reset_env_ids` | The env rows **this operation performed** a reset on; empty after a step. |
+| `reset_due_env_ids` | The episode-clock **due** rows at the producing tick; empty after a reset. |
+| `terminated` | The producing tick's `(N,)` termination mask; `None` at spawn/reset. |
 | `raw` | The live state mapping (`extra` without `reset_env_ids` / `should_reset`). |
 | `obs_cache` | Exact copy of `StepResult.obs`; values are kept verbatim. |
 
@@ -231,8 +281,9 @@ clock.
   resynchronizes, and raises `StaleStateError` on clock drift.
 - `step` ticks the one runner exactly once and caches the returned
   `StepResult`.
-- `reset` resets every env through the same runner, clears pending and
-  refreshes the cached state.
+- `reset(env_ids=...)` resets the named rows (or every row when `None`) through
+  the same runner, clears pending and refreshes the cached state. A subset
+  reset does not move the clock and does not make the other rows stale.
 - Out-of-band ticks are detected via `runner.ticks_done` drift and raise
   `StaleStateError`; the facade never silently resyncs or applies a stale
   target.
@@ -250,18 +301,18 @@ All facade errors derive from `unigym.errors.UniGymError`. `NoWorldError` and
 | --- | --- |
 | `NoWorldError` | `build()` has no world, or the world declares no asset. |
 | `NoControlError` | `add_articulation` is called without `control=`. |
-| `SimulationConfigError` | Invalid declaration: dt arithmetic, labels, backend name, face/profile coverage, config-mode requirements. |
+| `SimulationConfigError` | Invalid declaration or caller argument: dt arithmetic, labels, backend name, face/profile coverage, config-mode requirements, `reset(env_ids=...)` ids (empty, non-int, out of range or duplicate), or a foreign config with `runner.auto_reset: true`. |
 | `ForeignHandleError` | A handle, binding or pack ref belongs to another builder/simulation or pack set. |
 | `BindingError` | Unknown face, illegal kind, bad column order, bad shape/dtype, ambiguous or partial named action. |
 | `PendingActionError` | Duplicate face, empty pending on `step()`, or a staged face that is not declared. |
 | `MissingActionError` | A required control face is not staged. |
 | `StaleStateError` | The runner advanced out of band; the facade clock is behind. |
-| `ObservationError` | A required state key is missing or invalid, or `q0` is unavailable. |
+| `ObservationError` | A required state key is missing or invalid, `q0` is unavailable, or a projected tensor/mask violates its `num_envs` contract (wrong row count, non-int64/out-of-range/duplicate reset ids, or a `terminated` mask that is not `(N,)` bool). |
 | `SimulationClosedError` | A live call after `close()`. |
 | `SimulationFaultedError` | A live call after an engine exception; only `close()` is safe. |
 | `BuilderSealedError` | A declaration after the first successful `build()`. |
 | `ConfigModeError` | `add_articulation` / `add_camera` / `world=` on a `from_config` builder. |
-| `DeferredFeatureError` | A declared out-of-scope feature, currently `attach=BodyHandle` cameras. |
+| `DeferredFeatureError` | A declared out-of-scope feature: `attach=BodyHandle` cameras, or camera frames at `N > 1`. |
 
 ## Config round-trip
 
@@ -291,28 +342,32 @@ handles are re-adopted from the live instance after `build()`.
 
 ## Acceptance evidence
 
-The first-spike acceptance script
-(`tests/_support/sim_facade_script.py`) has no backend branch. Lanes differ only
-in the fixture they supply:
+The shared acceptance script (`tests/_support/sim_facade_script.py`) has no
+backend branch and takes `num_envs`. Lanes differ only in the fixture they
+supply:
 
-- `mujoco` (D0): the `facade_mjcf` fixture pack and the `tiny_arm` MJCF.
+- `mujoco` (D0): the `facade_mjcf` fixture pack and the `tiny_arm` MJCF;
+  `N ∈ {1, 2, 3}` run through the lane.
 - `isaaclab2` (external lane): a lane-owned G1 fixture pack and an inline
-  terrain world.
+  terrain world; targeted `N ∈ {1, 2}` on the recorded dog lane (full dog lane
+  unverified).
 
 Claim: **same script, lane-owned fixture**. This is not a same-asset claim
-(there is no dual-format test pack yet; see the residuals). The cross-backend
-part is recorded A6 evidence; A7 did not rerun the `isaaclab2` lane.
+(there is no dual-format test pack yet; see the residuals). The targeted
+`isaaclab2` part (`N ∈ {1, 2}`) is recorded dog-lane evidence, not a
+cross-backend parity claim, and the full dog lane remains unverified.
 
 ## Scope and non-goals
 
-In scope for `SIM_API_VERSION = 1`:
+In scope for `SIM_API_VERSION = 2`:
 
 - One explicit `PackSet`, explicit world/control declarations, identity-scoped
   handles.
 - `Control.position_pd` only.
-- `N == 1` acceptance (the first-spike scope); the builder and handles keep
-  the leading env axis, and `mujoco`/`mjwarp`/`isaaclab2` have `N > 1`
-  backends (the `N > 1` facade plan is separate).
+- Tested multi-env coverage on `mujoco` at `N ∈ {1, 2, 3}` and targeted
+  `isaaclab2` at `N ∈ {1, 2}` (full dog lane unverified): explicit `(N, dim)`
+  actions, the per-env named form, `reset(env_ids=...)`, and due/terminated
+  reporting with `step` never resetting a row.
 - `mujoco` and `isaaclab2` backend acceptance; `mjwarp` and `isaaclab3` are
   not part of the spike claim (`mjwarp` supports `N > 1`; it is out of this
   spike's lane/fixture scope, not out of capability).
@@ -321,8 +376,9 @@ In scope for `SIM_API_VERSION = 1`:
 Non-goals:
 
 - No Gym/VectorEnv integration; the `GymRunner` family stays the RL path.
-- No change to `Run`, `make`, `NamedAction`, control-law, runner, contact or
-  backend semantics.
+- No semantic change to `Run`, `make`, `NamedAction`, control-law, contact or
+  backend behavior; the multi-env spike only forwards the existing reset
+  policy and fixes the empty-group termination mask shape.
 - No removal or deprecation of the low-level API.
 - No hidden defaults, pack discovery, or second parser.
 
@@ -330,13 +386,13 @@ Deferred (exact follow-up, not open questions):
 
 | Deferred | Reason |
 | --- | --- |
-| Multi-env acceptance / `N > 1` promises | First-spike acceptance is `N == 1`; `mujoco` (native per-env `MjData`), `mjwarp` (batched warp + CPU mirrors) and `isaaclab2` (scene cloning) have `N > 1` backends, and the facade `N > 1` plan is separate. |
 | Camera frames / rendering | `Run` hard-codes `enable_cameras=False`; the manual adapter requests no images. |
 | `attach=BodyHandle` cameras | A canonical body id needs the build-selected native asset name. |
 | Typed contacts / props / object handles | `contact/` keys are not backend-symmetric in `extra`. |
 | Subset `joints=` action bindings | Full-face bindings only in this spike. |
 | Same-asset cross-backend run | No dual-format (MJCF + USD/URDF) test pack in both lanes. |
 | Per-env action masks | No consumer yet. |
+| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `raw`. |
 
 ## Honest residuals
 
@@ -347,8 +403,8 @@ Deferred (exact follow-up, not open questions):
   has an `_build_extra` prop-manager side effect that is out of spike scope.
 - Camera frames are opportunistic: they appear only if the backend publishes
   them in `obs_cache`.
-- The full IsaacLab 2 dog lane is external and was not rerun for the
-  documentation slice; the targeted facade test is recorded as passing.
-- The facade is experimental: promotion requires independent review, a
-  dual-format test pack, multi-env tests, camera/contact contracts and a
-  revisited activation-scoped profile channel.
+- The full IsaacLab 2 dog lane is external and remains unverified; the targeted
+  `N == 1` and `N == 2` facade tests are recorded as passing in isolation.
+- The facade is experimental: this spike's independent review returned
+  `APPROVE`, but promotion still requires a dual-format test pack,
+  camera/contact contracts and a revisited activation-scoped profile channel.
