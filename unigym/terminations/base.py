@@ -25,11 +25,16 @@ from typing import Any, Mapping, Sequence, cast
 
 
 def all_false(x):
-    """All-False bool mask shaped like ``x``'s leading dim (numpy or torch).
+    """All-False bool mask shaped like ``x``'s leading (batch) dim.
 
-    ``x[..., 0] > inf`` is False for any finite/NaN value and keeps the
-    backend type of ``x`` (torch tensors stay torch, numpy stays numpy).
+    A 1-D ``(N,)`` reference *is* the batch axis, so the mask is ``x > inf``
+    (shape ``(N,)``); for an N-D ``(N, ...)`` reference the trailing dims are
+    reduced to the leading batch dim via ``x[..., 0]``.  ``> inf`` is False
+    for any finite/NaN value and keeps the backend type of ``x`` (torch
+    tensors stay torch, numpy stays numpy).
     """
+    if x.ndim == 1:
+        return x > float("inf")
     return x[..., 0] > float("inf")
 
 

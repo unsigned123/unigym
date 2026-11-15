@@ -48,6 +48,33 @@ def test_composite_empty_group_never_fires():
     assert group.check(_state()).tolist() == [False, False]
 
 
+@pytest.mark.parametrize(
+    ("ref", "expected_shape"),
+    [
+        (np.array([0.0, 1.0, 2.0]), (3,)),
+        (np.zeros((3, 4)), (3,)),
+    ],
+    ids=["1d", "2d"],
+)
+def test_composite_empty_group_mask_keeps_batch_shape(ref, expected_shape):
+    """Empty group mask keeps the reference's leading batch shape, not 0-D."""
+    mask = TerminationGroup([]).check(TerminationState(batch=ref))
+
+    assert mask.shape == expected_shape
+    assert mask.dtype == np.bool_
+    assert not mask.any()
+
+
+def test_composite_empty_group_mask_keeps_torch_type():
+    """The empty group mask stays a torch tensor for a torch reference."""
+    torch = pytest.importorskip("torch")
+    mask = TerminationGroup([]).check(TerminationState(batch=torch.zeros(4)))
+
+    assert isinstance(mask, torch.Tensor)
+    assert tuple(mask.shape) == (4,)
+    assert not bool(mask.any())
+
+
 def test_composite_group_rejects_unknown_mode():
     """Only OR and AND are legal; any other mode fails naming the value."""
     with pytest.raises(ValueError, match="mode must be 'or' or 'and', got 'xor'"):
