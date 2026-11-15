@@ -121,6 +121,64 @@ def test_reader_and_projection_agree_on_spawn_keys_shapes_and_columns(
         env.close()
 
 
+def test_two_env_rows_project_distinct_values(tmp_path: Path) -> None:
+    """read_extra and build_observation agree row-for-row at num_envs=2."""
+    handle = _handle(tmp_path)
+    env = FakeBackend(num_envs=2, joint_names=JOINT_ORDER)
+    target = torch.tensor([[0.25, -0.5], [-0.75, 0.4]], dtype=torch.float32)
+    try:
+        env.step({ARTICULATION_NAME: NamedAction(target, list(JOINT_ORDER), "position")})
+        state = read_extra(env)
+        obs = _observe(env, handle, t=1)
+
+        prefix = f"articulation/{ARTICULATION_NAME}"
+        record = obs.articulations[handle]
+        assert obs.num_envs == 2
+        assert record.joint_names == JOINT_ORDER
+        assert record.joint_pos.shape == (2, len(JOINT_ORDER))
+        assert record.gravity_b.shape == (2, 3)
+        assert record.base_quat_w.shape == (2, 4)
+        for key in PROJECTED_KEYS:
+            typed = getattr(record, key)
+            assert typed.shape[0] == 2, f"{key} lost the leading env axis: {typed.shape}"
+            assert torch.equal(typed, state[f"{prefix}/{key}"])
+        assert torch.equal(record.joint_pos, target)
+        assert not torch.equal(record.joint_pos[0], record.joint_pos[1])
+        time_in_episode = obs.raw["time_in_episode"]
+        assert isinstance(time_in_episode, torch.Tensor)
+        assert time_in_episode.tolist() == [1.0, 1.0]
+        assert obs.reset_env_ids.tolist() == []
+    finally:
+        env.close()
+
+
+def test_two_env_subset_reset_agrees_row_wise(tmp_path: Path) -> None:
+    """A row-subset reset keeps the other row and the reader agrees per row."""
+    handle = _handle(tmp_path)
+    env = FakeBackend(num_envs=2, joint_names=JOINT_ORDER)
+    target = torch.tensor([[0.25, -0.5], [-0.75, 0.4]], dtype=torch.float32)
+    try:
+        env.step({ARTICULATION_NAME: NamedAction(target, list(JOINT_ORDER), "position")})
+        env.reset_envs(torch.tensor([1], dtype=torch.int64))
+        state = read_extra(env)
+        obs = _observe(env, handle, t=1)
+
+        prefix = f"articulation/{ARTICULATION_NAME}"
+        record = obs.articulations[handle]
+        assert record.joint_pos.tolist() == [[0.25, -0.5], [0.0, 0.0]]
+        for key in PROJECTED_KEYS:
+            typed = getattr(record, key)
+            assert torch.equal(typed, state[f"{prefix}/{key}"])
+        time_in_episode = obs.raw["time_in_episode"]
+        assert isinstance(time_in_episode, torch.Tensor)
+        assert time_in_episode.tolist() == [1.0, 0.0]
+        episode_id = obs.raw["episode_id"]
+        assert isinstance(episode_id, torch.Tensor)
+        assert episode_id.tolist() == [0, 1]
+    finally:
+        env.close()
+
+
 def test_projection_columns_follow_the_acted_joint_values(tmp_path: Path) -> None:
     """A stepped action reaches the record column-for-column, never reordered."""
     handle = _handle(tmp_path)
