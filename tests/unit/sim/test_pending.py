@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from unigym.packs.packset import PackSet, RobotRef
-from unigym.sim import ActionBinding, Control, SimulationBuilder
+from unigym.sim import ActionBinding, BindingOrder, Control, SimulationBuilder
 from unigym.sim.errors import PendingActionError
 from unigym.sim.pending import PendingActions, StagedAction
 from tests._support.sim_fixtures import write_sim_pack
@@ -28,8 +28,8 @@ def _bindings(pack_set: PackSet, ref: RobotRef) -> dict[str, ActionBinding]:
         control=Control.position_pd(joint_set="body", face="b", kp=1.0, kd=0.1),
     )
     return {
-        "a": first.bind_action("a", kind="position"),
-        "b": second.bind_action("b", kind="position"),
+        "a": first.bind_action("a", kind="position", order=BindingOrder.DEFAULT),
+        "b": second.bind_action("b", kind="position", order=BindingOrder.DEFAULT),
     }
 
 

@@ -13,6 +13,7 @@ from unigym.runtime.actions import NamedAction
 from unigym.sim import (
     ActionBinding,
     ArticulationHandle,
+    BindingOrder,
     Control,
     ForeignHandleError,
     MissingActionError,
@@ -86,7 +87,7 @@ def _binding(
     handle: ArticulationHandle, face: str = "arm", kind: str = "position"
 ) -> ActionBinding:
     """An action binding for the handle's declared face."""
-    return handle.bind_action(face, kind=kind)
+    return handle.bind_action(face, kind=kind, order=BindingOrder.DEFAULT)
 
 
 def _values(value: float = 0.5) -> torch.Tensor:

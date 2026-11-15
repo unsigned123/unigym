@@ -11,7 +11,7 @@ import torch
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.run.api import Run
 from unigym.runtime.actions import NamedAction
-from unigym.sim import Control, SimulationBuilder
+from unigym.sim import BindingOrder, Control, SimulationBuilder
 from unigym.world import World
 from tests._support.sim_fixtures import write_sim_pack
 
@@ -38,7 +38,7 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
         name="body",
         control=Control.position_pd(joint_set="body", kp=20.0, kd=1.0),
     )
-    binding = handle.bind_action("body", kind="position")
+    binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
     actions = (
         torch.tensor([[0.2, -0.1]], dtype=torch.float32),
         torch.tensor([[0.0, 0.3]], dtype=torch.float32),

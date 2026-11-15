@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -30,9 +31,16 @@ if TYPE_CHECKING:
 __all__ = [
     "ActionBinding",
     "ArticulationHandle",
+    "BindingOrder",
     "BodyHandle",
     "CameraHandle",
 ]
+
+
+class BindingOrder(Enum):
+    """The explicit action column-order choice at the binding boundary."""
+
+    DEFAULT = "default"
 
 
 def _check_owner(handle: BodyHandle, owner: object, what: str) -> None:
@@ -98,9 +106,14 @@ class ArticulationHandle:
         face: str,
         *,
         kind: str,
-        order: Sequence[str] | None = None,
+        order: Sequence[str] | BindingOrder,
     ) -> ActionBinding:
-        """Bind one face to an explicit action kind and column order."""
+        """Bind one face to an explicit action kind and column order.
+
+        ``order`` has no default: pass ``BindingOrder.DEFAULT`` for the face's
+        resolved joint order, or a sequence that is a permutation of the face
+        joints to choose the tensor column order.
+        """
         from unigym.runtime.actions import LEGAL_ACTION_KINDS
 
         if face not in self.faces:
@@ -113,18 +126,20 @@ class ArticulationHandle:
                 f"action binding kind must be one of {list(LEGAL_ACTION_KINDS)}, " f"got {kind!r}"
             )
         face_joints = self.faces[face]
-        if order is None:
+        if order is BindingOrder.DEFAULT:
             joint_names = face_joints
         else:
-            if isinstance(order, (str, bytes)):
+            if not isinstance(order, Sequence) or isinstance(order, (str, bytes)):
                 raise BindingError(
-                    f"action binding order must be a sequence of joint names, got {order!r}"
+                    f"action binding order must be BindingOrder.DEFAULT or a "
+                    f"sequence of joint names, got {order!r}"
                 )
             joint_names = tuple(order)
             if len(joint_names) != len(face_joints) or set(joint_names) != set(face_joints):
                 raise BindingError(
-                    f"action binding order for face {face!r} must be a permutation of "
-                    f"{list(face_joints)}; got {list(joint_names)}"
+                    f"action binding order for face {face!r} must be a permutation "
+                    f"of {list(face_joints)} (or use BindingOrder.DEFAULT); "
+                    f"got {list(joint_names)}"
                 )
         return ActionBinding(
             articulation=self,

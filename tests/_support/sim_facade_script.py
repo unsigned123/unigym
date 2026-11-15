@@ -24,7 +24,7 @@ from __future__ import annotations
 import torch
 
 from unigym.packs.packset import PackSet, RobotRef
-from unigym.sim import Control, PendingActionError, SimulationBuilder
+from unigym.sim import BindingOrder, Control, PendingActionError, SimulationBuilder
 from unigym.world import World
 
 __all__ = ["ARTICULATION_LABEL", "run_facade_acceptance"]
@@ -151,7 +151,7 @@ def run_facade_acceptance(
             record.joint_pos, raw_pos
         ), "spawn typed joint_pos is not the backend state tensor"
 
-        binding = robot.bind_action("body", kind="position")
+        binding = robot.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
         assert (
             binding.joint_names == joint_names
         ), f"action binding columns {binding.joint_names} != profile order {joint_names}"

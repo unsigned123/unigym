@@ -13,7 +13,13 @@ from unigym.packs.packset import PackSet, RobotRef
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.runner.external import ExternalRunner
 from unigym.runner.state import read_extra
-from unigym.sim import ArticulationHandle, Control, Simulation, SimulationBuilder
+from unigym.sim import (
+    ArticulationHandle,
+    BindingOrder,
+    Control,
+    Simulation,
+    SimulationBuilder,
+)
 from unigym.world import World
 from tests._support.sim_facade_script import ARTICULATION_LABEL, run_facade_acceptance
 
@@ -119,7 +125,10 @@ def test_reset_subset_restores_only_the_named_row(tiny_mjcf: Path) -> None:
     prefix = f"articulation/{handle.name}"
     try:
         spawn = _joint_pos(sim.observe(), prefix).clone()
-        sim.act(handle.bind_action("body", kind="position"), _targets(2))
+        sim.act(
+            handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT),
+            _targets(2),
+        )
         stepped = sim.step()
         post_step = _joint_pos(stepped, prefix).clone()
         assert not torch.equal(
@@ -150,7 +159,7 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
 ) -> None:
     """episode_length_s=0.04 makes both rows due on tick 2, reported not applied."""
     sim, handle = _build_sim(tiny_mjcf, num_envs=2, episode_length_s=0.04)
-    binding = handle.bind_action("body", kind="position")
+    binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
     try:
         sim.act(binding, _targets(2))
         first = sim.step()
@@ -191,7 +200,10 @@ def test_reader_after_subset_reset_agrees_row_wise(tiny_mjcf: Path) -> None:
     assert isinstance(runner, ExternalRunner)
     try:
         spawn = _joint_pos(sim.observe(), prefix).clone()
-        sim.act(handle.bind_action("body", kind="position"), _targets(2))
+        sim.act(
+            handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT),
+            _targets(2),
+        )
         stepped = sim.step()
         post_step = _joint_pos(stepped, prefix).clone()
         step_state = read_extra(runner.env)

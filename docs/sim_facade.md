@@ -11,7 +11,7 @@ SimulationBuilder -> Simulation -> Run / ExternalRunner / backend
 
 ## Experimental status
 
-- `unigym.sim.SIM_API_VERSION` is `2`. There is no stable-API promise; an
+- `unigym.sim.SIM_API_VERSION` is `3`. There is no stable-API promise; an
   incompatible facade change bumps the version.
 - The facade is proven for **one articulation** on the tested coverage:
   `mujoco` at `N ∈ {1, 2, 3}` and `isaaclab2` at targeted `N ∈ {1, 2}` (full
@@ -57,7 +57,11 @@ robot = builder.add_articulation(
     packs.pack("acme_robots").robot("acme.arm"),
     control=control,
 )
-binding = robot.bind_action("body", kind="position")
+binding = robot.bind_action(
+    "body",
+    kind="position",
+    order=unigym.BindingOrder.DEFAULT,   # explicit default-order choice
+)
 
 with builder.build() as sim:
     obs = sim.observe()                            # spawn state, t == 0
@@ -165,13 +169,18 @@ An `ActionBinding` is one face lowered to the existing `NamedAction` surface:
 `binding.joint_names` is the column order and `binding.kind` is the action kind
 (`"position"` for `Control.position_pd`).
 
-- `binding = handle.bind_action(face, kind="position")`: columns default to the
-  face's resolved joint order. An explicit `order=` must be a permutation of
-  that face.
+- `binding = handle.bind_action(face, kind="position", order=...)`: `order` is
+  required, with exactly two explicit choices. `unigym.BindingOrder.DEFAULT`
+  selects the face's resolved joint order (the profile `joint_set` order or the
+  explicit `joints=` order from the control spec). A sequence of joint names is
+  the tensor column order and must be a permutation of the face joints.
+  Omitting `order` is a `TypeError`; `None` or another invalid value is a
+  `BindingError` naming the supported forms.
 - `act(binding, values)` requires a floating `torch.Tensor` of shape
   `(num_envs, binding.dim)`, or `(binding.dim,)` when `num_envs == 1`. Values
   are normalized to `(N, dim)` and cloned.
-- `act(handle, {joint: value})` is the named form. Its keys must cover exactly
+- `act(handle, {joint: value})` is the named form and does not call
+  `bind_action`: it remains mapping-key addressed. Its keys must cover exactly
   the face joints; key order becomes the action column order. With more than
   one declared face, `face=` selects one. At `N == 1` a value may be a finite
   number or a floating `(1,)` tensor; the per-env rules are in
@@ -359,7 +368,7 @@ cross-backend parity claim, and the full dog lane remains unverified.
 
 ## Scope and non-goals
 
-In scope for `SIM_API_VERSION = 2`:
+In scope for `SIM_API_VERSION = 3`:
 
 - One explicit `PackSet`, explicit world/control declarations, identity-scoped
   handles.

@@ -10,7 +10,7 @@ import torch
 
 from unigym.packs.packset import PackSet
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
-from unigym.sim import BindingError, Control, SimulationBuilder
+from unigym.sim import BindingError, BindingOrder, Control, SimulationBuilder
 from unigym.world import World
 from tests._support.sim_fixtures import write_sim_pack
 
@@ -86,11 +86,14 @@ def test_config_mode_acts_through_the_runtime_target(tmp_path: Path, tiny_mjcf: 
     sim = loaded.build()
     try:
         handle = sim.articulations[0]
-        binding = handle.bind_action("body", kind="position")
+        binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
         sim.act(binding, torch.tensor([[0.3, -0.4]], dtype=torch.float32))
         obs = sim.step()
         assert obs.raw[f"articulation/{handle.name}/joint_pos"].shape == (1, 2)
         with pytest.raises(BindingError, match="control target 'position'"):
-            sim.act(handle.bind_action("body", kind="torque"), torch.zeros(1, 2))
+            sim.act(
+                handle.bind_action("body", kind="torque", order=BindingOrder.DEFAULT),
+                torch.zeros(1, 2),
+            )
     finally:
         sim.close()

@@ -74,6 +74,6 @@ def test_public_facade_records_are_importable() -> None:
     assert issubclass(SimulationError, UniGymError)
 
 
-def test_sim_api_version_is_two() -> None:
-    """The multi-env contract bump is the published facade version."""
-    assert SIM_API_VERSION == 2
+def test_sim_api_version_is_three() -> None:
+    """The explicit-binding-order contract bump is the published facade version."""
+    assert SIM_API_VERSION == 3

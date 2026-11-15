@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,10 @@ import pytest
 from unigym.camera import Camera
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.sim import (
+    ActionBinding,
     ArticulationHandle,
     BindingError,
+    BindingOrder,
     Control,
     DeferredFeatureError,
     ForeignHandleError,
@@ -77,9 +80,9 @@ def test_body_rejects_an_undeclared_canonical_id() -> None:
         _handle().body("pelvis")
 
 
-def test_bind_action_uses_the_face_order_by_default() -> None:
-    """The default binding order is the declared face joint order."""
-    binding = _handle().bind_action("body", kind="position")
+def test_bind_action_uses_the_face_order_for_the_default_sentinel() -> None:
+    """BindingOrder.DEFAULT selects the declared face joint order."""
+    binding = _handle().bind_action("body", kind="position", order=BindingOrder.DEFAULT)
 
     assert binding.face == "body"
     assert binding.joint_names == ("shoulder", "elbow")
@@ -87,11 +90,27 @@ def test_bind_action_uses_the_face_order_by_default() -> None:
     assert binding.dim == 2
 
 
+def test_bind_action_requires_an_explicit_order() -> None:
+    """Omitting order is a TypeError: there is no implicit binding order."""
+    binder: Callable[..., ActionBinding] = _handle().bind_action
+
+    with pytest.raises(TypeError, match="order"):
+        binder("body", kind="position")
+
+
 def test_bind_action_accepts_an_explicit_permutation() -> None:
     """An explicit order is the tensor column order, not a face redefinition."""
     binding = _handle().bind_action("body", kind="position", order=["elbow", "shoulder"])
 
     assert binding.joint_names == ("elbow", "shoulder")
+    assert binding.dim == 2
+
+
+@pytest.mark.parametrize("order", [None, 3, "elbow"])
+def test_bind_action_rejects_a_non_sequence_order(order: object) -> None:
+    """None and scalars fail with the two supported order forms named."""
+    with pytest.raises(BindingError, match="BindingOrder.DEFAULT or a sequence"):
+        _handle().bind_action("body", kind="position", order=order)
 
 
 @pytest.mark.parametrize(
@@ -108,16 +127,24 @@ def test_bind_action_rejects_a_non_permutation_order(order: list[str]) -> None:
         _handle().bind_action("body", kind="position", order=order)
 
 
+def test_binding_order_is_exported_from_sim_and_top_level() -> None:
+    """The explicit sentinel is part of both public facade surfaces."""
+    import unigym
+
+    assert unigym.BindingOrder is BindingOrder
+    assert BindingOrder.DEFAULT.value == "default"
+
+
 def test_bind_action_rejects_an_unknown_face() -> None:
     """The face must exist, and the error lists the declared faces."""
     with pytest.raises(BindingError, match="no action face"):
-        _handle().bind_action("legs", kind="position")
+        _handle().bind_action("legs", kind="position", order=BindingOrder.DEFAULT)
 
 
 def test_bind_action_rejects_an_illegal_kind() -> None:
     """The kind vocabulary is owned by the runtime action contract."""
     with pytest.raises(BindingError, match="kind must be one of"):
-        _handle().bind_action("body", kind="position_pd")
+        _handle().bind_action("body", kind="position_pd", order=BindingOrder.DEFAULT)
 
 
 def test_body_camera_attach_is_foreign_or_deferred_across_builders(

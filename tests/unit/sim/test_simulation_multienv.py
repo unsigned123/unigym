@@ -12,6 +12,7 @@ from unigym.runner.state import read_extra
 from unigym.sim import (
     ActionBinding,
     ArticulationHandle,
+    BindingOrder,
     Control,
     ObservationError,
     PendingActionError,
@@ -72,7 +73,7 @@ def _sim(*, runner: FakeRunner | None = None, num_envs: int = 2) -> Simulation:
 
 def _binding(sim: Simulation) -> ActionBinding:
     """The one declared action binding of the fixture handle."""
-    return sim.articulations[0].bind_action("arm", kind="position")
+    return sim.articulations[0].bind_action("arm", kind="position", order=BindingOrder.DEFAULT)
 
 
 def _values() -> torch.Tensor:

@@ -47,6 +47,7 @@ __all__ = [
     "StaleModelError",
     "UnknownExtensionError",
     "Control",
+    "BindingOrder",
     "Observation",
     "Simulation",
     "SimulationBuilder",
@@ -72,6 +73,7 @@ _LAZY = {
     "StaleModelError": ("unigym.model.errors", "StaleModelError"),
     "UnknownExtensionError": ("unigym.model.errors", "UnknownExtensionError"),
     "Control": ("unigym.sim", "Control"),
+    "BindingOrder": ("unigym.sim", "BindingOrder"),
     "Observation": ("unigym.sim", "Observation"),
     "Simulation": ("unigym.sim", "Simulation"),
     "SimulationBuilder": ("unigym.sim", "SimulationBuilder"),
@@ -95,7 +97,7 @@ if TYPE_CHECKING:
     )
     from unigym.run.api import Run, load, make
     from unigym.scenes.terrain import Terrain
-    from unigym.sim import Control, Observation, Simulation, SimulationBuilder
+    from unigym.sim import BindingOrder, Control, Observation, Simulation, SimulationBuilder
     from unigym.world import Box, Capsule, Cylinder, Plane, Sphere, World
 
 

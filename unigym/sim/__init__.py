@@ -1,4 +1,4 @@
-"""Experimental simulation facade (``SIM_API_VERSION = 2``).
+"""Experimental simulation facade (``SIM_API_VERSION = 3``).
 
 The facade is a thin, additive surface over the existing ``Run`` / runner /
 backend stack.  This namespace ships the explicit-pack builder, identity-scoped
@@ -39,11 +39,17 @@ from .errors import (
     SimulationFaultedError,
     StaleStateError,
 )
-from .handles import ActionBinding, ArticulationHandle, BodyHandle, CameraHandle
+from .handles import (
+    ActionBinding,
+    ArticulationHandle,
+    BindingOrder,
+    BodyHandle,
+    CameraHandle,
+)
 from .observation import ArticulationObservation, CameraFrame, Observation
 from .simulation import Simulation
 
-SIM_API_VERSION: Final[int] = 2
+SIM_API_VERSION: Final[int] = 3
 """The experimental facade API version."""
 
 __all__ = [
@@ -51,6 +57,7 @@ __all__ = [
     "ActionBinding",
     "ArticulationHandle",
     "ArticulationObservation",
+    "BindingOrder",
     "BodyHandle",
     "CameraFrame",
     "CameraHandle",
