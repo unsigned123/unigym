@@ -15,6 +15,7 @@ from unigym.scenes.terrain import Terrain
 from unigym.sim import (
     Control,
     ControlSpec,
+    DeferredFeatureError,
     NoWorldError,
     SimulationBuilder,
     SimulationConfigError,
@@ -55,6 +56,7 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
     assert cfg["adapter"] == {"name": "manual"}
     assert cfg["command"] == {"name": "fixed", "dim": 0, "values": []}
     assert cfg["collect"] == {"steps": 1000, "shard_steps": 1000}
+    assert cfg["runner"] == {"auto_reset": False}
     assert cfg["env"] == {
         "backend": "mujoco",
         "num_envs": 1,
@@ -202,6 +204,58 @@ def test_cameras_are_deep_copied_declared_entries(tmp_path: Path) -> None:
     assert cfg["cameras"] == [entry]
     assert cfg["cameras"] is not entry
     assert cfg["cameras"][0] is not entry
+
+
+def test_two_envs_are_emitted_with_the_no_reset_policy(tmp_path: Path) -> None:
+    """``num_envs=2`` reaches ``env.num_envs`` and the runner never auto-resets."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = SimulationBuilder(
+        backend="mujoco",
+        dt=0.02,
+        physics_dt=0.005,
+        num_envs=2,
+        pack_set=pack_set,
+    )
+    builder.world = World.base(mjcf="world.xml")
+    builder.add_articulation(ref, control=_body_control())
+
+    cfg = builder._to_cfg()
+
+    assert cfg["env"]["num_envs"] == 2
+    assert cfg["runner"] == {"auto_reset": False}
+
+
+def test_cameras_at_two_envs_are_refused_before_the_engine_is_built(tmp_path: Path) -> None:
+    """Declared camera frames at ``N > 1`` are a deferred feature at the boundary."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = SimulationBuilder(
+        backend="mujoco",
+        dt=0.02,
+        physics_dt=0.005,
+        num_envs=2,
+        pack_set=pack_set,
+    )
+    builder.world = World.base(mjcf="world.xml")
+    builder.add_articulation(ref, control=_body_control())
+    builder.add_camera(Camera.world("top", pos=(1.0, 0.0, 2.0), lookat=(0.0, 0.0, 0.0)))
+
+    with pytest.raises(DeferredFeatureError, match="camera frames at N > 1"):
+        builder.build()
+
+    assert builder._sim is None
+
+
+def test_one_env_keeps_the_camera_table(tmp_path: Path) -> None:
+    """Cameras at ``N == 1`` keep working exactly as in the first spike."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = _builder(pack_set)
+    builder.add_articulation(ref, control=_body_control())
+    builder.add_camera(Camera.world("top", pos=(1.0, 0.0, 2.0), lookat=(0.0, 0.0, 0.0)))
+
+    cfg = builder._to_cfg()
+
+    assert cfg["env"]["num_envs"] == 1
+    assert [entry["name"] for entry in cfg["cameras"]] == ["top"]
 
 
 def _spec_for(builder: SimulationBuilder) -> RunSpec:

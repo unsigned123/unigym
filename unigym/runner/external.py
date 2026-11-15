@@ -32,6 +32,9 @@ class ExternalRunner(SyncRunner):
         """Build from a live RunInstance (mirrors SyncRunner.from_instance)."""
         spec = instance.spec
         runner_cfg = spec.runner or {}
+        auto_reset = getattr(instance, "auto_reset", None)
+        if auto_reset is None:
+            auto_reset = runner_cfg.get("auto_reset", True)
         return cls(
             spec.cfg,
             instance.profile,
@@ -43,6 +46,7 @@ class ExternalRunner(SyncRunner):
             reset_on_termination=instance.reset_on_termination,
             reset_mask_fn=runner_cfg.get("reset_mask_fn"),
             replay=instance.replay,
+            auto_reset=auto_reset,
             action_fn=action_fn,
             adapter_groups=_adapter_groups(instance),
         )

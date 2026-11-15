@@ -102,8 +102,8 @@ class SimulationBuilder:
         substeps: the integer decimation; exactly one of this and
             ``physics_dt``.
         seed: the deterministic seed (>= 0).
-        num_envs: the environment count (>= 1; the first-spike acceptance is
-            ``N == 1``; the ``N > 1`` contract is a separate plan).
+        num_envs: the environment count (>= 1; ``N > 1`` is supported on the
+            ``mujoco`` and ``isaaclab2`` lanes).
         pack_set: the explicit pack scope every robot ref is validated against.
         name: the run label.
         steps: the collect budget (>= 1).
@@ -414,7 +414,9 @@ class SimulationBuilder:
         ``controls[]``; the world contributes only its own fragment, which
         ``Run(cfg, world=world)`` merges exactly once.  The emitted
         ``dt``/``physics_dt`` arithmetic is re-checked here because this
-        document is the contract handed to ``Run``.
+        document is the contract handed to ``Run``.  The emitted
+        ``runner.auto_reset: false`` is the facade reset policy: ``step`` never
+        resets a row on its own; the caller resets what it means to reset.
         """
         world = self._world
         if world is None:
@@ -458,6 +460,7 @@ class SimulationBuilder:
             },
             "command": {"name": "fixed", "dim": 0, "values": []},
             "collect": {"steps": self._steps, "shard_steps": 1000},
+            "runner": {"auto_reset": False},
         }
         cfg["articulations"] = _json_objects(self._articulation_entries())
         cfg["controls"] = _json_objects(self._control_entries())
@@ -558,12 +561,34 @@ class SimulationBuilder:
         """Seal this builder; the live transition (A3) calls this once."""
         self._sealed = True
 
+    def _refuse_cameras_at_multienv(self, cameras: object) -> None:
+        """Refuse declared camera frames above one env (deferred feature)."""
+        if self._num_envs > 1 and cameras:
+            raise DeferredFeatureError(
+                "camera frames at N > 1 are not part of the multi-env spike "
+                f"(num_envs={self._num_envs}); build with num_envs=1 or remove "
+                "the declared cameras"
+            )
+
+    def _check_reset_policy(self, spec: RunSpec) -> None:
+        """Refuse a config whose runner would still auto-reset due rows."""
+        auto_reset = (spec.runner or {}).get("auto_reset", True)
+        if auto_reset is not False:
+            raise SimulationConfigError(
+                "config-mode simulation requires runner.auto_reset: false so "
+                "step never resets a row; got "
+                f"runner.auto_reset={auto_reset!r} (an absent key means the "
+                "runner default true). Set runner.auto_reset: false in the run "
+                "config; the facade never silently overrides it."
+            )
+
     def build(self) -> Simulation:
         """Build the live simulation once and return the cached instance."""
         if self._sim is not None:
             return self._sim
         if self._config_mode:
             return self._build_from_config()
+        self._refuse_cameras_at_multienv(self._cameras)
         cfg = self._to_cfg()
         world = cast("World", self._world)
         from unigym.run.api import Run
@@ -616,6 +641,8 @@ class SimulationBuilder:
                 "a config-mode builder needs its stored Run and RunSpec; "
                 "create it with SimulationBuilder.from_config(path)"
             )
+        self._check_reset_policy(spec)
+        self._refuse_cameras_at_multienv(spec.cameras)
         from unigym.runner.external import ExternalRunner
         from unigym.runner.state import read_extra
         from unigym.world import World

@@ -60,6 +60,9 @@ def _control() -> ControlSpec:
         ({"physics_dt": None}, "exactly one of physics_dt or substeps"),
         ({"physics_dt": 0.003}, "must equal physics_dt \\* substeps"),
         ({"num_envs": 0}, "num_envs"),
+        ({"num_envs": True}, "num_envs"),
+        ({"num_envs": 1.5}, "num_envs"),
+        ({"num_envs": "2"}, "num_envs"),
         ({"steps": 0}, "steps"),
         ({"episode_length_s": 0.0}, "episode_length_s"),
         ({"name": "  "}, "name"),
@@ -94,6 +97,69 @@ def test_constructor_derives_physics_dt_from_substeps(tmp_path: Path) -> None:
     builder = _builder(pack_set, physics_dt=None, substeps=4)
 
     assert builder.pack_runtime is pack_set.to_runtime()
+
+
+def test_num_envs_two_is_accepted(tmp_path: Path) -> None:
+    """A declared multi-env run is accepted and carries the no-reset policy."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    builder = _builder(pack_set, num_envs=2)
+    builder.world = World.base(mjcf="world.xml")
+    builder.add_articulation(ref, control=_control())
+
+    cfg = builder._to_cfg()
+
+    assert cfg["env"]["num_envs"] == 2
+    assert cfg["runner"] == {"auto_reset": False}
+
+
+def _write_config(tmp_path: Path, runner_lines: tuple[str, ...]) -> Path:
+    """A minimal valid run config with an explicit reset policy section."""
+    path = tmp_path / "run.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "run_name: policy",
+                "seed: 0",
+                "env:",
+                "  backend: mujoco",
+                "  num_envs: 1",
+                "  episode_length_s: 10.0",
+                "  decimation: 4",
+                "  sim_dt: 0.005",
+                "world_base: {mjcf: world.xml}",
+                "collect: {steps: 4}",
+                "articulations: [{name: arm, joints: [{name: shoulder}]}]",
+                "controls:",
+                "  - {name: arm, adapter: manual, articulation: arm,",
+                "     joints: [shoulder], drive: position_pd, target: position}",
+                *runner_lines,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    "runner_lines",
+    [
+        ("runner: {auto_reset: true}",),
+        (),
+    ],
+)
+def test_from_config_refuses_an_auto_reset_policy(
+    tmp_path: Path, runner_lines: tuple[str, ...]
+) -> None:
+    """A foreign auto-reset policy is refused, never silently overridden."""
+    builder = SimulationBuilder.from_config(_write_config(tmp_path, runner_lines))
+
+    with pytest.raises(SimulationConfigError, match="runner.auto_reset") as excinfo:
+        builder.build()
+
+    message = str(excinfo.value)
+    assert "runner.auto_reset=True" in message
+    assert "never silently overrides" in message
 
 
 def test_world_and_terrain_are_owned_by_the_world(tmp_path: Path) -> None:

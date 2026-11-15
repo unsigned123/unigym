@@ -35,7 +35,7 @@ def test_lazy_public_sim_names_resolve_without_a_backend() -> None:
         "import unigym\n"
         "assert unigym.Control.position_pd is not None\n"
         "assert unigym.SimulationBuilder is not None\n"
-        "assert unigym.sim.SIM_API_VERSION == 1\n"
+        "assert unigym.sim.SIM_API_VERSION == 2\n"
         "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
         f"{sorted(_HEAVY_ROOTS)!r})\n"
         "assert not heavy, heavy\n"
