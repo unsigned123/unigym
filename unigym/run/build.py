@@ -40,7 +40,7 @@ from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
 from unigym.robots import build_robot_profile
 from unigym.robots.base import validate_body_bindings
-from unigym.runtime.actions import OrderedActionSpec, resolve_control_dt
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, resolve_control_dt
 from unigym.runtime.controllers import (
     articulation_facts,
     build_control_plan,
@@ -400,14 +400,29 @@ def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[tuple[str, str], ...
     return {owner: tuple(keys) for owner, keys in groups.items()}
 
 
+def _control_rows(
+    controls: Mapping[tuple[str, str], ControlRuntime] | Sequence[ControlRuntime] | None,
+) -> list[ControlRuntime]:
+    """The control rows of an ``env.controls`` mapping or an iterable."""
+    if controls is None:
+        return []
+    if isinstance(controls, Mapping):
+        return list(controls.values())
+    return list(controls)
+
+
 def _build_adapter_joint_targets(
     spec: RunSpec,
+    *,
+    controls: Mapping[tuple[str, str], ControlRuntime] | Sequence[ControlRuntime] | None = None,
 ) -> dict[str, dict[tuple[str, str], str]]:
     """``{adapter_name: {(articulation, joint): target_kind}}`` from policies.
 
     This is the authoring/validation partition: every joint driven by an
     action group bound to an adapter is owned by that adapter with the group's
-    target kind.  Backend routing never reads it.
+    target kind.  When *controls* is supplied, every actuated prop control's
+    joints join the emitting adapter's partition (the config's ``action_spec``
+    cannot name backend-declared props).  Backend routing never reads it.
     """
     groups = {
         (group.articulation, group.name): group for group in getattr(spec, "action_spec").groups
@@ -432,7 +447,60 @@ def _build_adapter_joint_targets(
                         f"declared more than once"
                     )
                 owned[key] = group.target
+    emitting = getattr(spec, "adapter_name", None)
+    if controls is None or not emitting:
+        return targets
+    owned = targets.setdefault(str(emitting), {})
+    for control in _control_rows(controls):
+        if not getattr(control, "prop", False):
+            continue
+        for joint in control.joint_names:
+            key = (str(control.articulation), str(joint))
+            if key in owned:
+                raise ValueError(
+                    f"prop control {control.name!r} declares joint {key!r}, which "
+                    f"adapter {emitting!r} already owns"
+                )
+            owned[key] = str(control.target)
     return targets
+
+
+def _build_effective_action_groups(
+    spec: RunSpec,
+    controls: Mapping[tuple[str, str], ControlRuntime] | Sequence[ControlRuntime] | None = None,
+) -> tuple[OrderedActionGroup, ...]:
+    """The consumer-side action table: authored groups + declared prop groups.
+
+    Prop groups are backend-declared, so ``RunSpec.action_spec`` cannot name
+    them.  They are appended explicitly to preserve the historical
+    ``action_target/<prop>`` recording columns.  The result is authoring /
+    metadata only -- no backend routes physics through it.  A prop control whose
+    ``(articulation, name)`` identity collides with an authored group fails
+    loud (the backend control tables already reject the same collision).
+    """
+    groups = list(getattr(spec, "action_spec").groups)
+    seen = {(group.articulation, group.name) for group in groups}
+    for control in _control_rows(controls):
+        if not getattr(control, "prop", False):
+            continue
+        identity = (str(control.articulation), str(control.name))
+        if identity in seen:
+            raise ValueError(
+                f"effective action group {identity!r} is declared twice "
+                f"(authored action_spec vs backend prop control); action group "
+                f"names must be unique per articulation"
+            )
+        seen.add(identity)
+        groups.append(
+            OrderedActionGroup(
+                name=control.name,
+                articulation=control.articulation,
+                joints=tuple(control.joint_names),
+                target=control.target,
+                role="aux",
+            )
+        )
+    return tuple(groups)
 
 
 def _announce_artifacts(path: str | Path | None) -> None:
@@ -1307,6 +1375,7 @@ def _build_sinks(
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
     pack_runtime: PackRuntime | None,
+    action_groups: Sequence[OrderedActionGroup] = (),
 ) -> _SinkBundle:
     """Step 5: director + timeline + mode sink composition."""
     from unigym.runner.sinks import BenchmarkSink, CollectSink, FanOutSink
@@ -1364,6 +1433,7 @@ def _build_sinks(
             dur_lo=dur_lo,
             dur_hi=dur_hi,
             command_dim=command_dim,
+            action_groups=action_groups,
         )
     bench_sink: BenchmarkSink | None = None
     stop_when: Callable[[], bool] | None = None
@@ -1688,24 +1758,23 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)
-    env.adapter_joint_targets = _build_adapter_joint_targets(spec)
+    env.adapter_joint_targets = _build_adapter_joint_targets(spec, controls=env.controls)
     if spec.adapter_name:
         adapter._unigym_name = spec.adapter_name
         # articulated-prop action groups are declared by ``objects:`` sugar and
         # materialized by the backend as prop control runtimes; the emitting
-        # adapter owns them (the config's action_spec cannot name them).
+        # adapter owns them (the config's action_spec cannot name them).  This
+        # policy-ownership table is introspection metadata, not routing input.
         prop_groups = tuple(
             control_key(control) for control in (env.controls or {}).values() if control.prop
         )
         if prop_groups:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))
             env.adapter_groups[spec.adapter_name] = owned + prop_groups
-            joint_targets = env.adapter_joint_targets.setdefault(spec.adapter_name, {})
-            for control in (env.controls or {}).values():
-                if not control.prop:
-                    continue
-                for joint in control.joint_names:
-                    joint_targets[(control.articulation, joint)] = control.target
+    # consumer-side action table (authored groups + backend-declared prop
+    # groups); collect/watchers/trace project onto it.  Never backend input.
+    effective_groups = _build_effective_action_groups(spec, env.controls)
+    env.effective_action_groups = effective_groups
     sampler = built["sampler"]
     policy_dt = built["policy_dt"]
     total_steps, bench_cfg, task_meta = _apply_benchmark_budget(
@@ -1851,6 +1920,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         task_meta,
         sensing["contact_manager"],
         pack_runtime,
+        effective_groups,
     )
     wiring = _build_bridge_and_wiring(
         spec,
@@ -1878,6 +1948,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         term_group=term_group,
         env=env,
         plan=control_plan,
+        action_groups=effective_groups,
         camera_manager=sensing["camera_manager"],
         prop_manager=prop_manager,
         contact_manager=sensing["contact_manager"],

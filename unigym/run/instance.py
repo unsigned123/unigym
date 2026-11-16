@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
     from unigym.robots.base import RobotProfile
+    from unigym.runtime.actions import OrderedActionGroup
     from unigym.runtime.bridge import Bridge
     from unigym.runtime.controllers import (
         ResolvedControl,
@@ -47,11 +48,14 @@ if TYPE_CHECKING:
         (the joint -> kind validation partition) are stamped by
         :func:`build_instance`; the snapshot/restore pair is the rewind face
         (all registered backends implement it, and rewind gates on the
-        SNAPSHOT trait before use).
+        SNAPSHOT trait before use).  ``effective_action_groups`` is the
+        consumer-side action table (authored groups + backend-declared prop
+        groups); it is metadata for sinks/runners, never backend routing input.
         """
 
         adapter_groups: dict[str, tuple[tuple[str, str], ...]]
         adapter_joint_targets: dict[str, dict[tuple[str, str], str]]
+        effective_action_groups: tuple[OrderedActionGroup, ...]
 
         def snapshot(self) -> object:
             """Capture the engine state for a rewind checkpoint."""
@@ -96,6 +100,7 @@ class RunInstance:
     env: RunEnv
     bridge: Bridge
     plan: ResolvedControlPlan | None = None
+    action_groups: tuple[OrderedActionGroup, ...] = ()
     camera_manager: CameraManager | None = None
     prop_manager: PropManager | None = None
     contact_manager: ContactManager | None = None

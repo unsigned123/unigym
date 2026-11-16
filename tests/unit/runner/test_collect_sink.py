@@ -1,8 +1,4 @@
-"""CollectSink B1 fallback records joint-addressed action entries deterministically.
-
-The full spec+prop-derived effective-group projection lands in B2; this lane
-pins the compile-safe per-entry fallback key.
-"""
+"""CollectSink records spec+prop-derived action columns (no runtime drift)."""
 
 from __future__ import annotations
 
@@ -12,10 +8,10 @@ import pytest
 import torch
 
 from unigym.runner.sinks.collect import CollectSink, action_group_contract
-from unigym.runtime.actions import NamedAction
+from unigym.runtime.actions import ActionGroupValue, NamedAction, OrderedActionGroup
 
 
-def _sink():
+def _sink(action_groups=None):
     records: list[dict] = []
     writer = SimpleNamespace(meta={}, append=records.append)
     sink = CollectSink(
@@ -37,15 +33,17 @@ def _sink():
         dur_lo=1.0,
         dur_hi=1.0,
         command_dim=0,
+        action_groups=action_groups,
     )
     return sink, records
 
 
-def _bundle(targets, t):
+def _bundle(targets, t, projection=None):
     return {
         "t": t,
         "raw": None,
         "targets": targets,
+        "action_group_values": projection,
         "obs_collect": torch.zeros(1, 1),
         "extra": {
             "time_in_episode": torch.tensor([1.0]),
@@ -53,6 +51,17 @@ def _bundle(targets, t):
         },
         "cmd": None,
     }
+
+
+def _body(joint_names, values=None):
+    if values is None:
+        values = torch.zeros(1, len(joint_names))
+    return NamedAction(
+        articulation="arm",
+        values=values,
+        joint_names=joint_names,
+        kind="position",
+    )
 
 
 def _legs(articulation, values):
@@ -64,78 +73,162 @@ def _legs(articulation, values):
     )
 
 
-def _body(joint_names):
-    return NamedAction(
-        articulation="arm",
-        values=torch.zeros(1, len(joint_names)),
-        joint_names=joint_names,
-        kind="position",
+def _body_group():
+    return OrderedActionGroup("body", "arm", ("shoulder", "elbow"), "position")
+
+
+def _hand_group():
+    return OrderedActionGroup("hand", "arm", ("finger",), "position")
+
+
+def test_action_contract_is_spec_derived_and_includes_prop_groups():
+    """The contract is authored groups + backend-declared prop groups, ordered."""
+    prop = OrderedActionGroup("door", "arm", ("hinge",), "position", role="aux")
+
+    contract = action_group_contract((_body_group(), _hand_group(), prop))
+
+    assert [row["key"] for row in contract] == ["body", "hand", "door"]
+    assert [row["column"] for row in contract] == [
+        "action_target/body",
+        "action_target/hand",
+        "action_target/door",
+    ]
+    assert contract[2]["articulation"] == "arm"
+    assert contract[2]["group"] == "door"
+    assert contract[2]["joint_names"] == ["hinge"]
+    assert contract[2]["kind"] == "position"
+
+
+def test_shared_group_name_across_articulations_keeps_distinct_columns():
+    """The same group name on two articulations must not collide in metadata."""
+    go1 = OrderedActionGroup("legs", "go1", ("hip",), "position")
+    go2 = OrderedActionGroup("legs", "go2", ("hip",), "position")
+
+    contract = action_group_contract((go1, go2))
+
+    assert [row["key"] for row in contract] == ["go1/legs", "go2/legs"]
+    assert [row["column"] for row in contract] == [
+        "action_target/go1/legs",
+        "action_target/go2/legs",
+    ]
+    assert [row["group"] for row in contract] == ["legs", "legs"]
+
+
+def test_meta_action_groups_is_the_spec_prop_table_with_no_first_tick_capture():
+    """meta[\"action_groups\"] is fixed at construction, not from a runtime tick."""
+    prop = OrderedActionGroup("door", "arm", ("hinge",), "position")
+    sink, _ = _sink(action_groups=(_body_group(), _hand_group(), prop))
+
+    assert sink.writer.meta["action_groups"] == action_group_contract(
+        (_body_group(), _hand_group(), prop)
     )
 
 
-def _hand():
-    return NamedAction(
-        articulation="arm",
-        values=torch.zeros(1, 1),
-        joint_names=("finger",),
-        kind="position",
+def test_collect_records_split_and_merged_entries_into_authored_columns():
+    """Tolerant projection: split/merged entries land in the authored columns."""
+    groups = (_body_group(), _hand_group())
+    sink, records = _sink(action_groups=groups)
+    targets = (
+        NamedAction("arm", torch.tensor([[1.0]]), ("shoulder",), "position"),
+        NamedAction("arm", torch.tensor([[2.0, 3.0]]), ("elbow", "finger"), "position"),
     )
 
+    sink.on_step(0, _bundle(targets, 0))
 
-def test_action_contract_ignores_sequence_order():
-    """The same entries in a different tuple order yield the identical contract."""
-    go1 = _legs("go1", [1.0, 2.0])
-    go2 = _legs("go2", [3.0, 4.0])
-
-    assert action_group_contract((go1, go2)) == action_group_contract((go2, go1))
+    assert records[0]["action_target/body"].tolist() == [[1.0, 2.0]]
+    assert records[0]["action_target/hand"].tolist() == [[3.0]]
 
 
-def test_entry_keys_are_articulation_plus_ordered_joint_names():
-    """B1 fallback keys are deterministic from articulation + joint names."""
-    groups = action_group_contract((_hand(), _body(("shoulder", "elbow"))))
+def test_collect_ignores_sequence_order_and_has_no_mid_run_drift_guard():
+    """A reordered/split tick projects identically; there is no mid-run error."""
+    groups = (_body_group(), _hand_group())
+    sink, records = _sink(action_groups=groups)
+    merged = (_body(("finger", "elbow", "shoulder"), torch.tensor([[3.0, 2.0, 1.0]])),)
+    split = (
+        _body(("shoulder",), torch.tensor([[1.0]])),
+        _body(("elbow",), torch.tensor([[2.0]])),
+        _body(("finger",), torch.tensor([[3.0]])),
+    )
 
-    assert [group["key"] for group in groups] == ["arm/finger", "arm/shoulder,elbow"]
-    assert [group["column"] for group in groups] == [
-        "action_target/arm/finger",
-        "action_target/arm/shoulder,elbow",
-    ]
-    assert groups[0]["articulation"] == "arm"
-    assert groups[0]["joint_names"] == ["finger"]
-    assert groups[0]["kind"] == "position"
+    sink.on_step(0, _bundle(merged, 0))
+    sink.on_step(1, _bundle(split, 1))
 
-
-def test_same_named_joints_across_articulations_stay_distinct():
-    """go1/go2 identical joint names produce distinct fallback keys."""
-    groups = action_group_contract((_legs("go2", [3.0, 4.0]), _legs("go1", [1.0, 2.0])))
-
-    assert [group["key"] for group in groups] == ["go1/hip,knee", "go2/hip,knee"]
-    assert [group["column"] for group in groups] == [
-        "action_target/go1/hip,knee",
-        "action_target/go2/hip,knee",
-    ]
-    assert [group["articulation"] for group in groups] == ["go1", "go2"]
+    for record in records:
+        assert record["action_target/body"].tolist() == [[1.0, 2.0]]
+        assert record["action_target/hand"].tolist() == [[3.0]]
 
 
-def test_action_contract_rejects_a_duplicate_entry_key():
-    """One articulation + joint set + kind addressed twice is ambiguous."""
-    go1 = _legs("go1", [1.0, 2.0])
+def test_collect_uses_the_runner_projection_when_present():
+    """The runner-supplied projection wins over projecting targets again."""
+    groups = (_body_group(), _hand_group())
+    sink, records = _sink(action_groups=groups)
+    targets = (
+        _body(("shoulder", "elbow"), torch.tensor([[9.0, 9.0]])),
+        _body(("finger",), torch.tensor([[9.0]])),
+    )
+    projection = (
+        ActionGroupValue(_body_group(), torch.tensor([[1.0, 2.0]])),
+        ActionGroupValue(_hand_group(), torch.tensor([[3.0]])),
+    )
 
-    with pytest.raises(ValueError, match="more than one NamedAction entry"):
-        action_group_contract((go1, _legs("go1", [5.0, 6.0])))
+    sink.on_step(0, _bundle(targets, 0, projection=projection))
+
+    assert records[0]["action_target/body"].tolist() == [[1.0, 2.0]]
+    assert records[0]["action_target/hand"].tolist() == [[3.0]]
 
 
-def test_collect_sink_accepts_reordered_targets():
-    """A mid-run reordered sequence does not trip the entry-change guard."""
+def test_collect_records_a_prop_group_column():
+    """A declared prop group keeps its historical action_target/<prop> column."""
+    prop = OrderedActionGroup("door", "arm", ("hinge",), "position")
+    sink, records = _sink(action_groups=(_body_group(), _hand_group(), prop))
+    targets = (
+        _body(("shoulder", "elbow"), torch.tensor([[1.0, 2.0]])),
+        _body(("finger",), torch.tensor([[3.0]])),
+        _body(("hinge",), torch.tensor([[4.0]])),
+    )
+
+    sink.on_step(0, _bundle(targets, 0))
+
+    assert records[0]["action_target/door"].tolist() == [[4.0]]
+
+
+@pytest.mark.parametrize(
+    ("targets", "match"),
+    [
+        pytest.param(
+            (_body(("shoulder",), torch.tensor([[1.0]])), _body(("finger",), torch.zeros(1, 1))),
+            "joint 'elbow' is not addressed",
+            id="missing-joint",
+        ),
+        pytest.param(
+            (
+                _body(("shoulder", "elbow"), torch.zeros(1, 2)),
+                NamedAction("arm", torch.zeros(1, 1), ("finger",), "velocity"),
+            ),
+            "joint 'finger' has action kind 'velocity'",
+            id="wrong-kind",
+        ),
+    ],
+)
+def test_collect_projection_errors_name_joints(targets, match):
+    """Exact coverage/kind failures from the authoring projection name joints."""
+    sink, _ = _sink(action_groups=(_body_group(), _hand_group()))
+
+    with pytest.raises(ValueError, match=match):
+        sink.on_step(0, _bundle(targets, 0))
+
+
+def test_direct_construction_falls_back_to_per_entry_columns():
+    """A sink built without an authoring table keeps deterministic entry keys."""
     sink, records = _sink()
     go1 = _legs("go1", [1.0, 2.0])
     go2 = _legs("go2", [3.0, 4.0])
 
-    sink.on_step(0, _bundle((go1, go2), 0))
-    sink.on_step(1, _bundle((go2, go1), 1))
+    sink.on_step(0, _bundle((go2, go1), 0))
+    sink.on_step(1, _bundle((go1, go2), 1))
 
-    assert [group["column"] for group in sink.writer.meta["action_groups"]] == [
+    assert [row["column"] for row in sink.writer.meta["action_groups"]] == [
         "action_target/go1/hip,knee",
         "action_target/go2/hip,knee",
     ]
-    assert records[1]["action_target/go1/hip,knee"].tolist() == [[1.0, 2.0]]
-    assert records[1]["action_target/go2/hip,knee"].tolist() == [[3.0, 4.0]]
+    assert records[0]["action_target/go2/hip,knee"].tolist() == [[3.0, 4.0]]

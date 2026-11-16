@@ -238,11 +238,12 @@ class WatchContext:
     def _action_values(self) -> list[tuple[str, Any]]:
         """``(key, values)`` for the action face.
 
-        Uses ``bundle["action_group_values"]`` when the runner supplied the
-        authoring projection; otherwise falls back to one deterministic
-        per-entry key per joint-addressed NamedAction
-        (``<articulation>/<comma-joined joint_names>``).  The fallback is a
-        B1 bridge until B2 supplies the spec+prop-derived projection.
+        Uses ``bundle["action_group_values"]`` (the spec+prop-derived authoring
+        projection) when the runner supplied it, preserving the historical
+        ``action/<group>`` keys (``action/<articulation>/<group>`` when a group
+        name is shared across articulations).  Otherwise one deterministic
+        per-entry key per joint-addressed NamedAction is emitted
+        (``<articulation>/<comma-joined joint_names>``).
         """
         projection = self.bundle.get("action_group_values")
         if projection is not None:

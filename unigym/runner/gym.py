@@ -27,7 +27,12 @@ import numpy as np
 import torch
 
 from unigym.runner.state import read_extra
-from unigym.runner.sync import SyncRunner, _adapter_joint_targets, _instance_control_dt
+from unigym.runner.sync import (
+    SyncRunner,
+    _adapter_joint_targets,
+    _instance_action_groups,
+    _instance_control_dt,
+)
 from unigym.runtime.actions import NamedAction
 
 
@@ -135,6 +140,7 @@ class GymEnvRunner(_GymBase):
             replay=instance.replay,
             auto_reset=False,
             adapter_joint_targets=_adapter_joint_targets(instance),
+            action_groups=_instance_action_groups(instance),
             control_dt=_instance_control_dt(instance),
         )
         self.instance = instance
@@ -221,6 +227,7 @@ class GymVectorRunner(_GymBase):
             replay=instance.replay,
             auto_reset=True,
             adapter_joint_targets=_adapter_joint_targets(instance),
+            action_groups=_instance_action_groups(instance),
             control_dt=_instance_control_dt(instance),
         )
         self.instance = instance

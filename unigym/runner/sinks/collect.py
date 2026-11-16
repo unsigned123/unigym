@@ -37,7 +37,12 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from unigym.runtime.actions import NamedAction
+from unigym.runtime.actions import (
+    ActionGroupValue,
+    NamedAction,
+    OrderedActionGroup,
+    OrderedActionSpec,
+)
 from unigym.runtime.controllers import articulation_facts
 
 from ..episodes import _flush_episode, slice_step_for_env
@@ -63,64 +68,84 @@ def _record_key(key: str) -> str:
     return key
 
 
-def _entry_fallback_key(na: NamedAction) -> str:
-    """Deterministic per-entry action key (B1 joint fallback).
+def _fallback_entry_key(entry: NamedAction) -> str:
+    """Deterministic per-entry action key (direct-construction fallback).
 
-    B2 will replace this with the spec+prop-derived effective-group
-    projection and its historical ``action_target/<group>`` columns; until
-    then the key is derived only from the runtime entry's articulation and
-    ordered joint names.
+    The normal path is spec-derived: ``effective_action_groups`` (authored
+    groups + backend-declared prop groups) yields the historical
+    ``action_target/<group>`` columns.  Only a sink built without that table
+    (test doubles / direct construction) falls back to
+    ``<articulation>/<comma-joined joint_names>``.  Joint names are identifiers,
+    so the comma is a documented separator, not a free-form payload.
     """
-    return f"{na.articulation}/{','.join(na.joint_names)}"
+    return f"{entry.articulation}/{','.join(entry.joint_names)}"
 
 
-def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[NamedAction, str, str]]:
-    """Canonical ``(entry, record_column, entry_key)`` triples, in stable order.
+def _fallback_action_contract(targets: Sequence[NamedAction]) -> list:
+    """The per-entry fallback contract (no authoring table available).
 
-    B1 fallback: the runtime value has no group identity, so entries are
-    ordered by ``(articulation, joint_names, kind)`` and keyed by
-    ``<articulation>/<comma-joined joint_names>``.  B2 replaces this with the
-    spec+prop-derived effective-group contract (documented follow-up).
+    Entries are ordered by ``(articulation, joint_names, kind)`` so sequence
+    order is not semantic.  The key is :func:`_fallback_entry_key`; one entry
+    key addressed twice is ambiguous and fails loud.
     """
     ordered = sorted(targets, key=lambda na: (na.articulation, na.joint_names, na.kind))
     seen: set[str] = set()
-    out: list[tuple[NamedAction, str, str]] = []
+    out: list = []
     for na in ordered:
-        key = _entry_fallback_key(na)
+        key = _fallback_entry_key(na)
         if key in seen:
             raise ValueError(
-                f"action entry {key!r} is addressed by more than one " f"NamedAction entry"
+                f"action entry {key!r} is addressed by more than one NamedAction entry"
             )
         seen.add(key)
-        out.append((na, f"action_target/{key}", key))
+        out.append(
+            {
+                "key": key,
+                "column": f"action_target/{key}",
+                "articulation": na.articulation,
+                "group": key,
+                "joint_names": list(na.joint_names),
+                "kind": na.kind,
+            }
+        )
     return out
 
 
-def action_group_contract(targets: Sequence[NamedAction]) -> list:
-    """The per-entry action contract (playback v3 meta shape).
+def action_group_contract(groups: Sequence[OrderedActionGroup]) -> list:
+    """The spec+prop-derived action contract (playback v3 meta shape).
 
-    B1 keeps the historical ``{key, column, articulation, group, joint_names,
-    kind}`` meta shape, but the value now comes from the joint-addressed
-    runtime entry rather than a runtime group identity.  ``group`` carries the
-    same deterministic per-entry key as ``key`` until B2 projects the
-    authoring spec + declared prop groups (documented follow-up).
+    One ``{key, column, articulation, group, joint_names, kind}`` row per
+    effective group, in declaration order (authored groups first, then
+    backend-declared prop groups).  A group name unique across articulations
+    keys/columns by ``<group>``; a shared name is disambiguated as
+    ``<articulation>/<group>`` so record columns stay unique.  Duplicate
+    ``(articulation, name)`` identities are ambiguous and fail loud.
 
-    The sink writes this into ``meta.json`` (``action_groups``) on its
-    first recorded step; shard playback validates every entry against
-    it.  Old shards without the key are rejected explicitly
-    (pre-playback re-record).
+    The sink writes this into ``meta.json`` (``action_groups``) once at
+    construction; it is authoring metadata, not a runtime-entry snapshot.
     """
-    return [
-        {
-            "key": entry_key,
-            "column": column,
-            "articulation": na.articulation,
-            "group": entry_key,
-            "joint_names": list(na.joint_names),
-            "kind": na.kind,
-        }
-        for na, column, entry_key in _canonical_action_entries(targets)
-    ]
+    counts: dict[str, int] = {}
+    for group in groups:
+        counts[group.name] = counts.get(group.name, 0) + 1
+    seen: set[tuple[str, str]] = set()
+    out: list = []
+    for group in groups:
+        identity = (group.articulation, group.name)
+        if identity in seen:
+            raise ValueError(f"action group {identity!r} is declared more than once")
+        seen.add(identity)
+        key = group.name if counts[group.name] == 1 else f"{group.articulation}/{group.name}"
+        out.append(
+            {
+                "key": key,
+                "column": f"action_target/{key}",
+                "articulation": group.articulation,
+                "group": group.name,
+                "joint_names": list(group.joints),
+                "kind": group.target,
+            }
+        )
+    return out
 
 
 def _policy_runtimes(env) -> list:
@@ -172,6 +197,7 @@ class CollectSink:
         dur_lo,
         dur_hi,
         command_dim,
+        action_groups: Sequence[OrderedActionGroup] | None = None,
     ):
         self.writer = writer
         self.logger = logger
@@ -191,10 +217,20 @@ class CollectSink:
         self.episode_length_s = episode_length_s
         self.dur_lo, self.dur_hi = dur_lo, dur_hi
         self.command_dim = command_dim
-        # playback: the action-group contract, captured ONCE from the
-        # actual first-step routing and written into the writer's meta
-        # (lands in meta.json with the first flush); None until then
-        self._action_groups: list | None = None
+        # playback: the spec+prop-derived action contract, fixed at
+        # construction.  ``None`` keeps the direct-construction fallback for
+        # test doubles; the build path always supplies the effective groups.
+        self._effective_groups = None if not action_groups else tuple(action_groups)
+        self._action_spec = (
+            None if self._effective_groups is None else OrderedActionSpec(self._effective_groups)
+        )
+        self._action_groups: list | None = (
+            None
+            if self._effective_groups is None
+            else action_group_contract(self._effective_groups)
+        )
+        if self._action_groups is not None:
+            self.writer.meta["action_groups"] = self._action_groups
         # per-env episode buffer (only when filters active)
         self.ep_bufs: list[list[dict]] = (
             [[] for _ in range(self.num_envs)] if self.filter_active else []
@@ -209,6 +245,31 @@ class CollectSink:
     # ------------------------------------------------------------------ #
     # per-step recording (pre-reset data side)
     # ------------------------------------------------------------------ #
+    def _adopt_projection_groups(self, projection: Sequence[ActionGroupValue]) -> None:
+        """Freeze the contract from a runner-supplied projection (fallback path)."""
+        groups = tuple(value.group for value in projection)
+        self._effective_groups = groups
+        self._action_spec = OrderedActionSpec(groups) if groups else None
+        self._action_groups = None if not groups else action_group_contract(groups)
+        if self._action_groups is not None:
+            self.writer.meta["action_groups"] = self._action_groups
+
+    def _record_group_columns(self, rec: dict, projection: Sequence[ActionGroupValue]) -> None:
+        """Write one authored column per effective group, in group-joint order."""
+        values = {
+            (value.group.articulation, value.group.name): value.values for value in projection
+        }
+        for entry in self._action_groups or ():
+            rec[entry["column"]] = values[(entry["articulation"], entry["group"])]
+
+    def _record_fallback_columns(self, rec: dict, targets: Sequence[NamedAction]) -> None:
+        """Write deterministic per-entry columns when no authoring table exists."""
+        if self._action_groups is None:
+            self._action_groups = _fallback_action_contract(targets)
+            self.writer.meta["action_groups"] = self._action_groups
+        for na in targets:
+            rec[f"action_target/{_fallback_entry_key(na)}"] = na.values
+
     def on_step(self, t: int, bundle: dict) -> None:
         raw = bundle["raw"]
         targets = bundle["targets"]
@@ -223,26 +284,19 @@ class CollectSink:
             rec[_record_key(k)] = v
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
-        # one column per joint-addressed NamedAction entry (B1 fallback key:
-        # action_target/<articulation>/<joints>; B2 projects the authoring
-        # effective-group columns instead).  The canonical entry order makes
-        # sequence order irrelevant.
-        for na, column, _entry_key in _canonical_action_entries(targets):
-            rec[column] = na.values
-        # playback contract (single source of truth on disk): capture
-        # the entries from THIS step's actual routing once, then hold every
-        # later step to it -- a mid-run entry change would make the
-        # recorded contract a lie, so it fail-fasts instead
-        groups = action_group_contract(targets)
-        if self._action_groups is None:
-            self._action_groups = groups
-            self.writer.meta["action_groups"] = groups
-        elif groups != self._action_groups:
-            raise ValueError(
-                f"action entries changed mid-run: {groups} != "
-                f"{self._action_groups} -- the recorded meta contract "
-                f"(action_groups) would not describe the shard stream"
-            )
+        # one column per effective group (authored groups + backend-declared
+        # prop groups).  Values come from the runner's authoring projection
+        # when present, otherwise from the tolerant spec projection of this
+        # tick's routed targets.  Sequence order is never semantic.
+        projection = bundle.get("action_group_values")
+        if self._action_spec is None and projection is not None:
+            self._adopt_projection_groups(projection)
+        if self._action_spec is not None:
+            if projection is None:
+                projection = self._action_spec.project_groups(targets)
+            self._record_group_columns(rec, projection)
+        else:
+            self._record_fallback_columns(rec, targets)
         # P11: recovery-switching adapters expose their per-env switch state
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:

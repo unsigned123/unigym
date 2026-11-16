@@ -8,14 +8,22 @@ import pytest
 import torch
 
 from tests._support.fakes.backend import FakeBackend
+from unigym.adapters.manual import ManualAdapter
 from unigym.run.build import (
     _body_controls,
     _build_adapter_groups,
     _build_adapter_joint_targets,
+    _build_effective_action_groups,
 )
 from unigym.runner.external import ExternalRunner
 from unigym.runner.sync import SyncRunner, _adapter_joint_targets
-from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec, PolicyBinding
+from unigym.runtime.actions import (
+    ActionGroupValue,
+    NamedAction,
+    OrderedActionGroup,
+    OrderedActionSpec,
+    PolicyBinding,
+)
 from unigym.runtime.controllers import ControlRuntime
 from unigym.terminations import TerminationGroup
 
@@ -126,6 +134,72 @@ def test_build_adapter_joint_targets_rejects_an_undeclared_group():
         _build_adapter_joint_targets(spec)
 
 
+def _prop_control(name="door", joints=("hinge",), articulation="arm"):
+    return ControlRuntime(
+        name=name,
+        adapter="prop",
+        articulation=articulation,
+        joint_names=joints,
+        q0=tuple(0.0 for _ in joints),
+        drive="position_servo",
+        target="position",
+        required=False,
+        prop=True,
+    )
+
+
+def test_build_adapter_joint_targets_includes_prop_controls():
+    """Prop control joints join the emitting adapter's partition."""
+    group = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+    spec = SimpleNamespace(
+        action_spec=OrderedActionSpec((group,)),
+        policies=(_binding((("arm", "body"),), adapter="a"),),
+        adapter_name="a",
+    )
+
+    targets = _build_adapter_joint_targets(spec, controls={("arm", "door"): _prop_control()})
+
+    assert targets == {"a": {("arm", "shoulder"): "position", ("arm", "hinge"): "position"}}
+
+
+def test_build_adapter_joint_targets_rejects_a_prop_robot_joint_collision():
+    """A prop joint may not shadow a robot joint of the same articulation."""
+    group = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+    spec = SimpleNamespace(
+        action_spec=OrderedActionSpec((group,)),
+        policies=(_binding((("arm", "body"),), adapter="a"),),
+        adapter_name="a",
+    )
+
+    with pytest.raises(ValueError, match="already owns"):
+        _build_adapter_joint_targets(
+            spec, controls={("arm", "door"): _prop_control(joints=("shoulder",))}
+        )
+
+
+def test_build_effective_action_groups_appends_prop_groups_as_aux():
+    """The consumer table is authored groups first, then prop groups as aux."""
+    group = OrderedActionGroup("body", "arm", ("shoulder",), "position", role="body")
+    spec = SimpleNamespace(action_spec=OrderedActionSpec((group,)))
+
+    groups = _build_effective_action_groups(spec, controls=[_prop_control()])
+
+    assert [g.name for g in groups] == ["body", "door"]
+    assert groups[1].articulation == "arm"
+    assert groups[1].joints == ("hinge",)
+    assert groups[1].target == "position"
+    assert groups[1].role == "aux"
+
+
+def test_build_effective_action_groups_rejects_a_name_collision():
+    """A prop control reusing an authored identity is ambiguous."""
+    group = OrderedActionGroup("door", "arm", ("shoulder",), "position")
+    spec = SimpleNamespace(action_spec=OrderedActionSpec((group,)))
+
+    with pytest.raises(ValueError, match="declared twice"):
+        _build_effective_action_groups(spec, controls=[_prop_control(name="door")])
+
+
 def test_adapter_joint_targets_reads_the_explicit_partition():
     """An explicit env partition is normalized and returned."""
     env = FakeBackend()
@@ -229,6 +303,20 @@ def test_validate_targets_accepts_split_and_merged_entries():
     runner._validate_targets(merged)  # no raise
 
 
+def test_validate_targets_accepts_separate_entries_for_two_articulations():
+    """go1/legs + go2/legs are distinct joint partitions (same joint names)."""
+    runner = _runner({("go1", "hip"): "position", ("go2", "hip"): "position"})
+
+    runner._validate_targets((_named("go1", ("hip",)), _named("go2", ("hip",))))  # no raise
+
+
+def test_validate_targets_accepts_a_permuted_entry():
+    """A group's columns may arrive in a different (named) order."""
+    runner = _runner({("arm", "shoulder"): "position", ("arm", "elbow"): "position"})
+
+    runner._validate_targets((_named(joints=("elbow", "shoulder")),))  # no raise
+
+
 def test_validate_targets_rejects_a_duplicate_joint():
     """Two entries addressing the same joint are ambiguous."""
     runner = _runner({("arm", "shoulder"): "position"})
@@ -275,3 +363,63 @@ def test_validate_targets_rejects_a_mapping():
 
     with pytest.raises(TypeError, match="expected a sequence of NamedAction"):
         runner._validate_targets({"arm": _named()})
+
+
+class _CaptureSink:
+    """Minimal sink recording every bundle handed to ``on_step``."""
+
+    def __init__(self):
+        self.bundles: list[dict] = []
+
+    def on_step(self, t, bundle):
+        self.bundles.append(bundle)
+
+    def on_episode_end(self, env_ids, bundle):
+        pass
+
+    def on_step_end(self, t, bundle):
+        pass
+
+    def on_run_end(self):
+        return {}
+
+
+def _tick_runner(action_groups):
+    sink = _CaptureSink()
+    runner = SyncRunner(
+        cfg={"collect": {"steps": 1}},
+        profile=None,
+        adapter=ManualAdapter(),
+        sampler=None,
+        term_group=TerminationGroup(),
+        env=FakeBackend(),
+        sink=sink,
+        adapter_joint_targets={("arm", "shoulder"): "position"},
+        action_groups=action_groups,
+    )
+    return runner, sink
+
+
+def test_sync_runner_exposes_the_authoring_projection():
+    """bundle[\"action_group_values\"] is the effective-group projection."""
+    group = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+    runner, sink = _tick_runner((group,))
+
+    runner.tick((_named(rows=1),))
+
+    projection = sink.bundles[0]["action_group_values"]
+    assert isinstance(projection, tuple)
+    assert len(projection) == 1
+    assert isinstance(projection[0], ActionGroupValue)
+    assert projection[0].group == group
+    assert projection[0].values.tolist() == [[0.0]]
+
+
+def test_sync_runner_reports_no_projection_without_an_authoring_table():
+    """Test doubles without effective groups expose an explicit None."""
+    runner, sink = _tick_runner(None)
+
+    runner.tick((_named(rows=1),))
+
+    assert "action_group_values" in sink.bundles[0]
+    assert sink.bundles[0]["action_group_values"] is None

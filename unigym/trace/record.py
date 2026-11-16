@@ -28,8 +28,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # One console eval per sampled tick.  Contract keys (§2): obs/<key> from
 # obs_cache (images excluded: ndim >= 3), extra/<key> from bundle['extra'],
-# action/<name> from bundle['targets'] (+ action/raw), obs/policy_frame
-# from bundle['obs_frame'], tick scalar.  Trailing expression = the ack.
+# action/<name> from bundle['action_group_values'] (the spec+prop-derived
+# authoring projection; historical action/<group> keys) or, when absent, one
+# per-entry action/<articulation>/<comma-joined joints> key from
+# bundle['targets'] (+ action/raw), obs/policy_frame from bundle['obs_frame'],
+# tick scalar.  Trailing expression = the ack.
 _DUMP_EXPR = """\
 _arrs = {{}}
 def _as_np(v):

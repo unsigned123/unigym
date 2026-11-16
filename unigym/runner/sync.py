@@ -28,7 +28,13 @@ from collections.abc import Callable, Mapping, Sequence
 import torch
 
 from unigym.runner.base import StepResult
-from unigym.runtime.actions import LEGAL_ACTION_KINDS, NamedAction, resolve_control_dt
+from unigym.runtime.actions import (
+    LEGAL_ACTION_KINDS,
+    NamedAction,
+    OrderedActionGroup,
+    OrderedActionSpec,
+    resolve_control_dt,
+)
 from unigym.runtime.bridge import RewindBoundary
 from unigym.terminations import TerminationState
 
@@ -162,6 +168,20 @@ def _all_adapter_joint_targets(instance) -> dict[tuple[str, str], str] | None:
     return _controls_joint_targets(controls.values()) or None
 
 
+def _instance_action_groups(instance) -> tuple[OrderedActionGroup, ...] | None:
+    """The run's consumer-side action table (authored groups + props).
+
+    The build step stamps it on the instance and on the env; test doubles may
+    omit it entirely (``None`` -> no authoring projection in the bundle).
+    """
+    groups = getattr(instance, "action_groups", None)
+    if groups is None:
+        groups = getattr(getattr(instance, "env", None), "effective_action_groups", None)
+    if groups is None:
+        return None
+    return tuple(groups)
+
+
 def _instance_control_dt(instance) -> float | None:
     """The effective policy period of a live instance (binding beats adapter).
 
@@ -236,6 +256,10 @@ class SyncRunner:
             value (and a run with a sampler and no period fails loud).  The
             run's ``policies`` bindings supply it through
             :func:`unigym.runtime.actions.resolve_control_dt`.
+        action_groups: optional effective action table (authored groups +
+            backend-declared prop groups).  When present, every tick exposes
+            ``bundle["action_group_values"]`` for sinks/watchers/trace; it is
+            consumer metadata, never an action identity or routing input.
 
     Rewind seam (Round B B1): ``_tick`` is the
     loop counter as INSTANCE state.  The rewind controller sets it back to
@@ -283,6 +307,7 @@ class SyncRunner:
             replay=instance.replay,
             auto_reset=auto_reset,
             adapter_joint_targets=_adapter_joint_targets(instance),
+            action_groups=_instance_action_groups(instance),
             control_dt=_instance_control_dt(instance),
         )
 
@@ -300,6 +325,7 @@ class SyncRunner:
         replay=None,
         auto_reset: bool = True,
         adapter_joint_targets: Mapping[tuple[str, str], str] | None = None,
+        action_groups: Sequence[OrderedActionGroup] | None = None,
         control_dt: float | None = None,
     ):
         self.cfg = cfg
@@ -325,6 +351,13 @@ class SyncRunner:
             None
             if adapter_joint_targets is None
             else _normalize_joint_targets(adapter_joint_targets, self.adapter_name)
+        )
+        # authoring projection for sinks/watchers/trace: the effective action
+        # table (authored groups + backend-declared prop groups).  Additive
+        # bundle data only -- never an action identity and never backend input.
+        self.action_groups = None if not action_groups else tuple(action_groups)
+        self._action_spec = (
+            None if self.action_groups is None else OrderedActionSpec(self.action_groups)
         )
         self.total_steps = int(cfg["collect"]["steps"])
         # rewind seam: the resumable loop counter + the snapshot's
@@ -470,6 +503,11 @@ class SyncRunner:
         # (build-time controls[] partition) and each entry's kind must match
         # the group's configured target.
         self._validate_targets(targets)
+        # 3b) authoring projection for consumers: one value row per effective
+        # group, in group-joint order.  Absent table -> None (no projection).
+        group_values = (
+            None if self._action_spec is None else self._action_spec.project_groups(targets)
+        )
         # 4) physics (interval DR events applied internally)
         obs, extra = env.step(targets, raw_action=raw, cmd=cmd)
         # 5) command resample (self-commanding adapter: cmd stays None)
@@ -511,6 +549,7 @@ class SyncRunner:
             "obs_collect": obs_collect,
             "extra": extra,
             "cmd": eff_cmd,
+            "action_group_values": group_values,
             "terminated": terminated,
             "alive": alive,
             "term_state": term_state,
