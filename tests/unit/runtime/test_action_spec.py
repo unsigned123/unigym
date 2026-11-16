@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
-from unigym.runtime.actions import ActionDim, OrderedActionGroup, OrderedActionSpec
+from unigym.runtime.actions import (
+    ActionDim,
+    NamedAction,
+    OrderedActionGroup,
+    OrderedActionSpec,
+)
 
 
 def _group(name="body", articulation="g1", joints=("hip", "knee"), target="position"):
@@ -206,3 +212,175 @@ def test_repr_is_a_concise_summary():
     assert "dim=3" in text
     assert "g1/body:2" in text
     assert "g1/hand:1" in text
+
+
+# --------------------------------------------------------------------------- #
+# Stage A2: OrderedActionSpec <-> NamedAction conversion
+# --------------------------------------------------------------------------- #
+JOINTS = ("hip_joint", "knee_joint", "ankle_joint")
+
+
+def _two_robot_spec():
+    return _spec(
+        OrderedActionGroup("body", "go1", JOINTS, "position"),
+        OrderedActionGroup("body", "go2", JOINTS, "position"),
+    )
+
+
+def test_unflatten_slices_groups_in_declaration_order():
+    spec = _two_robot_spec()
+    flat = torch.arange(24, dtype=torch.float64).reshape(4, spec.dim)
+
+    named = spec.unflatten(flat)
+
+    assert isinstance(named, tuple)
+    assert [entry.articulation for entry in named] == ["go1", "go2"]
+    assert [entry.group for entry in named] == ["body", "body"]
+    assert [entry.joint_names for entry in named] == [JOINTS, JOINTS]
+    assert [entry.kind for entry in named] == ["position", "position"]
+    assert torch.equal(named[0].values, flat[:, :3])
+    assert torch.equal(named[1].values, flat[:, 3:])
+    assert named[0].values.dtype == torch.float64
+    assert named[1].values.dtype == torch.float64
+
+
+def test_flat_to_named_to_flat_round_trip_is_bit_identical():
+    spec = _two_robot_spec()
+    flat = torch.randn(4, spec.dim, dtype=torch.float64)
+
+    assert torch.equal(spec.flatten(spec.unflatten(flat)), flat)
+
+
+def test_flatten_is_order_insensitive():
+    spec = _two_robot_spec()
+    flat = torch.randn(3, spec.dim)
+    named = spec.unflatten(flat)
+
+    assert torch.equal(spec.flatten((named[1], named[0])), flat)
+
+
+def test_unflatten_preserves_dtype_and_device():
+    spec = _two_robot_spec()
+    flat = torch.zeros(2, spec.dim, dtype=torch.float64, device="meta")
+
+    named = spec.unflatten(flat)
+
+    assert all(entry.values.dtype == torch.float64 for entry in named)
+    assert all(entry.values.device.type == "meta" for entry in named)
+
+
+def test_flatten_rejects_missing_identity():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+
+    with pytest.raises(ValueError, match="unaddressed"):
+        spec.flatten((named[0],))
+
+
+def test_flatten_rejects_extra_identity():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+    extra = NamedAction("go3", "body", torch.zeros(2, 3), JOINTS, "position")
+
+    with pytest.raises(ValueError, match="not declared"):
+        spec.flatten((*named, extra))
+
+
+def test_flatten_rejects_duplicate_identity():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+
+    with pytest.raises(ValueError, match="more than one NamedAction"):
+        spec.flatten((named[0], named[0], named[1]))
+
+
+def test_flatten_rejects_non_named_action_entries():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+
+    with pytest.raises(TypeError, match="sequence of NamedAction"):
+        spec.flatten((named[0], object(), named[1]))
+
+
+def test_flatten_accepts_joint_permutation_and_reorders_columns():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee", "ankle"), "position"))
+    entry = NamedAction(
+        articulation="go1",
+        group="body",
+        values=torch.tensor([[30.0, 10.0, 20.0]]),
+        joint_names=("ankle", "hip", "knee"),
+        kind="position",
+    )
+
+    flat = spec.flatten((entry,))
+
+    assert torch.equal(flat, torch.tensor([[10.0, 20.0, 30.0]]))
+
+
+def test_flatten_rejects_wrong_joint_name():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee", "ankle"), "position"))
+    entry = NamedAction(
+        articulation="go1",
+        group="body",
+        values=torch.zeros(1, 3),
+        joint_names=("hip", "knee", "toe"),
+        kind="position",
+    )
+
+    with pytest.raises(ValueError, match="permutation"):
+        spec.flatten((entry,))
+
+
+def test_flatten_rejects_wrong_kind():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+    bad = NamedAction("go2", "body", torch.zeros(2, 3), JOINTS, "velocity")
+
+    with pytest.raises(ValueError, match="template expects target"):
+        spec.flatten((named[0], bad))
+
+
+def test_flatten_rejects_mixed_num_envs():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+    bad = NamedAction("go2", "body", torch.zeros(3, 3), JOINTS, "position")
+
+    with pytest.raises(ValueError, match="env rows"):
+        spec.flatten((named[0], bad))
+
+
+def test_flatten_rejects_mixed_dtype():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+    bad = NamedAction("go2", "body", torch.zeros(2, 3, dtype=torch.float64), JOINTS, "position")
+
+    with pytest.raises(ValueError, match="mixed dtypes"):
+        spec.flatten((named[0], bad))
+
+
+def test_flatten_rejects_mixed_device():
+    spec = _two_robot_spec()
+    named = spec.unflatten(torch.zeros(2, spec.dim))
+    bad = NamedAction("go2", "body", torch.zeros(2, 3, device="meta"), JOINTS, "position")
+
+    with pytest.raises(ValueError, match="mixed devices"):
+        spec.flatten((named[0], bad))
+
+
+@pytest.mark.parametrize(
+    "flat",
+    [torch.zeros(3), torch.zeros(2, 3, 1)],
+    ids=["rank-1", "rank-3"],
+)
+def test_unflatten_rejects_non_matrix_shapes(flat):
+    spec = _two_robot_spec()
+
+    with pytest.raises(ValueError, match=r"expects a \(N, dim\) tensor"):
+        spec.unflatten(flat)
+
+
+def test_unflatten_rejects_wrong_column_count():
+    spec = _two_robot_spec()
+
+    with pytest.raises(ValueError, match="action columns"):
+        spec.unflatten(torch.zeros(2, spec.dim + 1))

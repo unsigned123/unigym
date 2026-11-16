@@ -29,6 +29,12 @@ Stage A0 adds declaration-ordered action templates
 a spec fixes the group order and each group's joint order, so a flattened
 action vector is stable and self-describing (``idx articulation group joint
 target``).
+
+Stage A2 connects those templates to the self-describing runtime values:
+:meth:`OrderedActionSpec.unflatten` and :meth:`OrderedActionSpec.flatten`
+share the ``dim_table`` group-then-joint traversal and round-trip
+bit-identically (``flatten`` also accepts any NamedAction tuple order and any
+per-entry joint-name permutation).
 """
 
 from __future__ import annotations
@@ -195,23 +201,190 @@ class OrderedActionSpec:
         """Return the total flattened action dimension."""
         return sum(len(group.joints) for group in self.groups)
 
+    def _group_spans(self) -> tuple[tuple[OrderedActionGroup, int, int], ...]:
+        """Return ``(group, start, end)`` column spans in declaration order.
+
+        This is the single traversal shared by :meth:`dim_table`,
+        :meth:`unflatten` and :meth:`flatten`, so the flat layout can never
+        drift between the table view and the conversion methods.
+        """
+        spans: list[tuple[OrderedActionGroup, int, int]] = []
+        start = 0
+        for group in self.groups:
+            end = start + len(group.joints)
+            spans.append((group, start, end))
+            start = end
+        return tuple(spans)
+
     def dim_table(self) -> tuple[ActionDim, ...]:
         """Return the declaration-ordered action dimensions."""
         rows: list[ActionDim] = []
-        index = 0
-        for group in self.groups:
-            for joint in group.joints:
+        for group, start, _ in self._group_spans():
+            for offset, joint in enumerate(group.joints):
                 rows.append(
                     ActionDim(
-                        index=index,
+                        index=start + offset,
                         articulation=group.articulation,
                         group=group.name,
                         joint=joint,
                         target=group.target,
                     )
                 )
-                index += 1
         return tuple(rows)
+
+    def unflatten(self, flat: torch.Tensor) -> tuple[NamedAction, ...]:
+        """Split a flat ``(N, dim)`` action tensor into NamedAction values.
+
+        Columns are sliced in declaration order (group order, then each
+        group's joint order) and wrapped as one self-describing
+        :class:`NamedAction` per group.  Slices are views: dtype and device
+        are preserved and no value is copied.
+
+        Args:
+            flat: ``(N, dim)`` action tensor where ``dim == self.dim``.
+
+        Returns:
+            One ``NamedAction`` per spec group, in declaration order.
+
+        Raises:
+            TypeError: *flat* is not a torch tensor.
+            ValueError: *flat* is not rank 2 or its column count differs
+                from ``self.dim``.
+        """
+        if not isinstance(flat, torch.Tensor):
+            raise TypeError(
+                "OrderedActionSpec.unflatten expects a torch tensor, " f"got {type(flat).__name__}"
+            )
+        if flat.ndim != 2:
+            raise ValueError(
+                "OrderedActionSpec.unflatten expects a (N, dim) tensor, "
+                f"got shape {tuple(flat.shape)}"
+            )
+        if flat.shape[1] != self.dim:
+            raise ValueError(
+                f"OrderedActionSpec.unflatten expects {self.dim} action columns, "
+                f"got {flat.shape[1]} (shape {tuple(flat.shape)})"
+            )
+        return tuple(
+            NamedAction(
+                articulation=group.articulation,
+                group=group.name,
+                values=flat[:, start:end],
+                joint_names=group.joints,
+                kind=group.target,
+            )
+            for group, start, end in self._group_spans()
+        )
+
+    def flatten(self, actions: Sequence[NamedAction]) -> torch.Tensor:
+        """Pack self-describing NamedAction values into flat ``(N, dim)`` form.
+
+        The sequence order is not semantic: entries are matched by
+        ``(articulation, group)`` and must cover exactly the spec identities.
+        Each entry's ``joint_names`` must be a permutation of that template
+        group's joints (columns are reordered back to template order), and all
+        entries must agree on ``num_envs``, dtype and device.
+
+        Args:
+            actions: NamedAction entries in any order.
+
+        Returns:
+            ``(N, dim)`` tensor in spec declaration order.  It is the bitwise
+            inverse of :meth:`unflatten`.
+
+        Raises:
+            TypeError: *actions* is not a sequence or an entry is not a
+                NamedAction.
+            ValueError: identities are duplicated, missing or extra; a
+                joint-name set, kind, ``num_envs``, dtype or device does not
+                match the template.
+        """
+        if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
+            raise TypeError(
+                "OrderedActionSpec.flatten expects a sequence of NamedAction, "
+                f"got {type(actions).__name__}"
+            )
+        spans = self._group_spans()
+        templates = {(group.articulation, group.name): group for group, _, _ in spans}
+        accepted = sorted(templates)
+        entries: dict[tuple[str, str], NamedAction] = {}
+        for entry in actions:
+            if not isinstance(entry, NamedAction):
+                raise TypeError(
+                    "OrderedActionSpec.flatten expects a sequence of NamedAction, "
+                    f"got {type(entry).__name__} entry"
+                )
+            identity = (entry.articulation, entry.group)
+            if identity in entries:
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} is addressed "
+                    "by more than one NamedAction"
+                )
+            entries[identity] = entry
+        unknown = sorted(set(entries) - set(templates))
+        if unknown:
+            raise ValueError(
+                f"OrderedActionSpec.flatten: NamedAction groups {unknown} are not "
+                f"declared by this spec; accepted groups: {accepted}"
+            )
+        missing = [identity for identity in templates if identity not in entries]
+        if missing:
+            raise ValueError(
+                "OrderedActionSpec.flatten: NamedAction entries leave spec groups "
+                f"unaddressed: {missing}; accepted groups: {accepted}"
+            )
+        first_group, _, _ = spans[0]
+        reference_identity = (first_group.articulation, first_group.name)
+        reference = entries[reference_identity]
+        for group, _, _ in spans:
+            identity = (group.articulation, group.name)
+            entry = entries[identity]
+            if entry.kind != group.target:
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} has kind "
+                    f"{entry.kind!r} but the template expects target {group.target!r}"
+                )
+            if len(entry.joint_names) != len(group.joints) or set(entry.joint_names) != set(
+                group.joints
+            ):
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} joint_names "
+                    f"{list(entry.joint_names)} are not a permutation of template "
+                    f"joints {list(group.joints)}"
+                )
+            if entry.num_envs != reference.num_envs:
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} has "
+                    f"{entry.num_envs} env rows but {reference_identity!r} has "
+                    f"{reference.num_envs}; all entries must share num_envs"
+                )
+            if entry.values.dtype != reference.values.dtype:
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} values dtype "
+                    f"{entry.values.dtype} differs from {reference_identity!r} "
+                    f"dtype {reference.values.dtype}; mixed dtypes are not allowed"
+                )
+            if entry.values.device != reference.values.device:
+                raise ValueError(
+                    f"OrderedActionSpec.flatten: group {identity!r} values device "
+                    f"{entry.values.device} differs from {reference_identity!r} "
+                    f"device {reference.values.device}; mixed devices are not allowed"
+                )
+        chunks = []
+        for group, _, _ in spans:
+            entry = entries[(group.articulation, group.name)]
+            if entry.joint_names == group.joints:
+                block = entry.values
+            else:
+                positions = {name: index for index, name in enumerate(entry.joint_names)}
+                gather = torch.tensor(
+                    [positions[name] for name in group.joints],
+                    dtype=torch.int64,
+                    device=entry.values.device,
+                )
+                block = entry.values.index_select(1, gather)
+            chunks.append(block)
+        return torch.cat(chunks, dim=1)
 
     def __str__(self) -> str:
         """Render the compact ``idx articulation group joint target`` table."""
