@@ -71,7 +71,7 @@ def write_sim_pack(
             "left_foot": {"mjcf": "left_foot", "usd": "/World/left_foot"},
             "left_hand": {"mjcf": "left_hand", "usd": "/World/left_hand"},
         },
-        "action_faces": {},
+        "extra_action_sets": {},
         "full_joint_order": full_order,
     }
     manifest = {

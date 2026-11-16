@@ -17,7 +17,7 @@ def _action(env, values, joint_names=None):
     control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names if joint_names is None else joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
-    return (NamedAction(control.articulation, control.action_face, tensor, names, control.target),)
+    return (NamedAction(control.articulation, control.name, tensor, names, control.target),)
 
 
 def _two_dog_env():
@@ -25,7 +25,6 @@ def _two_dog_env():
     controls = {
         (name, "legs"): ControlRuntime(
             name="legs",
-            action_face="legs",
             adapter="dog_policy",
             articulation=name,
             joint_names=("hip", "knee"),
@@ -156,7 +155,7 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
-        control.action_face,
+        control.name,
         list(control.joint_names),
         kind,
     )
@@ -399,7 +398,7 @@ def test_step_rejects_a_missing_control_joint(tiny_env):
     action = (
         NamedAction(
             control.articulation,
-            control.action_face,
+            control.name,
             torch.zeros(tiny_env.num_envs, 1),
             ("elbow",),
             "position",
@@ -415,7 +414,7 @@ def test_step_rejects_a_joint_name_the_control_does_not_own(tiny_env):
     action = (
         NamedAction(
             control.articulation,
-            control.action_face,
+            control.name,
             torch.zeros(tiny_env.num_envs, 2),
             ("elbow", "wrist"),
             "position",

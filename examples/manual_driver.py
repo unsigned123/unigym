@@ -50,13 +50,13 @@ class PrintSink:
 
 
 def make_env():
-    """Build the tiny free-base arm and its manual control face."""
+    """Build the tiny free-base arm and its manual control group."""
     profile = RobotProfile(
         name="tiny",
         joint_sets={"body": ("hinge",)},
         default_joint_pos={"hinge": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

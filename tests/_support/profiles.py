@@ -22,7 +22,7 @@ def fixture_profile(
         joint_sets={"body": ("shoulder", "elbow"), "hand": ("finger",)},
         default_joint_pos={"shoulder": 0.0, "elbow": 0.0, "finger": 0.0},
         assets=assets,
-        action_faces={"hand": ("finger",)},
+        extra_action_sets={"hand": ("finger",)},
         base_body="base",
         foot_bodies=(),
         body_sets={},

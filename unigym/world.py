@@ -792,12 +792,12 @@ class World:
             }
         ]
         if profile is not None:
-            for face, face_joints in profile.action_faces.items():
+            for action_set, set_joints in profile.extra_action_sets.items():
                 groups.append(
                     {
-                        "name": str(face),
+                        "name": str(action_set),
                         "articulation": name,
-                        "joints": [str(joint) for joint in face_joints],
+                        "joints": [str(joint) for joint in set_joints],
                         "target": "position",
                         "role": "aux",
                     }

@@ -407,6 +407,6 @@ def build_adapter(section: dict, num_envs: int, device: str) -> Adapter:
     adapter = cast(Callable[..., Adapter], constructor)(num_envs=num_envs, device=device, **params)
     # registry identity: the build-time policies partition and the
     # runner's group validation resolve ownership by this name (never by
-    # joint-order / action-face inference).
+    # joint-order / action-group inference).
     adapter._unigym_name = name
     return adapter

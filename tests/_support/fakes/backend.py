@@ -34,7 +34,7 @@ class FakeBackend(EnvBackend):
     cache and the full extra-info record set, and advances the episode clock by
     one second.  There is no physics, contact, camera, prop or event model.
     ``joint_names`` defaults to the one-joint contract fixture; a caller that
-    needs a multi-joint action face may declare more names (identity order).
+    needs a multi-joint action group may declare more names (identity order).
     """
 
     def __init__(
@@ -76,7 +76,6 @@ class FakeBackend(EnvBackend):
         self.controls: dict[tuple[str, str], ControlRuntime] = {
             (ARTICULATION_NAME, CONTROL_NAME): ControlRuntime(
                 name=CONTROL_NAME,
-                action_face=CONTROL_NAME,
                 adapter="manual",
                 articulation=ARTICULATION_NAME,
                 joint_names=self.joint_names,

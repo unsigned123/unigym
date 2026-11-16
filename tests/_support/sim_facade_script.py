@@ -30,10 +30,10 @@ from unigym.world import World
 __all__ = ["ARTICULATION_LABEL", "run_facade_acceptance"]
 
 ARTICULATION_LABEL = "body"
-"""The shared articulation label: it equals the ``body`` control face.
+"""The shared articulation label: it equals the ``body`` control group name.
 
-The backend contract requires one control whose ``action_face`` equals its
-articulation (the body face), so the acceptance articulation is labelled
+The backend contract requires one control whose ``name`` equals its
+articulation (the body group), so the acceptance articulation is labelled
 ``body`` and the run config routes it to the pack profile through
 ``params.profile``.
 """

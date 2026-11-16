@@ -18,8 +18,8 @@ from pathlib import Path
 import numpy as np
 
 # v103.5 data schema v3: robot state keys are namespaced
-# (``articulation/<name>/<leaf>``) and every action face is
-# ``action_target/<face>``.  The tool therefore hashes EVERY numeric/string
+# (``articulation/<name>/<leaf>``) and every action group is
+# ``action_target/<group>``.  The tool therefore hashes EVERY numeric/string
 # column of each shard in sorted-key order (object columns -- language
 # strings -- are skipped: their in-memory pointer bytes are not stable).
 _SKIP_DTYPE = "O"

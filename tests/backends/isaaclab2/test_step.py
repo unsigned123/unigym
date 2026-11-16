@@ -105,18 +105,18 @@ def test_two_env_step_batches_every_extra_over_both_rows(two_env):
     assert shapes == TWO_ENV_TENSOR_SHAPES
 
 
-@pytest.mark.parametrize("face", ["g1", "wrist"])
-def test_unknown_action_face_fails_fast(cartpole_env, face):
+@pytest.mark.parametrize("group", ["g1", "wrist"])
+def test_unknown_action_group_fails_fast(cartpole_env, group):
     """An action group naming no control group is rejected with the accepted groups."""
     entry = NamedAction.zeros(
-        cartpole_env.num_envs, ARTICULATION, face, list(CART_JOINTS), "position"
+        cartpole_env.num_envs, ARTICULATION, group, list(CART_JOINTS), "position"
     )
 
     with pytest.raises(ValueError) as excinfo:
         cartpole_env.step((entry,))
 
     message = str(excinfo.value)
-    assert face in message
+    assert group in message
     assert f"accepted control groups: [('{ARTICULATION}', '{ARTICULATION}')]" in message
 
 

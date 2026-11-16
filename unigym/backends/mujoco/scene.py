@@ -63,7 +63,7 @@ class MujocoSceneOps:
         }
         # Limit rows over ALL actuated robot
         # joints -- the model is the source (``jnt_range`` by name; the
-        # 29-joint policy table stays an action-face concern), computed
+        # 29-joint policy table stays an action-group concern), computed
         # in the same lazy batch as the joint addressing (model-static,
         # cached by the face).
         backend_limits = model_joint_limits(m, backend_joints)

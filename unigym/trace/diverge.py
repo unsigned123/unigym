@@ -52,12 +52,12 @@ def load_map(name: str) -> dict:
 
 
 def _resolve_segment(reader, segment: str) -> str:
-    """Resolve a historical bare ``action/target`` to its v3 face.
+    """Resolve a historical bare ``action/target`` to its v3 group.
 
-    v103.5 records every NamedAction face as ``action/target/<face>``.  A
+    v103.5 records every NamedAction group as ``action/target/<group>``.  A
     frozen anchor spec (or a single-policy trace) still names the historical
-    ``action/target``; when exactly ONE face exists, that segment IS the same
-    series (a cardinality rule, never a "first binding").  Multiple faces
+    ``action/target``; when exactly ONE group exists, that segment IS the same
+    series (a cardinality rule, never a "first binding").  Multiple groups
     stay unresolved and surface the existing not-found error with the
     available list.
     """

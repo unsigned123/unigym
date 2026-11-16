@@ -1,4 +1,4 @@
-"""CollectSink action-face contract is addressed by (articulation, group)."""
+"""CollectSink action-group contract is addressed by (articulation, group)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from unigym.runner.sinks.collect import CollectSink, action_face_contract
+from unigym.runner.sinks.collect import CollectSink, action_group_contract
 from unigym.runtime.actions import NamedAction
 
 
@@ -81,46 +81,46 @@ def _hand():
     )
 
 
-def test_action_face_contract_ignores_sequence_order():
+def test_action_group_contract_ignores_sequence_order():
     """The same groups in a different tuple order yield the identical contract."""
     go1 = _legs("go1", [1.0, 2.0])
     go2 = _legs("go2", [3.0, 4.0])
 
-    assert action_face_contract((go1, go2)) == action_face_contract((go2, go1))
+    assert action_group_contract((go1, go2)) == action_group_contract((go2, go1))
 
 
 def test_unique_group_names_keep_the_historical_column():
     """A group name unique across articulations keeps action_target/<group>."""
-    faces = action_face_contract((_hand(), _body(("shoulder", "elbow"))))
+    groups = action_group_contract((_hand(), _body(("shoulder", "elbow"))))
 
-    assert [face["key"] for face in faces] == ["body", "hand"]
-    assert [face["column"] for face in faces] == ["action_target/body", "action_target/hand"]
-    assert faces[0]["articulation"] == "arm"
-    assert faces[0]["group"] == "body"
+    assert [group["key"] for group in groups] == ["body", "hand"]
+    assert [group["column"] for group in groups] == ["action_target/body", "action_target/hand"]
+    assert groups[0]["articulation"] == "arm"
+    assert groups[0]["group"] == "body"
 
 
 def test_shared_group_names_gain_the_articulation_path():
     """A group name shared by two articulations is disambiguated for uniqueness."""
-    faces = action_face_contract((_legs("go2", [3.0, 4.0]), _legs("go1", [1.0, 2.0])))
+    groups = action_group_contract((_legs("go2", [3.0, 4.0]), _legs("go1", [1.0, 2.0])))
 
-    assert [face["key"] for face in faces] == ["go1/legs", "go2/legs"]
-    assert [face["column"] for face in faces] == [
+    assert [group["key"] for group in groups] == ["go1/legs", "go2/legs"]
+    assert [group["column"] for group in groups] == [
         "action_target/go1/legs",
         "action_target/go2/legs",
     ]
-    assert [face["articulation"] for face in faces] == ["go1", "go2"]
+    assert [group["articulation"] for group in groups] == ["go1", "go2"]
 
 
-def test_action_face_contract_rejects_a_duplicate_identity():
+def test_action_group_contract_rejects_a_duplicate_identity():
     """One identity addressed twice is ambiguous."""
     go1 = _legs("go1", [1.0, 2.0])
 
     with pytest.raises(ValueError, match="more than one NamedAction entry"):
-        action_face_contract((go1, _legs("go1", [5.0, 6.0])))
+        action_group_contract((go1, _legs("go1", [5.0, 6.0])))
 
 
 def test_collect_sink_accepts_reordered_targets():
-    """A mid-run reordered sequence does not trip the face-change guard."""
+    """A mid-run reordered sequence does not trip the group-change guard."""
     sink, records = _sink()
     go1 = _legs("go1", [1.0, 2.0])
     go2 = _legs("go2", [3.0, 4.0])
@@ -128,7 +128,7 @@ def test_collect_sink_accepts_reordered_targets():
     sink.on_step(0, _bundle((go1, go2), 0))
     sink.on_step(1, _bundle((go2, go1), 1))
 
-    assert [face["column"] for face in sink.writer.meta["action_faces"]] == [
+    assert [group["column"] for group in sink.writer.meta["action_groups"]] == [
         "action_target/go1/legs",
         "action_target/go2/legs",
     ]

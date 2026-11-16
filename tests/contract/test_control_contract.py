@@ -89,7 +89,6 @@ def test_action_coverage_requires_driven_plus_passive_to_equal_actuated():
     )
     partial = ControlRuntime(
         name="body",
-        action_face="body",
         adapter="manual",
         articulation="arm",
         joint_names=("shoulder",),
@@ -111,7 +110,6 @@ def test_action_coverage_rejects_unknown_and_overlapping_joints():
     arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
     unknown = ControlRuntime(
         name="body",
-        action_face="body",
         adapter="manual",
         articulation="arm",
         joint_names=("shoulder", "wrist"),
@@ -122,7 +120,6 @@ def test_action_coverage_rejects_unknown_and_overlapping_joints():
 
     first = ControlRuntime(
         name="a",
-        action_face="a",
         adapter="manual",
         articulation="arm",
         joint_names=("shoulder",),
@@ -130,7 +127,6 @@ def test_action_coverage_rejects_unknown_and_overlapping_joints():
     )
     second = ControlRuntime(
         name="b",
-        action_face="b",
         adapter="manual",
         articulation="arm",
         joint_names=("shoulder",),

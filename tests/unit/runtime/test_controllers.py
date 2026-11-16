@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -77,7 +80,7 @@ def _profile(joint_sets, defaults):
         joint_sets=joint_sets,
         default_joint_pos=defaults,
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},
@@ -88,7 +91,6 @@ def _profile(joint_sets, defaults):
 def _runtime(name: str, articulation: str, joints: tuple[str, ...], role="aux") -> ControlRuntime:
     return ControlRuntime(
         name=name,
-        action_face=name,
         adapter="manual",
         articulation=articulation,
         joint_names=joints,
@@ -110,7 +112,6 @@ def test_control_runtime_rejects_invalid_drive_target_pair(drive, target, match)
     with pytest.raises(ControlError, match=match):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder",),
@@ -136,7 +137,6 @@ def test_control_runtime_rejects_empty_or_duplicate_joint_names(joint_names, mat
     with pytest.raises(ControlError, match=match):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=joint_names,
@@ -150,7 +150,6 @@ def test_control_runtime_requires_q0_aligned_with_joint_names(q0):
     with pytest.raises(ControlError, match=r"q0 has \("):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder", "elbow"),
@@ -498,7 +497,6 @@ def test_control_runtime_rejects_non_finite_q0(bad):
     with pytest.raises(ControlError, match=r"control 'body' q0 must be finite"):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder", "elbow"),
@@ -521,7 +519,6 @@ def test_control_runtime_rejects_non_numeric_q0():
     with pytest.raises(ControlError, match=r"control 'body' q0 must be numeric"):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder",),
@@ -534,7 +531,6 @@ def test_control_runtime_rejects_non_finite_tensor_q0():
     with pytest.raises(ControlError, match=r"control 'body' q0 must be finite"):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder", "elbow"),
@@ -547,12 +543,52 @@ def test_control_runtime_checks_q0_shape_before_finiteness():
     with pytest.raises(ControlError, match=r"q0 has \(1,\) entries"):
         ControlRuntime(
             name="body",
-            action_face="body",
             adapter="manual",
             articulation="arm",
             joint_names=("shoulder", "elbow"),
             q0=(float("nan"),),
         )
+
+
+def test_control_runtime_has_no_action_face_member():
+    """Identity is ``(articulation, name)``; there is no separate action-face field."""
+    assert "action_face" not in {field.name for field in fields(ControlRuntime)}
+    assert not hasattr(ControlRuntime, "action_face")
+
+
+def test_action_routing_source_has_no_action_specific_face_terminology():
+    """The routed action path names groups, never a separate action face."""
+    root = Path(__file__).resolve().parents[3]
+    files = (
+        "unigym/runtime/controllers.py",
+        "unigym/env/backends/base.py",
+        "unigym/run/build.py",
+        "unigym/run/api.py",
+        "unigym/runner/sinks/collect.py",
+        "unigym/runner/sync.py",
+        "unigym/robots/base.py",
+        "unigym/world.py",
+        "unigym/backends/shared/mjfamily/articulation_actions.py",
+        "unigym/backends/shared/mjfamily/articulation_runtime.py",
+        "unigym/backends/isaaclab2/env.py",
+        "unigym/backends/isaaclab2/articulation_runtime.py",
+    )
+    forbidden = (
+        "action_face",
+        "action-face",
+        "action face",
+        "action faces",
+        "control face",
+        "control faces",
+        "accepted faces",
+    )
+    offenders = []
+    for relative in files:
+        text = (root / relative).read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in text:
+                offenders.append(f"{relative}: {token!r}")
+    assert not offenders, f"action-specific face terminology remains: {offenders}"
 
 
 def test_articulation_runtime_keeps_native_and_canonical_base_body():

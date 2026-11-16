@@ -3,7 +3,7 @@
 Every engine iterates ``env.articulations`` and ``env.controls``.  This
 module owns the IsaacLab-side runtime tables: one scene field per
 articulation (``robot`` / ``robot_<name>``), one action term per control
-face, the per-articulation address/catalog tables, action routing, reset and
+group, the per-articulation address/catalog tables, action routing, reset and
 the namespaced observation/termination records.
 
 There is no policy runtime type: a policy is a ``position_pd`` control plus
@@ -144,19 +144,19 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
             continue
         if control.articulation not in fields:
             continue
-        face = control.action_face
-        if not str(face).isidentifier():
+        group = control.name
+        if not str(group).isidentifier():
             raise ValueError(
-                f"{_LABEL}: action face {face!r} of articulation "
+                f"{_LABEL}: action group {group!r} of articulation "
                 f"{control.articulation!r} is not a valid action-term name"
             )
-        if hasattr(cfg.actions, face):
+        if hasattr(cfg.actions, group):
             raise ValueError(
-                f"{_LABEL}: action entry {face!r} collides with an " f"existing action term name"
+                f"{_LABEL}: action entry {group!r} collides with an " f"existing action term name"
             )
         setattr(
             cfg.actions,
-            face,
+            group,
             JointPositionActionCfg(
                 asset_name=fields[control.articulation],
                 joint_names=list(control.joint_names),
@@ -253,19 +253,18 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
                 f"{control.articulation!r}, which has no runtime"
             )
         control.asset_joint_names = tuple(art.joint_names)
-        control.addresses["term"] = control.action_face
+        control.addresses["term"] = control.name
         index = {n: i for i, n in enumerate(art.joint_names)}
         control.addresses["perm_il2pol"] = [index[n] for n in control.joint_names if n in index]
         controls[control_key(control)] = control
     # every remaining action term (articulated props) becomes a servo control
-    declared_faces = {control.action_face for control in controls.values()}
+    declared_groups = {control.name for control in controls.values()}
     for term in env.action_entry_names:
-        if term in declared_faces:
+        if term in declared_groups:
             continue
         joint_names = tuple(getattr(env.action_manager.get_term(term).cfg, "joint_names", ()))
         prop = ControlRuntime(
             name=term,
-            action_face=term,
             adapter="prop",
             articulation=first,
             joint_names=joint_names,
@@ -282,14 +281,14 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
 
 def _bind_control_order(env, controls) -> None:
     env.controls = controls
-    by_face = {control.action_face: control for control in controls.values()}
-    if len(by_face) != len(controls):
+    by_group = {control.name: control for control in controls.values()}
+    if len(by_group) != len(controls):
         raise ValueError(
-            f"{_LABEL}: control action faces are not unique; each action term "
+            f"{_LABEL}: control action groups are not unique; each action term "
             f"name must map to exactly one control group "
-            f"(declared: {[(c.articulation, c.name, c.action_face) for c in controls.values()]})"
+            f"(declared: {[(c.articulation, c.name) for c in controls.values()]})"
         )
-    env._control_order = [by_face[name] for name in env.action_entry_names if name in by_face]
+    env._control_order = [by_group[name] for name in env.action_entry_names if name in by_group]
     for art in env.articulations.values():
         body = next(
             (c for c in env._control_order if c.articulation == art.name and c.role == "body"),
@@ -353,7 +352,7 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
 
     Entries are routed by ``(entry.articulation, entry.group)`` to the
     control whose ``(articulation, name)`` matches; the action-term name
-    stays an internal backend detail (``control.action_face``).
+    stays an internal backend detail (``control.name``).
     """
     if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
         raise TypeError(
@@ -403,8 +402,8 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
     chunks = []
     for control in env._control_order:
         identity = (control.articulation, control.name)
-        face = control.action_face
-        term = env.action_manager.get_term(face)
+        term_name = control.name
+        term = env.action_manager.get_term(term_name)
         dim = int(term.action_dim)
         na = entries.get(identity)
         if na is None:
@@ -421,9 +420,9 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
         if na.dim != dim:
             raise ValueError(
                 f"action group {identity!r} addresses {na.dim} joints but "
-                f"term {face!r} covers {dim}"
+                f"term {term_name!r} covers {dim}"
             )
-        gather = env._term_resolvers[face].gather(na.joint_names).to(env.device)
+        gather = env._term_resolvers[term_name].gather(na.joint_names).to(env.device)
         buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
         buf[:, gather] = na.values.to(device=env.device, dtype=torch.float32)
         chunks.append(buf)

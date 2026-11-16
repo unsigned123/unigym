@@ -83,7 +83,7 @@ def _make_env(tmp_path):
         joint_sets={"body": ("hinge",)},
         default_joint_pos={"hinge": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

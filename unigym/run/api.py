@@ -344,12 +344,12 @@ def _action_entries(
     # Only profile-declared extra action sets are emitted here: an adapter
     # that emits a group the profile does not declare must get it from its
     # config's action_spec -- the partition is the single authority.
-    for face, face_joints in (profile.action_faces or {}).items():
+    for action_set, set_joints in (profile.extra_action_sets or {}).items():
         groups.append(
             {
-                "name": str(face),
+                "name": str(action_set),
                 "articulation": name,
-                "joints": [str(joint) for joint in face_joints],
+                "joints": [str(joint) for joint in set_joints],
                 "target": "position",
                 "role": "aux",
             }
@@ -1098,7 +1098,7 @@ class Run:
 
         One entry per ``env.articulations`` runtime: name/model/root/joints/
         q0/base_body/foot_bodies/body_sets/contacts/spawn plus the owning
-        body control's action face.  This is NOT a copy of a
+        body control's action group.  This is NOT a copy of a
         ``ModelIR.meta`` annotation; body facts are canonical effective ids.
         """
         env = self.build().env
@@ -1131,7 +1131,7 @@ class Run:
                         else getattr(art, "contacts").to_dict()
                     ),
                     "spawn": _json_object(getattr(art, "spawn", {})),
-                    "action_face": (None if body is None else _optional_str(body.action_face)),
+                    "action_group": (None if body is None else _optional_str(body.name)),
                 }
             )
         return views

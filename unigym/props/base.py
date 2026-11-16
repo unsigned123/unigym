@@ -88,7 +88,7 @@ class PropSpec:
     (checked at backend bind time, when the asset joint names are known).
     Actuated joints automatically join the action surface as the named
     entry ``{prop_name: NamedAction}``; passive joints get damping
-    injection only (no action face).  ``range`` (optional, [lo, hi]) feeds
+    injection only (no action group).  ``range`` (optional, [lo, hi]) feeds
     the mujoco position-servo ctrlrange; the isaaclab side keeps the asset
     limits. both modes also accept optional ``effort_limit``
     (ImplicitActuatorCfg.effort_limit_sim) and a ``passive`` joint may keep

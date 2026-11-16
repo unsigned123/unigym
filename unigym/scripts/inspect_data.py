@@ -34,7 +34,7 @@ def _single_key(data: dict, leaf: str, required: bool = False):
 
 
 def _articulation_orders(meta: dict) -> dict:
-    """``{name: {joint_names, foot_bodies, ...}}`` from the v4 meta record."""
+    """``{name: {joint_names, foot_bodies, ...}}`` from the v5 meta record."""
     arts = meta.get("articulations")
     if isinstance(arts, dict):
         return arts

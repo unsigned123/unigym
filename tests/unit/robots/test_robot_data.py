@@ -24,7 +24,7 @@ def _document(**overrides: object) -> dict[str, object]:
         "body_sets": {},
         "body_bindings": {"base": {"mjcf": "base", "usd": "/World/base"}},
         "assets": {"usd": "pack:acme/robots/acme_arm.usd"},
-        "action_faces": {},
+        "extra_action_sets": {},
         "full_joint_order": ["shoulder", "elbow"],
     }
     document.update(overrides)
@@ -55,7 +55,7 @@ def test_loader_builds_the_exact_profile(tmp_path: Path) -> None:
     assert profile.body_bindings["base"] == BodyBinding(
         "base", {"mjcf": "base", "usd": "/World/base"}
     )
-    assert profile.action_faces == {}
+    assert profile.extra_action_sets == {}
     assert profile.full_joint_names == ["shoulder", "elbow"]
 
 
@@ -67,6 +67,29 @@ def test_loader_rejects_a_missing_required_field(tmp_path: Path, key: str) -> No
     path = _write(tmp_path / "robot.yaml", document)
 
     with pytest.raises(RobotDataError, match=key):
+        load_robot_profile(path)
+
+
+def test_loader_parses_extra_action_sets(tmp_path: Path) -> None:
+    """``extra_action_sets`` maps named joint sets onto the profile."""
+    path = _write(
+        tmp_path / "robot.yaml",
+        _document(extra_action_sets={"hand": ["elbow"]}),
+    )
+
+    profile = load_robot_profile(path)
+
+    assert profile.extra_action_sets == {"hand": ("elbow",)}
+
+
+def test_loader_rejects_the_legacy_action_faces_key(tmp_path: Path) -> None:
+    """The old key is not aliased; the teaching error names the new key."""
+    document = _document()
+    del document["extra_action_sets"]
+    document["action_faces"] = {}
+    path = _write(tmp_path / "robot.yaml", document)
+
+    with pytest.raises(RobotDataError, match="extra_action_sets"):
         load_robot_profile(path)
 
 

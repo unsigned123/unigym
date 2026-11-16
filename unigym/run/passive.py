@@ -4,7 +4,7 @@ A profile declares its full actuated vocabulary (``joint_sets``) and
 every control group selects an explicit subset.  The programmatic builders
 (``Run(robot=...)`` / ``World``) are authoring sugar, so the remaining
 profile joints are written into ``passive_joints`` instead of inventing a
-runtime action face.  An explicit caller declaration always wins.
+runtime action group.  An explicit caller declaration always wins.
 """
 
 from __future__ import annotations

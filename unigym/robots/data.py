@@ -1,7 +1,7 @@
 """Load external ``unigym.robot/1`` robot profile documents.
 
 The document is authoring data only: joint sets, standby pose, canonical base
-and foot facts, per-format body bindings, declared assets, action faces and an
+and foot facts, per-format body bindings, declared assets, extra action sets and an
 optional full joint order.  Loading builds a backend-neutral
 :class:`~unigym.robots.base.RobotProfile` and never imports a backend, an
 engine or pack Python.
@@ -42,7 +42,7 @@ _OPTIONAL_KEYS = (
     "body_sets",
     "body_bindings",
     "assets",
-    "action_faces",
+    "extra_action_sets",
     "full_joint_order",
 )
 _TOP_LEVEL_KEYS = frozenset((*_REQUIRED_KEYS, *_OPTIONAL_KEYS))
@@ -140,6 +140,13 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             f"robot profile {document_path} must be a mapping, " f"got {type(document).__name__}"
         )
 
+    if "action_faces" in document:
+        raise _error(
+            document_path,
+            "action_faces",
+            "was renamed to 'extra_action_sets'; rename the key " "(no alias is accepted)",
+        )
+
     unknown = sorted(str(key) for key in document if key not in _TOP_LEVEL_KEYS)
     if unknown:
         raise _error(
@@ -164,7 +171,7 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             f"expected {SCHEMA_ID!r}, got {schema!r}",
         )
 
-    raw_action_faces = document.get("action_faces")
+    raw_extra_action_sets = document.get("extra_action_sets")
     raw_foot_bodies = document.get("foot_bodies")
     raw_body_sets = document.get("body_sets")
     try:
@@ -173,7 +180,7 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             joint_sets=document["joint_sets"],
             default_joint_pos=document["default_joint_pos"],
             assets=_assets(document_path, document.get("assets")),
-            action_faces={} if raw_action_faces is None else raw_action_faces,
+            extra_action_sets={} if raw_extra_action_sets is None else raw_extra_action_sets,
             base_body=document.get("base_body"),
             foot_bodies=() if raw_foot_bodies is None else raw_foot_bodies,
             body_sets={} if raw_body_sets is None else raw_body_sets,

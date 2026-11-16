@@ -23,7 +23,7 @@ def _cartpole_profile():
         joint_sets={"body": joints},
         default_joint_pos={joint: 0.0 for joint in joints},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},

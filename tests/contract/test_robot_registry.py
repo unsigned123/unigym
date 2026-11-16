@@ -34,7 +34,7 @@ def _arm_profile(name: str = "acme.arm", *, shoulder: float = 0.0) -> RobotProfi
         joint_sets={"body": ("shoulder",)},
         default_joint_pos={"shoulder": shoulder},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},

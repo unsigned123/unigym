@@ -15,7 +15,7 @@ def _action(env, values):
     control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
-    return (NamedAction(control.articulation, control.action_face, tensor, names, control.target),)
+    return (NamedAction(control.articulation, control.name, tensor, names, control.target),)
 
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
@@ -112,7 +112,7 @@ def test_reset_envs_empty_is_a_noop_and_preserves_requested_id_order(tiny_env_fa
         pytest.param(("elbow", "shoulder"), id="matching-joints"),
     ],
 )
-def test_step_rejects_an_unknown_action_face(tiny_env, joint_names):
+def test_step_rejects_an_unknown_action_group(tiny_env, joint_names):
     """An unknown group is rejected even when its joints match a control."""
     entry = NamedAction("tiny", "wrist", torch.zeros(tiny_env.num_envs, 2), joint_names, "position")
 
@@ -131,7 +131,7 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
-        control.action_face,
+        control.name,
         list(control.joint_names),
         kind,
     )
@@ -367,7 +367,7 @@ def test_step_rejects_an_action_that_does_not_match_the_control_joint_set(
     control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction(
         control.articulation,
-        control.action_face,
+        control.name,
         torch.zeros(tiny_env.num_envs, len(joint_names)),
         joint_names,
         "position",

@@ -253,7 +253,7 @@ def build_robot_profile(section: dict[str, JsonValue]) -> RobotProfile:
 
     ``section`` is the projection ``{name, params}`` of an
     :class:`~unigym.scenes.articulation.ArticulationSpec`; it is authoring
-    data (joint order / q0 / assets / action faces), never a policy and never
+    data (joint order / q0 / assets / extra action sets), never a policy and never
     a backend object.
 
     Resolution goes through the external registry.  A missing name raises

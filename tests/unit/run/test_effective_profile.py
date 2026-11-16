@@ -49,7 +49,7 @@ def _profile() -> RobotProfile:
         joint_sets={"body": ("j",)},
         default_joint_pos={"j": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=("left_foot",),
         body_sets={"grasp": ("finger",)},
@@ -70,9 +70,9 @@ def _build(profile: RobotProfile, spec: ArticulationSpec, asset_format: str) -> 
     }
 
 
-def test_data_schema_version_is_v4():
-    """The run data schema is the explicit v4 cutover version."""
-    assert DATA_SCHEMA_VERSION == 4
+def test_data_schema_version_is_v5():
+    """The run data schema is the explicit v5 cutover version."""
+    assert DATA_SCHEMA_VERSION == 5
 
 
 def test_spec_overrides_win_over_profile_body_facts():
@@ -150,7 +150,7 @@ def test_selected_backend_format_must_exist_on_every_required_binding():
         joint_sets={"body": ("j",)},
         default_joint_pos={"j": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},
@@ -224,7 +224,7 @@ def test_all_contributes_one_sentinel_group_and_the_selected_asset():
         joint_sets={"body": ("j",)},
         default_joint_pos={"j": 0.0},
         assets=AssetRef(usd="/tmp/arm.usd"),
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},
@@ -246,7 +246,7 @@ def test_all_uses_the_per_articulation_selected_asset_format():
         joint_sets={"body": ("j",)},
         default_joint_pos={"j": 0.0},
         assets=AssetRef(usd="/tmp/arm.usd", urdf="/tmp/arm.urdf"),
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},
@@ -294,7 +294,7 @@ def test_camera_base_mount_uses_the_per_articulation_selected_format():
         joint_sets={"body": ("j",)},
         default_joint_pos={"j": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},
@@ -309,7 +309,7 @@ def test_camera_base_mount_uses_the_per_articulation_selected_format():
     assert out[0]["rig"]["attach"] == "pelvis_urdf"
 
 
-def test_v4_articulation_facts_serialize_body_and_contact_vocabulary():
+def test_v5_articulation_facts_serialize_body_and_contact_vocabulary():
     """The meta/summary row carries canonical body facts and inventory groups."""
     inventory = ContactSensorInventory(
         mode="declared",
@@ -327,7 +327,6 @@ def test_v4_articulation_facts_serialize_body_and_contact_vocabulary():
     )
     control = ControlRuntime(
         name="arm",
-        action_face="arm",
         adapter="manual",
         articulation="arm",
         joint_names=("j",),
@@ -339,7 +338,7 @@ def test_v4_articulation_facts_serialize_body_and_contact_vocabulary():
     assert facts == {
         "joint_names": ["j"],
         "asset_joint_names": ["j"],
-        "action_face": "arm",
+        "action_group": "arm",
         "base_body": "base",
         "foot_bodies": ["left_foot"],
         "body_sets": {"grasp": ["finger"]},

@@ -14,7 +14,7 @@ def _profile(**overrides):
         "joint_sets": {"body": ("j",)},
         "default_joint_pos": {"j": 0.0},
         "assets": None,
-        "action_faces": {},
+        "extra_action_sets": {},
         "base_body": None,
         "foot_bodies": (),
         "body_sets": {},

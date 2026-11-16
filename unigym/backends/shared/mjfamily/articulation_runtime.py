@@ -247,19 +247,18 @@ def _build_articulation(env, spec, profile, name_map, label):
 
 
 def _add_prop_controls(env, controls: dict) -> None:
-    """Represent articulated prop action faces as ControlRuntime entries."""
+    """Represent articulated prop action groups as ControlRuntime entries."""
     if env.prop_backend is None:
         return
     for name, table in (env._prop_actuators or {}).items():
         if not table:
             # passive articulated props (all joints declared passive) expose
             # no actuated table: they are NOT control groups (undriven
-            # joints live in passive_joints, never a servo face)
+            # joints live in passive_joints, never a servo group)
             continue
         joints = tuple(str(j) for j in table)
         control = ControlRuntime(
             name=name,
-            action_face=name,
             adapter="prop",
             articulation=next(iter(env.articulations), name),
             joint_names=joints,
@@ -273,7 +272,7 @@ def _add_prop_controls(env, controls: dict) -> None:
         key = control_key(control)
         if key in controls:
             raise ValueError(
-                f"{_label(env)}: prop {name!r} control face collides with a "
+                f"{_label(env)}: prop {name!r} control group collides with a "
                 f"declared control group of articulation {control.articulation!r}"
             )
         controls[key] = control

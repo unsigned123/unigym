@@ -18,7 +18,7 @@ def _zero_action(env):
         NamedAction.zeros(
             env.num_envs,
             control.articulation,
-            control.action_face,
+            control.name,
             list(control.joint_names),
             control.target,
         ),
@@ -210,7 +210,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None):
             joint_sets={"body": joints},
             default_joint_pos={joint: 0.0 for joint in joints},
             assets=None,
-            action_faces={},
+            extra_action_sets={},
             base_body="base",
             foot_bodies=(),
             body_sets={},

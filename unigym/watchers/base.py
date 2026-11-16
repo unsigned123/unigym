@@ -56,7 +56,7 @@ class Level(str, enum.Enum):
     ERROR = "error"
 
 
-# trigger action face (design §2.3 -- all reuse existing pieces)
+# trigger action surface (design §2.3 -- all reuse existing pieces)
 PAUSE = "pause"  # StepGate.pause() -- parks the engine THIS tick
 CAPTURE = "capture"  # broadcast-camera jpeg + sidecar (watcher/tick/value)
 DUMP = "dump"  # obs+extra npz (save_npz key face) at <out>/watch/dump

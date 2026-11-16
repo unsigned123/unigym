@@ -46,7 +46,6 @@ def _runner(adapter_groups):
 def _runtime(name, role):
     return ControlRuntime(
         name=name,
-        action_face=name,
         adapter="manual",
         articulation="arm",
         joint_names=("shoulder",),

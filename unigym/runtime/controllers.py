@@ -1,7 +1,7 @@
 """Neutral runtime descriptions of articulations and explicit controls.
 
 An *articulation* is ``root + model + joints + spawn``; a *control* is one
-explicit drive face over an articulation (the owning adapter, its joints,
+explicit drive group over an articulation (the owning adapter, its joints,
 the drive/target pair and the backend-specific addressing/strategy).  There
 is no "policy" runtime type: a policy is just ``position_pd`` (or
 ``position_servo``) plus an adapter.
@@ -238,11 +238,11 @@ class ArticulationRuntime:
 
 
 def articulation_facts(art: ArticulationRuntime, control: ControlRuntime) -> dict[str, JsonValue]:
-    """The v4 per-articulation neutral facts shared by meta and summary."""
+    """The v5 per-articulation neutral facts shared by meta and summary."""
     return {
         "joint_names": list(control.joint_names),
         "asset_joint_names": list(art.joint_names),
-        "action_face": control.action_face,
+        "action_group": control.name,
         "base_body": None if art.base_body_id is None else str(art.base_body_id),
         "foot_bodies": [str(body) for body in art.foot_bodies],
         "body_sets": {
@@ -254,19 +254,18 @@ def articulation_facts(art: ArticulationRuntime, control: ControlRuntime) -> dic
 
 @dataclass
 class ControlRuntime:
-    """One explicit drive face over an articulation (§3.3).
+    """One explicit drive group over an articulation (§3.3).
 
     Attributes:
         name: the control name within its articulation; with
             :attr:`articulation` it is the authoritative control identity
             (``env.controls`` is keyed by that ``(articulation, name)`` pair).
-        action_face: action-group identity within the articulation
-            (kept until Stage A4); it always equals ``name`` today.
+            It is also the action-group identity.
         role: explicit body/aux selection marker (``body`` | ``aux``),
             copied from the owning :class:`OrderedActionGroup`.
-        adapter: the adapter instance name that drives this face.
+        adapter: the adapter instance name that drives this group.
         articulation: the owning articulation name.
-        joint_names: joints owned by this face, in action order.
+        joint_names: joints owned by this group, in action order.
         q0: default positions aligned with ``joint_names`` (torch float32).
         drive: one of :data:`unigym.runtime.controls.CONTROL_DRIVES`, derived
             from the action target plus the resolved actuation law.
@@ -283,11 +282,10 @@ class ControlRuntime:
         source: provenance of the resolved joints.
         joint_set: always ``None`` (the action surface declares explicit
             joints; the field remains for the plan projection until A4).
-        prop: True for an articulated-prop servo face.
+        prop: True for an articulated-prop servo group.
     """
 
     name: str
-    action_face: str
     adapter: str
     articulation: str
     joint_names: tuple[str, ...]
@@ -307,7 +305,7 @@ class ControlRuntime:
     role: str = "aux"
 
     def __post_init__(self):
-        for key in ("name", "action_face", "adapter", "articulation"):
+        for key in ("name", "adapter", "articulation"):
             value = getattr(self, key)
             if not value:
                 raise ControlError(f"control runtime {self.name!r} {key} must be non-empty")
@@ -473,7 +471,6 @@ def _declared_control_runtime(
     drive = drive_for_target_laws(group.target, laws, what=what)
     return ControlRuntime(
         name=group.name,
-        action_face=group.name,
         adapter=adapter,
         articulation=group.articulation,
         joint_names=tuple(group.joints),
@@ -501,7 +498,7 @@ def _law_by_joint(
 
 @dataclass(frozen=True)
 class ResolvedControl:
-    """One build-time resolved control face (the read-only plan row).
+    """One build-time resolved control group (the read-only plan row).
 
     Every joint name here is a neutral ``unigym_name`` (§2.4): the
     backend name map never appears on this surface.
@@ -769,7 +766,7 @@ def build_control_runtimes(
     the resolved actuation law, and ``q0`` comes from joint/profile defaults.
     ``control_dt`` mirrors the binding's declared period, falling back to
     ``default_control_dt`` (the adapter's period) when the binding omits it.
-    There is no face-name inference and no implicit extra group.
+    There is no group-name inference and no implicit extra group.
 
     Args:
         action_spec: the run's ordered action groups (``RunSpec.action_spec``).

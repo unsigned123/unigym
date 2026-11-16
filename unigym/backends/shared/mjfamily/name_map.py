@@ -152,7 +152,7 @@ class MjComposition:
 
 @dataclass(frozen=True)
 class MjControlBinding:
-    """Backend-private binding of one control face (§6.4).
+    """Backend-private binding of one control group (§6.4).
 
     ``ControlRuntime.joint_names`` stays the neutral ``unigym_name`` tuple;
     this row carries the compiled names and addresses the step loop writes.

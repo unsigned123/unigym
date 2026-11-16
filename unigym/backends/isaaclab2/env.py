@@ -285,9 +285,9 @@ def _configure_robot_scene(
             "isaaclab2 backend: a run must declare at least one articulation "
             "with an ArticulationCfg realization"
         )
-    # The body action term name is the body control's action face (kept as a
-    # legacy backend term identity).  Resolve the body group from its explicit
-    # role instead of inferring it from the articulation name.
+    # The body action term name is the body control's action-group name (kept
+    # as a legacy backend term identity).  Resolve the body group from its
+    # explicit role instead of inferring it from the articulation name.
     single_name = ars[0].name if ars else None
     body_controls = [
         control
@@ -307,10 +307,10 @@ def _configure_robot_scene(
             f"role): {accepted}"
         )
     body_control = body_controls[0]
-    term_name = str(body_control.action_face)
+    term_name = str(body_control.name)
     if not term_name.isidentifier():
         raise ValueError(
-            f"isaaclab2 backend: action face {term_name!r} of articulation "
+            f"isaaclab2 backend: action group {term_name!r} of articulation "
             f"{body_control.articulation!r} is not a valid action-term name"
         )
     # Keep the joint list source unchanged: the profile's declared body order
@@ -355,13 +355,13 @@ def _configure_robot_scene(
                     preserve_order=True,
                 ),
             )
-    # profile-declared extra NamedAction faces (the G1 "hand"
-    # dex3 finger face on with-hand assets) -- one preserve_order term
+    # profile-declared extra action sets (the G1 "hand"
+    # dex3 finger set on with-hand assets) -- one preserve_order term
     # per declared entry, field name == the NamedAction entry key
     # (declaration-becomes-capability, same rule as the prop terms
-    # above).  ``None`` (a profile without extra action faces)
+    # above).  ``None`` (a profile without extra action sets)
     # leaves the action surface untouched.
-    for term_name, term_joints in (robot_profile.action_faces or {}).items():
+    for term_name, term_joints in (robot_profile.extra_action_sets or {}).items():
         if hasattr(cfg.actions, term_name):
             raise ValueError(
                 f"extra action entry {term_name!r} collides with an " f"existing action term name"
@@ -399,14 +399,15 @@ class _IsaaclabSceneCfg(InteractiveSceneCfg):
 
 @configclass
 class _IsaaclabActionsCfg:
-    """Action faces created dynamically from the run's controls.
+    """Action groups created dynamically from the run's controls.
 
     The single-articulation path creates the body term under the body
-    control's action face; the partitioned path creates one term per control
-    face in :mod:`articulation_runtime`.  Extra faces (hands, articulated
-    props) are added the same way.  ``preserve_order=True`` keeps the term
-    input dim ``i == joint_names[i]``, which is what makes the NamedAction
-    name addressing trivially correct (IsaaclabJointResolver contract).
+    control's action-group name; the partitioned path creates one term per
+    control group in :mod:`articulation_runtime`.  Extra action sets (hands,
+    articulated props) are added the same way.  ``preserve_order=True`` keeps
+    the term input dim ``i == joint_names[i]``, which is what makes the
+    NamedAction name addressing trivially correct (IsaaclabJointResolver
+    contract).
     """
 
 

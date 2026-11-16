@@ -73,7 +73,7 @@ Planned coverage:
 - named-action step / obs / extra;
 - reset subset and reset-all;
 - model IR topology;
-- action-face and kind failure paths;
+- action-group and kind failure paths;
 - close lifecycle;
 - G1 contact-all per-body sensor rows (nested finger links, merged palms
   excluded);

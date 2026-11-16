@@ -21,14 +21,14 @@ layer without MuJoCo, IsaacLab, MJWarp, assets, network, subprocesses or a GPU.
 
 Boundary: one articulation `arm` with a configurable identity joint list
 (default one joint `shoulder`); one body control group `body` driving that
-articulation (`position_pd` / `position`). The action face is the articulation
-name `arm`, because the contract body-face rule is
-`action_face == articulation`.
+articulation (`position_pd` / `position`). The action-group name is the
+articulation name `arm`, because the contract body-group rule is
+`name == articulation`.
 
 Behavior:
 
 - `step(actions, raw_action=None, cmd=None)` consumes `dict[str, NamedAction]`,
-  requires the named action face, validates kind/batch/joint coverage and
+  requires the named action group, validates kind/batch/joint coverage and
   replaces the scalar joint position with the target. `raw_action` is copied to
   `obs_cache["prev_action"]`; `cmd`, when supplied, is copied to
   `obs_cache["command"]`.

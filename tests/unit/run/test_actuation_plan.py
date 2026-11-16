@@ -20,7 +20,7 @@ def _profile(name: str = "arm", sets: dict | None = None) -> RobotProfile:
         joint_sets=({"body": ("shoulder", "elbow")} if sets is None else sets),
         default_joint_pos={},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},

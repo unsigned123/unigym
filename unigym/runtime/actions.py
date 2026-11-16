@@ -177,7 +177,7 @@ class OrderedActionGroup:
     """One named, declaration-ordered action group of an articulation.
 
     Attributes:
-        name: action-face name (unique per articulation).
+        name: action-group name (unique per articulation).
         articulation: owning articulation name.
         joints: joint names in declaration order (stored as a tuple).
         target: legal action kind (see :data:`LEGAL_ACTION_KINDS`).

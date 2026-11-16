@@ -637,7 +637,7 @@ Robot definitions are backend-neutral authoring data. A profile factory returns
 ```text
 joint_sets / default_joint_pos
 assets (AssetRef: usd | mjcf | urdf refs, or None)
-action_faces
+extra_action_sets
 base_body / foot_bodies / body_sets   (canonical body ids)
 body_bindings                          (canonical id -> per-format native name)
 base_height                            (free-base spawn height, or None)
@@ -859,7 +859,7 @@ assets:
 - required: `schema` (exactly `unigym.robot/1`), `name`, `joint_sets`,
   `default_joint_pos`;
 - optional: `base_body`, `base_height`, `foot_bodies`, `body_sets`,
-  `body_bindings`, `assets`, `action_faces`, `full_joint_order`;
+  `body_bindings`, `assets`, `extra_action_sets`, `full_joint_order`;
 - only top-level unknown keys fail; `body_bindings.<id>.<format>` is data, not
   a top-level field;
 - `body_bindings` builds `BodyBinding(canonical=<key>, names=<value>)`;
@@ -867,7 +867,8 @@ assets:
   `pack:` reference stays an unresolved string; `assets: null` and an omitted
   key both become `None`;
 - every other invariant stays with `RobotProfile`; errors name the file, the
-  field and the expected/actual form.
+  field and the expected/actual form. The legacy `action_faces` key is
+  rejected with a teaching error naming `extra_action_sets` (no alias).
 
 The loader imports `yaml` but never an engine, a backend or pack Python. It
 does not know the provider item id; the pack resource provider enforces

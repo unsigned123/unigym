@@ -42,7 +42,7 @@ def _handle(
         joint_sets={"body": tuple(joints)},
         default_joint_pos={joint: 0.0 for joint in joints},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

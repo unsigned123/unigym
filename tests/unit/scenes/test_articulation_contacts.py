@@ -227,7 +227,7 @@ def test_contact_body_id_errors_carry_group_field_context():
 
 
 def test_contact_inventory_serializes_bodies_and_body_set_groups():
-    """v4 metadata serializes each group as bodies or body_set."""
+    """v5 metadata serializes each group as bodies or body_set."""
     inventory = ContactSensorInventory(
         mode="declared",
         groups=(

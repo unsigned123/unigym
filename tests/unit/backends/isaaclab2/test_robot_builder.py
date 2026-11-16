@@ -74,7 +74,7 @@ def _profile(*, name="arm", assets=_DEFAULT_ASSETS):
         joint_sets={"body": ("joint",)},
         default_joint_pos={"joint": 0.25},
         assets=assets,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},

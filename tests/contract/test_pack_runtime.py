@@ -337,7 +337,7 @@ _ROBOT_SOURCE = (
     "        joint_sets={'body': ('shoulder',)},\n"
     "        default_joint_pos={'shoulder': 0.0},\n"
     "        assets=None,\n"
-    "        action_faces={},\n"
+    "        extra_action_sets={},\n"
     "        base_body=None,\n"
     "        foot_bodies=(),\n"
     "        body_sets={},\n"
@@ -723,7 +723,7 @@ def test_manifest_robot_provider_rejects_an_already_registered_name(tmp_path: Pa
             joint_sets={"body": ("shoulder",)},
             default_joint_pos={"shoulder": 0.0},
             assets=None,
-            action_faces={},
+            extra_action_sets={},
             base_body=None,
             foot_bodies=(),
             body_sets={},
@@ -800,7 +800,7 @@ def test_entrypoint_registered_robot_does_not_appear_in_the_handle(tmp_path: Pat
         "        joint_sets={'body': ('shoulder',)},\n"
         "        default_joint_pos={'shoulder': 0.0},\n"
         "        assets=None,\n"
-        "        action_faces={},\n"
+        "        extra_action_sets={},\n"
         "        base_body=None,\n"
         "        foot_bodies=(),\n"
         "        body_sets={},\n"
@@ -967,7 +967,7 @@ def test_mixed_adapter_robot_and_scene_failure_rolls_back_every_registry(
         "        joint_sets={'body': ('shoulder',)},\n"
         "        default_joint_pos={'shoulder': 0.0},\n"
         "        assets=None,\n"
-        "        action_faces={},\n"
+        "        extra_action_sets={},\n"
         "        base_body=None,\n"
         "        foot_bodies=(),\n"
         "        body_sets={},\n"
@@ -979,7 +979,7 @@ def test_mixed_adapter_robot_and_scene_failure_rolls_back_every_registry(
         "        joint_sets={'body': ('shoulder',)},\n"
         "        default_joint_pos={'shoulder': 0.0},\n"
         "        assets=None,\n"
-        "        action_faces={},\n"
+        "        extra_action_sets={},\n"
         "        base_body=None,\n"
         "        foot_bodies=(),\n"
         "        body_sets={},\n"

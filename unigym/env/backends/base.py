@@ -37,9 +37,9 @@ Attributes:
     values are ``(N, dim)`` tensors on ``device``, refreshed every step.
 ``controls: Mapping[tuple[str, str], ControlRuntime]``
     The ONLY per-control surface (v104.2): one runtime per explicit drive
-    face, keyed by the authoritative ``(articulation, name)`` identity -- a
+    group, keyed by the authoritative ``(articulation, name)`` identity -- a
     bare group name is NOT a key (two articulations may both declare
-    ``legs``).  Each runtime carries ``name`` / ``action_face`` / ``adapter``
+    ``legs``).  Each runtime carries ``name`` / ``adapter``
     / ``articulation`` / ``joint_names`` / ``q0`` / ``drive`` / ``target``.
 ``articulations: Mapping[str, ArticulationRuntime]``
     One runtime per declared articulation (``joint_names`` / ``q0`` /
@@ -454,7 +454,6 @@ def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
     for key, rt in controls.items():
         for member in (
             "name",
-            "action_face",
             "adapter",
             "articulation",
             "joint_names",
@@ -586,7 +585,7 @@ def assert_backend_contract(
             NamedAction.zeros(
                 n,
                 rt.articulation,
-                rt.action_face,
+                rt.name,
                 list(rt.joint_names),
                 rt.target,
                 device=env.device,

@@ -144,7 +144,7 @@ def add_free_articulation_body(mjspec, handler) -> None:
     (that freejoint is the prop's live dof; the declared table covers
     the INTERNAL joints only, and the freejoint name is not declarable).
     Declared-narrowing v1: passive-only (an ``actuated`` internal joint
-    fails fast -- the free-root servo/action face is unexercised) and
+    fails fast -- the free-root servo/action group is unexercised) and
     no latch (same isaaclab-only rejection as the anchored build).
     """
     import mujoco
@@ -202,7 +202,7 @@ def add_free_articulation_body(mjspec, handler) -> None:
     if actuated:
         raise ValueError(
             f"free_articulation prop {spec.name!r}: passive-only in v1 "
-            f"(got actuated {actuated} -- the free-root servo/action face "
+            f"(got actuated {actuated} -- the free-root servo/action group "
             f"is unexercised scope)"
         )
     # pre-attach: config damping / optional declared range onto the

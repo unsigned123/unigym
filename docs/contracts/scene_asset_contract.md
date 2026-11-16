@@ -55,7 +55,7 @@ Each asset instance is **one rigid root body**:
 
 The `pose` is initial placement only. Static assets do not move; dynamic
 assets move under physics but are not re-placed on reset. There is no
-prop-manager lifecycle, reset state, action face, contact group, sensor target
+prop-manager lifecycle, reset state, action group, contact group, sensor target
 or `object/<name>` record key for a scene asset.
 
 ### Pose placement

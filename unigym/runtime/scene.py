@@ -171,7 +171,7 @@ def joint_limit_rows(
 
     ``names``: ordered joint names -- ALL ACTUATED robot joints for the
     robot face (the full articulation table, hands
-    included -- the 29-joint policy table is a subset the action face
+    included -- the 29-joint policy table is a subset the action group
     carries; contract §1.23).
     ``limits``: ``{name: (lo, hi) | None}`` from the backend's model
     face; ``None`` = the engine does not limit the joint (or the

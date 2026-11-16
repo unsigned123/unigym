@@ -73,7 +73,7 @@ def _build_env(
         joint_sets={"body": JOINT_ORDER},
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body=None,
         foot_bodies=(),
         body_sets={},

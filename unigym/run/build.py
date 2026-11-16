@@ -245,8 +245,8 @@ class _RunMeta(TypedDict, total=False):
     obs_catalog: dict[str, JsonValue] | None
 
 
-DATA_SCHEMA_VERSION = 4
-"""The run data schema version (v4: neutral body/contact facts)."""
+DATA_SCHEMA_VERSION = 5
+"""The run data schema version (v5: neutral body/contact facts)."""
 
 
 def _config_int(value: JsonValue) -> int:
@@ -1658,12 +1658,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
         # articulated-prop action groups are declared by ``objects:`` sugar and
         # materialized by the backend as prop control runtimes; the emitting
         # adapter owns them (the config's action_spec cannot name them).
-        prop_faces = tuple(
+        prop_groups = tuple(
             control_key(control) for control in (env.controls or {}).values() if control.prop
         )
-        if prop_faces:
+        if prop_groups:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))
-            env.adapter_groups[spec.adapter_name] = owned + prop_faces
+            env.adapter_groups[spec.adapter_name] = owned + prop_groups
     sampler = built["sampler"]
     policy_dt = built["policy_dt"]
     total_steps, bench_cfg, task_meta = _apply_benchmark_budget(
@@ -1721,7 +1721,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "policy_dt": policy_dt,
         "episode_length_s": episode_length_s,
         "episode_length_range": [dur_lo, dur_hi],
-        # v4 data schema: neutral per-articulation body/contact facts
+        # v5 data schema: neutral per-articulation body/contact facts
         # (no body_parts, no foot_names, no foot-derived records).
         "schema_version": DATA_SCHEMA_VERSION,
         "articulations": {

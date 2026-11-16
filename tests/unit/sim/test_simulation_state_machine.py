@@ -38,7 +38,7 @@ def _handle(owner: object, name: str = "arm", face: str = "arm") -> Articulation
         joint_sets={"body": joints},
         default_joint_pos={"shoulder": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

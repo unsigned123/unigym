@@ -16,7 +16,7 @@ body_bindings:
     mjcf: base
   left_foot:
     mjcf: left_foot
-action_faces: {}
+extra_action_sets: {}
 full_joint_order:
   - shoulder
   - elbow

@@ -311,7 +311,7 @@ class UsdArticulationProp(PropArticulation):
     """``type: usd_articulation`` : native USD articulation.
 
     Same declared surfaces as :class:`PropArticulation` (joints/latch/
-    state/action faces are inherited unchanged); only the spawn builder
+    state/action groups are inherited unchanged); only the spawn builder
     differs -- the USD is loaded AS AUTHORED via ``UsdFileCfg`` with
     ``fix_root_link`` anchoring, so the asset's embedded revolute joints,
     limits and joint friction come with the file (the HumanoidArena

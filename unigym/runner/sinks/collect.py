@@ -64,7 +64,7 @@ def _record_key(key: str) -> str:
 
 
 def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[NamedAction, str, str]]:
-    """Canonical ``(entry, record_column, face_key)`` triples, in identity order.
+    """Canonical ``(entry, record_column, group_key)`` triples, in identity order.
 
     The action-group contract is addressed by ``(articulation, group)``, so
     the incoming sequence order is NOT semantic: entries are sorted by that
@@ -87,15 +87,15 @@ def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[Name
     out: list[tuple[NamedAction, str, str]] = []
     for na in ordered:
         if counts[na.group] == 1:
-            face_key = na.group
+            group_key = na.group
         else:
-            face_key = f"{na.articulation}/{na.group}"
-        out.append((na, f"action_target/{face_key}", face_key))
+            group_key = f"{na.articulation}/{na.group}"
+        out.append((na, f"action_target/{group_key}", group_key))
     return out
 
 
-def action_face_contract(targets: Sequence[NamedAction]) -> list:
-    """The action-face contract (playback v3) as data.
+def action_group_contract(targets: Sequence[NamedAction]) -> list:
+    """The action-group contract (playback v3) as data.
 
     One ``{key, column, articulation, group, joint_names, kind}`` entry per
     NamedAction group, canonicalized by ``(articulation, group)`` -- captured
@@ -106,21 +106,21 @@ def action_face_contract(targets: Sequence[NamedAction]) -> list:
     when the group name is not unique across articulations); there is no
     primary entry.
 
-    The sink writes this into ``meta.json`` (``action_faces``) on its
-    first recorded step; shard playback validates every face against
+    The sink writes this into ``meta.json`` (``action_groups``) on its
+    first recorded step; shard playback validates every group against
     it and constructs the NamedActions from it.  Old shards without the
     key are rejected explicitly (pre-playback re-record).
     """
     return [
         {
-            "key": face_key,
+            "key": group_key,
             "column": column,
             "articulation": na.articulation,
             "group": na.group,
             "joint_names": list(na.joint_names),
             "kind": na.kind,
         }
-        for na, column, face_key in _canonical_action_entries(targets)
+        for na, column, group_key in _canonical_action_entries(targets)
     ]
 
 
@@ -192,10 +192,10 @@ class CollectSink:
         self.episode_length_s = episode_length_s
         self.dur_lo, self.dur_hi = dur_lo, dur_hi
         self.command_dim = command_dim
-        # playback: the action-face contract, captured ONCE from the
+        # playback: the action-group contract, captured ONCE from the
         # actual first-step routing and written into the writer's meta
         # (lands in meta.json with the first flush); None until then
-        self._action_faces: list | None = None
+        self._action_groups: list | None = None
         # per-env episode buffer (only when filters active)
         self.ep_bufs: list[list[dict]] = (
             [[] for _ in range(self.num_envs)] if self.filter_active else []
@@ -227,21 +227,21 @@ class CollectSink:
         # one column per NamedAction group: action_target/<group> (v103.5;
         # no primary, no action_target_<group> suffix form).  The canonical
         # (articulation, group) order makes sequence order irrelevant.
-        for na, column, _face_key in _canonical_action_entries(targets):
+        for na, column, _group_key in _canonical_action_entries(targets):
             rec[column] = na.values
         # playback contract (single source of truth on disk): capture
-        # the faces from THIS step's actual routing once, then hold every
-        # later step to it -- a mid-run face change would make the
+        # the groups from THIS step's actual routing once, then hold every
+        # later step to it -- a mid-run group change would make the
         # recorded contract a lie, so it fail-fasts instead
-        faces = action_face_contract(targets)
-        if self._action_faces is None:
-            self._action_faces = faces
-            self.writer.meta["action_faces"] = faces
-        elif faces != self._action_faces:
+        groups = action_group_contract(targets)
+        if self._action_groups is None:
+            self._action_groups = groups
+            self.writer.meta["action_groups"] = groups
+        elif groups != self._action_groups:
             raise ValueError(
-                f"action faces changed mid-run: {faces} != "
-                f"{self._action_faces} -- the recorded meta contract "
-                f"(action_faces) would not describe the shard stream"
+                f"action groups changed mid-run: {groups} != "
+                f"{self._action_groups} -- the recorded meta contract "
+                f"(action_groups) would not describe the shard stream"
             )
         # P11: recovery-switching adapters expose their per-env switch state
         in_recovery = getattr(self.adapter, "in_recovery", None)
@@ -378,7 +378,7 @@ class CollectSink:
             "policy_dt": self.policy_dt,
             "episode_length_s": self.episode_length_s,
             "episode_length_range": [self.dur_lo, self.dur_hi],
-            # per-articulation neutral facts (v4; no flat primary order)
+            # per-articulation neutral facts (v5; no flat primary order)
             "articulations": {
                 rt.articulation: articulation_facts(self.env.articulations[rt.articulation], rt)
                 for rt in _policy_runtimes(self.env)

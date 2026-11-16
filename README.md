@@ -82,7 +82,7 @@ runner = ExternalRunner.from_instance(instance)   # adapter, env, sink, ...
 runner.step((
     NamedAction(
         articulation="robot",                     # owning articulation
-        group="body",                             # control group / action face
+        group="body",                             # control group / action group
         values=values,                            # (num_envs, len(joint_names))
         joint_names=("joint_a", "joint_b"),       # column order
         kind="position",

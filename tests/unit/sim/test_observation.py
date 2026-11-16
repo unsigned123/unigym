@@ -23,7 +23,7 @@ def _handle(
         joint_sets={"body": joints},
         default_joint_pos=q0,
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

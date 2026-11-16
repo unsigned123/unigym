@@ -2,7 +2,7 @@
 
 A :class:`RobotProfile` is authoring data only: named joint sets, the
 standby pose, the canonical base/feet/body-set facts, the per-format body
-bindings, declared assets and named action faces.  It carries no backend
+bindings, declared assets and named extra action sets.  It carries no backend
 object and no backend switch; a backend that needs an engine-specific
 realization builds it from this profile at its own boundary
 (``BackendInfo.robot_realizer``).
@@ -210,14 +210,14 @@ class RobotProfile:
         joint_sets: the named joint vocabulary
             (``{set_name: (joint names in action order)}``).  ``body`` is
             the primary policy/body order; extra sets (curated groups such
-            as ``legs`` / ``waist`` / ``arms`` and explicit faces such as
+            as ``legs`` / ``waist`` / ``arms`` and explicit named sets such as
             ``hand`` / ``right_hand``) are selected by name.
         default_joint_pos: joint name -> default angle (rad), i.e. the
             policy standby pose (must match the policy's q0 by name).
         assets: the neutral :class:`AssetRef` (or ``None`` when the asset is
             owned by a scene/pack resource).
-        action_faces: neutral named action surfaces beyond the primary body
-            face (``{face_name: (joint names in term input order)}``); this
+        extra_action_sets: neutral named action sets beyond the primary body
+            group (``{set_name: (joint names in term input order)}``); this
             is authoring data, not a backend capability.
         base_body: the canonical id of the robot's base link (``None`` when
             the robot declares none).
@@ -242,7 +242,7 @@ class RobotProfile:
     joint_sets: Mapping[str, tuple[str, ...]]
     default_joint_pos: Mapping[str, float]
     assets: AssetRef | None
-    action_faces: Mapping[str, tuple[str, ...]]
+    extra_action_sets: Mapping[str, tuple[str, ...]]
     base_body: CanonicalBodyId | None
     foot_bodies: tuple[CanonicalBodyId, ...]
     body_sets: Mapping[str, tuple[CanonicalBodyId, ...]]
@@ -263,14 +263,16 @@ class RobotProfile:
             sets[str(set_name)] = names
         if not sets:
             raise ValueError("RobotProfile must declare at least one joint set")
-        faces: dict[str, tuple[str, ...]] = {}
-        for face, joints in dict(self.action_faces or {}).items():
+        extra_sets: dict[str, tuple[str, ...]] = {}
+        for set_name, joints in dict(self.extra_action_sets or {}).items():
             names = tuple(str(joint) for joint in (joints or ()))
             if not names:
-                raise ValueError(f"RobotProfile action face {face!r} is empty")
+                raise ValueError(f"RobotProfile extra action set {set_name!r} is empty")
             if len(set(names)) != len(names):
-                raise ValueError(f"RobotProfile action face {face!r} contains duplicate names")
-            faces[str(face)] = names
+                raise ValueError(
+                    f"RobotProfile extra action set {set_name!r} contains duplicate names"
+                )
+            extra_sets[str(set_name)] = names
         full_order = self.full_joint_order
         if full_order is not None:
             full_order = tuple(str(joint) for joint in full_order)
@@ -328,7 +330,7 @@ class RobotProfile:
             {str(joint): float(value) for joint, value in default_pos.items()},
         )
         object.__setattr__(self, "assets", assets)
-        object.__setattr__(self, "action_faces", faces)
+        object.__setattr__(self, "extra_action_sets", extra_sets)
         object.__setattr__(self, "base_body", base_body)
         object.__setattr__(self, "foot_bodies", foot_bodies)
         object.__setattr__(self, "body_sets", body_sets)

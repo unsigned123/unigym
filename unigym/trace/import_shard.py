@@ -7,7 +7,7 @@ else passes through verbatim -- no cosmetic renames):
 
     obs                  -> obs/policy_frame   (the dataset policy frame)
     action_raw           -> action/raw
-    action_target/<face> -> action/target/<face> (v3, EVERY NamedAction face)
+    action_target/<group> -> action/target/<group> (v3, EVERY NamedAction group)
     action_target        -> action/target          (legacy v2 shard migration)
 
 Robot state keys are namespaced (``articulation/<name>/...`` in v3) and
@@ -125,7 +125,7 @@ def import_shard(run_dir: str | Path, out: str | Path, max_ticks: int | None = N
             "map_table": {
                 "obs": "obs/policy_frame",
                 "action_raw": "action/raw",
-                "action_target/<face>": "action/target/<face>",
+                "action_target/<group>": "action/target/<group>",
                 "(others)": "verbatim",
             },
             **({"skipped_non_array": skipped} if skipped else {}),

@@ -29,7 +29,7 @@ def _tiny_profile() -> RobotProfile:
         joint_sets={"body": ("shoulder", "elbow")},
         default_joint_pos={"shoulder": 0.0, "elbow": 0.0},
         assets=None,
-        action_faces={},
+        extra_action_sets={},
         base_body="base",
         foot_bodies=(),
         body_sets={},

@@ -37,7 +37,7 @@ def _named_action(env, values):
     )
     return NamedAction(
         control.articulation,
-        control.action_face,
+        control.name,
         tensor,
         control.joint_names,
         control.target,
@@ -88,7 +88,7 @@ def test_step_applies_named_action_and_passes_raw_action_through(env):
 
     action = NamedAction(
         control.articulation,
-        control.action_face,
+        control.name,
         values.clone(),
         control.joint_names,
         control.target,
@@ -118,7 +118,7 @@ def test_step_is_deterministic_for_same_state_and_actions(env):
     control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     action = NamedAction(
         control.articulation,
-        control.action_face,
+        control.name,
         values.clone(),
         control.joint_names,
         control.target,
