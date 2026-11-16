@@ -17,12 +17,40 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
 
 if TYPE_CHECKING:
     from unigym.runtime.actions import NamedAction
 
 __all__ = ["JointActionIndex", "JointSlot", "RoutedColumn"]
+
+
+class _ControlLike(Protocol):
+    """The physical control-row surface read by :meth:`JointActionIndex.from_controls`.
+
+    Only the attributes the helper consumes are declared; a control row never
+    exposes an action identity through this protocol.  Members are read-only so
+    a row storing ``joint_names`` as a tuple satisfies the protocol without a
+    mutable ``Sequence`` mismatch.
+    """
+
+    @property
+    def articulation(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def joint_names(self) -> Sequence[str]: ...
+
+    @property
+    def target(self) -> str: ...
+
+    @property
+    def required(self) -> bool: ...
+
+    @property
+    def prop(self) -> bool: ...
 
 
 def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
@@ -149,7 +177,12 @@ class JointActionIndex:
         }
 
     @classmethod
-    def from_controls(cls, controls: object, *, label: str) -> JointActionIndex:
+    def from_controls(
+        cls,
+        controls: Mapping[Any, _ControlLike] | Sequence[_ControlLike],
+        *,
+        label: str,
+    ) -> JointActionIndex:
         """Build the index from a physical control table.
 
         Controls are consumed in physical declaration order.  A mapping is
@@ -174,7 +207,7 @@ class JointActionIndex:
         label = _require_text(label, "JointActionIndex label")
         if isinstance(controls, Mapping):
             rows = tuple(controls.values())
-        elif _is_sequence(controls):
+        elif isinstance(controls, Sequence) and not isinstance(controls, (str, bytes)):
             rows = tuple(controls)
         else:
             raise TypeError(
