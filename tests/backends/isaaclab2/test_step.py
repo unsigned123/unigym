@@ -58,7 +58,9 @@ TWO_ENV_TENSOR_SHAPES = {
 
 
 def _zero_action(env):
-    return {ARTICULATION: NamedAction.zeros(env.num_envs, list(CART_JOINTS), "position")}
+    return (
+        NamedAction.zeros(env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS), "position"),
+    )
 
 
 def test_zero_action_advances_exactly_one_policy_step(cartpole_env):
@@ -105,62 +107,83 @@ def test_two_env_step_batches_every_extra_over_both_rows(two_env):
 
 @pytest.mark.parametrize("face", ["g1", "wrist"])
 def test_unknown_action_face_fails_fast(cartpole_env, face):
-    """An action entry naming no control face is rejected with the accepted faces."""
-    entry = NamedAction.zeros(cartpole_env.num_envs, list(CART_JOINTS), "position")
+    """An action group naming no control group is rejected with the accepted groups."""
+    entry = NamedAction.zeros(
+        cartpole_env.num_envs, ARTICULATION, face, list(CART_JOINTS), "position"
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        cartpole_env.step({face: entry})
+        cartpole_env.step((entry,))
 
     message = str(excinfo.value)
     assert face in message
-    assert f"accepted action faces: ['{ARTICULATION}']" in message
+    assert f"accepted control groups: [('{ARTICULATION}', '{ARTICULATION}')]" in message
 
 
 def test_missing_action_entry_fails_fast(cartpole_env):
     """Leaving a required control unaddressed is rejected."""
     with pytest.raises(ValueError) as excinfo:
-        cartpole_env.step({})
+        cartpole_env.step(())
 
     message = str(excinfo.value)
-    assert "leave controls unaddressed" in message
-    assert f"['{ARTICULATION}']" in message
+    assert "leave control groups unaddressed" in message
+    assert f"('{ARTICULATION}', '{ARTICULATION}')" in message
 
 
 def test_action_kind_mismatch_fails_fast(cartpole_env):
     """A legal action kind that disagrees with the control target is rejected."""
-    entry = NamedAction.zeros(cartpole_env.num_envs, list(CART_JOINTS), "torque")
+    entry = NamedAction.zeros(
+        cartpole_env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS), "torque"
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        cartpole_env.step({ARTICULATION: entry})
+        cartpole_env.step((entry,))
 
     message = str(excinfo.value)
-    assert f"action entry '{ARTICULATION}'" in message
+    assert f"action group ('{ARTICULATION}', '{ARTICULATION}')" in message
     assert "kind 'torque'" in message
     assert f"control '{ARTICULATION}' expects target 'position'" in message
 
 
 def test_wrong_env_row_count_fails_fast(cartpole_env):
     """An entry with the wrong batch height is rejected against num_envs."""
-    entry = NamedAction.zeros(cartpole_env.num_envs + 1, list(CART_JOINTS), "position")
+    entry = NamedAction.zeros(
+        cartpole_env.num_envs + 1,
+        ARTICULATION,
+        ARTICULATION,
+        list(CART_JOINTS),
+        "position",
+    )
 
     with pytest.raises(ValueError, match=r"has 2 env rows, expected 1"):
-        cartpole_env.step({ARTICULATION: entry})
+        cartpole_env.step((entry,))
 
 
 def test_wrong_joint_count_fails_fast(cartpole_env):
     """An entry addressing fewer joints than the action term is rejected."""
-    entry = NamedAction.zeros(cartpole_env.num_envs, list(CART_JOINTS[:1]), "position")
+    entry = NamedAction.zeros(
+        cartpole_env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS[:1]), "position"
+    )
 
-    with pytest.raises(ValueError, match=r"addresses 1 joints but term 'cartpole' covers 2"):
-        cartpole_env.step({ARTICULATION: entry})
+    with pytest.raises(
+        ValueError,
+        match=r"addresses 1 joints but term 'cartpole' covers 2",
+    ):
+        cartpole_env.step((entry,))
 
 
 def test_unknown_joint_name_fails_fast(cartpole_env):
     """An entry column naming a joint the action term does not own is rejected."""
-    entry = NamedAction.zeros(cartpole_env.num_envs, [CART_JOINTS[0], "wrist"], "position")
+    entry = NamedAction.zeros(
+        cartpole_env.num_envs,
+        ARTICULATION,
+        ARTICULATION,
+        [CART_JOINTS[0], "wrist"],
+        "position",
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        cartpole_env.step({ARTICULATION: entry})
+        cartpole_env.step((entry,))
 
     message = str(excinfo.value)
     assert "unknown joint name(s) ['wrist']" in message

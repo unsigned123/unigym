@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -62,14 +63,14 @@ def _record_key(key: str) -> str:
     return key
 
 
-def action_face_contract(targets: dict[str, NamedAction]) -> list:
+def action_face_contract(targets: Sequence[NamedAction]) -> list:
     """The action-face contract (playback v3) as data.
 
-    One ``{key, column, joint_names}`` entry per NamedAction face,
-    in routing order -- captured from the actual per-step targets
-    (zero inference: names and widths come from the entries themselves,
-    never from family constants).  Every column is
-    ``action_target/<face>``; there is no primary entry.
+    One ``{key, column, joint_names}`` entry per NamedAction group, in
+    sequence order -- captured from the actual per-step targets (zero
+    inference: names and widths come from the entries themselves, never
+    from family constants).  Every column is ``action_target/<group>``;
+    there is no primary entry.
 
     The sink writes this into ``meta.json`` (``action_faces``) on its
     first recorded step; shard playback validates every face against
@@ -78,12 +79,12 @@ def action_face_contract(targets: dict[str, NamedAction]) -> list:
     """
     return [
         {
-            "key": key,
-            "column": f"action_target/{key}",
+            "key": na.group,
+            "column": f"action_target/{na.group}",
             "joint_names": list(na.joint_names),
             "kind": na.kind,
         }
-        for key, na in targets.items()
+        for na in targets
     ]
 
 
@@ -187,10 +188,10 @@ class CollectSink:
             rec[_record_key(k)] = v
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
-        # one column per NamedAction face: action_target/<face> (v103.5;
-        # no primary, no action_target_<face> suffix form)
-        for key, na in targets.items():
-            rec[f"action_target/{key}"] = na.values
+        # one column per NamedAction group: action_target/<group> (v103.5;
+        # no primary, no action_target_<group> suffix form)
+        for na in targets:
+            rec[f"action_target/{na.group}"] = na.values
         # playback contract (single source of truth on disk): capture
         # the faces from THIS step's actual routing once, then hold every
         # later step to it -- a mid-run face change would make the

@@ -51,13 +51,16 @@ def test_duplicate_face_is_refused_and_keeps_the_first_entry(tmp_path: Path) -> 
 
     assert pending.faces() == frozenset({"a"})
     lowered = pending.lower()
-    assert lowered["a"].values is first.values
-    assert lowered["a"].values.shape == (2, 2)
-    assert torch.equal(lowered["a"].values, first.values)
+    assert len(lowered) == 1
+    assert lowered[0].articulation == "a"
+    assert lowered[0].group == "a"
+    assert lowered[0].values is first.values
+    assert lowered[0].values.shape == (2, 2)
+    assert torch.equal(lowered[0].values, first.values)
 
 
 def test_lower_preserves_staging_order_and_binding_columns(tmp_path: Path) -> None:
-    """Lowering keeps insertion order and the binding's names/kind per face."""
+    """Lowering keeps insertion order and the binding's names/kind per group."""
     pack_set, ref = write_sim_pack(tmp_path)
     bindings = _bindings(pack_set, ref)
     pending = PendingActions()
@@ -66,14 +69,16 @@ def test_lower_preserves_staging_order_and_binding_columns(tmp_path: Path) -> No
 
     lowered = pending.lower()
 
-    assert list(lowered) == ["b", "a"]
-    assert lowered["a"].joint_names == list(bindings["a"].joint_names)
-    assert lowered["a"].kind == "position"
-    assert torch.equal(lowered["a"].values, torch.tensor([[0.3, 0.4]]))
+    assert [entry.group for entry in lowered] == ["b", "a"]
+    by_group = {entry.group: entry for entry in lowered}
+    assert by_group["a"].articulation == "a"
+    assert by_group["a"].joint_names == bindings["a"].joint_names
+    assert by_group["a"].kind == "position"
+    assert torch.equal(by_group["a"].values, torch.tensor([[0.3, 0.4]]))
 
 
 def test_clear_drops_every_face_and_empty_lowers_to_empty(tmp_path: Path) -> None:
-    """Clear empties the table; an empty table lowers to an empty dict."""
+    """Clear empties the table; an empty table lowers to an empty tuple."""
     pack_set, ref = write_sim_pack(tmp_path)
     bindings = _bindings(pack_set, ref)
     pending = PendingActions()
@@ -82,4 +87,4 @@ def test_clear_drops_every_face_and_empty_lowers_to_empty(tmp_path: Path) -> Non
     pending.clear()
 
     assert pending.faces() == frozenset()
-    assert pending.lower() == {}
+    assert pending.lower() == ()

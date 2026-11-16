@@ -242,6 +242,8 @@ class WatchContext:
         targets = self.bundle.get("targets")
         if isinstance(targets, dict):
             out += [f"action/{k}" for k in targets]
+        elif targets is not None:
+            out += [f"action/{entry.group}" for entry in targets]
         if "raw" in self.bundle:
             out.append("action/raw")
         return sorted(set(out))
@@ -271,7 +273,13 @@ class WatchContext:
             return self.bundle.get("raw")
         elif name.startswith("action/"):
             targets = self.bundle.get("targets")
-            na = targets.get(name[7:]) if isinstance(targets, dict) else None
+            if isinstance(targets, dict):
+                na = targets.get(name[7:])
+            else:
+                na = next(
+                    (entry for entry in (targets or ()) if entry.group == name[7:]),
+                    None,
+                )
             if na is None:
                 raise WatchError(f"unknown key {name!r} (available: {self.keys()})", self.keys())
             return getattr(na, "values", na)

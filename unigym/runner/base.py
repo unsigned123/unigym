@@ -43,15 +43,15 @@ class Runner(Protocol):
 
     def tick(
         self,
-        actions_override: dict[str, NamedAction] | None = None,
+        actions_override: Sequence[NamedAction] | None = None,
     ) -> StepResult:
         """Advance exactly one policy tick.
 
         Args:
-            actions_override: Optional external-driver action dict.  When
+            actions_override: Optional external-driver action sequence.  When
                 supplied the adapter forward/postprocess is skipped and the
-                named actions go straight to the env step; ``None`` runs the
-                adapter-driven path.
+                self-describing actions go straight to the env step; ``None``
+                runs the adapter-driven path.
         """
         ...
 

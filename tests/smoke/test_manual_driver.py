@@ -135,7 +135,7 @@ def _make_env(tmp_path):
         profiles={"tiny": profile},
         actuation_plans=actuation_plans,
     )
-    env.adapter_groups = {"manual": ("tiny",)}
+    env.adapter_groups = {"manual": (("tiny", "tiny"),)}
     return env, adapter
 
 
@@ -161,11 +161,15 @@ def _runner(env, adapter, sink):
 
 
 def _action(value):
-    return {
-        "tiny": NamedAction(
-            torch.tensor([[value]], dtype=torch.float32), ["hinge"], kind="position"
-        )
-    }
+    return (
+        NamedAction(
+            articulation="tiny",
+            group="tiny",
+            values=torch.tensor([[value]], dtype=torch.float32),
+            joint_names=("hinge",),
+            kind="position",
+        ),
+    )
 
 
 def test_manual_adapter_act_is_a_loud_error():

@@ -70,7 +70,7 @@ class FakeRunner:
         )
         self.fail_next_tick = False
         self.reset_t: int | None = None
-        self.last_actions: dict[str, NamedAction] | None = None
+        self.last_actions: tuple[NamedAction, ...] | None = None
         self.cache_extra: dict[str, object] = {}
         self.terminated_rows = _row_ids(terminated_rows, num_envs, "terminated_rows")
         self.due_rows = _row_ids(due_rows, num_envs, "due_rows")
@@ -82,17 +82,17 @@ class FakeRunner:
         """Policy ticks completed so far."""
         return self._ticks
 
-    def step(self, actions: dict[str, NamedAction]) -> StepResult:
+    def step(self, actions: Sequence[NamedAction]) -> StepResult:
         """Advance one tick with caller-supplied named actions."""
         return self.tick(actions_override=actions)
 
-    def tick(self, actions_override: dict[str, NamedAction] | None = None) -> StepResult:
-        """Advance one tick; the external action dict is required."""
+    def tick(self, actions_override: Sequence[NamedAction] | None = None) -> StepResult:
+        """Advance one tick; the external action sequence is required."""
         if self._closed:
             raise RuntimeError("FakeRunner is closed")
         if actions_override is None:
             raise RuntimeError("FakeRunner has no adapter path; pass named actions")
-        self.last_actions = dict(actions_override)
+        self.last_actions = tuple(actions_override)
         if self.fail_next_tick:
             self.fail_next_tick = False
             self._ticks += 1

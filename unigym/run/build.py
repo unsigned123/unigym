@@ -353,28 +353,29 @@ def _body_control_for(env: EnvBackend, articulation: str) -> ControlRuntime:
     raise RuntimeError(f"articulation {articulation!r} has no control face")
 
 
-def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[str, ...]]:
-    """``{adapter_name: tuple[group_name, ...]}`` from ``RunSpec.controls``.
+def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[tuple[str, str], ...]]:
+    """``{adapter_name: tuple[(articulation, group), ...]}`` from controls.
 
     This is the authoritative control partition: the config's
-    ``controls[]`` names exactly which control group each adapter drives.
-    One group cannot be claimed by two adapters; profile-derived extra faces
-    and articulated props are NOT implicitly added here (an adapter that
-    emits them must have them declared as control groups).
+    ``controls[]`` names exactly which action group each adapter drives.
+    Group identity is ``(articulation, name)``.  One group cannot be claimed
+    by two adapters; profile-derived extra faces and articulated props are
+    NOT implicitly added here (an adapter that emits them must have them
+    declared as control groups).
     """
-    groups: dict[str, list[str]] = {}
-    owners: dict[str, str] = {}
+    groups: dict[str, list[tuple[str, str]]] = {}
+    owners: dict[tuple[str, str], str] = {}
     for group in getattr(spec, "controls", ()) or ():
-        name = str(group.name)
+        identity = (str(group.articulation), str(group.name))
         owner = str(group.adapter)
-        prev = owners.get(name)
+        prev = owners.get(identity)
         if prev is not None:
             raise ValueError(
-                f"control group {name!r} is claimed by two adapters: " f"{prev!r} and {owner!r}"
+                f"control group {identity!r} is claimed by two adapters: " f"{prev!r} and {owner!r}"
             )
-        owners[name] = owner
-        groups.setdefault(owner, []).append(name)
-    return {owner: tuple(names) for owner, names in groups.items()}
+        owners[identity] = owner
+        groups.setdefault(owner, []).append(identity)
+    return {owner: tuple(keys) for owner, keys in groups.items()}
 
 
 def _announce_artifacts(path: str | Path | None) -> None:
@@ -1634,7 +1635,9 @@ def build_instance(spec: RunSpec) -> RunInstance:
         # articulated-prop action faces are declared by ``objects:`` sugar and
         # materialized by the backend as prop control runtimes; the emitting
         # adapter owns them (the config's controls[] cannot name them).
-        prop_faces = tuple(c.name for c in (env.controls or {}).values() if c.prop)
+        prop_faces = tuple(
+            (c.articulation, c.action_face) for c in (env.controls or {}).values() if c.prop
+        )
         if prop_faces:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))
             env.adapter_groups[spec.adapter_name] = owned + prop_faces

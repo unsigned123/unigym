@@ -102,7 +102,7 @@ class FakeBackend(EnvBackend):
 
     def step(
         self,
-        actions: dict[str, NamedAction],
+        actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor | bool]]:
@@ -167,28 +167,30 @@ class FakeBackend(EnvBackend):
         if self._closed:
             raise RuntimeError("FakeBackend is closed")
 
-    def _resolve_targets(self, actions: dict[str, NamedAction]) -> torch.Tensor:
-        if not isinstance(actions, dict):
+    def _resolve_targets(self, actions: Sequence[NamedAction]) -> torch.Tensor:
+        if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
             raise TypeError(
-                f"actions must be a dict[str, NamedAction], got {type(actions).__name__}"
+                f"actions must be a sequence of NamedAction, got {type(actions).__name__}"
             )
         control = self._body_control
-        accepted = {control.action_face}
-        unknown = sorted(set(actions) - accepted)
+        key = (control.articulation, control.action_face)
+        entries: dict[tuple[str, str], NamedAction] = {}
+        for entry in actions:
+            if not isinstance(entry, NamedAction):
+                raise TypeError(f"action entry must be a NamedAction, got {type(entry).__name__}")
+            identity = (entry.articulation, entry.group)
+            if identity in entries:
+                raise ValueError(f"duplicate action group {identity!r}")
+            entries[identity] = entry
+        unknown = sorted(set(entries) - {key})
         if unknown:
-            raise ValueError(f"unknown action face(s) {unknown}; accepted: {sorted(accepted)}")
-        if control.action_face not in actions:
-            raise ValueError(
-                f"missing required action face {control.action_face!r}; "
-                f"accepted: {sorted(accepted)}"
-            )
-        entry = actions[control.action_face]
-        if not isinstance(entry, NamedAction):
-            raise TypeError(f"action entry must be a NamedAction, got {type(entry).__name__}")
+            raise ValueError(f"unknown action group(s) {unknown}; accepted: {[key]}")
+        if key not in entries:
+            raise ValueError(f"missing required action group {key!r}; accepted: {[key]}")
+        entry = entries[key]
         if entry.kind != control.target:
             raise ValueError(
-                f"action face {control.action_face!r} kind {entry.kind!r} != "
-                f"control target {control.target!r}"
+                f"action group {key!r} kind {entry.kind!r} != " f"control target {control.target!r}"
             )
         if entry.num_envs != self.num_envs:
             raise ValueError(f"action batch {entry.num_envs} != num_envs {self.num_envs}")
@@ -198,7 +200,7 @@ class FakeBackend(EnvBackend):
         missing_joints = sorted(set(control.joint_names) - set(provided))
         if unknown_joints or missing_joints:
             raise ValueError(
-                f"action face {control.action_face!r} joint coverage mismatch; "
+                f"action group {key!r} joint coverage mismatch; "
                 f"unknown={unknown_joints}, missing={missing_joints}"
             )
         column = {name: index for index, name in enumerate(provided)}

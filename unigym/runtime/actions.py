@@ -1,13 +1,14 @@
-"""NamedAction: the name-addressed action contract (feat/named-actions).
+"""NamedAction: the self-describing action contract (feat/named-actions).
 
-The action boundary changes from an ORDERED TENSOR to explicit NAME ADDRESSING:
-an adapter returns ``dict[str, NamedAction]`` — one named entry per action
-face (e.g. ``{"g1": <29 body joints>, "hand": <14 finger joints>}``), each
-carrying its values plus the joint name for every column.  Consumers
-(backends) resolve the names to simulator addresses ONCE per name-tuple
-(cached) and scatter the values; users never touch simulator joint order
-(same philosophy as the name-based obs/contact/foot layers — actions are the
-last piece).
+The action boundary is an ORDERED sequence of self-describing values: an
+adapter returns ``tuple[NamedAction, ...]`` — one entry per action group
+(e.g. the body group plus a hand group), each carrying its owning
+``(articulation, group)`` identity, its values and the joint name for every
+column.  Consumers (backends) resolve the names to simulator addresses ONCE
+per name-tuple (cached) and scatter the values; users never touch simulator
+joint order (same philosophy as the name-based obs/contact/foot layers —
+actions are the last piece).  The sequence order is not an action layout: the
+entries are keyed by ``(articulation, group)``.
 
 Backends:
   * isaaclab — each action term is built with ``preserve_order=True`` and an
@@ -236,29 +237,40 @@ class OrderedActionSpec:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class NamedAction:
-    """One named action face: values, joint names and an explicit kind.
+    """One self-describing action group value.
+
+    Identity is ``(articulation, group)``: duplicate joint names across
+    articulations are legal and are disambiguated by the articulation.
+    The order of a ``NamedAction`` sequence is not an action layout.
 
     Attributes:
+        articulation: owning articulation name (non-empty).
+        group: owning action-group name within that articulation (non-empty).
         values: ``(N, dim)`` float tensor — targets in the units of *kind*
             (rad for position, rad/s for velocity, N·m for torque/effort,
             A for current), one column per entry in *joint_names*.
         joint_names: joint names, ``len(joint_names) == values.shape[1]``.
-            The list IS the contract: consumers resolve by name, never by
-            position.
+            The tuple IS the contract: consumers resolve by name, never by
+            position.  Names are scoped to ``(articulation, group)``.
         kind: the explicit target kind
             (``position | velocity | torque | effort | current``).  The
             engine validates it against the configured control group's
             ``target`` every tick.
 
-    Construction validates the shape/name/kind agreement (fail-fast) and
-    rejects duplicate names (a duplicate would make the routing ambiguous).
+    Construction validates the identity, shape/name/kind agreement
+    (fail-fast) and rejects duplicate names (a duplicate would make the
+    routing ambiguous).
     """
 
+    articulation: str
+    group: str
     values: torch.Tensor
-    joint_names: list[str]
+    joint_names: tuple[str, ...]
     kind: str
 
     def __post_init__(self):
+        _require_text(self.articulation, "NamedAction.articulation")
+        _require_text(self.group, "NamedAction.group")
         if self.kind not in LEGAL_ACTION_KINDS:
             raise ValueError(
                 f"NamedAction.kind must be one of {list(LEGAL_ACTION_KINDS)}, " f"got {self.kind!r}"
@@ -271,7 +283,14 @@ class NamedAction:
             raise ValueError(
                 f"NamedAction.values must be (N, dim), got " f"{tuple(self.values.shape)}"
             )
-        names = list(self.joint_names)
+        if isinstance(self.joint_names, (str, bytes)) or not isinstance(self.joint_names, Sequence):
+            raise ValueError(
+                "NamedAction.joint_names must be a sequence of joint names, "
+                f"got {type(self.joint_names).__name__}"
+            )
+        names = tuple(self.joint_names)
+        if not names:
+            raise ValueError("NamedAction.joint_names must be non-empty")
         if len(names) != self.values.shape[1]:
             raise ValueError(
                 f"NamedAction: {self.values.shape[1]} value columns vs "
@@ -280,6 +299,7 @@ class NamedAction:
         if len(set(names)) != len(names):
             dupes = sorted({n for n in names if names.count(n) > 1})
             raise ValueError(f"NamedAction: duplicate joint names {dupes}")
+        object.__setattr__(self, "joint_names", names)
 
     @property
     def num_envs(self) -> int:
@@ -295,14 +315,27 @@ class NamedAction:
     def zeros(
         cls,
         num_envs: int,
+        articulation: str,
+        group: str,
         joint_names: Sequence[str],
         kind: str,
         device: str | torch.device = "cpu",
         dtype: torch.dtype = torch.float32,
     ) -> NamedAction:
-        """All-zero action over *joint_names* with an explicit *kind*."""
-        names = list(joint_names)
-        return cls(torch.zeros(int(num_envs), len(names), dtype=dtype, device=device), names, kind)
+        """All-zero action over *joint_names* for ``(articulation, group)``."""
+        if isinstance(joint_names, (str, bytes)) or not isinstance(joint_names, Sequence):
+            raise ValueError(
+                "NamedAction.zeros joint_names must be a sequence of joint names, "
+                f"got {type(joint_names).__name__}"
+            )
+        names = tuple(joint_names)
+        return cls(
+            articulation=articulation,
+            group=group,
+            values=torch.zeros(int(num_envs), len(names), dtype=dtype, device=device),
+            joint_names=names,
+            kind=kind,
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -222,7 +222,9 @@ class ControlRuntime:
 
     Attributes:
         name: the control name (the ``env.controls`` key).
-        action_face: the accepted ``dict[str, NamedAction]`` key (== name).
+        action_face: legacy action-group identity within the articulation
+            (``(articulation, action_face)`` is the current routing key; kept
+            until the Stage A3/A4 authoring split).
         adapter: the adapter instance name that drives this face.
         articulation: the owning articulation name.
         joint_names: joints owned by this face, in action order.

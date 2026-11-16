@@ -6,7 +6,7 @@ Run from the repository root::
 
 No robot asset, policy adapter, or task pack is involved.  The manual
 adapter deliberately has no ``act`` forward; the caller owns the clock and
-supplies ``dict[str, NamedAction]`` through ``ExternalRunner.step``.
+supplies ``Sequence[NamedAction]`` through ``ExternalRunner.step``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class PrintSink:
 
     def on_step(self, t, bundle):
         """Print the target carried by this tick's named action."""
-        values = next(iter(bundle["targets"].values())).values.tolist()
+        values = bundle["targets"][0].values.tolist()
         print(f"t={t} target={values[0]}")
 
     def on_episode_end(self, env_ids, bundle):
@@ -107,7 +107,7 @@ def make_env():
         profiles={"tiny": profile},
         actuation_plans=actuation_plans,
     )
-    env.adapter_groups = {"manual": ("tiny",)}
+    env.adapter_groups = {"manual": (("tiny", "tiny"),)}
     return env
 
 
@@ -133,9 +133,13 @@ def main() -> None:
         for step in range(5):
             target = 0.1 * (step + 1)
             action = NamedAction(
-                torch.tensor([[target]], dtype=torch.float32), ["hinge"], kind="position"
+                articulation="tiny",
+                group="tiny",
+                values=torch.tensor([[target]], dtype=torch.float32),
+                joint_names=("hinge",),
+                kind="position",
             )
-            runner.step({"tiny": action})
+            runner.step((action,))
         print("final hinge qpos:", float(env.mj_data.qpos[-1]))
     finally:
         env.close()

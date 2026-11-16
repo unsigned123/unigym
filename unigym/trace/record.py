@@ -52,7 +52,12 @@ for _k, _v in (_b.get('extra') or {{}}).items():
         continue
     if _a.ndim <= 2 and _a.dtype.kind in 'bfiu':
         _arrs['extra/' + str(_k)] = _a
-for _k, _v in (_b.get('targets') or {{}}).items():
+_targets = _b.get('targets') or ()
+if isinstance(_targets, dict):
+    _pairs = _targets.items()
+else:
+    _pairs = ((str(getattr(_v, 'group', '?')), _v) for _v in _targets)
+for _k, _v in _pairs:
     try:
         _arrs['action/' + str(_k)] = _as_np(getattr(_v, 'values', _v))
     except Exception:

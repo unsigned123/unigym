@@ -7,8 +7,12 @@ and maintainable.  Every engine still iterates the neutral
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
+
+from unigym.runtime.actions import NamedAction
 
 
 def _label(env) -> str:
@@ -33,26 +37,26 @@ def _initial_targets(env, order) -> dict:
     return targets
 
 
-def _apply_entry(env, control, key, entry, targets, covered, label) -> None:
+def _apply_entry(env, control, identity, entry, targets, covered, label) -> None:
     """Scatter one NamedAction entry into its control target row."""
     if entry.kind != control.target:
         raise ValueError(
-            f"{label}: action entry {key!r} has kind {entry.kind!r} but "
+            f"{label}: action group {identity!r} has kind {entry.kind!r} but "
             f"control {control.name!r} expects target {control.target!r}"
         )
-    names = list(entry.joint_names or ())
+    names = list(entry.joint_names)
     index = {n: i for i, n in enumerate(control.joint_names)}
     unknown = sorted(set(names) - set(index))
     if unknown:
         raise ValueError(
-            f"{label}: action entry {key!r} names joints {unknown} that "
+            f"{label}: action group {identity!r} names joints {unknown} that "
             f"control {control.name!r} does not own | owns: "
             f"{list(control.joint_names)}"
         )
     row = entry.values.detach().to("cpu").to(torch.float32).numpy()
     if row.shape[-1] != len(names):
         raise ValueError(
-            f"{label}: action entry {key!r} carries {row.shape[-1]} "
+            f"{label}: action group {identity!r} carries {row.shape[-1]} "
             f"values for {len(names)} joints"
         )
     if control.prop:
@@ -63,46 +67,68 @@ def _apply_entry(env, control, key, entry, targets, covered, label) -> None:
     cols = np.asarray([index[n] for n in names], dtype=np.int64)
     if covered[control.name][cols].any():
         raise ValueError(
-            f"{label}: action entry {key!r} re-addresses joints of " f"control {control.name!r}"
+            f"{label}: action group {identity!r} re-addresses joints of "
+            f"control {control.name!r}"
         )
     targets[control.name][:, cols] = row
     covered[control.name][cols] = True
 
 
-def route_actions(env, actions: dict, label=None) -> dict:
-    """Resolve every action face onto its control's target array."""
+def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
+    """Resolve every self-describing action onto its control's target array.
+
+    Entries are routed by ``(entry.articulation, entry.group)``; the
+    sequence order is not a layout.  A control's routing identity is
+    ``(control.articulation, control.action_face)`` until the Stage A3/A4
+    authoring split replaces ``action_face`` with the explicit group name.
+    """
     label = label or _label(env)
-    if not isinstance(actions, dict):
+    if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
         raise TypeError(
-            f"{label} step expects dict[str, NamedAction], got " f"{type(actions).__name__}"
+            f"{label} step expects a sequence of NamedAction, got " f"{type(actions).__name__}"
         )
     order = list(getattr(env, "_control_order", env.controls.values()))
     targets = _initial_targets(env, order)
     covered = {c.name: np.zeros(len(c.joint_names), dtype=bool) for c in order if not c.prop}
-    by_face = {c.action_face: c for c in order}
-    seen = set()
-    accepted = sorted(by_face)
-    for key, entry in actions.items():
-        control = by_face.get(key)
+    by_key: dict[tuple[str, str], object] = {}
+    for control in order:
+        identity = (control.articulation, control.action_face)
+        if identity in by_key:
+            raise ValueError(
+                f"{label}: control group {identity!r} is declared by more "
+                f"than one control runtime"
+            )
+        by_key[identity] = control
+    accepted = sorted(by_key)
+    seen: set[tuple[str, str]] = set()
+    for entry in actions:
+        if not isinstance(entry, NamedAction):
+            raise TypeError(
+                f"{label} step expects a sequence of NamedAction, got "
+                f"{type(entry).__name__} entry"
+            )
+        identity = (entry.articulation, entry.group)
+        control = by_key.get(identity)
         if control is None:
             raise ValueError(
-                f"{label}: action entry {key!r} is not a declared control "
-                f"face; accepted faces: {accepted}"
+                f"{label}: action group {identity!r} is not a declared "
+                f"control group; accepted control groups: {accepted}"
             )
-        if control.name in seen:
+        if identity in seen:
             raise ValueError(
-                f"{label}: control {control.name!r} is addressed by more than " f"one action entry"
+                f"{label}: control group {identity!r} is addressed by more "
+                f"than one action entry"
             )
-        seen.add(control.name)
-        _apply_entry(env, control, key, entry, targets, covered, label)
-    for control in env._control_order:
+        seen.add(identity)
+        _apply_entry(env, control, identity, entry, targets, covered, label)
+    for control in order:
         if control.prop or not control.required:
             continue
         if not bool(covered[control.name].all()):
             left = [n for n, hit in zip(control.joint_names, covered[control.name]) if not hit]
+            identity = (control.articulation, control.action_face)
             raise ValueError(
-                f"{label}: action entry for {control.action_face!r} leaves "
-                f"joints unaddressed: {left}"
+                f"{label}: action group {identity!r} leaves joints " f"unaddressed: {left}"
             )
     return targets
 

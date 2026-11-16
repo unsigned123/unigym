@@ -14,12 +14,17 @@ def _named_action(env, values):
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(
         env.num_envs, len(control.joint_names)
     )
-    return NamedAction(tensor, list(control.joint_names), control.target)
+    return NamedAction(
+        control.articulation,
+        control.action_face,
+        tensor,
+        control.joint_names,
+        control.target,
+    )
 
 
 def _step(env, values, **kwargs):
-    control = env.controls[CONTROL_NAME]
-    return env.step({control.action_face: _named_action(env, values)}, **kwargs)
+    return env.step((_named_action(env, values),), **kwargs)
 
 
 def test_reset_envs_resets_only_selected_rows():
@@ -30,11 +35,15 @@ def test_reset_envs_resets_only_selected_rows():
         values = torch.tensor([[0.1], [0.2]], dtype=torch.float32)
         raw_action = values + 10.0
         backend.step(
-            {
-                control.action_face: NamedAction(
-                    values.clone(), list(control.joint_names), control.target
-                )
-            },
+            (
+                NamedAction(
+                    control.articulation,
+                    control.action_face,
+                    values.clone(),
+                    control.joint_names,
+                    control.target,
+                ),
+            ),
             raw_action=raw_action,
         )
 

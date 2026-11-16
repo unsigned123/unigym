@@ -95,9 +95,12 @@ def test_named_mapping_order_becomes_the_named_action_column_order() -> None:
 
     action = runner.last_actions
     assert action is not None
-    assert action["arm"].joint_names == ["elbow", "shoulder"]
-    assert action["arm"].values.shape == (1, 2)
-    assert torch.allclose(action["arm"].values, torch.tensor([[0.7, 0.3]]))
+    assert len(action) == 1
+    assert action[0].articulation == "arm"
+    assert action[0].group == "arm"
+    assert action[0].joint_names == ("elbow", "shoulder")
+    assert action[0].values.shape == (1, 2)
+    assert torch.allclose(action[0].values, torch.tensor([[0.7, 0.3]]))
     assert obs.articulations[handle].joint_names == ("shoulder", "elbow")
     assert torch.allclose(obs.articulations[handle].joint_pos, torch.tensor([[0.3, 0.7]]))
 
@@ -248,10 +251,11 @@ def test_named_mapping_applies_per_env_values() -> None:
 
     action = runner.last_actions
     assert action is not None
-    assert action["arm"].joint_names == ["elbow", "shoulder"]
-    assert action["arm"].values.shape == (2, 2)
+    assert len(action) == 1
+    assert action[0].joint_names == ("elbow", "shoulder")
+    assert action[0].values.shape == (2, 2)
     assert torch.allclose(
-        action["arm"].values,
+        action[0].values,
         torch.tensor([[0.3, 0.1], [0.4, 0.2]]),
     )
     assert torch.allclose(

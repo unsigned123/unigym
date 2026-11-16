@@ -62,7 +62,15 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
         raw = []
         for action in actions:
             result = raw_runner.step(
-                {"body": NamedAction(action, list(binding.joint_names), "position")}
+                (
+                    NamedAction(
+                        binding.articulation.name,
+                        binding.face,
+                        action,
+                        tuple(binding.joint_names),
+                        "position",
+                    ),
+                )
             )
             raw.append((result.extra[joint_pos_key], result.extra[joint_vel_key]))
 

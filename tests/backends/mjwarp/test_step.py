@@ -13,9 +13,9 @@ pytestmark = pytest.mark.sim
 
 def _action(env, values):
     control = env.controls["tiny"]
-    names = list(control.joint_names)
+    names = tuple(control.joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
-    return {"tiny": NamedAction(tensor, names, control.target)}
+    return (NamedAction(control.articulation, control.action_face, tensor, names, control.target),)
 
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
@@ -108,33 +108,39 @@ def test_reset_envs_empty_is_a_noop_and_preserves_requested_id_order(tiny_env_fa
 @pytest.mark.parametrize(
     "joint_names",
     [
-        pytest.param(["elbow", "wrist"], id="nonmatching-joints"),
-        pytest.param(["elbow", "shoulder"], id="matching-joints"),
+        pytest.param(("elbow", "wrist"), id="nonmatching-joints"),
+        pytest.param(("elbow", "shoulder"), id="matching-joints"),
     ],
 )
 def test_step_rejects_an_unknown_action_face(tiny_env, joint_names):
-    """An unknown face is rejected even when its joints match a control."""
-    entry = NamedAction(torch.zeros(tiny_env.num_envs, 2), joint_names, "position")
+    """An unknown group is rejected even when its joints match a control."""
+    entry = NamedAction("tiny", "wrist", torch.zeros(tiny_env.num_envs, 2), joint_names, "position")
 
     with pytest.raises(ValueError) as excinfo:
-        tiny_env.step({"wrist": entry})
+        tiny_env.step((entry,))
 
     message = str(excinfo.value)
-    assert "action entry 'wrist' is not a declared control face" in message
-    assert "accepted faces: ['tiny']" in message
+    assert "action group ('tiny', 'wrist') is not a declared control group" in message
+    assert "accepted control groups: [('tiny', 'tiny')]" in message
 
 
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
 def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_env, kind):
     """A mismatched NamedAction.kind is rejected against the control's target."""
     control = tiny_env.controls["tiny"]
-    entry = NamedAction.zeros(tiny_env.num_envs, list(control.joint_names), kind)
+    entry = NamedAction.zeros(
+        tiny_env.num_envs,
+        control.articulation,
+        control.action_face,
+        list(control.joint_names),
+        kind,
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        tiny_env.step({"tiny": entry})
+        tiny_env.step((entry,))
 
     message = str(excinfo.value)
-    assert "action entry 'tiny'" in message
+    assert "action group ('tiny', 'tiny')" in message
     assert f"kind '{kind}'" in message
     assert "control 'tiny' expects target 'position'" in message
 
@@ -350,23 +356,30 @@ def test_direct_env_rejects_removed_gain_env_params(tiny_env_factory, params):
 @pytest.mark.parametrize(
     ("joint_names", "fragment"),
     [
-        pytest.param(["elbow"], "leaves joints unaddressed: ['shoulder']", id="missing-joint"),
-        pytest.param(["elbow", "wrist"], "names joints ['wrist']", id="unowned-joint"),
+        pytest.param(("elbow",), "leaves joints unaddressed: ['shoulder']", id="missing-joint"),
+        pytest.param(("elbow", "wrist"), "names joints ['wrist']", id="unowned-joint"),
     ],
 )
 def test_step_rejects_an_action_that_does_not_match_the_control_joint_set(
     tiny_env, joint_names, fragment
 ):
     """An action's joint columns must address exactly the control's joints."""
-    entry = NamedAction(torch.zeros(tiny_env.num_envs, len(joint_names)), joint_names, "position")
+    control = tiny_env.controls["tiny"]
+    entry = NamedAction(
+        control.articulation,
+        control.action_face,
+        torch.zeros(tiny_env.num_envs, len(joint_names)),
+        joint_names,
+        "position",
+    )
 
     with pytest.raises(ValueError, match=fragment.replace("[", r"\[").replace("]", r"\]")):
+        tiny_env.step((entry,))
+
+
+def test_step_rejects_a_mapping_action_payload(tiny_env):
+    """The step entry point requires a sequence of NamedAction, not a dict."""
+    entry = _action(tiny_env, [[0.0, 0.0]])[0]
+
+    with pytest.raises(TypeError, match=r"sequence of NamedAction"):
         tiny_env.step({"tiny": entry})
-
-
-def test_step_rejects_a_non_mapping_action_payload(tiny_env):
-    """The step entry point requires dict[str, NamedAction], not a sequence."""
-    entry = _action(tiny_env, [[0.0, 0.0]])["tiny"]
-
-    with pytest.raises(TypeError, match=r"dict\[str, NamedAction\]"):
-        tiny_env.step([("tiny", entry)])

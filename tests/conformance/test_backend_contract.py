@@ -35,12 +35,17 @@ def _named_action(env, values):
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(
         env.num_envs, len(control.joint_names)
     )
-    return NamedAction(tensor, list(control.joint_names), control.target)
+    return NamedAction(
+        control.articulation,
+        control.action_face,
+        tensor,
+        control.joint_names,
+        control.target,
+    )
 
 
 def _step(env, values, **kwargs):
-    control = env.controls[CONTROL_NAME]
-    return env.step({control.action_face: _named_action(env, values)}, **kwargs)
+    return env.step((_named_action(env, values),), **kwargs)
 
 
 @pytest.mark.parametrize("num_envs", (1, 2))
@@ -81,8 +86,14 @@ def test_step_applies_named_action_and_passes_raw_action_through(env):
     values = torch.arange(1, env.num_envs + 1, dtype=torch.float32).reshape(env.num_envs, 1) / 10
     raw_action = values + 10.0
 
-    action = NamedAction(values.clone(), list(control.joint_names), control.target)
-    obs, extra = env.step({control.action_face: action}, raw_action=raw_action)
+    action = NamedAction(
+        control.articulation,
+        control.action_face,
+        values.clone(),
+        control.joint_names,
+        control.target,
+    )
+    obs, extra = env.step((action,), raw_action=raw_action)
 
     assert torch.equal(obs["joint_pos"], values)
     assert torch.equal(obs["prev_action"], raw_action)
@@ -105,8 +116,14 @@ def test_step_is_deterministic_for_same_state_and_actions(env):
     """Two fresh fakes produce identical observations and extra info."""
     values = torch.arange(1, env.num_envs + 1, dtype=torch.float32).reshape(env.num_envs, 1) / 4
     control = env.controls[CONTROL_NAME]
-    action = NamedAction(values.clone(), list(control.joint_names), control.target)
-    actions = {control.action_face: action}
+    action = NamedAction(
+        control.articulation,
+        control.action_face,
+        values.clone(),
+        control.joint_names,
+        control.target,
+    )
+    actions = (action,)
 
     other = FakeBackend(num_envs=env.num_envs)
     try:

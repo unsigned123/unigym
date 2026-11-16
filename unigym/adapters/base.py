@@ -13,6 +13,7 @@ unit-testable on a plain laptop python.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, NamedTuple, Protocol, TypedDict, Unpack
 
@@ -157,10 +158,11 @@ class Adapter(ABC):
     code.
 
     The ACTION boundary is group-addressed: :meth:`postprocess_action`
-    returns ``dict[str, NamedAction]`` keyed by the control group names the
-    run's ``controls[]`` partition assigns to this adapter, each carrying
-    explicit ``joint_names`` and an explicit ``kind``.  The backend resolves
-    names to simulator addresses — see :mod:`unigym.runtime.actions`.
+    returns a ``Sequence[NamedAction]`` (one entry per control group the
+    run's ``controls[]`` partition assigns to this adapter), each carrying
+    its ``(articulation, group)`` identity, explicit ``joint_names`` and an
+    explicit ``kind``.  The backend resolves names to simulator addresses —
+    see :mod:`unigym.runtime.actions`.
     """
 
     generates_command: bool = False
@@ -269,30 +271,49 @@ class Adapter(ABC):
         """
 
     @abstractmethod
-    def postprocess_action(self, raw: torch.Tensor) -> dict[str, NamedAction]:
-        """Raw action -> one NamedAction per owned control group.
+    def postprocess_action(self, raw: torch.Tensor) -> Sequence[NamedAction]:
+        """Raw action -> one self-describing NamedAction per owned group.
 
-        The returned dict is keyed by the control group names assigned to
-        this adapter by the run's ``controls[]`` partition (e.g. ``"g1"``
-        plus an extra ``"hand"`` face).  Each
-        :class:`~unigym.runtime.actions.NamedAction` carries ``(N, dim)``
-        target values, the joint name of every column, and its explicit
-        ``kind`` (``position`` / ``velocity`` / ``torque`` / ``effort`` /
-        ``current``) matching the group's configured ``target``.  Backends
-        resolve the names to simulator addresses.
+        The returned sequence carries one entry per control group assigned
+        to this adapter by the run's ``controls[]`` partition (e.g. the body
+        group plus an extra hand group).  Each
+        :class:`~unigym.runtime.actions.NamedAction` carries its
+        ``(articulation, group)`` identity, ``(N, dim)`` target values, the
+        joint name of every column, and its explicit ``kind``
+        (``position`` / ``velocity`` / ``torque`` / ``effort`` /
+        ``current``) matching the group's configured ``target``.  Sequence
+        order is not a layout; backends route by identity and resolve the
+        names to simulator addresses.
         """
 
-    def named_action(self, values: torch.Tensor, kind: str = "position") -> NamedAction:
-        """Convenience: wrap *values* as a NamedAction over
-        :attr:`joint_order` (the body group)."""
+    def named_action(
+        self,
+        values: torch.Tensor,
+        *,
+        articulation: str,
+        group: str,
+        joint_names: Sequence[str] | None = None,
+        kind: str = "position",
+    ) -> NamedAction:
+        """Convenience: wrap *values* as a NamedAction for one group.
 
-        order = self.joint_order
+        *joint_names* defaults to :attr:`joint_order` (the body group).
+        """
+
+        order = self.joint_order if joint_names is None else joint_names
         if order is None:
             raise RuntimeError(
-                f"{type(self).__name__}.named_action requires joint_order; "
-                f"declare the adapter's joint order before wrapping values"
+                f"{type(self).__name__}.named_action requires joint_names or "
+                f"joint_order; declare the adapter's joint order before "
+                f"wrapping values"
             )
-        return NamedAction(values=values, joint_names=list(order), kind=kind)
+        return NamedAction(
+            articulation=articulation,
+            group=group,
+            values=values,
+            joint_names=tuple(order),
+            kind=kind,
+        )
 
     def on_reset(self, env_ids: torch.Tensor) -> None:
         """Called on episode reset for the given env ids (clear history etc.)."""

@@ -15,6 +15,8 @@ manual drivers.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import torch
 
 from ..runtime.actions import NamedAction
@@ -82,17 +84,17 @@ class ManualAdapter(Adapter):
             "instead"
         )
 
-    def postprocess_action(self, raw: torch.Tensor) -> dict[str, NamedAction]:
+    def postprocess_action(self, raw: torch.Tensor) -> Sequence[NamedAction]:
         """Never legal: external drivers bypass adapter postprocessing.
 
-        The contract is explicit action dicts handed straight to
+        The contract is explicit action sequences handed straight to
         ``ExternalRunner.step`` / ``SyncRunner.tick(actions_override=...)``;
         silently returning a tensor where the base promises named groups
         would hide a caller bug.
         """
         raise NotImplementedError(
-            "ManualAdapter.postprocess_action must never be called; pass "
-            "dict[str, NamedAction] to ExternalRunner.step(actions) / "
+            "ManualAdapter.postprocess_action must never be called; pass a "
+            "sequence of NamedAction to ExternalRunner.step(actions) / "
             "SyncRunner.tick(actions_override) instead"
         )
 

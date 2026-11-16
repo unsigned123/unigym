@@ -127,7 +127,13 @@ def test_two_env_rows_project_distinct_values(tmp_path: Path) -> None:
     env = FakeBackend(num_envs=2, joint_names=JOINT_ORDER)
     target = torch.tensor([[0.25, -0.5], [-0.75, 0.4]], dtype=torch.float32)
     try:
-        env.step({ARTICULATION_NAME: NamedAction(target, list(JOINT_ORDER), "position")})
+        env.step(
+            (
+                NamedAction(
+                    ARTICULATION_NAME, ARTICULATION_NAME, target, tuple(JOINT_ORDER), "position"
+                ),
+            )
+        )
         state = read_extra(env)
         obs = _observe(env, handle, t=1)
 
@@ -158,7 +164,13 @@ def test_two_env_subset_reset_agrees_row_wise(tmp_path: Path) -> None:
     env = FakeBackend(num_envs=2, joint_names=JOINT_ORDER)
     target = torch.tensor([[0.25, -0.5], [-0.75, 0.4]], dtype=torch.float32)
     try:
-        env.step({ARTICULATION_NAME: NamedAction(target, list(JOINT_ORDER), "position")})
+        env.step(
+            (
+                NamedAction(
+                    ARTICULATION_NAME, ARTICULATION_NAME, target, tuple(JOINT_ORDER), "position"
+                ),
+            )
+        )
         env.reset_envs(torch.tensor([1], dtype=torch.int64))
         state = read_extra(env)
         obs = _observe(env, handle, t=1)
@@ -185,7 +197,13 @@ def test_projection_columns_follow_the_acted_joint_values(tmp_path: Path) -> Non
     env = FakeBackend(num_envs=1, joint_names=JOINT_ORDER)
     target = torch.tensor([[0.25, -0.5]], dtype=torch.float32)
     try:
-        env.step({ARTICULATION_NAME: NamedAction(target, list(JOINT_ORDER), "position")})
+        env.step(
+            (
+                NamedAction(
+                    ARTICULATION_NAME, ARTICULATION_NAME, target, tuple(JOINT_ORDER), "position"
+                ),
+            )
+        )
         obs = _observe(env, handle, t=1)
         record = obs.articulations[handle]
 

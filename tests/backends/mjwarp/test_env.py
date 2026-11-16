@@ -14,7 +14,15 @@ pytestmark = pytest.mark.sim
 
 def _zero_action(env):
     control = env.controls["tiny"]
-    return NamedAction.zeros(env.num_envs, list(control.joint_names), control.target)
+    return (
+        NamedAction.zeros(
+            env.num_envs,
+            control.articulation,
+            control.action_face,
+            list(control.joint_names),
+            control.target,
+        ),
+    )
 
 
 def test_env_constructs_from_tiny_mjcf_and_satisfies_backend_contract(tiny_env):
@@ -96,7 +104,7 @@ def test_step_after_close_raises_the_closed_error(tiny_env):
     tiny_env.close()
 
     with pytest.raises(RuntimeError) as excinfo:
-        tiny_env.step({"tiny": _zero_action(tiny_env)})
+        tiny_env.step(_zero_action(tiny_env))
 
     assert str(excinfo.value) == "mjwarp backend: environment is closed"
 
@@ -136,7 +144,7 @@ def test_close_failure_leaves_backend_guarded_and_retryable(tiny_env, monkeypatc
     assert tiny_env.mj_data is not None
     assert tiny_env.mj_model is not None
 
-    action = {"tiny": _zero_action(tiny_env)}
+    action = _zero_action(tiny_env)
 
     def _step():
         return tiny_env.step(action)
@@ -279,14 +287,16 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
     """The seam maps neutral joints/gain keys/parts to compiled prefixed names."""
     env = _two_articulation_env(tmp_path, tiny_mjcf)
     try:
-        actions = {
-            name: NamedAction(
-                torch.tensor([[sign * 0.4, sign * -0.2]], dtype=torch.float32),
-                ["elbow", "shoulder"],
-                "position",
+        actions = tuple(
+            NamedAction(
+                articulation=name,
+                group=name,
+                values=torch.tensor([[sign * 0.4, sign * -0.2]], dtype=torch.float32),
+                joint_names=("elbow", "shoulder"),
+                kind="position",
             )
             for name, sign in (("left", 1.0), ("right", -1.0))
-        }
+        )
 
         _, extra = env.step(actions)
 

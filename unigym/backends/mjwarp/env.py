@@ -45,6 +45,7 @@ Highlights inherited from the mujoco backend (unchanged semantics):
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -150,7 +151,7 @@ from unigym.backends.shared.mjfamily.world_base import (
     reject_legacy_scene_params,
     resolve_world_base_mjcf,
 )
-from unigym.runtime.actions import MujocoJointResolver
+from unigym.runtime.actions import MujocoJointResolver, NamedAction
 
 
 # capability bits: runs N>1 as ONE batched warp Data (nworld=N) with N CPU
@@ -1180,14 +1181,18 @@ class MjwarpEnv(WarpBatchMixin):
         self._actuator_phase_split = phase_split
 
     def step(
-        self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
+        self,
+        actions: Sequence[NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
     ) -> tuple[dict, dict]:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
-        ``actions`` is a ``dict[str, NamedAction]`` (the adapter's
-        ``postprocess_action`` output); entry joint names resolve by name to
-        policy-order PD targets (the "g1" body face).  Read AFTER the
-        physics as in the isaaclab backend (``step -> refresh obs/extra``).
+        ``actions`` is a ``Sequence[NamedAction]`` (the adapter's
+        ``postprocess_action`` output); entries route to controls by
+        ``(articulation, group)`` and their joint names resolve by name to
+        policy-order PD targets.  Read AFTER the physics as in the isaaclab
+        backend (``step -> refresh obs/extra``).
         The ctrl write face is the always-active actuator seam
         (``_setup_actuator_seam``); a non-standard law runs the mj_step1/
         step2 phase split.

@@ -8,7 +8,7 @@ The pending-state rules are the facade contract:
 
 * ``act`` validates and stages; it never advances time.
 * ``step`` requires complete, fresh pending actions, lowers them to
-  ``dict[str, NamedAction]``, ticks exactly once and clears the table before
+  ``tuple[NamedAction, ...]``, ticks exactly once and clears the table before
   the new observation is built.  The ``step(actions=...)`` sugar stages its
   whole mapping atomically: any failed entry clears the table and leaves the
   tick/state untouched.
@@ -74,7 +74,7 @@ class _StepRunner(Protocol):
     proved without an engine.
     """
 
-    def step(self, actions: dict[str, NamedAction]) -> StepResult: ...
+    def step(self, actions: Sequence[NamedAction]) -> StepResult: ...
 
 
 def _reset_ids(

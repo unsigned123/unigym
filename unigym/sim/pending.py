@@ -1,7 +1,7 @@
 """Staged, not-yet-lowered actions of the experimental simulation facade.
 
 ``act`` writes exactly one staged entry per control face; ``step`` lowers the
-whole pending map to the existing ``dict[str, NamedAction]`` surface and
+whole pending map to the existing ``tuple[NamedAction, ...]`` surface and
 clears it only after the engine accepted the tick.  This module owns the
 staging table and the lowering; the validation policy lives in
 :class:`~unigym.sim.simulation.Simulation`.
@@ -68,14 +68,22 @@ class PendingActions:
         """The staged face names."""
         return frozenset(self._entries)
 
-    def lower(self) -> dict[str, NamedAction]:
-        """Lower the pending table to the existing named-action surface.
+    def lower(self) -> tuple[NamedAction, ...]:
+        """Lower the pending table to a self-describing action sequence.
 
-        The result preserves staging order; an empty table lowers to ``{}``.
+        The result preserves staging order; an empty table lowers to ``()``.
+        Each entry carries its owning articulation name and face (group)
+        identity; the sequence order is not an action layout.
         """
         from unigym.runtime.actions import NamedAction
 
-        return {
-            face: NamedAction(staged.values, list(staged.binding.joint_names), staged.binding.kind)
-            for face, staged in self._entries.items()
-        }
+        return tuple(
+            NamedAction(
+                articulation=staged.binding.articulation.name,
+                group=staged.binding.face,
+                values=staged.values,
+                joint_names=tuple(staged.binding.joint_names),
+                kind=staged.binding.kind,
+            )
+            for staged in self._entries.values()
+        )

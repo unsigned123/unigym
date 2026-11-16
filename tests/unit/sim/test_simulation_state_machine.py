@@ -265,7 +265,7 @@ def test_out_of_band_tick_raises_stale_and_clears_pending() -> None:
     handle = sim.articulations[0]
     binding = _binding(handle)
     sim.act(binding, _values(0.3))
-    runner.step({"arm": NamedAction(_values(0.9), ["shoulder"], "position")})
+    runner.step((NamedAction("arm", "arm", _values(0.9), ("shoulder",), "position"),))
 
     with pytest.raises(StaleStateError) as excinfo:
         sim.step()

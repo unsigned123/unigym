@@ -13,6 +13,7 @@ an adapter.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import torch
 import isaaclab.utils.math as math_utils
@@ -25,6 +26,7 @@ from unigym.backends.isaaclab2.naming import (
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.env.obs_catalog import ObsCatalog, ObsSpec, build_obs_catalog
+from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
 
 __all__ = [
@@ -336,48 +338,79 @@ def sync_articulation_controls(env, articulation: str) -> None:
     art.addresses["perm_il2pol"] = [index[n] for n in art.joint_names if n in index]
 
 
-def route_actions(env, actions: dict) -> torch.Tensor:
-    """Resolve every control's action face onto the flat action-term input."""
-    if not isinstance(actions, dict):
+def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
+    """Resolve every self-describing action onto the flat action-term input.
+
+    Entries are routed by ``(entry.articulation, entry.group)`` to the
+    control whose ``(articulation, action_face)`` matches; the action-term
+    name stays an internal backend detail (``control.action_face``).
+    """
+    if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
         raise TypeError(
-            f"{_LABEL} step expects dict[str, NamedAction], got " f"{type(actions).__name__}"
+            f"{_LABEL} step expects a sequence of NamedAction, got " f"{type(actions).__name__}"
         )
-    accepted = [c.action_face for c in env._control_order]
-    unknown = sorted(set(actions) - set(accepted))
+    by_key: dict[tuple[str, str], ControlRuntime] = {}
+    for control in env._control_order:
+        identity = (control.articulation, control.action_face)
+        if identity in by_key:
+            raise ValueError(
+                f"{_LABEL}: control group {identity!r} is declared by more "
+                f"than one control runtime"
+            )
+        by_key[identity] = control
+    accepted = sorted(by_key)
+    entries: dict[tuple[str, str], NamedAction] = {}
+    for entry in actions:
+        if not isinstance(entry, NamedAction):
+            raise TypeError(
+                f"{_LABEL} step expects a sequence of NamedAction, got "
+                f"{type(entry).__name__} entry"
+            )
+        identity = (entry.articulation, entry.group)
+        if identity in entries:
+            raise ValueError(
+                f"{_LABEL}: control group {identity!r} is addressed by more "
+                f"than one action entry"
+            )
+        entries[identity] = entry
+    unknown = sorted(set(entries) - set(by_key))
     if unknown:
         raise ValueError(
-            f"{_LABEL}: action entries {unknown} match no control face; "
-            f"accepted action faces: {accepted}"
+            f"{_LABEL}: action groups {unknown} match no control group; "
+            f"accepted control groups: {accepted}"
         )
     missing = [
-        c.action_face for c in env._control_order if c.required and c.action_face not in actions
+        (c.articulation, c.action_face)
+        for c in env._control_order
+        if c.required and (c.articulation, c.action_face) not in entries
     ]
     if missing:
         raise ValueError(
-            f"{_LABEL}: action entries leave controls unaddressed: "
-            f"{missing}; accepted action faces: {accepted}"
+            f"{_LABEL}: action entries leave control groups unaddressed: "
+            f"{missing}; accepted control groups: {accepted}"
         )
     n = env.num_envs
     chunks = []
     for control in env._control_order:
+        identity = (control.articulation, control.action_face)
         face = control.action_face
         term = env.action_manager.get_term(face)
         dim = int(term.action_dim)
-        na = actions.get(face)
+        na = entries.get(identity)
         if na is None:
             buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
             chunks.append(buf)
             continue
         if na.kind != control.target:
             raise ValueError(
-                f"{_LABEL}: action entry {face!r} has kind {na.kind!r} but "
-                f"control {control.name!r} expects target {control.target!r}"
+                f"{_LABEL}: action group {identity!r} has kind {na.kind!r} "
+                f"but control {control.name!r} expects target {control.target!r}"
             )
         if na.num_envs != n:
-            raise ValueError(f"action entry {face!r} has {na.num_envs} env rows, " f"expected {n}")
+            raise ValueError(f"action group {identity!r} has {na.num_envs} env rows, expected {n}")
         if na.dim != dim:
             raise ValueError(
-                f"action entry {face!r} addresses {na.dim} joints but "
+                f"action group {identity!r} addresses {na.dim} joints but "
                 f"term {face!r} covers {dim}"
             )
         gather = env._term_resolvers[face].gather(na.joint_names).to(env.device)

@@ -3,7 +3,7 @@
 The runner borrows the same :class:`~unigym.runner.sync.SyncRunner` engine
 (reset chain, termination, sink callbacks, RNG order) and adds exactly one
 face: :meth:`step`, which feeds a caller-supplied
-``dict[str, NamedAction]`` through ``SyncRunner.tick(actions_override=...)``.
+``Sequence[NamedAction]`` through ``SyncRunner.tick(actions_override=...)``.
 The adapter-driven path is untouched (``tick()`` with no override).
 
 Use :class:`~unigym.adapters.manual.ManualAdapter` (or any adapter whose
@@ -12,10 +12,14 @@ Use :class:`~unigym.adapters.manual.ManualAdapter` (or any adapter whose
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from unigym.runner.base import StepResult
 from unigym.runner.sync import SyncRunner, _adapter_groups
+
+if TYPE_CHECKING:
+    from unigym.runtime.actions import NamedAction
 
 
 class ExternalRunner(SyncRunner):
@@ -24,7 +28,7 @@ class ExternalRunner(SyncRunner):
     ``run()`` is intentionally not a rollout: without an ``action_fn`` it
     refuses and tells the caller to drive :meth:`step` themselves.  When an
     ``action_fn`` is supplied it is called as ``action_fn(t)`` for each tick
-    and must return the named-action dict for that tick.
+    and must return the ``Sequence[NamedAction]`` for that tick.
     """
 
     @classmethod
@@ -55,7 +59,7 @@ class ExternalRunner(SyncRunner):
         super().__init__(*args, **kwargs)
         self.action_fn = action_fn
 
-    def step(self, actions: dict) -> StepResult:
+    def step(self, actions: Sequence[NamedAction]) -> StepResult:
         """Advance one policy tick with caller-supplied named actions."""
         return self.tick(actions_override=actions)
 
@@ -69,7 +73,7 @@ class ExternalRunner(SyncRunner):
         if self.action_fn is None:
             raise RuntimeError(
                 "ExternalRunner.run() needs an action_fn (t -> "
-                "dict[str, NamedAction]); drive ExternalRunner.step(actions) "
+                "Sequence[NamedAction]); drive ExternalRunner.step(actions) "
                 "yourself for a manual loop"
             )
         self._start()

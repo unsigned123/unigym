@@ -21,13 +21,14 @@ the action plumbing and the Gymnasium return shapes differ.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 import torch
 
 from unigym.runner.state import read_extra
 from unigym.runner.sync import SyncRunner, _adapter_groups
+from unigym.runtime.actions import NamedAction
 
 
 def _as_numpy(value):
@@ -142,13 +143,13 @@ class GymEnvRunner(_GymBase):
         """
         if self._finished:
             raise RuntimeError("episode finished; call reset()")
-        if isinstance(action, dict):
+        if isinstance(action, (list, tuple)) and (not action or isinstance(action[0], NamedAction)):
             actions = action
         elif self.action_fn is not None:
             actions = self.action_fn(action)
         else:
             raise TypeError(
-                "GymEnvRunner.step expects dict[str, NamedAction] (or pass "
+                "GymEnvRunner.step expects a sequence of NamedAction (or pass "
                 f"an action_fn); got {type(action).__name__}"
             )
 
@@ -209,23 +210,42 @@ class GymVectorRunner(_GymBase):
         self.num_envs = num_envs
 
     def _vector_actions(self, actions):
-        """Named-action dict, or ``action_fn`` applied once per env."""
-        if isinstance(actions, dict):
-            return actions
+        """Named-action sequence, or ``action_fn`` applied once per env."""
+        if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)):
+            if not actions or isinstance(actions[0], NamedAction):
+                return actions
         if self.action_fn is None:
             raise TypeError(
-                "GymVectorRunner.step expects dict[str, NamedAction] (or "
+                "GymVectorRunner.step expects a sequence of NamedAction (or "
                 f"pass an action_fn); got {type(actions).__name__}"
             )
         if isinstance(actions, (list, tuple)) and len(actions) == self.num_envs:
             per_env = [self.action_fn(a) for a in actions]
         else:
             per_env = [self.action_fn(actions) for _ in range(self.num_envs)]
-        merged: dict = {}
-        for key, first in per_env[0].items():
-            values = torch.cat([entry[key].values for entry in per_env], dim=0)
-            merged[key] = type(first)(values, list(first.joint_names), first.kind)
-        return merged
+        merged: dict[tuple[str, str], list[NamedAction]] = {}
+        for entries in per_env:
+            for entry in entries:
+                merged.setdefault((entry.articulation, entry.group), []).append(entry)
+        out: list[NamedAction] = []
+        for (articulation, group), group_entries in merged.items():
+            first = group_entries[0]
+            for entry in group_entries[1:]:
+                if entry.kind != first.kind or entry.joint_names != first.joint_names:
+                    raise ValueError(
+                        f"GymVectorRunner action group {(articulation, group)!r} "
+                        f"has inconsistent kind/joint_names across envs"
+                    )
+            out.append(
+                NamedAction(
+                    articulation=articulation,
+                    group=group,
+                    values=torch.cat([entry.values for entry in group_entries], dim=0),
+                    joint_names=first.joint_names,
+                    kind=first.kind,
+                )
+            )
+        return tuple(out)
 
     def reset(self, seed=None, options=None):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Reset all envs; return ``(post_reset_obs, batched_infos)``."""

@@ -1239,12 +1239,12 @@ class Run:
 
     def step(
         self,
-        actions: dict[str, NamedAction] | None = None,
+        actions: Sequence[NamedAction] | None = None,
     ) -> StepResult:
         """Advance one policy tick and return its ``StepResult``.
 
         Args:
-            actions: Optional ``dict[str, NamedAction]``.  When supplied the
+            actions: Optional ``Sequence[NamedAction]``.  When supplied the
                 adapter forward/postprocess is skipped (external-driver
                 path); ``None`` reproduces the active runner's normal tick.
         """

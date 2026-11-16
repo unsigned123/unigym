@@ -61,7 +61,7 @@ class Trait(Enum):
 
     # --- env core (registration prerequisite) ---
     ENV_STEP_RESET = "ENV_STEP_RESET"  # step/reset_envs/reset_all + extra 17-key contract
-    ACTION_FACES_NAMED = "ACTION_FACES_NAMED"  # consumes dict[str, NamedAction]
+    ACTION_FACES_NAMED = "ACTION_FACES_NAMED"  # consumes Sequence[NamedAction]
     JOINT_PERMUTATION = "JOINT_PERMUTATION"  # policy/il orders + inverse perm
     # --- env shape (optional: single-env backends omit it) ---
     MULTI_ENV = "MULTI_ENV"  # native N>1 parallel-env runs

@@ -23,7 +23,7 @@ buffers by name, so ordering is correct by construction.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -62,6 +62,7 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from unigym.cameras import CameraManager
     from unigym.contacts import ContactManager
+    from unigym.runtime.actions import NamedAction
 
 
 from unigym.env.backends.base import BackendCapabilities
@@ -1089,14 +1090,17 @@ class IsaaclabEnv(ManagerBasedEnv):
     # stepping
     # ------------------------------------------------------------------ #
     def step(
-        self, actions: dict, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
+        self,
+        actions: Sequence[NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
     ) -> tuple[dict, dict]:
         """Advance one policy step.
 
         Args:
-            actions: ``dict[str, NamedAction]`` — named action faces; each
-                key must be an action-term name (``self.action_entry_names``)
-                and every term must receive exactly one entry.  Entry joint
+            actions: ``Sequence[NamedAction]`` — self-describing action
+                groups routed by ``(articulation, group)``; every required
+                control group must receive exactly one entry.  Entry joint
                 names are resolved onto the term's flat input slice
                 (preserve_order terms; resolver cached per name-tuple).
             raw_action: adapter raw action (policy order) -> obs_cache["prev_action"].
@@ -1124,55 +1128,18 @@ class IsaaclabEnv(ManagerBasedEnv):
             self.camera_manager.sync_pose()
         return dict(self.obs_cache), extra
 
-    def _route_named_actions(self, actions: dict) -> torch.Tensor:
-        """Resolve + gather the named action faces onto the flat term input.
+    def _route_named_actions(self, actions: Sequence[NamedAction]) -> torch.Tensor:
+        """Resolve + gather self-describing actions onto the flat term input.
 
         Builds the ``(N, total_action_dim)`` tensor ManagerBasedEnv.step
-        expects, with each term's slice filled in the term's own input order
-        (preserve_order terms: input dim i == cfg.joint_names[i]).  Entries
-        that do not match any term, missing entries and partial term
-        coverage all fail fast.
+        expects, with each group routed by ``(articulation, group)`` and each
+        term's slice filled in the term's own input order (preserve_order
+        terms: input dim i == cfg.joint_names[i]).  Unknown groups, missing
+        required groups and partial term coverage all fail fast.
         """
         from . import articulation_runtime as _articulation_runtime
 
         return _articulation_runtime.route_actions(self, actions)
-        if not isinstance(actions, dict):
-            raise TypeError(
-                f"IsaaclabEnv.step expects dict[str, NamedAction], got " f"{type(actions).__name__}"
-            )
-        unknown = sorted(set(actions) - set(self.action_entry_names))
-        if unknown:
-            raise ValueError(
-                f"action entries {unknown} match no action term; known "
-                f"terms: {self.action_entry_names}"
-            )
-        missing = [k for k in self.action_entry_names if k not in actions]
-        if missing:
-            raise ValueError(
-                f"action entries missing for terms {missing}; every action "
-                f"term must receive exactly one NamedAction entry "
-                f"(terms: {self.action_entry_names})"
-            )
-        n = self.num_envs
-        chunks = []
-        for key in self.action_entry_names:
-            na = actions[key]
-            term = self.action_manager.get_term(key)
-            dim = int(term.action_dim)
-            if na.num_envs != n:
-                raise ValueError(
-                    f"action entry {key!r} has {na.num_envs} env rows, " f"expected {n}"
-                )
-            if na.dim != dim:
-                raise ValueError(
-                    f"action entry {key!r} addresses {na.dim} joints but "
-                    f"term {key!r} covers {dim}"
-                )
-            gather = self._term_resolvers[key].gather(na.joint_names).to(self.device)
-            buf = torch.zeros(n, dim, dtype=torch.float32, device=self.device)
-            buf[:, gather] = na.values.to(device=self.device, dtype=torch.float32)
-            chunks.append(buf)
-        return torch.cat(chunks, dim=-1)
 
     def _build_extra(self) -> dict:
         """Per-step recorded quantities, read post-step like the verify script."""

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
         implement it, and rewind gates on the SNAPSHOT trait before use).
         """
 
-        adapter_groups: dict[str, tuple[str, ...]]
+        adapter_groups: dict[str, tuple[tuple[str, str], ...]]
 
         def snapshot(self) -> object:
             """Capture the engine state for a rewind checkpoint."""

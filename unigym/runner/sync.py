@@ -23,7 +23,7 @@ inline computation cannot perturb bit-exact rollouts.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -32,14 +32,48 @@ from unigym.runtime.bridge import RewindBoundary
 from unigym.terminations import TerminationState
 
 
+def _control_group_key(control) -> tuple[str, str]:
+    """The routing identity of one control runtime: ``(articulation, group)``."""
+    return (str(control.articulation), str(control.action_face))
+
+
+def _normalize_group_key(entry, controls, adapter_name: str) -> tuple[str, str]:
+    """Normalize one declared adapter group entry to ``(articulation, group)``.
+
+    ``env.adapter_groups`` may still carry legacy string names in this
+    stage; a string is resolved through the env's controls to its owning
+    ``(control.articulation, control.action_face)`` key.
+    """
+    if isinstance(entry, str):
+        control = controls.get(entry)
+        if control is None:
+            raise ValueError(
+                f"adapter {adapter_name!r} declares group {entry!r}, which is "
+                f"not a control runtime (declared controls: {sorted(controls)})"
+            )
+        return _control_group_key(control)
+    if isinstance(entry, (tuple, list)) and len(entry) == 2:
+        articulation, group = entry
+        if not isinstance(articulation, str) or not articulation:
+            raise ValueError(f"adapter {adapter_name!r} group key has empty articulation")
+        if not isinstance(group, str) or not group:
+            raise ValueError(f"adapter {adapter_name!r} group key has empty group")
+        return (articulation, group)
+    raise ValueError(
+        f"adapter {adapter_name!r} group entries must be a string name or an "
+        f"(articulation, group) pair, got {entry!r}"
+    )
+
+
 def _adapter_groups(instance):
     """The control groups the instance's adapter owns (build-time partition).
 
     The run's build step derives ``env.adapter_groups`` from
     ``RunSpec.controls``; this helper reads that partition for the run's
-    adapter.  A run with no controls
-    (test doubles) keeps the historical no-validation path returning
-    ``None``.  No joint-order / action-face inference is performed.
+    adapter and normalizes every entry to its ``(articulation, group)``
+    identity.  A run with no controls (test doubles) keeps the historical
+    no-validation path returning ``None``.  No joint-order inference is
+    performed.
     """
     env = getattr(instance, "env", None)
     controls = getattr(env, "controls", None)
@@ -52,22 +86,24 @@ def _adapter_groups(instance):
     groups = getattr(env, "adapter_groups", None)
     if groups is not None:
         if name in groups:
-            return tuple(groups[name])
+            return tuple(_normalize_group_key(entry, controls, str(name)) for entry in groups[name])
         raise ValueError(
             f"adapter {name!r} has no entry in env.adapter_groups "
             f"(declared adapters: {sorted(groups)})"
         )
     if not name:
-        # test doubles / direct construction: the body control faces are a
+        # test doubles / direct construction: the body control groups are a
         # cardinality fact, not a guess.
-        owned = tuple(c.action_face for c in controls.values() if c.action_face == c.articulation)
+        owned = tuple(
+            _control_group_key(c) for c in controls.values() if c.action_face == c.articulation
+        )
         if owned:
             return owned
         raise ValueError(
             "cannot resolve the adapter's control groups: no registry "
             "name on the adapter and no env.adapter_groups partition"
         )
-    owned = tuple(c.name for c in controls.values() if c.adapter == name)
+    owned = tuple(_control_group_key(c) for c in controls.values() if c.adapter == name)
     if not owned:
         raise ValueError(
             f"adapter {name!r} owns no control group in env.controls; "
@@ -194,12 +230,20 @@ class SyncRunner:
         self.reset_mask_fn = reset_mask_fn
         self.replay = replay
         self.auto_reset = bool(auto_reset)
-        # v104.3: the build-time controls[] partition names exactly the
-        # control groups this adapter owns.  None = no control surface
-        # (test doubles / direct construction) -> historical behavior.
-        self.adapter_groups = None if adapter_groups is None else tuple(adapter_groups)
         self.adapter_name = getattr(adapter, "_unigym_name", None) or type(adapter).__name__
         self.controls = dict(getattr(env, "controls", None) or {})
+        # v104.3: the build-time controls[] partition names exactly the
+        # control groups this adapter owns, normalized to their
+        # (articulation, group) identity.  None = no control surface
+        # (test doubles / direct construction) -> historical behavior.
+        self.adapter_groups = (
+            None
+            if adapter_groups is None
+            else tuple(
+                _normalize_group_key(entry, self.controls, self.adapter_name)
+                for entry in adapter_groups
+            )
+        )
         self.total_steps = int(cfg["collect"]["steps"])
         # rewind seam: the resumable loop counter + the snapshot's
         # iteration state, both written only by the rewind controller
@@ -227,21 +271,40 @@ class SyncRunner:
     def _validate_targets(self, actions) -> None:
         """Validate one tick's action surface against the control partition.
 
-        Exact group-key equality with the adapter's owned groups (missing
-        group or undeclared extra group fails loud), then every entry's
-        ``kind`` must equal its control group's configured ``target``.
-        No controls (``adapter_groups is None``) keeps the historical
-        pass-through for test doubles.
+        ``actions`` must be a sequence of self-describing
+        :class:`~unigym.runtime.actions.NamedAction` entries.  Their
+        ``(articulation, group)`` identities must equal the adapter's owned
+        group keys exactly (missing group, undeclared extra group or a
+        duplicate identity fails loud), then every entry's ``kind`` must
+        equal its control group's configured ``target``.  No controls
+        (``adapter_groups is None``) keeps the historical pass-through for
+        test doubles.
         """
         if self.adapter_groups is None:
             return
-        if not isinstance(actions, dict):
+        if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
             raise TypeError(
                 f"adapter {self.adapter_name!r} returned "
-                f"{type(actions).__name__}, expected dict[str, NamedAction]"
+                f"{type(actions).__name__}, expected a sequence of NamedAction"
             )
+        entries: dict[tuple[str, str], object] = {}
+        for entry in actions:
+            articulation = getattr(entry, "articulation", None)
+            group = getattr(entry, "group", None)
+            if not articulation or not group:
+                raise TypeError(
+                    "every action entry must be a NamedAction carrying "
+                    f"(articulation, group); got {type(entry).__name__}"
+                )
+            identity = (str(articulation), str(group))
+            if identity in entries:
+                raise ValueError(
+                    f"adapter {self.adapter_name!r} action group {identity!r} "
+                    f"is addressed by more than one action entry"
+                )
+            entries[identity] = entry
         owned = set(self.adapter_groups)
-        keys = set(actions)
+        keys = set(entries)
         missing = sorted(owned - keys)
         extra = sorted(keys - owned)
         if missing or extra:
@@ -250,19 +313,20 @@ class SyncRunner:
                 f"missing={missing}, extra={extra}, "
                 f"declared={list(self.adapter_groups)}"
             )
-        for face, entry in actions.items():
-            control = self.controls.get(face)
+        by_group = {(c.articulation, c.action_face): c for c in self.controls.values()}
+        for identity, entry in entries.items():
+            control = by_group.get(identity)
             if control is None:
                 raise ValueError(
-                    f"action face {face!r} is not a declared control "
-                    f"(declared controls: {sorted(self.controls)})"
+                    f"action group {identity!r} is not a declared control "
+                    f"group (declared: {sorted(by_group)})"
                 )
             kind = getattr(entry, "kind", None)
             if kind != control.target:
                 from unigym.runtime.actions import LEGAL_ACTION_KINDS
 
                 raise ValueError(
-                    f"action face {face!r}: configured target "
+                    f"action group {identity!r}: configured target "
                     f"{control.target!r}, actual kind {kind!r}; legal "
                     f"kinds: {list(LEGAL_ACTION_KINDS)}"
                 )
@@ -283,7 +347,7 @@ class SyncRunner:
         """Advance exactly one policy tick; returns its :class:`StepResult`.
 
         ``actions_override`` is the additive external-driver hook:
-        when it is a ``dict[str, NamedAction]`` the adapter forward and its
+        when it is a ``Sequence[NamedAction]`` the adapter forward and its
         postprocess are skipped and the provided actions go straight to
         ``env.step``.  Every other line (obs refresh, termination, sink
         callbacks, reset chain, RNG order) is shared verbatim with the
@@ -315,7 +379,7 @@ class SyncRunner:
                 injected_raw = self.replay.raw_for(t, raw)
                 if injected_raw is not None:
                     raw = injected_raw
-            # 2) action -> named surface dict[str, NamedAction] (by name)
+            # 2) action -> self-describing sequence[NamedAction] (by identity)
             targets = adapter.postprocess_action(raw)
         else:
             # external driver: no policy forward, no postprocess

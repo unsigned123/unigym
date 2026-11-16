@@ -10,13 +10,14 @@ Contract surface (consumed by collect.py / adapters)
 
 Methods:
 ``step(actions, raw_action=None, cmd=None) -> (obs_cache, extra)``
-    Advance one policy step.  ``actions`` is a ``dict[str, NamedAction]``
-    (name-addressed action faces; each entry's values are ``(N,
-    dim)`` absolute joint position targets (rad) and ``joint_names`` names
-    every column — backends resolve the names to simulator addresses, cached
-    per name-tuple).  ``raw_action`` is the adapter's raw action (policy
-    order) which must land in ``obs_cache["prev_action"]``; ``cmd`` is the
-    current command tensor which must land in ``obs_cache["command"]``.
+    Advance one policy step.  ``actions`` is a ``Sequence[NamedAction]``
+    (self-describing action groups routed by ``(articulation, group)``;
+    each entry's values are ``(N, dim)`` absolute joint position targets
+    (rad) and ``joint_names`` names every column — backends resolve the
+    names to simulator addresses, cached per name-tuple).  ``raw_action`` is
+    the adapter's raw action (policy order) which must land in
+    ``obs_cache["prev_action"]``; ``cmd`` is the current command tensor which
+    must land in ``obs_cache["command"]``.
     Returns ``(obs_cache, extra)``: the (copied) observation cache dict and
     the per-step extra-info dict holding the 15 record keys + 2 control keys
     (see ``EXTRA_INFO_KEYS``).
@@ -278,7 +279,7 @@ class EnvBackend(Protocol):
 
     def step(
         self,
-        actions: dict[str, NamedAction],
+        actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
     ) -> tuple[
@@ -573,10 +574,17 @@ def assert_backend_contract(
 
     # 4) optional live exercise (fakes / offline tests only)
     if exercise_step:
-        actions = {
-            rt.action_face: NamedAction.zeros(n, list(rt.joint_names), rt.target, device=env.device)
+        actions = tuple(
+            NamedAction.zeros(
+                n,
+                rt.articulation,
+                rt.action_face,
+                list(rt.joint_names),
+                rt.target,
+                device=env.device,
+            )
             for rt in body_controls
-        }
+        )
         obs, extra = env.step(actions)
         check_extra_info(extra, n, j, device=env.device)
         check_obs_cache(obs, n, device=env.device)
