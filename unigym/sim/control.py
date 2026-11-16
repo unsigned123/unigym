@@ -2,10 +2,12 @@
 
 A :class:`ControlSpec` is an immutable declaration of one or more control
 groups.  Every group keeps both halves of the existing control contract next to
-each other: the action group (``name`` / ``joints`` / ``q0``) and the actuation
-gains (``kp`` / ``kd`` plus optional limits).  The builder lowers the groups to
-the existing ``action_spec`` / ``policies`` / ``articulations[].actuation[]``
-tables; this module never imports a backend or an engine.
+each other: the authoring action group (``name`` / ``joints`` / ``q0``) and the
+actuation gains (``kp`` / ``kd`` plus optional limits).  The builder lowers the
+groups to the existing ``action_spec`` / ``policies`` /
+``articulations[].actuation[]`` tables; runtime ``NamedAction`` values are
+joint-addressed and carry no group field.  This module never imports a backend
+or an engine.
 
 Only :meth:`Control.position_pd` is exposed in the first spike.  Its drive is
 ``position_pd`` and its target is the existing ``position`` kind, so the
@@ -94,7 +96,7 @@ class ControlGroupSpec:
     """One immutable control group: action joints plus explicit actuation gains.
 
     Attributes:
-        name: the action group and ``NamedAction`` group name.
+        name: the authoring action-group label (not a ``NamedAction`` field).
         drive: one of :data:`unigym.runtime.controls.CONTROL_DRIVES`.
         target: the action kind; must equal ``DRIVE_TARGET[drive]``.
         joint_set: a profile joint-set name, or ``None``.

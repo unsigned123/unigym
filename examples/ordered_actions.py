@@ -8,8 +8,10 @@ or the environment Python after activating it; a bare ``python`` may lack the
 project dependencies.
 
 Two articulations (``go1`` and ``go2``) declare the same 12 joint names.  The
-example shows the template/value round-trip, identity-based ordering, a joint
-permutation, and the policy binding that owns both groups.
+example shows the authoring template, its joint-addressed runtime lowering
+(``NamedAction`` has no group field), identity-based ordering, a joint
+permutation, the tolerant authoring projection, and the policy binding that
+owns both groups.
 """
 
 from __future__ import annotations
@@ -54,6 +56,16 @@ def main() -> None:
     named = spec.unflatten(flat)  # go1, go2 in declaration order
     assert [entry.articulation for entry in named] == ["go1", "go2"]
 
+    # Lowering emits joint-addressed batches: no group field, and each
+    # column is identified by (articulation, joint_name).
+    assert all(not hasattr(entry, "group") for entry in named)
+    assert named[0].joint_names == GO_JOINTS
+    assert named[1].joint_names == GO_JOINTS
+    assert {(entry.articulation, entry.joint_names[0]) for entry in named} == {
+        ("go1", GO_JOINTS[0]),
+        ("go2", GO_JOINTS[0]),
+    }
+
     # The value tuple order does not matter: flatten matches by
     # (articulation, joint-name set, kind).
     assert torch.equal(spec.flatten((named[1], named[0])), flat)
@@ -67,11 +79,25 @@ def main() -> None:
     )
     assert torch.equal(spec.flatten((named[1], go1_permuted)), flat)
 
-    # The dim table is the flat layout: index, identity, joint and target.
+    # The dim table is the flat layout: index, authoring label, joint, target.
     table = spec.dim_table()
     assert [row.index for row in table] == list(range(spec.dim))
-    assert (table[0].articulation, table[0].joint) == ("go1", GO_JOINTS[0])
-    assert (table[12].articulation, table[12].joint) == ("go2", GO_JOINTS[0])
+    assert (table[0].articulation, table[0].group, table[0].joint) == (
+        "go1",
+        "legs",
+        GO_JOINTS[0],
+    )
+    assert (table[12].articulation, table[12].group, table[12].joint) == (
+        "go2",
+        "legs",
+        GO_JOINTS[0],
+    )
+
+    # The tolerant authoring projection restores whole-group columns.  It is
+    # diagnostic/data metadata, never a backend routing identity.
+    projected = spec.project_groups(named)
+    assert [value.group.name for value in projected] == ["legs", "legs"]
+    assert torch.equal(projected[0].values, flat[:, : spec.dim // 2])
 
     # One adapter owns both groups; bindings are the timing authority.
     binding = PolicyBinding(

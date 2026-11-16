@@ -1155,9 +1155,9 @@ class MujocoEnv:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
         ``actions`` is a ``Sequence[NamedAction]`` (the adapter's
-        ``postprocess_action`` output); entries route to controls by
-        ``(articulation, group)`` and their joint names resolve by name to
-        policy-order PD targets.  Read AFTER the
+        ``postprocess_action`` output); every action column routes to the
+        control that owns its ``(articulation, joint_name)`` pair and resolves
+        by name to a policy-order PD target.  Read AFTER the
         physics as in the isaaclab backend (``step -> refresh obs/extra``).
         The ctrl write face is the always-active actuator seam
         (``_setup_actuator_seam``); a non-standard law runs the mj_step1/

@@ -118,9 +118,10 @@ SimulationBuilder(
   the builder is the single owner of those tables. `builder.terrain` is sugar for
   `builder.world.terrain`.
 - `add_articulation(ref, *, name=None, control=...)` requires an explicit
-  `Control` spec; there is no implicit control. Action groups are resolved
-  against the pack profile, group identities are `(articulation, name)`, and
-  the groups of one articulation must be disjoint.
+  `Control` spec; there is no implicit control. Authoring action groups are
+  resolved against the pack profile, their authoring identity is
+  `(articulation, name)`, and the groups of one articulation must be disjoint.
+  This identity is a facade/authoring handle, not a runtime routing key.
 - `add_camera(entry, *, name=None)` accepts an existing `unigym.Camera.*`
   `cameras[]` entry mapping. `attach=BodyHandle` is deferred and raises
   `DeferredFeatureError`; use a native mount name through
@@ -159,12 +160,21 @@ builder.world = World.from_preset(preset, runtime=builder.pack_runtime)
 
 ## Actions
 
-Actions use the ordered action template directly. Each articulation handle
-carries a read-only `action_groups` mapping of
+Actions use the ordered action template as an **authoring handle** at the
+facade. Each articulation handle carries a read-only `action_groups` mapping of
 `OrderedActionGroup` objects, and `Simulation` holds the global
-`OrderedActionSpec` built from those groups. A group fixes its
+`OrderedActionSpec` built from those groups. A group fixes its authoring
 `(articulation, name)` identity, joint order, target kind and body/aux role; the
-same group name may appear on different articulations.
+same group name may appear on different articulations. The public facade
+behavior is unchanged: `act(group, ...)` still stages exactly one declared
+authoring group and `step()` still requires every declared group to be staged.
+
+The boundary change is only in lowering: `PendingActions.lower()` produces
+`tuple[NamedAction, ...]` with **no group field**. Each lowered entry carries
+the staged group's articulation, its joint names in the group's declared order,
+its values and its kind; backends then route every column by
+`(articulation, joint_name)`. The group is an authoring handle, never part of
+the runtime value.
 
 - `group = handle.action_groups[name]` is the only action handle. There is no
   separate action-to-column binding layer and no column-order choice: the

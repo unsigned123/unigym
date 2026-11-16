@@ -17,7 +17,7 @@ Process documents:
 
 Usage documents:
 
-- [Actions](actions.md) - ordered action templates, named values, identity and
-  policy ownership rules.
+- [Actions](actions.md) - joint-addressed runtime values, authoring templates,
+  per-joint routing/coverage and policy ownership rules.
 - [Simulation facade](sim_facade.md) - experimental `unigym.sim` usage, scope,
   error taxonomy and residual limits.
