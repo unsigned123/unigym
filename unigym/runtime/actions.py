@@ -35,13 +35,20 @@ Stage A2 connects those templates to the self-describing runtime values:
 share the ``dim_table`` group-then-joint traversal and round-trip
 bit-identically (``flatten`` also accepts any NamedAction tuple order and any
 per-entry joint-name permutation).
+
+Stage A3a adds the independent :class:`PolicyBinding` declaration plus the
+mapping parsers (:meth:`OrderedActionGroup.from_mapping`,
+:meth:`OrderedActionSpec.from_mapping`, :meth:`PolicyBinding.from_mapping`)
+for the action-authoring surface.  Run/build wiring is deliberately not part
+of this stage.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import torch
 
@@ -63,6 +70,7 @@ __all__ = [
     "NamedAction",
     "OrderedActionGroup",
     "OrderedActionSpec",
+    "PolicyBinding",
     "ResolvedJointTargets",
 ]
 
@@ -71,6 +79,34 @@ def _require_text(value: object, what: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{what} must be a non-empty string, got {value!r}")
     return value
+
+
+def _require_mapping(entry: object, what: str) -> Mapping[str, object]:
+    if not isinstance(entry, Mapping):
+        raise TypeError(f"{what} expects a mapping, got {type(entry).__name__}")
+    return entry
+
+
+def _reject_unknown_keys(
+    entry: Mapping[str, object],
+    allowed: tuple[str, ...],
+    what: str,
+) -> None:
+    unknown = sorted(set(entry) - set(allowed))
+    if unknown:
+        raise ValueError(f"{what} does not accept key(s) {unknown}; allowed keys: {list(allowed)}")
+
+
+def _require_keys(
+    entry: Mapping[str, object],
+    required: tuple[str, ...],
+    what: str,
+) -> None:
+    missing = [key for key in required if key not in entry]
+    if missing:
+        raise ValueError(
+            f"{what} is missing required key(s) {missing}; required keys: {list(required)}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -147,6 +183,52 @@ class OrderedActionGroup:
             )
         object.__setattr__(self, "joints", joints)
 
+    @classmethod
+    def from_mapping(cls, entry: Mapping[str, object]) -> OrderedActionGroup:
+        """Build one group from an explicit declaration mapping.
+
+        Accepted keys are exactly ``name``, ``articulation``, ``joints`` and
+        ``target``; all are required.  ``joints`` must already be an explicit
+        non-empty list/tuple of joint names -- selector keys such as
+        ``joint_set`` are resolved outside this parser (Stage A3b) and are
+        rejected here as unknown keys.  Construction runs the regular
+        :class:`OrderedActionGroup` validation.
+
+        Args:
+            entry: Mapping with the four declaration keys.
+
+        Returns:
+            The validated declaration-ordered group.
+
+        Raises:
+            TypeError: *entry* is not a mapping.
+            ValueError: Unknown or missing keys, or constructor validation
+                fails (empty/duplicate/non-text joints, illegal target).
+        """
+        data = _require_mapping(entry, "OrderedActionGroup.from_mapping")
+        allowed = ("name", "articulation", "joints", "target")
+        _reject_unknown_keys(data, allowed, "OrderedActionGroup.from_mapping")
+        _require_keys(data, allowed, "OrderedActionGroup.from_mapping")
+        raw_joints = data["joints"]
+        if isinstance(raw_joints, (str, bytes)) or not isinstance(raw_joints, Sequence):
+            raise ValueError(
+                "OrderedActionGroup.from_mapping joints must be an explicit "
+                "list/tuple of joint names (selectors such as joint_set are "
+                f"resolved outside this parser), got {type(raw_joints).__name__}"
+            )
+        joints = tuple(
+            _require_text(joint, "OrderedActionGroup.from_mapping joint name")
+            for joint in raw_joints
+        )
+        return cls(
+            name=_require_text(data["name"], "OrderedActionGroup.from_mapping name"),
+            articulation=_require_text(
+                data["articulation"], "OrderedActionGroup.from_mapping articulation"
+            ),
+            joints=joints,
+            target=_require_text(data["target"], "OrderedActionGroup.from_mapping target"),
+        )
+
 
 @dataclass(frozen=True)
 class OrderedActionSpec:
@@ -195,6 +277,48 @@ class OrderedActionSpec:
                     )
                 joint_owner[key] = group.name
         object.__setattr__(self, "groups", groups)
+
+    @classmethod
+    def from_mapping(cls, entries: Sequence[object]) -> OrderedActionSpec:
+        """Build a spec from an ordered sequence of group declarations.
+
+        Each entry may already be an :class:`OrderedActionGroup` or a mapping
+        accepted by :meth:`OrderedActionGroup.from_mapping`.  Declared order
+        is preserved.  Strings, bytes and mappings are rejected as the outer
+        container (a spec is a sequence, not a single declaration), and
+        construction runs the regular :class:`OrderedActionSpec` validation.
+
+        Args:
+            entries: Sequence of group declarations (mappings or groups).
+
+        Returns:
+            The validated declaration-ordered spec.
+
+        Raises:
+            TypeError: *entries* is a string/bytes/mapping/non-sequence, or an
+                entry is neither an OrderedActionGroup nor a mapping.
+            ValueError: *entries* is empty or constructor validation fails
+                (duplicate identity, overlapping joints, bad group).
+        """
+        if isinstance(entries, (str, bytes, Mapping)) or not isinstance(entries, Sequence):
+            raise TypeError(
+                "OrderedActionSpec.from_mapping expects a sequence of "
+                "OrderedActionGroup or mapping entries, "
+                f"got {type(entries).__name__}"
+            )
+        groups: list[OrderedActionGroup] = []
+        for index, entry in enumerate(entries):
+            if isinstance(entry, OrderedActionGroup):
+                groups.append(entry)
+            elif isinstance(entry, Mapping):
+                groups.append(OrderedActionGroup.from_mapping(entry))
+            else:
+                raise TypeError(
+                    "OrderedActionSpec.from_mapping entry must be an "
+                    f"OrderedActionGroup or mapping; entry {index} is "
+                    f"{type(entry).__name__}"
+                )
+        return cls(groups=tuple(groups))
 
     @property
     def dim(self) -> int:
@@ -405,6 +529,129 @@ class OrderedActionSpec:
             f"{group.articulation}/{group.name}:{len(group.joints)}" for group in self.groups
         )
         return f"OrderedActionSpec(dim={self.dim}, groups=[{groups}])"
+
+
+# --------------------------------------------------------------------------- #
+# independent policy binding (Stage A3a: authoring surface only, no run/build
+# wiring yet)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class PolicyBinding:
+    """Which adapter and action groups a policy declares it produces.
+
+    This is the independent declaration half of the action-authoring surface:
+    it names the adapter plus the addressed ``(articulation, group)``
+    identities (and optional timing/agent metadata) without pointing at any
+    run or config object yet.
+
+    Attributes:
+        adapter: adapter name that produces the actions (non-empty).
+        groups: addressed ``(articulation, group)`` identities, stored as a
+            tuple of tuples; order is preserved.  The same group name may
+            appear on different articulations, but each identity is unique.
+        control_dt: optional control period in seconds (finite and > 0).
+        agent: optional agent name (non-empty when present).
+
+    Construction validates the declaration and normalizes *groups* to a tuple
+    of tuples (fail-fast).
+    """
+
+    adapter: str
+    groups: tuple[tuple[str, str], ...]  # (articulation, group)
+    control_dt: float | None = None
+    agent: str | None = None
+
+    def __post_init__(self):
+        _require_text(self.adapter, "PolicyBinding.adapter")
+        if isinstance(self.groups, (str, bytes)) or not isinstance(self.groups, Sequence):
+            raise ValueError(
+                "PolicyBinding.groups must be a non-empty sequence of "
+                f"(articulation, group) pairs, got {type(self.groups).__name__}"
+            )
+        raw_groups = tuple(self.groups)
+        if not raw_groups:
+            raise ValueError(
+                "PolicyBinding.groups must contain at least one " "(articulation, group) pair"
+            )
+        groups: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for pair in raw_groups:
+            if isinstance(pair, (str, bytes)) or not isinstance(pair, Sequence):
+                raise ValueError(
+                    "PolicyBinding.groups entries must be 2-item "
+                    "(articulation, group) sequences, "
+                    f"got {type(pair).__name__}"
+                )
+            if len(pair) != 2:
+                raise ValueError(
+                    "PolicyBinding.groups entry must have exactly 2 items "
+                    f"(articulation, group), got {tuple(pair)!r}"
+                )
+            identity = (
+                _require_text(pair[0], "PolicyBinding group articulation"),
+                _require_text(pair[1], "PolicyBinding group name"),
+            )
+            if identity in seen:
+                raise ValueError(
+                    "PolicyBinding: duplicate group identity " f"(articulation, group)={identity!r}"
+                )
+            seen.add(identity)
+            groups.append(identity)
+        object.__setattr__(self, "groups", tuple(groups))
+        if self.control_dt is not None:
+            if isinstance(self.control_dt, bool) or not isinstance(self.control_dt, (int, float)):
+                raise ValueError(
+                    "PolicyBinding.control_dt must be a positive finite number "
+                    f"or None, got {self.control_dt!r}"
+                )
+            value = float(self.control_dt)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    "PolicyBinding.control_dt must be a positive finite number "
+                    f"or None, got {self.control_dt!r}"
+                )
+            object.__setattr__(self, "control_dt", value)
+        if self.agent is not None:
+            _require_text(self.agent, "PolicyBinding.agent")
+
+    @classmethod
+    def from_mapping(cls, entry: Mapping[str, object]) -> PolicyBinding:
+        """Build a binding from an explicit declaration mapping.
+
+        Accepted keys are exactly ``adapter``, ``groups``, ``control_dt`` and
+        ``agent``; ``adapter`` and ``groups`` are required.  ``groups`` must
+        be a non-empty list of 2-item lists/tuples ``[articulation, group]``.
+        Construction runs the regular :class:`PolicyBinding` validation
+        (normalization included).
+
+        Args:
+            entry: Mapping with the binding declaration.
+
+        Returns:
+            The validated policy binding.
+
+        Raises:
+            TypeError: *entry* is not a mapping.
+            ValueError: Unknown or missing keys, or constructor validation
+                fails (empty identities, duplicates, bad dt/agent).
+        """
+        data = _require_mapping(entry, "PolicyBinding.from_mapping")
+        allowed = ("adapter", "groups", "control_dt", "agent")
+        _reject_unknown_keys(data, allowed, "PolicyBinding.from_mapping")
+        _require_keys(data, ("adapter", "groups"), "PolicyBinding.from_mapping")
+        groups = data["groups"]
+        if isinstance(groups, (str, bytes)) or not isinstance(groups, Sequence):
+            raise ValueError(
+                "PolicyBinding.from_mapping groups must be a non-empty list "
+                "of [articulation, group] pairs, "
+                f"got {type(groups).__name__}"
+            )
+        return cls(
+            adapter=cast("str", data["adapter"]),
+            groups=cast("tuple[tuple[str, str], ...]", groups),
+            control_dt=cast("float | None", data.get("control_dt")),
+            agent=cast("str | None", data.get("agent")),
+        )
 
 
 # --------------------------------------------------------------------------- #

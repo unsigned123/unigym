@@ -10,6 +10,7 @@ from unigym.runtime.actions import (
     NamedAction,
     OrderedActionGroup,
     OrderedActionSpec,
+    PolicyBinding,
 )
 
 
@@ -384,3 +385,267 @@ def test_unflatten_rejects_wrong_column_count():
 
     with pytest.raises(ValueError, match="action columns"):
         spec.unflatten(torch.zeros(2, spec.dim + 1))
+
+
+# --------------------------------------------------------------------------- #
+# Stage A3a: PolicyBinding + declaration mapping parsers
+# --------------------------------------------------------------------------- #
+def _group_mapping(**overrides):
+    entry = {
+        "name": "body",
+        "articulation": "g1",
+        "joints": ["hip", "knee"],
+        "target": "position",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def _binding_mapping(**overrides):
+    entry = {"adapter": "sonic_g1", "groups": [["g1", "body"]]}
+    entry.update(overrides)
+    return entry
+
+
+def test_policy_binding_normalizes_groups_to_tuple_of_tuples():
+    binding = PolicyBinding(
+        adapter="sonic_g1",
+        groups=[["g1", "body"], ("g1", "hand")],
+        control_dt=1,
+        agent="sonic",
+    )
+
+    assert binding.groups == (("g1", "body"), ("g1", "hand"))
+    assert all(isinstance(pair, tuple) for pair in binding.groups)
+    assert binding.control_dt == 1.0
+    assert isinstance(binding.control_dt, float)
+    assert binding.adapter == "sonic_g1"
+    assert binding.agent == "sonic"
+
+
+def test_policy_binding_defaults_optional_fields_to_none():
+    binding = PolicyBinding("sonic_g1", (("g1", "body"),))
+
+    assert binding.control_dt is None
+    assert binding.agent is None
+
+
+def test_policy_binding_allows_same_group_name_on_different_articulations():
+    binding = PolicyBinding("sonic_g1", (("g1", "body"), ("g2", "body")))
+
+    assert binding.groups == (("g1", "body"), ("g2", "body"))
+
+
+def test_policy_binding_rejects_duplicate_identity():
+    with pytest.raises(ValueError, match="duplicate group identity"):
+        PolicyBinding("sonic_g1", (("g1", "body"), ("g1", "body")))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"adapter": ""}, "adapter must be a non-empty"),
+        ({"adapter": 3}, "adapter must be a non-empty"),
+        ({"groups": ()}, "at least one"),
+        ({"groups": "g1"}, "must be a non-empty sequence"),
+        ({"groups": (("g1",),)}, "exactly 2 items"),
+        ({"groups": (("g1", "body", "hand"),)}, "exactly 2 items"),
+        ({"groups": (("g1", ""),)}, "group name must be a non-empty"),
+        ({"groups": (("", "body"),)}, "group articulation must be a non-empty"),
+        ({"groups": ((1, "body"),)}, "group articulation must be a non-empty"),
+        ({"groups": (42,)}, "entries must be 2-item"),
+        ({"control_dt": 0}, "control_dt must be a positive finite"),
+        ({"control_dt": -0.02}, "control_dt must be a positive finite"),
+        ({"control_dt": float("inf")}, "control_dt must be a positive finite"),
+        ({"control_dt": float("nan")}, "control_dt must be a positive finite"),
+        ({"control_dt": True}, "control_dt must be a positive finite"),
+        ({"control_dt": "0.02"}, "control_dt must be a positive finite"),
+        ({"agent": ""}, "agent must be a non-empty"),
+        ({"agent": 5}, "agent must be a non-empty"),
+    ],
+    ids=[
+        "empty-adapter",
+        "non-text-adapter",
+        "empty-groups",
+        "string-groups",
+        "short-pair",
+        "long-pair",
+        "empty-group-name",
+        "empty-articulation",
+        "non-text-articulation",
+        "non-sequence-pair",
+        "zero-dt",
+        "negative-dt",
+        "infinite-dt",
+        "nan-dt",
+        "bool-dt",
+        "string-dt",
+        "empty-agent",
+        "non-text-agent",
+    ],
+)
+def test_policy_binding_rejects_invalid_fields(kwargs, match):
+    fields = {"adapter": "sonic_g1", "groups": (("g1", "body"),)}
+    fields.update(kwargs)
+
+    with pytest.raises(ValueError, match=match):
+        PolicyBinding(**fields)
+
+
+def test_group_from_mapping_builds_and_freezes_joints():
+    group = OrderedActionGroup.from_mapping(_group_mapping(joints=["hip", "knee"]))
+
+    assert group == OrderedActionGroup("body", "g1", ("hip", "knee"), "position")
+    assert isinstance(group.joints, tuple)
+
+
+def test_group_from_mapping_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="does not accept"):
+        OrderedActionGroup.from_mapping(_group_mapping(extra=1))
+
+
+def test_group_from_mapping_rejects_joint_set_selector():
+    entry = _group_mapping()
+    entry["joint_set"] = "g1_body"
+
+    with pytest.raises(ValueError, match="joint_set"):
+        OrderedActionGroup.from_mapping(entry)
+
+
+def test_group_from_mapping_requires_all_keys():
+    entry = _group_mapping()
+    del entry["target"]
+
+    with pytest.raises(ValueError, match="missing required"):
+        OrderedActionGroup.from_mapping(entry)
+
+
+def test_group_from_mapping_requires_explicit_joints():
+    with pytest.raises(ValueError, match="explicit"):
+        OrderedActionGroup.from_mapping(_group_mapping(joints="hip"))
+
+
+def test_group_from_mapping_requires_mapping():
+    with pytest.raises(TypeError, match="expects a mapping"):
+        OrderedActionGroup.from_mapping(("body", "g1", ("hip",), "position"))
+
+
+def test_spec_from_mapping_accepts_mappings_and_groups_in_declared_order():
+    spec = OrderedActionSpec.from_mapping(
+        [
+            _group_mapping(name="body", articulation="g1", joints=["hip"]),
+            OrderedActionGroup("hand", "g1", ("finger",), "effort"),
+            _group_mapping(name="body", articulation="g2", joints=["hip"]),
+        ]
+    )
+
+    assert spec.dim == 3
+    assert [(group.articulation, group.name) for group in spec.groups] == [
+        ("g1", "body"),
+        ("g1", "hand"),
+        ("g2", "body"),
+    ]
+    assert spec.groups[0].joints == ("hip",)
+
+
+def test_spec_from_mapping_rejects_empty_sequence():
+    with pytest.raises(ValueError, match="at least one group"):
+        OrderedActionSpec.from_mapping([])
+
+
+@pytest.mark.parametrize(
+    "entries",
+    ["body", b"body", {"name": "body"}],
+    ids=["str", "bytes", "mapping"],
+)
+def test_spec_from_mapping_rejects_strings_bytes_and_mappings(entries):
+    with pytest.raises(TypeError, match="expects a sequence"):
+        OrderedActionSpec.from_mapping(entries)
+
+
+def test_spec_from_mapping_rejects_non_sequence():
+    with pytest.raises(TypeError, match="expects a sequence"):
+        OrderedActionSpec.from_mapping(42)
+
+
+def test_spec_from_mapping_rejects_unknown_entry_type():
+    with pytest.raises(TypeError, match="OrderedActionGroup or mapping"):
+        OrderedActionSpec.from_mapping([_group_mapping(), object()])
+
+
+def test_spec_from_mapping_propagates_group_validation():
+    with pytest.raises(ValueError, match="duplicate group identity"):
+        OrderedActionSpec.from_mapping([_group_mapping(), _group_mapping()])
+
+
+def test_binding_from_mapping_normalizes_groups():
+    binding = PolicyBinding.from_mapping(
+        _binding_mapping(
+            groups=[["g1", "body"], ["g1", "hand"]],
+            control_dt=0.02,
+            agent="sonic",
+        )
+    )
+
+    assert binding.groups == (("g1", "body"), ("g1", "hand"))
+    assert binding.control_dt == 0.02
+    assert binding.agent == "sonic"
+
+
+def test_binding_from_mapping_defaults_optional_fields():
+    binding = PolicyBinding.from_mapping(_binding_mapping())
+
+    assert (binding.control_dt, binding.agent) == (None, None)
+
+
+def test_binding_from_mapping_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="does not accept"):
+        PolicyBinding.from_mapping(_binding_mapping(extra=1))
+
+
+@pytest.mark.parametrize("key", ["adapter", "groups"])
+def test_binding_from_mapping_requires_keys(key):
+    entry = _binding_mapping()
+    del entry[key]
+
+    with pytest.raises(ValueError, match="missing required"):
+        PolicyBinding.from_mapping(entry)
+
+
+@pytest.mark.parametrize("groups", ["g1", 3], ids=["str", "int"])
+def test_binding_from_mapping_rejects_non_sequence_groups(groups):
+    with pytest.raises(ValueError, match="groups must be a non-empty list"):
+        PolicyBinding.from_mapping(_binding_mapping(groups=groups))
+
+
+def test_binding_from_mapping_rejects_empty_groups():
+    with pytest.raises(ValueError, match="at least one"):
+        PolicyBinding.from_mapping(_binding_mapping(groups=[]))
+
+
+@pytest.mark.parametrize(
+    ("groups", "match"),
+    [
+        ([["g1"]], "exactly 2 items"),
+        ([["g1", "body", "x"]], "exactly 2 items"),
+        ([["g1", ""]], "group name must be a non-empty"),
+    ],
+    ids=["short-pair", "long-pair", "empty-group-name"],
+)
+def test_binding_from_mapping_rejects_bad_pairs(groups, match):
+    with pytest.raises(ValueError, match=match):
+        PolicyBinding.from_mapping(_binding_mapping(groups=groups))
+
+
+def test_binding_from_mapping_requires_mapping():
+    with pytest.raises(TypeError, match="expects a mapping"):
+        PolicyBinding.from_mapping(("sonic_g1", [["g1", "body"]]))
+
+
+def test_policy_binding_is_independent_of_run_config():
+    import unigym.runtime.actions as actions
+
+    binding = PolicyBinding.from_mapping({"adapter": "sonic_g1", "groups": [("g1", "body")]})
+
+    assert binding.groups == (("g1", "body"),)
+    assert "ControlGroup" not in vars(actions)
