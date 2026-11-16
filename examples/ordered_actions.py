@@ -1,8 +1,11 @@
 """Ordered action templates and named values, without an engine.
 
-Run from the repository root::
+Run from the repository root with the project environment, for example::
 
-    PYTHONPATH=. python examples/ordered_actions.py
+    PYTHONPATH=. .venv/bin/python examples/ordered_actions.py
+
+or the environment Python after activating it; a bare ``python`` may lack the
+project dependencies.
 
 Two articulations (``go1`` and ``go2``) declare the same 12 joint names.  The
 example shows the template/value round-trip, identity-based ordering, a joint

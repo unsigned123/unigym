@@ -224,8 +224,9 @@ class OrderedActionGroup:
         Accepted keys are exactly ``name``, ``articulation``, ``joints``,
         ``target`` and the optional ``role`` (default ``aux``); all but
         ``role`` are required.  ``joints`` must already be an explicit
-        non-empty list/tuple of joint names -- the action surface has no
-        selector keys (``joint_set`` is an *actuation* selector), so they are
+        non-empty non-string ``Sequence`` of joint names (tuple, list or
+        another ``Sequence``) -- the action surface has no selector keys
+        (``joint_set`` is an *actuation* selector), so selector keys are
         rejected here as unknown keys.  Construction runs the regular
         :class:`OrderedActionGroup` validation.
 

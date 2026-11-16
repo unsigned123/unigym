@@ -143,8 +143,9 @@ group = OrderedActionGroup.from_mapping(
 spec = OrderedActionSpec.from_mapping([group])
 ```
 
-`joints` must be an explicit list/tuple on the action surface. `joint_set` is an
-actuation selector and is rejected by `OrderedActionGroup.from_mapping`.
+`joints` must be an explicit non-string sequence of joint names (a tuple, list
+or any other `Sequence`). `joint_set` is an actuation selector and is rejected
+by `OrderedActionGroup.from_mapping`.
 
 ## Identity and duplicate names
 
@@ -308,6 +309,21 @@ derived from target plus actuation laws, and its `control_dt` mirrors the
 resolved policy clock. Backends consume these rows for addressing and drive
 strategy; there is no separate action identity beside `(articulation, name)`.
 
+### `q0` ownership
+
+Action groups carry no `q0`: a standby position is not an authored
+action-group field. It is resolved per joint into each derived
+`ControlRuntime.q0` from articulation/joint and robot-profile facts, with this
+precedence:
+
+1. the articulation joint's declared `init` (`ArticulationSpec.joints[*].init`),
+2. the robot profile's `default_joint_pos[joint]` (`RobotProfile`),
+3. `0.0`, only for position drives (`position_pd` / `position_servo`).
+
+A velocity or torque drive never falls back to zero: a joint with neither an
+articulation init nor a profile default is a `ControlError`, not an invented
+target. The resolution lives in `unigym/runtime/controllers.py::_control_q0`.
+
 ## `PolicyBinding`: ownership and `control_dt`
 
 A `PolicyBinding` declares which adapter produces which groups:
@@ -405,5 +421,6 @@ restores template order by name.
   tick loops.
 - [`sim_facade.md`](sim_facade.md) — facade-level `act` / `step` rules.
 - [`examples/ordered_actions.py`](../examples/ordered_actions.py) — executable
-  conversion and ownership example (`PYTHONPATH=. python
-  examples/ordered_actions.py`).
+  conversion and ownership example (`PYTHONPATH=. .venv/bin/python
+  examples/ordered_actions.py`, or the environment Python after activating the
+  project environment; a bare `python` may lack the project dependencies).

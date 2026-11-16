@@ -167,8 +167,10 @@ carries a read-only `action_groups` mapping of
 same group name may appear on different articulations.
 
 - `group = handle.action_groups[name]` is the only action handle. There is no
-  separate binding layer and no column-order choice: the group's joint tuple is
-  the tensor column order.
+  separate action-to-column binding layer and no column-order choice: the
+  group's joint tuple is the tensor column order. A `PolicyBinding` is a
+  separate declaration (adapter ownership and `control_dt`), not a column
+  mapping.
 - `act(group, values)` requires a floating `torch.Tensor` of shape
   `(num_envs, len(group.joints))`, or `(len(group.joints),)` when
   `num_envs == 1`. Values are normalized to `(N, dim)` and cloned.
@@ -314,7 +316,7 @@ All facade errors derive from `unigym.errors.UniGymError`. `NoWorldError` and
 | `NoWorldError` | `build()` has no world, or the world declares no asset. |
 | `NoControlError` | `add_articulation` is called without `control=`. |
 | `SimulationConfigError` | Invalid declaration or caller argument: dt arithmetic, labels, backend name, group/profile coverage, config-mode requirements, `reset(env_ids=...)` ids (empty, non-int, out of range or duplicate), or a foreign config with `runner.auto_reset: true`. |
-| `ForeignHandleError` | An articulation or camera handle, or a pack ref, belongs to another builder/simulation or pack set. |
+| `ForeignHandleError` | An articulation or camera-attach body handle, or a pack ref, belongs to another builder/simulation or pack set. |
 | `BindingError` | Unknown action-group identity, a group that differs from the template, a bad shape/dtype, or an ambiguous/partial named action. |
 | `PendingActionError` | Duplicate group identity, empty pending on `step()`, or a staged group that is not declared. |
 | `MissingActionError` | A required action group is not staged. |
