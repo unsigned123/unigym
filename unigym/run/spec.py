@@ -58,6 +58,12 @@ from unigym.scene_presets import (
 #: composition boundary must supply an explicit runtime/context for them.
 _ASSET_REF_MARKERS = ("${UNIGYM_ASSET_ROOT}", "${UNIGYM_ASSET_PACK}")
 
+#: Supported termination ownership modes.  ``core`` builds the termination
+#: group from the config ``terminations:`` section (today's behavior);
+#: ``external`` disables core terminations so an external task layer (the RL
+#: TaskEnv) owns every terminated/truncated mask.
+_TERMINATION_MODES = ("core", "external")
+
 if TYPE_CHECKING:
     from unigym.packs.runtime import PackRuntime
     from unigym.scenes.terrain import Terrain
@@ -128,6 +134,10 @@ class RunSpec:
     bridges: dict[str, JsonValue]
     benchmark: dict[str, JsonValue]
     terminations: JsonValue
+    #: termination ownership mode: ``core`` (default; the ``terminations:``
+    #: section above is the source) or ``external`` (core builds an empty
+    #: never-firing group and the task layer owns termination).
+    termination_mode: str
     runner: dict[str, JsonValue]
     output: OutputSpec
     sinks: str
@@ -521,6 +531,56 @@ def _adapter_params_result(
     raise ConfigError(f"adapter params returned {type(value).__name__}")
 
 
+def _parse_termination_mode(
+    cfg: dict[str, JsonValue],
+    runner_cfg: dict[str, JsonValue],
+    config_path: str,
+) -> str:
+    """Validate the run's termination ownership mode.
+
+    ``core`` (the default) leaves today's behavior untouched: the core builds
+    its termination group from ``terminations:``.  ``external`` disables core
+    terminations for an RL task layer, so it rejects any core termination
+    source and requires a caller-owned reset policy.
+    """
+    from unigym.errors import ConfigError
+
+    value = cfg.get("termination_mode", "core")
+    if not isinstance(value, str) or value not in _TERMINATION_MODES:
+        raise ConfigError(
+            f"{config_path}: termination_mode={value!r} is not supported "
+            f"(one of: {' | '.join(_TERMINATION_MODES)}) | hint: omit the key "
+            "for the default 'core' mode"
+        )
+    if value == "core":
+        return value
+    terminations = cfg.get("terminations")
+    if terminations is not None and not (is_json_list(terminations) and not terminations):
+        raise ConfigError(
+            f"{config_path}: termination_mode: external owns termination in "
+            f"the task layer; 'terminations:' must be absent or empty, got "
+            f"{terminations!r} | hint: remove the core terminations or use "
+            "termination_mode: core"
+        )
+    auto_reset = runner_cfg.get("auto_reset")
+    if auto_reset is not False:
+        raise ConfigError(
+            f"{config_path}: termination_mode: external requires an explicit "
+            "runner.auto_reset: false so core never resets a terminated row; "
+            f"got runner.auto_reset={auto_reset!r} | hint: set "
+            "runner.auto_reset: false"
+        )
+    reset_on_termination = runner_cfg.get("reset_on_termination", False)
+    if reset_on_termination is not False:
+        raise ConfigError(
+            f"{config_path}: termination_mode: external requires "
+            "runner.reset_on_termination: false (the caller owns terminated "
+            f"row resets); got runner.reset_on_termination="
+            f"{reset_on_termination!r}"
+        )
+    return value
+
+
 def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
@@ -689,6 +749,7 @@ def build_spec(
     # reset_on_termination merges terminated rows.  runner.reset_mask_fn is
     # a reserved key (not deserialized here; inject via SyncRunner).
     runner_cfg = _require_config(cfg.get("runner") or {}, "runner")
+    termination_mode = _parse_termination_mode(cfg, runner_cfg, args.config)
     output_root_value = cfg.get("output_root", "data_out")
     output_root = output_root_value if isinstance(output_root_value, str) else "data_out"
     run_name = _require_str(cfg.get("run_name"), "run_name")
@@ -731,6 +792,7 @@ def build_spec(
         },
         benchmark=benchmark_cfg,
         terminations=cfg.get("terminations"),
+        termination_mode=termination_mode,
         runner=runner_cfg,
         output=OutputSpec(
             out_dir=requested_out,

@@ -101,6 +101,27 @@ Implement your own policy adapter by subclassing
 `unigym.adapters.base.Adapter` and registering it in your own code. The
 public core does not ship vendor policy adapters.
 
+## Run termination mode
+
+By default (`termination_mode: core`) a run builds its termination group from
+the top-level `terminations:` section and reports the per-env
+`StepResult.terminated` mask. A task layer that owns termination itself (for
+example an RL `TaskEnv`) declares `termination_mode: external`:
+
+```yaml
+termination_mode: external
+terminations: []
+runner:
+  auto_reset: false
+  reset_on_termination: false
+```
+
+External mode builds an empty core termination group that never fires, so core
+`StepResult.terminated` is all-False. `terminations:` must be absent or empty,
+and both reset policy keys must be explicitly false: the caller owns
+terminated-row resets. Core still exposes `reset(env_ids)`; there is no core
+`terminate()` API.
+
 ## Documentation
 
 The full documentation is being rewritten. See [`docs/README.md`](docs/README.md).

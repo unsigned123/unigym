@@ -48,6 +48,7 @@ from unigym.runtime.controllers import (
     control_key,
 )
 from unigym.terminations import (
+    TerminationGroup,
     build_termination_group,
 )
 
@@ -1649,6 +1650,18 @@ def _boundary_asset_plan(
     return None
 
 
+def _core_termination_group(spec: RunSpec, cfg: dict[str, JsonValue]) -> TerminationGroup:
+    """Build the core termination group for the run's termination mode.
+
+    ``core`` (the default) constructs the group from the config
+    ``terminations:`` section.  ``external`` returns an empty group that never
+    fires: the task layer owns termination, so core must not mask any row.
+    """
+    if spec.termination_mode == "external":
+        return TerminationGroup()
+    return build_termination_group(_config_list(cfg.get("terminations")))
+
+
 def build_instance(spec: RunSpec) -> RunInstance:
     """Construct every live resource of one run from ``spec`` (no driving)."""
     cfg = spec.cfg
@@ -1801,9 +1814,11 @@ def build_instance(spec: RunSpec) -> RunInstance:
         print(f"[collect] filter chain ({len(filter_chain)}): {names}", flush=True)
 
     # unified termination checks (detection-only; episodes still end by
-    # duration).  Terminations are explicit; no default fall group is
-    # synthesised when the config omits the section.
-    term_group = build_termination_group(_config_list(cfg.get("terminations")))
+    # duration).  In ``core`` mode the ``terminations:`` section is the
+    # explicit source and no default fall group is synthesised when it is
+    # omitted.  In ``termination_mode: external`` the core group is empty and
+    # never fires: the RL task layer owns terminated/truncated masks.
+    term_group = _core_termination_group(spec, cfg)
     print(f"[collect] terminations: {term_group.names} " f"(mode={term_group.mode})", flush=True)
 
     # label single-writer: the run process stamps its OWN
