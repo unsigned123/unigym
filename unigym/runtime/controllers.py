@@ -257,10 +257,10 @@ class ControlRuntime:
     """One explicit drive group over an articulation (§3.3).
 
     Attributes:
-        name: the control name within its articulation; with
-            :attr:`articulation` it is the authoritative control identity
-            (``env.controls`` is keyed by that ``(articulation, name)`` pair).
-            It is also the action-group identity.
+        name: the physical control row label within its articulation; with
+            :attr:`articulation` it is the ``env.controls`` physical-table
+            key.  It is NOT an action identity: runtime action columns are
+            addressed by ``(articulation, joint_name)``.
         role: explicit body/aux selection marker (``body`` | ``aux``),
             copied from the owning :class:`OrderedActionGroup`.
         adapter: the adapter instance name that drives this group.
@@ -662,15 +662,17 @@ def validate_policy_bindings(
 def validate_action_coverage(
     articulations: Iterable[ArticulationSpec] | None,
     profiles: AbcMapping[str, RobotProfile] | None,
-    runtimes: Iterable[ControlRuntime] | None,
+    action_spec: OrderedActionSpec,
 ) -> None:
-    """Validate the resolved control coverage of every articulation (§4).
+    """Validate the joint-authoritative action coverage of every articulation (§4).
 
-    For EVERY declared articulation (including ones with no action group):
+    Driven joints come from the authored :class:`OrderedActionSpec` groups,
+    never from a control row label used as an action identity.  For EVERY
+    declared articulation (including ones with no action group):
 
     * ``actuated`` = union of the profile ``joint_sets`` (profile-backed)
       or ``ArticulationSpec.joints`` (profile-less);
-    * ``driven`` = union of the resolved control joints;
+    * ``driven`` = union of the authored action groups' joints;
     * ``passive`` = ``ArticulationSpec.passive_joints``;
     * every action group of one articulation must be disjoint;
     * ``driven`` and ``passive`` must be disjoint;
@@ -680,6 +682,9 @@ def validate_action_coverage(
     joint is listed in ``passive_joints``; an omitted profile-backed
     articulation therefore fails instead of building silently unactuated.
 
+    Group names appear only as provenance ("source group"); the failing
+    identity is always the articulation plus joint names.
+
     Raises:
         ControlError: with the articulation name and the missing / overlap /
             passive-conflict / unknown joint names.
@@ -688,25 +693,19 @@ def validate_action_coverage(
     profiles = dict(profiles or {})
 
     driven: dict[str, list[str]] = {}
-    for runtime in tuple(runtimes or ()):
-        if runtime.prop:
-            continue
-        art = arts.get(runtime.articulation)
-        if art is None:
-            raise ControlError(
-                f"control {runtime.name!r} names articulation "
-                f"{runtime.articulation!r}, which is not declared"
-            )
-        bare = list(runtime.joint_names)
-        owned = driven.setdefault(art.name, [])
-        overlap = sorted(set(owned) & set(bare))
-        if overlap:
-            raise ControlError(
-                f"articulation {art.name!r}: action groups overlap on "
-                f"joints {overlap} (group {runtime.name!r}); every driven "
-                f"joint must belong to exactly one group"
-            )
-        owned.extend(bare)
+    provenance: dict[tuple[str, str], str] = {}
+    for group in action_spec.groups:
+        for joint in group.joints:
+            key = (group.articulation, joint)
+            previous = provenance.get(key)
+            if previous is not None:
+                raise ControlError(
+                    f"articulation {group.articulation!r}: joint {joint!r} is "
+                    f"driven by more than one action group "
+                    f"(source groups: {previous!r}, {group.name!r})"
+                )
+            provenance[key] = group.name
+        driven.setdefault(group.articulation, []).extend(group.joints)
 
     for art in arts.values():
         name = art.name
@@ -760,8 +759,9 @@ def build_control_runtimes(
 ) -> tuple[ControlRuntime, ...]:
     """Derive neutral :class:`ControlRuntime` rows for one action spec.
 
-    Each :class:`OrderedActionGroup` contributes one row; its identity source
-    is ``(articulation, name)``.  The adapter comes from the owning
+    Each :class:`OrderedActionGroup` contributes one physical control row; its
+    table key is ``(articulation, control name)``.  The action identity is the
+    joint, not the row label.  The adapter comes from the owning
     :class:`PolicyBinding`; the drive is derived from the group target plus
     the resolved actuation law, and ``q0`` comes from joint/profile defaults.
     ``control_dt`` mirrors the binding's declared period, falling back to
@@ -806,7 +806,7 @@ def build_control_runtimes(
             )
         )
     out = tuple(rows)
-    validate_action_coverage(arts.values(), profiles, out)
+    validate_action_coverage(arts.values(), profiles, action_spec)
     return out
 
 

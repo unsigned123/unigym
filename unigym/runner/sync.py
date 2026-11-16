@@ -23,7 +23,7 @@ inline computation cannot perturb bit-exact rollouts.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import torch
 
@@ -33,72 +33,73 @@ from unigym.runtime.bridge import RewindBoundary
 from unigym.terminations import TerminationState
 
 
-def _control_group_key(control) -> tuple[str, str]:
-    """The routing identity of one control runtime: ``(articulation, name)``."""
-    return (str(control.articulation), str(control.name))
-
-
-def _normalize_group_key(entry, adapter_name: str) -> tuple[str, str]:
-    """Validate one declared adapter group entry as ``(articulation, group)``.
-
-    The ONLY legal adapter-group key form is the canonical
-    ``(articulation, group)`` tuple emitted by
-    :func:`unigym.run.build._build_adapter_groups`.  Legacy bare string names,
-    malformed tuples and any mixed form are rejected with a teaching error --
-    there is no alias resolution and no inference from a control name.
-    """
-    if isinstance(entry, str):
-        raise ValueError(
-            f"adapter {adapter_name!r} group entry {entry!r} is a bare string; "
-            f"adapter groups must be (articulation, group) tuples"
-        )
-    if not isinstance(entry, tuple) or len(entry) != 2:
-        raise ValueError(
-            f"adapter {adapter_name!r} group entries must be "
-            f"(articulation, group) tuples, got {entry!r}"
-        )
-    articulation, group = entry
+def _joint_target(
+    articulation: object, joint: object, value: object, what: str
+) -> tuple[tuple[str, str], str]:
+    """Validate one adapter-owned ``(articulation, joint) -> kind`` entry."""
     if not isinstance(articulation, str) or not articulation:
+        raise ValueError(f"{what} has an empty or non-string articulation: {articulation!r}")
+    if not isinstance(joint, str) or not joint:
+        raise ValueError(f"{what} has an empty or non-string joint name: {joint!r}")
+    if not isinstance(value, str) or value not in LEGAL_ACTION_KINDS:
         raise ValueError(
-            f"adapter {adapter_name!r} group key {entry!r} has an empty or "
-            f"non-string articulation"
+            f"{what} joint {(articulation, joint)!r} has an illegal target kind "
+            f"{value!r}; legal kinds: {list(LEGAL_ACTION_KINDS)}"
         )
-    if not isinstance(group, str) or not group:
-        raise ValueError(
-            f"adapter {adapter_name!r} group key {entry!r} has an empty or " f"non-string group"
-        )
-    return (articulation, group)
+    return (articulation, joint), value
 
 
-def _normalize_group_keys(entries, adapter_name: str) -> tuple[tuple[str, str], ...]:
-    """Normalize a whole adapter-group list and reject duplicate identities.
+def _normalize_joint_targets(targets: object, adapter_name: str) -> dict[tuple[str, str], str]:
+    """Normalize one adapter's ``{(articulation, joint): kind}`` partition.
 
-    Duplicate ``(articulation, group)`` identities would make routing
-    ambiguous, so they fail loud instead of being silently collapsed.
+    The partition is authoring/validation metadata: a joint is owned by the
+    adapter and expects exactly one target kind.  Duplicate joints would make
+    validation ambiguous and fail loud.
     """
-    keys: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for entry in entries:
-        key = _normalize_group_key(entry, adapter_name)
-        if key in seen:
+    if not isinstance(targets, Mapping):
+        raise ValueError(
+            f"adapter {adapter_name!r} joint targets must be a mapping of "
+            f"(articulation, joint) -> kind, got {type(targets).__name__}"
+        )
+    out: dict[tuple[str, str], str] = {}
+    for raw_key, kind in targets.items():
+        if not isinstance(raw_key, tuple) or len(raw_key) != 2:
             raise ValueError(
-                f"adapter {adapter_name!r} declares group {key!r} more than "
-                f"once; adapter group identities must be unique"
+                f"adapter {adapter_name!r} joint target key {raw_key!r} must be "
+                f"an (articulation, joint) tuple"
             )
-        seen.add(key)
-        keys.append(key)
-    return tuple(keys)
+        key, target = _joint_target(raw_key[0], raw_key[1], kind, f"adapter {adapter_name!r}")
+        if key in out:
+            raise ValueError(
+                f"adapter {adapter_name!r} declares joint {key!r} more than once; "
+                f"adapter joint targets must be unique"
+            )
+        out[key] = target
+    return out
 
 
-def _adapter_groups(instance):
-    """The control groups the instance's adapter owns (build-time partition).
+def _controls_joint_targets(controls) -> dict[tuple[str, str], str]:
+    """Derive ``{(articulation, joint): kind}`` from physical control rows."""
+    targets: dict[tuple[str, str], str] = {}
+    for control in controls:
+        for joint in control.joint_names:
+            key = (str(control.articulation), str(joint))
+            if key in targets:
+                raise ValueError(
+                    f"control rows declare joint {key!r} more than once; joint "
+                    f"ownership must be unique"
+                )
+            targets[key] = str(control.target)
+    return targets
 
-    The run's build step derives ``env.adapter_groups`` from
-    ``RunSpec.policies``; this helper reads that partition for the run's
-    adapter and normalizes every entry to its ``(articulation, group)``
-    identity.  A run with no controls (test doubles) keeps the historical
-    no-validation path returning ``None``.  No joint-order inference is
-    performed.
+
+def _adapter_joint_targets(instance) -> dict[tuple[str, str], str] | None:
+    """The adapter-owned joint -> kind partition (build-time metadata).
+
+    The run's build step derives ``env.adapter_joint_targets`` from
+    ``RunSpec.policies`` plus backend-declared prop controls; this helper
+    reads that partition for the run's adapter.  A run with no controls (test
+    doubles) keeps the historical no-validation path returning ``None``.
     """
     env = getattr(instance, "env", None)
     controls = getattr(env, "controls", None)
@@ -108,60 +109,57 @@ def _adapter_groups(instance):
     name = getattr(adapter, "_unigym_name", None) or getattr(
         getattr(instance, "spec", None), "adapter_name", None
     )
-    groups = getattr(env, "adapter_groups", None)
-    if groups is not None:
-        if name in groups:
-            return _normalize_group_keys(groups[name], str(name))
+    partitions = getattr(env, "adapter_joint_targets", None)
+    if partitions is not None:
+        if name in partitions:
+            return _normalize_joint_targets(partitions[name], str(name))
         raise ValueError(
-            f"adapter {name!r} has no entry in env.adapter_groups "
-            f"(declared adapters: {sorted(groups)})"
+            f"adapter {name!r} has no entry in env.adapter_joint_targets "
+            f"(declared adapters: {sorted(partitions)})"
         )
     if not name:
-        # test doubles / direct construction: the body control groups are a
+        # test doubles / direct construction: the body control joints are a
         # cardinality fact, not a guess.
-        owned = tuple(_control_group_key(c) for c in controls.values() if c.role == "body")
+        owned = [c for c in controls.values() if getattr(c, "role", None) == "body"]
         if owned:
-            return owned
+            return _controls_joint_targets(owned)
         raise ValueError(
-            "cannot resolve the adapter's control groups: no registry "
-            "name on the adapter and no env.adapter_groups partition"
+            "cannot resolve the adapter's joint targets: no registry name on "
+            "the adapter and no env.adapter_joint_targets partition"
         )
-    owned = tuple(_control_group_key(c) for c in controls.values() if c.adapter == name)
+    owned = [c for c in controls.values() if c.adapter == name]
     if not owned:
         raise ValueError(
-            f"adapter {name!r} owns no control group in env.controls; "
-            f"declared groups: {[(c.name, c.adapter) for c in controls.values()]}"
+            f"adapter {name!r} owns no control row in env.controls; declared "
+            f"rows: {[(c.name, c.adapter) for c in controls.values()]}"
         )
-    return owned
+    return _controls_joint_targets(owned)
 
 
-def _all_adapter_groups(instance):
-    """Every declared ``(articulation, group)`` identity across policies.
+def _all_adapter_joint_targets(instance) -> dict[tuple[str, str], str] | None:
+    """The union of every adapter's joint -> kind partition.
 
     :class:`~unigym.runner.external.ExternalRunner` is driven by the caller,
     not by one adapter: its action surface is the whole action spec, so its
-    validation partition is the union of every policy binding.
+    validation partition is the union of every policy-owned joint.
     """
     env = getattr(instance, "env", None)
-    groups = getattr(env, "adapter_groups", None)
-    if groups:
-        merged: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for adapter_name, entries in groups.items():
-            for key in _normalize_group_keys(entries, str(adapter_name)):
-                if key in seen:
+    partitions = getattr(env, "adapter_joint_targets", None)
+    if partitions:
+        merged: dict[tuple[str, str], str] = {}
+        for adapter_name, entries in partitions.items():
+            for key, kind in _normalize_joint_targets(entries, str(adapter_name)).items():
+                if key in merged:
                     raise ValueError(
-                        f"action group {key!r} is declared by more than one "
+                        f"action joint {key!r} is declared by more than one "
                         f"policy; the external action surface must be unique"
                     )
-                seen.add(key)
-                merged.append(key)
-        return tuple(merged)
+                merged[key] = kind
+        return merged
     controls = getattr(env, "controls", None)
     if not controls:
         return None
-    owned = tuple(_control_group_key(c) for c in controls.values())
-    return owned or None
+    return _controls_joint_targets(controls.values()) or None
 
 
 def _instance_control_dt(instance) -> float | None:
@@ -284,7 +282,7 @@ class SyncRunner:
             reset_mask_fn=runner_cfg.get("reset_mask_fn"),
             replay=instance.replay,
             auto_reset=auto_reset,
-            adapter_groups=_adapter_groups(instance),
+            adapter_joint_targets=_adapter_joint_targets(instance),
             control_dt=_instance_control_dt(instance),
         )
 
@@ -301,7 +299,7 @@ class SyncRunner:
         reset_mask_fn=None,
         replay=None,
         auto_reset: bool = True,
-        adapter_groups=None,
+        adapter_joint_targets: Mapping[tuple[str, str], str] | None = None,
         control_dt: float | None = None,
     ):
         self.cfg = cfg
@@ -320,13 +318,13 @@ class SyncRunner:
         self.control_dt = None if resolved_dt is None else float(resolved_dt)
         self.controls = dict(getattr(env, "controls", None) or {})
         # v104.3: the build-time policies partition names exactly the
-        # control groups this adapter owns, normalized to their
-        # (articulation, group) identity.  None = no control surface
-        # (test doubles / direct construction) -> historical behavior.
-        self.adapter_groups = (
+        # (articulation, joint) rows this adapter owns, with the target kind
+        # each joint expects.  None = no control surface (test doubles /
+        # direct construction) -> historical behavior.
+        self.adapter_joint_targets = (
             None
-            if adapter_groups is None
-            else _normalize_group_keys(adapter_groups, self.adapter_name)
+            if adapter_joint_targets is None
+            else _normalize_joint_targets(adapter_joint_targets, self.adapter_name)
         )
         self.total_steps = int(cfg["collect"]["steps"])
         # rewind seam: the resumable loop counter + the snapshot's
@@ -353,64 +351,66 @@ class SyncRunner:
                 fn(info)
 
     def _validate_targets(self, actions) -> None:
-        """Validate one tick's action surface against the control partition.
+        """Validate one tick's action surface against the adapter partition.
 
         ``actions`` must be a sequence of self-describing
-        :class:`~unigym.runtime.actions.NamedAction` entries.  Their
-        ``(articulation, group)`` identities must equal the adapter's owned
-        group keys exactly (missing group, undeclared extra group or a
-        duplicate identity fails loud), then every entry's ``kind`` must
-        equal its control group's configured ``target``.  No controls
-        (``adapter_groups is None``) keeps the historical pass-through for
-        test doubles.
+        :class:`~unigym.runtime.actions.NamedAction` entries.  Every addressed
+        ``(articulation, joint)`` must be owned by this adapter, carry the
+        owned target kind, and be addressed exactly once; every owned joint
+        must be covered.  No controls (``adapter_joint_targets is None``)
+        keeps the historical pass-through for test doubles.
         """
-        if self.adapter_groups is None:
+        partition = self.adapter_joint_targets
+        if partition is None:
             return
         if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
             raise TypeError(
                 f"adapter {self.adapter_name!r} returned "
                 f"{type(actions).__name__}, expected a sequence of NamedAction"
             )
-        entries: dict[tuple[str, str], object] = {}
+        addressed: set[tuple[str, str]] = set()
         for entry in actions:
             if not isinstance(entry, NamedAction):
                 raise TypeError(
                     f"adapter {self.adapter_name!r} returned a "
                     f"{type(entry).__name__} entry; every action entry must "
-                    f"be a NamedAction carrying (articulation, group)"
+                    f"be a NamedAction carrying joint-addressed values"
                 )
-            identity = (entry.articulation, entry.group)
-            if identity in entries:
-                raise ValueError(
-                    f"adapter {self.adapter_name!r} action group {identity!r} "
-                    f"is addressed by more than one action entry"
-                )
-            entries[identity] = entry
-        owned = set(self.adapter_groups)
-        keys = set(entries)
-        missing = sorted(owned - keys)
-        extra = sorted(keys - owned)
-        if missing or extra:
-            raise ValueError(
-                f"adapter {self.adapter_name!r} action groups mismatch: "
-                f"missing={missing}, extra={extra}, "
-                f"declared={list(self.adapter_groups)}"
+            for joint in entry.joint_names:
+                key = (entry.articulation, joint)
+                expected = partition.get(key)
+                if expected is None:
+                    accepted = sorted(j for a, j in partition if a == entry.articulation)
+                    raise ValueError(
+                        f"adapter {self.adapter_name!r}: unknown action joint "
+                        f"{joint!r} for articulation {entry.articulation!r}; "
+                        f"accepted joints: {accepted}"
+                    )
+                if entry.kind != expected:
+                    raise ValueError(
+                        f"adapter {self.adapter_name!r}: articulation "
+                        f"{entry.articulation!r} joint {joint!r} has action kind "
+                        f"{entry.kind!r} but the adapter-owned target kind is "
+                        f"{expected!r}; legal kinds: {list(LEGAL_ACTION_KINDS)}"
+                    )
+                if key in addressed:
+                    raise ValueError(
+                        f"adapter {self.adapter_name!r}: articulation "
+                        f"{entry.articulation!r} joint {joint!r} is addressed "
+                        f"more than once in one tick"
+                    )
+                addressed.add(key)
+        missing = sorted(key for key in partition if key not in addressed)
+        if missing:
+            details = "; ".join(
+                f"articulation {articulation!r}: joints "
+                f"{[joint for a, joint in missing if a == articulation]}"
+                for articulation in sorted({a for a, _ in missing})
             )
-        by_group = {(c.articulation, c.name): c for c in self.controls.values()}
-        for identity, entry in entries.items():
-            control = by_group.get(identity)
-            if control is None:
-                raise ValueError(
-                    f"action group {identity!r} is not a declared control "
-                    f"group (declared: {sorted(by_group)})"
-                )
-            kind = getattr(entry, "kind", None)
-            if kind != control.target:
-                raise ValueError(
-                    f"action group {identity!r}: configured target "
-                    f"{control.target!r}, actual kind {kind!r}; legal "
-                    f"kinds: {list(LEGAL_ACTION_KINDS)}"
-                )
+            raise ValueError(
+                f"adapter {self.adapter_name!r}: adapter-owned joints are "
+                f"unaddressed: {details}"
+            )
 
     def _start(self) -> None:
         """Reset the run-scoped iteration state (cmd / obs frame)."""

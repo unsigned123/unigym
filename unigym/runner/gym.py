@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 from unigym.runner.state import read_extra
-from unigym.runner.sync import SyncRunner, _adapter_groups, _instance_control_dt
+from unigym.runner.sync import SyncRunner, _adapter_joint_targets, _instance_control_dt
 from unigym.runtime.actions import NamedAction
 
 
@@ -79,9 +79,9 @@ def _reject_mapping_action(action) -> None:
     if isinstance(action, Mapping):
         raise TypeError(
             "received a mapping action, but the action contract is a sequence "
-            "of NamedAction entries keyed by (articulation, group); build "
-            "NamedAction(articulation=..., group=..., values=..., "
-            "joint_names=..., kind=...) instead of a dict"
+            "of joint-addressed NamedAction entries; build "
+            "NamedAction(articulation=..., values=..., joint_names=..., "
+            "kind=...) instead of a dict"
         )
 
 
@@ -134,7 +134,7 @@ class GymEnvRunner(_GymBase):
             reset_mask_fn=runner_cfg.get("reset_mask_fn"),
             replay=instance.replay,
             auto_reset=False,
-            adapter_groups=_adapter_groups(instance),
+            adapter_joint_targets=_adapter_joint_targets(instance),
             control_dt=_instance_control_dt(instance),
         )
         self.instance = instance
@@ -220,7 +220,7 @@ class GymVectorRunner(_GymBase):
             reset_mask_fn=runner_cfg.get("reset_mask_fn"),
             replay=instance.replay,
             auto_reset=True,
-            adapter_groups=_adapter_groups(instance),
+            adapter_joint_targets=_adapter_joint_targets(instance),
             control_dt=_instance_control_dt(instance),
         )
         self.instance = instance
@@ -243,24 +243,27 @@ class GymVectorRunner(_GymBase):
             per_env = [self.action_fn(a) for a in actions]
         else:
             per_env = [self.action_fn(actions) for _ in range(self.num_envs)]
-        merged: dict[tuple[str, str], list[NamedAction]] = {}
+        merged: dict[tuple[str, str, frozenset[str]], list[NamedAction]] = {}
         for entries in per_env:
             for entry in entries:
-                merged.setdefault((entry.articulation, entry.group), []).append(entry)
+                merged.setdefault(
+                    (entry.articulation, entry.kind, frozenset(entry.joint_names)), []
+                ).append(entry)
         out: list[NamedAction] = []
-        for (articulation, group), group_entries in merged.items():
-            first = group_entries[0]
-            for entry in group_entries[1:]:
-                if entry.kind != first.kind or entry.joint_names != first.joint_names:
+        for (articulation, kind, joint_set), batch in merged.items():
+            first = batch[0]
+            for entry in batch[1:]:
+                if entry.joint_names != first.joint_names:
                     raise ValueError(
-                        f"GymVectorRunner action group {(articulation, group)!r} "
-                        f"has inconsistent kind/joint_names across envs"
+                        "GymVectorRunner action "
+                        f"(articulation={articulation!r}, kind={kind!r}, "
+                        f"joints={sorted(joint_set)}) has inconsistent ordered "
+                        "joint_names across envs"
                     )
             out.append(
                 NamedAction(
                     articulation=articulation,
-                    group=group,
-                    values=torch.cat([entry.values for entry in group_entries], dim=0),
+                    values=torch.cat([entry.values for entry in batch], dim=0),
                     joint_names=first.joint_names,
                     kind=first.kind,
                 )

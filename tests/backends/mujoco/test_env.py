@@ -17,7 +17,6 @@ def _zero_action(env):
         NamedAction.zeros(
             env.num_envs,
             control.articulation,
-            control.name,
             list(control.joint_names),
             control.target,
         ),
@@ -283,7 +282,6 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
         actions = tuple(
             NamedAction(
                 articulation=name,
-                group=name,
                 values=torch.tensor([[sign * 0.4, sign * -0.2]], dtype=torch.float32),
                 joint_names=("elbow", "shoulder"),
                 kind="position",
@@ -304,7 +302,7 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
 def _legs_action(articulation: str, target: float) -> NamedAction:
     """One body-group action over the tiny arm's joints (``legs``)."""
     values = torch.tensor([[target, target]], dtype=torch.float32)
-    return NamedAction(articulation, "legs", values, ("elbow", "shoulder"), "position")
+    return NamedAction(articulation, values, ("elbow", "shoulder"), "position")
 
 
 def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
@@ -394,6 +392,14 @@ def test_composite_adapter_sync_runner_routes_both_legs_groups(tmp_path, tiny_mj
     env = _two_articulation_env(tmp_path, tiny_mjcf, group_name="legs", names=("go1", "go2"))
     adapter = _TwoDogAdapter()
     env.adapter_groups = {"two_dog": (("go1", "legs"), ("go2", "legs"))}
+    env.adapter_joint_targets = {
+        "two_dog": {
+            ("go1", "elbow"): "position",
+            ("go1", "shoulder"): "position",
+            ("go2", "elbow"): "position",
+            ("go2", "shoulder"): "position",
+        }
+    }
     sink = _CaptureSink()
     runner = SyncRunner(
         cfg={"collect": {"steps": 2}},
@@ -403,7 +409,7 @@ def test_composite_adapter_sync_runner_routes_both_legs_groups(tmp_path, tiny_mj
         term_group=TerminationGroup(),
         env=env,
         sink=sink,
-        adapter_groups=(("go1", "legs"), ("go2", "legs")),
+        adapter_joint_targets=env.adapter_joint_targets["two_dog"],
     )
     try:
         assert runner.run() == {"steps": 2}

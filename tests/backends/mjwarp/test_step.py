@@ -15,7 +15,7 @@ def _action(env, values):
     control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
-    return (NamedAction(control.articulation, control.name, tensor, names, control.target),)
+    return (NamedAction(control.articulation, tensor, names, control.target),)
 
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
@@ -105,23 +105,27 @@ def test_reset_envs_empty_is_a_noop_and_preserves_requested_id_order(tiny_env_fa
     assert returned.dtype == torch.int64
 
 
-@pytest.mark.parametrize(
-    "joint_names",
-    [
-        pytest.param(("elbow", "wrist"), id="nonmatching-joints"),
-        pytest.param(("elbow", "shoulder"), id="matching-joints"),
-    ],
-)
-def test_step_rejects_an_unknown_action_group(tiny_env, joint_names):
-    """An unknown group is rejected even when its joints match a control."""
-    entry = NamedAction("tiny", "wrist", torch.zeros(tiny_env.num_envs, 2), joint_names, "position")
+def test_step_rejects_an_unknown_joint(tiny_env):
+    """An unknown joint is the error; there is no group fallback."""
+    entry = NamedAction("tiny", torch.zeros(tiny_env.num_envs, 2), ("elbow", "wrist"), "position")
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match="unknown action joint 'wrist'"):
         tiny_env.step((entry,))
 
-    message = str(excinfo.value)
-    assert "action group ('tiny', 'wrist') is not a declared control group" in message
-    assert "accepted control groups: [('tiny', 'tiny')]" in message
+
+def test_joint_addressed_entry_routes_even_without_a_group(tiny_env):
+    """An entry whose joints exactly match a control routes by joint."""
+    control = tiny_env.controls[("tiny", "tiny")]
+    entry = NamedAction.zeros(
+        tiny_env.num_envs,
+        control.articulation,
+        list(control.joint_names),
+        control.target,
+    )
+
+    _, extra = tiny_env.step((entry,))
+
+    assert extra["articulation/tiny/joint_pos"].abs().max() < 0.01
 
 
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
@@ -131,7 +135,6 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
-        control.name,
         list(control.joint_names),
         kind,
     )
@@ -140,9 +143,9 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
         tiny_env.step((entry,))
 
     message = str(excinfo.value)
-    assert "action group ('tiny', 'tiny')" in message
+    assert "articulation 'tiny' joint 'elbow'" in message
     assert f"kind '{kind}'" in message
-    assert "control 'tiny' expects target 'position'" in message
+    assert "expects target kind 'position'" in message
 
 
 def test_direct_torque_writes_the_target_torque(tiny_env_factory):
@@ -356,8 +359,8 @@ def test_direct_env_rejects_removed_gain_env_params(tiny_env_factory, params):
 @pytest.mark.parametrize(
     ("joint_names", "fragment"),
     [
-        pytest.param(("elbow",), "leaves joints unaddressed: ['shoulder']", id="missing-joint"),
-        pytest.param(("elbow", "wrist"), "names joints ['wrist']", id="unowned-joint"),
+        pytest.param(("elbow",), "required joints are unaddressed", id="missing-joint"),
+        pytest.param(("elbow", "wrist"), "unknown action joint 'wrist'", id="unowned-joint"),
     ],
 )
 def test_step_rejects_an_action_that_does_not_match_the_control_joint_set(
@@ -367,7 +370,6 @@ def test_step_rejects_an_action_that_does_not_match_the_control_joint_set(
     control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction(
         control.articulation,
-        control.name,
         torch.zeros(tiny_env.num_envs, len(joint_names)),
         joint_names,
         "position",

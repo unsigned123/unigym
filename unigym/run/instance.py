@@ -43,12 +43,15 @@ if TYPE_CHECKING:
     class RunEnv(EnvBackend, Protocol):
         """Env backend plus the run-layer wiring and snapshot faces.
 
-        ``adapter_groups`` is stamped by :func:`build_instance`; the
-        snapshot/restore pair is the rewind face (all registered backends
-        implement it, and rewind gates on the SNAPSHOT trait before use).
+        ``adapter_groups`` (policy ownership) and ``adapter_joint_targets``
+        (the joint -> kind validation partition) are stamped by
+        :func:`build_instance`; the snapshot/restore pair is the rewind face
+        (all registered backends implement it, and rewind gates on the
+        SNAPSHOT trait before use).
         """
 
         adapter_groups: dict[str, tuple[tuple[str, str], ...]]
+        adapter_joint_targets: dict[str, dict[tuple[str, str], str]]
 
         def snapshot(self) -> object:
             """Capture the engine state for a rewind checkpoint."""

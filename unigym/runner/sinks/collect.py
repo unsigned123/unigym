@@ -63,64 +63,63 @@ def _record_key(key: str) -> str:
     return key
 
 
-def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[NamedAction, str, str]]:
-    """Canonical ``(entry, record_column, group_key)`` triples, in identity order.
+def _entry_fallback_key(na: NamedAction) -> str:
+    """Deterministic per-entry action key (B1 joint fallback).
 
-    The action-group contract is addressed by ``(articulation, group)``, so
-    the incoming sequence order is NOT semantic: entries are sorted by that
-    identity before comparison or recording (a reordered sequence produces
-    the identical contract).  A group name shared by two articulations is
-    disambiguated with the articulation path so record keys stay unique; a
-    duplicate identity is ambiguous and fails loud.
+    B2 will replace this with the spec+prop-derived effective-group
+    projection and its historical ``action_target/<group>`` columns; until
+    then the key is derived only from the runtime entry's articulation and
+    ordered joint names.
     """
-    ordered = sorted(targets, key=lambda na: (na.articulation, na.group))
-    seen: set[tuple[str, str]] = set()
-    counts: dict[str, int] = {}
-    for na in ordered:
-        identity = (na.articulation, na.group)
-        if identity in seen:
-            raise ValueError(
-                f"action group {identity!r} is addressed by more than one " f"NamedAction entry"
-            )
-        seen.add(identity)
-        counts[na.group] = counts.get(na.group, 0) + 1
+    return f"{na.articulation}/{','.join(na.joint_names)}"
+
+
+def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[NamedAction, str, str]]:
+    """Canonical ``(entry, record_column, entry_key)`` triples, in stable order.
+
+    B1 fallback: the runtime value has no group identity, so entries are
+    ordered by ``(articulation, joint_names, kind)`` and keyed by
+    ``<articulation>/<comma-joined joint_names>``.  B2 replaces this with the
+    spec+prop-derived effective-group contract (documented follow-up).
+    """
+    ordered = sorted(targets, key=lambda na: (na.articulation, na.joint_names, na.kind))
+    seen: set[str] = set()
     out: list[tuple[NamedAction, str, str]] = []
     for na in ordered:
-        if counts[na.group] == 1:
-            group_key = na.group
-        else:
-            group_key = f"{na.articulation}/{na.group}"
-        out.append((na, f"action_target/{group_key}", group_key))
+        key = _entry_fallback_key(na)
+        if key in seen:
+            raise ValueError(
+                f"action entry {key!r} is addressed by more than one " f"NamedAction entry"
+            )
+        seen.add(key)
+        out.append((na, f"action_target/{key}", key))
     return out
 
 
 def action_group_contract(targets: Sequence[NamedAction]) -> list:
-    """The action-group contract (playback v3) as data.
+    """The per-entry action contract (playback v3 meta shape).
 
-    One ``{key, column, articulation, group, joint_names, kind}`` entry per
-    NamedAction group, canonicalized by ``(articulation, group)`` -- captured
-    from the actual per-step targets (zero inference: names and widths come
-    from the entries themselves, never from family constants).  Sequence
-    order is not semantic and reordering must not change the contract.  Every
-    column is ``action_target/<group>`` (``action_target/<articulation>/<group>``
-    when the group name is not unique across articulations); there is no
-    primary entry.
+    B1 keeps the historical ``{key, column, articulation, group, joint_names,
+    kind}`` meta shape, but the value now comes from the joint-addressed
+    runtime entry rather than a runtime group identity.  ``group`` carries the
+    same deterministic per-entry key as ``key`` until B2 projects the
+    authoring spec + declared prop groups (documented follow-up).
 
     The sink writes this into ``meta.json`` (``action_groups``) on its
-    first recorded step; shard playback validates every group against
-    it and constructs the NamedActions from it.  Old shards without the
-    key are rejected explicitly (pre-playback re-record).
+    first recorded step; shard playback validates every entry against
+    it.  Old shards without the key are rejected explicitly
+    (pre-playback re-record).
     """
     return [
         {
-            "key": group_key,
+            "key": entry_key,
             "column": column,
             "articulation": na.articulation,
-            "group": na.group,
+            "group": entry_key,
             "joint_names": list(na.joint_names),
             "kind": na.kind,
         }
-        for na, column, group_key in _canonical_action_entries(targets)
+        for na, column, entry_key in _canonical_action_entries(targets)
     ]
 
 
@@ -224,14 +223,15 @@ class CollectSink:
             rec[_record_key(k)] = v
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
-        # one column per NamedAction group: action_target/<group> (v103.5;
-        # no primary, no action_target_<group> suffix form).  The canonical
-        # (articulation, group) order makes sequence order irrelevant.
-        for na, column, _group_key in _canonical_action_entries(targets):
+        # one column per joint-addressed NamedAction entry (B1 fallback key:
+        # action_target/<articulation>/<joints>; B2 projects the authoring
+        # effective-group columns instead).  The canonical entry order makes
+        # sequence order irrelevant.
+        for na, column, _entry_key in _canonical_action_entries(targets):
             rec[column] = na.values
         # playback contract (single source of truth on disk): capture
-        # the groups from THIS step's actual routing once, then hold every
-        # later step to it -- a mid-run group change would make the
+        # the entries from THIS step's actual routing once, then hold every
+        # later step to it -- a mid-run entry change would make the
         # recorded contract a lie, so it fail-fasts instead
         groups = action_group_contract(targets)
         if self._action_groups is None:
@@ -239,7 +239,7 @@ class CollectSink:
             self.writer.meta["action_groups"] = groups
         elif groups != self._action_groups:
             raise ValueError(
-                f"action groups changed mid-run: {groups} != "
+                f"action entries changed mid-run: {groups} != "
                 f"{self._action_groups} -- the recorded meta contract "
                 f"(action_groups) would not describe the shard stream"
             )

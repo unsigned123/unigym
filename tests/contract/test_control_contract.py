@@ -6,7 +6,6 @@ import pytest
 
 from unigym.runtime.actions import OrderedActionSpec, OrderedActionGroup, PolicyBinding
 from unigym.runtime.controllers import validate_action_coverage, validate_policy_bindings
-from unigym.runtime.controllers import ControlRuntime
 from unigym.runtime.controls import ControlError, target_for_drive
 from unigym.scenes.articulation import ArticulationSpec, JointSpec
 
@@ -87,50 +86,23 @@ def test_action_coverage_requires_driven_plus_passive_to_equal_actuated():
         name="arm",
         joints=(JointSpec("shoulder"), JointSpec("elbow")),
     )
-    partial = ControlRuntime(
-        name="body",
-        adapter="manual",
-        articulation="arm",
-        joint_names=("shoulder",),
-        q0=(0.0,),
-    )
+    partial = OrderedActionSpec((OrderedActionGroup("body", "arm", ("shoulder",), "position"),))
     with pytest.raises(ControlError, match="neither driven by an action group"):
-        validate_action_coverage((arm,), {}, (partial,))
+        validate_action_coverage((arm,), {}, partial)
 
     passive = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"), JointSpec("elbow")),
         passive_joints=("elbow",),
     )
-    validate_action_coverage((passive,), {}, (partial,))
+    validate_action_coverage((passive,), {}, partial)
 
 
-def test_action_coverage_rejects_unknown_and_overlapping_joints():
-    """Unknown joints and cross-group overlap are rejected."""
+def test_action_coverage_rejects_unknown_joints():
+    """Joints outside the articulation's actuated vocabulary are rejected."""
     arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
-    unknown = ControlRuntime(
-        name="body",
-        adapter="manual",
-        articulation="arm",
-        joint_names=("shoulder", "wrist"),
-        q0=(0.0, 0.0),
+    unknown = OrderedActionSpec(
+        (OrderedActionGroup("body", "arm", ("shoulder", "wrist"), "position"),)
     )
     with pytest.raises(ControlError, match="not in the articulation"):
-        validate_action_coverage((arm,), {}, (unknown,))
-
-    first = ControlRuntime(
-        name="a",
-        adapter="manual",
-        articulation="arm",
-        joint_names=("shoulder",),
-        q0=(0.0,),
-    )
-    second = ControlRuntime(
-        name="b",
-        adapter="manual",
-        articulation="arm",
-        joint_names=("shoulder",),
-        q0=(0.0,),
-    )
-    with pytest.raises(ControlError, match="overlap"):
-        validate_action_coverage((arm,), {}, (first, second))
+        validate_action_coverage((arm,), {}, unknown)

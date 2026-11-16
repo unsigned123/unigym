@@ -89,8 +89,8 @@ class ManualAdapter(Adapter):
 
         The contract is explicit action sequences handed straight to
         ``ExternalRunner.step`` / ``SyncRunner.tick(actions_override=...)``;
-        silently returning a tensor where the base promises named groups
-        would hide a caller bug.
+        silently returning a tensor where the base promises named joint
+        batches would hide a caller bug.
         """
         raise NotImplementedError(
             "ManualAdapter.postprocess_action must never be called; pass a "

@@ -18,7 +18,6 @@ def _zero_action(env):
         NamedAction.zeros(
             env.num_envs,
             control.articulation,
-            control.name,
             list(control.joint_names),
             control.target,
         ),
@@ -293,7 +292,6 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
         actions = tuple(
             NamedAction(
                 articulation=name,
-                group=name,
                 values=torch.tensor([[sign * 0.4, sign * -0.2]], dtype=torch.float32),
                 joint_names=("elbow", "shoulder"),
                 kind="position",
@@ -319,14 +317,12 @@ def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
         actions = (
             NamedAction(
                 articulation="left",
-                group="legs",
                 values=torch.tensor([[0.4, 0.4]], dtype=torch.float32),
                 joint_names=("elbow", "shoulder"),
                 kind="position",
             ),
             NamedAction(
                 articulation="right",
-                group="legs",
                 values=torch.tensor([[-0.4, -0.4]], dtype=torch.float32),
                 joint_names=("elbow", "shoulder"),
                 kind="position",

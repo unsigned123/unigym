@@ -54,13 +54,13 @@ def main() -> None:
     named = spec.unflatten(flat)  # go1, go2 in declaration order
     assert [entry.articulation for entry in named] == ["go1", "go2"]
 
-    # The value tuple order does not matter: flatten matches by identity.
+    # The value tuple order does not matter: flatten matches by
+    # (articulation, joint-name set, kind).
     assert torch.equal(spec.flatten((named[1], named[0])), flat)
 
     # A per-entry joint permutation is legal and is undone in the flat result.
     go1_permuted = NamedAction(
         articulation="go1",
-        group="legs",
         values=torch.flip(flat[:, : spec.dim // 2], dims=[1]),
         joint_names=tuple(reversed(GO_JOINTS)),
         kind="position",
@@ -81,7 +81,7 @@ def main() -> None:
     )
     assert resolve_control_dt((binding,), "go_legs_policy", fallback=0.01) == 0.02
 
-    zeros = NamedAction.zeros(2, "go1", "legs", GO_JOINTS, "position")
+    zeros = NamedAction.zeros(2, "go1", GO_JOINTS, "position")
     assert zeros.values.shape == (2, len(GO_JOINTS))
 
     print(spec)

@@ -11,7 +11,7 @@ Contract surface (consumed by collect.py / adapters)
 Methods:
 ``step(actions, raw_action=None, cmd=None) -> (obs_cache, extra)``
     Advance one policy step.  ``actions`` is a ``Sequence[NamedAction]``
-    (self-describing action groups routed by ``(articulation, group)``;
+    (joint-addressed action batches routed by ``(articulation, joint)``;
     each entry's values are ``(N, dim)`` absolute joint position targets
     (rad) and ``joint_names`` names every column — backends resolve the
     names to simulator addresses, cached per name-tuple).  ``raw_action`` is
@@ -37,10 +37,12 @@ Attributes:
     values are ``(N, dim)`` tensors on ``device``, refreshed every step.
 ``controls: Mapping[tuple[str, str], ControlRuntime]``
     The ONLY per-control surface (v104.2): one runtime per explicit drive
-    group, keyed by the authoritative ``(articulation, name)`` identity -- a
+    group, keyed by the physical ``(articulation, name)`` row label -- a
     bare group name is NOT a key (two articulations may both declare
-    ``legs``).  Each runtime carries ``name`` / ``adapter``
-    / ``articulation`` / ``joint_names`` / ``q0`` / ``drive`` / ``target``.
+    ``legs``).  The row label is never an action identity: runtime action
+    columns are addressed by ``(articulation, joint_name)``.  Each runtime
+    carries ``name`` / ``adapter`` / ``articulation`` / ``joint_names`` /
+    ``q0`` / ``drive`` / ``target``.
 ``articulations: Mapping[str, ArticulationRuntime]``
     One runtime per declared articulation (``joint_names`` / ``q0`` /
     ``foot_bodies`` / ``body_sets`` / ``contacts`` / ``spawn`` / addresses).
@@ -585,7 +587,6 @@ def assert_backend_contract(
             NamedAction.zeros(
                 n,
                 rt.articulation,
-                rt.name,
                 list(rt.joint_names),
                 rt.target,
                 device=env.device,

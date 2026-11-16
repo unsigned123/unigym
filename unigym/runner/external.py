@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from unigym.runner.base import StepResult
-from unigym.runner.sync import SyncRunner, _all_adapter_groups, _instance_control_dt
+from unigym.runner.sync import SyncRunner, _all_adapter_joint_targets, _instance_control_dt
 
 if TYPE_CHECKING:
     from unigym.runtime.actions import NamedAction
@@ -52,7 +52,7 @@ class ExternalRunner(SyncRunner):
             replay=instance.replay,
             auto_reset=auto_reset,
             action_fn=action_fn,
-            adapter_groups=_all_adapter_groups(instance),
+            adapter_joint_targets=_all_adapter_joint_targets(instance),
             control_dt=_instance_control_dt(instance),
         )
 

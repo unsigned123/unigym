@@ -239,7 +239,6 @@ def test_unflatten_slices_groups_in_declaration_order():
 
     assert isinstance(named, tuple)
     assert [entry.articulation for entry in named] == ["go1", "go2"]
-    assert [entry.group for entry in named] == ["body", "body"]
     assert [entry.joint_names for entry in named] == [JOINTS, JOINTS]
     assert [entry.kind for entry in named] == ["position", "position"]
     assert torch.equal(named[0].values, flat[:, :3])
@@ -284,9 +283,9 @@ def test_flatten_rejects_missing_identity():
 def test_flatten_rejects_extra_identity():
     spec = _two_robot_spec()
     named = spec.unflatten(torch.zeros(2, spec.dim))
-    extra = NamedAction("go3", "body", torch.zeros(2, 3), JOINTS, "position")
+    extra = NamedAction("go3", torch.zeros(2, 3), JOINTS, "position")
 
-    with pytest.raises(ValueError, match="not declared"):
+    with pytest.raises(ValueError, match="matches no spec template"):
         spec.flatten((*named, extra))
 
 
@@ -310,7 +309,6 @@ def test_flatten_accepts_joint_permutation_and_reorders_columns():
     spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee", "ankle"), "position"))
     entry = NamedAction(
         articulation="go1",
-        group="body",
         values=torch.tensor([[30.0, 10.0, 20.0]]),
         joint_names=("ankle", "hip", "knee"),
         kind="position",
@@ -325,29 +323,28 @@ def test_flatten_rejects_wrong_joint_name():
     spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee", "ankle"), "position"))
     entry = NamedAction(
         articulation="go1",
-        group="body",
         values=torch.zeros(1, 3),
         joint_names=("hip", "knee", "toe"),
         kind="position",
     )
 
-    with pytest.raises(ValueError, match="permutation"):
+    with pytest.raises(ValueError, match="matches no spec template"):
         spec.flatten((entry,))
 
 
 def test_flatten_rejects_wrong_kind():
     spec = _two_robot_spec()
     named = spec.unflatten(torch.zeros(2, spec.dim))
-    bad = NamedAction("go2", "body", torch.zeros(2, 3), JOINTS, "velocity")
+    bad = NamedAction("go2", torch.zeros(2, 3), JOINTS, "velocity")
 
-    with pytest.raises(ValueError, match="template expects target"):
+    with pytest.raises(ValueError, match="matches no spec template"):
         spec.flatten((named[0], bad))
 
 
 def test_flatten_rejects_mixed_num_envs():
     spec = _two_robot_spec()
     named = spec.unflatten(torch.zeros(2, spec.dim))
-    bad = NamedAction("go2", "body", torch.zeros(3, 3), JOINTS, "position")
+    bad = NamedAction("go2", torch.zeros(3, 3), JOINTS, "position")
 
     with pytest.raises(ValueError, match="env rows"):
         spec.flatten((named[0], bad))
@@ -356,7 +353,7 @@ def test_flatten_rejects_mixed_num_envs():
 def test_flatten_rejects_mixed_dtype():
     spec = _two_robot_spec()
     named = spec.unflatten(torch.zeros(2, spec.dim))
-    bad = NamedAction("go2", "body", torch.zeros(2, 3, dtype=torch.float64), JOINTS, "position")
+    bad = NamedAction("go2", torch.zeros(2, 3, dtype=torch.float64), JOINTS, "position")
 
     with pytest.raises(ValueError, match="mixed dtypes"):
         spec.flatten((named[0], bad))
@@ -365,7 +362,7 @@ def test_flatten_rejects_mixed_dtype():
 def test_flatten_rejects_mixed_device():
     spec = _two_robot_spec()
     named = spec.unflatten(torch.zeros(2, spec.dim))
-    bad = NamedAction("go2", "body", torch.zeros(2, 3, device="meta"), JOINTS, "position")
+    bad = NamedAction("go2", torch.zeros(2, 3, device="meta"), JOINTS, "position")
 
     with pytest.raises(ValueError, match="mixed devices"):
         spec.flatten((named[0], bad))
@@ -725,10 +722,9 @@ def test_policy_binding_declares_groups_without_a_run_or_spec():
 # --------------------------------------------------------------------------- #
 # OrderedActionSpec.project_groups (tolerant authoring projection)
 # --------------------------------------------------------------------------- #
-def _named(articulation, joint_names, values, *, group="body", kind="position"):
+def _named(articulation, joint_names, values, *, kind="position"):
     return NamedAction(
         articulation=articulation,
-        group=group,
         values=values,
         joint_names=joint_names,
         kind=kind,
@@ -744,7 +740,6 @@ def test_project_groups_returns_declaration_and_group_joint_order():
         "go1",
         ("finger",),
         torch.tensor([[3.0]]),
-        group="hand",
         kind="effort",
     )
     body = _named("go1", ("knee", "hip"), torch.tensor([[20.0, 10.0]]))
@@ -809,8 +804,8 @@ def test_project_groups_rejects_missing_joint_column():
 
 def test_project_groups_rejects_duplicate_joint_column():
     spec = _spec(OrderedActionGroup("body", "go1", ("hip",), "position"))
-    first = _named("go1", ("hip",), torch.tensor([[1.0]]), group="first")
-    second = _named("go1", ("hip",), torch.tensor([[2.0]]), group="second")
+    first = _named("go1", ("hip",), torch.tensor([[1.0]]))
+    second = _named("go1", ("hip",), torch.tensor([[2.0]]))
 
     with pytest.raises(ValueError, match="more than one") as excinfo:
         spec.project_groups((first, second))

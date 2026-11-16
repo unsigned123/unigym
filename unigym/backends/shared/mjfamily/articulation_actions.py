@@ -3,6 +3,10 @@
 Split out of :mod:`articulation_runtime` to keep each module small
 and maintainable.  Every engine still iterates the neutral
 ``env._control_order`` tables built there.
+
+Runtime action columns are routed by ``(articulation, joint)`` through the
+shared :class:`~unigym.runtime.action_routing.JointActionIndex`; a control-row
+label is a physical target-table key, never an action identity.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
+from unigym.runtime.action_routing import JointActionIndex, RoutedColumn
 from unigym.runtime.actions import NamedAction
 
 
@@ -20,10 +25,15 @@ def _label(env) -> str:
     return getattr(env, "_backend_label", "mujoco backend")
 
 
+def _control_key(control) -> tuple[str, str]:
+    """The physical target-table key of one control row (not an action id)."""
+    return (control.articulation, control.name)
+
+
 def _initial_targets(env, order) -> dict:
     targets = {}
     for control in order:
-        key = (control.articulation, control.name)
+        key = _control_key(control)
         if control.prop:
             slots = control.addresses.get("ctrl")
             targets[key] = (
@@ -36,56 +46,30 @@ def _initial_targets(env, order) -> dict:
     return targets
 
 
-def _apply_entry(env, control, identity, entry, targets, covered, label) -> None:
-    """Scatter one NamedAction entry into its control target row."""
-    if entry.kind != control.target:
-        raise ValueError(
-            f"{label}: action group {identity!r} has kind {entry.kind!r} but "
-            f"control {control.name!r} expects target {control.target!r}"
-        )
-    names = list(entry.joint_names)
-    index = {n: i for i, n in enumerate(control.joint_names)}
-    unknown = sorted(set(names) - set(index))
-    if unknown:
-        raise ValueError(
-            f"{label}: action group {identity!r} names joints {unknown} that "
-            f"control {control.name!r} does not own | owns: "
-            f"{list(control.joint_names)}"
-        )
+def _apply_column(env, routed: RoutedColumn, targets: dict) -> None:
+    """Scatter one routed action column into its physical target row."""
+    entry = routed.entry
+    slot = routed.slot
+    control = slot.owner
     row = entry.values.detach().to("cpu").to(torch.float32).numpy()
-    if entry.num_envs != env.num_envs:
-        raise ValueError(
-            f"{label}: action group {identity!r} has {entry.num_envs} env "
-            f"rows, expected {env.num_envs}"
-        )
-    if row.shape[-1] != len(names):
-        raise ValueError(
-            f"{label}: action group {identity!r} carries {row.shape[-1]} "
-            f"values for {len(names)} joints"
-        )
-    if control.prop:
-        resolved = env._action_resolver.resolve(names, prop=control.name)
-        env._prop_targets[:, resolved.prop_adr] = row
-        key = (control.articulation, control.name)
+    column = row[:, routed.source_index]
+    if slot.prop:
+        resolved = env._action_resolver.resolve([slot.joint], prop=control.name)
+        env._prop_targets[:, resolved.prop_adr] = column[:, None]
+        key = _control_key(control)
         targets[key] = env._prop_targets[:, control.addresses["ctrl"]].copy()
         return
-    keys = (control.articulation, control.name)
-    cols = np.asarray([index[n] for n in names], dtype=np.int64)
-    if covered[keys][cols].any():
-        raise ValueError(
-            f"{label}: action group {identity!r} re-addresses joints of "
-            f"control {control.name!r}"
-        )
-    targets[keys][:, cols] = row
-    covered[keys][cols] = True
+    key = _control_key(control)
+    targets[key][:, slot.column] = column
 
 
 def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
-    """Resolve every self-describing action onto its control's target array.
+    """Resolve every joint-addressed action column onto its control target array.
 
-    Entries are routed by ``(entry.articulation, entry.group)``; the
-    sequence order is not a layout.  A control's routing identity is
-    ``(control.articulation, control.name)``.
+    Columns are routed by ``(articulation, joint)``; the sequence order is not
+    a layout.  One entry may span several physical control rows of one
+    articulation as long as every column's kind matches the owning control.
+    Required coverage is checked per joint by the shared index.
     """
     label = label or _label(env)
     if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
@@ -94,52 +78,13 @@ def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
         )
     order = list(getattr(env, "_control_order", env.controls.values()))
     targets = _initial_targets(env, order)
-    covered = {
-        (c.articulation, c.name): np.zeros(len(c.joint_names), dtype=bool)
-        for c in order
-        if not c.prop
-    }
-    by_key: dict[tuple[str, str], object] = {}
-    for control in order:
-        identity = (control.articulation, control.name)
-        if identity in by_key:
-            raise ValueError(
-                f"{label}: control group {identity!r} is declared by more "
-                f"than one control runtime"
-            )
-        by_key[identity] = control
-    accepted = sorted(by_key)
-    seen: set[tuple[str, str]] = set()
-    for entry in actions:
-        if not isinstance(entry, NamedAction):
-            raise TypeError(
-                f"{label} step expects a sequence of NamedAction, got "
-                f"{type(entry).__name__} entry"
-            )
-        identity = (entry.articulation, entry.group)
-        control = by_key.get(identity)
-        if control is None:
-            raise ValueError(
-                f"{label}: action group {identity!r} is not a declared "
-                f"control group; accepted control groups: {accepted}"
-            )
-        if identity in seen:
-            raise ValueError(
-                f"{label}: control group {identity!r} is addressed by more "
-                f"than one action entry"
-            )
-        seen.add(identity)
-        _apply_entry(env, control, identity, entry, targets, covered, label)
-    for control in order:
-        if control.prop or not control.required:
-            continue
-        key = (control.articulation, control.name)
-        if not bool(covered[key].all()):
-            left = [n for n, hit in zip(control.joint_names, covered[key]) if not hit]
-            identity = (control.articulation, control.name)
-            raise ValueError(
-                f"{label}: action group {identity!r} leaves joints " f"unaddressed: {left}"
-            )
+    index = getattr(env, "_action_joint_index", None)
+    if index is None:
+        index = JointActionIndex.from_controls(order, label=label)
+        env._action_joint_index = index
+    routed = index.route(actions, env.num_envs)
+    for routed_column in routed:
+        _apply_column(env, routed_column, targets)
     return targets
 
 

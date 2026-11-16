@@ -58,9 +58,7 @@ TWO_ENV_TENSOR_SHAPES = {
 
 
 def _zero_action(env):
-    return (
-        NamedAction.zeros(env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS), "position"),
-    )
+    return (NamedAction.zeros(env.num_envs, ARTICULATION, list(CART_JOINTS), "position"),)
 
 
 def test_zero_action_advances_exactly_one_policy_step(cartpole_env):
@@ -105,19 +103,16 @@ def test_two_env_step_batches_every_extra_over_both_rows(two_env):
     assert shapes == TWO_ENV_TENSOR_SHAPES
 
 
-@pytest.mark.parametrize("group", ["g1", "wrist"])
-def test_unknown_action_group_fails_fast(cartpole_env, group):
-    """An action group naming no control group is rejected with the accepted groups."""
-    entry = NamedAction.zeros(
-        cartpole_env.num_envs, ARTICULATION, group, list(CART_JOINTS), "position"
-    )
+def test_unknown_articulation_fails_fast(cartpole_env):
+    """An unknown articulation is rejected with the accepted articulations."""
+    entry = NamedAction.zeros(cartpole_env.num_envs, "g1", list(CART_JOINTS), "position")
 
     with pytest.raises(ValueError) as excinfo:
         cartpole_env.step((entry,))
 
     message = str(excinfo.value)
-    assert group in message
-    assert f"accepted control groups: [('{ARTICULATION}', '{ARTICULATION}')]" in message
+    assert "unknown" in message
+    assert ARTICULATION in message
 
 
 def test_missing_action_entry_fails_fast(cartpole_env):
@@ -126,23 +121,21 @@ def test_missing_action_entry_fails_fast(cartpole_env):
         cartpole_env.step(())
 
     message = str(excinfo.value)
-    assert "leave control groups unaddressed" in message
-    assert f"('{ARTICULATION}', '{ARTICULATION}')" in message
+    assert "required joints are unaddressed" in message
+    assert ARTICULATION in message
 
 
 def test_action_kind_mismatch_fails_fast(cartpole_env):
     """A legal action kind that disagrees with the control target is rejected."""
-    entry = NamedAction.zeros(
-        cartpole_env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS), "torque"
-    )
+    entry = NamedAction.zeros(cartpole_env.num_envs, ARTICULATION, list(CART_JOINTS), "torque")
 
     with pytest.raises(ValueError) as excinfo:
         cartpole_env.step((entry,))
 
     message = str(excinfo.value)
-    assert f"action group ('{ARTICULATION}', '{ARTICULATION}')" in message
+    assert f"articulation '{ARTICULATION}' joint" in message
     assert "kind 'torque'" in message
-    assert f"control '{ARTICULATION}' expects target 'position'" in message
+    assert "expects target kind 'position'" in message
 
 
 def test_wrong_env_row_count_fails_fast(cartpole_env):
@@ -150,25 +143,21 @@ def test_wrong_env_row_count_fails_fast(cartpole_env):
     entry = NamedAction.zeros(
         cartpole_env.num_envs + 1,
         ARTICULATION,
-        ARTICULATION,
         list(CART_JOINTS),
         "position",
     )
 
-    with pytest.raises(ValueError, match=r"has 2 env rows, expected 1"):
+    with pytest.raises(ValueError, match=r"has 2 env rows, but the backend expects 1"):
         cartpole_env.step((entry,))
 
 
 def test_wrong_joint_count_fails_fast(cartpole_env):
     """An entry addressing fewer joints than the action term is rejected."""
     entry = NamedAction.zeros(
-        cartpole_env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS[:1]), "position"
+        cartpole_env.num_envs, ARTICULATION, list(CART_JOINTS[:1]), "position"
     )
 
-    with pytest.raises(
-        ValueError,
-        match=r"addresses 1 joints but term 'cartpole' covers 2",
-    ):
+    with pytest.raises(ValueError, match=r"required joints are unaddressed"):
         cartpole_env.step((entry,))
 
 
@@ -176,7 +165,6 @@ def test_unknown_joint_name_fails_fast(cartpole_env):
     """An entry column naming a joint the action term does not own is rejected."""
     entry = NamedAction.zeros(
         cartpole_env.num_envs,
-        ARTICULATION,
         ARTICULATION,
         [CART_JOINTS[0], "wrist"],
         "position",
@@ -186,5 +174,5 @@ def test_unknown_joint_name_fails_fast(cartpole_env):
         cartpole_env.step((entry,))
 
     message = str(excinfo.value)
-    assert "unknown joint name(s) ['wrist']" in message
-    assert f"accepted names: {list(CART_JOINTS)}" in message
+    assert "unknown action joint 'wrist'" in message
+    assert "accepted joints" in message

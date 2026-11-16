@@ -113,7 +113,6 @@ def test_named_mapping_values_are_reordered_into_group_joint_order() -> None:
     assert action is not None
     assert len(action) == 1
     assert action[0].articulation == "arm"
-    assert action[0].group == "arm"
     assert action[0].joint_names == ("shoulder", "elbow")
     assert action[0].values.shape == (1, 2)
     assert torch.allclose(action[0].values, torch.tensor([[0.3, 0.7]]))

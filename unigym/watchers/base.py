@@ -235,13 +235,38 @@ class WatchContext:
     # ------------------------------------------------------------------ #
     # the key face (trace contract §2 -- ONE table)
     # ------------------------------------------------------------------ #
+    def _action_values(self) -> list[tuple[str, Any]]:
+        """``(key, values)`` for the action face.
+
+        Uses ``bundle["action_group_values"]`` when the runner supplied the
+        authoring projection; otherwise falls back to one deterministic
+        per-entry key per joint-addressed NamedAction
+        (``<articulation>/<comma-joined joint_names>``).  The fallback is a
+        B1 bridge until B2 supplies the spec+prop-derived projection.
+        """
+        projection = self.bundle.get("action_group_values")
+        if projection is not None:
+            counts: dict[str, int] = {}
+            for value in projection:
+                name = value.group.name
+                counts[name] = counts.get(name, 0) + 1
+            out: list[tuple[str, Any]] = []
+            for value in projection:
+                name = value.group.name
+                key = name if counts[name] == 1 else f"{value.group.articulation}/{name}"
+                out.append((key, value.values))
+            return out
+        targets = self.bundle.get("targets") or ()
+        return [
+            (f"{entry.articulation}/{','.join(entry.joint_names)}", entry.values)
+            for entry in targets
+        ]
+
     def keys(self) -> list[str]:
         """Available trace-face keys (candidate-discovery listing)."""
         out = [f"obs/{k}" for k in self.obs_cache]
         out += [f"extra/{k}" for k in self.extra]
-        targets = self.bundle.get("targets")
-        if targets is not None:
-            out += [f"action/{entry.group}" for entry in targets]
+        out += [f"action/{key}" for key, _ in self._action_values()]
         if "raw" in self.bundle:
             out.append("action/raw")
         return sorted(set(out))
@@ -270,14 +295,11 @@ class WatchContext:
         elif name == "action/raw":
             return self.bundle.get("raw")
         elif name.startswith("action/"):
-            targets = self.bundle.get("targets")
-            na = next(
-                (entry for entry in (targets or ()) if entry.group == name[7:]),
-                None,
-            )
-            if na is None:
-                raise WatchError(f"unknown key {name!r} (available: {self.keys()})", self.keys())
-            return getattr(na, "values", na)
+            wanted = name[7:]
+            for key, values in self._action_values():
+                if key == wanted:
+                    return values
+            raise WatchError(f"unknown key {name!r} (available: {self.keys()})", self.keys())
         else:
             raise WatchError(
                 f"key {name!r} must use the trace face prefix "

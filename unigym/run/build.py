@@ -400,6 +400,41 @@ def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[tuple[str, str], ...
     return {owner: tuple(keys) for owner, keys in groups.items()}
 
 
+def _build_adapter_joint_targets(
+    spec: RunSpec,
+) -> dict[str, dict[tuple[str, str], str]]:
+    """``{adapter_name: {(articulation, joint): target_kind}}`` from policies.
+
+    This is the authoring/validation partition: every joint driven by an
+    action group bound to an adapter is owned by that adapter with the group's
+    target kind.  Backend routing never reads it.
+    """
+    groups = {
+        (group.articulation, group.name): group for group in getattr(spec, "action_spec").groups
+    }
+    targets: dict[str, dict[tuple[str, str], str]] = {}
+    for binding in getattr(spec, "policies", ()) or ():
+        owned = targets.setdefault(str(binding.adapter), {})
+        for identity in binding.groups:
+            group = groups.get(identity)
+            if group is None:
+                raise ValueError(
+                    f"policy binding adapter {binding.adapter!r} references "
+                    f"undeclared action group {identity!r}; declared groups: "
+                    f"{sorted(groups)}"
+                )
+            for joint in group.joints:
+                key = (group.articulation, joint)
+                previous = owned.get(key)
+                if previous is not None:
+                    raise ValueError(
+                        f"adapter {binding.adapter!r} joint target {key!r} is "
+                        f"declared more than once"
+                    )
+                owned[key] = group.target
+    return targets
+
+
 def _announce_artifacts(path: str | Path | None) -> None:
     """Print the run-artifact destination (or the off switch)."""
     if path is None:
@@ -1653,6 +1688,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)
+    env.adapter_joint_targets = _build_adapter_joint_targets(spec)
     if spec.adapter_name:
         adapter._unigym_name = spec.adapter_name
         # articulated-prop action groups are declared by ``objects:`` sugar and
@@ -1664,6 +1700,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
         if prop_groups:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))
             env.adapter_groups[spec.adapter_name] = owned + prop_groups
+            joint_targets = env.adapter_joint_targets.setdefault(spec.adapter_name, {})
+            for control in (env.controls or {}).values():
+                if not control.prop:
+                    continue
+                for joint in control.joint_names:
+                    joint_targets[(control.articulation, joint)] = control.target
     sampler = built["sampler"]
     policy_dt = built["policy_dt"]
     total_steps, bench_cfg, task_meta = _apply_benchmark_budget(

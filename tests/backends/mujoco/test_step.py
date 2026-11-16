@@ -17,7 +17,7 @@ def _action(env, values, joint_names=None):
     control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names if joint_names is None else joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
-    return (NamedAction(control.articulation, control.name, tensor, names, control.target),)
+    return (NamedAction(control.articulation, tensor, names, control.target),)
 
 
 def _two_dog_env():
@@ -45,9 +45,9 @@ def _two_dog_env():
 def test_route_actions_rejects_a_duplicate_group_identity():
     """One (articulation, group) addressed by two entries is ambiguous."""
     env = _two_dog_env()
-    go1 = NamedAction("go1", "legs", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position")
+    go1 = NamedAction("go1", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position")
 
-    with pytest.raises(ValueError, match="more than one action entry"):
+    with pytest.raises(ValueError, match="addressed more than once"):
         route_actions(env, (go1, go1))
 
 
@@ -64,17 +64,17 @@ def test_route_actions_rejects_a_non_named_action_entry(entry):
 def test_route_actions_rejects_a_row_count_mismatch():
     """An entry must carry exactly env.num_envs value rows."""
     env = _two_dog_env()
-    entry = NamedAction("go1", "legs", torch.zeros(2, 2), ("hip", "knee"), "position")
+    entry = NamedAction("go1", torch.zeros(2, 2), ("hip", "knee"), "position")
 
-    with pytest.raises(ValueError, match=r"has 2 env rows, expected 1"):
+    with pytest.raises(ValueError, match=r"has 2 env rows, but the backend expects 1"):
         route_actions(env, (entry,))
 
 
 def test_two_articulations_with_identical_joint_names_route_by_identity():
     """Duplicate joint names route to their own (articulation, group), no collision."""
     env = _two_dog_env()
-    go1 = NamedAction("go1", "legs", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position")
-    go2 = NamedAction("go2", "legs", torch.tensor([[3.0, 4.0]]), ("hip", "knee"), "position")
+    go1 = NamedAction("go1", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position")
+    go2 = NamedAction("go2", torch.tensor([[3.0, 4.0]]), ("hip", "knee"), "position")
 
     targets = route_actions(env, (go1, go2))
 
@@ -85,16 +85,50 @@ def test_two_articulations_with_identical_joint_names_route_by_identity():
     assert reordered[("go1", "legs")].tolist() == [[1.0, 2.0]]
     assert reordered[("go2", "legs")].tolist() == [[3.0, 4.0]]
 
-    with pytest.raises(ValueError, match=r"\('go1', 'arms'\).*not a declared control group"):
+    with pytest.raises(ValueError, match="unknown action joint 'arms'"):
         route_actions(
             env,
-            (NamedAction("go1", "arms", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position"),),
+            (NamedAction("go1", torch.tensor([[1.0, 2.0]]), ("hip", "arms"), "position"),),
         )
-    with pytest.raises(ValueError, match=r"\('go3', 'legs'\).*not a declared control group"):
+    with pytest.raises(ValueError, match="unknown articulation 'go3'"):
         route_actions(
             env,
-            (NamedAction("go3", "legs", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position"),),
+            (NamedAction("go3", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position"),),
         )
+
+
+def test_one_entry_spans_multiple_physical_controls_of_one_articulation():
+    """A joint-addressed entry may scatter across two control-row targets."""
+    upper = ControlRuntime(
+        name="upper",
+        adapter="arm_policy",
+        articulation="arm",
+        joint_names=("shoulder",),
+        q0=(0.0,),
+        drive="position_pd",
+        target="position",
+    )
+    lower = ControlRuntime(
+        name="lower",
+        adapter="arm_policy",
+        articulation="arm",
+        joint_names=("elbow",),
+        q0=(0.0,),
+        drive="position_pd",
+        target="position",
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        controls={("arm", "upper"): upper, ("arm", "lower"): lower},
+        _control_order=[upper, lower],
+        _backend_label="arm test",
+    )
+    entry = NamedAction("arm", torch.tensor([[1.0, 2.0]]), ("elbow", "shoulder"), "position")
+
+    targets = route_actions(env, (entry,))
+
+    assert targets[("arm", "upper")].tolist() == [[2.0]]
+    assert targets[("arm", "lower")].tolist() == [[1.0]]
 
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
@@ -120,42 +154,35 @@ def test_named_action_step_advances_joints_and_returns_contract_shaped_output(ti
     assert tuple(extra["reset_env_ids"].shape) == (0,)
 
 
-def test_step_rejects_unknown_face_with_nonmatching_joints(tiny_env):
-    """An unknown group whose joints match no control is rejected (no fallback)."""
-    entry = NamedAction(
-        "tiny", "wrist", torch.zeros(tiny_env.num_envs, 2), ("elbow", "wrist"), "position"
-    )
-    with pytest.raises(ValueError, match="is not a declared control group"):
+def test_step_rejects_an_unknown_joint(tiny_env):
+    """An unknown joint is the error; there is no group fallback."""
+    entry = NamedAction("tiny", torch.zeros(tiny_env.num_envs, 2), ("elbow", "wrist"), "position")
+    with pytest.raises(ValueError, match="unknown action joint 'wrist'"):
         tiny_env.step((entry,))
 
 
-def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
-    """An unknown group is rejected even when its joints exactly match a control."""
+def test_joint_addressed_entry_routes_even_without_a_group(tiny_env):
+    """An entry whose joints exactly match a control routes by joint."""
     control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
-        "wrist",
         list(control.joint_names),
         control.target,
     )
 
-    with pytest.raises(ValueError) as excinfo:
-        tiny_env.step((entry,))
+    _, extra = tiny_env.step((entry,))
 
-    message = str(excinfo.value)
-    assert "action group ('tiny', 'wrist') is not a declared control group" in message
-    assert "accepted control groups: [('tiny', 'tiny')]" in message
+    assert extra["articulation/tiny/joint_pos"].abs().max() < 0.01
 
 
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
 def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_env, kind):
-    """A mismatched NamedAction.kind is rejected against the control's target."""
+    """A mismatched NamedAction.kind is rejected against the owning joint."""
     control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
-        control.name,
         list(control.joint_names),
         kind,
     )
@@ -164,9 +191,9 @@ def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_e
         tiny_env.step((entry,))
 
     message = str(excinfo.value)
-    assert "action group ('tiny', 'tiny')" in message
+    assert "articulation 'tiny' joint 'elbow'" in message
     assert f"kind '{kind}'" in message
-    assert "control 'tiny' expects target 'position'" in message
+    assert "expects target kind 'position'" in message
 
 
 def test_direct_torque_writes_the_target_torque(tiny_env_factory):
@@ -398,13 +425,12 @@ def test_step_rejects_a_missing_control_joint(tiny_env):
     action = (
         NamedAction(
             control.articulation,
-            control.name,
             torch.zeros(tiny_env.num_envs, 1),
             ("elbow",),
             "position",
         ),
     )
-    with pytest.raises(ValueError, match=r"leaves joints unaddressed: \['shoulder'\]"):
+    with pytest.raises(ValueError, match=r"required joints are unaddressed.*\['shoulder'\]"):
         tiny_env.step(action)
 
 
@@ -414,13 +440,12 @@ def test_step_rejects_a_joint_name_the_control_does_not_own(tiny_env):
     action = (
         NamedAction(
             control.articulation,
-            control.name,
             torch.zeros(tiny_env.num_envs, 2),
             ("elbow", "wrist"),
             "position",
         ),
     )
-    with pytest.raises(ValueError, match=r"names joints \['wrist'\]"):
+    with pytest.raises(ValueError, match=r"unknown action joint 'wrist'"):
         tiny_env.step(action)
 
 

@@ -147,7 +147,7 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
         group = control.name
         if not str(group).isidentifier():
             raise ValueError(
-                f"{_LABEL}: action group {group!r} of articulation "
+                f"{_LABEL}: control {group!r} of articulation "
                 f"{control.articulation!r} is not a valid action-term name"
             )
         if hasattr(cfg.actions, group):
@@ -284,8 +284,8 @@ def _bind_control_order(env, controls) -> None:
     by_group = {control.name: control for control in controls.values()}
     if len(by_group) != len(controls):
         raise ValueError(
-            f"{_LABEL}: control action groups are not unique; each action term "
-            f"name must map to exactly one control group "
+            f"{_LABEL}: control rows are not unique; each action term name "
+            f"must map to exactly one control row "
             f"(declared: {[(c.articulation, c.name) for c in controls.values()]})"
         )
     env._control_order = [by_group[name] for name in env.action_entry_names if name in by_group]
@@ -348,85 +348,44 @@ def sync_articulation_controls(env, articulation: str) -> None:
 
 
 def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
-    """Resolve every self-describing action onto the flat action-term input.
+    """Resolve every joint-addressed action column onto the flat term input.
 
-    Entries are routed by ``(entry.articulation, entry.group)`` to the
-    control whose ``(articulation, name)`` matches; the action-term name
-    stays an internal backend detail (``control.name``).
+    Columns are routed by ``(articulation, joint)`` through the shared
+    :class:`~unigym.runtime.action_routing.JointActionIndex`; each term's
+    buffer is filled in the term's own input order (preserve_order terms:
+    input dim i == cfg.joint_names[i]).  Unknown joints, wrong kinds, duplicate
+    coverage and missing required joints all fail fast with joint-worded
+    errors.  A control-row / action-term name is a backend detail, never an
+    action identity.
     """
     if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
         raise TypeError(
             f"{_LABEL} step expects a sequence of NamedAction, got " f"{type(actions).__name__}"
         )
-    by_key: dict[tuple[str, str], ControlRuntime] = {}
-    for control in env._control_order:
-        identity = (control.articulation, control.name)
-        if identity in by_key:
-            raise ValueError(
-                f"{_LABEL}: control group {identity!r} is declared by more "
-                f"than one control runtime"
-            )
-        by_key[identity] = control
-    accepted = sorted(by_key)
-    entries: dict[tuple[str, str], NamedAction] = {}
-    for entry in actions:
-        if not isinstance(entry, NamedAction):
-            raise TypeError(
-                f"{_LABEL} step expects a sequence of NamedAction, got "
-                f"{type(entry).__name__} entry"
-            )
-        identity = (entry.articulation, entry.group)
-        if identity in entries:
-            raise ValueError(
-                f"{_LABEL}: control group {identity!r} is addressed by more "
-                f"than one action entry"
-            )
-        entries[identity] = entry
-    unknown = sorted(set(entries) - set(by_key))
-    if unknown:
-        raise ValueError(
-            f"{_LABEL}: action groups {unknown} match no control group; "
-            f"accepted control groups: {accepted}"
-        )
-    missing = [
-        (c.articulation, c.name)
-        for c in env._control_order
-        if c.required and (c.articulation, c.name) not in entries
-    ]
-    if missing:
-        raise ValueError(
-            f"{_LABEL}: action entries leave control groups unaddressed: "
-            f"{missing}; accepted control groups: {accepted}"
-        )
-    n = env.num_envs
-    chunks = []
-    for control in env._control_order:
-        identity = (control.articulation, control.name)
-        term_name = control.name
-        term = env.action_manager.get_term(term_name)
-        dim = int(term.action_dim)
-        na = entries.get(identity)
-        if na is None:
-            buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
-            chunks.append(buf)
-            continue
-        if na.kind != control.target:
-            raise ValueError(
-                f"{_LABEL}: action group {identity!r} has kind {na.kind!r} "
-                f"but control {control.name!r} expects target {control.target!r}"
-            )
-        if na.num_envs != n:
-            raise ValueError(f"action group {identity!r} has {na.num_envs} env rows, expected {n}")
-        if na.dim != dim:
-            raise ValueError(
-                f"action group {identity!r} addresses {na.dim} joints but "
-                f"term {term_name!r} covers {dim}"
-            )
-        gather = env._term_resolvers[term_name].gather(na.joint_names).to(env.device)
-        buf = torch.zeros(n, dim, dtype=torch.float32, device=env.device)
-        buf[:, gather] = na.values.to(device=env.device, dtype=torch.float32)
-        chunks.append(buf)
-    return torch.cat(chunks, dim=-1)
+    order = list(env._control_order)
+    buffers: dict[str, torch.Tensor] = {}
+    for control in order:
+        term_name = control.addresses.get("term", control.name)
+        dim = int(env.action_manager.get_term(term_name).action_dim)
+        buffers[term_name] = torch.zeros(env.num_envs, dim, dtype=torch.float32, device=env.device)
+    index = getattr(env, "_action_joint_index", None)
+    if index is None:
+        from unigym.runtime.action_routing import JointActionIndex
+
+        index = JointActionIndex.from_controls(order, label=_LABEL)
+        env._action_joint_index = index
+    routed = index.route(actions, env.num_envs)
+    for routed_column in routed:
+        slot = routed_column.slot
+        control = slot.owner
+        term_name = control.addresses.get("term", control.name)
+        term_index = env._term_resolvers[term_name].index_of(slot.joint)
+        buffers[term_name][:, term_index] = routed_column.entry.values[
+            :, routed_column.source_index
+        ].to(device=env.device, dtype=torch.float32)
+    return torch.cat(
+        [buffers[control.addresses.get("term", control.name)] for control in order], dim=-1
+    )
 
 
 def _articulation_extra(env, art) -> dict:

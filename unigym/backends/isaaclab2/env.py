@@ -310,7 +310,7 @@ def _configure_robot_scene(
     term_name = str(body_control.name)
     if not term_name.isidentifier():
         raise ValueError(
-            f"isaaclab2 backend: action group {term_name!r} of articulation "
+            f"isaaclab2 backend: control {term_name!r} of articulation "
             f"{body_control.articulation!r} is not a valid action-term name"
         )
     # Keep the joint list source unchanged: the profile's declared body order
@@ -1094,9 +1094,9 @@ class IsaaclabEnv(ManagerBasedEnv):
         """Advance one policy step.
 
         Args:
-            actions: ``Sequence[NamedAction]`` — self-describing action
-                groups routed by ``(articulation, group)``; every required
-                control group must receive exactly one entry.  Entry joint
+            actions: ``Sequence[NamedAction]`` — joint-addressed action
+                batches routed by ``(articulation, joint)``; every required
+                control joint must be addressed exactly once.  Entry joint
                 names are resolved onto the term's flat input slice
                 (preserve_order terms; resolver cached per name-tuple).
             raw_action: adapter raw action (policy order) -> obs_cache["prev_action"].
@@ -1125,13 +1125,13 @@ class IsaaclabEnv(ManagerBasedEnv):
         return dict(self.obs_cache), extra
 
     def _route_named_actions(self, actions: Sequence[NamedAction]) -> torch.Tensor:
-        """Resolve + gather self-describing actions onto the flat term input.
+        """Resolve + gather joint-addressed actions onto the flat term input.
 
         Builds the ``(N, total_action_dim)`` tensor ManagerBasedEnv.step
-        expects, with each group routed by ``(articulation, group)`` and each
+        expects, with each column routed by ``(articulation, joint)`` and each
         term's slice filled in the term's own input order (preserve_order
-        terms: input dim i == cfg.joint_names[i]).  Unknown groups, missing
-        required groups and partial term coverage all fail fast.
+        terms: input dim i == cfg.joint_names[i]).  Unknown joints, wrong
+        kinds, duplicate coverage and missing required joints all fail fast.
         """
         from . import articulation_runtime as _articulation_runtime
 

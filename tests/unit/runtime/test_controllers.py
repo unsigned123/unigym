@@ -249,23 +249,18 @@ def test_build_control_runtimes_rejects_uncovered_joint():
         )
 
 
+def _unused_spec():
+    """A spec with no group on the target articulation (zero driven joints)."""
+    return OrderedActionSpec((OrderedActionGroup("noop", "other", ("x",), "position"),))
+
+
 def _coverage_case(kind: str):
     if kind == "missing":
         arm = ArticulationSpec(name="arm", joints=(JointSpec("j"), JointSpec("k")))
         return (
             (arm,),
-            (_runtime("body", "arm", ("j",)),),
+            OrderedActionSpec((_group(joints=("j",)),)),
             "neither driven by an action group",
-        )
-    if kind == "overlap":
-        arm = ArticulationSpec(name="arm", joints=(JointSpec("j"),))
-        return (
-            (arm,),
-            (
-                _runtime("body", "arm", ("j",)),
-                _runtime("aux", "arm", ("j",)),
-            ),
-            "action groups overlap on joints",
         )
     if kind == "passive-conflict":
         arm = ArticulationSpec(
@@ -275,14 +270,14 @@ def _coverage_case(kind: str):
         )
         return (
             (arm,),
-            (_runtime("body", "arm", ("j",)),),
+            OrderedActionSpec((_group(joints=("j",)),)),
             "both driven by an action group",
         )
     if kind == "unknown":
         arm = ArticulationSpec(name="arm", joints=(JointSpec("j"),))
         return (
             (arm,),
-            (_runtime("body", "arm", ("j", "z")),),
+            OrderedActionSpec((_group(joints=("j", "z")),)),
             "not in the articulation's actuated joint vocabulary",
         )
     raise AssertionError(f"unknown coverage case {kind!r}")
@@ -290,14 +285,14 @@ def _coverage_case(kind: str):
 
 @pytest.mark.parametrize(
     "kind",
-    ["missing", "overlap", "passive-conflict", "unknown"],
+    ["missing", "passive-conflict", "unknown"],
 )
 def test_validate_action_coverage_rejects_incomplete_or_conflicting(kind):
-    """Resolved coverage is exact and disjoint against the actuated vocabulary."""
-    arts, runtimes, match = _coverage_case(kind)
+    """Spec-driven coverage is exact and disjoint against the actuated vocabulary."""
+    arts, spec, match = _coverage_case(kind)
 
     with pytest.raises(ControlError, match=match):
-        validate_action_coverage(arts, {}, runtimes)
+        validate_action_coverage(arts, {}, spec)
 
 
 def test_build_control_runtimes_falls_back_to_the_adapter_control_dt():
@@ -342,7 +337,7 @@ def test_validate_action_coverage_rejects_an_undriven_profile_articulation():
     profile = _profile({"body": ("a", "b")}, {"a": 0.0, "b": 0.0})
 
     with pytest.raises(ControlError, match="declares no action group"):
-        validate_action_coverage((arm,), {"arm": profile}, ())
+        validate_action_coverage((arm,), {"arm": profile}, _unused_spec())
 
 
 def test_validate_action_coverage_allows_a_fully_passive_profile_articulation():
@@ -350,7 +345,7 @@ def test_validate_action_coverage_allows_a_fully_passive_profile_articulation():
     arm = ArticulationSpec(name="arm", passive_joints=("a", "b"))
     profile = _profile({"body": ("a", "b")}, {"a": 0.0, "b": 0.0})
 
-    validate_action_coverage((arm,), {"arm": profile}, ())
+    validate_action_coverage((arm,), {"arm": profile}, _unused_spec())
 
 
 def test_validate_policy_bindings_rejects_unknown_group_reference():

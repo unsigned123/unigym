@@ -1,10 +1,10 @@
-"""Adapter interface: the group-addressed observation/action bridge.
+"""Adapter interface: the joint-addressed observation/action bridge.
 
 An adapter consumes explicitly requested raw observation quantities and
-returns one :class:`~unigym.runtime.actions.NamedAction` per control group it
-owns (the group names come from the run's ``policies`` partition).  There
-is no policy-vector contract: actions are addressed by control group + joint
-name, never by a flat positional slice.
+returns one :class:`~unigym.runtime.actions.NamedAction` per joint-addressed
+batch it emits.  There is no policy-vector contract: actions are addressed by
+articulation + joint name, never by a flat positional slice and never by an
+action-group label (groups are authoring/policy ownership metadata).
 
 This module must only depend on torch (no isaaclab) so adapters are
 unit-testable on a plain laptop python.
@@ -150,19 +150,19 @@ class ImageObsRequest(NamedTuple):
 
 
 class Adapter(ABC):
-    """Group-addressed adapter: explicit observations -> named control targets.
+    """Joint-addressed adapter: explicit observations -> named joint targets.
 
     The adapter declares the joint order it wants via :attr:`joint_order`
     (a list of simulator entity names).  The env backend gathers robot data
     by name, so no explicit permutation matrices ever leak into adapter
     code.
 
-    The ACTION boundary is group-addressed: :meth:`postprocess_action`
-    returns a ``Sequence[NamedAction]`` (one entry per control group the
-    run's ``policies`` partition assigns to this adapter), each carrying
-    its ``(articulation, group)`` identity, explicit ``joint_names`` and an
-    explicit ``kind``.  The backend resolves names to simulator addresses —
-    see :mod:`unigym.runtime.actions`.
+    The ACTION boundary is joint-addressed: :meth:`postprocess_action`
+    returns a ``Sequence[NamedAction]`` with one self-describing joint batch
+    per emitted entry, each carrying its articulation, explicit
+    ``joint_names`` and an explicit ``kind``.  The backend resolves names to
+    simulator addresses -- see :mod:`unigym.runtime.actions`.  Group
+    ownership is an authoring partition, never a runtime field.
     """
 
     generates_command: bool = False
@@ -172,7 +172,7 @@ class Adapter(ABC):
 
     _unigym_name: str = ""
     """Registry identity stamped by ``build_adapter`` (the policies
-    partition / group validation resolve ownership by this name)."""
+    partition / joint-target validation resolve ownership by this name)."""
 
     rewindable: bool = False
     """Rewind superpower declaration (explicit class attribute —
@@ -272,18 +272,18 @@ class Adapter(ABC):
 
     @abstractmethod
     def postprocess_action(self, raw: torch.Tensor) -> Sequence[NamedAction]:
-        """Raw action -> one self-describing NamedAction per owned group.
+        """Raw action -> one or more self-describing joint batches.
 
-        The returned sequence carries one entry per control group assigned
-        to this adapter by the run's ``policies`` partition (e.g. the body
-        group plus an extra hand group).  Each
-        :class:`~unigym.runtime.actions.NamedAction` carries its
-        ``(articulation, group)`` identity, ``(N, dim)`` target values, the
-        joint name of every column, and its explicit ``kind``
-        (``position`` / ``velocity`` / ``torque`` / ``effort`` /
-        ``current``) matching the group's configured ``target``.  Sequence
-        order is not a layout; backends route by identity and resolve the
-        names to simulator addresses.
+        Every returned :class:`~unigym.runtime.actions.NamedAction` carries
+        its articulation, ``(N, dim)`` target values, the joint name of every
+        column, and one explicit ``kind`` (``position`` / ``velocity`` /
+        ``torque`` / ``effort`` / ``current``).  One entry covers one
+        articulation and one kind; it may span several physical controls of
+        that articulation as long as every addressed joint expects that
+        kind.  Sequence order is not a layout; backends route by
+        ``(articulation, joint)`` and resolve the names to simulator
+        addresses.  Group ownership is an authoring partition, not a runtime
+        field.
         """
 
     def named_action(
@@ -291,13 +291,12 @@ class Adapter(ABC):
         values: torch.Tensor,
         *,
         articulation: str,
-        group: str,
         joint_names: Sequence[str] | None = None,
         kind: str = "position",
     ) -> NamedAction:
-        """Convenience: wrap *values* as a NamedAction for one group.
+        """Convenience: wrap *values* as a joint-addressed NamedAction.
 
-        *joint_names* defaults to :attr:`joint_order` (the body group).
+        *joint_names* defaults to :attr:`joint_order`.
         """
 
         order = self.joint_order if joint_names is None else joint_names
@@ -314,7 +313,6 @@ class Adapter(ABC):
             )
         return NamedAction(
             articulation=articulation,
-            group=group,
             values=values,
             joint_names=tuple(order),
             kind=kind,

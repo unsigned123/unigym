@@ -75,15 +75,15 @@ class PendingActions:
         """Lower the pending table to a self-describing action sequence.
 
         The result preserves staging order; an empty table lowers to ``()``.
-        Each entry carries its group's articulation, name, joint order and
-        kind; the sequence order is not an action layout.
+        Each entry carries its group's articulation, joint order and kind;
+        the sequence order is not an action layout.  The staging group is an
+        authoring handle only: the lowered runtime value has no group field.
         """
         from unigym.runtime.actions import NamedAction
 
         return tuple(
             NamedAction(
                 articulation=staged.group.articulation,
-                group=staged.group.name,
                 values=staged.values,
                 joint_names=tuple(staged.group.joints),
                 kind=staged.group.target,

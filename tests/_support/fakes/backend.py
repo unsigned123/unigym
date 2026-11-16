@@ -26,8 +26,8 @@ class FakeBackend(EnvBackend):
     """One-articulation, one-joint fake backend (CPU, deterministic).
 
     The articulation ``arm`` owns the joint ``shoulder``; the single body
-    control group is also named ``arm`` (action identity ``(arm, arm)``) with
-    an explicit ``role == "body"``.
+    control row is also named ``arm`` (physical row key ``(arm, arm)``) with an
+    explicit ``role == "body"``.  Action columns are joint-addressed.
 
     Every step replaces the scalar joint position with the named action's
     position target, publishes ``joint_pos``/``prev_action`` in the observation
@@ -172,39 +172,37 @@ class FakeBackend(EnvBackend):
                 f"actions must be a sequence of NamedAction, got {type(actions).__name__}"
             )
         control = self._body_control
-        key = (control.articulation, control.name)
-        entries: dict[tuple[str, str], NamedAction] = {}
+        owned = {joint: index for index, joint in enumerate(control.joint_names)}
+        columns: dict[str, tuple[torch.Tensor, int]] = {}
         for entry in actions:
             if not isinstance(entry, NamedAction):
                 raise TypeError(f"action entry must be a NamedAction, got {type(entry).__name__}")
-            identity = (entry.articulation, entry.group)
-            if identity in entries:
-                raise ValueError(f"duplicate action group {identity!r}")
-            entries[identity] = entry
-        unknown = sorted(set(entries) - {key})
-        if unknown:
-            raise ValueError(f"unknown action group(s) {unknown}; accepted: {[key]}")
-        if key not in entries:
-            raise ValueError(f"missing required action group {key!r}; accepted: {[key]}")
-        entry = entries[key]
-        if entry.kind != control.target:
-            raise ValueError(
-                f"action group {key!r} kind {entry.kind!r} != " f"control target {control.target!r}"
-            )
-        if entry.num_envs != self.num_envs:
-            raise ValueError(f"action batch {entry.num_envs} != num_envs {self.num_envs}")
-
-        provided = list(entry.joint_names)
-        unknown_joints = sorted(set(provided) - set(control.joint_names))
-        missing_joints = sorted(set(control.joint_names) - set(provided))
-        if unknown_joints or missing_joints:
-            raise ValueError(
-                f"action group {key!r} joint coverage mismatch; "
-                f"unknown={unknown_joints}, missing={missing_joints}"
-            )
-        column = {name: index for index, name in enumerate(provided)}
-        columns = [column[name] for name in control.joint_names]
-        return entry.values[:, columns].to(device=self.device, dtype=torch.float32).clone()
+            if entry.articulation != control.articulation:
+                raise ValueError(
+                    f"unknown action articulation {entry.articulation!r}; "
+                    f"accepted: {[control.articulation]}"
+                )
+            if entry.kind != control.target:
+                raise ValueError(
+                    f"action joint kind {entry.kind!r} != control target {control.target!r}"
+                )
+            if entry.num_envs != self.num_envs:
+                raise ValueError(f"action batch {entry.num_envs} != num_envs {self.num_envs}")
+            for column, joint in enumerate(entry.joint_names):
+                if joint not in owned:
+                    raise ValueError(
+                        f"unknown action joint {joint!r}; accepted: {list(control.joint_names)}"
+                    )
+                if joint in columns:
+                    raise ValueError(
+                        f"action joint {joint!r} is addressed more than once in one tick"
+                    )
+                columns[joint] = (entry.values, column)
+        missing = sorted(joint for joint in owned if joint not in columns)
+        if missing:
+            raise ValueError(f"missing action joints {missing}; accepted: {list(owned)}")
+        ordered = [columns[joint][0][:, columns[joint][1]] for joint in control.joint_names]
+        return torch.stack(ordered, dim=1).to(device=self.device, dtype=torch.float32).clone()
 
     def _refresh_obs_cache(self) -> None:
         self.obs_cache["joint_pos"] = self._joint_pos.clone()

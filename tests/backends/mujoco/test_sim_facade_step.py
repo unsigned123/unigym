@@ -65,7 +65,6 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
                 (
                     NamedAction(
                         group.articulation,
-                        group.name,
                         action,
                         tuple(group.joints),
                         "position",

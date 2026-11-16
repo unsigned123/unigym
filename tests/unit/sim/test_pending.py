@@ -53,7 +53,6 @@ def test_duplicate_group_identity_is_refused_and_keeps_the_first_entry(
     lowered = pending.lower()
     assert len(lowered) == 1
     assert lowered[0].articulation == "a"
-    assert lowered[0].group == "a"
     assert lowered[0].values is first.values
     assert lowered[0].values.shape == (2, 2)
     assert torch.equal(lowered[0].values, first.values)
@@ -69,12 +68,11 @@ def test_lower_preserves_staging_order_and_group_columns(tmp_path: Path) -> None
 
     lowered = pending.lower()
 
-    assert [entry.group for entry in lowered] == ["b", "a"]
-    by_group = {entry.group: entry for entry in lowered}
-    assert by_group["a"].articulation == "a"
-    assert by_group["a"].joint_names == groups["a"].joints
-    assert by_group["a"].kind == "position"
-    assert torch.equal(by_group["a"].values, torch.tensor([[0.3, 0.4]]))
+    assert [entry.articulation for entry in lowered] == ["b", "a"]
+    by_articulation = {entry.articulation: entry for entry in lowered}
+    assert by_articulation["a"].joint_names == groups["a"].joints
+    assert by_articulation["a"].kind == "position"
+    assert torch.equal(by_articulation["a"].values, torch.tensor([[0.3, 0.4]]))
 
 
 def test_clear_drops_every_group_and_empty_lowers_to_empty(tmp_path: Path) -> None:

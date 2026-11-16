@@ -29,13 +29,11 @@ def _action(
     values=None,
     *,
     kind="position",
-    group="test",
 ):
     if values is None:
         values = torch.zeros(1, len(joint_names))
     return NamedAction(
         articulation=articulation,
-        group=group,
         values=values,
         joint_names=tuple(joint_names),
         kind=kind,
@@ -147,8 +145,8 @@ def test_wrong_kind_names_articulation_joint_and_both_kinds():
 
 def test_duplicate_addressed_joint_fails_naming_articulation_and_joint():
     index = _index(_Control("body", "g1", ("hip",)), _Control("aux", "g1", ("knee",)))
-    first = _action("g1", ("hip",), group="first")
-    second = _action("g1", ("hip",), group="second")
+    first = _action("g1", ("hip",))
+    second = _action("g1", ("hip",))
 
     with pytest.raises(ValueError, match="more than once") as excinfo:
         index.route((first, second), 1)

@@ -16,7 +16,6 @@ def _named_action(env, values):
     )
     return NamedAction(
         control.articulation,
-        control.name,
         tensor,
         control.joint_names,
         control.target,
@@ -38,7 +37,6 @@ def test_reset_envs_resets_only_selected_rows():
             (
                 NamedAction(
                     control.articulation,
-                    control.name,
                     values.clone(),
                     control.joint_names,
                     control.target,

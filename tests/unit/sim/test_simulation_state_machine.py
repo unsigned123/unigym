@@ -203,10 +203,7 @@ def test_same_group_name_on_two_articulations_is_distinct() -> None:
 
     lowered = runner.last_actions
     assert lowered is not None
-    assert [(entry.articulation, entry.group) for entry in lowered] == [
-        ("left", "body"),
-        ("right", "body"),
-    ]
+    assert [entry.articulation for entry in lowered] == ["left", "right"]
     assert [entry.values.tolist() for entry in lowered] == [[[0.25]], [[0.75]]]
     assert obs.articulations[left].joint_pos.tolist() == [[0.25]]
     assert obs.articulations[right].joint_pos.tolist() == [[0.75]]
@@ -312,7 +309,7 @@ def test_out_of_band_tick_raises_stale_and_clears_pending() -> None:
     handle = sim.articulations[0]
     group = _group(handle)
     sim.act(group, _values(0.3))
-    runner.step((NamedAction("arm", "arm", _values(0.9), ("shoulder",), "position"),))
+    runner.step((NamedAction("arm", _values(0.9), ("shoulder",), "position"),))
 
     with pytest.raises(StaleStateError) as excinfo:
         sim.step()
@@ -520,9 +517,7 @@ class _EchoRunner:
 
     def step(self, actions: Sequence[NamedAction]) -> StepResult:
         self.last_actions = tuple(actions)
-        values = {
-            (entry.articulation, entry.group): entry.values.clone() for entry in self.last_actions
-        }
+        values = {entry.articulation: entry.values.clone() for entry in self.last_actions}
         extra = _two_state(self._handles, values=values)
         result = StepResult(
             t=self.ticks_done,
@@ -543,15 +538,14 @@ def _run() -> Run:
 def _two_state(
     handles: Sequence[ArticulationHandle],
     *,
-    values: dict[tuple[str, str], torch.Tensor] | None = None,
+    values: dict[str, torch.Tensor] | None = None,
 ) -> dict[str, object]:
     """A complete one-row state for two one-joint articulations."""
     state: dict[str, object] = {}
     for handle in handles:
         value = torch.zeros(1, 1)
         if values is not None:
-            identity = next(iter(handle.action_groups))
-            value = values[(handle.name, identity)]
+            value = values[handle.name]
         prefix = f"articulation/{handle.name}"
         zeros3 = torch.zeros(1, 3)
         state[f"{prefix}/joint_pos"] = value

@@ -53,10 +53,27 @@ for _k, _v in (_b.get('extra') or {{}}).items():
     if _a.ndim <= 2 and _a.dtype.kind in 'bfiu':
         _arrs['extra/' + str(_k)] = _a
 _targets = _b.get('targets') or ()
-_pairs = ((str(getattr(_v, 'group', '?')), _v) for _v in _targets)
+_proj = _b.get('action_group_values')
+_pairs = []
+if _proj:
+    _counts = {{}}
+    for _v in _proj:
+        _n = str(getattr(getattr(_v, 'group', None), 'name', '?'))
+        _counts[_n] = _counts.get(_n, 0) + 1
+    for _v in _proj:
+        _g = getattr(_v, 'group', None)
+        _n = str(getattr(_g, 'name', '?'))
+        _k = _n if _counts[_n] == 1 else str(getattr(_g, 'articulation', '?')) + '/' + _n
+        _pairs.append((_k, getattr(_v, 'values', _v)))
+else:
+    for _v in _targets:
+        _k = str(getattr(_v, 'articulation', '?')) + '/' + ','.join(
+            str(_j) for _j in getattr(_v, 'joint_names', ())
+        )
+        _pairs.append((_k, getattr(_v, 'values', _v)))
 for _k, _v in _pairs:
     try:
-        _arrs['action/' + str(_k)] = _as_np(getattr(_v, 'values', _v))
+        _arrs['action/' + str(_k)] = _as_np(_v)
     except Exception:
         continue
 if _b.get('raw') is not None:

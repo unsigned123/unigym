@@ -137,7 +137,7 @@ def _make_env(tmp_path):
         profiles={"tiny": profile},
         actuation_plans=actuation_plans,
     )
-    env.adapter_groups = {"manual": (("tiny", "tiny"),)}
+    env.adapter_joint_targets = {"manual": {("tiny", "hinge"): "position"}}
     return env, adapter
 
 
@@ -166,7 +166,6 @@ def _action(value):
     return (
         NamedAction(
             articulation="tiny",
-            group="tiny",
             values=torch.tensor([[value]], dtype=torch.float32),
             joint_names=("hinge",),
             kind="position",

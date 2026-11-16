@@ -1,16 +1,19 @@
-"""NamedAction: the self-describing action contract (feat/named-actions).
+"""NamedAction: the self-describing, joint-addressed action contract.
 
 The action boundary is a SEQUENCE of self-describing values whose container
 order is NOT semantic: an adapter returns ``tuple[NamedAction, ...]`` with one
-entry per action group (e.g. the body group plus a hand group), and every
-entry is addressed by its owning ``(articulation, group)`` identity.  Routing
-therefore never depends on where an entry sits in the tuple.  What IS an
-explicit per-entry contract is each ``NamedAction.joint_names`` tuple: its
-order fixes that entry's column order.  Every entry carries its values and the
-joint name for each column.  Consumers (backends) resolve the names to
-simulator addresses ONCE per name-tuple (cached) and scatter the values; users
-never touch simulator joint order (same philosophy as the name-based
+entry per joint-addressed batch, and every column is addressed by its owning
+``(articulation, joint_name)`` pair.  Routing therefore never depends on where
+an entry sits in the tuple.  What IS an explicit per-entry contract is each
+``NamedAction.joint_names`` tuple: its order fixes that entry's column order.
+Every entry carries its values, the joint name for each column, and one
+homogeneous kind.  Consumers (backends) resolve the names to simulator
+addresses ONCE per name-tuple (cached) and scatter the values; users never
+touch simulator joint order (same philosophy as the name-based
 obs/contact/foot layers — actions are the last piece).
+
+Action groups are authoring/policy/flat-layout labels only.  They are not part
+of the runtime value and must never be used as a backend routing key.
 
 Backends:
   * isaaclab — each action term is built with ``preserve_order=True`` and an
@@ -478,7 +481,6 @@ class OrderedActionSpec:
         return tuple(
             NamedAction(
                 articulation=group.articulation,
-                group=group.name,
                 values=flat[:, start:end],
                 joint_names=group.joints,
                 kind=group.target,
@@ -487,13 +489,14 @@ class OrderedActionSpec:
         )
 
     def flatten(self, actions: Sequence[NamedAction]) -> torch.Tensor:
-        """Pack self-describing NamedAction values into flat ``(N, dim)`` form.
+        """Pack joint-addressed NamedAction values into flat ``(N, dim)`` form.
 
-        The sequence order is not semantic: entries are matched by
-        ``(articulation, group)`` and must cover exactly the spec identities.
-        Each entry's ``joint_names`` must be a permutation of that template
-        group's joints (columns are reordered back to template order), and all
-        entries must agree on ``num_envs``, dtype and device.
+        The sequence order is not semantic: entries are matched to template
+        groups by ``(articulation, joint-name set, kind)`` and must cover
+        exactly the spec's template groups.  Each entry's ``joint_names`` may
+        be a permutation of the template group's joints (columns are
+        reordered back to template order), and all entries must agree on
+        ``num_envs``, dtype and device.
 
         Args:
             actions: NamedAction entries in any order.
@@ -505,9 +508,9 @@ class OrderedActionSpec:
         Raises:
             TypeError: *actions* is not a sequence or an entry is not a
                 NamedAction.
-            ValueError: identities are duplicated, missing or extra; a
-                joint-name set, kind, ``num_envs``, dtype or device does not
-                match the template.
+            ValueError: An entry matches no template, a template is matched
+                twice, a template is left unaddressed, or a joint-name set,
+                kind, ``num_envs``, dtype or device does not match.
         """
         if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
             raise TypeError(
@@ -515,74 +518,111 @@ class OrderedActionSpec:
                 f"got {type(actions).__name__}"
             )
         spans = self._group_spans()
-        templates = {(group.articulation, group.name): group for group, _, _ in spans}
-        accepted = sorted(templates)
-        entries: dict[tuple[str, str], NamedAction] = {}
+        templates: dict[tuple[str, frozenset[str], str], OrderedActionGroup] = {}
+        for group, _, _ in spans:
+            key = (group.articulation, frozenset(group.joints), group.target)
+            if key in templates:
+                raise ValueError(
+                    "OrderedActionSpec.flatten: template identity "
+                    f"(articulation, joints, target)={key!r} is declared more "
+                    "than once"
+                )
+            templates[key] = group
+        accepted = [(group.articulation, list(group.joints), group.target) for group, _, _ in spans]
+
+        matched: dict[tuple[str, frozenset[str], str], NamedAction] = {}
         for entry in actions:
             if not isinstance(entry, NamedAction):
                 raise TypeError(
                     "OrderedActionSpec.flatten expects a sequence of NamedAction, "
                     f"got {type(entry).__name__} entry"
                 )
-            identity = (entry.articulation, entry.group)
-            if identity in entries:
+            joint_set = frozenset(entry.joint_names)
+            candidates = [
+                group
+                for group, _, _ in spans
+                if entry.articulation == group.articulation
+                and entry.kind == group.target
+                and len(entry.joint_names) == len(group.joints)
+                and joint_set == frozenset(group.joints)
+            ]
+            if not candidates:
                 raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} is addressed "
-                    "by more than one NamedAction"
+                    "OrderedActionSpec.flatten: entry "
+                    f"(articulation={entry.articulation!r}, "
+                    f"joints={list(entry.joint_names)}, kind={entry.kind!r}) "
+                    f"matches no spec template; accepted templates "
+                    f"(articulation, joints, target): {accepted}"
                 )
-            entries[identity] = entry
-        unknown = sorted(set(entries) - set(templates))
-        if unknown:
-            raise ValueError(
-                f"OrderedActionSpec.flatten: NamedAction groups {unknown} are not "
-                f"declared by this spec; accepted groups: {accepted}"
-            )
-        missing = [identity for identity in templates if identity not in entries]
+            if len(candidates) > 1:
+                raise ValueError(
+                    "OrderedActionSpec.flatten: entry "
+                    f"(articulation={entry.articulation!r}, "
+                    f"joints={list(entry.joint_names)}, kind={entry.kind!r}) "
+                    "matches more than one spec template; the spec template "
+                    "identities must be unique"
+                )
+            group = candidates[0]
+            key = (group.articulation, frozenset(group.joints), group.target)
+            if key in matched:
+                raise ValueError(
+                    "OrderedActionSpec.flatten: template "
+                    f"(articulation={group.articulation!r}, "
+                    f"joints={list(group.joints)}) is matched by more than one "
+                    "NamedAction entry"
+                )
+            matched[key] = entry
+
+        missing = [
+            (group.articulation, list(group.joints))
+            for group, _, _ in spans
+            if (group.articulation, frozenset(group.joints), group.target) not in matched
+        ]
         if missing:
             raise ValueError(
-                "OrderedActionSpec.flatten: NamedAction entries leave spec groups "
-                f"unaddressed: {missing}; accepted groups: {accepted}"
+                "OrderedActionSpec.flatten: NamedAction entries leave spec "
+                f"templates unaddressed: {missing}; accepted templates "
+                f"(articulation, joints, target): {accepted}"
             )
+
         first_group, _, _ = spans[0]
-        reference_identity = (first_group.articulation, first_group.name)
-        reference = entries[reference_identity]
+        reference_key = (
+            first_group.articulation,
+            frozenset(first_group.joints),
+            first_group.target,
+        )
+        reference = matched[reference_key]
         for group, _, _ in spans:
-            identity = (group.articulation, group.name)
-            entry = entries[identity]
-            if entry.kind != group.target:
-                raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} has kind "
-                    f"{entry.kind!r} but the template expects target {group.target!r}"
-                )
-            if len(entry.joint_names) != len(group.joints) or set(entry.joint_names) != set(
-                group.joints
-            ):
-                raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} joint_names "
-                    f"{list(entry.joint_names)} are not a permutation of template "
-                    f"joints {list(group.joints)}"
-                )
+            key = (group.articulation, frozenset(group.joints), group.target)
+            entry = matched[key]
             if entry.num_envs != reference.num_envs:
                 raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} has "
-                    f"{entry.num_envs} env rows but {reference_identity!r} has "
-                    f"{reference.num_envs}; all entries must share num_envs"
+                    "OrderedActionSpec.flatten: template "
+                    f"(articulation={group.articulation!r}, "
+                    f"joints={list(group.joints)}) has {entry.num_envs} env "
+                    f"rows but the first template has {reference.num_envs}; "
+                    "all entries must share num_envs"
                 )
             if entry.values.dtype != reference.values.dtype:
                 raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} values dtype "
-                    f"{entry.values.dtype} differs from {reference_identity!r} "
+                    "OrderedActionSpec.flatten: template "
+                    f"(articulation={group.articulation!r}, "
+                    f"joints={list(group.joints)}) values dtype "
+                    f"{entry.values.dtype} differs from the first template's "
                     f"dtype {reference.values.dtype}; mixed dtypes are not allowed"
                 )
             if entry.values.device != reference.values.device:
                 raise ValueError(
-                    f"OrderedActionSpec.flatten: group {identity!r} values device "
-                    f"{entry.values.device} differs from {reference_identity!r} "
+                    "OrderedActionSpec.flatten: template "
+                    f"(articulation={group.articulation!r}, "
+                    f"joints={list(group.joints)}) values device "
+                    f"{entry.values.device} differs from the first template's "
                     f"device {reference.values.device}; mixed devices are not allowed"
                 )
+
         chunks: list[torch.Tensor] = []
         for group, _, _ in spans:
-            entry = entries[(group.articulation, group.name)]
+            entry = matched[(group.articulation, frozenset(group.joints), group.target)]
             if entry.joint_names == group.joints:
                 block = entry.values
             else:
@@ -860,40 +900,39 @@ def resolve_control_dt(
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class NamedAction:
-    """One self-describing action group value.
+    """One joint-addressed, homogeneous-kind action batch of an articulation.
 
-    Identity is ``(articulation, group)``: duplicate joint names across
-    articulations are legal and are disambiguated by the articulation.
-    The order of a ``NamedAction`` sequence is not an action layout.
+    Identity is ``(articulation, joint_name)`` per column: duplicate joint
+    names across articulations are legal and are disambiguated by the
+    articulation.  The order of a ``NamedAction`` sequence is not an action
+    layout, and there is no action-group field: groups are authoring,
+    policy-ownership, flat-layout and diagnostic labels only.
 
     Attributes:
         articulation: owning articulation name (non-empty).
-        group: owning action-group name within that articulation (non-empty).
         values: ``(N, dim)`` float tensor — targets in the units of *kind*
             (rad for position, rad/s for velocity, N·m for torque/effort,
             A for current), one column per entry in *joint_names*.
         joint_names: joint names, ``len(joint_names) == values.shape[1]``.
             The tuple IS the contract: consumers resolve by name, never by
-            position.  Names are scoped to ``(articulation, group)``.
+            position.  Every column addresses one joint of *articulation*.
         kind: the explicit target kind
             (``position | velocity | torque | effort | current``).  The
-            engine validates it against the configured control group's
-            ``target`` every tick.
+            engine validates it against the physical control that owns each
+            addressed joint every tick.
 
-    Construction validates the identity, shape/name/kind agreement
+    Construction validates the articulation, shape/name/kind agreement
     (fail-fast) and rejects duplicate names (a duplicate would make the
     routing ambiguous).
     """
 
     articulation: str
-    group: str
     values: torch.Tensor
     joint_names: tuple[str, ...]
     kind: str
 
     def __post_init__(self):
         _require_text(self.articulation, "NamedAction.articulation")
-        _require_text(self.group, "NamedAction.group")
         if self.kind not in LEGAL_ACTION_KINDS:
             raise ValueError(
                 f"NamedAction.kind must be one of {list(LEGAL_ACTION_KINDS)}, " f"got {self.kind!r}"
@@ -939,13 +978,12 @@ class NamedAction:
         cls,
         num_envs: int,
         articulation: str,
-        group: str,
         joint_names: Sequence[str],
         kind: str,
         device: str | torch.device = "cpu",
         dtype: torch.dtype = torch.float32,
     ) -> NamedAction:
-        """All-zero action over *joint_names* for ``(articulation, group)``."""
+        """All-zero action over *joint_names* for *articulation*."""
         if isinstance(joint_names, (str, bytes)) or not isinstance(joint_names, Sequence):
             raise ValueError(
                 "NamedAction.zeros joint_names must be a sequence of joint names, "
@@ -954,7 +992,6 @@ class NamedAction:
         names = tuple(joint_names)
         return cls(
             articulation=articulation,
-            group=group,
             values=torch.zeros(int(num_envs), len(names), dtype=dtype, device=device),
             joint_names=names,
             kind=kind,
@@ -1021,6 +1058,16 @@ class IsaaclabJointResolver:
             idx = torch.tensor([self._index[n] for n in key], dtype=torch.int64)
             self._cache[key] = idx
         return idx
+
+    def index_of(self, joint_name: str) -> int:
+        """Position of one joint in the term's flat input (fail-fast)."""
+        try:
+            return self._index[joint_name]
+        except KeyError:
+            raise ValueError(
+                f"unknown joint name {joint_name!r} for this action term; "
+                f"accepted names: {self.term_names}"
+            ) from None
 
     # JointResolver protocol name: the isaaclab addressing primitive
     # is the gather index; ``gather`` stays the historical caller face.

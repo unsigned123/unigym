@@ -76,9 +76,7 @@ def _resolved(cartpole_pack, asset_id: str) -> Path:
 def _zero_action(env):
     from unigym.runtime.actions import NamedAction
 
-    return (
-        NamedAction.zeros(env.num_envs, ARTICULATION, ARTICULATION, list(JOINT_ORDER), "position"),
-    )
+    return (NamedAction.zeros(env.num_envs, ARTICULATION, list(JOINT_ORDER), "position"),)
 
 
 def _advance(env, steps: int) -> None:

@@ -1,4 +1,4 @@
-"""Strict (articulation, group) adapter group keys and action validation."""
+"""Joint-authoritative adapter partitions and runner action validation."""
 
 from __future__ import annotations
 
@@ -8,10 +8,14 @@ import pytest
 import torch
 
 from tests._support.fakes.backend import FakeBackend
-from unigym.run.build import _body_controls, _build_adapter_groups
+from unigym.run.build import (
+    _body_controls,
+    _build_adapter_groups,
+    _build_adapter_joint_targets,
+)
 from unigym.runner.external import ExternalRunner
-from unigym.runner.sync import SyncRunner, _adapter_groups
-from unigym.runtime.actions import NamedAction, PolicyBinding
+from unigym.runner.sync import SyncRunner, _adapter_joint_targets
+from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec, PolicyBinding
 from unigym.runtime.controllers import ControlRuntime
 from unigym.terminations import TerminationGroup
 
@@ -20,17 +24,16 @@ def _binding(groups, adapter="a"):
     return PolicyBinding(adapter=adapter, groups=tuple(groups))
 
 
-def _named(articulation="arm", group="arm", rows=1):
+def _named(articulation="arm", joints=("shoulder",), kind="position", rows=1):
     return NamedAction(
         articulation=articulation,
-        group=group,
-        values=torch.zeros(rows, 1),
-        joint_names=("shoulder",),
-        kind="position",
+        values=torch.zeros(rows, len(joints)),
+        joint_names=tuple(joints),
+        kind=kind,
     )
 
 
-def _runner(adapter_groups):
+def _runner(adapter_joint_targets):
     return SyncRunner(
         cfg={"collect": {"steps": 1}},
         profile=None,
@@ -39,22 +42,23 @@ def _runner(adapter_groups):
         term_group=TerminationGroup(),
         env=FakeBackend(),
         sink=SimpleNamespace(),
-        adapter_groups=adapter_groups,
+        adapter_joint_targets=adapter_joint_targets,
     )
 
 
-def _runtime(name, role):
+def _runtime(name, role, joints=("shoulder",), target="position", adapter="manual"):
     return ControlRuntime(
         name=name,
-        adapter="manual",
+        adapter=adapter,
         articulation="arm",
-        joint_names=("shoulder",),
-        q0=(0.0,),
+        joint_names=joints,
+        q0=tuple(0.0 for _ in joints),
+        target=target,
         role=role,
     )
 
 
-def test_body_role_selects_the_body_group_not_the_name():
+def test_body_role_selects_the_body_row_not_the_name():
     """Body selection uses the explicit role, not articulation-name equality."""
     body = _runtime("legs", "body")
     aux = _runtime("arm", "aux")
@@ -91,61 +95,62 @@ def test_build_adapter_groups_rejects_a_group_claimed_by_two_policies():
         _build_adapter_groups(spec)
 
 
-def test_adapter_groups_reads_explicit_identity_tuples():
-    """An explicit partition normalizes to the same canonical identities."""
+def _spec(*groups):
+    return SimpleNamespace(
+        action_spec=OrderedActionSpec(tuple(groups)),
+        policies=tuple(
+            _binding(((group.articulation, group.name),), adapter="a") for group in groups
+        ),
+    )
+
+
+def test_build_adapter_joint_targets_derives_joint_kind_partition():
+    """Every group joint becomes one adapter-owned (articulation, joint) row."""
+    group = OrderedActionGroup("body", "arm", ("shoulder", "elbow"), "position")
+    spec = _spec(group)
+
+    assert _build_adapter_joint_targets(spec) == {
+        "a": {("arm", "shoulder"): "position", ("arm", "elbow"): "position"}
+    }
+
+
+def test_build_adapter_joint_targets_rejects_an_undeclared_group():
+    """A policy binding naming a missing action group fails loudly."""
+    group = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+    spec = SimpleNamespace(
+        action_spec=OrderedActionSpec((group,)),
+        policies=(_binding((("arm", "missing"),), adapter="a"),),
+    )
+
+    with pytest.raises(ValueError, match="undeclared action group"):
+        _build_adapter_joint_targets(spec)
+
+
+def test_adapter_joint_targets_reads_the_explicit_partition():
+    """An explicit env partition is normalized and returned."""
     env = FakeBackend()
-    env.adapter_groups = {"manual": (("arm", "arm"),)}
+    env.adapter_joint_targets = {"manual": {("arm", "shoulder"): "position"}}
     instance = SimpleNamespace(env=env, adapter=SimpleNamespace(_unigym_name="manual"))
 
-    assert _adapter_groups(instance) == (("arm", "arm"),)
+    assert _adapter_joint_targets(instance) == {("arm", "shoulder"): "position"}
 
 
 @pytest.mark.parametrize(
-    "entry",
+    ("targets", "match"),
     [
-        pytest.param("arm", id="bare-string"),
-        pytest.param(["arm", "arm"], id="list-not-tuple"),
-        pytest.param(("arm",), id="short-tuple"),
-        pytest.param(("arm", "arm", "extra"), id="long-tuple"),
-        pytest.param(("", "arm"), id="empty-articulation"),
-        pytest.param(("arm", ""), id="empty-group"),
-        pytest.param(("arm", 1), id="non-string-group"),
+        pytest.param({"arm": "position"}, "must be an .* tuple", id="string-key"),
+        pytest.param({("arm",): "position"}, "must be an .* tuple", id="short-key"),
+        pytest.param({("arm", "shoulder"): "illegal"}, "illegal target kind", id="bad-kind"),
     ],
 )
-def test_adapter_groups_rejects_non_canonical_keys(entry):
-    """Strings, malformed tuples and mixed forms fail with a teaching error."""
+def test_adapter_joint_targets_rejects_malformed_partitions(targets, match):
+    """Malformed adapter partitions fail with a teaching error."""
     env = FakeBackend()
-    env.adapter_groups = {"manual": (entry,)}
+    env.adapter_joint_targets = {"manual": targets}
     instance = SimpleNamespace(env=env, adapter=SimpleNamespace(_unigym_name="manual"))
 
-    with pytest.raises(ValueError, match=r"articulation, group|bare string|non-string"):
-        _adapter_groups(instance)
-
-
-def test_adapter_groups_rejects_a_mixed_form():
-    """A valid tuple next to a legacy string is rejected, never aliased."""
-    env = FakeBackend()
-    env.adapter_groups = {"manual": (("arm", "arm"), "arm")}
-    instance = SimpleNamespace(env=env, adapter=SimpleNamespace(_unigym_name="manual"))
-
-    with pytest.raises(ValueError, match="bare string"):
-        _adapter_groups(instance)
-
-
-def test_adapter_groups_rejects_duplicate_identities():
-    """A duplicate (articulation, group) identity is ambiguous."""
-    env = FakeBackend()
-    env.adapter_groups = {"manual": (("arm", "arm"), ("arm", "arm"))}
-    instance = SimpleNamespace(env=env, adapter=SimpleNamespace(_unigym_name="manual"))
-
-    with pytest.raises(ValueError, match="more than once"):
-        _adapter_groups(instance)
-
-
-def test_sync_runner_constructor_rejects_a_legacy_string_group():
-    """Direct construction follows the same strict key contract."""
-    with pytest.raises(ValueError, match="bare string"):
-        _runner(("arm",))
+    with pytest.raises(ValueError, match=match):
+        _adapter_joint_targets(instance)
 
 
 def test_sync_runner_from_instance_rejects_multiple_policy_adapters():
@@ -170,12 +175,12 @@ def test_sync_runner_from_instance_rejects_multiple_policy_adapters():
         SyncRunner.from_instance(instance)
 
 
-def test_external_runner_accepts_every_policy_group():
-    """A caller-driven run is not restricted to one policy adapter."""
+def test_external_runner_unions_every_adapter_joint_partition():
+    """A caller-driven run validates the union of every policy-owned joint."""
     env = FakeBackend()
-    env.adapter_groups = {
-        "a": (("arm", "body"),),
-        "b": (("arm", "hand"),),
+    env.adapter_joint_targets = {
+        "a": {("arm", "shoulder"): "position"},
+        "b": {("arm", "finger"): "position"},
     }
     instance = SimpleNamespace(
         spec=SimpleNamespace(runner={}, cfg={"collect": {"steps": 1}}),
@@ -191,27 +196,74 @@ def test_external_runner_accepts_every_policy_group():
 
     runner = ExternalRunner.from_instance(instance)
 
-    assert runner.adapter_groups == (("arm", "body"), ("arm", "hand"))
+    assert runner.adapter_joint_targets == {
+        ("arm", "shoulder"): "position",
+        ("arm", "finger"): "position",
+    }
 
 
-def test_validate_targets_accepts_the_declared_identity():
-    """The matching NamedAction identity passes validation."""
-    runner = _runner((("arm", "arm"),))
+def test_validate_targets_accepts_the_declared_joint():
+    """The matching joint-addressed entry passes validation."""
+    runner = _runner({("arm", "shoulder"): "position"})
 
     runner._validate_targets((_named(),))  # no raise
 
 
-def test_validate_targets_rejects_a_duplicate_identity():
-    """Two entries addressing the same group are ambiguous."""
-    runner = _runner((("arm", "arm"),))
+def test_validate_targets_accepts_split_and_merged_entries():
+    """A group may be split across entries or merged into one same-kind entry."""
+    runner = _runner(
+        {
+            ("arm", "shoulder"): "position",
+            ("arm", "elbow"): "position",
+            ("arm", "finger"): "position",
+        }
+    )
 
-    with pytest.raises(ValueError, match="more than one action entry"):
+    split = (
+        _named(joints=("shoulder",)),
+        _named(joints=("elbow", "finger")),
+    )
+    merged = (_named(joints=("finger", "shoulder", "elbow")),)
+
+    runner._validate_targets(split)  # no raise
+    runner._validate_targets(merged)  # no raise
+
+
+def test_validate_targets_rejects_a_duplicate_joint():
+    """Two entries addressing the same joint are ambiguous."""
+    runner = _runner({("arm", "shoulder"): "position"})
+
+    with pytest.raises(ValueError, match="addressed more than once"):
         runner._validate_targets((_named(), _named()))
+
+
+def test_validate_targets_rejects_an_unknown_joint():
+    """A joint outside the adapter-owned partition fails naming the joint."""
+    runner = _runner({("arm", "shoulder"): "position"})
+
+    with pytest.raises(ValueError, match="unknown action joint 'elbow'"):
+        runner._validate_targets((_named(joints=("elbow",)),))
+
+
+def test_validate_targets_rejects_a_wrong_kind():
+    """A kind mismatch fails naming articulation, joint and expected kind."""
+    runner = _runner({("arm", "shoulder"): "position"})
+
+    with pytest.raises(ValueError, match="joint 'shoulder'.*kind 'velocity'"):
+        runner._validate_targets((_named(kind="velocity"),))
+
+
+def test_validate_targets_rejects_a_missing_joint():
+    """Every adapter-owned joint must be covered exactly once."""
+    runner = _runner({("arm", "shoulder"): "position", ("arm", "elbow"): "position"})
+
+    with pytest.raises(ValueError, match="unaddressed.*'elbow'"):
+        runner._validate_targets((_named(),))
 
 
 def test_validate_targets_rejects_a_non_named_action_entry():
     """Every sequence entry must be a NamedAction, not a duck-typed object."""
-    runner = _runner((("arm", "arm"),))
+    runner = _runner({("arm", "shoulder"): "position"})
 
     with pytest.raises(TypeError, match="must be a NamedAction"):
         runner._validate_targets((object(),))
@@ -219,7 +271,7 @@ def test_validate_targets_rejects_a_non_named_action_entry():
 
 def test_validate_targets_rejects_a_mapping():
     """A mapping action payload is not a sequence of NamedAction."""
-    runner = _runner((("arm", "arm"),))
+    runner = _runner({("arm", "shoulder"): "position"})
 
     with pytest.raises(TypeError, match="expected a sequence of NamedAction"):
         runner._validate_targets({"arm": _named()})

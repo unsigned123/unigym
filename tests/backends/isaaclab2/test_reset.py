@@ -16,9 +16,7 @@ CART_JOINTS = ("slider_to_cart", "cart_to_pole")
 
 
 def _zero_action(env):
-    return (
-        NamedAction.zeros(env.num_envs, ARTICULATION, ARTICULATION, list(CART_JOINTS), "position"),
-    )
+    return (NamedAction.zeros(env.num_envs, ARTICULATION, list(CART_JOINTS), "position"),)
 
 
 def test_reset_envs_resets_only_the_requested_row(two_env):
