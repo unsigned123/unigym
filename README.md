@@ -68,7 +68,9 @@ development lock records the exact tested version.
 ## Manual / external-driver example
 
 `ManualAdapter` has no policy forward: the caller owns the clock and supplies
-named actions.
+a sequence of self-describing `NamedAction` entries (one per
+`(articulation, group)`). Sequence order is not semantic; each entry's
+`joint_names` order fixes its column order.
 
 ```python
 from unigym.adapters.manual import ManualAdapter
@@ -77,9 +79,15 @@ from unigym.runner import ExternalRunner
 
 adapter = ManualAdapter()
 runner = ExternalRunner.from_instance(instance)   # adapter, env, sink, ...
-runner.step({
-    "body": NamedAction(values, ["joint_a", "joint_b"], kind="position"),
-})
+runner.step((
+    NamedAction(
+        articulation="robot",                     # owning articulation
+        group="body",                             # control group / action face
+        values=values,                            # (num_envs, len(joint_names))
+        joint_names=("joint_a", "joint_b"),       # column order
+        kind="position",
+    ),
+))
 ```
 
 A complete runnable version with a tiny self-authored MJCF lives in

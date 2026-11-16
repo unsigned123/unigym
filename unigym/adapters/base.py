@@ -307,6 +307,11 @@ class Adapter(ABC):
                 f"joint_order; declare the adapter's joint order before "
                 f"wrapping values"
             )
+        if isinstance(order, (str, bytes)):
+            raise ValueError(
+                f"{type(self).__name__}.named_action joint_names must be a "
+                f"sequence of joint names, not a bare string {order!r}"
+            )
         return NamedAction(
             articulation=articulation,
             group=group,

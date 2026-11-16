@@ -69,6 +69,22 @@ def _per_env_values(values: Mapping[str, object], env_id: int) -> dict:
     return out
 
 
+def _reject_mapping_action(action) -> None:
+    """Fail loud on the removed mapping/dict action form.
+
+    Actions are a sequence of self-describing NamedAction entries; a mapping
+    would silently lose the articulation identity and must never fall through
+    to ``action_fn`` or be treated as a per-env value.
+    """
+    if isinstance(action, Mapping):
+        raise TypeError(
+            "received a mapping action, but the action contract is a sequence "
+            "of NamedAction entries keyed by (articulation, group); build "
+            "NamedAction(articulation=..., group=..., values=..., "
+            "joint_names=..., kind=...) instead of a dict"
+        )
+
+
 class _GymBase(SyncRunner):
     """Shared best-effort post-reset 17-key extra reader."""
 
@@ -143,6 +159,7 @@ class GymEnvRunner(_GymBase):
         """
         if self._finished:
             raise RuntimeError("episode finished; call reset()")
+        _reject_mapping_action(action)
         if isinstance(action, (list, tuple)) and (not action or isinstance(action[0], NamedAction)):
             actions = action
         elif self.action_fn is not None:
@@ -211,6 +228,7 @@ class GymVectorRunner(_GymBase):
 
     def _vector_actions(self, actions):
         """Named-action sequence, or ``action_fn`` applied once per env."""
+        _reject_mapping_action(actions)
         if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)):
             if not actions or isinstance(actions[0], NamedAction):
                 return actions

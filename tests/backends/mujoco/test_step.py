@@ -43,6 +43,34 @@ def _two_dog_env():
     )
 
 
+def test_route_actions_rejects_a_duplicate_group_identity():
+    """One (articulation, group) addressed by two entries is ambiguous."""
+    env = _two_dog_env()
+    go1 = NamedAction("go1", "legs", torch.tensor([[1.0, 2.0]]), ("hip", "knee"), "position")
+
+    with pytest.raises(ValueError, match="more than one action entry"):
+        route_actions(env, (go1, go1))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [pytest.param("not-an-action", id="string"), pytest.param(object(), id="object")],
+)
+def test_route_actions_rejects_a_non_named_action_entry(entry):
+    """Every sequence entry must be a NamedAction, not a duck-typed object."""
+    with pytest.raises(TypeError, match="sequence of NamedAction"):
+        route_actions(_two_dog_env(), (entry,))
+
+
+def test_route_actions_rejects_a_row_count_mismatch():
+    """An entry must carry exactly env.num_envs value rows."""
+    env = _two_dog_env()
+    entry = NamedAction("go1", "legs", torch.zeros(2, 2), ("hip", "knee"), "position")
+
+    with pytest.raises(ValueError, match=r"has 2 env rows, expected 1"):
+        route_actions(env, (entry,))
+
+
 def test_two_articulations_with_identical_joint_names_route_by_identity():
     """Duplicate joint names route to their own (articulation, group), no collision."""
     env = _two_dog_env()

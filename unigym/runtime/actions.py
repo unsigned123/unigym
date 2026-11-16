@@ -1,14 +1,16 @@
 """NamedAction: the self-describing action contract (feat/named-actions).
 
-The action boundary is an ORDERED sequence of self-describing values: an
-adapter returns ``tuple[NamedAction, ...]`` — one entry per action group
-(e.g. the body group plus a hand group), each carrying its owning
-``(articulation, group)`` identity, its values and the joint name for every
-column.  Consumers (backends) resolve the names to simulator addresses ONCE
-per name-tuple (cached) and scatter the values; users never touch simulator
-joint order (same philosophy as the name-based obs/contact/foot layers —
-actions are the last piece).  The sequence order is not an action layout: the
-entries are keyed by ``(articulation, group)``.
+The action boundary is a SEQUENCE of self-describing values whose container
+order is NOT semantic: an adapter returns ``tuple[NamedAction, ...]`` with one
+entry per action group (e.g. the body group plus a hand group), and every
+entry is addressed by its owning ``(articulation, group)`` identity.  Routing
+therefore never depends on where an entry sits in the tuple.  What IS an
+explicit per-entry contract is each ``NamedAction.joint_names`` tuple: its
+order fixes that entry's column order.  Every entry carries its values and the
+joint name for each column.  Consumers (backends) resolve the names to
+simulator addresses ONCE per name-tuple (cached) and scatter the values; users
+never touch simulator joint order (same philosophy as the name-based
+obs/contact/foot layers — actions are the last piece).
 
 Backends:
   * isaaclab — each action term is built with ``preserve_order=True`` and an

@@ -54,6 +54,11 @@ def _apply_entry(env, control, identity, entry, targets, covered, label) -> None
             f"{list(control.joint_names)}"
         )
     row = entry.values.detach().to("cpu").to(torch.float32).numpy()
+    if entry.num_envs != env.num_envs:
+        raise ValueError(
+            f"{label}: action group {identity!r} has {entry.num_envs} env "
+            f"rows, expected {env.num_envs}"
+        )
     if row.shape[-1] != len(names):
         raise ValueError(
             f"{label}: action group {identity!r} carries {row.shape[-1]} "

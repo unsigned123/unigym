@@ -95,3 +95,18 @@ def test_named_action_zeros_carries_the_identity():
     assert tuple(action.values.shape) == (2, 2)
     assert action.num_envs == 2
     assert action.dim == 2
+
+
+def test_adapter_named_action_rejects_a_bare_joint_string():
+    """A bare string must not become a tuple of single-character joint names."""
+    from unigym.adapters.manual import ManualAdapter
+
+    adapter = ManualAdapter()
+
+    with pytest.raises(ValueError, match="not a bare string"):
+        adapter.named_action(
+            torch.zeros(1, 1),
+            articulation="tiny",
+            group="tiny",
+            joint_names="hinge",
+        )

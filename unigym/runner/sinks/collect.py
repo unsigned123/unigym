@@ -63,14 +63,48 @@ def _record_key(key: str) -> str:
     return key
 
 
+def _canonical_action_entries(targets: Sequence[NamedAction]) -> list[tuple[NamedAction, str, str]]:
+    """Canonical ``(entry, record_column, face_key)`` triples, in identity order.
+
+    The action-group contract is addressed by ``(articulation, group)``, so
+    the incoming sequence order is NOT semantic: entries are sorted by that
+    identity before comparison or recording (a reordered sequence produces
+    the identical contract).  A group name shared by two articulations is
+    disambiguated with the articulation path so record keys stay unique; a
+    duplicate identity is ambiguous and fails loud.
+    """
+    ordered = sorted(targets, key=lambda na: (na.articulation, na.group))
+    seen: set[tuple[str, str]] = set()
+    counts: dict[str, int] = {}
+    for na in ordered:
+        identity = (na.articulation, na.group)
+        if identity in seen:
+            raise ValueError(
+                f"action group {identity!r} is addressed by more than one " f"NamedAction entry"
+            )
+        seen.add(identity)
+        counts[na.group] = counts.get(na.group, 0) + 1
+    out: list[tuple[NamedAction, str, str]] = []
+    for na in ordered:
+        if counts[na.group] == 1:
+            face_key = na.group
+        else:
+            face_key = f"{na.articulation}/{na.group}"
+        out.append((na, f"action_target/{face_key}", face_key))
+    return out
+
+
 def action_face_contract(targets: Sequence[NamedAction]) -> list:
     """The action-face contract (playback v3) as data.
 
-    One ``{key, column, joint_names}`` entry per NamedAction group, in
-    sequence order -- captured from the actual per-step targets (zero
-    inference: names and widths come from the entries themselves, never
-    from family constants).  Every column is ``action_target/<group>``;
-    there is no primary entry.
+    One ``{key, column, articulation, group, joint_names, kind}`` entry per
+    NamedAction group, canonicalized by ``(articulation, group)`` -- captured
+    from the actual per-step targets (zero inference: names and widths come
+    from the entries themselves, never from family constants).  Sequence
+    order is not semantic and reordering must not change the contract.  Every
+    column is ``action_target/<group>`` (``action_target/<articulation>/<group>``
+    when the group name is not unique across articulations); there is no
+    primary entry.
 
     The sink writes this into ``meta.json`` (``action_faces``) on its
     first recorded step; shard playback validates every face against
@@ -79,12 +113,14 @@ def action_face_contract(targets: Sequence[NamedAction]) -> list:
     """
     return [
         {
-            "key": na.group,
-            "column": f"action_target/{na.group}",
+            "key": face_key,
+            "column": column,
+            "articulation": na.articulation,
+            "group": na.group,
             "joint_names": list(na.joint_names),
             "kind": na.kind,
         }
-        for na in targets
+        for na, column, face_key in _canonical_action_entries(targets)
     ]
 
 
@@ -189,9 +225,10 @@ class CollectSink:
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
         # one column per NamedAction group: action_target/<group> (v103.5;
-        # no primary, no action_target_<group> suffix form)
-        for na in targets:
-            rec[f"action_target/{na.group}"] = na.values
+        # no primary, no action_target_<group> suffix form).  The canonical
+        # (articulation, group) order makes sequence order irrelevant.
+        for na, column, _face_key in _canonical_action_entries(targets):
+            rec[column] = na.values
         # playback contract (single source of truth on disk): capture
         # the faces from THIS step's actual routing once, then hold every
         # later step to it -- a mid-run face change would make the

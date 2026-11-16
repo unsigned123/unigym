@@ -240,9 +240,7 @@ class WatchContext:
         out = [f"obs/{k}" for k in self.obs_cache]
         out += [f"extra/{k}" for k in self.extra]
         targets = self.bundle.get("targets")
-        if isinstance(targets, dict):
-            out += [f"action/{k}" for k in targets]
-        elif targets is not None:
+        if targets is not None:
             out += [f"action/{entry.group}" for entry in targets]
         if "raw" in self.bundle:
             out.append("action/raw")
@@ -273,13 +271,10 @@ class WatchContext:
             return self.bundle.get("raw")
         elif name.startswith("action/"):
             targets = self.bundle.get("targets")
-            if isinstance(targets, dict):
-                na = targets.get(name[7:])
-            else:
-                na = next(
-                    (entry for entry in (targets or ()) if entry.group == name[7:]),
-                    None,
-                )
+            na = next(
+                (entry for entry in (targets or ()) if entry.group == name[7:]),
+                None,
+            )
             if na is None:
                 raise WatchError(f"unknown key {name!r} (available: {self.keys()})", self.keys())
             return getattr(na, "values", na)

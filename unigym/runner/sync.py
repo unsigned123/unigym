@@ -28,6 +28,7 @@ from collections.abc import Callable, Sequence
 import torch
 
 from unigym.runner.base import StepResult
+from unigym.runtime.actions import LEGAL_ACTION_KINDS, NamedAction
 from unigym.runtime.bridge import RewindBoundary
 from unigym.terminations import TerminationState
 
@@ -37,32 +38,56 @@ def _control_group_key(control) -> tuple[str, str]:
     return (str(control.articulation), str(control.action_face))
 
 
-def _normalize_group_key(entry, controls, adapter_name: str) -> tuple[str, str]:
-    """Normalize one declared adapter group entry to ``(articulation, group)``.
+def _normalize_group_key(entry, adapter_name: str) -> tuple[str, str]:
+    """Validate one declared adapter group entry as ``(articulation, group)``.
 
-    ``env.adapter_groups`` may still carry legacy string names in this
-    stage; a string is resolved through the env's controls to its owning
-    ``(control.articulation, control.action_face)`` key.
+    The ONLY legal adapter-group key form is the canonical
+    ``(articulation, group)`` tuple emitted by
+    :func:`unigym.run.build._build_adapter_groups`.  Legacy bare string names,
+    malformed tuples and any mixed form are rejected with a teaching error --
+    there is no alias resolution and no inference from a control name.
     """
     if isinstance(entry, str):
-        control = controls.get(entry)
-        if control is None:
+        raise ValueError(
+            f"adapter {adapter_name!r} group entry {entry!r} is a bare string; "
+            f"adapter groups must be (articulation, group) tuples"
+        )
+    if not isinstance(entry, tuple) or len(entry) != 2:
+        raise ValueError(
+            f"adapter {adapter_name!r} group entries must be "
+            f"(articulation, group) tuples, got {entry!r}"
+        )
+    articulation, group = entry
+    if not isinstance(articulation, str) or not articulation:
+        raise ValueError(
+            f"adapter {adapter_name!r} group key {entry!r} has an empty or "
+            f"non-string articulation"
+        )
+    if not isinstance(group, str) or not group:
+        raise ValueError(
+            f"adapter {adapter_name!r} group key {entry!r} has an empty or " f"non-string group"
+        )
+    return (articulation, group)
+
+
+def _normalize_group_keys(entries, adapter_name: str) -> tuple[tuple[str, str], ...]:
+    """Normalize a whole adapter-group list and reject duplicate identities.
+
+    Duplicate ``(articulation, group)`` identities would make routing
+    ambiguous, so they fail loud instead of being silently collapsed.
+    """
+    keys: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = _normalize_group_key(entry, adapter_name)
+        if key in seen:
             raise ValueError(
-                f"adapter {adapter_name!r} declares group {entry!r}, which is "
-                f"not a control runtime (declared controls: {sorted(controls)})"
+                f"adapter {adapter_name!r} declares group {key!r} more than "
+                f"once; adapter group identities must be unique"
             )
-        return _control_group_key(control)
-    if isinstance(entry, (tuple, list)) and len(entry) == 2:
-        articulation, group = entry
-        if not isinstance(articulation, str) or not articulation:
-            raise ValueError(f"adapter {adapter_name!r} group key has empty articulation")
-        if not isinstance(group, str) or not group:
-            raise ValueError(f"adapter {adapter_name!r} group key has empty group")
-        return (articulation, group)
-    raise ValueError(
-        f"adapter {adapter_name!r} group entries must be a string name or an "
-        f"(articulation, group) pair, got {entry!r}"
-    )
+        seen.add(key)
+        keys.append(key)
+    return tuple(keys)
 
 
 def _adapter_groups(instance):
@@ -86,7 +111,7 @@ def _adapter_groups(instance):
     groups = getattr(env, "adapter_groups", None)
     if groups is not None:
         if name in groups:
-            return tuple(_normalize_group_key(entry, controls, str(name)) for entry in groups[name])
+            return _normalize_group_keys(groups[name], str(name))
         raise ValueError(
             f"adapter {name!r} has no entry in env.adapter_groups "
             f"(declared adapters: {sorted(groups)})"
@@ -239,10 +264,7 @@ class SyncRunner:
         self.adapter_groups = (
             None
             if adapter_groups is None
-            else tuple(
-                _normalize_group_key(entry, self.controls, self.adapter_name)
-                for entry in adapter_groups
-            )
+            else _normalize_group_keys(adapter_groups, self.adapter_name)
         )
         self.total_steps = int(cfg["collect"]["steps"])
         # rewind seam: the resumable loop counter + the snapshot's
@@ -289,14 +311,13 @@ class SyncRunner:
             )
         entries: dict[tuple[str, str], object] = {}
         for entry in actions:
-            articulation = getattr(entry, "articulation", None)
-            group = getattr(entry, "group", None)
-            if not articulation or not group:
+            if not isinstance(entry, NamedAction):
                 raise TypeError(
-                    "every action entry must be a NamedAction carrying "
-                    f"(articulation, group); got {type(entry).__name__}"
+                    f"adapter {self.adapter_name!r} returned a "
+                    f"{type(entry).__name__} entry; every action entry must "
+                    f"be a NamedAction carrying (articulation, group)"
                 )
-            identity = (str(articulation), str(group))
+            identity = (entry.articulation, entry.group)
             if identity in entries:
                 raise ValueError(
                     f"adapter {self.adapter_name!r} action group {identity!r} "
@@ -323,8 +344,6 @@ class SyncRunner:
                 )
             kind = getattr(entry, "kind", None)
             if kind != control.target:
-                from unigym.runtime.actions import LEGAL_ACTION_KINDS
-
                 raise ValueError(
                     f"action group {identity!r}: configured target "
                     f"{control.target!r}, actual kind {kind!r}; legal "
