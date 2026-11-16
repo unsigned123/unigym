@@ -1,4 +1,4 @@
-"""The named action sugar: coverage, face selection, order and shape."""
+"""The action surface: group templates, named values, coverage and shapes."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import torch
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.runner.state import read_extra
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
     ArticulationHandle,
     BindingError,
@@ -25,15 +26,15 @@ from tests._support.fakes.runner import FakeRunner
 
 def _handle(
     *,
-    faces: Mapping[str, Sequence[str]] | None = None,
+    groups: Mapping[str, Sequence[str]] | None = None,
     name: str = "arm",
     owner: object | None = None,
 ) -> ArticulationHandle:
-    """One real handle with explicit control faces over its profile."""
-    declared = {"arm": ("shoulder", "elbow")} if faces is None else dict(faces)
+    """One real handle with explicit ordered action groups over its profile."""
+    declared = {"arm": ("shoulder", "elbow")} if groups is None else dict(groups)
     joints: list[str] = []
-    for face_joints in declared.values():
-        for joint in face_joints:
+    for group_joints in declared.values():
+        for joint in group_joints:
             if joint not in joints:
                 joints.append(joint)
     token = object() if owner is None else owner
@@ -48,21 +49,35 @@ def _handle(
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
-    specs = tuple(
-        Control.position_pd(joints=tuple(face_joints), face=face_name, kp=1.0, kd=0.1).faces[
-            face_name
+    groups_spec = tuple(
+        Control.position_pd(joints=tuple(group_joints), group=group_name, kp=1.0, kd=0.1).groups[
+            group_name
         ]
-        for face_name, face_joints in declared.items()
+        for group_name, group_joints in declared.items()
     )
-    control = ControlSpec.from_faces(specs)
+    control = ControlSpec.from_groups(groups_spec)
+    action_groups = {
+        group_name: OrderedActionGroup(
+            name=group_name,
+            articulation=name,
+            joints=tuple(group_joints),
+            target="position",
+        )
+        for group_name, group_joints in declared.items()
+    }
     return ArticulationHandle(
         name=name,
         ref=None,
         profile=profile,
         control=control,
-        faces={face_name: tuple(face_joints) for face_name, face_joints in declared.items()},
+        action_groups=action_groups,
         _owner=token,
     )
+
+
+def _spec(handle: ArticulationHandle) -> OrderedActionSpec:
+    """The global action template of one handle."""
+    return OrderedActionSpec(tuple(handle.action_groups.values()))
 
 
 def _sim(handle: ArticulationHandle, runner: FakeRunner) -> Simulation:
@@ -74,6 +89,7 @@ def _sim(handle: ArticulationHandle, runner: FakeRunner) -> Simulation:
         world=World.base(mjcf="world.xml"),
         articulations=(handle,),
         cameras=(),
+        action_spec=_spec(handle),
         runner=runner,
         env=runner.env,
         run=run,
@@ -84,8 +100,8 @@ def _sim(handle: ArticulationHandle, runner: FakeRunner) -> Simulation:
     )
 
 
-def test_named_mapping_order_becomes_the_named_action_column_order() -> None:
-    """The mapping key order is the lowered column order; names resolve the rest."""
+def test_named_mapping_values_are_reordered_into_group_joint_order() -> None:
+    """The mapping key order never changes the group's declared column order."""
     handle = _handle()
     runner = FakeRunner(joint_names=("shoulder", "elbow"))
     sim = _sim(handle, runner)
@@ -98,9 +114,9 @@ def test_named_mapping_order_becomes_the_named_action_column_order() -> None:
     assert len(action) == 1
     assert action[0].articulation == "arm"
     assert action[0].group == "arm"
-    assert action[0].joint_names == ("elbow", "shoulder")
+    assert action[0].joint_names == ("shoulder", "elbow")
     assert action[0].values.shape == (1, 2)
-    assert torch.allclose(action[0].values, torch.tensor([[0.7, 0.3]]))
+    assert torch.allclose(action[0].values, torch.tensor([[0.3, 0.7]]))
     assert obs.articulations[handle].joint_names == ("shoulder", "elbow")
     assert torch.allclose(obs.articulations[handle].joint_pos, torch.tensor([[0.3, 0.7]]))
 
@@ -115,7 +131,7 @@ def test_named_mapping_order_becomes_the_named_action_column_order() -> None:
         ),
     ],
 )
-def test_named_mapping_must_cover_every_face_joint(values: dict[str, float], match: str) -> None:
+def test_named_mapping_must_cover_every_group_joint(values: dict[str, float], match: str) -> None:
     """A partial or over-specified mapping names both sets and stages nothing."""
     handle = _handle()
 
@@ -123,39 +139,41 @@ def test_named_mapping_must_cover_every_face_joint(values: dict[str, float], mat
         _sim(handle, FakeRunner(joint_names=("shoulder", "elbow"))).act(handle, values)
 
     message = str(excinfo.value)
-    assert "face joints ['shoulder', 'elbow']" in message
+    assert "the group joints ['shoulder', 'elbow']" in message
 
 
-def test_multiple_faces_require_an_explicit_face() -> None:
-    """An ambiguous handle lists its declared faces instead of guessing."""
-    handle = _handle(faces={"body": ("shoulder",), "hand": ("elbow",)})
+def test_multiple_groups_require_the_group_target() -> None:
+    """A multi-group handle lists its identities instead of guessing."""
+    handle = _handle(groups={"body": ("shoulder",), "hand": ("elbow",)})
     sim = _sim(handle, FakeRunner(joint_names=("shoulder", "elbow")))
 
-    with pytest.raises(BindingError, match="needs face=") as excinfo:
+    with pytest.raises(BindingError, match="needs a single-group handle") as excinfo:
         sim.act(handle, {"shoulder": 0.1})
 
     message = str(excinfo.value)
-    assert "['body', 'hand']" in message
+    assert "('arm', 'body')" in message
+    assert "('arm', 'hand')" in message
 
 
-def test_explicit_face_selects_one_of_many() -> None:
-    """face= stages the named face even when the handle declares several."""
-    handle = _handle(faces={"body": ("shoulder",), "hand": ("elbow",)})
+def test_explicit_group_stages_one_of_many() -> None:
+    """Passing the group object stages that group even on a multi-group handle."""
+    handle = _handle(groups={"body": ("shoulder",), "hand": ("elbow",)})
     sim = _sim(handle, FakeRunner(joint_names=("shoulder", "elbow")))
+    body = handle.action_groups["body"]
 
-    sim.act(handle, {"shoulder": 0.1}, face="body")
+    sim.act(body, {"shoulder": 0.1})
 
     with pytest.raises(PendingActionError, match="already staged"):
-        sim.act(handle, {"shoulder": 0.2}, face="body")
+        sim.act(body, {"shoulder": 0.2})
 
 
-def test_explicit_face_is_accepted_on_the_single_face_form() -> None:
-    """The explicit face argument matches the one declared face."""
+def test_single_group_handle_accepts_a_tensor_in_group_order() -> None:
+    """A single-group handle convenience accepts the explicit (N, dim) tensor."""
     handle = _handle()
     runner = FakeRunner(joint_names=("shoulder", "elbow"))
     sim = _sim(handle, runner)
 
-    sim.act(handle, {"shoulder": 0.3, "elbow": -0.4}, face="arm")
+    sim.act(handle, torch.tensor([[0.3, -0.4]], dtype=torch.float32))
     obs = sim.step()
 
     assert torch.allclose(obs.articulations[handle].joint_pos, torch.tensor([[0.3, -0.4]]))
@@ -252,11 +270,11 @@ def test_named_mapping_applies_per_env_values() -> None:
     action = runner.last_actions
     assert action is not None
     assert len(action) == 1
-    assert action[0].joint_names == ("elbow", "shoulder")
+    assert action[0].joint_names == ("shoulder", "elbow")
     assert action[0].values.shape == (2, 2)
     assert torch.allclose(
         action[0].values,
-        torch.tensor([[0.3, 0.1], [0.4, 0.2]]),
+        torch.tensor([[0.1, 0.3], [0.2, 0.4]]),
     )
     assert torch.allclose(
         obs.articulations[handle].joint_pos,
@@ -274,9 +292,16 @@ def test_foreign_handle_is_refused_before_staging() -> None:
         sim.act(foreign, {"shoulder": 0.1, "elbow": 0.2})
 
 
-def test_tensor_values_are_not_the_named_mapping_form() -> None:
-    """A handle target with a tensor is refused instead of guessed."""
+def test_unknown_group_is_refused_instead_of_staging() -> None:
+    """A group identity the action_spec does not declare is not accepted."""
     handle = _handle()
+    sim = _sim(handle, FakeRunner(joint_names=("shoulder", "elbow")))
+    unknown = OrderedActionGroup(
+        name="legs",
+        articulation="arm",
+        joints=("shoulder", "elbow"),
+        target="position",
+    )
 
-    with pytest.raises(BindingError, match="requires a mapping"):
-        _sim(handle, FakeRunner(joint_names=("shoulder", "elbow"))).act(handle, torch.zeros(1, 2))
+    with pytest.raises(BindingError, match="is not declared by this simulation"):
+        sim.act(unknown, torch.zeros(1, 2))

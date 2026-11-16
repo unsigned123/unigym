@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
-from unigym.sim import BindingOrder, Control, SimulationBuilder
+from unigym.sim import Control, SimulationBuilder
 from unigym.world import World
 from tests._support.sim_fixtures import write_sim_pack
 
@@ -36,7 +36,7 @@ def test_observed_joint_tensors_match_the_step_extra(tmp_path: Path, tiny_mjcf: 
         name="body",
         control=Control.position_pd(joint_set="body", kp=20.0, kd=1.0),
     )
-    binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
+    binding = handle.action_groups["body"]
 
     sim = builder.build()
     try:

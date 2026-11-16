@@ -10,7 +10,8 @@ import torch
 
 from unigym.packs.packset import PackSet
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
-from unigym.sim import BindingError, BindingOrder, Control, SimulationBuilder
+from unigym.runtime.actions import OrderedActionGroup
+from unigym.sim import BindingError, Control, SimulationBuilder
 from unigym.world import World
 from tests._support.sim_fixtures import write_sim_pack
 
@@ -72,12 +73,12 @@ def test_config_round_trip_reproduces_the_reset_joint_positions(
 
     assert sim.backend == source.backend == "mujoco"
     assert tuple(handle.name for handle in loaded.articulations) == ("body",)
-    assert tuple(loaded.articulations[0].faces) == ("body",)
+    assert tuple(loaded.articulations[0].action_groups) == ("body",)
     assert torch.equal(source_pos, loaded_pos)
 
 
 def test_config_mode_acts_through_the_runtime_target(tmp_path: Path, tiny_mjcf: Path) -> None:
-    """A control=None config handle binds with the live ControlRuntime target."""
+    """A control=None config handle stages the RunSpec action group."""
     builder, pack_set = _source_builder(tmp_path, tiny_mjcf)
     path = tmp_path / "roundtrip.yaml"
     _write_roundtrip(builder, path)
@@ -86,13 +87,15 @@ def test_config_mode_acts_through_the_runtime_target(tmp_path: Path, tiny_mjcf: 
     sim = loaded.build()
     try:
         handle = sim.articulations[0]
-        binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
-        sim.act(binding, torch.tensor([[0.3, -0.4]], dtype=torch.float32))
+        group = handle.action_groups["body"]
+        sim.act(group, torch.tensor([[0.3, -0.4]], dtype=torch.float32))
         obs = sim.step()
         assert obs.raw[f"articulation/{handle.name}/joint_pos"].shape == (1, 2)
-        with pytest.raises(BindingError, match="control target 'position'"):
+        with pytest.raises(BindingError, match="does not match the declared template"):
             sim.act(
-                handle.bind_action("body", kind="torque", order=BindingOrder.DEFAULT),
+                OrderedActionGroup(
+                    name="body", articulation="body", joints=("shoulder", "elbow"), target="torque"
+                ),
                 torch.zeros(1, 2),
             )
     finally:

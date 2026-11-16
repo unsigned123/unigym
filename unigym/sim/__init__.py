@@ -1,10 +1,15 @@
-"""Experimental simulation facade (``SIM_API_VERSION = 3``).
+"""Experimental simulation facade (``SIM_API_VERSION = 4``).
 
 The facade is a thin, additive surface over the existing ``Run`` / runner /
 backend stack.  This namespace ships the explicit-pack builder, identity-scoped
 handles, the ``Control.position_pd`` preset, the error taxonomy, the live
 :class:`Simulation` and its typed :class:`Observation` projection (articulation
 records, published camera frames and ``contact/`` tensors).
+
+Actions are expressed with the ordered action template
+(:class:`~unigym.runtime.actions.OrderedActionGroup`): each articulation handle
+carries its action groups, and ``Simulation`` holds the global
+:class:`~unigym.runtime.actions.OrderedActionSpec` they must match.
 
 The tested coverage extends to ``num_envs`` in ``{1, 2, 3}`` on ``mujoco``
 and targeted ``{1, 2}`` on ``isaaclab2`` (full dog lane unverified): explicit
@@ -21,7 +26,7 @@ from __future__ import annotations
 from typing import Final
 
 from .builder import SimulationBuilder
-from .control import Control, ControlFaceSpec, ControlSpec
+from .control import Control, ControlGroupSpec, ControlSpec
 from .errors import (
     BindingError,
     BuilderSealedError,
@@ -39,30 +44,22 @@ from .errors import (
     SimulationFaultedError,
     StaleStateError,
 )
-from .handles import (
-    ActionBinding,
-    ArticulationHandle,
-    BindingOrder,
-    BodyHandle,
-    CameraHandle,
-)
+from .handles import ArticulationHandle, BodyHandle, CameraHandle
 from .observation import ArticulationObservation, CameraFrame, Observation
 from .simulation import Simulation
 
-SIM_API_VERSION: Final[int] = 3
+SIM_API_VERSION: Final[int] = 4
 """The experimental facade API version."""
 
 __all__ = [
     "SIM_API_VERSION",
-    "ActionBinding",
     "ArticulationHandle",
     "ArticulationObservation",
-    "BindingOrder",
     "BodyHandle",
     "CameraFrame",
     "CameraHandle",
     "Control",
-    "ControlFaceSpec",
+    "ControlGroupSpec",
     "ControlSpec",
     "Observation",
     "Simulation",

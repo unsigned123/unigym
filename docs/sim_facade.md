@@ -11,7 +11,7 @@ SimulationBuilder -> Simulation -> Run / ExternalRunner / backend
 
 ## Experimental status
 
-- `unigym.sim.SIM_API_VERSION` is `3`. There is no stable-API promise; an
+- `unigym.sim.SIM_API_VERSION` is `4`. There is no stable-API promise; an
   incompatible facade change bumps the version.
 - The facade is proven for **one articulation** on the tested coverage:
   `mujoco` at `N ∈ {1, 2, 3}` and `isaaclab2` at targeted `N ∈ {1, 2}` (full
@@ -57,18 +57,14 @@ robot = builder.add_articulation(
     packs.pack("acme_robots").robot("acme.arm"),
     control=control,
 )
-binding = robot.bind_action(
-    "body",
-    kind="position",
-    order=unigym.BindingOrder.DEFAULT,   # explicit default-order choice
-)
+group = robot.action_groups["body"]    # the ordered action template group
 
 with builder.build() as sim:
     obs = sim.observe()                            # spawn state, t == 0
     print(obs.articulations[robot].joint_pos)
 
     for _ in range(3):
-        sim.act(binding, torch.zeros((1, binding.dim), dtype=torch.float32))
+        sim.act(group, torch.zeros((1, len(group.joints)), dtype=torch.float32))
         obs = sim.step()                           # one tick; first step keeps t == 0
 ```
 
@@ -77,20 +73,18 @@ with builder.build() as sim:
 `obs.t == N - 1`.
 
 The named single-env form is equivalent when the handle declares exactly one
-face:
+action group:
 
 ```python
 sim.act(robot, {"shoulder": 0.1, "elbow": -0.2})
 obs = sim.step()
 ```
 
-`step(actions={binding: values, ...})` is sugar: it stages every entry
+`step(actions={group: values, ...})` is sugar: it stages every entry
 atomically and then runs the normal `step()`. A failed entry clears the pending
 table and leaves the tick/state untouched. The canonical path is `act` +
-`step()`. Entries are currently dispatched through `act`, so the same
-binding-tensor and handle-mapping forms are accepted at runtime even though the
-typed annotation is binding-keyed tensors. Finiteness is checked for Python
-numbers only; a tensor's `NaN`/`inf` values are not inspected in v2.
+`step()`. Finiteness is checked for Python numbers only; a tensor's
+`NaN`/`inf` values are not inspected.
 
 ## Builder
 
@@ -124,9 +118,9 @@ SimulationBuilder(
   the builder is the single owner of those tables. `builder.terrain` is sugar for
   `builder.world.terrain`.
 - `add_articulation(ref, *, name=None, control=...)` requires an explicit
-  `Control` spec; there is no implicit control. Faces are resolved against the
-  pack profile, face names are global, and faces of one articulation must be
-  disjoint.
+  `Control` spec; there is no implicit control. Action groups are resolved
+  against the pack profile, group identities are `(articulation, name)`, and
+  the groups of one articulation must be disjoint.
 - `add_camera(entry, *, name=None)` accepts an existing `unigym.Camera.*`
   `cameras[]` entry mapping. `attach=BodyHandle` is deferred and raises
   `DeferredFeatureError`; use a native mount name through
@@ -165,29 +159,32 @@ builder.world = World.from_preset(preset, runtime=builder.pack_runtime)
 
 ## Actions
 
-An `ActionBinding` is one face lowered to the existing `NamedAction` surface:
-`binding.joint_names` is the column order and `binding.kind` is the action kind
-(`"position"` for `Control.position_pd`).
+Actions use the ordered action template directly. Each articulation handle
+carries a read-only `action_groups` mapping of
+`OrderedActionGroup` objects, and `Simulation` holds the global
+`OrderedActionSpec` built from those groups. A group fixes its
+`(articulation, name)` identity, joint order, target kind and body/aux role; the
+same group name may appear on different articulations.
 
-- `binding = handle.bind_action(face, kind="position", order=...)`: `order` is
-  required, with exactly two explicit choices. `unigym.BindingOrder.DEFAULT`
-  selects the face's resolved joint order (the profile `joint_set` order or the
-  explicit `joints=` order from the control spec). A sequence of joint names is
-  the tensor column order and must be a permutation of the face joints.
-  Omitting `order` is a `TypeError`; `None` or another invalid value is a
-  `BindingError` naming the supported forms.
-- `act(binding, values)` requires a floating `torch.Tensor` of shape
-  `(num_envs, binding.dim)`, or `(binding.dim,)` when `num_envs == 1`. Values
-  are normalized to `(N, dim)` and cloned.
-- `act(handle, {joint: value})` is the named form and does not call
-  `bind_action`: it remains mapping-key addressed. Its keys must cover exactly
-  the face joints; key order becomes the action column order. With more than
-  one declared face, `face=` selects one. At `N == 1` a value may be a finite
-  number or a floating `(1,)` tensor; the per-env rules are in
+- `group = handle.action_groups[name]` is the only action handle. There is no
+  separate action-binding layer and no column-order choice: the group's joint
+  tuple is the tensor column order.
+- `act(group, values)` requires a floating `torch.Tensor` of shape
+  `(num_envs, len(group.joints))`, or `(len(group.joints),)` when
+  `num_envs == 1`. Values are normalized to `(N, dim)` and cloned.
+- `act(handle, values)` is the single-group convenience. It is legal only when
+  the handle declares exactly one action group; a multi-group handle must pass
+  the `OrderedActionGroup` itself. A mapping must cover exactly the group
+  joints; its values are reordered into the group's declared joint order, so
+  mapping key order never changes the action layout. At `N == 1` a value may be
+  a finite number or a floating `(1,)` tensor; the per-env rules are in
   [Multi-env](#multi-env).
-- At most one pending entry per face. `step()` requires **every** declared
-  control face to be staged; an unstaged face is `MissingActionError`. The
-  previous action is never reused.
+- Every target is validated against the simulation's `OrderedActionSpec`: an
+  unknown identity, a group whose joints/target differ from the template, a
+  partial group, or a wrong value shape is a `BindingError` before staging.
+- At most one pending entry per `(articulation, group)` identity. `step()`
+  requires **every** declared group to be staged; an unstaged group is
+  `MissingActionError`. The previous action is never reused.
 - All validation happens before the tick. An engine exception clears pending,
   marks the simulation `faulted`, and propagates; later live calls raise
   `SimulationFaultedError` until `close()`.
@@ -199,20 +196,20 @@ is explicit: every action is `(N, dim)` and every projected tensor is
 `(N, ...)`. The facade never broadcasts, fills or skips a row.
 
 ```python
-sim.act(binding, torch.zeros((N, binding.dim), dtype=torch.float32))  # exact (N, dim)
+sim.act(group, torch.zeros((N, len(group.joints)), dtype=torch.float32))  # exact (N, dim)
 sim.act(robot, {"shoulder": torch.full((N,), 0.1), "elbow": torch.zeros(N)})
 ```
 
-- `act(binding, tensor)` requires an exact `(N, dim)` floating tensor; the
+- `act(group, tensor)` requires an exact `(N, dim)` floating tensor; the
   `(dim,)` short form remains legal only at `N == 1`. A `(1, dim)` tensor,
   a `(dim,)` vector or a 3-D tensor at `N > 1` is a `BindingError` naming the
   actual and the expected `(num_envs, dim)`.
 - `act(handle, {joint: value})` is the per-env named form. At `N > 1` every
   value must be a floating `(N,)` tensor with one dtype and device; a Python
   number is refused with a `BindingError` naming the joint and the explicit
-  broadcast, `torch.full((N,), value)`. The columns are stacked in key order
-  into the same `(N, dim)` staging path. At `N == 1` finite numbers and `(1,)`
-  tensors may mix, exactly as before.
+  broadcast, `torch.full((N,), value)`. The columns are stacked in the group's
+  declared joint order into the same `(N, dim)` staging path. At `N == 1` finite
+  numbers and `(1,)` tensors may mix.
 - `reset(env_ids=...)` resets exactly the named rows; `reset()` (or
   `env_ids=None`) resets all rows. Ids are ints in `[0, N)`, non-empty and
   unique; a subset reset does not touch the other rows.
@@ -310,11 +307,11 @@ All facade errors derive from `unigym.errors.UniGymError`. `NoWorldError` and
 | --- | --- |
 | `NoWorldError` | `build()` has no world, or the world declares no asset. |
 | `NoControlError` | `add_articulation` is called without `control=`. |
-| `SimulationConfigError` | Invalid declaration or caller argument: dt arithmetic, labels, backend name, face/profile coverage, config-mode requirements, `reset(env_ids=...)` ids (empty, non-int, out of range or duplicate), or a foreign config with `runner.auto_reset: true`. |
-| `ForeignHandleError` | A handle, binding or pack ref belongs to another builder/simulation or pack set. |
-| `BindingError` | Unknown face, illegal kind, bad column order, bad shape/dtype, ambiguous or partial named action. |
-| `PendingActionError` | Duplicate face, empty pending on `step()`, or a staged face that is not declared. |
-| `MissingActionError` | A required control face is not staged. |
+| `SimulationConfigError` | Invalid declaration or caller argument: dt arithmetic, labels, backend name, group/profile coverage, config-mode requirements, `reset(env_ids=...)` ids (empty, non-int, out of range or duplicate), or a foreign config with `runner.auto_reset: true`. |
+| `ForeignHandleError` | A handle, action group or pack ref belongs to another builder/simulation or pack set. |
+| `BindingError` | Unknown action-group identity, a group that differs from the template, a bad shape/dtype, or an ambiguous/partial named action. |
+| `PendingActionError` | Duplicate group identity, empty pending on `step()`, or a staged group that is not declared. |
+| `MissingActionError` | A required action group is not staged. |
 | `StaleStateError` | The runner advanced out of band; the facade clock is behind. |
 | `ObservationError` | A required state key is missing or invalid, `q0` is unavailable, or a projected tensor/mask violates its `num_envs` contract (wrong row count, non-int64/out-of-range/duplicate reset ids, or a `terminated` mask that is not `(N,)` bool). |
 | `SimulationClosedError` | A live call after `close()`. |
@@ -345,9 +342,10 @@ backend and seed. Handles are not serialized and pack refs are not resurrected.
 `discover_runtime=False`: a config that references a pack needs `pack_set=` and
 fails with a teaching `ConfigError` naming `pack_set=` / `pack_runtime=`
 instead of falling back to ambient entry-point discovery. It refuses a config
-with no manual control face, because the facade is not a policy-adapter driver.
-A config-mode builder cannot declare new objects (`ConfigModeError`); its
-handles are re-adopted from the live instance after `build()`.
+with no manual policy binding, because the facade is not a policy-adapter
+driver. A config-mode builder cannot declare new objects (`ConfigModeError`);
+its handles and action groups are re-adopted from the live instance and the
+`RunSpec.action_spec` after `build()`.
 
 ## Acceptance evidence
 
@@ -368,10 +366,10 @@ cross-backend parity claim, and the full dog lane remains unverified.
 
 ## Scope and non-goals
 
-In scope for `SIM_API_VERSION = 3`:
+In scope for `SIM_API_VERSION = 4`:
 
 - One explicit `PackSet`, explicit world/control declarations, identity-scoped
-  handles.
+  handles and ordered action groups from the run/action spec.
 - `Control.position_pd` only.
 - Tested multi-env coverage on `mujoco` at `N ∈ {1, 2, 3}` and targeted
   `isaaclab2` at `N ∈ {1, 2}` (full dog lane unverified): explicit `(N, dim)`
@@ -398,7 +396,7 @@ Deferred (exact follow-up, not open questions):
 | Camera frames / rendering | `Run` hard-codes `enable_cameras=False`; the manual adapter requests no images. |
 | `attach=BodyHandle` cameras | A canonical body id needs the build-selected native asset name. |
 | Typed contacts / props / object handles | `contact/` keys are not backend-symmetric in `extra`. |
-| Subset `joints=` action bindings | Full-face bindings only in this spike. |
+| Subset `joints=` action groups | Full-group values only in this spike. |
 | Same-asset cross-backend run | No dual-format (MJCF + USD/URDF) test pack in both lanes. |
 | Per-env action masks | No consumer yet. |
 | Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `raw`. |

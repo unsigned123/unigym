@@ -34,7 +34,7 @@ def _handle(
         ref=None,
         profile=profile,
         control=None,
-        faces={},
+        action_groups={},
         _owner=object(),
     )
 

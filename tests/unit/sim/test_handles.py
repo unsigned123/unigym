@@ -1,19 +1,16 @@
-"""Identity-scoped handles, body vocabulary and action-binding validation."""
+"""Identity-scoped handles, body vocabulary and ordered action-group validation."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from unigym.camera import Camera
 from unigym.robots.base import BodyBinding, RobotProfile
+from unigym.runtime.actions import OrderedActionGroup
 from unigym.sim import (
-    ActionBinding,
     ArticulationHandle,
-    BindingError,
-    BindingOrder,
     Control,
     DeferredFeatureError,
     ForeignHandleError,
@@ -42,14 +39,29 @@ def _profile() -> RobotProfile:
     )
 
 
+def _group(
+    joints: tuple[str, ...], name: str = "body", articulation: str = "arm"
+) -> OrderedActionGroup:
+    """One declared position group."""
+    return OrderedActionGroup(
+        name=name,
+        articulation=articulation,
+        joints=joints,
+        target="position",
+    )
+
+
 def _handle(*, owner: object | None = None) -> ArticulationHandle:
-    """A directly constructed handle with two disjoint faces."""
+    """A directly constructed handle with two disjoint action groups."""
     return ArticulationHandle(
         name="arm",
         ref=None,
         profile=_profile(),
         control=None,
-        faces={"body": ("shoulder", "elbow"), "hand": ("finger",)},
+        action_groups={
+            "body": _group(("shoulder", "elbow")),
+            "finger": _group(("finger",), name="finger"),
+        },
         _owner=object() if owner is None else owner,
     )
 
@@ -80,71 +92,41 @@ def test_body_rejects_an_undeclared_canonical_id() -> None:
         _handle().body("pelvis")
 
 
-def test_bind_action_uses_the_face_order_for_the_default_sentinel() -> None:
-    """BindingOrder.DEFAULT selects the declared face joint order."""
-    binding = _handle().bind_action("body", kind="position", order=BindingOrder.DEFAULT)
+def test_action_groups_are_read_only_and_keep_the_template() -> None:
+    """The handle stores the ordered groups by name in a read-only mapping."""
+    handle = _handle()
 
-    assert binding.face == "body"
-    assert binding.joint_names == ("shoulder", "elbow")
-    assert binding.kind == "position"
-    assert binding.dim == 2
-
-
-def test_bind_action_requires_an_explicit_order() -> None:
-    """Omitting order is a TypeError: there is no implicit binding order."""
-    binder: Callable[..., ActionBinding] = _handle().bind_action
-
-    with pytest.raises(TypeError, match="order"):
-        binder("body", kind="position")
+    assert set(handle.action_groups) == {"body", "finger"}
+    assert handle.action_groups["body"].joints == ("shoulder", "elbow")
+    assert handle.action_groups["body"].target == "position"
+    with pytest.raises(TypeError):
+        handle.action_groups["other"] = _group(("finger",), name="other")
 
 
-def test_bind_action_accepts_an_explicit_permutation() -> None:
-    """An explicit order is the tensor column order, not a face redefinition."""
-    binding = _handle().bind_action("body", kind="position", order=["elbow", "shoulder"])
-
-    assert binding.joint_names == ("elbow", "shoulder")
-    assert binding.dim == 2
-
-
-@pytest.mark.parametrize("order", [None, 3, "elbow"])
-def test_bind_action_rejects_a_non_sequence_order(order: object) -> None:
-    """None and scalars fail with the two supported order forms named."""
-    with pytest.raises(BindingError, match="BindingOrder.DEFAULT or a sequence"):
-        _handle().bind_action("body", kind="position", order=order)
+def test_action_group_key_must_match_the_group_name() -> None:
+    """A mapping key that disagrees with its group is a declaration error."""
+    with pytest.raises(SimulationConfigError, match="does not match its group name"):
+        ArticulationHandle(
+            name="arm",
+            ref=None,
+            profile=_profile(),
+            control=None,
+            action_groups={"other": _group(("shoulder",))},
+            _owner=object(),
+        )
 
 
-@pytest.mark.parametrize(
-    "order",
-    [
-        ["shoulder"],
-        ["shoulder", "shoulder"],
-        ["shoulder", "finger"],
-    ],
-)
-def test_bind_action_rejects_a_non_permutation_order(order: list[str]) -> None:
-    """An explicit order must be a duplicate-free permutation of the face."""
-    with pytest.raises(BindingError, match="must be a permutation"):
-        _handle().bind_action("body", kind="position", order=order)
-
-
-def test_binding_order_is_exported_from_sim_and_top_level() -> None:
-    """The explicit sentinel is part of both public facade surfaces."""
-    import unigym
-
-    assert unigym.BindingOrder is BindingOrder
-    assert BindingOrder.DEFAULT.value == "default"
-
-
-def test_bind_action_rejects_an_unknown_face() -> None:
-    """The face must exist, and the error lists the declared faces."""
-    with pytest.raises(BindingError, match="no action face"):
-        _handle().bind_action("legs", kind="position", order=BindingOrder.DEFAULT)
-
-
-def test_bind_action_rejects_an_illegal_kind() -> None:
-    """The kind vocabulary is owned by the runtime action contract."""
-    with pytest.raises(BindingError, match="kind must be one of"):
-        _handle().bind_action("body", kind="position_pd", order=BindingOrder.DEFAULT)
+def test_action_group_must_belong_to_the_enclosing_articulation() -> None:
+    """A group declared for another articulation cannot be re-homed by the key."""
+    with pytest.raises(SimulationConfigError, match="declared for articulation"):
+        ArticulationHandle(
+            name="arm",
+            ref=None,
+            profile=_profile(),
+            control=None,
+            action_groups={"body": _group(("shoulder",), articulation="other")},
+            _owner=object(),
+        )
 
 
 def test_body_camera_attach_is_foreign_or_deferred_across_builders(

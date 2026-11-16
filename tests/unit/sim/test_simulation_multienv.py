@@ -9,10 +9,9 @@ from unigym.run.api import Run
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner.base import StepResult
 from unigym.runner.state import read_extra
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
-    ActionBinding,
     ArticulationHandle,
-    BindingOrder,
     Control,
     ObservationError,
     PendingActionError,
@@ -38,13 +37,17 @@ def _handle(owner: object) -> ArticulationHandle:
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
-    control = Control.position_pd(joints=joints, face="arm", kp=1.0, kd=0.1)
+    control = Control.position_pd(joints=joints, group="arm", kp=1.0, kd=0.1)
     return ArticulationHandle(
         name="arm",
         ref=None,
         profile=profile,
         control=control,
-        faces={"arm": joints},
+        action_groups={
+            "arm": OrderedActionGroup(
+                name="arm", articulation="arm", joints=joints, target="position"
+            )
+        },
         _owner=owner,
     )
 
@@ -61,6 +64,7 @@ def _sim(*, runner: FakeRunner | None = None, num_envs: int = 2) -> Simulation:
         world=World.base(mjcf="world.xml"),
         articulations=(handle,),
         cameras=(),
+        action_spec=OrderedActionSpec(tuple(handle.action_groups.values())),
         runner=live,
         env=live.env,
         run=run,
@@ -71,9 +75,9 @@ def _sim(*, runner: FakeRunner | None = None, num_envs: int = 2) -> Simulation:
     )
 
 
-def _binding(sim: Simulation) -> ActionBinding:
-    """The one declared action binding of the fixture handle."""
-    return sim.articulations[0].bind_action("arm", kind="position", order=BindingOrder.DEFAULT)
+def _group(sim: Simulation) -> OrderedActionGroup:
+    """The one declared action group of the fixture handle."""
+    return sim.articulations[0].action_groups["arm"]
 
 
 def _values() -> torch.Tensor:
@@ -137,7 +141,7 @@ def test_step_reports_due_and_terminated_without_resetting_rows() -> None:
     """A step performs no reset: due/terminated are reported, the rows survive."""
     runner = FakeRunner(num_envs=2, due_rows=(0, 1), terminated_rows=(1,))
     sim = _sim(runner=runner)
-    binding = _binding(sim)
+    binding = _group(sim)
     sim.act(binding, _values())
 
     obs = sim.step()
@@ -156,7 +160,7 @@ def test_reset_after_a_due_tick_clears_due_and_episode_clock() -> None:
     """The caller's reset clears the due mask and the per-row episode clock."""
     runner = FakeRunner(num_envs=2, due_rows=(0, 1))
     sim = _sim(runner=runner)
-    sim.act(_binding(sim), _values())
+    sim.act(_group(sim), _values())
     sim.step()
 
     obs = sim.reset(env_ids=[0, 1])
@@ -172,7 +176,7 @@ def test_reset_after_a_due_tick_clears_due_and_episode_clock() -> None:
 def test_reset_subset_restores_only_the_named_row() -> None:
     """A subset reset re-reads the full state and leaves the other rows untouched."""
     sim = _sim()
-    sim.act(_binding(sim), _values())
+    sim.act(_group(sim), _values())
     sim.step()
 
     obs = sim.reset(env_ids=[1])
@@ -204,7 +208,7 @@ def test_reset_all_reports_every_row() -> None:
 def test_reset_never_advances_the_tick() -> None:
     """Reset re-synchronises t with ticks_done and never ticks the runner."""
     sim = _sim()
-    sim.act(_binding(sim), _values())
+    sim.act(_group(sim), _values())
     sim.step()
     ticks = sim.runner.ticks_done
 
@@ -218,7 +222,7 @@ def test_reset_never_advances_the_tick() -> None:
 def test_reset_clears_the_whole_pending_table() -> None:
     """A staged action may belong to a reset row, so reset clears every face."""
     sim = _sim()
-    sim.act(_binding(sim), _values())
+    sim.act(_group(sim), _values())
 
     sim.reset(env_ids=[1])
 
@@ -301,7 +305,7 @@ def test_step_rejects_a_bad_terminated_mask(bad_terminated: torch.Tensor, match:
     """A malformed termination mask is not adopted; the facade stays unfaulted."""
     runner = _BadTerminatedRunner(bad_terminated, num_envs=2)
     sim = _sim(runner=runner)
-    sim.act(_binding(sim), _values())
+    sim.act(_group(sim), _values())
 
     with pytest.raises(ObservationError, match=match):
         sim.step()

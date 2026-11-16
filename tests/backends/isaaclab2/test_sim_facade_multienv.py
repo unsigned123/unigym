@@ -14,7 +14,7 @@ from unigym.packs.packset import PackSet, RobotRef
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.scenes import Scene
 from unigym.scenes.terrain import Terrain
-from unigym.sim import BindingOrder, Control, SimulationBuilder
+from unigym.sim import Control, SimulationBuilder
 from unigym.world import World
 from tests._support.sim_facade_script import ARTICULATION_LABEL, run_facade_acceptance
 
@@ -176,7 +176,7 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
         assert isinstance(spawn, torch.Tensor)
         spawn = spawn.clone()
         sim.act(
-            handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT),
+            handle.action_groups["body"],
             targets,
         )
         stepped = sim.step()

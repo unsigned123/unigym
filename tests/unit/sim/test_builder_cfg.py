@@ -37,7 +37,7 @@ def _builder(pack_set: PackSet) -> SimulationBuilder:
 
 
 def _body_control() -> ControlSpec:
-    """The canonical one-face body preset (shoulder, elbow)."""
+    """The canonical one-group body preset (shoulder, elbow)."""
     return Control.position_pd(joint_set="body", kp=10.0, kd=0.5)
 
 
@@ -102,10 +102,10 @@ def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) ->
 
 
 def test_explicit_joints_keep_declaration_order(tmp_path: Path) -> None:
-    """An explicit-joint face emits its joints without resolving a joint_set."""
+    """An explicit-joint group emits its joints without resolving a joint_set."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
-    control = Control.position_pd(joints=["elbow", "shoulder"], face="arm", kp=1.0, kd=0.1)
+    control = Control.position_pd(joints=["elbow", "shoulder"], group="arm", kp=1.0, kd=0.1)
     builder.add_articulation(ref, control=control)
 
     cfg = builder._to_cfg()
@@ -362,41 +362,21 @@ def test_at_least_one_articulation_is_required(tmp_path: Path) -> None:
         builder._to_cfg()
 
 
-def test_two_articulations_may_not_share_a_default_face_name(tmp_path: Path) -> None:
-    """A duplicate default face is refused at the declaration boundary."""
+def test_two_articulations_may_share_a_group_name(tmp_path: Path) -> None:
+    """Action-group identity is (articulation, name), so equal names coexist."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     builder.add_articulation(ref, name="a", control=_body_control())
-
-    with pytest.raises(SimulationConfigError) as excinfo:
-        builder.add_articulation(ref, name="b", control=_body_control())
-
-    message = str(excinfo.value)
-    assert "'body'" in message
-    assert "'a'" in message
-    assert "'b'" in message
-    assert "declare a distinct face=" in message
-    assert tuple(handle.name for handle in builder.articulations) == ("a",)
-
-
-def test_two_articulations_with_distinct_faces_emit_unique_control_names(
-    tmp_path: Path,
-) -> None:
-    """An explicit face= per articulation keeps the global control table unique."""
-    pack_set, ref = write_sim_pack(tmp_path)
-    builder = _builder(pack_set)
-    builder.add_articulation(
-        ref,
-        name="a",
-        control=Control.position_pd(joint_set="body", face="a", kp=10.0, kd=0.5),
-    )
-    builder.add_articulation(
-        ref,
-        name="b",
-        control=Control.position_pd(joint_set="body", face="b", kp=10.0, kd=0.5),
-    )
+    builder.add_articulation(ref, name="b", control=_body_control())
 
     cfg = builder._to_cfg()
 
     assert [entry["name"] for entry in cfg["articulations"]] == ["a", "b"]
-    assert [entry["name"] for entry in cfg["action_spec"]] == ["a", "b"]
+    assert [(entry["articulation"], entry["name"]) for entry in cfg["action_spec"]] == [
+        ("a", "body"),
+        ("b", "body"),
+    ]
+    assert cfg["policies"] == [
+        {"adapter": "manual", "groups": [["a", "body"]]},
+        {"adapter": "manual", "groups": [["b", "body"]]},
+    ]

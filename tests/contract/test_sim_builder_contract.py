@@ -46,7 +46,7 @@ def _builder(pack_set: PackSet, **overrides: object) -> SimulationBuilder:
 
 
 def _control() -> ControlSpec:
-    """The canonical one-face body control used by most contract cases."""
+    """The canonical one-group body control used by most contract cases."""
     return Control.position_pd(joint_set="body", kp=10.0, kd=0.5)
 
 
@@ -186,8 +186,8 @@ def test_add_articulation_requires_an_explicit_control(tmp_path: Path) -> None:
         _builder(pack_set).add_articulation(ref)
 
 
-def test_add_articulation_resolves_faces_and_owns_the_handle(tmp_path: Path) -> None:
-    """The handle carries the ref, profile, control and resolved face joints."""
+def test_add_articulation_resolves_groups_and_owns_the_handle(tmp_path: Path) -> None:
+    """The handle carries the ref, profile, control and resolved action groups."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     control = _control()
@@ -199,17 +199,19 @@ def test_add_articulation_resolves_faces_and_owns_the_handle(tmp_path: Path) -> 
     assert handle.ref == ref
     assert handle.control is control
     assert handle.profile.name == ref.id
-    assert handle.faces == {"body": ("shoulder", "elbow")}
+    assert set(handle.action_groups) == {"body"}
+    assert handle.action_groups["body"].joints == ("shoulder", "elbow")
 
 
 def test_add_articulation_accepts_explicit_joints(tmp_path: Path) -> None:
-    """Explicit face joints are kept in declaration order."""
+    """Explicit group joints are kept in declaration order."""
     pack_set, ref = write_sim_pack(tmp_path)
-    control = Control.position_pd(joints=["elbow", "shoulder"], face="arm", kp=1.0, kd=0.1)
+    control = Control.position_pd(joints=["elbow", "shoulder"], group="arm", kp=1.0, kd=0.1)
 
     handle = _builder(pack_set).add_articulation(ref, control=control)
 
-    assert handle.faces == {"arm": ("elbow", "shoulder")}
+    assert set(handle.action_groups) == {"arm"}
+    assert handle.action_groups["arm"].joints == ("elbow", "shoulder")
 
 
 def test_add_articulation_rejects_duplicate_labels(tmp_path: Path) -> None:
@@ -224,7 +226,7 @@ def test_add_articulation_rejects_duplicate_labels(tmp_path: Path) -> None:
 
 
 def test_add_articulation_rejects_an_undeclared_joint_set(tmp_path: Path) -> None:
-    """A control face may only select a profile joint set."""
+    """A control group may only select a profile joint set."""
     pack_set, ref = write_sim_pack(tmp_path)
     control = Control.position_pd(joint_set="legs", kp=1.0, kd=0.1)
 
@@ -233,15 +235,15 @@ def test_add_articulation_rejects_an_undeclared_joint_set(tmp_path: Path) -> Non
 
 
 def test_add_articulation_rejects_an_unknown_explicit_joint(tmp_path: Path) -> None:
-    """An explicit face joint must exist on the profile."""
+    """An explicit group joint must exist on the profile."""
     pack_set, ref = write_sim_pack(tmp_path)
-    control = Control.position_pd(joints=["wheel"], face="arm", kp=1.0, kd=0.1)
+    control = Control.position_pd(joints=["wheel"], group="arm", kp=1.0, kd=0.1)
 
     with pytest.raises(SimulationConfigError, match="'wheel'"):
         _builder(pack_set).add_articulation(ref, control=control)
 
 
-def test_add_articulation_requires_a_q0_for_every_face_joint(tmp_path: Path) -> None:
+def test_add_articulation_requires_a_q0_for_every_group_joint(tmp_path: Path) -> None:
     """A joint without a control override or a profile default has no q0."""
     pack_set, ref = write_sim_pack(tmp_path, default_joint_pos={"shoulder": 0.0, "finger": 0.0})
 
@@ -249,12 +251,12 @@ def test_add_articulation_requires_a_q0_for_every_face_joint(tmp_path: Path) -> 
         _builder(pack_set).add_articulation(ref, control=_control())
 
 
-def test_add_articulation_rejects_overlapping_faces(tmp_path: Path) -> None:
-    """Faces of one articulation must be disjoint."""
+def test_add_articulation_rejects_overlapping_groups(tmp_path: Path) -> None:
+    """Action groups of one articulation must be disjoint."""
     pack_set, ref = write_sim_pack(tmp_path)
-    left = Control.position_pd(joints=["shoulder"], face="left", kp=1.0, kd=0.1)
-    right = Control.position_pd(joints=["shoulder"], face="right", kp=1.0, kd=0.1)
-    control = ControlSpec.from_faces((left.faces["left"], right.faces["right"]))
+    left = Control.position_pd(joints=["shoulder"], group="left", kp=1.0, kd=0.1)
+    right = Control.position_pd(joints=["shoulder"], group="right", kp=1.0, kd=0.1)
+    control = ControlSpec.from_groups((left.groups["left"], right.groups["right"]))
 
     with pytest.raises(SimulationConfigError, match="overlap on joints"):
         _builder(pack_set).add_articulation(ref, control=control)

@@ -1,9 +1,9 @@
 """Explicit control presets for the experimental simulation facade.
 
 A :class:`ControlSpec` is an immutable declaration of one or more control
-faces.  Every face keeps both halves of the existing control contract next to
-each other: the action face (``name`` / ``joints`` / ``q0``) and the actuation
-gains (``kp`` / ``kd`` plus optional limits).  The builder lowers the faces to
+groups.  Every group keeps both halves of the existing control contract next to
+each other: the action group (``name`` / ``joints`` / ``q0``) and the actuation
+gains (``kp`` / ``kd`` plus optional limits).  The builder lowers the groups to
 the existing ``action_spec`` / ``policies`` / ``articulations[].actuation[]``
 tables; this module never imports a backend or an engine.
 
@@ -24,7 +24,7 @@ from unigym.runtime.controls import DRIVE_TARGET
 
 from .errors import SimulationConfigError
 
-__all__ = ["Control", "ControlFaceSpec", "ControlSpec"]
+__all__ = ["Control", "ControlGroupSpec", "ControlSpec"]
 
 _GAIN_NAMES = frozenset({"kp", "kd"})
 
@@ -90,11 +90,11 @@ def _joint_names(value: object, what: str) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class ControlFaceSpec:
-    """One immutable control face: action joints plus explicit actuation gains.
+class ControlGroupSpec:
+    """One immutable control group: action joints plus explicit actuation gains.
 
     Attributes:
-        name: the action face and ``NamedAction`` key.
+        name: the action group and ``NamedAction`` group name.
         drive: one of :data:`unigym.runtime.controls.CONTROL_DRIVES`.
         target: the action kind; must equal ``DRIVE_TARGET[drive]``.
         joint_set: a profile joint-set name, or ``None``.
@@ -119,54 +119,54 @@ class ControlFaceSpec:
     velocity_limit: float | Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
-        name = _non_empty_name(self.name, "control face name")
+        name = _non_empty_name(self.name, "control group name")
         if self.drive not in DRIVE_TARGET:
             raise SimulationConfigError(
-                f"control face {name!r} drive must be one of {sorted(DRIVE_TARGET)}, "
+                f"control group {name!r} drive must be one of {sorted(DRIVE_TARGET)}, "
                 f"got {self.drive!r}"
             )
         expected_target = DRIVE_TARGET[self.drive]
         if self.target != expected_target:
             raise SimulationConfigError(
-                f"control face {name!r} declares drive {self.drive!r} with target "
+                f"control group {name!r} declares drive {self.drive!r} with target "
                 f"{self.target!r}; drive {self.drive!r} requires target "
                 f"{expected_target!r}"
             )
 
         joint_set = self.joint_set
         if joint_set is not None:
-            joint_set = _non_empty_name(joint_set, f"control face {name!r} joint_set")
+            joint_set = _non_empty_name(joint_set, f"control group {name!r} joint_set")
         joints = self.joints
         if joints is not None:
-            joints = _joint_names(joints, f"control face {name!r} joints")
+            joints = _joint_names(joints, f"control group {name!r} joints")
         if (joint_set is None) == (joints is None):
             raise SimulationConfigError(
-                f"control face {name!r} must declare exactly one of joint_set or "
+                f"control group {name!r} must declare exactly one of joint_set or "
                 f"non-empty joints (got joint_set={joint_set!r}, joints={joints!r})"
             )
 
         q0: dict[str, float] = {}
         if not isinstance(self.q0, Mapping):
             raise SimulationConfigError(
-                f"control face {name!r} q0 must be a mapping, got {self.q0!r}"
+                f"control group {name!r} q0 must be a mapping, got {self.q0!r}"
             )
         for joint, raw in self.q0.items():
-            key = _non_empty_name(joint, f"control face {name!r} q0 key")
-            q0[key] = _finite(raw, f"control face {name!r} q0[{key!r}]")
+            key = _non_empty_name(joint, f"control group {name!r} q0 key")
+            q0[key] = _finite(raw, f"control group {name!r} q0[{key!r}]")
 
         if not isinstance(self.gains, Mapping):
             raise SimulationConfigError(
-                f"control face {name!r} gains must be a mapping, got {self.gains!r}"
+                f"control group {name!r} gains must be a mapping, got {self.gains!r}"
             )
         unknown = sorted(set(self.gains) - _GAIN_NAMES)
         missing = sorted(_GAIN_NAMES - set(self.gains))
         if unknown or missing:
             raise SimulationConfigError(
-                f"control face {name!r} gains must be exactly {sorted(_GAIN_NAMES)}; "
+                f"control group {name!r} gains must be exactly {sorted(_GAIN_NAMES)}; "
                 f"missing {missing}, unknown {unknown}"
             )
         gains = {
-            key: _gain(self.gains[key], f"control face {name!r} gains[{key!r}]")
+            key: _gain(self.gains[key], f"control group {name!r} gains[{key!r}]")
             for key in ("kp", "kd")
         }
 
@@ -176,57 +176,58 @@ class ControlFaceSpec:
         object.__setattr__(self, "q0", MappingProxyType(q0))
         object.__setattr__(self, "gains", MappingProxyType(gains))
         object.__setattr__(
-            self, "effort_limit", _limit(self.effort_limit, f"control face {name!r} effort_limit")
+            self, "effort_limit", _limit(self.effort_limit, f"control group {name!r} effort_limit")
         )
         object.__setattr__(
             self,
             "velocity_limit",
-            _limit(self.velocity_limit, f"control face {name!r} velocity_limit"),
+            _limit(self.velocity_limit, f"control group {name!r} velocity_limit"),
         )
 
 
 @dataclass(frozen=True)
 class ControlSpec:
-    """A read-only mapping of face name -> :class:`ControlFaceSpec`."""
+    """A read-only mapping of group name -> :class:`ControlGroupSpec`."""
 
-    faces: Mapping[str, ControlFaceSpec]
+    groups: Mapping[str, ControlGroupSpec]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.faces, Mapping):
+        if not isinstance(self.groups, Mapping):
             raise SimulationConfigError(
-                f"ControlSpec.faces must be a mapping, got {type(self.faces).__name__}"
+                f"ControlSpec.groups must be a mapping, got {type(self.groups).__name__}"
             )
-        faces: dict[str, ControlFaceSpec] = {}
-        for name, face in self.faces.items():
-            if not isinstance(face, ControlFaceSpec):
+        groups: dict[str, ControlGroupSpec] = {}
+        for name, group in self.groups.items():
+            if not isinstance(group, ControlGroupSpec):
                 raise SimulationConfigError(
-                    f"ControlSpec face {name!r} must be a ControlFaceSpec, "
-                    f"got {type(face).__name__}"
+                    f"ControlSpec group {name!r} must be a ControlGroupSpec, "
+                    f"got {type(group).__name__}"
                 )
-            if name != face.name:
+            if name != group.name:
                 raise SimulationConfigError(
-                    f"ControlSpec face key {name!r} does not match its spec name " f"{face.name!r}"
+                    f"ControlSpec group key {name!r} does not match its spec name "
+                    f"{group.name!r}"
                 )
-            faces[name] = face
-        if not faces:
-            raise SimulationConfigError("ControlSpec must declare at least one face")
-        object.__setattr__(self, "faces", MappingProxyType(faces))
+            groups[name] = group
+        if not groups:
+            raise SimulationConfigError("ControlSpec must declare at least one group")
+        object.__setattr__(self, "groups", MappingProxyType(groups))
 
     @classmethod
-    def from_faces(cls, faces: Sequence[ControlFaceSpec]) -> ControlSpec:
-        """Build a spec from an ordered face sequence, rejecting duplicate names."""
-        mapping: dict[str, ControlFaceSpec] = {}
-        for face in faces:
-            if not isinstance(face, ControlFaceSpec):
+    def from_groups(cls, groups: Sequence[ControlGroupSpec]) -> ControlSpec:
+        """Build a spec from an ordered group sequence, rejecting duplicate names."""
+        mapping: dict[str, ControlGroupSpec] = {}
+        for group in groups:
+            if not isinstance(group, ControlGroupSpec):
                 raise SimulationConfigError(
-                    f"ControlSpec.from_faces expects ControlFaceSpec entries, "
-                    f"got {type(face).__name__}"
+                    f"ControlSpec.from_groups expects ControlGroupSpec entries, "
+                    f"got {type(group).__name__}"
                 )
-            if face.name in mapping:
+            if group.name in mapping:
                 raise SimulationConfigError(
-                    f"ControlSpec declares duplicate face name {face.name!r}"
+                    f"ControlSpec declares duplicate group name {group.name!r}"
                 )
-            mapping[face.name] = face
+            mapping[group.name] = group
         return cls(mapping)
 
 
@@ -238,17 +239,17 @@ class Control:
         *,
         joint_set: str | None = None,
         joints: Sequence[str] | None = None,
-        face: str | None = None,
+        group: str | None = None,
         q0: Mapping[str, float] | None = None,
         kp: float | Mapping[str, float],
         kd: float | Mapping[str, float],
         effort_limit: float | Mapping[str, float] | None = None,
         velocity_limit: float | Mapping[str, float] | None = None,
     ) -> ControlSpec:
-        """Declare one ``position_pd`` control face.
+        """Declare one ``position_pd`` control group.
 
-        Exactly one of ``joint_set`` / ``joints`` is required.  ``face``
-        defaults to ``joint_set``; an explicit-joint face must name itself.
+        Exactly one of ``joint_set`` / ``joints`` is required.  ``group``
+        defaults to ``joint_set``; an explicit-joint group must name itself.
         ``kp`` and ``kd`` are required and may be scalars or per-joint maps.
         """
         if (joint_set is None) == (joints is None):
@@ -257,30 +258,32 @@ class Control:
                 f"(got joint_set={joint_set!r}, joints={joints!r})"
             )
         if joint_set is not None:
-            face_name = joint_set if face is None else _non_empty_name(face, "control face name")
+            group_name = (
+                joint_set if group is None else _non_empty_name(group, "control group name")
+            )
         else:
-            if face is None:
+            if group is None:
                 raise SimulationConfigError(
-                    "Control.position_pd(joints=...) requires an explicit face= name"
+                    "Control.position_pd(joints=...) requires an explicit group= name"
                 )
-            face_name = _non_empty_name(face, "control face name")
+            group_name = _non_empty_name(group, "control group name")
         resolved_joint_set = (
             None if joint_set is None else _non_empty_name(joint_set, "control joint_set")
         )
         resolved_joints = None if joints is None else _joint_names(joints, "control joints")
         if q0 is not None and not isinstance(q0, Mapping):
             raise SimulationConfigError(
-                f"control face {face_name!r} q0 must be a mapping, got {q0!r}"
+                f"control group {group_name!r} q0 must be a mapping, got {q0!r}"
             )
 
         gains = {
-            "kp": _gain(kp, f"control face {face_name!r} gains['kp']"),
-            "kd": _gain(kd, f"control face {face_name!r} gains['kd']"),
+            "kp": _gain(kp, f"control group {group_name!r} gains['kp']"),
+            "kd": _gain(kd, f"control group {group_name!r} gains['kd']"),
         }
-        return ControlSpec.from_faces(
+        return ControlSpec.from_groups(
             (
-                ControlFaceSpec(
-                    name=face_name,
+                ControlGroupSpec(
+                    name=group_name,
                     drive="position_pd",
                     target="position",
                     joint_set=resolved_joint_set,

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from unigym.robots.base import RobotProfile
     from unigym.run.api import Run
     from unigym.run.spec import RunSpec
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
     from unigym.world import World, _TerrainBuilder
 
 __all__ = ["SimulationBuilder"]
@@ -327,7 +328,7 @@ class SimulationBuilder:
         name: str | None = None,
         control: ControlSpec | None = None,
     ) -> ArticulationHandle:
-        """Declare one pack robot and resolve every control face against its profile."""
+        """Declare one pack robot and resolve every control group against its profile."""
         self._check_declarable("add_articulation")
         if control is None:
             raise NoControlError(
@@ -350,14 +351,13 @@ class SimulationBuilder:
                 "there is no ambient pack discovery"
             )
         profile = load_profile_for_ref(pack_set, ref)
-        faces = self._resolve_faces(label, profile, control)
-        self._check_face_names_available(label, control)
+        action_groups = self._resolve_groups(label, profile, control)
         handle = ArticulationHandle(
             name=label,
             ref=ref,
             profile=profile,
             control=control,
-            faces=faces,
+            action_groups=action_groups,
             _owner=self._owner,
         )
         self._articulations.append(handle)
@@ -501,13 +501,14 @@ class SimulationBuilder:
     ) -> dict[str, JsonValue]:
         """Per-joint standby positions (q0 is a joint fact, not an action one)."""
         inits: dict[str, JsonValue] = {}
-        for face_name, face in control.faces.items():
-            for joint, value in face.q0.items():
-                if joint not in handle.faces[face_name]:
+        for group_name, control_group in control.groups.items():
+            group = handle.action_groups[group_name]
+            for joint, value in control_group.q0.items():
+                if joint not in group.joints:
                     raise SimulationConfigError(
-                        f"articulation {handle.name!r} control face {face_name!r} q0 "
-                        f"names joint {joint!r} outside its face joints "
-                        f"{list(handle.faces[face_name])}"
+                        f"articulation {handle.name!r} control group {group_name!r} q0 "
+                        f"names joint {joint!r} outside its group joints "
+                        f"{list(group.joints)}"
                     )
                 inits[str(joint)] = {"init": float(value)}
         return inits
@@ -517,45 +518,38 @@ class SimulationBuilder:
         control: ControlSpec,
         handle: ArticulationHandle,
     ) -> list[JsonValue]:
-        """One ``standard_pd`` actuation group per resolved control face."""
+        """One ``standard_pd`` actuation group per resolved control group."""
         groups: list[JsonValue] = []
-        for face_name, face in control.faces.items():
-            group: dict[str, JsonValue] = {
-                "name": face.name,
+        for group_name, control_group in control.groups.items():
+            group = handle.action_groups[group_name]
+            entry: dict[str, JsonValue] = {
+                "name": control_group.name,
                 "law": "standard_pd",
-                "joints": _json_names(handle.faces[face_name]),
+                "joints": _json_names(group.joints),
                 "gains": {
-                    "kp": _json_limit(face.gains["kp"]),
-                    "kd": _json_limit(face.gains["kd"]),
+                    "kp": _json_limit(control_group.gains["kp"]),
+                    "kd": _json_limit(control_group.gains["kd"]),
                 },
             }
-            if face.effort_limit is not None:
-                group["effort_limit"] = _json_limit(face.effort_limit)
-            if face.velocity_limit is not None:
-                group["velocity_limit"] = _json_limit(face.velocity_limit)
-            groups.append(group)
+            if control_group.effort_limit is not None:
+                entry["effort_limit"] = _json_limit(control_group.effort_limit)
+            if control_group.velocity_limit is not None:
+                entry["velocity_limit"] = _json_limit(control_group.velocity_limit)
+            groups.append(entry)
         return groups
 
     def _action_entries(self) -> list[dict[str, JsonValue]]:
         """The ``action_spec`` table with explicit joints."""
         entries: list[dict[str, JsonValue]] = []
         for handle in self._articulations:
-            control = handle.control
-            if control is None:
-                raise SimulationConfigError(
-                    f"articulation {handle.name!r} has no control declaration; "
-                    f"config-mode builders are not implemented in this slice"
-                )
-            for face_name, face in control.faces.items():
+            for group in handle.action_groups.values():
                 entries.append(
                     {
-                        "name": face.name,
+                        "name": group.name,
                         "articulation": handle.name,
-                        "joints": _json_names(handle.faces[face_name]),
-                        "target": face.target,
-                        "role": (
-                            "body" if face.joint_set == "body" or face.name == "body" else "aux"
-                        ),
+                        "joints": _json_names(group.joints),
+                        "target": group.target,
+                        "role": group.role,
                     }
                 )
         return entries
@@ -564,14 +558,8 @@ class SimulationBuilder:
         """One manual policy binding per articulation's action groups."""
         entries: list[dict[str, JsonValue]] = []
         for handle in self._articulations:
-            control = handle.control
-            if control is None:
-                raise SimulationConfigError(
-                    f"articulation {handle.name!r} has no control declaration; "
-                    f"config-mode builders are not implemented in this slice"
-                )
             groups: list[JsonValue] = [
-                [handle.name, str(face.name)] for face in control.faces.values()
+                [handle.name, str(group.name)] for group in handle.action_groups.values()
             ]
             entries.append({"adapter": "manual", "groups": groups})
         return entries
@@ -656,6 +644,7 @@ class SimulationBuilder:
                 world=world,
                 articulations=tuple(self._articulations),
                 cameras=tuple(self._cameras),
+                action_spec=self._declared_action_spec(),
                 runner=runner,
                 env=instance.env,
                 run=run,
@@ -694,7 +683,7 @@ class SimulationBuilder:
                     f"SimulationBuilder.runner('external') returned "
                     f"{type(runner).__name__}, expected ExternalRunner"
                 )
-            articulations, face_targets = self._adopt_config_articulations(instance.env)
+            articulations, action_spec = self._adopt_config_articulations(instance.env, spec)
             cameras = self._adopt_config_cameras(spec)
             try:
                 world = World.from_config(spec.cfg, runtime=spec.pack_runtime)
@@ -709,6 +698,7 @@ class SimulationBuilder:
                 world=world,
                 articulations=articulations,
                 cameras=cameras,
+                action_spec=action_spec,
                 runner=runner,
                 env=instance.env,
                 run=run,
@@ -716,7 +706,6 @@ class SimulationBuilder:
                 state=read_extra(instance.env),
                 obs_cache=dict(instance.env.obs_cache),
                 t=0,
-                face_targets=face_targets,
             )
         except BaseException:
             run.close()
@@ -730,8 +719,10 @@ class SimulationBuilder:
     def _adopt_config_articulations(
         self,
         env: EnvBackend,
-    ) -> tuple[tuple[ArticulationHandle, ...], dict[str, str]]:
-        """Re-adopt config-mode articulation handles from the live runtime."""
+        spec: RunSpec,
+    ) -> tuple[tuple[ArticulationHandle, ...], OrderedActionSpec]:
+        """Re-adopt config-mode handles and their action groups from the RunSpec."""
+        from unigym.runtime.actions import OrderedActionSpec
         from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
 
         articulations = getattr(env, "articulations", None)
@@ -746,18 +737,42 @@ class SimulationBuilder:
                 "config-mode build needs a non-empty env.controls mapping; "
                 f"got {type(controls).__name__}"
             )
-        manual_controls: list[ControlRuntime] = []
+        control_by_key: dict[tuple[str, str], ControlRuntime] = {}
         for key, runtime in controls.items():
             if not isinstance(runtime, ControlRuntime):
                 raise SimulationConfigError(
                     f"env.controls[{key!r}] is {type(runtime).__name__}, "
                     f"expected ControlRuntime"
                 )
-            if runtime.adapter == "manual" and not runtime.prop:
-                manual_controls.append(runtime)
+            control_by_key[(str(runtime.articulation), str(runtime.name))] = runtime
+
+        manual_identities = {
+            (str(group[0]), str(group[1]))
+            for binding in spec.policies
+            if binding.adapter == "manual"
+            for group in binding.groups
+        }
+        groups_by_articulation: dict[str, dict[str, OrderedActionGroup]] = {}
+        adopted: list[OrderedActionGroup] = []
+        for group in spec.action_spec.groups:
+            identity = (group.articulation, group.name)
+            if identity not in manual_identities:
+                continue
+            runtime = control_by_key.get(identity)
+            if runtime is None:
+                raise SimulationConfigError(
+                    f"config-mode action group {identity!r} has no live control runtime; "
+                    f"declared control identities: {sorted(control_by_key)}"
+                )
+            if runtime.target != group.target:
+                raise SimulationConfigError(
+                    f"config-mode action group {identity!r} target {group.target!r} "
+                    f"does not match the live control target {runtime.target!r}"
+                )
+            groups_by_articulation.setdefault(group.articulation, {})[group.name] = group
+            adopted.append(group)
 
         handles: list[ArticulationHandle] = []
-        face_targets: dict[str, str] = {}
         for key, runtime in articulations.items():
             if not isinstance(runtime, ArticulationRuntime):
                 raise SimulationConfigError(
@@ -771,29 +786,28 @@ class SimulationBuilder:
                     f"config-mode articulation {name!r} has no RobotProfile; "
                     f"the facade re-adopts profile-backed handles only"
                 )
-            faces: dict[str, tuple[str, ...]] = {}
-            for control in manual_controls:
-                if control.articulation != name:
-                    continue
-                face = control.name
-                if face in face_targets:
-                    raise SimulationConfigError(
-                        f"control face {face!r} is declared by more than one "
-                        f"manual control group; face names are global"
-                    )
-                faces[face] = tuple(control.joint_names)
-                face_targets[face] = control.target
             handles.append(
                 ArticulationHandle(
                     name=name,
                     ref=None,
                     profile=profile,
                     control=None,
-                    faces=faces,
+                    action_groups=groups_by_articulation.get(name, {}),
                     _owner=self._owner,
                 )
             )
-        return tuple(handles), face_targets
+        declared_names = {handle.name for handle in handles}
+        unknown = sorted(
+            articulation
+            for articulation in groups_by_articulation
+            if articulation not in declared_names
+        )
+        if unknown:
+            raise SimulationConfigError(
+                f"config-mode action groups name articulation(s) {unknown} that the "
+                f"live env does not publish; declared articulations: {sorted(declared_names)}"
+            )
+        return tuple(handles), OrderedActionSpec(tuple(adopted))
 
     def _adopt_config_cameras(self, spec: RunSpec) -> tuple[CameraHandle, ...]:
         """Re-adopt config-mode camera handles from the normalized config table."""
@@ -831,92 +845,85 @@ class SimulationBuilder:
             )
         return tuple(handles)
 
-    def _check_face_names_available(self, label: str, control: ControlSpec) -> None:
-        """Refuse control-face names another articulation already owns.
+    def _declared_action_spec(self) -> OrderedActionSpec:
+        """The global action template of the declared handles, in declaration order."""
+        from unigym.runtime.actions import OrderedActionSpec
 
-        The simulation facade still exposes one global ``faces`` table
-        (``Simulation.act`` keys actions by face name), so two articulations
-        that both fall back to the same default face name (for example
-        ``joint_set="body"`` -> face ``"body"``) would collide in the facade
-        even though core action identity is ``(articulation, group)``.  Refuse
-        here, while the caller can still name the face.
-        """
-        declared = {
-            face_name: handle.name
-            for handle in self._articulations
-            if handle.control is not None
-            for face_name in handle.control.faces
-        }
-        overlaps = sorted(face_name for face_name in control.faces if face_name in declared)
-        if not overlaps:
-            return
-        names = ", ".join(repr(face_name) for face_name in overlaps)
-        owners = ", ".join(
-            f"{face_name!r} (articulation {declared[face_name]!r})" for face_name in overlaps
-        )
-        raise SimulationConfigError(
-            f"articulation {label!r} reuses control face(s) {names} already declared by "
-            f"{owners}; control-face names are global, so declare a distinct face= for "
-            f"this articulation"
+        return OrderedActionSpec(
+            tuple(
+                group for handle in self._articulations for group in handle.action_groups.values()
+            )
         )
 
-    def _resolve_faces(
+    def _resolve_groups(
         self,
         label: str,
         profile: RobotProfile,
         control: ControlSpec,
-    ) -> dict[str, tuple[str, ...]]:
-        """Expand each control face against the profile and validate coverage."""
+    ) -> dict[str, OrderedActionGroup]:
+        """Expand each control group against the profile and validate coverage."""
+        from unigym.runtime.actions import OrderedActionGroup
+
         declared = set(profile.full_joint_names)
-        resolved: dict[str, tuple[str, ...]] = {}
+        resolved: dict[str, OrderedActionGroup] = {}
         owners: dict[str, str] = {}
-        for face_name, face in control.faces.items():
-            if face.joint_set is not None:
-                joint_set = face.joint_set
+        for group_name, control_group in control.groups.items():
+            if control_group.joint_set is not None:
+                joint_set = control_group.joint_set
                 if joint_set not in profile.joint_sets:
                     raise SimulationConfigError(
-                        f"articulation {label!r} control face {face_name!r} selects "
+                        f"articulation {label!r} control group {group_name!r} selects "
                         f"joint_set {joint_set!r}, which the profile does not declare; "
                         f"declared sets: {sorted(profile.joint_sets)}"
                     )
                 joints = tuple(profile.joint_sets[joint_set])
             else:
-                if face.joints is None:
+                if control_group.joints is None:
                     raise SimulationConfigError(
-                        f"articulation {label!r} control face {face_name!r} has no joints"
+                        f"articulation {label!r} control group {group_name!r} has no joints"
                     )
-                joints = face.joints
+                joints = control_group.joints
                 unknown = sorted(set(joints) - declared)
                 if unknown:
                     raise SimulationConfigError(
-                        f"articulation {label!r} control face {face_name!r} names joints "
+                        f"articulation {label!r} control group {group_name!r} names joints "
                         f"{unknown} that the profile does not declare; declared joints: "
                         f"{sorted(declared)}"
                     )
-            unknown_q0 = sorted(set(face.q0) - set(joints))
+            unknown_q0 = sorted(set(control_group.q0) - set(joints))
             if unknown_q0:
                 raise SimulationConfigError(
-                    f"articulation {label!r} control face {face_name!r} q0 names joints "
-                    f"{unknown_q0} outside the face joints {list(joints)}"
+                    f"articulation {label!r} control group {group_name!r} q0 names joints "
+                    f"{unknown_q0} outside the group joints {list(joints)}"
                 )
             missing_q0 = sorted(
                 joint
                 for joint in joints
-                if joint not in face.q0 and joint not in profile.default_joint_pos
+                if joint not in control_group.q0 and joint not in profile.default_joint_pos
             )
             if missing_q0:
                 raise SimulationConfigError(
-                    f"articulation {label!r} control face {face_name!r} has no q0 for "
+                    f"articulation {label!r} control group {group_name!r} has no q0 for "
                     f"joints {missing_q0}; declare control q0 or extend the profile "
                     f"default_joint_pos"
                 )
             overlap = sorted(set(joints) & set(owners))
             if overlap:
                 raise SimulationConfigError(
-                    f"articulation {label!r} control faces {owners[overlap[0]]!r} and "
-                    f"{face_name!r} overlap on joints {overlap}; faces must be disjoint"
+                    f"articulation {label!r} control groups {owners[overlap[0]]!r} and "
+                    f"{group_name!r} overlap on joints {overlap}; groups must be disjoint"
                 )
             for joint in joints:
-                owners[joint] = face_name
-            resolved[face_name] = joints
+                owners[joint] = group_name
+            resolved[group_name] = OrderedActionGroup(
+                name=control_group.name,
+                articulation=label,
+                joints=joints,
+                target=control_group.target,
+                role=(
+                    "body"
+                    if control_group.joint_set == "body" or control_group.name == "body"
+                    else "aux"
+                ),
+            )
         return resolved

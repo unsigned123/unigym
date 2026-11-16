@@ -40,19 +40,19 @@ class SimulationConfigError(SimulationError):
 
 
 class ForeignHandleError(SimulationError):
-    """A handle or binding belongs to another builder/simulation."""
+    """A handle, action group or pack ref belongs to another builder/simulation."""
 
 
 class BindingError(SimulationError):
-    """An action face, kind, order or shape is illegal."""
+    """An action group identity, target kind or value shape is illegal."""
 
 
 class PendingActionError(SimulationError):
-    """A pending action is duplicated, missing or stale."""
+    """A pending action group is duplicated, missing or stale."""
 
 
 class MissingActionError(SimulationError):
-    """A required control face has no staged action."""
+    """A required action group has no staged action."""
 
 
 class StaleStateError(SimulationError):

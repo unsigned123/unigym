@@ -12,6 +12,7 @@ from unigym.errors import ConfigError
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.runner.state import read_extra
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.sim import ArticulationHandle, Simulation, SimulationBuilder
 from unigym.world import World
 from tests._support.fakes.runner import FakeRunner
@@ -64,12 +65,15 @@ def _handle(owner: object) -> ArticulationHandle:
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
+    group = OrderedActionGroup(
+        name="arm", articulation="arm", joints=("shoulder",), target="position"
+    )
     return ArticulationHandle(
         name="arm",
         ref=None,
         profile=profile,
         control=None,
-        faces={},
+        action_groups={"arm": group},
         _owner=owner,
     )
 
@@ -79,12 +83,14 @@ def _simulation(source: Path, *, num_envs: int = 1) -> Simulation:
     run = Run.from_config(source)
     runner = FakeRunner(num_envs=num_envs)
     owner = object()
+    handle = _handle(owner)
     return Simulation(
         backend="mujoco",
         num_envs=num_envs,
         world=World.from_config(yaml.safe_load(source.read_text(encoding="utf-8"))),
-        articulations=(_handle(owner),),
+        articulations=(handle,),
         cameras=(),
+        action_spec=OrderedActionSpec(tuple(handle.action_groups.values())),
         runner=runner,
         env=runner.env,
         run=run,

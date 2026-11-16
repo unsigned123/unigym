@@ -13,9 +13,8 @@ mutated here.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -23,24 +22,17 @@ from unigym._typing import JsonValue
 from unigym.robots.base import CanonicalBodyId, RobotProfile, normalize_canonical_body_id
 
 from .control import ControlSpec
-from .errors import BindingError, ForeignHandleError, SimulationConfigError
+from .errors import ForeignHandleError, SimulationConfigError
 
 if TYPE_CHECKING:
     from unigym.packs.packset import RobotRef
+    from unigym.runtime.actions import OrderedActionGroup
 
 __all__ = [
-    "ActionBinding",
     "ArticulationHandle",
-    "BindingOrder",
     "BodyHandle",
     "CameraHandle",
 ]
-
-
-class BindingOrder(Enum):
-    """The explicit action column-order choice at the binding boundary."""
-
-    DEFAULT = "default"
 
 
 def _check_owner(handle: BodyHandle, owner: object, what: str) -> None:
@@ -54,14 +46,15 @@ def _check_owner(handle: BodyHandle, owner: object, what: str) -> None:
 
 @dataclass(frozen=True, eq=False)
 class ArticulationHandle:
-    """One declared articulation and its resolved action faces.
+    """One declared articulation and its resolved ordered action groups.
 
     Attributes:
         name: the articulation label used in the run config.
         ref: the pack robot reference, or ``None`` for a config-mode handle.
         profile: the neutral, backend-independent profile.
         control: the explicit control preset, or ``None`` in config mode.
-        faces: read-only face name -> resolved joint names mapping.
+        action_groups: read-only group name -> :class:`OrderedActionGroup`
+            mapping; group identity is the enclosing articulation plus the key.
         _owner: the builder/simulation identity token (never a value).
     """
 
@@ -69,24 +62,43 @@ class ArticulationHandle:
     ref: RobotRef | None
     profile: RobotProfile
     control: ControlSpec | None
-    faces: Mapping[str, tuple[str, ...]]
+    action_groups: Mapping[str, OrderedActionGroup]
     _owner: object = field(repr=False)
 
     def __post_init__(self) -> None:
+        from unigym.runtime.actions import OrderedActionGroup
+
         if not self.name or not self.name.strip():
             raise SimulationConfigError(
                 f"articulation handle name must be non-empty, got {self.name!r}"
             )
-        faces: dict[str, tuple[str, ...]] = {}
-        for name, joints in self.faces.items():
-            face_name = str(name)
-            if not face_name:
-                raise SimulationConfigError("articulation face names must be non-empty")
-            face_joints = tuple(str(joint) for joint in joints)
-            if not face_joints:
-                raise SimulationConfigError(f"articulation face {face_name!r} has no joints")
-            faces[face_name] = face_joints
-        object.__setattr__(self, "faces", MappingProxyType(faces))
+        if not isinstance(self.action_groups, Mapping):
+            raise SimulationConfigError(
+                f"articulation {self.name!r} action_groups must be a mapping, "
+                f"got {type(self.action_groups).__name__}"
+            )
+        groups: dict[str, OrderedActionGroup] = {}
+        for name, group in self.action_groups.items():
+            group_name = str(name)
+            if not group_name:
+                raise SimulationConfigError("articulation action group names must be non-empty")
+            if not isinstance(group, OrderedActionGroup):
+                raise SimulationConfigError(
+                    f"articulation {self.name!r} action group {group_name!r} must be "
+                    f"an OrderedActionGroup, got {type(group).__name__}"
+                )
+            if group.name != group_name:
+                raise SimulationConfigError(
+                    f"articulation {self.name!r} action group key {group_name!r} "
+                    f"does not match its group name {group.name!r}"
+                )
+            if group.articulation != self.name:
+                raise SimulationConfigError(
+                    f"articulation {self.name!r} owns action group {group_name!r} "
+                    f"declared for articulation {group.articulation!r}"
+                )
+            groups[group_name] = group
+        object.__setattr__(self, "action_groups", MappingProxyType(groups))
 
     def body(self, canonical_id: str) -> BodyHandle:
         """Resolve one canonical body id against the profile's declared vocabulary."""
@@ -100,54 +112,6 @@ class ArticulationHandle:
                 f"declared body ids: {sorted(vocabulary)}"
             )
         return BodyHandle(articulation=self, canonical_id=normalized, _owner=self._owner)
-
-    def bind_action(
-        self,
-        face: str,
-        *,
-        kind: str,
-        order: Sequence[str] | BindingOrder,
-    ) -> ActionBinding:
-        """Bind one face to an explicit action kind and column order.
-
-        ``order`` has no default: pass ``BindingOrder.DEFAULT`` for the face's
-        resolved joint order, or a sequence that is a permutation of the face
-        joints to choose the tensor column order.
-        """
-        from unigym.runtime.actions import LEGAL_ACTION_KINDS
-
-        if face not in self.faces:
-            raise BindingError(
-                f"articulation {self.name!r} has no action face {face!r}; "
-                f"declared faces: {sorted(self.faces)}"
-            )
-        if kind not in LEGAL_ACTION_KINDS:
-            raise BindingError(
-                f"action binding kind must be one of {list(LEGAL_ACTION_KINDS)}, " f"got {kind!r}"
-            )
-        face_joints = self.faces[face]
-        if order is BindingOrder.DEFAULT:
-            joint_names = face_joints
-        else:
-            if not isinstance(order, Sequence) or isinstance(order, (str, bytes)):
-                raise BindingError(
-                    f"action binding order must be BindingOrder.DEFAULT or a "
-                    f"sequence of joint names, got {order!r}"
-                )
-            joint_names = tuple(order)
-            if len(joint_names) != len(face_joints) or set(joint_names) != set(face_joints):
-                raise BindingError(
-                    f"action binding order for face {face!r} must be a permutation "
-                    f"of {list(face_joints)} (or use BindingOrder.DEFAULT); "
-                    f"got {list(joint_names)}"
-                )
-        return ActionBinding(
-            articulation=self,
-            face=face,
-            joint_names=joint_names,
-            kind=kind,
-            _owner=self._owner,
-        )
 
     def _body_vocabulary(self) -> frozenset[str]:
         """The profile's declared canonical body ids (base, feet, sets, bindings)."""
@@ -195,19 +159,3 @@ class CameraHandle:
                 f"got {type(self.entry).__name__}"
             )
         object.__setattr__(self, "entry", MappingProxyType(dict(self.entry)))
-
-
-@dataclass(frozen=True)
-class ActionBinding:
-    """An action face lowered for ``NamedAction``: columns plus an explicit kind."""
-
-    articulation: ArticulationHandle
-    face: str
-    joint_names: tuple[str, ...]
-    kind: str
-    _owner: object = field(repr=False)
-
-    @property
-    def dim(self) -> int:
-        """Per-env action dimension (== number of bound joint columns)."""
-        return len(self.joint_names)

@@ -49,7 +49,7 @@ from .errors import (
     SimulationFaultedError,
     StaleStateError,
 )
-from .handles import ActionBinding, ArticulationHandle, CameraHandle
+from .handles import ArticulationHandle, CameraHandle
 from .observation import Observation, build_observation
 from .pending import PendingActions, StagedAction
 
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
     from unigym.run.api import Run
     from unigym.runner.base import Runner, StepResult
-    from unigym.runtime.actions import NamedAction
+    from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec
     from unigym.world import World
 
 __all__ = ["Simulation"]
@@ -145,6 +145,7 @@ class Simulation:
         world: the world declaration the builder handed to ``Run``.
         articulations: the declared articulation handles (builder-owned).
         cameras: the declared camera handles (builder-owned).
+        action_spec: the global ordered action template every staged group obeys.
         runner: the live external runner of ``run`` (kind-pinned upstream).
         env: the live env backend the runner steps.
         run: the run that owns the instance and the runner.
@@ -153,9 +154,6 @@ class Simulation:
         obs_cache: the spawn observation cache (copied verbatim; entries need
             not be tensors).
         t: the policy tick that produced ``state`` (``0`` at spawn).
-        face_targets: explicit action kinds for config-mode handles whose
-            ``control`` is ``None``; the kind comes from the live
-            ``ControlRuntime.target``.
     """
 
     def __init__(
@@ -166,6 +164,7 @@ class Simulation:
         world: World,
         articulations: Sequence[ArticulationHandle],
         cameras: Sequence[CameraHandle],
+        action_spec: OrderedActionSpec,
         runner: Runner,
         env: EnvBackend,
         run: Run,
@@ -173,9 +172,10 @@ class Simulation:
         state: Mapping[str, object],
         obs_cache: Mapping[str, object],
         t: int,
-        face_targets: Mapping[str, str] | None = None,
     ) -> None:
         import torch
+
+        from unigym.runtime.actions import OrderedActionSpec
 
         if not isinstance(runner, _StepRunner):
             raise SimulationConfigError(
@@ -188,6 +188,11 @@ class Simulation:
             )
         if isinstance(t, bool) or not isinstance(t, int) or t < 0:
             raise SimulationConfigError(f"Simulation t must be an int >= 0, got {t!r}")
+        if not isinstance(action_spec, OrderedActionSpec):
+            raise SimulationConfigError(
+                "Simulation action_spec must be an OrderedActionSpec, "
+                f"got {type(action_spec).__name__}"
+            )
         env_num_envs = getattr(env, "num_envs", num_envs)
         if env_num_envs != num_envs:
             raise SimulationConfigError(
@@ -195,36 +200,45 @@ class Simulation:
             )
 
         handles = tuple(articulations)
-        faces: dict[str, tuple[ArticulationHandle, tuple[str, ...], str]] = {}
+        handle_by_name: dict[str, ArticulationHandle] = {}
         for handle in handles:
             if handle._owner is not owner:
                 raise ForeignHandleError(
                     f"articulation handle {handle.name!r} belongs to another "
                     f"builder/simulation; handles are scoped to their owner"
                 )
-            control = handle.control
-            for face_name, joints in handle.faces.items():
-                if face_name in faces:
+            if handle.name in handle_by_name:
+                raise SimulationConfigError(
+                    f"articulation {handle.name!r} is declared twice; labels are unique"
+                )
+            handle_by_name[handle.name] = handle
+
+        action_groups: dict[tuple[str, str], OrderedActionGroup] = {
+            (group.articulation, group.name): group for group in action_spec.groups
+        }
+        spec_by_articulation: dict[str, dict[str, OrderedActionGroup]] = {}
+        for group in action_spec.groups:
+            spec_by_articulation.setdefault(group.articulation, {})[group.name] = group
+        missing_handles = sorted(set(spec_by_articulation) - set(handle_by_name))
+        if missing_handles:
+            raise SimulationConfigError(
+                f"action_spec names articulation(s) {missing_handles} with no declared "
+                f"handle; declared handles: {sorted(handle_by_name)}"
+            )
+        for handle in handles:
+            expected = spec_by_articulation.get(handle.name, {})
+            actual = dict(handle.action_groups)
+            if set(actual) != set(expected):
+                raise SimulationConfigError(
+                    f"articulation {handle.name!r} declares action groups "
+                    f"{sorted(actual)} but the action_spec expects {sorted(expected)}"
+                )
+            for group_name, group in expected.items():
+                if actual[group_name] != group:
                     raise SimulationConfigError(
-                        f"control face {face_name!r} is declared twice; face names are global"
+                        f"articulation {handle.name!r} action group {group_name!r} does "
+                        f"not match the action_spec template {group!r}"
                     )
-                if control is not None:
-                    face = control.faces.get(face_name)
-                    if face is None:
-                        raise SimulationConfigError(
-                            f"articulation {handle.name!r} face {face_name!r} has no "
-                            f"control-face declaration"
-                        )
-                    target = face.target
-                else:
-                    target = None if face_targets is None else face_targets.get(face_name)
-                    if target is None:
-                        raise SimulationConfigError(
-                            f"articulation {handle.name!r} face {face_name!r} has no "
-                            f"control declaration and no runtime target; config-mode "
-                            f"handles need the live ControlRuntime.target"
-                        )
-                faces[face_name] = (handle, tuple(joints), target)
 
         self.backend = backend
         self.num_envs = num_envs
@@ -235,7 +249,8 @@ class Simulation:
         self._env = env
         self._run = run
         self._owner = owner
-        self._faces = faces
+        self._action_spec = action_spec
+        self._action_groups = action_groups
         self._pending = PendingActions()
         self._state: dict[str, object] = dict(state)
         self._obs_cache: dict[str, object] = dict(obs_cache)
@@ -295,160 +310,148 @@ class Simulation:
     @overload
     def act(
         self,
-        target: ActionBinding,
-        values: torch.Tensor,
-        *,
-        face: str | None = None,
+        target: OrderedActionGroup,
+        values: torch.Tensor | Mapping[str, float | torch.Tensor],
     ) -> None: ...
 
     @overload
     def act(
         self,
         target: ArticulationHandle,
-        values: Mapping[str, float | torch.Tensor],
-        *,
-        face: str | None = None,
+        values: torch.Tensor | Mapping[str, float | torch.Tensor],
     ) -> None: ...
 
     def act(
         self,
-        target: ActionBinding | ArticulationHandle,
+        target: OrderedActionGroup | ArticulationHandle,
         values: torch.Tensor | Mapping[str, float | torch.Tensor],
-        *,
-        face: str | None = None,
     ) -> None:
-        """Validate and stage one action face; never advances time.
+        """Validate and stage one ordered action group; never advances time.
 
-        Two forms are accepted:
+        Two target forms are accepted:
 
-        * ``act(binding, tensor)``: the explicit :class:`ActionBinding` path.
-          ``tensor`` is a floating ``(N, dim)`` tensor, or ``(dim,)`` when
-          ``N == 1``.
-        * ``act(handle, mapping)``: the named sugar.  ``mapping`` keys must
-          equal the face's joints exactly; key order becomes the
-          ``NamedAction`` column order.  With ``N == 1`` a value may be a
-          finite number or a floating ``(1,)`` tensor, and the forms may mix.
-          With ``N > 1`` every value must be a floating ``(N,)`` tensor; the
-          columns are stacked in key order into the same ``(N, dim)`` staging
-          path.  With more than one declared face on the handle, ``face=``
-          selects one; omitting it is an ambiguous-face error.
+        * ``act(group, tensor)``: the explicit :class:`OrderedActionGroup`
+          path.  ``tensor`` is a floating ``(N, dim)`` tensor in the group's
+          joint order, or ``(dim,)`` when ``N == 1``.
+        * ``act(handle, values)``: a convenience for a handle that declares
+          exactly one action group.  A mapping must cover the group joints
+          exactly; its values are reordered into the group's joint order.  With
+          ``N == 1`` a value may be a finite number or a floating ``(1,)``
+          tensor, and the forms may mix.  With ``N > 1`` every value must be a
+          floating ``(N,)`` tensor.  A tensor is accepted in group joint order.
+
+        The target must name exactly one group of this simulation's
+        :class:`OrderedActionSpec`; an unknown or mismatched group is refused.
         """
         self._ensure_operable()
         self._check_clock()
         import torch
 
-        if isinstance(target, ActionBinding):
-            if not isinstance(values, torch.Tensor):
-                raise BindingError(
-                    "act(binding, values) requires a torch.Tensor, " f"got {type(values).__name__}"
-                )
-            self._stage_binding(target, values, face)
-            return
-        if isinstance(target, ArticulationHandle):
-            self._act_named(target, values, face)
-            return
-        raise BindingError(
-            "act target must be an ActionBinding or an ArticulationHandle from this "
-            f"simulation, got {type(target).__name__}"
-        )
+        group = self._resolve_group(target)
+        if isinstance(values, Mapping):
+            tensor = self._named_values(group, values)
+        elif isinstance(values, torch.Tensor):
+            tensor = self._normalize_values(group, values)
+        else:
+            raise BindingError(
+                f"act for action group {(group.articulation, group.name)!r} requires a "
+                f"mapping of joint name -> value or a torch.Tensor, got "
+                f"{type(values).__name__}"
+            )
+        self._pending.stage(StagedAction(group=group, values=tensor))
 
-    def _act_named(
+    def _resolve_group(
         self,
-        handle: ArticulationHandle,
-        values: torch.Tensor | Mapping[str, float | torch.Tensor],
-        face: str | None,
-    ) -> None:
-        """Validate and stage the ``handle -> {joint: value}`` sugar form."""
-        if handle._owner is not self._owner or handle not in self.articulations:
-            raise ForeignHandleError(
-                f"articulation handle {handle.name!r} belongs to another "
-                f"builder/simulation; handles are scoped to their owner"
-            )
-        if not isinstance(values, Mapping):
-            raise BindingError(
-                f"act(handle, values) requires a mapping of joint name -> value, "
-                f"got {type(values).__name__}"
-            )
-        declared_faces = tuple(handle.faces)
-        if face is None:
-            if len(declared_faces) != 1:
+        target: OrderedActionGroup | ArticulationHandle,
+    ) -> OrderedActionGroup:
+        """Resolve one target to the authoritative declared action group."""
+        from unigym.runtime.actions import OrderedActionGroup
+
+        if isinstance(target, OrderedActionGroup):
+            identity = (target.articulation, target.name)
+            declared = self._action_groups.get(identity)
+            if declared is None:
                 raise BindingError(
-                    f"articulation {handle.name!r} declares {len(declared_faces)} "
-                    f"control faces {list(declared_faces)}; act(handle, mapping) "
-                    f"needs face= to choose one"
+                    f"action group {identity!r} is not declared by this simulation; "
+                    f"declared groups: {sorted(self._action_groups)}"
                 )
-            face = declared_faces[0]
-        elif face not in handle.faces:
-            raise BindingError(
-                f"articulation {handle.name!r} has no action face {face!r}; "
-                f"declared faces: {list(declared_faces)}"
-            )
-        joints = handle.faces[face]
-        tensor = self._named_values(face, values, joints)
-        declared = self._faces.get(face)
-        if declared is None:
-            raise BindingError(
-                f"action face {face!r} is not a declared control face; "
-                f"declared faces: {sorted(self._faces)}"
-            )
-        declared_handle, _, kind = declared
-        if declared_handle is not handle:
-            raise ForeignHandleError(
-                f"action face {face!r} belongs to articulation "
-                f"{declared_handle.name!r}, not {handle.name!r}"
-            )
-        binding = handle.bind_action(face, kind=kind, order=tuple(values))
-        self._stage_binding(binding, tensor, face)
+            if declared != target:
+                raise BindingError(
+                    f"action group {identity!r} does not match the declared template "
+                    f"{declared!r}; stage the group object declared by the action_spec"
+                )
+            return declared
+        if isinstance(target, ArticulationHandle):
+            if target._owner is not self._owner or target not in self.articulations:
+                raise ForeignHandleError(
+                    f"articulation handle {target.name!r} belongs to another "
+                    f"builder/simulation; handles are scoped to their owner"
+                )
+            groups = tuple(target.action_groups.values())
+            if len(groups) != 1:
+                declared = [(group.articulation, group.name) for group in groups]
+                raise BindingError(
+                    f"articulation {target.name!r} declares {len(groups)} action groups "
+                    f"{declared}; act(handle, values) needs a single-group handle, so "
+                    f"pass the OrderedActionGroup to act"
+                )
+            return groups[0]
+        raise BindingError(
+            "act target must be an OrderedActionGroup or an ArticulationHandle from "
+            f"this simulation, got {type(target).__name__}"
+        )
 
     def _named_values(
         self,
-        face: str,
+        group: OrderedActionGroup,
         values: Mapping[str, float | torch.Tensor],
-        joints: tuple[str, ...],
     ) -> torch.Tensor:
-        """Lower one named mapping to the explicit ``(N, dim)`` value tensor.
+        """Lower one named mapping to an ``(N, dim)`` tensor in group joint order.
 
         ``N == 1`` accepts finite numbers and floating ``(1,)`` tensors in any
         mix; numbers lower to float32 columns.  ``N > 1`` requires one floating
         ``(N,)`` tensor per joint with a uniform dtype and device.  Columns are
-        stacked in mapping key order, cloned, and then staged through the same
-        ``_stage_binding`` path as the explicit tensor form.
+        stacked in the group's declared joint order, cloned, and then staged
+        through the same explicit tensor path.
         """
         import torch
 
+        identity = (group.articulation, group.name)
         provided = tuple(values)
-        missing = [joint for joint in joints if joint not in values]
-        extra = [joint for joint in provided if joint not in joints]
+        missing = [joint for joint in group.joints if joint not in values]
+        extra = [joint for joint in provided if joint not in group.joints]
         if missing or extra:
             raise BindingError(
-                f"act(handle, mapping) for face {face!r} must cover exactly the "
-                f"face joints {list(joints)}; missing {missing}, unexpected {extra}"
+                f"act(handle, mapping) for action group {identity!r} must cover exactly "
+                f"the group joints {list(group.joints)}; missing {missing}, "
+                f"unexpected {extra}"
             )
         columns: list[float | torch.Tensor] = []
         tensor_device: torch.device | None = None
         reference: tuple[str, torch.dtype, torch.device] | None = None
-        for joint in values:
+        for joint in group.joints:
             value = values[joint]
             if isinstance(value, torch.Tensor):
                 if not value.is_floating_point():
                     raise BindingError(
-                        f"act(handle, mapping) face {face!r} joint {joint!r} value "
-                        f"must be a floating tensor, got dtype {value.dtype}"
+                        f"act(handle, mapping) action group {identity!r} joint "
+                        f"{joint!r} value must be a floating tensor, got dtype "
+                        f"{value.dtype}"
                     )
                 if self.num_envs == 1:
                     if tuple(value.shape) != (1,):
                         raise BindingError(
-                            f"act(handle, mapping) face {face!r} joint {joint!r} "
-                            f"value shape {tuple(value.shape)} is not a legal (1,) "
-                            f"vector for num_envs=1"
+                            f"act(handle, mapping) action group {identity!r} joint "
+                            f"{joint!r} value shape {tuple(value.shape)} is not a legal "
+                            f"(1,) vector for num_envs=1"
                         )
                 else:
                     expected = (self.num_envs,)
                     if tuple(value.shape) != expected:
                         raise BindingError(
-                            f"act(handle, mapping) face {face!r} joint {joint!r} "
-                            f"value shape {tuple(value.shape)} does not match the "
-                            f"expected (num_envs,)={expected}"
+                            f"act(handle, mapping) action group {identity!r} joint "
+                            f"{joint!r} value shape {tuple(value.shape)} does not match "
+                            f"the expected (num_envs,)={expected}"
                         )
                     if reference is None:
                         reference = (joint, value.dtype, value.device)
@@ -456,16 +459,16 @@ class Simulation:
                         first_joint, first_dtype, first_device = reference
                         if value.dtype != first_dtype:
                             raise BindingError(
-                                f"act(handle, mapping) face {face!r} joint {joint!r} "
-                                f"value dtype {value.dtype} does not match joint "
-                                f"{first_joint!r} dtype {first_dtype}; all per-env "
+                                f"act(handle, mapping) action group {identity!r} joint "
+                                f"{joint!r} value dtype {value.dtype} does not match "
+                                f"joint {first_joint!r} dtype {first_dtype}; all per-env "
                                 f"values must share one dtype"
                             )
                         if value.device != first_device:
                             raise BindingError(
-                                f"act(handle, mapping) face {face!r} joint {joint!r} "
-                                f"value device {value.device} does not match joint "
-                                f"{first_joint!r} device {first_device}; all per-env "
+                                f"act(handle, mapping) action group {identity!r} joint "
+                                f"{joint!r} value device {value.device} does not match "
+                                f"joint {first_joint!r} device {first_device}; all per-env "
                                 f"values must share one device"
                             )
                 if tensor_device is None:
@@ -474,20 +477,20 @@ class Simulation:
                 continue
             if self.num_envs != 1:
                 raise BindingError(
-                    f"act(handle, mapping) face {face!r} joint {joint!r} value must "
-                    f"be a floating torch.Tensor of shape ({self.num_envs},) for "
-                    f"num_envs={self.num_envs}; use torch.full(({self.num_envs},), "
-                    f"{value!r}) for a constant"
+                    f"act(handle, mapping) action group {identity!r} joint {joint!r} "
+                    f"value must be a floating torch.Tensor of shape "
+                    f"({self.num_envs},) for num_envs={self.num_envs}; use "
+                    f"torch.full(({self.num_envs},), {value!r}) for a constant"
                 )
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise BindingError(
-                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
-                    f"must be a finite number, got {value!r}"
+                    f"act(handle, mapping) action group {identity!r} joint {joint!r} "
+                    f"value must be a finite number, got {value!r}"
                 )
             if not math.isfinite(float(value)):
                 raise BindingError(
-                    f"act(handle, mapping) face {face!r} joint {joint!r} value "
-                    f"must be finite, got {value!r}"
+                    f"act(handle, mapping) action group {identity!r} joint {joint!r} "
+                    f"value must be finite, got {value!r}"
                 )
             columns.append(float(value))
         stacked: list[torch.Tensor] = []
@@ -498,74 +501,40 @@ class Simulation:
                 stacked.append(torch.tensor([column], dtype=torch.float32, device=tensor_device))
         return torch.stack(stacked, dim=1).clone()
 
-    def _stage_binding(
-        self,
-        target: ActionBinding,
-        values: torch.Tensor,
-        face: str | None,
-    ) -> None:
-        """Validate one explicit binding and stage its normalized values."""
-        if target._owner is not self._owner or target.articulation._owner is not self._owner:
-            raise ForeignHandleError(
-                f"action binding for face {target.face!r} belongs to another "
-                f"builder/simulation; handles are scoped to their owner"
-            )
-        if face is not None and face != target.face:
-            raise BindingError(f"act face {face!r} does not match the binding face {target.face!r}")
-        declared = self._faces.get(target.face)
-        if declared is None:
-            raise BindingError(
-                f"action face {target.face!r} is not a declared control face; "
-                f"declared faces: {sorted(self._faces)}"
-            )
-        handle, joints, kind = declared
-        if target.articulation is not handle:
-            raise ForeignHandleError(
-                f"action binding face {target.face!r} names articulation "
-                f"{target.articulation.name!r}, but the declared face belongs to "
-                f"{handle.name!r}"
-            )
-        if target.kind != kind:
-            raise BindingError(
-                f"action face {target.face!r} binding kind {target.kind!r} does not "
-                f"match the control target {kind!r}"
-            )
-        if len(target.joint_names) != len(joints) or set(target.joint_names) != set(joints):
-            raise BindingError(
-                f"action face {target.face!r} binding columns {list(target.joint_names)} "
-                f"are not a permutation of the face joints {list(joints)}"
-            )
-        normalized = self._normalize_values(target, values, len(joints))
-        self._pending.stage(target.face, StagedAction(binding=target, values=normalized))
-
     def step(
         self,
-        actions: Mapping[ActionBinding, torch.Tensor] | None = None,
+        actions: (
+            Mapping[
+                OrderedActionGroup | ArticulationHandle,
+                torch.Tensor | Mapping[str, float | torch.Tensor],
+            ]
+            | None
+        ) = None,
     ) -> Observation:
         """Advance exactly one tick with the staged actions and return the state.
 
         Args:
-            actions: Optional sugar: one ``binding -> values`` entry per face.
-                Every entry is staged with :meth:`act` and then the normal
-                :meth:`step` runs; an already-staged simulation is refused.
-                The canonical path is ``act`` followed by ``step()``.
+            actions: Optional sugar: one ``group -> values`` entry per declared
+                action group.  Every entry is staged with :meth:`act` and then
+                the normal :meth:`step` runs; an already-staged simulation is
+                refused.  The canonical path is ``act`` followed by ``step()``.
         """
         self._ensure_operable()
         if actions is not None:
             if not isinstance(actions, Mapping):
                 raise BindingError(
-                    "step(actions=...) expects a mapping of ActionBinding -> tensor, "
+                    "step(actions=...) expects a mapping of action group -> values, "
                     f"got {type(actions).__name__}"
                 )
-            if self._pending.faces():
+            if self._pending.groups():
                 raise PendingActionError(
                     f"step(actions=...) requires an empty pending table; already staged: "
-                    f"{sorted(self._pending.faces())}"
+                    f"{sorted(self._pending.groups())}"
                 )
             self._check_clock()
             try:
-                for binding, values in actions.items():
-                    self.act(binding, values)
+                for target, values in actions.items():
+                    self.act(target, values)
             except BaseException:
                 self._pending.clear()
                 raise
@@ -575,24 +544,24 @@ class Simulation:
         """Run the canonical one-tick path after all checks have passed."""
         self._ensure_operable()
         self._check_clock()
-        staged = self._pending.faces()
+        staged = self._pending.groups()
         if not staged:
             raise PendingActionError(
                 "step() needs a staged action; call act(...) first "
                 "(the previous action is never reused)"
             )
-        required = frozenset(self._faces)
+        required = frozenset(self._action_groups)
         unknown = staged - required
         if unknown:
             raise PendingActionError(
-                f"pending actions name undeclared face(s) {sorted(unknown)}; "
-                f"declared faces: {sorted(required)}"
+                f"pending actions name undeclared action group(s) {sorted(unknown)}; "
+                f"declared groups: {sorted(required)}"
             )
         missing = required - staged
         if missing:
             raise MissingActionError(
-                f"step() is missing staged action(s) for required face(s) "
-                f"{sorted(missing)}; staged faces: {sorted(staged)}"
+                f"step() is missing staged action(s) for required action group(s) "
+                f"{sorted(missing)}; staged groups: {sorted(staged)}"
             )
         lowered = self._pending.lower()
         try:
@@ -803,27 +772,27 @@ class Simulation:
 
     def _normalize_values(
         self,
-        binding: ActionBinding,
+        group: OrderedActionGroup,
         values: torch.Tensor,
-        dim: int,
     ) -> torch.Tensor:
         """Validate one value tensor and normalize it to ``(N, dim)``."""
         import torch
 
+        identity = (group.articulation, group.name)
+        dim = len(group.joints)
         if not isinstance(values, torch.Tensor):
             raise BindingError(
-                f"action face {binding.face!r} values must be a torch.Tensor, "
+                f"action group {identity!r} values must be a torch.Tensor, "
                 f"got {type(values).__name__}"
             )
         if not values.is_floating_point():
             raise BindingError(
-                f"action face {binding.face!r} values must be floating, got dtype "
-                f"{values.dtype}"
+                f"action group {identity!r} values must be floating, got dtype " f"{values.dtype}"
             )
         if values.ndim == 1:
             if self.num_envs != 1 or values.shape[0] != dim:
                 raise BindingError(
-                    f"action face {binding.face!r} values shape {tuple(values.shape)} "
+                    f"action group {identity!r} values shape {tuple(values.shape)} "
                     f"is not a legal (dim,) vector for num_envs={self.num_envs}, "
                     f"dim={dim}"
                 )
@@ -832,13 +801,13 @@ class Simulation:
             expected = (self.num_envs, dim)
             if tuple(values.shape) != expected:
                 raise BindingError(
-                    f"action face {binding.face!r} values shape {tuple(values.shape)} "
+                    f"action group {identity!r} values shape {tuple(values.shape)} "
                     f"does not match the expected (num_envs, dim)={expected}"
                 )
             normalized = values
         else:
             raise BindingError(
-                f"action face {binding.face!r} values must be (num_envs, dim) or "
+                f"action group {identity!r} values must be (num_envs, dim) or "
                 f"(dim,), got {values.ndim} dimensions"
             )
         return normalized.clone()

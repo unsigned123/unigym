@@ -15,7 +15,6 @@ from unigym.runner.external import ExternalRunner
 from unigym.runner.state import read_extra
 from unigym.sim import (
     ArticulationHandle,
-    BindingOrder,
     Control,
     Simulation,
     SimulationBuilder,
@@ -126,7 +125,7 @@ def test_reset_subset_restores_only_the_named_row(tiny_mjcf: Path) -> None:
     try:
         spawn = _joint_pos(sim.observe(), prefix).clone()
         sim.act(
-            handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT),
+            handle.action_groups["body"],
             _targets(2),
         )
         stepped = sim.step()
@@ -159,7 +158,7 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
 ) -> None:
     """episode_length_s=0.04 makes both rows due on tick 2, reported not applied."""
     sim, handle = _build_sim(tiny_mjcf, num_envs=2, episode_length_s=0.04)
-    binding = handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT)
+    binding = handle.action_groups["body"]
     try:
         sim.act(binding, _targets(2))
         first = sim.step()
@@ -201,7 +200,7 @@ def test_reader_after_subset_reset_agrees_row_wise(tiny_mjcf: Path) -> None:
     try:
         spawn = _joint_pos(sim.observe(), prefix).clone()
         sim.act(
-            handle.bind_action("body", kind="position", order=BindingOrder.DEFAULT),
+            handle.action_groups["body"],
             _targets(2),
         )
         stepped = sim.step()

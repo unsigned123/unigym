@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 import torch
 
 from unigym.run.api import Run
 from unigym.robots.base import BodyBinding, RobotProfile
-from unigym.runner.base import Runner
+from unigym.runner.base import Runner, StepResult
 from unigym.runner.state import read_extra
-from unigym.runtime.actions import NamedAction
+from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
-    ActionBinding,
     ArticulationHandle,
-    BindingOrder,
     Control,
     ForeignHandleError,
     MissingActionError,
@@ -30,8 +30,8 @@ from unigym.world import World
 from tests._support.fakes.runner import FakeRunner
 
 
-def _handle(owner: object, name: str = "arm", face: str = "arm") -> ArticulationHandle:
-    """One real handle with one one-joint face (identity-scoped by *owner*)."""
+def _handle(owner: object, name: str = "arm", group: str = "arm") -> ArticulationHandle:
+    """One real handle with one single-joint action group (owner-scoped)."""
     joints = ("shoulder",)
     profile = RobotProfile(
         name=name,
@@ -44,15 +44,21 @@ def _handle(owner: object, name: str = "arm", face: str = "arm") -> Articulation
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
     )
-    control = Control.position_pd(joints=joints, face=face, kp=1.0, kd=0.1)
+    control = Control.position_pd(joints=joints, group=group, kp=1.0, kd=0.1)
+    template = OrderedActionGroup(name=group, articulation=name, joints=joints, target="position")
     return ArticulationHandle(
         name=name,
         ref=None,
         profile=profile,
         control=control,
-        faces={face: joints},
+        action_groups={group: template},
         _owner=owner,
     )
+
+
+def _singleton_spec(handle: ArticulationHandle) -> OrderedActionSpec:
+    """The global template of one handle."""
+    return OrderedActionSpec(tuple(handle.action_groups.values()))
 
 
 def _sim(
@@ -66,6 +72,9 @@ def _sim(
     token = object() if owner is None else owner
     declared = (_handle(token),) if handles is None else handles
     live = FakeRunner(num_envs=num_envs) if runner is None else runner
+    spec = OrderedActionSpec(
+        tuple(group for handle in declared for group in handle.action_groups.values())
+    )
     run = Run({"run_name": "facade-unit", "env": {"backend": "mujoco", "num_envs": num_envs}})
     return Simulation(
         backend="mujoco",
@@ -73,6 +82,7 @@ def _sim(
         world=World.base(mjcf="world.xml"),
         articulations=declared,
         cameras=(),
+        action_spec=spec,
         runner=live,
         env=live.env,
         run=run,
@@ -83,11 +93,9 @@ def _sim(
     )
 
 
-def _binding(
-    handle: ArticulationHandle, face: str = "arm", kind: str = "position"
-) -> ActionBinding:
-    """An action binding for the handle's declared face."""
-    return handle.bind_action(face, kind=kind, order=BindingOrder.DEFAULT)
+def _group(handle: ArticulationHandle, group: str = "arm") -> OrderedActionGroup:
+    """The handle's declared action group."""
+    return handle.action_groups[group]
 
 
 def _values(value: float = 0.5) -> torch.Tensor:
@@ -120,9 +128,9 @@ def test_act_stages_without_ticking_and_observe_serves_the_cache() -> None:
     runner = FakeRunner()
     sim = _sim(runner=runner)
     handle = sim.articulations[0]
-    binding = _binding(handle)
+    group = _group(handle)
 
-    sim.act(binding, _values())
+    sim.act(group, _values())
     obs = sim.observe()
 
     assert runner.ticks_done == 0
@@ -137,41 +145,78 @@ def test_act_stages_without_ticking_and_observe_serves_the_cache() -> None:
     assert dict(obs.contacts) == {}
 
 
-def test_duplicate_act_keeps_the_first_staged_value() -> None:
-    """A second act for one face raises and does not overwrite the target."""
+def test_duplicate_group_act_keeps_the_first_staged_value() -> None:
+    """A second act for one identity raises and does not overwrite the target."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
-    sim.act(binding, _values(0.25))
+    group = _group(sim.articulations[0])
+    sim.act(group, _values(0.25))
 
     with pytest.raises(PendingActionError, match="already staged"):
-        sim.act(binding, _values(0.75))
+        sim.act(group, _values(0.75))
 
     obs = sim.step()
     assert obs.obs_cache["joint_pos"].tolist() == [[0.25]]
 
 
-def test_step_requires_every_declared_face() -> None:
-    """A missing required face raises before the engine tick."""
+def test_step_requires_every_declared_group() -> None:
+    """A missing required group raises before the engine tick."""
     token = object()
-    handles = (_handle(token, name="x", face="x"), _handle(token, name="y", face="y"))
+    handles = (_handle(token, name="x", group="x"), _handle(token, name="y", group="y"))
     runner = FakeRunner()
     sim = _sim(handles, runner=runner, owner=token)
-    sim.act(_binding(handles[0], face="x"), _values())
+    sim.act(_group(handles[0], "x"), _values())
 
     with pytest.raises(MissingActionError, match="missing staged action") as excinfo:
         sim.step()
 
     message = str(excinfo.value)
-    assert "'y'" in message
-    assert "'x'" in message
+    assert "('y', 'y')" in message
+    assert "('x', 'x')" in message
     assert runner.ticks_done == 0
+
+
+def test_same_group_name_on_two_articulations_is_distinct() -> None:
+    """Both ``body`` groups stage and lower by their (articulation, group) identity."""
+    token = object()
+    left = _handle(token, name="left", group="body")
+    right = _handle(token, name="right", group="body")
+    runner = _EchoRunner((left, right))
+    sim = Simulation(
+        backend="mujoco",
+        num_envs=1,
+        world=World.base(mjcf="world.xml"),
+        articulations=(left, right),
+        cameras=(),
+        action_spec=OrderedActionSpec((left.action_groups["body"], right.action_groups["body"])),
+        runner=runner,
+        env=runner.env,
+        run=_run(),
+        owner=token,
+        state=_two_state((left, right)),
+        obs_cache={},
+        t=0,
+    )
+
+    sim.act(left.action_groups["body"], _values(0.25))
+    sim.act(right.action_groups["body"], _values(0.75))
+    obs = sim.step()
+
+    lowered = runner.last_actions
+    assert lowered is not None
+    assert [(entry.articulation, entry.group) for entry in lowered] == [
+        ("left", "body"),
+        ("right", "body"),
+    ]
+    assert [entry.values.tolist() for entry in lowered] == [[[0.25]], [[0.75]]]
+    assert obs.articulations[left].joint_pos.tolist() == [[0.25]]
+    assert obs.articulations[right].joint_pos.tolist() == [[0.75]]
 
 
 def test_step_applies_and_consumes_the_staged_action() -> None:
     """A successful tick caches the result and leaves an empty pending table."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
-    sim.act(binding, _values(0.5))
+    group = _group(sim.articulations[0])
+    sim.act(group, _values(0.5))
 
     obs = sim.step()
 
@@ -186,9 +231,9 @@ def test_step_applies_and_consumes_the_staged_action() -> None:
 def test_step_actions_sugar_stages_then_steps() -> None:
     """The one-shot mapping form is the canonical stage+step path."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
+    group = _group(sim.articulations[0])
 
-    obs = sim.step({binding: _values(0.5)})
+    obs = sim.step({group: _values(0.5)})
 
     assert obs.obs_cache["joint_pos"].tolist() == [[0.5]]
     assert sim.runner.ticks_done == 1
@@ -197,11 +242,11 @@ def test_step_actions_sugar_stages_then_steps() -> None:
 def test_step_actions_sugar_refuses_an_existing_pending_table() -> None:
     """The sugar never merges with or overwrites staged actions."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
-    sim.act(binding, _values(0.1))
+    group = _group(sim.articulations[0])
+    sim.act(group, _values(0.1))
 
     with pytest.raises(PendingActionError, match="empty pending table"):
-        sim.step({binding: _values(0.2)})
+        sim.step({group: _values(0.2)})
 
     assert sim.runner.ticks_done == 0
 
@@ -209,7 +254,7 @@ def test_step_actions_sugar_refuses_an_existing_pending_table() -> None:
 @pytest.mark.parametrize(
     ("case", "match"),
     [
-        ("kind", "control target 'position'"),
+        ("kind", "does not match the declared template"),
         ("shape", "expected \\(num_envs, dim\\)=\\(1, 1\\)"),
         ("foreign", "another builder/simulation"),
     ],
@@ -217,17 +262,19 @@ def test_step_actions_sugar_refuses_an_existing_pending_table() -> None:
 def test_step_actions_sugar_is_atomic_when_a_later_entry_fails(case: str, match: str) -> None:
     """A failed entry clears every staged entry and leaves the tick untouched."""
     token = object()
-    handles = (_handle(token, name="x", face="x"), _handle(token, name="y", face="y"))
+    handles = (_handle(token, name="x", group="x"), _handle(token, name="y", group="y"))
     sim = _sim(handles, owner=token)
-    first = _binding(handles[0], face="x")
+    first = _group(handles[0], "x")
     if case == "kind":
-        second = _binding(handles[1], face="y", kind="torque")
+        second = OrderedActionGroup(
+            name="y", articulation="y", joints=("shoulder",), target="torque"
+        )
         values = _values()
     elif case == "shape":
-        second = _binding(handles[1], face="y")
+        second = _group(handles[1], "y")
         values = torch.zeros(2, 1)
     else:
-        second = _binding(_handle(object(), name="z", face="z"), face="z")
+        second = _handle(object(), name="z", group="z")
         values = _values()
 
     with pytest.raises((BindingError, ForeignHandleError), match=match):
@@ -242,15 +289,15 @@ def test_engine_exception_faults_and_clears_pending() -> None:
     """A runner exception is fatal for the live sim until close()."""
     runner = FakeRunner()
     sim = _sim(runner=runner)
-    binding = _binding(sim.articulations[0])
-    sim.act(binding, _values())
+    group = _group(sim.articulations[0])
+    sim.act(group, _values())
     runner.fail_next_tick = True
 
     with pytest.raises(RuntimeError, match="engine failure"):
         sim.step()
 
     assert sim.faulted is True
-    for call in (sim.observe, sim.reset, lambda: sim.act(binding, _values())):
+    for call in (sim.observe, sim.reset, lambda: sim.act(group, _values())):
         with pytest.raises(SimulationFaultedError):
             call()
 
@@ -263,8 +310,8 @@ def test_out_of_band_tick_raises_stale_and_clears_pending() -> None:
     runner = FakeRunner()
     sim = _sim(runner=runner)
     handle = sim.articulations[0]
-    binding = _binding(handle)
-    sim.act(binding, _values(0.3))
+    group = _group(handle)
+    sim.act(group, _values(0.3))
     runner.step((NamedAction("arm", "arm", _values(0.9), ("shoulder",), "position"),))
 
     with pytest.raises(StaleStateError) as excinfo:
@@ -280,10 +327,10 @@ def test_out_of_band_tick_raises_stale_and_clears_pending() -> None:
 def test_reset_clears_pending_and_refreshes_the_state() -> None:
     """Reset never consumes an action; it restores the spawn state and clock."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
-    sim.act(binding, _values(0.7))
+    group = _group(sim.articulations[0])
+    sim.act(group, _values(0.7))
     sim.step()
-    sim.act(binding, _values(0.7))
+    sim.act(group, _values(0.7))
 
     obs = sim.reset()
 
@@ -322,7 +369,7 @@ def test_step_keeps_a_non_tensor_cache_entry_exactly() -> None:
     payload = {"probe": [1, 2]}
     runner.cache_extra = {"contact_ops/foo": payload}
     sim = _sim(runner=runner)
-    sim.act(_binding(sim.articulations[0]), _values(0.5))
+    sim.act(_group(sim.articulations[0]), _values(0.5))
 
     obs = sim.step()
 
@@ -335,7 +382,7 @@ def test_bad_expected_cache_key_is_reported_after_the_tick_is_adopted() -> None:
     runner = FakeRunner()
     runner.cache_extra = {"articulation/arm/prev_action": "not-a-tensor"}
     sim = _sim(runner=runner)
-    sim.act(_binding(sim.articulations[0]), _values(0.5))
+    sim.act(_group(sim.articulations[0]), _values(0.5))
 
     with pytest.raises(ObservationError, match="articulation/arm/prev_action"):
         sim.step()
@@ -350,14 +397,14 @@ def test_bad_expected_cache_key_is_reported_after_the_tick_is_adopted() -> None:
 def test_close_is_idempotent_and_refuses_live_calls() -> None:
     """Close is safe twice; every later live call names the closed state."""
     sim = _sim()
-    binding = _binding(sim.articulations[0])
+    group = _group(sim.articulations[0])
 
     sim.close()
     sim.close()
 
     assert sim.closed is True
     for call in (
-        lambda: sim.act(binding, _values()),
+        lambda: sim.act(group, _values()),
         sim.step,
         sim.observe,
         sim.reset,
@@ -377,43 +424,44 @@ def test_context_manager_closes_on_exit() -> None:
     assert sim.closed is True
 
 
-def test_foreign_binding_is_refused_before_staging() -> None:
-    """A binding minted under another owner cannot stage here."""
+def test_foreign_group_is_refused_before_staging() -> None:
+    """A group minted for another owner cannot stage here."""
     sim = _sim()
     other = _handle(object())
 
     with pytest.raises(ForeignHandleError, match="another builder/simulation"):
-        sim.act(_binding(other), _values())
+        sim.act(other, {"shoulder": 0.1})
 
 
 @pytest.mark.parametrize(
-    ("binding_kind", "values", "match"),
+    ("kind", "values", "match"),
     [
-        ("torque", torch.tensor([[0.0]]), "control target 'position'"),
+        ("torque", torch.tensor([[0.0]]), "does not match the declared template"),
         ("position", torch.zeros(2, 1), "expected \\(num_envs, dim\\)=\\(1, 1\\)"),
         ("position", torch.zeros(1, 1, dtype=torch.int64), "must be floating"),
     ],
 )
-def test_act_rejects_bad_kind_shape_or_dtype(binding_kind, values, match) -> None:
-    """Kind, shape and dtype are validated before anything is staged."""
+def test_act_rejects_bad_kind_shape_or_dtype(kind, values, match) -> None:
+    """Group identity, shape and dtype are validated before anything is staged."""
     sim = _sim()
-    binding = _binding(sim.articulations[0], kind=binding_kind)
+    handle = sim.articulations[0]
+    group = OrderedActionGroup(name="arm", articulation="arm", joints=("shoulder",), target=kind)
 
     with pytest.raises(BindingError, match=match):
-        sim.act(binding, values)
+        sim.act(group if kind != "position" else handle, values)
 
     assert sim.runner.ticks_done == 0
 
 
 def test_tensor_action_applies_every_row_at_n2() -> None:
-    """A (2, 1) action lands in both rows and still stages once per face."""
+    """A (2, 1) action lands in both rows and still stages once per group."""
     runner = FakeRunner(num_envs=2)
     sim = _sim(num_envs=2, runner=runner)
-    binding = _binding(sim.articulations[0])
+    group = _group(sim.articulations[0])
 
-    sim.act(binding, torch.tensor([[0.25], [0.75]], dtype=torch.float32))
+    sim.act(group, torch.tensor([[0.25], [0.75]], dtype=torch.float32))
     with pytest.raises(PendingActionError, match="already staged"):
-        sim.act(binding, torch.tensor([[9.0], [9.0]], dtype=torch.float32))
+        sim.act(group, torch.tensor([[9.0], [9.0]], dtype=torch.float32))
     obs = sim.step()
 
     assert obs.obs_cache["joint_pos"].tolist() == [[0.25], [0.75]]
@@ -423,10 +471,95 @@ def test_tensor_action_refuses_a_single_row_at_n2() -> None:
     """A (1, 1) action is refused against the exact (num_envs, dim)."""
     runner = FakeRunner(num_envs=2)
     sim = _sim(num_envs=2, runner=runner)
-    binding = _binding(sim.articulations[0])
+    group = _group(sim.articulations[0])
 
     with pytest.raises(BindingError, match=r"expected \(num_envs, dim\)=\(2, 1\)") as excinfo:
-        sim.act(binding, torch.zeros(1, 1))
+        sim.act(group, torch.zeros(1, 1))
 
     assert "(1, 1)" in str(excinfo.value)
     assert runner.ticks_done == 0
+
+
+def test_group_with_different_joints_is_refused_as_template_mismatch() -> None:
+    """A same-identity group with other joints is not silently accepted."""
+    sim = _sim()
+    wrong = OrderedActionGroup(name="arm", articulation="arm", joints=("elbow",), target="position")
+
+    with pytest.raises(BindingError, match="does not match the declared template"):
+        sim.act(wrong, torch.zeros(1, 1))
+    assert sim.runner.ticks_done == 0
+
+
+def test_partial_group_is_refused_before_the_tick() -> None:
+    """A group value tensor must cover exactly the group joint count."""
+    sim = _sim()
+    handle = sim.articulations[0]
+
+    with pytest.raises(BindingError, match=r"expected \(num_envs, dim\)=\(1, 1\)"):
+        sim.act(handle, torch.zeros(1, 2))
+    assert sim.runner.ticks_done == 0
+
+
+class _EchoEnv:
+    """Minimal env face for the two-articulation same-name test."""
+
+    def __init__(self) -> None:
+        self.num_envs = 1
+        self.device = "cpu"
+        self.obs_cache: dict[str, object] = {}
+
+
+class _EchoRunner:
+    """Records the lowered actions and returns a complete two-articulation state."""
+
+    def __init__(self, handles: Sequence[ArticulationHandle]) -> None:
+        self.env = _EchoEnv()
+        self.ticks_done = 0
+        self.last_actions: tuple[NamedAction, ...] | None = None
+        self._handles = tuple(handles)
+
+    def step(self, actions: Sequence[NamedAction]) -> StepResult:
+        self.last_actions = tuple(actions)
+        values = {
+            (entry.articulation, entry.group): entry.values.clone() for entry in self.last_actions
+        }
+        extra = _two_state(self._handles, values=values)
+        result = StepResult(
+            t=self.ticks_done,
+            obs={},
+            extra=extra,
+            reset_env_ids=torch.empty(0, dtype=torch.int64),
+            terminated=None,
+        )
+        self.ticks_done += 1
+        return result
+
+
+def _run() -> Run:
+    """One Run shell for the direct Simulation seam."""
+    return Run({"run_name": "facade-multi", "env": {"backend": "mujoco", "num_envs": 1}})
+
+
+def _two_state(
+    handles: Sequence[ArticulationHandle],
+    *,
+    values: dict[tuple[str, str], torch.Tensor] | None = None,
+) -> dict[str, object]:
+    """A complete one-row state for two one-joint articulations."""
+    state: dict[str, object] = {}
+    for handle in handles:
+        value = torch.zeros(1, 1)
+        if values is not None:
+            identity = next(iter(handle.action_groups))
+            value = values[(handle.name, identity)]
+        prefix = f"articulation/{handle.name}"
+        zeros3 = torch.zeros(1, 3)
+        state[f"{prefix}/joint_pos"] = value
+        state[f"{prefix}/joint_vel"] = torch.zeros_like(value)
+        state[f"{prefix}/applied_torque"] = torch.zeros_like(value)
+        state[f"{prefix}/gravity_b"] = torch.tensor([[0.0, 0.0, -1.0]])
+        state[f"{prefix}/base_pos_w"] = zeros3.clone()
+        state[f"{prefix}/base_quat_w"] = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+        state[f"{prefix}/base_lin_vel_b"] = zeros3.clone()
+        state[f"{prefix}/base_ang_vel_b"] = zeros3.clone()
+    return state
