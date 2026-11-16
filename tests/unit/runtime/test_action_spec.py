@@ -218,7 +218,7 @@ def test_repr_is_a_concise_summary():
 
 
 # --------------------------------------------------------------------------- #
-# Stage A2: OrderedActionSpec <-> NamedAction conversion
+# OrderedActionSpec <-> NamedAction conversion
 # --------------------------------------------------------------------------- #
 JOINTS = ("hip_joint", "knee_joint", "ankle_joint")
 
@@ -390,7 +390,7 @@ def test_unflatten_rejects_wrong_column_count():
 
 
 # --------------------------------------------------------------------------- #
-# Stage A3a: PolicyBinding + declaration mapping parsers
+# PolicyBinding + declaration mapping parsers
 # --------------------------------------------------------------------------- #
 def _group_mapping(**overrides):
     entry = {

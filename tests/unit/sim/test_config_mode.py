@@ -89,7 +89,7 @@ def test_config_mode_without_pack_set_has_no_pack_runtime(tmp_path: Path) -> Non
         _ = builder.pack_runtime
 
 
-def test_from_config_needs_at_least_one_manual_control_face(tmp_path: Path) -> None:
+def test_from_config_needs_at_least_one_manual_control_group(tmp_path: Path) -> None:
     """A non-manual adapter yields no external action table, so it is refused."""
     path = tmp_path / "run.yaml"
     path.write_text(

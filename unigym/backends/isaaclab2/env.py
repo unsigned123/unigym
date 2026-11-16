@@ -541,8 +541,9 @@ class IsaaclabEnv(ManagerBasedEnv):
                 gripper scene fields (director_contract §4.3).
             device: torch device string for the sim (default ``cuda:0``).
             articulations: the run's ordered neutral articulation specs.
-            controls: neutral ``ControlRuntime`` entries built from
-                ``RunSpec.controls`` + the robot profiles.
+            controls: neutral ``ControlRuntime`` entries derived from
+                ``RunSpec.action_spec`` + ``RunSpec.policies`` + the robot
+                profiles.
             profiles: ``{articulation name: RobotProfile}`` neutral robot
                 data for every articulation.
             robot_realizations: ``{articulation name: ArticulationCfg}``

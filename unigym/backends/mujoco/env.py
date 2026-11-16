@@ -618,9 +618,10 @@ class MujocoEnv:
             self.prop_backend.on_reset([0], self)
 
         # every engine iterates env.articulations / env.controls.
-        # The run layer built the neutral control runtimes from RunSpec.controls
-        # + the neutral robot profiles; this backend resolves their addresses + drive
-        # strategies against the compiled model.
+        # The run layer derived the neutral control runtimes from
+        # RunSpec.action_spec + RunSpec.policies + the neutral robot profiles;
+        # this backend resolves their addresses + drive strategies against the
+        # compiled model.
         self._backend_label = "mujoco backend"
         self._articulation_specs = tuple(articulations or ())
         self._profiles = dict(profiles or {})

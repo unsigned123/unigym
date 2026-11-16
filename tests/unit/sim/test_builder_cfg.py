@@ -68,7 +68,7 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
 
 
 def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) -> None:
-    """Faces become one standard_pd actuation group, one action group and a policy."""
+    """A control group becomes one standard_pd actuation group, one action group and a policy."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     builder.add_articulation(ref, control=_body_control())

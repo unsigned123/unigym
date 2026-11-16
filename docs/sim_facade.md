@@ -167,8 +167,8 @@ carries a read-only `action_groups` mapping of
 same group name may appear on different articulations.
 
 - `group = handle.action_groups[name]` is the only action handle. There is no
-  separate action-binding layer and no column-order choice: the group's joint
-  tuple is the tensor column order.
+  separate binding layer and no column-order choice: the group's joint tuple is
+  the tensor column order.
 - `act(group, values)` requires a floating `torch.Tensor` of shape
   `(num_envs, len(group.joints))`, or `(len(group.joints),)` when
   `num_envs == 1`. Values are normalized to `(N, dim)` and cloned.
@@ -176,9 +176,13 @@ same group name may appear on different articulations.
   the handle declares exactly one action group; a multi-group handle must pass
   the `OrderedActionGroup` itself. A mapping must cover exactly the group
   joints; its values are reordered into the group's declared joint order, so
-  mapping key order never changes the action layout. At `N == 1` a value may be
-  a finite number or a floating `(1,)` tensor; the per-env rules are in
-  [Multi-env](#multi-env).
+  mapping key order never changes the action layout. A tensor is accepted in
+  the group's declared joint order, exactly like `act(group, tensor)`. At
+  `N == 1` a value may be a finite number or a floating `(1,)` tensor; the
+  per-env rules are in [Multi-env](#multi-env).
+- An `OrderedActionGroup` is an ownerless template: staging one that does not
+  exactly equal a declared group is a `BindingError` (there is no
+  `ForeignHandleError` ownership claim for action groups).
 - Every target is validated against the simulation's `OrderedActionSpec`: an
   unknown identity, a group whose joints/target differ from the template, a
   partial group, or a wrong value shape is a `BindingError` before staging.
@@ -203,7 +207,9 @@ sim.act(robot, {"shoulder": torch.full((N,), 0.1), "elbow": torch.zeros(N)})
 - `act(group, tensor)` requires an exact `(N, dim)` floating tensor; the
   `(dim,)` short form remains legal only at `N == 1`. A `(1, dim)` tensor,
   a `(dim,)` vector or a 3-D tensor at `N > 1` is a `BindingError` naming the
-  actual and the expected `(num_envs, dim)`.
+  actual and the expected `(num_envs, dim)`. `act(handle, tensor)` on a
+  single-group handle has the same rule, with columns in the group's declared
+  joint order.
 - `act(handle, {joint: value})` is the per-env named form. At `N > 1` every
   value must be a floating `(N,)` tensor with one dtype and device; a Python
   number is refused with a `BindingError` naming the joint and the explicit
@@ -308,7 +314,7 @@ All facade errors derive from `unigym.errors.UniGymError`. `NoWorldError` and
 | `NoWorldError` | `build()` has no world, or the world declares no asset. |
 | `NoControlError` | `add_articulation` is called without `control=`. |
 | `SimulationConfigError` | Invalid declaration or caller argument: dt arithmetic, labels, backend name, group/profile coverage, config-mode requirements, `reset(env_ids=...)` ids (empty, non-int, out of range or duplicate), or a foreign config with `runner.auto_reset: true`. |
-| `ForeignHandleError` | A handle, action group or pack ref belongs to another builder/simulation or pack set. |
+| `ForeignHandleError` | An articulation or camera handle, or a pack ref, belongs to another builder/simulation or pack set. |
 | `BindingError` | Unknown action-group identity, a group that differs from the template, a bad shape/dtype, or an ambiguous/partial named action. |
 | `PendingActionError` | Duplicate group identity, empty pending on `step()`, or a staged group that is not declared. |
 | `MissingActionError` | A required action group is not staged. |

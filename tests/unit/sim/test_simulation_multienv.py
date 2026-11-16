@@ -220,7 +220,7 @@ def test_reset_never_advances_the_tick() -> None:
 
 
 def test_reset_clears_the_whole_pending_table() -> None:
-    """A staged action may belong to a reset row, so reset clears every face."""
+    """A staged action may belong to a reset row, so reset clears every entry."""
     sim = _sim()
     sim.act(_group(sim), _values())
 

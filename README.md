@@ -106,6 +106,8 @@ public core does not ship vendor policy adapters.
 The full documentation is being rewritten. See [`docs/README.md`](docs/README.md).
 English and Chinese versions will live under `docs/en/` and `docs/zh/`.
 
+Action system reference: [`docs/actions.md`](docs/actions.md).
+
 ## Tests
 
 ```bash

@@ -24,23 +24,20 @@ Backends:
 This module must stay torch-only (importable by adapters/base.py without
 isaaclab/mujoco; the mujoco resolver imports mujoco lazily).
 
-Stage A0 adds declaration-ordered action templates
+The module also declares the ordered action templates
 (:class:`ActionDim` / :class:`OrderedActionGroup` / :class:`OrderedActionSpec`):
 a spec fixes the group order and each group's joint order, so a flattened
 action vector is stable and self-describing (``idx articulation group joint
-target``).
+target``).  :meth:`OrderedActionSpec.unflatten` and
+:meth:`OrderedActionSpec.flatten` share the ``dim_table`` group-then-joint
+traversal and round-trip bit-identically (``flatten`` also accepts any
+NamedAction tuple order and any per-entry joint-name permutation).
 
-Stage A2 connects those templates to the self-describing runtime values:
-:meth:`OrderedActionSpec.unflatten` and :meth:`OrderedActionSpec.flatten`
-share the ``dim_table`` group-then-joint traversal and round-trip
-bit-identically (``flatten`` also accepts any NamedAction tuple order and any
-per-entry joint-name permutation).
-
-Stage A3a adds the independent :class:`PolicyBinding` declaration plus the
-mapping parsers (:meth:`OrderedActionGroup.from_mapping`,
+:class:`PolicyBinding` is the independent ownership/timing declaration, with
+the mapping parsers (:meth:`OrderedActionGroup.from_mapping`,
 :meth:`OrderedActionSpec.from_mapping`, :meth:`PolicyBinding.from_mapping`)
-for the action-authoring surface; the run layer consumes them at build time
-(control runtimes, adapter partition and :func:`resolve_control_dt`).
+for the authoring surface; the run layer consumes them at build time (control
+runtimes, adapter partition and :func:`resolve_control_dt`).
 """
 
 from __future__ import annotations
@@ -138,7 +135,7 @@ def _require_keys(
 
 
 # --------------------------------------------------------------------------- #
-# declaration-ordered action templates (Stage A0)
+# declaration-ordered action templates
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ActionDim:
@@ -577,8 +574,8 @@ class OrderedActionSpec:
 
 
 # --------------------------------------------------------------------------- #
-# independent policy binding (Stage A3a: authoring surface only, no run/build
-# wiring yet)
+# independent policy binding (authoring declaration; the run layer consumes
+# it at build time)
 # --------------------------------------------------------------------------- #
 def _normalize_binding_groups(groups: object, what: str) -> tuple[tuple[str, str], ...]:
     """Validate and normalize one binding's declaration-ordered identities."""

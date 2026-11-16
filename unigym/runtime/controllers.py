@@ -281,7 +281,7 @@ class ControlRuntime:
         required: True when every joint must be addressed by an action entry.
         source: provenance of the resolved joints.
         joint_set: always ``None`` (the action surface declares explicit
-            joints; the field remains for the plan projection until A4).
+            joints; the field remains for the plan projection).
         prop: True for an articulated-prop servo group.
     """
 

@@ -40,7 +40,7 @@ class SimulationConfigError(SimulationError):
 
 
 class ForeignHandleError(SimulationError):
-    """A handle, action group or pack ref belongs to another builder/simulation."""
+    """A handle or pack ref belongs to another builder/simulation/pack set."""
 
 
 class BindingError(SimulationError):
