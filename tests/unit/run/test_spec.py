@@ -149,6 +149,24 @@ def test_build_spec_rejects_a_group_owned_by_two_policies():
         build_spec(cfg, _args())
 
 
+def test_build_spec_rejects_an_adapter_name_without_a_policy_binding():
+    """The declared adapter must participate in the policies partition."""
+    cfg = _cfg(
+        adapter={"name": "manual"},
+        policies=[{"adapter": "other", "groups": [["arm", "arm"]]}],
+    )
+
+    with pytest.raises(ConfigError, match="owns no policy binding"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_accepts_a_matching_adapter_name():
+    """A declared adapter that owns a policy binding is the single-adapter shape."""
+    spec = build_spec(_cfg(adapter={"name": "manual"}), _args())
+
+    assert [binding.adapter for binding in spec.policies] == ["manual"]
+
+
 def test_build_spec_rejects_a_group_for_an_undeclared_articulation():
     """An action group must belong to a declared articulation."""
     cfg = _cfg()

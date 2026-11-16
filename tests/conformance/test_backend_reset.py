@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from tests._support.fakes.backend import CONTROL_NAME, FakeBackend
+from tests._support.fakes.backend import ARTICULATION_NAME, CONTROL_NAME, FakeBackend
 from unigym.runtime.actions import NamedAction
 
 
 def _named_action(env, values):
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(
         env.num_envs, len(control.joint_names)
     )
@@ -31,7 +31,7 @@ def test_reset_envs_resets_only_selected_rows():
     """A subset reset restores its rows and leaves the other rows running."""
     backend = FakeBackend(num_envs=2)
     try:
-        control = backend.controls[CONTROL_NAME]
+        control = backend.controls[(ARTICULATION_NAME, CONTROL_NAME)]
         values = torch.tensor([[0.1], [0.2]], dtype=torch.float32)
         raw_action = values + 10.0
         backend.step(

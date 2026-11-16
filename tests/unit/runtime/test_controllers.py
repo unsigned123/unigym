@@ -7,7 +7,12 @@ import torch
 
 from unigym.actuators.ir import ActuationGroup, resolve_actuation_groups
 from unigym.robots.base import RobotProfile
-from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
+from unigym.runtime.actions import (
+    OrderedActionGroup,
+    OrderedActionSpec,
+    PolicyBinding,
+    resolve_control_dt,
+)
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
@@ -296,6 +301,59 @@ def test_validate_action_coverage_rejects_incomplete_or_conflicting(kind):
         validate_action_coverage(arts, {}, runtimes)
 
 
+def test_build_control_runtimes_falls_back_to_the_adapter_control_dt():
+    """A binding that declares no period mirrors the explicit adapter fallback."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    profile = _profile({"body": ("a",)}, {"a": 0.0})
+    group = _group(joints=("a",), role="body")
+
+    runtime = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (_binding(groups=(("arm", "body"),)),),
+        (arm,),
+        {"arm": profile},
+        _plans(group, arm),
+        default_control_dt=0.05,
+    )[0]
+
+    assert runtime.control_dt == 0.05
+
+
+def test_build_control_runtimes_binding_control_dt_wins_over_the_fallback():
+    """The policy binding's period is authoritative over the adapter fallback."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    profile = _profile({"body": ("a",)}, {"a": 0.0})
+    group = _group(joints=("a",), role="body")
+
+    runtime = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (_binding(groups=(("arm", "body"),), control_dt=0.1),),
+        (arm,),
+        {"arm": profile},
+        _plans(group, arm),
+        default_control_dt=0.05,
+    )[0]
+
+    assert runtime.control_dt == 0.1
+
+
+def test_validate_action_coverage_rejects_an_undriven_profile_articulation():
+    """An omitted profile-backed articulation cannot build silently unactuated."""
+    arm = ArticulationSpec(name="arm")
+    profile = _profile({"body": ("a", "b")}, {"a": 0.0, "b": 0.0})
+
+    with pytest.raises(ControlError, match="declares no action group"):
+        validate_action_coverage((arm,), {"arm": profile}, ())
+
+
+def test_validate_action_coverage_allows_a_fully_passive_profile_articulation():
+    """A zero-action articulation is legal when every actuated joint is passive."""
+    arm = ArticulationSpec(name="arm", passive_joints=("a", "b"))
+    profile = _profile({"body": ("a", "b")}, {"a": 0.0, "b": 0.0})
+
+    validate_action_coverage((arm,), {"arm": profile}, ())
+
+
 def test_validate_policy_bindings_rejects_unknown_group_reference():
     """A binding may only reference declared action groups."""
     group = _group()
@@ -325,6 +383,33 @@ def test_validate_policy_bindings_requires_every_group_owned():
 
     with pytest.raises(ControlError, match="not owned by any policy"):
         validate_policy_bindings((first, second), (_binding(groups=(("arm", "body"),)),))
+
+
+def test_resolve_control_dt_prefers_the_binding_over_the_adapter():
+    """The binding period is authoritative; the adapter value is the fallback."""
+    binding = PolicyBinding("manual", (("arm", "body"),), control_dt=0.1)
+
+    implicit = PolicyBinding("manual", (("arm", "body"),))
+
+    assert resolve_control_dt((binding,), "manual", 0.02) == 0.1
+    assert resolve_control_dt((implicit,), "manual", 0.02) == 0.02
+
+
+def test_resolve_control_dt_rejects_conflicting_binding_periods():
+    """One adapter has one clock; disagreeing bindings fail loud."""
+    policies = (
+        PolicyBinding("manual", (("arm", "body"),), control_dt=0.1),
+        PolicyBinding("manual", (("arm", "hand"),), control_dt=0.05),
+    )
+
+    with pytest.raises(ValueError, match="conflicting control_dt"):
+        resolve_control_dt(policies, "manual", 0.02)
+
+
+def test_resolve_control_dt_requires_an_explicit_period():
+    """Neither a binding nor the adapter declaring a period is an error."""
+    with pytest.raises(ValueError, match="must be explicit"):
+        resolve_control_dt((PolicyBinding("manual", (("arm", "body"),)),), "manual", None)
 
 
 def test_go1_go2_same_joint_names_share_one_adapter():

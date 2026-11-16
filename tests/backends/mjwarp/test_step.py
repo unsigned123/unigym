@@ -12,7 +12,7 @@ pytestmark = pytest.mark.sim
 
 
 def _action(env, values):
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
     return (NamedAction(control.articulation, control.action_face, tensor, names, control.target),)
@@ -20,7 +20,7 @@ def _action(env, values):
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
     """One named-position tick moves the joints and honors the obs/extra contract."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
 
     obs, extra = tiny_env.step(_action(tiny_env, [[0.3, -0.2]]))
 
@@ -127,7 +127,7 @@ def test_step_rejects_an_unknown_action_face(tiny_env, joint_names):
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
 def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_env, kind):
     """A mismatched NamedAction.kind is rejected against the control's target."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
@@ -253,7 +253,7 @@ def test_direct_torque_accepts_a_unit_gain_general_actuator(tiny_env_factory, ti
 def test_settle_feeds_a_neutral_target_to_direct_torque(tiny_env_factory):
     """Settle must not command torque=q0: a direct torque law settles on zero."""
     env = tiny_env_factory(drive="torque", target="torque", law="direct_torque", gains={})
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     control.q0 = control.q0 + 5.0
 
     env._settle_substeps(1)
@@ -271,7 +271,7 @@ def test_settle_feeds_a_neutral_target_to_direct_velocity(tiny_env_factory, tiny
         law="direct_velocity",
         gains={},
     )
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     control.q0 = control.q0 + 5.0
 
     env._settle_substeps(1)
@@ -283,7 +283,7 @@ def test_settle_feeds_a_neutral_target_to_direct_velocity(tiny_env_factory, tiny
 def test_settle_keeps_the_q0_goal_for_position_drives(tiny_env_factory, monkeypatch):
     """Settle still feeds q0 to position laws (the unchanged reset semantics)."""
     env = tiny_env_factory()
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     control.q0 = control.q0 + 0.5
     seen = []
     actuator = env._actuators[0]
@@ -364,7 +364,7 @@ def test_step_rejects_an_action_that_does_not_match_the_control_joint_set(
     tiny_env, joint_names, fragment
 ):
     """An action's joint columns must address exactly the control's joints."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction(
         control.articulation,
         control.action_face,

@@ -14,16 +14,16 @@ from unigym.runtime.controllers import ControlRuntime
 
 
 def _action(env, values, joint_names=None):
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     names = tuple(control.joint_names if joint_names is None else joint_names)
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(env.num_envs, len(names))
     return (NamedAction(control.articulation, control.action_face, tensor, names, control.target),)
 
 
 def _two_dog_env():
-    """Two articulation-scoped controls with identical joint names."""
+    """Two articulation-scoped controls sharing one group name (``legs``)."""
     controls = {
-        name: ControlRuntime(
+        (name, "legs"): ControlRuntime(
             name="legs",
             action_face="legs",
             adapter="dog_policy",
@@ -38,7 +38,7 @@ def _two_dog_env():
     return SimpleNamespace(
         num_envs=1,
         controls=controls,
-        _control_order=[controls["go1"], controls["go2"]],
+        _control_order=[controls[("go1", "legs")], controls[("go2", "legs")]],
         _backend_label="dog test",
     )
 
@@ -100,7 +100,7 @@ def test_two_articulations_with_identical_joint_names_route_by_identity():
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
     """One named-position tick moves the joints and honors the obs/extra contract."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     action = _action(tiny_env, [[0.3, -0.2]])
 
     obs, extra = tiny_env.step(action)
@@ -132,7 +132,7 @@ def test_step_rejects_unknown_face_with_nonmatching_joints(tiny_env):
 
 def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
     """An unknown group is rejected even when its joints exactly match a control."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
@@ -152,7 +152,7 @@ def test_step_rejects_unknown_face_even_when_joints_match_a_control(tiny_env):
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
 def test_step_rejects_an_action_kind_that_differs_from_the_control_target(tiny_env, kind):
     """A mismatched NamedAction.kind is rejected against the control's target."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     entry = NamedAction.zeros(
         tiny_env.num_envs,
         control.articulation,
@@ -323,7 +323,7 @@ def test_direct_velocity_requires_the_affine_velocity_servo_law(
 def test_settle_feeds_neutral_targets_to_direct_drive_laws(tiny_env_factory):
     """Settle must not command torque=q0: a direct torque law settles on zero."""
     env = tiny_env_factory(drive="torque", target="torque", law="direct_torque", gains={})
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     control.q0 = control.q0 + 5.0
 
     env._settle_substeps(1)
@@ -336,7 +336,7 @@ def test_settle_feeds_neutral_targets_to_direct_drive_laws(tiny_env_factory):
 def test_settle_keeps_the_q0_goal_for_position_drives(tiny_env_factory, monkeypatch):
     """Settle still feeds q0 to position laws (the unchanged reset semantics)."""
     env = tiny_env_factory()
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     control.q0 = control.q0 + 0.5
     seen = []
     actuator = env._actuators[0]
@@ -395,7 +395,7 @@ def test_direct_env_rejects_removed_gain_env_params(tiny_env_factory, params):
 
 def test_step_rejects_a_missing_control_joint(tiny_env):
     """A required control whose joint is left unaddressed fails fast."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     action = (
         NamedAction(
             control.articulation,
@@ -411,7 +411,7 @@ def test_step_rejects_a_missing_control_joint(tiny_env):
 
 def test_step_rejects_a_joint_name_the_control_does_not_own(tiny_env):
     """An action column naming a non-control joint fails fast."""
-    control = tiny_env.controls["tiny"]
+    control = tiny_env.controls[("tiny", "tiny")]
     action = (
         NamedAction(
             control.articulation,

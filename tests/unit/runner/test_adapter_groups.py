@@ -59,7 +59,7 @@ def test_body_role_selects_the_body_group_not_the_name():
     """Body selection uses the explicit role, not articulation-name equality."""
     body = _runtime("legs", "body")
     aux = _runtime("arm", "aux")
-    env = SimpleNamespace(controls={"legs": body, "arm": aux})
+    env = SimpleNamespace(controls={("arm", "legs"): body, ("arm", "arm"): aux})
 
     assert _body_controls(env) == [body]
 

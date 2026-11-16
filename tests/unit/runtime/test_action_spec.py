@@ -524,7 +524,7 @@ def test_group_from_mapping_rejects_unknown_keys():
 
 
 def test_group_from_mapping_rejects_joint_set_selector():
-    """joint_set is resolved outside this parser and is not an accepted key."""
+    """joint_set is an actuation selector, never an action-surface key."""
     entry = _group_mapping()
     entry["joint_set"] = "g1_body"
 

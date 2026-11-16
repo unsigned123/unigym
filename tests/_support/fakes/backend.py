@@ -73,8 +73,8 @@ class FakeBackend(EnvBackend):
                 foot_bodies=(),
             )
         }
-        self.controls: dict[str, ControlRuntime] = {
-            CONTROL_NAME: ControlRuntime(
+        self.controls: dict[tuple[str, str], ControlRuntime] = {
+            (ARTICULATION_NAME, CONTROL_NAME): ControlRuntime(
                 name=CONTROL_NAME,
                 action_face=CONTROL_NAME,
                 adapter="manual",
@@ -87,7 +87,7 @@ class FakeBackend(EnvBackend):
                 role="body",
             )
         }
-        self._body_control = self.controls[CONTROL_NAME]
+        self._body_control = self.controls[(ARTICULATION_NAME, CONTROL_NAME)]
         joint_count = len(self._body_control.joint_names)
 
         self.perm_il2pol = torch.arange(joint_count, dtype=torch.int64)

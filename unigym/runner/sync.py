@@ -28,7 +28,7 @@ from collections.abc import Callable, Sequence
 import torch
 
 from unigym.runner.base import StepResult
-from unigym.runtime.actions import LEGAL_ACTION_KINDS, NamedAction
+from unigym.runtime.actions import LEGAL_ACTION_KINDS, NamedAction, resolve_control_dt
 from unigym.runtime.bridge import RewindBoundary
 from unigym.terminations import TerminationState
 
@@ -164,6 +164,24 @@ def _all_adapter_groups(instance):
     return owned or None
 
 
+def _instance_control_dt(instance) -> float | None:
+    """The effective policy period of a live instance (binding beats adapter).
+
+    The run's ``policies`` bindings are the timing authority; the adapter's
+    own ``control_dt`` is the explicit fallback when no binding of that
+    adapter declares one.  ``None`` means neither source is available (test
+    doubles), not a silent default.
+    """
+    spec = getattr(instance, "spec", None)
+    adapter = getattr(instance, "adapter", None)
+    fallback = getattr(adapter, "control_dt", None)
+    policies = tuple(getattr(spec, "policies", ()) or ())
+    name = getattr(adapter, "_unigym_name", None) or getattr(spec, "adapter_name", None)
+    if not policies or not name:
+        return None if fallback is None else float(fallback)
+    return resolve_control_dt(policies, str(name), fallback)
+
+
 def _joint_limits_by_articulation(env):
     """``{articulation: (lower, upper)}`` for joint-limit terminations.
 
@@ -214,6 +232,12 @@ class SyncRunner:
             leaves the terminal state in place until the caller resets.
             Default True keeps the three collect/benchmark/both modes
             bit-identical.
+        control_dt: the effective policy period (s) used to advance the
+            command clock.  When set it is authoritative over
+            ``adapter.control_dt``; ``None`` falls back to the adapter's own
+            value (and a run with a sampler and no period fails loud).  The
+            run's ``policies`` bindings supply it through
+            :func:`unigym.runtime.actions.resolve_control_dt`.
 
     Rewind seam (Round B B1): ``_tick`` is the
     loop counter as INSTANCE state.  The rewind controller sets it back to
@@ -261,6 +285,7 @@ class SyncRunner:
             replay=instance.replay,
             auto_reset=auto_reset,
             adapter_groups=_adapter_groups(instance),
+            control_dt=_instance_control_dt(instance),
         )
 
     def __init__(
@@ -277,6 +302,7 @@ class SyncRunner:
         replay=None,
         auto_reset: bool = True,
         adapter_groups=None,
+        control_dt: float | None = None,
     ):
         self.cfg = cfg
         self.profile = profile
@@ -290,6 +316,8 @@ class SyncRunner:
         self.replay = replay
         self.auto_reset = bool(auto_reset)
         self.adapter_name = getattr(adapter, "_unigym_name", None) or type(adapter).__name__
+        resolved_dt = control_dt if control_dt is not None else getattr(adapter, "control_dt", None)
+        self.control_dt = None if resolved_dt is None else float(resolved_dt)
         self.controls = dict(getattr(env, "controls", None) or {})
         # v104.3: the build-time policies partition names exactly the
         # control groups this adapter owns, normalized to their
@@ -410,7 +438,7 @@ class SyncRunner:
             self._start()
         adapter, sampler, env = self.adapter, self.sampler, self.env
         device = env.device
-        policy_dt = adapter.control_dt
+        policy_dt = self.control_dt
         generates_command = bool(getattr(adapter, "generates_command", False))
         cmd = self._cmd
         obs_frame = self._obs_frame
@@ -446,6 +474,12 @@ class SyncRunner:
         obs, extra = env.step(targets, raw_action=raw, cmd=cmd)
         # 5) command resample (self-commanding adapter: cmd stays None)
         if sampler is not None:
+            if policy_dt is None:
+                raise RuntimeError(
+                    f"adapter {self.adapter_name!r} declares no control_dt and no "
+                    f"policy binding sets one; the command clock needs an "
+                    f"explicit policy period"
+                )
             cmd = sampler.update(policy_dt, cmd)
         # 6) obs frame (embeds this step's action, rolling history)
         obs_frame = adapter.compute_obs(env.obs_cache, cmd, env)

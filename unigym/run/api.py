@@ -24,7 +24,8 @@ The three introspection levels are deliberately separate surfaces:
 * ``run.model`` -- the frozen :class:`~unigym.model.set.ModelSet`: one
   backend-neutral ``ModelIR`` per articulation plus the whole-scene
   ``merged`` IR (``None`` when the backend cannot merge losslessly);
-* ``run.controls`` -- the neutral ``{group: ControlRuntime}`` view;
+* ``run.controls`` -- the neutral ``{(articulation, name): ControlRuntime}``
+  view;
 * ``run.articulations`` -- the neutral per-articulation views derived from
   the live runtime (never a duplicated ``ModelIR.meta`` list);
 * ``run.cameras`` -- the DECLARED :class:`CameraSet`
@@ -1013,8 +1014,12 @@ class Run:
         return self._spec
 
     @property
-    def controls(self) -> dict[str, ControlRuntime]:
-        """The neutral control runtime views (``{group: ControlRuntime}``)."""
+    def controls(self) -> dict[tuple[str, str], ControlRuntime]:
+        """The neutral control runtime views by ``(articulation, name)``.
+
+        A bare group name is never a key: two articulations may both declare
+        ``legs``, and that pair is their authoritative identity.
+        """
         return dict(self.build().env.controls)
 
     @property

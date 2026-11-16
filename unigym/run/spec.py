@@ -363,6 +363,16 @@ def _normalize_action_authoring(
         validate_policy_bindings(action_spec.groups, policies)
     except ControlError as exc:
         raise ConfigError(f"{source}: {exc}") from exc
+    declared_adapter = _declared_adapter_name(cfg)
+    if declared_adapter is not None:
+        bound = sorted({binding.adapter for binding in policies})
+        if declared_adapter not in bound:
+            raise ConfigError(
+                f"{source}: adapter name {declared_adapter!r} owns no policy "
+                f"binding; policies name {bound} | hint: the single-adapter "
+                f"contract requires `policies[*].adapter` to include "
+                f"`adapter.name`"
+            )
     return action_spec, tuple(policies)
 
 

@@ -41,7 +41,6 @@ from unigym.runtime.controls import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
-    from unigym.adapters.base import Adapter
     from unigym.env.backends.base import EnvBackend
     from unigym.env.obs_catalog import ObsCatalog
     from unigym.robots.base import RobotProfile
@@ -53,6 +52,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
 
 __all__ = [
     "ArticulationRuntime",
+    "ControlKey",
     "ControlRuntime",
     "DRIVE_STRATEGIES",
     "DriveStrategy",
@@ -62,7 +62,8 @@ __all__ = [
     "articulation_facts",
     "build_control_plan",
     "build_control_runtimes",
-    "control_of",
+    "control_key",
+    "controls_by_key",
     "drive_for_target_laws",
     "single_articulation_runtime",
     "strategy_for_drive",
@@ -72,6 +73,34 @@ __all__ = [
 
 #: legal explicit body/aux role values on a resolved control row
 LEGAL_CONTROL_ROLES = ("body", "aux")
+
+#: The authoritative control identity: ``(articulation, control name)``.
+ControlKey = tuple[str, str]
+
+
+def control_key(control: ControlRuntime) -> ControlKey:
+    """The control's authoritative table identity ``(articulation, name)``.
+
+    Two articulations may legitimately declare the same group name (e.g.
+    ``go1/legs`` and ``go2/legs``), so a bare name is never an identity.
+    """
+    return (str(control.articulation), str(control.name))
+
+
+def controls_by_key(
+    controls: Iterable[ControlRuntime],
+) -> dict[ControlKey, ControlRuntime]:
+    """Index control runtimes by :func:`control_key` (duplicates fail loud)."""
+    table: dict[ControlKey, ControlRuntime] = {}
+    for control in controls:
+        key = control_key(control)
+        if key in table:
+            raise ControlError(
+                f"control identity {key!r} is declared more than once; every "
+                f"(articulation, name) pair must be unique"
+            )
+        table[key] = control
+    return table
 
 
 @dataclass(frozen=True)
@@ -228,9 +257,10 @@ class ControlRuntime:
     """One explicit drive face over an articulation (§3.3).
 
     Attributes:
-        name: the control name (the ``env.controls`` key); with
-            :attr:`articulation` it is the authoritative control identity.
-        action_face: legacy action-group identity within the articulation
+        name: the control name within its articulation; with
+            :attr:`articulation` it is the authoritative control identity
+            (``env.controls`` is keyed by that ``(articulation, name)`` pair).
+        action_face: action-group identity within the articulation
             (kept until Stage A4); it always equals ``name`` today.
         role: explicit body/aux selection marker (``body`` | ``aux``),
             copied from the owning :class:`OrderedActionGroup`.
@@ -241,8 +271,10 @@ class ControlRuntime:
         drive: one of :data:`unigym.runtime.controls.CONTROL_DRIVES`, derived
             from the action target plus the resolved actuation law.
         target: the explicit target kind (must match ``drive``).
-        control_dt: control period (s) or ``None`` (derived from the owning
-            policy binding; not action authoring).
+        control_dt: control period (s) or ``None``.  A derived MIRROR of the
+            owning policy binding's ``control_dt`` (the adapter fallback when
+            the binding omits it); the binding, never this field, is the
+            timing authority.
         command: optional execution parameters / backend hints.
         strategy: the neutral :class:`DriveStrategy` descriptor.
         addresses: backend-specific addressing/strategy state.
@@ -514,14 +546,31 @@ class ResolvedControlPlan:
     def __len__(self) -> int:
         return len(self.controls)
 
-    def control(self, name: str) -> ResolvedControl:
-        """One resolved control by name (fail-fast)."""
-        for control in self.controls:
-            if control.name == name:
-                return control
+    def control(self, name: str, articulation: str | None = None) -> ResolvedControl:
+        """One resolved control by name (+ optional articulation).
+
+        A bare name is only unambiguous when exactly one declared control
+        carries it; two articulations may share a group name, so a multi-match
+        bare lookup fails loud instead of returning the first row.
+        """
+        matches = [
+            control
+            for control in self.controls
+            if control.name == name
+            and (articulation is None or control.articulation == articulation)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise KeyError(
+                f"resolved plan control name {name!r} is ambiguous; pass "
+                f"articulation= (declared identities: "
+                f"{[(c.articulation, c.name) for c in matches]})"
+            )
         raise KeyError(
-            f"resolved plan has no control {name!r}; declared: "
-            f"{[c.name for c in self.controls]}"
+            f"resolved plan has no control {name!r}"
+            f"{'' if articulation is None else f' of articulation {articulation!r}'}; "
+            f"declared: {[(c.articulation, c.name) for c in self.controls]}"
         )
 
     def for_articulation(self, articulation: str) -> tuple[ResolvedControl, ...]:
@@ -620,7 +669,7 @@ def validate_action_coverage(
 ) -> None:
     """Validate the resolved control coverage of every articulation (§4).
 
-    For each articulation with declared action groups:
+    For EVERY declared articulation (including ones with no action group):
 
     * ``actuated`` = union of the profile ``joint_sets`` (profile-backed)
       or ``ArticulationSpec.joints`` (profile-less);
@@ -629,6 +678,10 @@ def validate_action_coverage(
     * every action group of one articulation must be disjoint;
     * ``driven`` and ``passive`` must be disjoint;
     * ``driven | passive`` must equal ``actuated``.
+
+    An articulation with zero action groups is legal only when every actuated
+    joint is listed in ``passive_joints``; an omitted profile-backed
+    articulation therefore fails instead of building silently unactuated.
 
     Raises:
         ControlError: with the articulation name and the missing / overlap /
@@ -658,12 +711,12 @@ def validate_action_coverage(
             )
         owned.extend(bare)
 
-    for name, owned in driven.items():
-        art = arts[name]
+    for art in arts.values():
+        name = art.name
         profile = profiles.get(name)
         actuated = set(_actuated_joints(art, profile))
         passive = set(getattr(art, "passive_joints", ()) or ())
-        driven_set = set(owned)
+        driven_set = set(driven.get(name, ()))
         conflict = sorted(driven_set & passive)
         if conflict:
             raise ControlError(
@@ -677,10 +730,18 @@ def validate_action_coverage(
         covered = driven_set | passive
         missing = sorted(actuated - covered)
         if missing:
+            suffix = (
+                ""
+                if driven_set
+                else (
+                    f"; articulation {name!r} declares no action group, so "
+                    f"list them in `passive_joints` or bind an action group"
+                )
+            )
             raise ControlError(
                 f"articulation {name!r}: actuated joints {missing} are "
                 f"neither driven by an action group nor listed in "
-                f"passive_joints; declare the drive explicitly"
+                f"passive_joints; declare the drive explicitly{suffix}"
             )
         unknown = sorted(covered - actuated)
         if unknown:
@@ -697,14 +758,18 @@ def build_control_runtimes(
     articulations: Sequence[ArticulationSpec] | None,
     profiles: Mapping[str, RobotProfile] | None,
     actuation_plans: Mapping[str, Sequence[ResolvedActuationGroup]],
+    *,
+    default_control_dt: float | None = None,
 ) -> tuple[ControlRuntime, ...]:
     """Derive neutral :class:`ControlRuntime` rows for one action spec.
 
     Each :class:`OrderedActionGroup` contributes one row; its identity source
-    is ``(articulation, name)``.  The adapter and ``control_dt`` come from the
-    owning :class:`PolicyBinding`, the drive is derived from the group target
-    plus the resolved actuation law, and ``q0`` comes from joint/profile
-    defaults.  There is no face-name inference and no implicit extra group.
+    is ``(articulation, name)``.  The adapter comes from the owning
+    :class:`PolicyBinding`; the drive is derived from the group target plus
+    the resolved actuation law, and ``q0`` comes from joint/profile defaults.
+    ``control_dt`` mirrors the binding's declared period, falling back to
+    ``default_control_dt`` (the adapter's period) when the binding omits it.
+    There is no face-name inference and no implicit extra group.
 
     Args:
         action_spec: the run's ordered action groups (``RunSpec.action_spec``).
@@ -714,6 +779,8 @@ def build_control_runtimes(
             (robot) articulations.
         actuation_plans: resolved actuation groups per articulation; their
             laws make the target -> drive derivation explicit.
+        default_control_dt: fallback period (the adapter ``control_dt``) for
+            bindings that declare none.
 
     Returns:
         The control runtimes in action-spec declaration order.
@@ -727,76 +794,23 @@ def build_control_runtimes(
         for identity in binding.groups:
             owners[identity] = binding
     laws = _law_by_joint(tables)
-    out = tuple(
-        _declared_control_runtime(
-            group,
-            owners[(group.articulation, group.name)].adapter,
-            owners[(group.articulation, group.name)].control_dt,
-            arts,
-            profiles,
-            laws,
+    rows: list[ControlRuntime] = []
+    for group in action_spec.groups:
+        binding = owners[(group.articulation, group.name)]
+        control_dt = binding.control_dt if binding.control_dt is not None else default_control_dt
+        rows.append(
+            _declared_control_runtime(
+                group,
+                binding.adapter,
+                control_dt,
+                arts,
+                profiles,
+                laws,
+            )
         )
-        for group in action_spec.groups
-    )
+    out = tuple(rows)
     validate_action_coverage(arts.values(), profiles, out)
     return out
-
-
-def _iter_controls(
-    controls: Mapping[str, ControlRuntime] | Sequence[ControlRuntime] | None,
-) -> tuple[ControlRuntime, ...]:
-    if controls is None:
-        return ()
-    if isinstance(controls, Mapping):
-        return tuple(controls.values())
-    return tuple(controls)
-
-
-def control_of(env: EnvBackend, adapter: Adapter) -> ControlRuntime:
-    """Resolve the BODY control group an adapter drives on *env*.
-
-    This is a name-partition lookup, not face/joint inference: the adapter
-    carries the registry name it was built under (``_unigym_name``) and the
-    run's build-time policy bindings name the groups it owns.  Among those
-    groups a declared (non-prop) group with an explicit ``role == "body"`` is
-    the body group; a single declared group is returned directly.
-
-    Raises:
-        ControlError: no adapter name is available, or the ownership
-            partition does not identify exactly one body group.
-    """
-    name = getattr(adapter, "_unigym_name", None) or getattr(adapter, "name", None)
-    runtimes = _iter_controls(getattr(env, "controls", None))
-    if not runtimes:
-        raise ControlError("env exposes no controls")
-    if not name:
-        # test doubles / direct construction: a single declared control is a
-        # cardinality fact, not a guess (multi runs always carry a name).
-        declared = [c for c in runtimes if not c.prop]
-        if len(declared) == 1:
-            return declared[0]
-        raise ControlError(
-            f"adapter {type(adapter).__name__} carries no registry name "
-            f"(_unigym_name) and the run has {len(declared)} declared "
-            f"control groups; cannot resolve its control group without a "
-            f"name"
-        )
-    declared = [c for c in runtimes if c.adapter == name and not c.prop]
-    if not declared:
-        raise ControlError(
-            f"adapter {name!r} owns no declared control group; controls: "
-            f"{[(c.name, c.adapter) for c in runtimes]}"
-        )
-    if len(declared) == 1:
-        return declared[0]
-    body = [c for c in declared if c.role == "body"]
-    if len(body) == 1:
-        return body[0]
-    raise ControlError(
-        f"adapter {name!r} owns several control groups and none is a "
-        f"unique body group: {[c.name for c in declared]}; pass the group "
-        f"explicitly instead of guessing"
-    )
 
 
 def single_articulation_runtime(env: EnvBackend) -> ArticulationRuntime:

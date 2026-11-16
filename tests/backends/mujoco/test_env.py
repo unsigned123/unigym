@@ -6,12 +6,13 @@ import pytest
 import torch
 
 from tests._support.fakes.closing import FailingClose, RecordingClose
+from unigym.adapters.base import Adapter
 from unigym.env.backends.base import assert_backend_contract
 from unigym.runtime.actions import NamedAction
 
 
 def _zero_action(env):
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     return (
         NamedAction.zeros(
             env.num_envs,
@@ -67,7 +68,7 @@ def test_env_loads_only_the_tmp_mjcf_without_external_assets(tiny_mjcf, tiny_env
 def test_policy_joint_pos_limits_follow_the_control_order(tiny_env):
     """Limits are (N, J) float32 bounds in the control's joint order."""
     lower, upper = tiny_env.policy_joint_pos_limits
-    assert tiny_env.controls["tiny"].joint_names == ("elbow", "shoulder")
+    assert tiny_env.controls[("tiny", "tiny")].joint_names == ("elbow", "shoulder")
 
     for bound in (lower, upper):
         assert tuple(bound.shape) == (tiny_env.num_envs, 2)
@@ -163,7 +164,7 @@ _BASE_XML = """<?xml version="1.0"?>
 """
 
 
-def _two_articulation_env(tmp_path, tiny_mjcf):
+def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None, names=("left", "right")):
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
@@ -185,7 +186,8 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
     profiles = {}
     groups = []
     controls = []
-    for name, sign in (("left", -1.0), ("right", 1.0)):
+    for index, name in enumerate(names):
+        sign = -1.0 if index == 0 else 1.0
         robot = tmp_path / f"tiny_arm_{name}.xml"
         robot.write_text(
             source.replace('name="base_geom"', f'name="{name}_base_geom"')
@@ -233,7 +235,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
         )
         groups.append(
             OrderedActionGroup(
-                name=name,
+                name=name if group_name is None else group_name,
                 articulation=name,
                 joints=tuple(joints),
                 target="position",
@@ -256,7 +258,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
         plans,
     )
     env = MujocoEnv(
-        robot_profile=profiles["left"],
+        robot_profile=profiles[names[0]],
         adapter=ManualAdapter(),
         num_envs=1,
         episode_length_s=100.0,
@@ -293,7 +295,124 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
 
         assert extra["articulation/left/joint_pos"][0, 0] > 0.0
         assert extra["articulation/right/joint_pos"][0, 0] < 0.0
-        assert env.controls["left"].joint_names == ("elbow", "shoulder")
-        assert env.controls["right"].joint_names == ("elbow", "shoulder")
+        assert env.controls[("left", "left")].joint_names == ("elbow", "shoulder")
+        assert env.controls[("right", "right")].joint_names == ("elbow", "shoulder")
+    finally:
+        env.close()
+
+
+def _legs_action(articulation: str, target: float) -> NamedAction:
+    """One body-group action over the tiny arm's joints (``legs``)."""
+    values = torch.tensor([[target, target]], dtype=torch.float32)
+    return NamedAction(articulation, "legs", values, ("elbow", "shoulder"), "position")
+
+
+def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
+    """Duplicate group names are disambiguated by articulation across two steps."""
+    env = _two_articulation_env(tmp_path, tiny_mjcf, group_name="legs", names=("go1", "go2"))
+    try:
+        assert set(env.controls) == {("go1", "legs"), ("go2", "legs")}
+
+        _, first = env.step((_legs_action("go1", 0.4), _legs_action("go2", -0.4)))
+        assert first["articulation/go1/joint_pos"][0, 0] > first["articulation/go2/joint_pos"][0, 0]
+
+        _, second = env.step((_legs_action("go1", -0.4), _legs_action("go2", 0.4)))
+        assert (
+            second["articulation/go2/joint_pos"][0, 0] > second["articulation/go1/joint_pos"][0, 0]
+        )
+    finally:
+        env.close()
+
+
+class _TwoDogAdapter(Adapter):
+    """A real composite adapter emitting both ``legs`` groups every tick."""
+
+    generates_command = False
+    _unigym_name = "two_dog"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_obs_requests(self):
+        """No raw observation requests (the runner test only routes actions)."""
+        return []
+
+    @property
+    def obs_dim(self) -> int:
+        return 1
+
+    @property
+    def control_dt(self) -> float:
+        return 0.02
+
+    def compute_obs(self, obs_cache, cmd, env):
+        """Return a finite one-column frame for the runner's alive check."""
+        return torch.zeros(env.num_envs, 1)
+
+    def act(self, obs):
+        """Return the tick index (the composite postprocess reads it)."""
+        return torch.tensor([float(self.calls)])
+
+    def postprocess_action(self, raw):
+        """Return both articulation-scoped NamedActions (swapping the sign)."""
+        step = int(float(raw.reshape(-1)[0]))
+        self.calls += 1
+        target = 0.4 if step == 0 else -0.4
+        return (
+            _legs_action("go1", target),
+            _legs_action("go2", -target),
+        )
+
+    def on_reset(self, env_ids) -> None:
+        """No history to clear."""
+
+
+class _CaptureSink:
+    """Collect the per-tick extras the composite runner steps."""
+
+    def __init__(self) -> None:
+        self.extras = []
+
+    def on_step(self, t, bundle) -> None:
+        self.extras.append(bundle["extra"])
+
+    def on_episode_end(self, env_ids, bundle) -> None:
+        """No episode bookkeeping."""
+
+    def on_step_end(self, t, bundle) -> None:
+        """No metrics bookkeeping."""
+
+    def on_run_end(self) -> dict:
+        return {"steps": len(self.extras)}
+
+
+def test_composite_adapter_sync_runner_routes_both_legs_groups(tmp_path, tiny_mjcf):
+    """One adapter owns ``(go1, legs)`` + ``(go2, legs)``; the runner steps both."""
+    from unigym.runner.sync import SyncRunner
+    from unigym.terminations import TerminationGroup
+
+    env = _two_articulation_env(tmp_path, tiny_mjcf, group_name="legs", names=("go1", "go2"))
+    adapter = _TwoDogAdapter()
+    env.adapter_groups = {"two_dog": (("go1", "legs"), ("go2", "legs"))}
+    sink = _CaptureSink()
+    runner = SyncRunner(
+        cfg={"collect": {"steps": 2}},
+        profile=None,
+        adapter=adapter,
+        sampler=None,
+        term_group=TerminationGroup(),
+        env=env,
+        sink=sink,
+        adapter_groups=(("go1", "legs"), ("go2", "legs")),
+    )
+    try:
+        assert runner.run() == {"steps": 2}
+        first, second = sink.extras
+        assert first["articulation/go1/joint_pos"][0, 0] > first["articulation/go2/joint_pos"][0, 0]
+        assert (
+            second["articulation/go2/joint_pos"][0, 0] > second["articulation/go1/joint_pos"][0, 0]
+        )
+        assert env.controls[("go1", "legs")].name == "legs"
+        assert env.controls[("go2", "legs")].name == "legs"
     finally:
         env.close()

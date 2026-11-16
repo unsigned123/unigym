@@ -40,8 +40,10 @@ from unigym.env.obs_catalog import ObsCatalog
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
+    control_key,
+    controls_by_key,
 )
-from unigym.runtime.controls import target_for_drive
+from unigym.runtime.controls import ControlError, target_for_drive
 
 __all__ = [
     "build_actuator_seam",
@@ -107,7 +109,7 @@ def _control_addresses(env, control, art):
     index = {n: i for i, n in enumerate(art.joint_names)}
     perm = np.asarray([index[n] for n in names], dtype=np.int64)
     control.addresses["perm_il2pol"] = perm
-    env._mj_bindings[control.name] = MjControlBinding(
+    env._mj_bindings[control_key(control)] = MjControlBinding(
         unigym_joint_names=names,
         backend_joint_names=backend_names,
         jadr=tuple(int(v) for v in jadr),
@@ -254,13 +256,8 @@ def _add_prop_controls(env, controls: dict) -> None:
             # no actuated table: they are NOT control groups (undriven
             # joints live in passive_joints, never a servo face)
             continue
-        if name in controls:
-            raise ValueError(
-                f"{_label(env)}: prop {name!r} control face collides with a "
-                f"declared control group"
-            )
         joints = tuple(str(j) for j in table)
-        controls[name] = ControlRuntime(
+        control = ControlRuntime(
             name=name,
             action_face=name,
             adapter="prop",
@@ -273,6 +270,13 @@ def _add_prop_controls(env, controls: dict) -> None:
             prop=True,
             role="aux",
         )
+        key = control_key(control)
+        if key in controls:
+            raise ValueError(
+                f"{_label(env)}: prop {name!r} control face collides with a "
+                f"declared control group of articulation {control.articulation!r}"
+            )
+        controls[key] = control
 
 
 def _body_control(env, art_name):
@@ -302,7 +306,7 @@ def _bind_articulation_limits(env, art_order, model) -> None:
             art.jadr_pol = np.asarray(body.addresses["jadr"], dtype=np.int64)
             art.jdr_pol = np.asarray(body.addresses["jdr"], dtype=np.int64)
         if body is not None:
-            binding = env._mj_bindings.get(body.name)
+            binding = env._mj_bindings.get(control_key(body))
             names = (
                 list(binding.backend_joint_names) if binding is not None else list(body.joint_names)
             )
@@ -342,9 +346,11 @@ def init_tables(env, model, *, label=None) -> None:
     env.articulations = arts
     env._articulation_order = art_order
 
-    controls = {}
-    for control in tuple(getattr(env, "_planned_controls", ()) or ()):
-        controls[control.name] = control
+    planned = tuple(getattr(env, "_planned_controls", ()) or ())
+    try:
+        controls = controls_by_key(planned)
+    except ControlError as exc:
+        raise ValueError(f"{label}: {exc}") from exc
     # prop actuator bookkeeping stays in the prop backend (asset machinery)
     env._prop_actuators = env.prop_backend.actuated_addresses() if env.prop_backend else {}
     _add_prop_controls(env, controls)
@@ -370,7 +376,7 @@ def init_tables(env, model, *, label=None) -> None:
             )
         _control_addresses(env, control, art)
     env.controls = controls
-    env._control_order = [controls[g.name] for g in (getattr(env, "_planned_controls", ()) or ())]
+    env._control_order = [controls[control_key(control)] for control in planned]
     env._control_order += [c for c in controls.values() if c.prop]
 
     _bind_articulation_limits(env, art_order, model)
@@ -398,8 +404,8 @@ class _ActuatorTargetFeed:
 
     def __call__(self, targets: dict, e: int) -> np.ndarray:
         out = np.zeros(len(self._sources), dtype=np.float64)
-        for index, (control_key, column) in enumerate(self._sources):
-            out[index] = targets[control_key][e, column]
+        for index, (source_key, column) in enumerate(self._sources):
+            out[index] = targets[source_key][e, column]
         return out
 
 

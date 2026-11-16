@@ -87,7 +87,7 @@ def test_reader_and_projection_agree_on_spawn_keys_shapes_and_columns(
         obs = _observe(env, handle)
 
         assert handle.faces == {"body": JOINT_ORDER}
-        assert tuple(env.controls[CONTROL_NAME].joint_names) == JOINT_ORDER
+        assert tuple(env.controls[(ARTICULATION_NAME, CONTROL_NAME)].joint_names) == JOINT_ORDER
         prefix = f"articulation/{ARTICULATION_NAME}"
         for key in PROJECTED_KEYS:
             assert f"{prefix}/{key}" in state, f"backend extra lacks {prefix}/{key}"

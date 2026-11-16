@@ -91,7 +91,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only (stubs; runtime gate below)
         MjArticulationBinding,
         MjControlBinding,
     )
-    from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+    from unigym.runtime.controllers import (
+        ArticulationRuntime,
+        ControlKey,
+        ControlRuntime,
+    )
 else:
     try:  # mujoco is only importable in the host .venv_sim environment
         import mujoco
@@ -328,10 +332,10 @@ class MujocoEnv:
     # Backend-private runtime tables (built by ``init_tables``, not in
     # ``__init__``: declared here so the step/obs faces see the contract).
     articulations: dict[str, ArticulationRuntime]
-    controls: dict[str, ControlRuntime]
+    controls: dict[ControlKey, ControlRuntime]
     _articulation_order: list[ArticulationRuntime]
     _control_order: list[ControlRuntime]
-    _mj_bindings: dict[str, MjControlBinding]
+    _mj_bindings: dict[ControlKey, MjControlBinding]
     _mj_articulation_bindings: dict[str, MjArticulationBinding]
     _act_of_joint: dict[str, int]
     _prop_actuators: dict[str, dict[str, int]]

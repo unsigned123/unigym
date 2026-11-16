@@ -35,10 +35,12 @@ Attributes:
 ``obs_cache: dict``
     Raw quantities the adapter requested via ``adapter.get_obs_requests()``;
     values are ``(N, dim)`` tensors on ``device``, refreshed every step.
-``controls: Mapping[str, ControlRuntime]``
+``controls: Mapping[tuple[str, str], ControlRuntime]``
     The ONLY per-control surface (v104.2): one runtime per explicit drive
-    face (``name`` / ``action_face`` / ``adapter`` / ``articulation`` /
-    ``joint_names`` / ``q0`` / ``drive`` / ``target``).
+    face, keyed by the authoritative ``(articulation, name)`` identity -- a
+    bare group name is NOT a key (two articulations may both declare
+    ``legs``).  Each runtime carries ``name`` / ``action_face`` / ``adapter``
+    / ``articulation`` / ``joint_names`` / ``q0`` / ``drive`` / ``target``.
 ``articulations: Mapping[str, ArticulationRuntime]``
     One runtime per declared articulation (``joint_names`` / ``q0`` /
     ``foot_bodies`` / ``body_sets`` / ``contacts`` / ``spawn`` / addresses).
@@ -271,7 +273,7 @@ class EnvBackend(Protocol):
     num_envs: int
     device: str | torch.device
     obs_cache: dict[str, torch.Tensor]
-    controls: dict[str, ControlRuntime]
+    controls: dict[tuple[str, str], ControlRuntime]
     articulations: dict[str, ArticulationRuntime]
     perm_il2pol: torch.Tensor
     perm_pol2il: torch.Tensor
@@ -442,7 +444,9 @@ def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
     controls = env.controls
     articulations = env.articulations
     if not isinstance(controls, dict) or not controls:
-        raise BackendContractError("controls must be a non-empty {name: ControlRuntime} mapping")
+        raise BackendContractError(
+            "controls must be a non-empty {(articulation, name): ControlRuntime} mapping"
+        )
     if not isinstance(articulations, dict) or not articulations:
         raise BackendContractError(
             "articulations must be a non-empty {name: ArticulationRuntime} " "mapping"
@@ -462,8 +466,12 @@ def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
                 raise BackendContractError(
                     f"control {key!r} lacks the ControlRuntime member " f"{member!r}"
                 )
-        if key != rt.name:
-            raise BackendContractError(f"controls key {key!r} != runtime name {rt.name!r}")
+        expected = (str(rt.articulation), str(rt.name))
+        if key != expected:
+            raise BackendContractError(
+                f"controls key {key!r} != runtime identity {expected!r}; the "
+                f"authoritative key is (articulation, name), never a bare name"
+            )
         if not getattr(rt, "prop", False) and rt.articulation not in articulations:
             raise BackendContractError(
                 f"control {key!r} names unknown articulation " f"{rt.articulation!r}"

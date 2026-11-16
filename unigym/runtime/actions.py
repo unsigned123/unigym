@@ -39,8 +39,8 @@ per-entry joint-name permutation).
 Stage A3a adds the independent :class:`PolicyBinding` declaration plus the
 mapping parsers (:meth:`OrderedActionGroup.from_mapping`,
 :meth:`OrderedActionSpec.from_mapping`, :meth:`PolicyBinding.from_mapping`)
-for the action-authoring surface.  Run/build wiring is deliberately not part
-of this stage.
+for the action-authoring surface; the run layer consumes them at build time
+(control runtimes, adapter partition and :func:`resolve_control_dt`).
 """
 
 from __future__ import annotations
@@ -76,6 +76,7 @@ __all__ = [
     "OrderedActionSpec",
     "PolicyBinding",
     "ResolvedJointTargets",
+    "resolve_control_dt",
 ]
 
 
@@ -226,8 +227,8 @@ class OrderedActionGroup:
         Accepted keys are exactly ``name``, ``articulation``, ``joints``,
         ``target`` and the optional ``role`` (default ``aux``); all but
         ``role`` are required.  ``joints`` must already be an explicit
-        non-empty list/tuple of joint names -- selector keys such as
-        ``joint_set`` are resolved outside this parser (Stage A3b) and are
+        non-empty list/tuple of joint names -- the action surface has no
+        selector keys (``joint_set`` is an *actuation* selector), so they are
         rejected here as unknown keys.  Construction runs the regular
         :class:`OrderedActionGroup` validation.
 
@@ -252,8 +253,8 @@ class OrderedActionGroup:
         if not _is_sequence(raw_joints):
             raise ValueError(
                 "OrderedActionGroup.from_mapping joints must be an explicit "
-                "list/tuple of joint names (selectors such as joint_set are "
-                f"resolved outside this parser), got {type(raw_joints).__name__}"
+                "list/tuple of joint names (the action surface has no "
+                f"joint_set selector), got {type(raw_joints).__name__}"
             )
         joints = tuple(
             _require_text(joint, "OrderedActionGroup.from_mapping joint name")
@@ -640,7 +641,9 @@ class PolicyBinding:
         groups: addressed ``(articulation, group)`` identities, stored as a
             tuple of tuples; order is preserved.  The same group name may
             appear on different articulations, but each identity is unique.
-        control_dt: optional control period in seconds (finite and > 0).
+        control_dt: optional control period in seconds (finite and > 0).  When
+            set it is the timing AUTHORITY over the adapter's own
+            ``control_dt`` (see :func:`resolve_control_dt`).
         agent: optional agent name (non-empty when present).
 
     Construction validates the declaration and normalizes *groups* to a tuple
@@ -695,6 +698,50 @@ class PolicyBinding:
             control_dt=_normalize_control_dt(data.get("control_dt"), "PolicyBinding.control_dt"),
             agent=_optional_text(data.get("agent"), "PolicyBinding.agent"),
         )
+
+
+def resolve_control_dt(
+    policies: Sequence[PolicyBinding],
+    adapter: str,
+    fallback: float | None = None,
+) -> float:
+    """The effective control period of *adapter* (binding wins over adapter).
+
+    The policy bindings are the timing authority: every binding of *adapter*
+    that declares ``control_dt`` must agree, and that value overrides
+    *fallback* (the adapter's own ``control_dt``).  When no binding declares
+    one, *fallback* is used explicitly -- there is no silent default.
+
+    Args:
+        policies: The run's policy bindings.
+        adapter: The adapter name whose period is resolved.
+        fallback: The adapter's declared ``control_dt`` (``None`` when absent).
+
+    Returns:
+        The effective control period in seconds.
+
+    Raises:
+        ValueError: Bindings of one adapter disagree, or neither a binding nor
+            the adapter supplies a period.
+    """
+    declared = {
+        float(binding.control_dt)
+        for binding in policies
+        if str(binding.adapter) == str(adapter) and binding.control_dt is not None
+    }
+    if len(declared) > 1:
+        raise ValueError(
+            f"policies bound to adapter {adapter!r} declare conflicting "
+            f"control_dt values {sorted(declared)}; one adapter has one clock"
+        )
+    if declared:
+        return declared.pop()
+    if fallback is None:
+        raise ValueError(
+            f"adapter {adapter!r} declares no control_dt and no policy binding "
+            f"sets one; the policy clock must be explicit"
+        )
+    return float(fallback)
 
 
 # --------------------------------------------------------------------------- #

@@ -40,11 +40,12 @@ from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
 from unigym.robots import build_robot_profile
 from unigym.robots.base import validate_body_bindings
-from unigym.runtime.actions import OrderedActionSpec
+from unigym.runtime.actions import OrderedActionSpec, resolve_control_dt
 from unigym.runtime.controllers import (
     articulation_facts,
     build_control_plan,
     build_control_runtimes,
+    control_key,
 )
 from unigym.terminations import (
     build_termination_group,
@@ -156,6 +157,7 @@ class _RobotBundle(TypedDict):
     prop_manager: PropManager | None
     adapter: Adapter
     generates_command: bool
+    policy_dt: float
     contact_groups: dict[str, dict[str, tuple[str, ...]]]
     contact_assets: dict[str, str]
 
@@ -321,14 +323,33 @@ def _lighting_json(values: Mapping[str, float]) -> dict[str, JsonValue]:
     return {str(key): float(value) for key, value in values.items()}
 
 
-def _policy_hz_of(adapter: Adapter) -> float | None:
-    """The wall render scheduler's clock.
+def _policy_hz(policy_dt: float | None) -> float | None:
+    """The wall render scheduler's clock (camera_contract §16).
 
-    ``1 / adapter.control_dt`` (camera_contract §16); None when the adapter
-    exposes no positive control period (probe doubles).
+    ``1 / policy_dt`` where ``policy_dt`` is the EFFECTIVE policy period
+    (binding-declared or the adapter fallback); None when no positive period
+    is declared (probe doubles).
     """
-    dt = float(adapter.control_dt or 0.0)
+    dt = float(policy_dt or 0.0)
     return (1.0 / dt) if dt > 0 else None
+
+
+def _effective_policy_dt(spec: RunSpec, adapter: Adapter) -> float:
+    """The run's effective policy period (bindings win over the adapter).
+
+    The single sync adapter owns the tick clock: every ``policies`` binding
+    naming it may declare ``control_dt``, and that value is authoritative over
+    ``adapter.control_dt`` (which is the explicit fallback when the binding
+    omits it).  Conflicting binding values fail loud.
+    """
+    adapter_name = (
+        spec.adapter_name or getattr(adapter, "_unigym_name", None) or type(adapter).__name__
+    )
+    return resolve_control_dt(
+        spec.policies,
+        str(adapter_name),
+        getattr(adapter, "control_dt", None),
+    )
 
 
 def _adapter_self_command_dim(adapter: Adapter) -> int:
@@ -852,6 +873,7 @@ def _build_robot_and_props(
         "prop_manager": prop_manager,
         "adapter": adapter,
         "generates_command": generates_command,
+        "policy_dt": _effective_policy_dt(spec, adapter),
         "contact_groups": contact_groups,
         "contact_assets": contact_assets,
     }
@@ -913,6 +935,7 @@ def _build_sensing(
     contact_groups: Mapping[str, Mapping[str, tuple[str, ...]]],
     contact_assets: Mapping[str, str],
     adapter: Adapter,
+    policy_dt: float,
     prop_manager: PropManager | None,
 ) -> _SensingBundle:
     """Step 2: camera/contact managers + lighting/director/events/recorder."""
@@ -936,7 +959,7 @@ def _build_sensing(
         enable_cameras=spec.enable_cameras,
         refs=[rec_ref] if rec_ref else None,
         backend=backend_label,
-        policy_hz=_policy_hz_of(adapter),
+        policy_hz=_policy_hz(policy_dt),
         num_envs=num_envs,
     )
     if camera_manager is not None:
@@ -1064,6 +1087,7 @@ def _build_env_and_sampler(
     events_cfg: object | None,
     recorder: Recorder,
     episode_length_s: JsonValue,
+    policy_dt: float | None = None,
     controls: Sequence[ControlRuntime] | None = None,
     profiles: Mapping[str, RobotProfile] | None = None,
     robot_realizations: Mapping[str, object] | None = None,
@@ -1146,7 +1170,8 @@ def _build_env_and_sampler(
         else build_sampler(command_section, num_envs=num_envs, device=device)
     )
     command_dim = sampler.dim if sampler is not None else _adapter_self_command_dim(adapter)
-    policy_dt = adapter.control_dt
+    if policy_dt is None:
+        policy_dt = _effective_policy_dt(spec, adapter)
     language_section = _config_dict(cfg.get("language"))
     language_gen = build_generator(language_section)
     lang_interval = _config_int((language_section or {}).get("interval_steps", 1))
@@ -1565,6 +1590,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     adapter = robot["adapter"]
     prop_manager = robot["prop_manager"]
     generates_command = robot["generates_command"]
+    policy_dt = robot["policy_dt"]
     # RunSpec.action_spec/policies are authoritative.  The actuation laws are
     # resolved first (they own the physical drive), then one ControlRuntime is
     # derived per action group from (group + policy binding + actuation law +
@@ -1581,6 +1607,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         spec.articulations,
         profiles,
         actuation_plans,
+        default_control_dt=policy_dt,
     )
     for art_name, plan in actuation_plans.items():
         validate_drive_law_matrix(plan, [c for c in control_runtimes if c.articulation == art_name])
@@ -1596,6 +1623,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         robot["contact_groups"],
         robot["contact_assets"],
         adapter,
+        policy_dt,
         prop_manager,
     )
     built = _build_env_and_sampler(
@@ -1616,6 +1644,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sensing["events_cfg"],
         sensing["recorder"],
         sensing["episode_length_s"],
+        policy_dt=policy_dt,
         controls=control_runtimes,
         profiles=profiles,
         robot_realizations=robot_realizations,
@@ -1630,7 +1659,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         # materialized by the backend as prop control runtimes; the emitting
         # adapter owns them (the config's action_spec cannot name them).
         prop_faces = tuple(
-            (c.articulation, c.name) for c in (env.controls or {}).values() if c.prop
+            control_key(control) for control in (env.controls or {}).values() if control.prop
         )
         if prop_faces:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))

@@ -164,6 +164,7 @@ def test_run_sensing_manager_binds_in_the_constructor(tiny_env_factory, tiny_mjc
         {"tiny": {"all": (ALL_BODIES,)}},
         {"tiny": str(tiny_mjcf)},
         ManualAdapter(),
+        0.02,
         None,
     )
     manager = sensing["contact_manager"]

@@ -10,7 +10,7 @@ Quickstart (no doctest markers on purpose)::
 
     with unigym.Run.from_config("config/simple/simple_pick_scripted_mj.yaml") as run:
         print(run.model.joints.names())      # static IR (no runner needed)
-        print(run.controls[0].name)          # the resolved control runtimes
+        print(next(iter(run.controls.values())).name)  # resolved controls by identity
         result = run.step()                  # builds the live env on demand
         print(result.t, result.obs.keys())
 

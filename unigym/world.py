@@ -63,7 +63,9 @@ from unigym.world_primitives import (
 )
 
 if TYPE_CHECKING:
+    from unigym.actuators.ir import ActuationGroup
     from unigym.packs.runtime import PackRuntime
+    from unigym.robots.base import RobotProfile
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
 
@@ -643,21 +645,29 @@ class World:
         body_sets: Mapping[str, Sequence[str]] | None = None,
         contacts: JsonValue = None,
         passive_joints: Sequence[object] | None = None,
+        actuation: Sequence[ActuationGroup | Mapping[str, JsonValue]] | None = None,
         params: Mapping[str, JsonValue] | None = None,
         adapter: str = "manual",
         drive: str = "position_pd",
-        target: str = "position",
+        target: str | None = None,
     ) -> World:
         """Declare one articulation on this world (emits ``articulations[]``).
 
         The declaration is the neutral shape: an articulation is
-        ``root + model + joints`` (no articulation-level control mode).
-        ``model`` may be a path string or a mapping (``{"mjcf": <path>}``;
-        ``urdf``/``usd`` are accepted by the IR for future backends).  The
-        drive is emitted as one explicit ``action_spec`` group named after the
-        articulation (``role: body``) plus profile-declared extra action sets
-        (``role: aux``); the ``policies`` binding names the adapter that owns
-        them.
+        ``root + model + joints + actuation`` (no articulation-level control
+        mode).  ``model`` may be a path string or a mapping
+        (``{"mjcf": <path>}``; ``urdf``/``usd`` are accepted by the IR for
+        future backends).  The drive is emitted as one explicit ``action_spec``
+        group named after the articulation (``role: body``) plus
+        profile-declared extra action sets (``role: aux``); the ``policies``
+        binding names the adapter that owns them.
+
+        ``actuation`` is the physical ctrl law (the neutral
+        :class:`~unigym.actuators.ir.ActuationGroup` list) and is emitted
+        verbatim on the articulation.  A driven articulation needs it: the run
+        build has no implicit default law.  When actuation is declared the
+        ``drive`` is checked against the resolved laws, so a mismatched drive
+        fails here instead of at the physics seam.
 
         Builder form::
 
@@ -665,6 +675,10 @@ class World:
             world.articulation(
                 "g1",
                 model={"mjcf": ".../g1_29dof_with_hand.xml"},
+                joints={"left_hip_pitch": {}},
+                actuation=[{"name": "legs", "law": "standard_pd",
+                            "joints": ["left_hip_pitch"],
+                            "gains": {"kp": 40.0, "kd": 1.0}}],
                 adapter="manual")
 
         Args:
@@ -681,11 +695,15 @@ class World:
             contacts: Optional contact sensor inventory (``all`` / ``none`` /
                 a group list / a normalized inventory).
             passive_joints: Joints the articulation owns but does not drive.
+            actuation: The articulation's physical drive declarations
+                (``ActuationGroup`` records or their mappings).
             params: Optional backend knobs.
             adapter: The adapter name owning this articulation's action groups.
-            drive: The body drive (default ``position_pd``); validated against
-                ``target``.
-            target: The explicit target kind (must match ``drive``).
+            drive: The body drive (default ``position_pd``); it derives the
+                emitted action ``target`` and is validated against the
+                declared actuation laws when ``actuation`` is given.
+            target: Optional explicit target kind; when omitted it is derived
+                from ``drive`` (an explicit mismatch fails).
 
         Returns:
             This world (builder chaining).
@@ -699,17 +717,22 @@ class World:
                 f"drive as a top-level `action_spec:` group plus a `policies:` "
                 f"binding (adapter/drive/target arguments)"
             )
+        from unigym.actuators.ir import ActuationError, normalize_actuation_groups
         from unigym.runtime.controls import ControlError, target_for_drive
 
         try:
             expected_target = target_for_drive(str(drive))
         except ControlError as exc:
             raise ValueError(f"World.articulation {name!r}: {exc}") from exc
-        if str(target) != expected_target:
+        if target is not None and str(target) != expected_target:
             raise ValueError(
                 f"World.articulation {name!r}: drive {drive!r} requires "
                 f"target {expected_target!r}, got {target!r}"
             )
+        try:
+            actuation_groups = normalize_actuation_groups(actuation)
+        except ActuationError as exc:
+            raise ValueError(f"World.articulation {name!r}: actuation: {exc}") from exc
         entry: dict[str, JsonValue] = {"name": name}
         if model is not None:
             entry["model"] = (
@@ -737,7 +760,6 @@ class World:
             entry["params"] = copy.deepcopy(dict(params))
         if any(existing["name"] == name for existing in self._articulations):
             raise ValueError(f"World.articulation: duplicate articulation name {name!r}")
-        self._articulations.append(entry)
         profile = _world_profile(entry)
         declared = _joint_names_from_declaration(joints) if joints is not None else []
         if not declared and profile is not None:
@@ -748,13 +770,24 @@ class World:
                 f"explicit ordered joints; declare `joints:` or use a "
                 f"registered robot profile with a `body` joint set"
             )
+        if actuation:
+            entry["actuation"] = _actuation_json(actuation_groups)
+            _validate_world_drive(
+                name,
+                str(drive),
+                expected_target,
+                declared,
+                actuation_groups,
+                profile,
+            )
+        self._articulations.append(entry)
         declared_json: list[JsonValue] = [str(joint) for joint in declared]
         groups: list[dict[str, JsonValue]] = [
             {
                 "name": name,
                 "articulation": name,
                 "joints": declared_json,
-                "target": str(target),
+                "target": expected_target,
                 "role": "body",
             }
         ]
@@ -921,6 +954,81 @@ class World:
     def _mark_built(self) -> None:
         """Seal the world after the env compiles (mutations now fail)."""
         self._built = True
+
+
+def _json_number_value(value: float | Mapping[str, float]) -> JsonValue:
+    """One gain/limit value as JSON (scalar or a name-keyed number map)."""
+    if isinstance(value, Mapping):
+        table: dict[str, JsonValue] = {str(key): float(item) for key, item in value.items()}
+        return table
+    return float(value)
+
+
+def _actuation_json(entries: Sequence[ActuationGroup]) -> list[JsonValue]:
+    """Serialize neutral actuation groups onto the authoring shape."""
+    out: list[JsonValue] = []
+    for group in entries:
+        data: dict[str, JsonValue] = {"name": group.name, "law": group.law}
+        if group.joints is not None:
+            data["joints"] = [str(joint) for joint in group.joints]
+        if group.joint_set is not None:
+            data["joint_set"] = str(group.joint_set)
+        if group.gains:
+            gains: dict[str, JsonValue] = {
+                str(key): _json_number_value(value) for key, value in group.gains.items()
+            }
+            data["gains"] = gains
+        if group.effort_limit is not None:
+            data["effort_limit"] = _json_number_value(group.effort_limit)
+        if group.velocity_limit is not None:
+            data["velocity_limit"] = _json_number_value(group.velocity_limit)
+        if group.command:
+            data["command"] = copy.deepcopy(dict(group.command))
+        if group.parts is not None:
+            data["parts"] = [str(part) for part in group.parts]
+        out.append(data)
+    return out
+
+
+def _validate_world_drive(
+    name: str,
+    drive: str,
+    target: str,
+    declared: Sequence[str],
+    groups: Sequence[ActuationGroup],
+    profile: RobotProfile | None,
+) -> None:
+    """Check the declared drive against the actuation laws it resolves to.
+
+    The action group owns the target kind and the actuation groups own the
+    physical law; the runtime drive is their explicit combination.  A world
+    declaration that names an incompatible drive fails here instead of at the
+    backend ctrl seam.  Joints the actuation does not address are left to the
+    run's exactly-once coverage check.
+    """
+    from unigym.actuators.ir import ActuationError, resolve_group_joints
+    from unigym.runtime.controllers import drive_for_target_laws
+    from unigym.runtime.controls import ControlError
+
+    joint_sets = dict(profile.joint_sets) if profile is not None else None
+    try:
+        resolved = resolve_group_joints(groups, articulation=name, joint_sets=joint_sets)
+    except ActuationError as exc:
+        raise ValueError(f"World.articulation {name!r}: actuation: {exc}") from exc
+    law_by_joint = {str(joint): row.group.law for row in resolved for joint in row.joint_names}
+    laws = [law_by_joint[str(joint)] for joint in declared if str(joint) in law_by_joint]
+    if not laws:
+        return
+    try:
+        derived = drive_for_target_laws(target, laws, what=f"World.articulation {name!r}")
+    except ControlError as exc:
+        raise ValueError(str(exc)) from exc
+    if derived != drive:
+        raise ValueError(
+            f"World.articulation {name!r}: drive {drive!r} does not match the "
+            f"declared actuation laws {sorted(set(laws))} for target "
+            f"{target!r} (they resolve to {derived!r})"
+        )
 
 
 def _joints_json(

@@ -31,7 +31,7 @@ def env(request):
 
 
 def _named_action(env, values):
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     tensor = torch.as_tensor(values, dtype=torch.float32).reshape(
         env.num_envs, len(control.joint_names)
     )
@@ -60,7 +60,7 @@ def test_fake_backend_satisfies_env_backend_contract(num_envs):
 
 def test_step_publishes_contract_shaped_obs_and_extra(env):
     """Obs/extra keys, shapes, dtypes and the record namespace are valid."""
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     obs, extra = _step(env, [[0.0]] * env.num_envs)
 
     check_obs_cache(obs, env.num_envs, device=env.device)
@@ -82,7 +82,7 @@ def test_step_publishes_contract_shaped_obs_and_extra(env):
 
 def test_step_applies_named_action_and_passes_raw_action_through(env):
     """A named action drives the joint state; raw_action lands in prev_action."""
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     values = torch.arange(1, env.num_envs + 1, dtype=torch.float32).reshape(env.num_envs, 1) / 10
     raw_action = values + 10.0
 
@@ -115,7 +115,7 @@ def test_step_publishes_command_only_when_supplied(env):
 def test_step_is_deterministic_for_same_state_and_actions(env):
     """Two fresh fakes produce identical observations and extra info."""
     values = torch.arange(1, env.num_envs + 1, dtype=torch.float32).reshape(env.num_envs, 1) / 4
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     action = NamedAction(
         control.articulation,
         control.action_face,
@@ -145,7 +145,7 @@ def test_step_is_deterministic_for_same_state_and_actions(env):
 
 def test_identity_permutation_round_trips(env):
     """The fake publishes inverse identity permutations and a trivial round-trip."""
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     joint_count = len(control.joint_names)
     expected = list(range(joint_count))
     assert env.perm_il2pol.tolist() == expected
@@ -161,7 +161,7 @@ def test_identity_permutation_round_trips(env):
 
 def test_policy_joint_pos_limits_have_policy_shape(env):
     """Limits are a (N, J) float32 lower/upper pair in policy order."""
-    control = env.controls[CONTROL_NAME]
+    control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
     joint_count = len(control.joint_names)
     limits = env.policy_joint_pos_limits
 

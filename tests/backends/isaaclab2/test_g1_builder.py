@@ -384,7 +384,7 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
         art = env.articulations[ARTICULATION]
         assert len(art.joint_names) == 43
         assert set(art.joint_names) == set(profile.full_joint_names)
-        assert len(env.controls[ARTICULATION].joint_names) == 29
+        assert len(env.controls[(ARTICULATION, ARTICULATION)].joint_names) == 29
 
         bodies = [body.name for body in env.model_set.articulations[ARTICULATION].bodies]
         assert "pelvis" in bodies

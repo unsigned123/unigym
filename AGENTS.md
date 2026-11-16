@@ -199,7 +199,7 @@ contract, not decoration.
 - Every public function, method, dataclass field, module-level constant with a
   non-obvious type, `Protocol` member, and `TypedDict` field must have explicit
   parameter and return annotations.
-- Public API examples: `Run`, `RunSpec`, `ArticulationSpec`, `ControlGroup`,
+- Public API examples: `Run`, `RunSpec`, `ArticulationSpec`,
   `ControlRuntime`, `NamedAction`, `Adapter`, `EnvBackend`, camera/contact
   protocols, and registry factories.
 - Internal local variables are inferred; do not add annotation noise unless the

@@ -13,7 +13,7 @@ pytestmark = pytest.mark.sim
 
 
 def _zero_action(env):
-    control = env.controls["tiny"]
+    control = env.controls[("tiny", "tiny")]
     return (
         NamedAction.zeros(
             env.num_envs,
@@ -41,8 +41,8 @@ def test_env_constructs_a_native_batch_of_two_worlds(tiny_env_factory):
 
     assert env.num_envs == 2
     lower, upper = env.policy_joint_pos_limits
-    assert tuple(lower.shape) == (2, len(env.controls["tiny"].joint_names))
-    assert tuple(upper.shape) == (2, len(env.controls["tiny"].joint_names))
+    assert tuple(lower.shape) == (2, len(env.controls[("tiny", "tiny")].joint_names))
+    assert tuple(upper.shape) == (2, len(env.controls[("tiny", "tiny")].joint_names))
 
 
 def test_model_ir_publishes_expected_body_joint_and_actuator_names(tiny_env):
@@ -66,7 +66,7 @@ def test_model_ir_publishes_expected_body_joint_and_actuator_names(tiny_env):
 def test_policy_joint_pos_limits_follow_the_control_order(tiny_env):
     """Limits are (N, J) float32 bounds in the control's joint order."""
     lower, upper = tiny_env.policy_joint_pos_limits
-    assert tiny_env.controls["tiny"].joint_names == ("elbow", "shoulder")
+    assert tiny_env.controls[("tiny", "tiny")].joint_names == ("elbow", "shoulder")
 
     for bound in (lower, upper):
         assert tuple(bound.shape) == (tiny_env.num_envs, 2)
@@ -176,7 +176,7 @@ _BASE_XML = """<?xml version="1.0"?>
 """
 
 
-def _two_articulation_env(tmp_path, tiny_mjcf):
+def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None):
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
@@ -245,7 +245,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
         )
         groups.append(
             OrderedActionGroup(
-                name=name,
+                name=name if group_name is None else group_name,
                 articulation=name,
                 joints=tuple(joints),
                 target="position",
@@ -305,7 +305,37 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
 
         assert extra["articulation/left/joint_pos"][0, 0] > 0.0
         assert extra["articulation/right/joint_pos"][0, 0] < 0.0
-        assert env.controls["left"].joint_names == ("elbow", "shoulder")
-        assert env.controls["right"].joint_names == ("elbow", "shoulder")
+        assert env.controls[("left", "left")].joint_names == ("elbow", "shoulder")
+        assert env.controls[("right", "right")].joint_names == ("elbow", "shoulder")
+    finally:
+        env.close()
+
+
+def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
+    """The shared mj-family path keys controls by (articulation, name)."""
+    env = _two_articulation_env(tmp_path, tiny_mjcf, group_name="legs")
+    try:
+        assert set(env.controls) == {("left", "legs"), ("right", "legs")}
+        actions = (
+            NamedAction(
+                articulation="left",
+                group="legs",
+                values=torch.tensor([[0.4, 0.4]], dtype=torch.float32),
+                joint_names=("elbow", "shoulder"),
+                kind="position",
+            ),
+            NamedAction(
+                articulation="right",
+                group="legs",
+                values=torch.tensor([[-0.4, -0.4]], dtype=torch.float32),
+                joint_names=("elbow", "shoulder"),
+                kind="position",
+            ),
+        )
+        _, extra = env.step(actions)
+
+        assert (
+            extra["articulation/left/joint_pos"][0, 0] > extra["articulation/right/joint_pos"][0, 0]
+        )
     finally:
         env.close()

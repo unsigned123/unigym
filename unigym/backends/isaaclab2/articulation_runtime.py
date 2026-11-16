@@ -27,7 +27,11 @@ from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.env.obs_catalog import ObsCatalog, ObsSpec, build_obs_catalog
 from unigym.runtime.actions import NamedAction
-from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
+from unigym.runtime.controllers import (
+    ArticulationRuntime,
+    ControlRuntime,
+    control_key,
+)
 
 __all__ = [
     "bind_articulations",
@@ -231,7 +235,7 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
         env.articulations[spec.name] = _articulation_runtime(
             env, spec, profiles[spec.name], env.robots[spec.name]
         )
-    controls: dict[str, ControlRuntime] = {}
+    controls: dict[tuple[str, str], ControlRuntime] = {}
     for control in tuple(env._planned_controls or ()):
         if not control.prop and control.drive not in ("position_pd", "position_servo"):
             raise NotImplementedError(
@@ -252,13 +256,14 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
         control.addresses["term"] = control.action_face
         index = {n: i for i, n in enumerate(art.joint_names)}
         control.addresses["perm_il2pol"] = [index[n] for n in control.joint_names if n in index]
-        controls[control.name] = control
+        controls[control_key(control)] = control
     # every remaining action term (articulated props) becomes a servo control
+    declared_faces = {control.action_face for control in controls.values()}
     for term in env.action_entry_names:
-        if term in controls:
+        if term in declared_faces:
             continue
         joint_names = tuple(getattr(env.action_manager.get_term(term).cfg, "joint_names", ()))
-        controls[term] = ControlRuntime(
+        prop = ControlRuntime(
             name=term,
             action_face=term,
             adapter="prop",
@@ -271,12 +276,20 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
             prop=True,
             role="aux",
         )
+        controls[control_key(prop)] = prop
     return controls
 
 
 def _bind_control_order(env, controls) -> None:
     env.controls = controls
-    env._control_order = [controls[n] for n in env.action_entry_names if n in controls]
+    by_face = {control.action_face: control for control in controls.values()}
+    if len(by_face) != len(controls):
+        raise ValueError(
+            f"{_LABEL}: control action faces are not unique; each action term "
+            f"name must map to exactly one control group "
+            f"(declared: {[(c.articulation, c.name, c.action_face) for c in controls.values()]})"
+        )
+    env._control_order = [by_face[name] for name in env.action_entry_names if name in by_face]
     for art in env.articulations.values():
         body = next(
             (c for c in env._control_order if c.articulation == art.name and c.role == "body"),
