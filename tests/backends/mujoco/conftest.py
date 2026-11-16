@@ -35,8 +35,8 @@ def build_tiny_env(
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mujoco.env import MujocoEnv
     from unigym.robots.base import BodyBinding, RobotProfile
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
-    from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
     profile = RobotProfile(
@@ -62,28 +62,26 @@ def build_tiny_env(
         spawn={"pos": [0.0, 0.0, 0.8]},
         actuation=(actuation,),
     )
-    group = ControlGroup.from_mapping(
-        {
-            "name": CONTROL,
-            "adapter": "manual",
-            "articulation": ARTICULATION,
-            "joints": list(JOINT_ORDER),
-            "drive": drive,
-            "target": target,
-        }
+    group = OrderedActionGroup(
+        name=CONTROL,
+        articulation=ARTICULATION,
+        joints=JOINT_ORDER,
+        target=target,
+        role="body",
     )
-    controls = build_control_runtimes((group,), (articulation,), {ARTICULATION: profile})
-    actuation_plans = (
-        {
-            ARTICULATION: resolve_actuation_groups(
-                articulation.actuation,
-                articulation=ARTICULATION,
-                joints=JOINT_ORDER,
-            )
-        }
-        if plans
-        else None
+    resolved_plan = resolve_actuation_groups(
+        articulation.actuation,
+        articulation=ARTICULATION,
+        joints=JOINT_ORDER,
     )
+    controls = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (PolicyBinding(adapter="manual", groups=((ARTICULATION, CONTROL),)),),
+        (articulation,),
+        {ARTICULATION: profile},
+        {ARTICULATION: resolved_plan},
+    )
+    actuation_plans = {ARTICULATION: resolved_plan} if plans else None
     return MujocoEnv(
         robot_profile=profile,
         adapter=ManualAdapter(),

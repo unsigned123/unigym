@@ -1,39 +1,42 @@
-"""Pure-data control declaration contract (no engine involved)."""
+"""Pure-data action/control contract (no engine involved)."""
 
 from __future__ import annotations
 
 import pytest
 
-from unigym.runtime.controls import (
-    ControlError,
-    ControlGroup,
-    target_for_drive,
-    validate_controls,
-)
+from unigym.runtime.actions import OrderedActionSpec, OrderedActionGroup, PolicyBinding
+from unigym.runtime.controllers import validate_action_coverage, validate_policy_bindings
+from unigym.runtime.controllers import ControlRuntime
+from unigym.runtime.controls import ControlError, target_for_drive
 from unigym.scenes.articulation import ArticulationSpec, JointSpec
 
 
 def _group(**overrides):
     entry = {
         "name": "body",
-        "adapter": "manual",
         "articulation": "arm",
         "joints": ["shoulder", "elbow"],
-        "drive": "position_pd",
         "target": "position",
     }
     entry.update(overrides)
     return entry
 
 
-def test_group_accepts_explicit_joints_and_joint_set():
-    """Explicit joints and a named joint set are the two legal selectors."""
-    by_joints = ControlGroup.from_mapping(_group())
-    assert by_joints.joints == ("shoulder", "elbow")
-    assert by_joints.joint_set is None
-    by_set = ControlGroup.from_mapping(_group(joints=None, joint_set="body"))
-    assert by_set.joint_set == "body"
-    assert by_set.joints is None
+def test_group_requires_explicit_ordered_joints():
+    """The action surface has no joint_set selector; joints are explicit."""
+    group = OrderedActionGroup.from_mapping(_group())
+    assert group.joints == ("shoulder", "elbow")
+    assert group.role == "aux"
+
+    with pytest.raises(ValueError, match="joint_set"):
+        OrderedActionGroup.from_mapping({**_group(), "joint_set": "body"})
+
+
+def test_group_role_is_explicit_body_or_aux():
+    """role is optional (default aux) and validated when present."""
+    assert OrderedActionGroup.from_mapping(_group(role="body")).role == "body"
+    with pytest.raises(ValueError, match="role must be one of"):
+        OrderedActionGroup.from_mapping(_group(role="prop"))
 
 
 @pytest.mark.parametrize(
@@ -50,60 +53,88 @@ def test_group_accepts_explicit_joints_and_joint_set():
 def test_drive_target_pairs_map_explicitly(drive, target):
     """Every legal drive maps to exactly one target kind."""
     assert target_for_drive(drive) == target
-    group = ControlGroup.from_mapping(_group(drive=drive, target=target))
-    assert group.target == target
 
 
-def test_drive_target_mismatch_fails_fast():
-    """A drive may not be paired with a different target kind."""
-    with pytest.raises(ControlError, match="requires target 'torque'"):
-        ControlGroup.from_mapping(_group(drive="torque", target="position"))
+def test_action_spec_rejects_overlap_and_duplicate_identity():
+    """Groups are disjoint inside one articulation and unique by identity."""
+    shoulder = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+    with pytest.raises(ValueError, match="overlapping joints"):
+        OrderedActionSpec((shoulder, OrderedActionGroup("aux", "arm", ("shoulder",), "position")))
+    with pytest.raises(ValueError, match="duplicate group identity"):
+        OrderedActionSpec((shoulder, OrderedActionGroup("body", "arm", ("elbow",), "position")))
 
 
-def test_exactly_one_joint_selector_required():
-    """Both selectors and neither selector are rejected."""
-    with pytest.raises(ControlError, match="exactly one"):
-        ControlGroup.from_mapping(_group(joint_set="body"))
-    with pytest.raises(ControlError, match="exactly one"):
-        ControlGroup.from_mapping(_group(joints=[]))
-    with pytest.raises(ControlError, match="exactly one"):
-        ControlGroup.from_mapping(_group(joints=None))
+def test_policy_binding_references_declared_groups_only():
+    """A binding may not name an absent group or share one with another policy."""
+    body = OrderedActionGroup("body", "arm", ("shoulder",), "position")
+
+    with pytest.raises(ControlError, match="undeclared action group"):
+        validate_policy_bindings((body,), (PolicyBinding("manual", (("arm", "hand"),)),))
+    with pytest.raises(ControlError, match="owned by two policies"):
+        validate_policy_bindings(
+            (body,),
+            (
+                PolicyBinding("a", (("arm", "body"),)),
+                PolicyBinding("b", (("arm", "body"),)),
+            ),
+        )
+    validate_policy_bindings((body,), (PolicyBinding("manual", (("arm", "body"),)),))
 
 
-def test_duplicate_joints_and_unknown_keys_rejected():
-    """Joint lists are duplicate-free and the entry key set is closed."""
-    with pytest.raises(ControlError, match="duplicate"):
-        ControlGroup.from_mapping(_group(joints=["shoulder", "shoulder"]))
-    with pytest.raises(ControlError, match="unknown keys"):
-        ControlGroup.from_mapping(_group(mode="policy"))
-
-
-def test_validate_controls_coverage_and_passive_joints():
+def test_action_coverage_requires_driven_plus_passive_to_equal_actuated():
     """Coverage is exact: driven + passive must equal the declared joints."""
     arm = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"), JointSpec("elbow")),
     )
-    partial = ControlGroup.from_mapping(_group(joints=["shoulder"]))
-    with pytest.raises(ControlError, match="neither covered"):
-        validate_controls((arm,), (partial,))
+    partial = ControlRuntime(
+        name="body",
+        action_face="body",
+        adapter="manual",
+        articulation="arm",
+        joint_names=("shoulder",),
+        q0=(0.0,),
+    )
+    with pytest.raises(ControlError, match="neither driven by an action group"):
+        validate_action_coverage((arm,), {}, (partial,))
 
     passive = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"), JointSpec("elbow")),
         passive_joints=("elbow",),
     )
-    validate_controls((passive,), (partial,))
+    validate_action_coverage((passive,), {}, (partial,))
 
 
-def test_validate_controls_unknown_and_overlapping_joints():
+def test_action_coverage_rejects_unknown_and_overlapping_joints():
     """Unknown joints and cross-group overlap are rejected."""
     arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
-    unknown = ControlGroup.from_mapping(_group(joints=["wrist"]))
-    with pytest.raises(ControlError, match="not declared"):
-        validate_controls((arm,), (unknown,))
+    unknown = ControlRuntime(
+        name="body",
+        action_face="body",
+        adapter="manual",
+        articulation="arm",
+        joint_names=("shoulder", "wrist"),
+        q0=(0.0, 0.0),
+    )
+    with pytest.raises(ControlError, match="not in the articulation"):
+        validate_action_coverage((arm,), {}, (unknown,))
 
-    first = ControlGroup.from_mapping(_group(name="a", joints=["shoulder"]))
-    second = ControlGroup.from_mapping(_group(name="b", joints=["shoulder"]))
+    first = ControlRuntime(
+        name="a",
+        action_face="a",
+        adapter="manual",
+        articulation="arm",
+        joint_names=("shoulder",),
+        q0=(0.0,),
+    )
+    second = ControlRuntime(
+        name="b",
+        action_face="b",
+        adapter="manual",
+        articulation="arm",
+        joint_names=("shoulder",),
+        q0=(0.0,),
+    )
     with pytest.raises(ControlError, match="overlap"):
-        validate_controls((arm,), (first, second))
+        validate_action_coverage((arm,), {}, (first, second))

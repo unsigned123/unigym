@@ -115,16 +115,16 @@ def _cfg(**overrides):
         "articulations": [
             {"name": "arm", "joints": [{"name": "shoulder"}, {"name": "elbow"}]},
         ],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder", "elbow"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             },
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
     cfg.update(overrides)
     return cfg
@@ -610,16 +610,16 @@ def _consumer_run_cfg() -> dict:
         "env": {"backend": "isaaclab2", "num_envs": 1},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
 

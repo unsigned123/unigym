@@ -24,7 +24,7 @@ def _two_dog_env():
     """Two articulation-scoped controls with identical joint names."""
     controls = {
         name: ControlRuntime(
-            name=name,
+            name="legs",
             action_face="legs",
             adapter="dog_policy",
             articulation=name,
@@ -79,12 +79,12 @@ def test_two_articulations_with_identical_joint_names_route_by_identity():
 
     targets = route_actions(env, (go1, go2))
 
-    assert targets["go1"].tolist() == [[1.0, 2.0]]
-    assert targets["go2"].tolist() == [[3.0, 4.0]]
+    assert targets[("go1", "legs")].tolist() == [[1.0, 2.0]]
+    assert targets[("go2", "legs")].tolist() == [[3.0, 4.0]]
 
     reordered = route_actions(env, (go2, go1))
-    assert reordered["go1"].tolist() == [[1.0, 2.0]]
-    assert reordered["go2"].tolist() == [[3.0, 4.0]]
+    assert reordered[("go1", "legs")].tolist() == [[1.0, 2.0]]
+    assert reordered[("go2", "legs")].tolist() == [[3.0, 4.0]]
 
     with pytest.raises(ValueError, match=r"\('go1', 'arms'\).*not a declared control group"):
         route_actions(

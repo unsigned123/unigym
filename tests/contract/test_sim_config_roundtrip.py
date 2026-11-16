@@ -30,16 +30,16 @@ _CONFIG = {
     "world_base": {"mjcf": "world.xml"},
     "collect": {"steps": 10},
     "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-    "controls": [
+    "action_spec": [
         {
             "name": "arm",
-            "adapter": "manual",
             "articulation": "arm",
             "joints": ["shoulder"],
-            "drive": "position_pd",
             "target": "position",
+            "role": "body",
         }
     ],
+    "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     "cameras": [{"name": "top", "rig": {"type": "world"}}],
 }
 
@@ -101,9 +101,10 @@ def _tables(spec) -> tuple[object, ...]:
         spec.run_name,
         tuple(item.name for item in spec.articulations),
         tuple(
-            (control.name, control.articulation, tuple(control.joints or ()), control.drive)
-            for control in spec.controls
+            (group.name, group.articulation, tuple(group.joints), group.target, group.role)
+            for group in spec.action_spec.groups
         ),
+        tuple((binding.adapter, tuple(binding.groups)) for binding in spec.policies),
         spec.cameras,
         spec.world_base,
     )
@@ -166,7 +167,8 @@ def test_to_config_serializes_no_facade_handles(tmp_path: Path) -> None:
     assert "_owner" not in text
     assert "handles" not in document
     assert document["articulations"] == _CONFIG["articulations"]
-    assert document["controls"] == _CONFIG["controls"]
+    assert document["action_spec"] == _CONFIG["action_spec"]
+    assert document["policies"] == _CONFIG["policies"]
     assert document["cameras"] == _CONFIG["cameras"]
     assert document["world_base"] == _CONFIG["world_base"]
 
@@ -206,16 +208,16 @@ def test_from_config_uses_the_explicit_pack_set(tmp_path: Path) -> None:
     pack_set, ref = write_sim_pack(tmp_path / "pack")
     cfg = dict(_CONFIG)
     cfg["articulations"] = [{"name": "body", "params": {"profile": ref.id}}]
-    cfg["controls"] = [
+    cfg["action_spec"] = [
         {
             "name": "body",
-            "adapter": "manual",
             "articulation": "body",
             "joints": ["shoulder", "elbow"],
-            "drive": "position_pd",
             "target": "position",
+            "role": "body",
         }
     ]
+    cfg["policies"] = [{"adapter": "manual", "groups": [["body", "body"]]}]
     path = tmp_path / "pack.yaml"
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
 

@@ -67,8 +67,8 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
     }
 
 
-def test_to_cfg_emits_explicit_articulation_and_control_tables(tmp_path: Path) -> None:
-    """Faces become one standard_pd actuation group and one explicit control group."""
+def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) -> None:
+    """Faces become one standard_pd actuation group, one action group and a policy."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     builder.add_articulation(ref, control=_body_control())
@@ -89,16 +89,16 @@ def test_to_cfg_emits_explicit_articulation_and_control_tables(tmp_path: Path) -
             "passive_joints": ["finger"],
         }
     ]
-    assert cfg["controls"] == [
+    assert cfg["action_spec"] == [
         {
             "name": "body",
-            "adapter": "manual",
             "articulation": ref.id,
             "joints": ["shoulder", "elbow"],
-            "drive": "position_pd",
             "target": "position",
+            "role": "body",
         }
     ]
+    assert cfg["policies"] == [{"adapter": "manual", "groups": [[ref.id, "body"]]}]
 
 
 def test_explicit_joints_keep_declaration_order(tmp_path: Path) -> None:
@@ -111,12 +111,12 @@ def test_explicit_joints_keep_declaration_order(tmp_path: Path) -> None:
     cfg = builder._to_cfg()
 
     assert cfg["articulations"][0]["actuation"][0]["joints"] == ["elbow", "shoulder"]
-    assert cfg["controls"][0]["joints"] == ["elbow", "shoulder"]
-    assert cfg["controls"][0]["name"] == "arm"
+    assert cfg["action_spec"][0]["joints"] == ["elbow", "shoulder"]
+    assert cfg["action_spec"][0]["name"] == "arm"
 
 
 def test_q0_and_limits_are_emitted_when_declared(tmp_path: Path) -> None:
-    """Explicit q0 overrides and limits ride their declared tables."""
+    """Explicit q0 overrides ride the articulation joint declarations."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     control = Control.position_pd(
@@ -134,7 +134,7 @@ def test_q0_and_limits_are_emitted_when_declared(tmp_path: Path) -> None:
     actuation = cfg["articulations"][0]["actuation"][0]
     assert actuation["effort_limit"] == 100.0
     assert actuation["velocity_limit"] == 5.0
-    assert cfg["controls"][0]["q0"] == {"shoulder": 0.25}
+    assert cfg["articulations"][0]["joints"] == {"shoulder": {"init": 0.25}}
 
 
 def test_per_joint_gains_and_limits_keep_their_maps(tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ def test_a_renamed_articulation_keeps_its_profile_selector(tmp_path: Path) -> No
         ],
         "passive_joints": ["finger"],
     }
-    assert cfg["controls"][0]["articulation"] == "arm"
+    assert cfg["action_spec"][0]["articulation"] == "arm"
 
 
 def test_cameras_are_deep_copied_declared_entries(tmp_path: Path) -> None:
@@ -282,7 +282,7 @@ def test_world_fragment_is_merged_by_run_once(tmp_path: Path) -> None:
     spec = _spec_for(builder)
     assert spec.world_base == {"mjcf": "world.xml"}
     assert [entry.name for entry in spec.articulations] == [ref.id]
-    assert [entry.name for entry in spec.controls] == ["body"]
+    assert [group.name for group in spec.action_spec.groups] == ["body"]
 
 
 def test_inline_terrain_reaches_the_run_spec_through_the_world_handoff(tmp_path: Path) -> None:
@@ -340,12 +340,12 @@ def test_empty_world_fragment_is_refused(tmp_path: Path) -> None:
         builder._to_cfg()
 
 
-def test_world_fragment_may_not_own_articulations_or_controls(tmp_path: Path) -> None:
-    """The builder is the single owner of the articulation/control tables."""
+def test_world_fragment_may_not_own_articulations_or_action_tables(tmp_path: Path) -> None:
+    """The builder is the single owner of the articulation/action tables."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
     world = World.base(mjcf="world.xml")
-    world.articulation("other", model={"mjcf": "other.xml"})
+    world.articulation("other", model={"mjcf": "other.xml"}, joints=[{"name": "joint"}])
     builder.world = world
     builder.add_articulation(ref, control=_body_control())
 
@@ -399,4 +399,4 @@ def test_two_articulations_with_distinct_faces_emit_unique_control_names(
     cfg = builder._to_cfg()
 
     assert [entry["name"] for entry in cfg["articulations"]] == ["a", "b"]
-    assert [entry["name"] for entry in cfg["controls"]] == ["a", "b"]
+    assert [entry["name"] for entry in cfg["action_spec"]] == ["a", "b"]

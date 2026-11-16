@@ -2,7 +2,7 @@
 
 An adapter consumes explicitly requested raw observation quantities and
 returns one :class:`~unigym.runtime.actions.NamedAction` per control group it
-owns (the group names come from the run's ``controls[]`` partition).  There
+owns (the group names come from the run's ``policies`` partition).  There
 is no policy-vector contract: actions are addressed by control group + joint
 name, never by a flat positional slice.
 
@@ -159,7 +159,7 @@ class Adapter(ABC):
 
     The ACTION boundary is group-addressed: :meth:`postprocess_action`
     returns a ``Sequence[NamedAction]`` (one entry per control group the
-    run's ``controls[]`` partition assigns to this adapter), each carrying
+    run's ``policies`` partition assigns to this adapter), each carrying
     its ``(articulation, group)`` identity, explicit ``joint_names`` and an
     explicit ``kind``.  The backend resolves names to simulator addresses —
     see :mod:`unigym.runtime.actions`.
@@ -171,7 +171,7 @@ class Adapter(ABC):
     and records :attr:`last_command` instead."""
 
     _unigym_name: str = ""
-    """Registry identity stamped by ``build_adapter`` (the controls[]
+    """Registry identity stamped by ``build_adapter`` (the policies
     partition / group validation resolve ownership by this name)."""
 
     rewindable: bool = False
@@ -275,7 +275,7 @@ class Adapter(ABC):
         """Raw action -> one self-describing NamedAction per owned group.
 
         The returned sequence carries one entry per control group assigned
-        to this adapter by the run's ``controls[]`` partition (e.g. the body
+        to this adapter by the run's ``policies`` partition (e.g. the body
         group plus an extra hand group).  Each
         :class:`~unigym.runtime.actions.NamedAction` carries its
         ``(articulation, group)`` identity, ``(N, dim)`` target values, the

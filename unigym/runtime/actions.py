@@ -61,8 +61,12 @@ if TYPE_CHECKING:
 #: legal NamedAction target kinds (must equal the owning ControlRuntime.target)
 LEGAL_ACTION_KINDS = ("position", "velocity", "torque", "effort", "current")
 
+#: legal ordered-action-group roles (explicit body/aux selection)
+LEGAL_ACTION_ROLES = ("body", "aux")
+
 __all__ = [
     "LEGAL_ACTION_KINDS",
+    "LEGAL_ACTION_ROLES",
     "ActionDim",
     "IsaaclabJointResolver",
     "JointResolver",
@@ -176,12 +180,16 @@ class OrderedActionGroup:
         articulation: owning articulation name.
         joints: joint names in declaration order (stored as a tuple).
         target: legal action kind (see :data:`LEGAL_ACTION_KINDS`).
+        role: explicit backend body/aux selection marker
+            (``body`` | ``aux``; default ``aux``).  It is never inferred from
+            the group name.
     """
 
     name: str
     articulation: str
     joints: tuple[str, ...]
     target: str
+    role: str = "aux"
 
     def __post_init__(self):
         _require_text(self.name, "OrderedActionGroup.name")
@@ -204,14 +212,20 @@ class OrderedActionGroup:
                 f"OrderedActionGroup.target must be one of {list(LEGAL_ACTION_KINDS)}, "
                 f"got {self.target!r}"
             )
+        if self.role not in LEGAL_ACTION_ROLES:
+            raise ValueError(
+                f"OrderedActionGroup.role must be one of {list(LEGAL_ACTION_ROLES)}, "
+                f"got {self.role!r}"
+            )
         object.__setattr__(self, "joints", joints)
 
     @classmethod
     def from_mapping(cls, entry: Mapping[str, object]) -> OrderedActionGroup:
         """Build one group from an explicit declaration mapping.
 
-        Accepted keys are exactly ``name``, ``articulation``, ``joints`` and
-        ``target``; all are required.  ``joints`` must already be an explicit
+        Accepted keys are exactly ``name``, ``articulation``, ``joints``,
+        ``target`` and the optional ``role`` (default ``aux``); all but
+        ``role`` are required.  ``joints`` must already be an explicit
         non-empty list/tuple of joint names -- selector keys such as
         ``joint_set`` are resolved outside this parser (Stage A3b) and are
         rejected here as unknown keys.  Construction runs the regular
@@ -229,9 +243,11 @@ class OrderedActionGroup:
                 fails (empty/duplicate/non-text joints, illegal target).
         """
         data = _require_mapping(entry, "OrderedActionGroup.from_mapping")
-        allowed = ("name", "articulation", "joints", "target")
+        allowed = ("name", "articulation", "joints", "target", "role")
         _reject_unknown_keys(data, allowed, "OrderedActionGroup.from_mapping")
-        _require_keys(data, allowed, "OrderedActionGroup.from_mapping")
+        _require_keys(
+            data, ("name", "articulation", "joints", "target"), "OrderedActionGroup.from_mapping"
+        )
         raw_joints = data["joints"]
         if not _is_sequence(raw_joints):
             raise ValueError(
@@ -250,6 +266,7 @@ class OrderedActionGroup:
             ),
             joints=joints,
             target=_require_text(data["target"], "OrderedActionGroup.from_mapping target"),
+            role=_require_text(data.get("role", "aux"), "OrderedActionGroup.from_mapping role"),
         )
 
 

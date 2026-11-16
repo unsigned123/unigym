@@ -204,7 +204,8 @@ tests/
 Mapping rule for unit tests:
 
 ```text
-unigym/runtime/controls.py       -> tests/unit/runtime/test_controls.py
+unigym/runtime/actions.py        -> tests/unit/runtime/test_action_spec.py
+unigym/runtime/controllers.py    -> tests/unit/runtime/test_controllers.py
 unigym/terminations/articulation.py
                                   -> tests/unit/terminations/test_articulation.py
 unigym/backends/mujoco/env.py    -> tests/backends/mujoco/test_env.py

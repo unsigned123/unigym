@@ -182,8 +182,8 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.mjwarp.env import MjwarpEnv
     from unigym.robots.base import BodyBinding, RobotProfile
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
-    from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
     base = tmp_path / "base_scene.xml"
@@ -244,18 +244,14 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
             )
         )
         groups.append(
-            ControlGroup.from_mapping(
-                {
-                    "name": name,
-                    "adapter": "manual",
-                    "articulation": name,
-                    "joints": list(joints),
-                    "drive": "position_pd",
-                    "target": "position",
-                }
+            OrderedActionGroup(
+                name=name,
+                articulation=name,
+                joints=tuple(joints),
+                target="position",
+                role="body",
             )
         )
-    controls = build_control_runtimes(tuple(groups), tuple(specs), profiles)
     plans = {
         spec.name: resolve_actuation_groups(
             spec.actuation,
@@ -264,6 +260,13 @@ def _two_articulation_env(tmp_path, tiny_mjcf):
         )
         for spec in specs
     }
+    controls = build_control_runtimes(
+        OrderedActionSpec(tuple(groups)),
+        (PolicyBinding(adapter="manual", groups=tuple((g.articulation, g.name) for g in groups)),),
+        tuple(specs),
+        profiles,
+        plans,
+    )
     env = MjwarpEnv(
         robot_profile=profiles["left"],
         adapter=ManualAdapter(),

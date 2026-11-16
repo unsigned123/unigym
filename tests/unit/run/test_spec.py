@@ -20,16 +20,16 @@ def _cfg(**overrides):
         "articulations": [
             {"name": "arm", "joints": [{"name": "shoulder"}, {"name": "elbow"}]},
         ],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder", "elbow"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             },
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
     cfg.update(overrides)
     return cfg
@@ -40,15 +40,18 @@ def _args(**overrides):
 
 
 def test_build_spec_normalizes_minimal_run_config():
-    """A minimal config freezes into typed articulations, controls and output."""
+    """A minimal config freezes into typed articulations, action spec and output."""
     spec = build_spec(_cfg(), _args())
 
     assert spec.backend == "isaaclab2"
     assert spec.mode == spec.sinks == "collect"
     assert (spec.num_envs, spec.total_steps, spec.seed) == (2, 100, 7)
     assert [articulation.name for articulation in spec.articulations] == ["arm"]
-    assert [group.name for group in spec.controls] == ["arm"]
-    assert spec.controls[0].joints == ("shoulder", "elbow")
+    assert [group.name for group in spec.action_spec.groups] == ["arm"]
+    assert spec.action_spec.groups[0].joints == ("shoulder", "elbow")
+    assert spec.action_spec.groups[0].role == "body"
+    assert [binding.adapter for binding in spec.policies] == ["manual"]
+    assert spec.policies[0].groups == (("arm", "arm"),)
     assert spec.output.out_dir == "data_out/r"
 
 
@@ -89,11 +92,71 @@ def test_build_spec_rejects_unsupported_mode(mode):
         build_spec(_cfg(mode=mode), _args())
 
 
-@pytest.mark.parametrize("controls", [None, []], ids=["absent", "empty"])
-def test_build_spec_requires_controls_declaration(controls):
-    """A run with articulations must declare at least one controls group."""
-    with pytest.raises(ConfigError, match="no controls declared"):
-        build_spec(_cfg(controls=controls), _args())
+@pytest.mark.parametrize("action_spec", [None, []], ids=["absent", "empty"])
+def test_build_spec_requires_action_spec_declaration(action_spec):
+    """A run with articulations must declare at least one action group."""
+    cfg = _cfg(action_spec=action_spec)
+
+    with pytest.raises(ConfigError, match="no action_spec declared"):
+        build_spec(cfg, _args())
+
+
+@pytest.mark.parametrize("policies", [None, []], ids=["absent", "empty"])
+def test_build_spec_requires_policies_declaration(policies):
+    """Every action group must be bound to a policy adapter."""
+    cfg = _cfg(policies=policies)
+
+    with pytest.raises(ConfigError, match="no policies declared"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_the_removed_controls_block():
+    """The mixed controls: authoring surface is removed with no alias."""
+    cfg = _cfg()
+    cfg["controls"] = [
+        {
+            "name": "arm",
+            "adapter": "manual",
+            "articulation": "arm",
+            "joints": ["shoulder", "elbow"],
+            "drive": "position_pd",
+            "target": "position",
+        }
+    ]
+
+    with pytest.raises(ConfigError, match="`controls:` block was removed"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_a_policy_binding_with_an_unknown_group():
+    """A policy binding may only reference declared action groups."""
+    cfg = _cfg(policies=[{"adapter": "manual", "groups": [["arm", "hand"]]}])
+
+    with pytest.raises(ConfigError, match="undeclared action group"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_a_group_owned_by_two_policies():
+    """One action group cannot be claimed by two policies."""
+    cfg = _cfg(
+        policies=[
+            {"adapter": "a", "groups": [["arm", "arm"]]},
+            {"adapter": "b", "groups": [["arm", "arm"]]},
+        ]
+    )
+
+    with pytest.raises(ConfigError, match="owned by two policies"):
+        build_spec(cfg, _args())
+
+
+def test_build_spec_rejects_a_group_for_an_undeclared_articulation():
+    """An action group must belong to a declared articulation."""
+    cfg = _cfg()
+    cfg["action_spec"][0]["articulation"] = "leg"
+    cfg["policies"] = [{"adapter": "manual", "groups": [["leg", "arm"]]}]
+
+    with pytest.raises(ConfigError, match="which is not declared"):
+        build_spec(cfg, _args())
 
 
 @pytest.mark.parametrize(

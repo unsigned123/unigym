@@ -8,22 +8,16 @@ import pytest
 import torch
 
 from tests._support.fakes.backend import FakeBackend
-from unigym.run.build import _build_adapter_groups
+from unigym.run.build import _body_controls, _build_adapter_groups
+from unigym.runner.external import ExternalRunner
 from unigym.runner.sync import SyncRunner, _adapter_groups
-from unigym.runtime.actions import NamedAction
-from unigym.runtime.controls import ControlGroup
+from unigym.runtime.actions import NamedAction, PolicyBinding
+from unigym.runtime.controllers import ControlRuntime
 from unigym.terminations import TerminationGroup
 
 
-def _control(name="body", adapter="a", articulation="arm"):
-    return ControlGroup(
-        name=name,
-        adapter=adapter,
-        articulation=articulation,
-        drive="position_pd",
-        target="position",
-        joints=("shoulder",),
-    )
+def _binding(groups, adapter="a"):
+    return PolicyBinding(adapter=adapter, groups=tuple(groups))
 
 
 def _named(articulation="arm", group="arm", rows=1):
@@ -49,27 +43,52 @@ def _runner(adapter_groups):
     )
 
 
-def test_build_adapter_groups_partitions_controls_by_identity():
-    """The config controls[] partition yields canonical (articulation, group) tuples."""
+def _runtime(name, role):
+    return ControlRuntime(
+        name=name,
+        action_face=name,
+        adapter="manual",
+        articulation="arm",
+        joint_names=("shoulder",),
+        q0=(0.0,),
+        role=role,
+    )
+
+
+def test_body_role_selects_the_body_group_not_the_name():
+    """Body selection uses the explicit role, not articulation-name equality."""
+    body = _runtime("legs", "body")
+    aux = _runtime("arm", "aux")
+    env = SimpleNamespace(controls={"legs": body, "arm": aux})
+
+    assert _body_controls(env) == [body]
+
+
+def test_build_adapter_groups_partitions_policies_by_identity():
+    """The config policies partition yields canonical (articulation, group) tuples."""
     spec = SimpleNamespace(
-        controls=(
-            _control("body", "a", "arm"),
-            _control("hand", "a", "arm"),
-            _control("legs", "b", "dog"),
+        policies=(
+            _binding((("arm", "arm"), ("arm", "hand")), adapter="a"),
+            _binding((("dog", "legs"),), adapter="b"),
         )
     )
 
     assert _build_adapter_groups(spec) == {
-        "a": (("arm", "body"), ("arm", "hand")),
+        "a": (("arm", "arm"), ("arm", "hand")),
         "b": (("dog", "legs"),),
     }
 
 
-def test_build_adapter_groups_rejects_a_group_claimed_by_two_adapters():
-    """A control group cannot belong to two adapters."""
-    spec = SimpleNamespace(controls=(_control("body", "a", "arm"), _control("body", "b", "arm")))
+def test_build_adapter_groups_rejects_a_group_claimed_by_two_policies():
+    """An action group cannot belong to two policies."""
+    spec = SimpleNamespace(
+        policies=(
+            _binding((("arm", "arm"),), adapter="a"),
+            _binding((("arm", "arm"),), adapter="b"),
+        )
+    )
 
-    with pytest.raises(ValueError, match="claimed by two adapters"):
+    with pytest.raises(ValueError, match="claimed by two policies"):
         _build_adapter_groups(spec)
 
 
@@ -128,6 +147,52 @@ def test_sync_runner_constructor_rejects_a_legacy_string_group():
     """Direct construction follows the same strict key contract."""
     with pytest.raises(ValueError, match="bare string"):
         _runner(("arm",))
+
+
+def test_sync_runner_from_instance_rejects_multiple_policy_adapters():
+    """SyncRunner v0 is single-adapter; a composite adapter is required."""
+    instance = SimpleNamespace(
+        spec=SimpleNamespace(runner={}),
+        env=FakeBackend(),
+        adapter=SimpleNamespace(_unigym_name="manual"),
+        profile=None,
+        sampler=None,
+        term_group=TerminationGroup(),
+        sink=SimpleNamespace(),
+        reset_on_termination=False,
+        replay=None,
+    )
+    instance.env.adapter_groups = {
+        "a": (("arm", "arm"),),
+        "b": (("arm", "hand"),),
+    }
+
+    with pytest.raises(ValueError, match="exactly one policy adapter"):
+        SyncRunner.from_instance(instance)
+
+
+def test_external_runner_accepts_every_policy_group():
+    """A caller-driven run is not restricted to one policy adapter."""
+    env = FakeBackend()
+    env.adapter_groups = {
+        "a": (("arm", "body"),),
+        "b": (("arm", "hand"),),
+    }
+    instance = SimpleNamespace(
+        spec=SimpleNamespace(runner={}, cfg={"collect": {"steps": 1}}),
+        env=env,
+        adapter=SimpleNamespace(_unigym_name="manual"),
+        profile=None,
+        sampler=None,
+        term_group=TerminationGroup(),
+        sink=SimpleNamespace(),
+        reset_on_termination=False,
+        replay=None,
+    )
+
+    runner = ExternalRunner.from_instance(instance)
+
+    assert runner.adapter_groups == (("arm", "body"), ("arm", "hand"))
 
 
 def test_validate_targets_accepts_the_declared_identity():

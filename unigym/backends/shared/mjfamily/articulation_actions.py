@@ -23,17 +23,16 @@ def _label(env) -> str:
 def _initial_targets(env, order) -> dict:
     targets = {}
     for control in order:
+        key = (control.articulation, control.name)
         if control.prop:
             slots = control.addresses.get("ctrl")
-            targets[control.name] = (
+            targets[key] = (
                 np.zeros((env.num_envs, len(control.joint_names)), dtype=np.float64)
                 if slots is None
                 else env._prop_targets[:, slots].copy()
             )
         else:
-            targets[control.name] = np.zeros(
-                (env.num_envs, len(control.joint_names)), dtype=np.float64
-            )
+            targets[key] = np.zeros((env.num_envs, len(control.joint_names)), dtype=np.float64)
     return targets
 
 
@@ -67,16 +66,18 @@ def _apply_entry(env, control, identity, entry, targets, covered, label) -> None
     if control.prop:
         resolved = env._action_resolver.resolve(names, prop=control.name)
         env._prop_targets[:, resolved.prop_adr] = row
-        targets[control.name] = env._prop_targets[:, control.addresses["ctrl"]].copy()
+        key = (control.articulation, control.name)
+        targets[key] = env._prop_targets[:, control.addresses["ctrl"]].copy()
         return
+    keys = (control.articulation, control.name)
     cols = np.asarray([index[n] for n in names], dtype=np.int64)
-    if covered[control.name][cols].any():
+    if covered[keys][cols].any():
         raise ValueError(
             f"{label}: action group {identity!r} re-addresses joints of "
             f"control {control.name!r}"
         )
-    targets[control.name][:, cols] = row
-    covered[control.name][cols] = True
+    targets[keys][:, cols] = row
+    covered[keys][cols] = True
 
 
 def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
@@ -84,8 +85,7 @@ def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
 
     Entries are routed by ``(entry.articulation, entry.group)``; the
     sequence order is not a layout.  A control's routing identity is
-    ``(control.articulation, control.action_face)`` until the Stage A3/A4
-    authoring split replaces ``action_face`` with the explicit group name.
+    ``(control.articulation, control.name)``.
     """
     label = label or _label(env)
     if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
@@ -94,10 +94,14 @@ def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
         )
     order = list(getattr(env, "_control_order", env.controls.values()))
     targets = _initial_targets(env, order)
-    covered = {c.name: np.zeros(len(c.joint_names), dtype=bool) for c in order if not c.prop}
+    covered = {
+        (c.articulation, c.name): np.zeros(len(c.joint_names), dtype=bool)
+        for c in order
+        if not c.prop
+    }
     by_key: dict[tuple[str, str], object] = {}
     for control in order:
-        identity = (control.articulation, control.action_face)
+        identity = (control.articulation, control.name)
         if identity in by_key:
             raise ValueError(
                 f"{label}: control group {identity!r} is declared by more "
@@ -129,9 +133,10 @@ def route_actions(env, actions: Sequence[NamedAction], label=None) -> dict:
     for control in order:
         if control.prop or not control.required:
             continue
-        if not bool(covered[control.name].all()):
-            left = [n for n, hit in zip(control.joint_names, covered[control.name]) if not hit]
-            identity = (control.articulation, control.action_face)
+        key = (control.articulation, control.name)
+        if not bool(covered[key].all()):
+            left = [n for n, hit in zip(control.joint_names, covered[key]) if not hit]
+            identity = (control.articulation, control.name)
             raise ValueError(
                 f"{label}: action group {identity!r} leaves joints " f"unaddressed: {left}"
             )

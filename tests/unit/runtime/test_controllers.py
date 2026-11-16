@@ -1,32 +1,69 @@
-"""Control runtime construction: validation, profile resolution and coverage."""
+"""Control runtime construction: validation, derivation and coverage."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
+from unigym.actuators.ir import ActuationGroup, resolve_actuation_groups
 from unigym.robots.base import RobotProfile
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
     build_control_runtimes,
-    validate_resolved_coverage,
+    validate_action_coverage,
+    validate_policy_bindings,
 )
-from unigym.runtime.controls import ControlError, ControlGroup
+from unigym.runtime.controls import ControlError
 from unigym.scenes.articulation import ArticulationSpec, JointSpec
 
 
-def _group(**overrides):
-    entry = {
-        "name": "body",
-        "adapter": "manual",
-        "articulation": "arm",
-        "joints": ["shoulder", "elbow"],
-        "drive": "position_pd",
-        "target": "position",
+def _group(
+    name="body",
+    articulation="arm",
+    joints=("shoulder", "elbow"),
+    target="position",
+    role="aux",
+):
+    return OrderedActionGroup(
+        name=name,
+        articulation=articulation,
+        joints=joints,
+        target=target,
+        role=role,
+    )
+
+
+def _binding(adapter="manual", groups=(("arm", "body"),), control_dt=None):
+    return PolicyBinding(adapter=adapter, groups=groups, control_dt=control_dt)
+
+
+def _plans(group, art, *, law="standard_pd"):
+    gains = {"kp": 1.0, "kd": 0.1} if law in ("standard_pd", "computed_torque_pd") else {}
+    actuation = ActuationGroup(
+        name="act",
+        law=law,
+        joints=tuple(group.joints),
+        gains=gains,
+    )
+    return {
+        art.name: resolve_actuation_groups((actuation,), articulation=art.name, joints=group.joints)
     }
-    entry.update(overrides)
-    return ControlGroup.from_mapping(entry)
+
+
+def _build(groups, art, profile, *, policies=None, law="standard_pd"):
+    groups = tuple(groups)
+    if policies is None:
+        policies = (_binding(groups=tuple((g.articulation, g.name) for g in groups)),)
+    plans = _plans(groups[0], art, law=law) if groups else {}
+    return build_control_runtimes(
+        OrderedActionSpec(groups),
+        tuple(policies),
+        (art,),
+        {"arm": profile},
+        plans,
+    )
 
 
 def _profile(joint_sets, defaults):
@@ -43,7 +80,7 @@ def _profile(joint_sets, defaults):
     )
 
 
-def _runtime(name: str, articulation: str, joints: tuple[str, ...]) -> ControlRuntime:
+def _runtime(name: str, articulation: str, joints: tuple[str, ...], role="aux") -> ControlRuntime:
     return ControlRuntime(
         name=name,
         action_face=name,
@@ -51,6 +88,7 @@ def _runtime(name: str, articulation: str, joints: tuple[str, ...]) -> ControlRu
         articulation=articulation,
         joint_names=joints,
         q0=(0.0,) * len(joints),
+        role=role,
     )
 
 
@@ -75,6 +113,12 @@ def test_control_runtime_rejects_invalid_drive_target_pair(drive, target, match)
             drive=drive,
             target=target,
         )
+
+
+def test_control_runtime_rejects_invalid_role():
+    """The body/aux role is explicit and closed."""
+    with pytest.raises(ControlError, match="role must be one of"):
+        _runtime("body", "arm", ("shoulder",), role="prop")
 
 
 @pytest.mark.parametrize(
@@ -109,61 +153,96 @@ def test_control_runtime_requires_q0_aligned_with_joint_names(q0):
         )
 
 
-def test_build_control_runtimes_uses_explicit_joints_and_q0_precedence():
-    """Explicit joints project in declaration order with group q0 winning."""
+def test_build_derives_drive_from_action_target_and_actuation_law():
+    """The runtime drive is target + law, never an authored control field."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    profile = _profile({"body": ("a",)}, {"a": 0.0})
+    group = _group(joints=("a",))
+
+    position = _build((group,), arm, profile, law="standard_pd")[0]
+    servo = _build((group,), arm, profile, law="native_servo")[0]
+
+    assert (position.target, position.drive) == ("position", "position_pd")
+    assert (servo.target, servo.drive) == ("position", "position_servo")
+
+
+def test_build_derives_torque_drive_for_direct_torque():
+    """A torque target requires (and resolves to) the direct_torque drive."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    group = _group(joints=("a",), target="torque")
+
+    runtime = _build((group,), arm, _profile({"body": ("a",)}, {"a": 0.0}), law="direct_torque")[0]
+
+    assert (runtime.target, runtime.drive) == ("torque", "torque")
+
+
+def test_build_rejects_incompatible_target_and_law():
+    """An action target whose law cannot serve it fails teachingly."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    group = _group(joints=("a",), target="torque")
+
+    with pytest.raises(ControlError, match="requires the direct_torque"):
+        _build((group,), arm, _profile({"body": ("a",)}, {"a": 0.0}), law="standard_pd")
+
+
+def test_build_control_runtimes_uses_joint_and_profile_q0_defaults():
+    """q0 comes from explicit joint inits, profile defaults, then position zero."""
     arm = ArticulationSpec(
         name="arm",
-        joints=(JointSpec("a"), JointSpec("b"), JointSpec("c")),
+        joints=(JointSpec("b", init=0.4),),
     )
-    profile = _profile({"body": ("a", "b", "c")}, {"a": 0.1, "b": 0.2})
-    group = _group(joints=["a", "b", "c"], q0={"b": 0.9})
+    profile = _profile({"body": ("a", "b", "c")}, {"a": 0.1})
+    group = _group(joints=("a", "b", "c"))
 
-    runtime = build_control_runtimes((group,), (arm,), {"arm": profile})[0]
+    runtime = _build((group,), arm, profile)[0]
 
     assert runtime.joint_names == ("a", "b", "c")
-    assert runtime.q0.tolist() == pytest.approx([0.1, 0.9, 0.0])
-    assert runtime.source == "config.joints"
+    assert runtime.q0.tolist() == pytest.approx([0.1, 0.4, 0.0])
+    assert runtime.source == "action_spec"
     assert runtime.strategy_name == "position_pd"
 
 
-def test_build_control_runtimes_rejects_missing_q0_for_non_position_drive():
-    """Only position drives may default a missing q0 to zero."""
-    arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
-    group = _group(joints=["shoulder"], drive="torque", target="torque")
+def test_explicit_joint_init_wins_over_the_profile_default():
+    """A declared joint init is the explicit q0 fact; the profile is the fallback."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a", init=0.9),))
+    profile = _profile({"body": ("a",)}, {"a": 0.1})
+    group = _group(joints=("a",))
 
-    with pytest.raises(ControlError, match="only position drives may default to 0"):
-        build_control_runtimes((group,), (arm,), {"arm": _profile({"body": ("shoulder",)}, {})})
+    runtime = _build((group,), arm, profile)[0]
 
-
-def test_build_control_runtimes_expands_profile_joint_set():
-    """A named joint set is expanded once against the real profile."""
-    arm = ArticulationSpec(name="arm", joints=(JointSpec("finger"),))
-    profile = _profile({"hand": ("finger",)}, {"finger": 0.25})
-    group = _group(joint_set="hand", joints=None)
-
-    runtime = build_control_runtimes((group,), (arm,), {"arm": profile})[0]
-
-    assert runtime.joint_names == ("finger",)
-    assert runtime.q0.tolist() == pytest.approx([0.25])
-    assert runtime.source == "profile:arm.hand"
-    assert runtime.joint_set == "hand"
+    assert runtime.q0.tolist() == pytest.approx([0.9])
 
 
-@pytest.mark.parametrize(
-    ("profiles", "match"),
-    [
-        ({}, "has no RobotProfile"),
-        ({"arm": _profile({"body": ("shoulder",)}, {})}, "unknown joint_set 'hand'"),
-    ],
-    ids=["no-profile", "unknown-set"],
-)
-def test_build_control_runtimes_rejects_unresolvable_joint_set(profiles, match):
-    """A joint_set selector fails fast without a matching profile set."""
-    arm = ArticulationSpec(name="arm", joints=(JointSpec("shoulder"),))
-    group = _group(joint_set="hand", joints=None)
+def test_build_control_runtimes_copies_role_and_policy_metadata():
+    """The action group role and policy control_dt flow into the runtime."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+    profile = _profile({"body": ("a",)}, {"a": 0.0})
+    group = _group(joints=("a",), role="body")
 
-    with pytest.raises(ControlError, match=match):
-        build_control_runtimes((group,), (arm,), profiles)
+    runtime = _build(
+        (group,),
+        arm,
+        profile,
+        policies=(_binding(groups=(("arm", "body"),), control_dt=0.02),),
+    )[0]
+
+    assert runtime.role == "body"
+    assert runtime.control_dt == 0.02
+
+
+def test_build_control_runtimes_rejects_uncovered_joint():
+    """An action joint with no resolved actuation law is rejected."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"), JointSpec("b")))
+    group = _group(joints=("a",))
+
+    with pytest.raises(ControlError, match="no actuation group covers"):
+        build_control_runtimes(
+            OrderedActionSpec((group,)),
+            (_binding(),),
+            (arm,),
+            {"arm": _profile({"body": ("a",)}, {"a": 0.0})},
+            {},
+        )
 
 
 def _coverage_case(kind: str):
@@ -171,17 +250,18 @@ def _coverage_case(kind: str):
         arm = ArticulationSpec(name="arm", joints=(JointSpec("j"), JointSpec("k")))
         return (
             (arm,),
-            (_group(joints=["j"]),),
             (_runtime("body", "arm", ("j",)),),
-            "neither driven by a control group",
+            "neither driven by an action group",
         )
     if kind == "overlap":
         arm = ArticulationSpec(name="arm", joints=(JointSpec("j"),))
         return (
             (arm,),
-            (_group(joints=["j"]), _group(name="aux", joints=["j"])),
-            (_runtime("body", "arm", ("j",)), _runtime("aux", "arm", ("j",))),
-            "control groups overlap on joints",
+            (
+                _runtime("body", "arm", ("j",)),
+                _runtime("aux", "arm", ("j",)),
+            ),
+            "action groups overlap on joints",
         )
     if kind == "passive-conflict":
         arm = ArticulationSpec(
@@ -191,15 +271,13 @@ def _coverage_case(kind: str):
         )
         return (
             (arm,),
-            (_group(joints=["j"]),),
             (_runtime("body", "arm", ("j",)),),
-            "both driven by a control group",
+            "both driven by an action group",
         )
     if kind == "unknown":
         arm = ArticulationSpec(name="arm", joints=(JointSpec("j"),))
         return (
             (arm,),
-            (_group(joints=["j", "z"]),),
             (_runtime("body", "arm", ("j", "z")),),
             "not in the articulation's actuated joint vocabulary",
         )
@@ -210,12 +288,119 @@ def _coverage_case(kind: str):
     "kind",
     ["missing", "overlap", "passive-conflict", "unknown"],
 )
-def test_validate_resolved_coverage_rejects_incomplete_or_conflicting(kind):
+def test_validate_action_coverage_rejects_incomplete_or_conflicting(kind):
     """Resolved coverage is exact and disjoint against the actuated vocabulary."""
-    arts, controls, runtimes, match = _coverage_case(kind)
+    arts, runtimes, match = _coverage_case(kind)
 
     with pytest.raises(ControlError, match=match):
-        validate_resolved_coverage(arts, {}, controls, runtimes)
+        validate_action_coverage(arts, {}, runtimes)
+
+
+def test_validate_policy_bindings_rejects_unknown_group_reference():
+    """A binding may only reference declared action groups."""
+    group = _group()
+
+    with pytest.raises(ControlError, match="undeclared action group"):
+        validate_policy_bindings((group,), (_binding(groups=(("arm", "hand"),)),))
+
+
+def test_validate_policy_bindings_rejects_duplicate_policy_ownership():
+    """One action group cannot be owned by two policies."""
+    group = _group()
+
+    with pytest.raises(ControlError, match="owned by two policies"):
+        validate_policy_bindings(
+            (group,),
+            (
+                _binding(adapter="a", groups=(("arm", "body"),)),
+                _binding(adapter="b", groups=(("arm", "body"),)),
+            ),
+        )
+
+
+def test_validate_policy_bindings_requires_every_group_owned():
+    """Every action group must appear in exactly one policy binding."""
+    first = _group(name="body")
+    second = _group(name="aux", joints=("knee",))
+
+    with pytest.raises(ControlError, match="not owned by any policy"):
+        validate_policy_bindings((first, second), (_binding(groups=(("arm", "body"),)),))
+
+
+def test_go1_go2_same_joint_names_share_one_adapter():
+    """Two articulations with identical joint names are disambiguated by identity."""
+    joints = ("hip", "knee")
+    go1 = ArticulationSpec(name="go1", joints=tuple(JointSpec(j) for j in joints))
+    go2 = ArticulationSpec(name="go2", joints=tuple(JointSpec(j) for j in joints))
+    groups = (
+        _group(name="legs", articulation="go1", joints=joints, role="body"),
+        _group(name="legs", articulation="go2", joints=joints, role="body"),
+    )
+    actuation = ActuationGroup(
+        name="legs", law="standard_pd", joints=joints, gains={"kp": 1.0, "kd": 0.1}
+    )
+    plans = {
+        spec.name: resolve_actuation_groups((actuation,), articulation=spec.name, joints=joints)
+        for spec in (go1, go2)
+    }
+
+    runtimes = build_control_runtimes(
+        OrderedActionSpec(groups),
+        (PolicyBinding("dog_policy", (("go1", "legs"), ("go2", "legs"))),),
+        (go1, go2),
+        {"go1": _profile({"body": joints}, {}), "go2": _profile({"body": joints}, {})},
+        plans,
+    )
+
+    assert [(runtime.articulation, runtime.name) for runtime in runtimes] == [
+        ("go1", "legs"),
+        ("go2", "legs"),
+    ]
+    assert all(runtime.joint_names == joints for runtime in runtimes)
+    assert all(runtime.role == "body" for runtime in runtimes)
+
+
+def test_composite_adapter_owns_both_go1_and_go2_groups():
+    """The v0 composite-adapter path is one binding over both identities."""
+    action = OrderedActionSpec(
+        (
+            _group(name="legs", articulation="go1", joints=("hip",), role="body"),
+            _group(name="legs", articulation="go2", joints=("hip",), role="body"),
+        )
+    )
+    composite = PolicyBinding("two_dog", (("go1", "legs"), ("go2", "legs")))
+
+    validate_policy_bindings(action.groups, (composite,))
+
+    assert composite.adapter == "two_dog"
+    assert composite.groups == (("go1", "legs"), ("go2", "legs"))
+
+
+def test_build_copies_explicit_body_and_aux_roles():
+    """Roles are copied from the action group, never inferred from the name."""
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"), JointSpec("b")))
+    profile = _profile({"body": ("a",), "hand": ("b",)}, {"a": 0.0, "b": 0.0})
+    groups = (
+        _group(name="legs", articulation="arm", joints=("a",), role="body"),
+        _group(name="gripper", articulation="arm", joints=("b",), role="aux"),
+    )
+    actuation = ActuationGroup(
+        name="all", law="standard_pd", joints=("a", "b"), gains={"kp": 1.0, "kd": 0.1}
+    )
+    plans = {"arm": resolve_actuation_groups((actuation,), articulation="arm", joints=("a", "b"))}
+
+    runtimes = build_control_runtimes(
+        OrderedActionSpec(groups),
+        (PolicyBinding("manual", (("arm", "legs"), ("arm", "gripper"))),),
+        (arm,),
+        {"arm": profile},
+        plans,
+    )
+
+    assert [(runtime.name, runtime.role) for runtime in runtimes] == [
+        ("legs", "body"),
+        ("gripper", "aux"),
+    ]
 
 
 @pytest.mark.parametrize(

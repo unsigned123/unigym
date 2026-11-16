@@ -82,16 +82,16 @@ def _config() -> dict:
         "articulations": [
             {"name": "arm", "joints": [{"name": "shoulder"}, {"name": "elbow"}]},
         ],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "acme.run",
                 "articulation": "arm",
                 "joints": ["shoulder", "elbow"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             },
         ],
+        "policies": [{"adapter": "acme.run", "groups": [["arm", "arm"]]}],
         "adapter": {"name": "acme.run"},
     }
 

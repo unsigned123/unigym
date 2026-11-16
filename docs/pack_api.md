@@ -787,7 +787,7 @@ explicitly.  When `spec.spawn` is absent, `default_pos` is
 `(0, 0, profile.base_height)` only when `base_height` is not `None`; otherwise
 the builder fails because there is no spawn default.  Neutral actuation is
 declared on the articulation (`ArticulationSpec.actuation`) and translated by
-the backend; `env.params.actuators`, `controls[].gains` and the top-level
+the backend; `env.params.actuators`, the articulation `actuation` gains and the top-level
 `actuator:` override are removed.  GR1 declares no neutral USD/URDF asset, so
 the backend realizer rejects it because its effective asset has no compatible
 format, not because of its name.  Its MJCF remains a scene resource, not a

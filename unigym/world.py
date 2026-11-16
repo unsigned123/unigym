@@ -74,7 +74,8 @@ class WorldFragment(TypedDict, total=False):
     scene_preset: str | dict[str, JsonValue]
     world_base: dict[str, JsonValue]
     articulations: list[dict[str, JsonValue]]
-    controls: list[dict[str, JsonValue]]
+    action_spec: list[dict[str, JsonValue]]
+    policies: list[dict[str, JsonValue]]
     objects: dict[str, JsonValue]
 
 
@@ -219,7 +220,8 @@ class World:
         self._terrain_replace_floor = True
         self._terrain_builder: _TerrainBuilder | None = None
         self._articulations: list[dict[str, JsonValue]] = []
-        self._controls: list[dict[str, JsonValue]] = []
+        self._action_spec: list[dict[str, JsonValue]] = []
+        self._policies: list[dict[str, JsonValue]] = []
 
     # ------------------------------------------------------------------ #
     # factories
@@ -648,12 +650,14 @@ class World:
     ) -> World:
         """Declare one articulation on this world (emits ``articulations[]``).
 
-        The declaration is the v104 neutral shape: an articulation is
+        The declaration is the neutral shape: an articulation is
         ``root + model + joints`` (no articulation-level control mode).
         ``model`` may be a path string or a mapping (``{"mjcf": <path>}``;
         ``urdf``/``usd`` are accepted by the IR for future backends).  The
-        drive is emitted as a top-level ``controls[]`` group named after the
-        articulation (action face == articulation name).
+        drive is emitted as one explicit ``action_spec`` group named after the
+        articulation (``role: body``) plus profile-declared extra action sets
+        (``role: aux``); the ``policies`` binding names the adapter that owns
+        them.
 
         Builder form::
 
@@ -678,8 +682,9 @@ class World:
                 a group list / a normalized inventory).
             passive_joints: Joints the articulation owns but does not drive.
             params: Optional backend knobs.
-            adapter: The adapter name owning this articulation's body group.
-            drive: The body control drive (default ``position_pd``).
+            adapter: The adapter name owning this articulation's action groups.
+            drive: The body drive (default ``position_pd``); validated against
+                ``target``.
             target: The explicit target kind (must match ``drive``).
 
         Returns:
@@ -691,9 +696,19 @@ class World:
             raise ValueError(
                 f"World.articulation {name!r}: the articulation-level "
                 f"`control` declaration was removed in v104; declare the "
-                f"drive as a top-level `controls:` group "
-                f"(name/adapter/articulation/drive/target) via the "
-                f"adapter/drive/target arguments"
+                f"drive as a top-level `action_spec:` group plus a `policies:` "
+                f"binding (adapter/drive/target arguments)"
+            )
+        from unigym.runtime.controls import ControlError, target_for_drive
+
+        try:
+            expected_target = target_for_drive(str(drive))
+        except ControlError as exc:
+            raise ValueError(f"World.articulation {name!r}: {exc}") from exc
+        if str(target) != expected_target:
+            raise ValueError(
+                f"World.articulation {name!r}: drive {drive!r} requires "
+                f"target {expected_target!r}, got {target!r}"
             )
         entry: dict[str, JsonValue] = {"name": name}
         if model is not None:
@@ -723,26 +738,44 @@ class World:
         if any(existing["name"] == name for existing in self._articulations):
             raise ValueError(f"World.articulation: duplicate articulation name {name!r}")
         self._articulations.append(entry)
-        group: dict[str, JsonValue] = {
-            "name": name,
-            "adapter": str(adapter),
-            "articulation": name,
-            "drive": str(drive),
-            "target": str(target),
-        }
-        if joints is not None:
-            declared = _joint_names_from_declaration(joints)
-            if declared:
-                joints_json: list[JsonValue] = [name for name in declared]
-                group["joints"] = joints_json
-            else:
-                # empty declaration == the profile's body set
-                group["joint_set"] = "body"
-        else:
-            # a programmatic body group selects the profile set explicitly;
-            # build resolves it once (no group-name inference)
-            group["joint_set"] = "body"
-        self._controls.append(group)
+        profile = _world_profile(entry)
+        declared = _joint_names_from_declaration(joints) if joints is not None else []
+        if not declared and profile is not None:
+            declared = [str(joint) for joint in profile.joint_sets.get("body", ())]
+        if not declared:
+            raise ValueError(
+                f"World.articulation {name!r}: the action_spec group needs "
+                f"explicit ordered joints; declare `joints:` or use a "
+                f"registered robot profile with a `body` joint set"
+            )
+        declared_json: list[JsonValue] = [str(joint) for joint in declared]
+        groups: list[dict[str, JsonValue]] = [
+            {
+                "name": name,
+                "articulation": name,
+                "joints": declared_json,
+                "target": str(target),
+                "role": "body",
+            }
+        ]
+        if profile is not None:
+            for face, face_joints in profile.action_faces.items():
+                groups.append(
+                    {
+                        "name": str(face),
+                        "articulation": name,
+                        "joints": [str(joint) for joint in face_joints],
+                        "target": "position",
+                        "role": "aux",
+                    }
+                )
+        self._action_spec.extend(groups)
+        self._policies.append(
+            {
+                "adapter": str(adapter),
+                "groups": [[name, str(group["name"])] for group in groups],
+            }
+        )
         return self
 
     def flat_ground(self) -> World:
@@ -848,8 +881,9 @@ class World:
                 fragment["world_base"] = copy.deepcopy(self._world_base)
         if self._articulations:
             fragment["articulations"] = [copy.deepcopy(entry) for entry in self._articulations]
-        if self._controls:
-            fragment["controls"] = [copy.deepcopy(entry) for entry in self._controls]
+        if self._action_spec:
+            fragment["action_spec"] = [copy.deepcopy(entry) for entry in self._action_spec]
+            fragment["policies"] = [copy.deepcopy(entry) for entry in self._policies]
         dynamic = self.dynamic_declarations()
         if dynamic:
             fragment["objects"] = dynamic
@@ -864,8 +898,11 @@ class World:
             cfg["world_base"] = copy.deepcopy(fragment["world_base"])
         if "articulations" in fragment:
             _merge_articulations(cfg, fragment["articulations"])
-        if "controls" in fragment:
-            _merge_controls(cfg, fragment["controls"])
+        if "action_spec" in fragment:
+            _merge_action_spec(cfg, fragment["action_spec"])
+            declared_policies = fragment.get("policies")
+            if declared_policies is not None:
+                _merge_policies(cfg, declared_policies)
         dynamic = fragment.get("objects")
         if dynamic:
             # Preserve the config's own spelling (objects: surface wins,
@@ -908,34 +945,109 @@ def _joint_names_from_declaration(
     return names
 
 
-def _merge_controls(
+def _world_profile(entry: dict[str, JsonValue]):
+    """Resolve the robot profile of a world articulation, or ``None``.
+
+    ``params.profile`` selects a registered profile for a renamed
+    articulation (the same rule the run builder applies); an unregistered
+    robot type has no profile and must declare explicit joints.
+    """
+    from unigym.robots import build_robot_profile
+
+    section: dict[str, JsonValue] = {"name": entry.get("name")}
+    raw_params = entry.get("params")
+    params = dict(raw_params) if isinstance(raw_params, dict) else {}
+    selector = params.pop("profile", None)
+    if selector is not None:
+        section["name"] = str(selector)
+    section["params"] = params
+    try:
+        return build_robot_profile(section)
+    except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
+        return None
+
+
+def _merge_action_spec(
     cfg: dict[str, JsonValue],
     declared: list[dict[str, JsonValue]],
 ) -> None:
-    """Merge world-declared control groups into the config list by name."""
-    existing = cfg.get("controls")
-    if not existing:
-        initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
-        cfg["controls"] = initial
-        return
-    existing_list: list[JsonValue] = existing if isinstance(existing, list) else []
-    merged: list[JsonValue] = [copy.deepcopy(entry) for entry in existing_list]
-    index: dict[str, int] = {}
+    """Merge world-declared action groups into the config by identity."""
+    existing = cfg.get("action_spec")
+    merged: list[JsonValue] = (
+        [copy.deepcopy(entry) for entry in existing] if isinstance(existing, list) else []
+    )
+    index: dict[tuple[str, str], int] = {}
     for position, entry in enumerate(merged):
         if isinstance(entry, dict):
-            name_value = entry.get("name")
-            if isinstance(name_value, str):
-                index[name_value] = position
+            articulation = entry.get("articulation")
+            name = entry.get("name")
+            if isinstance(articulation, str) and isinstance(name, str):
+                index[(articulation, name)] = position
     for entry in declared:
-        name_value = entry["name"]
-        assert isinstance(name_value, str)
-        position = index.get(name_value)
+        key = (str(entry["articulation"]), str(entry["name"]))
+        position = index.get(key)
         if position is None:
-            index[name_value] = len(merged)
+            index[key] = len(merged)
             merged.append(copy.deepcopy(entry))
         else:
             merged[position] = copy.deepcopy(entry)
-    cfg["controls"] = merged
+    cfg["action_spec"] = merged
+
+
+def _merge_policies(
+    cfg: dict[str, JsonValue],
+    declared: list[dict[str, JsonValue]],
+) -> None:
+    """Merge world-declared policy bindings into the config by adapter."""
+    existing = cfg.get("policies")
+    merged: list[JsonValue] = (
+        [copy.deepcopy(entry) for entry in existing] if isinstance(existing, list) else []
+    )
+    index: dict[str, int] = {}
+    for position, entry in enumerate(merged):
+        if isinstance(entry, dict):
+            adapter = entry.get("adapter")
+            if isinstance(adapter, str):
+                index[adapter] = position
+    for entry in declared:
+        adapter = str(entry["adapter"])
+        position = index.get(adapter)
+        groups = entry.get("groups")
+        declared_groups: list[JsonValue] = (
+            [copy.deepcopy(group) for group in groups] if isinstance(groups, list) else []
+        )
+        if position is None:
+            index[adapter] = len(merged)
+            merged.append(
+                {
+                    "adapter": adapter,
+                    "groups": declared_groups,
+                }
+            )
+            continue
+        current = merged[position]
+        assert isinstance(current, dict)
+        current_groups = current.get("groups")
+        merged_groups: list[JsonValue] = (
+            [copy.deepcopy(group) for group in current_groups]
+            if isinstance(current_groups, list)
+            else []
+        )
+        seen = {
+            (str(group[0]), str(group[1]))
+            for group in merged_groups
+            if isinstance(group, (list, tuple)) and len(group) == 2
+        }
+        for group in declared_groups:
+            if not isinstance(group, (list, tuple)) or len(group) != 2:
+                merged_groups.append(group)
+                continue
+            key = (str(group[0]), str(group[1]))
+            if key not in seen:
+                seen.add(key)
+                merged_groups.append(group)
+        current["groups"] = merged_groups
+    cfg["policies"] = merged
 
 
 def _merge_articulations(

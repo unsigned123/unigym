@@ -645,7 +645,7 @@ class MjwarpEnv(WarpBatchMixin):
             n
             for art in self._articulation_order
             for c in self._control_order
-            if c.articulation == art.name and c.action_face != art.name
+            if c.articulation == art.name and c.role != "body"
             for n in c.joint_names
         )
         self._action_resolver = MujocoJointResolver(
@@ -653,7 +653,7 @@ class MjwarpEnv(WarpBatchMixin):
         )
         self._joint_gathers: dict = {}
         first = next(
-            (c for c in self._control_order if not c.prop and c.action_face == c.articulation),
+            (c for c in self._control_order if not c.prop and c.role == "body"),
             self._control_order[0] if self._control_order else None,
         )
         if first is not None:

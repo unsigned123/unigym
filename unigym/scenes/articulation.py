@@ -1,9 +1,9 @@
 """Neutral articulation IR (authoring model).
 
 An articulation is ``root + model + joints + spawn + actuation``.  There is no
-articulation-level control mode: *how* a joint is driven (and which adapter
-owns it) is declared explicitly in the run-level ``controls[]`` block
-(:mod:`unigym.runtime.controls`), and the physical ctrl law lives in
+articulation-level control mode: *which* adapter owns a joint is declared
+explicitly in the run-level ``action_spec`` groups plus ``policies`` bindings
+(:mod:`unigym.runtime.actions`), and the physical ctrl law lives in
 :attr:`ArticulationSpec.actuation` (the neutral
 :mod:`unigym.actuators.ir` records).  Joints that are neither driven nor
 passive are an error at run/build.
@@ -14,8 +14,9 @@ engine and no backend name is allowed here (attribute neutrality); the scene
 package forbids backend imports, not the neutral actuators package.
 
 v104 removed ``ControlSpec`` / ``JointSpec.mode`` / ``policy_articulation``
-/ ``policy_section``: the drive declaration lives in ``controls[]`` and the
-robot profile only supplies the joint order / q0 / body parts.
+/ ``policy_section``: the action declaration lives in ``action_spec`` plus
+``policies`` and the robot profile only supplies the joint order / q0 / body
+parts.
 """
 
 from __future__ import annotations
@@ -423,8 +424,8 @@ class JointSpec:
 
     A joint no longer carries a capability ``mode``: every declared joint is
     actuated unless it is named in :attr:`ArticulationSpec.passive_joints`,
-    and the drive (``position_pd`` / ``position_servo`` / ...) is declared by
-    the owning group in the run-level ``controls[]`` block.
+    and the action target is declared by the owning group in the run-level
+    ``action_spec`` block (the physical law by ``actuation``).
     """
 
     name: str
@@ -471,9 +472,9 @@ class JointSpec:
             raise ArticulationError(
                 f"joint {name!r} declares the removed v104 key 'mode'; joints "
                 f"are actuated unless listed in the articulation's "
-                f"`passive_joints`, and the drive belongs to a top-level "
-                f"`controls[]` group (drive: position_pd | position_servo | "
-                f"torque | velocity | effort | current)"
+                f"`passive_joints`, and the action target belongs to a "
+                f"top-level `action_spec` group (target: position | velocity | "
+                f"torque | effort | current)"
             )
         if "stiffness" in params or "latch" in params:
             raise ArticulationError(
@@ -576,9 +577,9 @@ class ArticulationSpec:
 
     ``joints`` may be omitted for profile-derived articulations (the robot
     profile supplies the joint order); when it is declared, every joint is
-    actuated unless listed in ``passive_joints``.  Control coverage is
-    validated at the run level against ``controls[]``
-    (:func:`unigym.runtime.controls.validate_controls`).
+    actuated unless listed in ``passive_joints``.  Action coverage is
+    validated at the run level against ``action_spec`` groups
+    (:func:`unigym.runtime.controllers.validate_action_coverage`).
 
     The body fields are run-level overrides over the robot profile: ``None``
     means inherit the profile, an explicit empty tuple/mapping means empty.
@@ -770,8 +771,8 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
     (``name/model/root/spawn/joints/base_body/foot_bodies/body_sets/
     contacts/passive_joints/actuation/params``); unknown keys fail fast (there is no
     shorthand and no alias).  The articulation-level ``control:`` block is
-    rejected with a teaching error (drives are declared in the run-level
-    ``controls[]``).
+    rejected with a teaching error (action groups live in the run-level
+    ``action_spec``/``policies``).
     """
     if not isinstance(entry, Mapping):
         raise ArticulationError(f"articulations entries must be mappings, got {entry!r}")
@@ -779,10 +780,10 @@ def normalize_articulation(entry: Mapping[str, JsonValue]) -> ArticulationSpec:
         raise ArticulationError(
             f"articulation {entry.get('name')!r} declares the removed v104 "
             f"key `control:`; articulation-level control modes "
-            f"(policy/named/passive) no longer exist -- declare the drive "
-            f"explicitly in the run-level `controls:` list "
-            f"(name/adapter/articulation/drive/target) and list undriven "
-            f"joints in `passive_joints`"
+            f"(policy/named/passive) no longer exist -- declare the action "
+            f"group explicitly in the run-level `action_spec:` list and bind "
+            f"it with a `policies:` entry, then list undriven joints in "
+            f"`passive_joints`"
         )
     _unknown_keys(
         entry,
@@ -838,14 +839,14 @@ def normalize_articulations(entries: JsonValue) -> tuple[ArticulationSpec, ...]:
 
     The list is declaration data only: every articulation is ``root + model
     + joints + spawn``.  Which joints are driven is decided by the run-level
-    ``controls[]`` block, not by a per-articulation mode.
+    ``action_spec`` groups, not by a per-articulation mode.
     """
     if entries is None:
         raise ArticulationError(
             "run config declares no articulations; the neutral shape is "
-            "`articulations: [{name: <robot>, params: ...}]` plus a "
-            "top-level `controls:` list (the old top-level `robot:` block "
-            "was removed -- no alias)"
+            "`articulations: [{name: <robot>, params: ...}]` plus top-level "
+            "`action_spec:` groups and `policies:` bindings (the old "
+            "top-level `robot:` block was removed -- no alias)"
         )
     if not isinstance(entries, (list, tuple)) or not entries:
         raise ArticulationError("articulations must be a non-empty list of mappings")

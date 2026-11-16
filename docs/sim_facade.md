@@ -120,8 +120,8 @@ SimulationBuilder(
 - Visible defaults are shown above; there are no hidden world, control or
   action defaults.
 - `builder.world` is required and must declare a non-empty world asset. The
-  world fragment may not declare `articulations` / `controls`; the builder is
-  the single owner of those tables. `builder.terrain` is sugar for
+  world fragment may not declare `articulations` / `action_spec` / `policies`;
+  the builder is the single owner of those tables. `builder.terrain` is sugar for
   `builder.world.terrain`.
 - `add_articulation(ref, *, name=None, control=...)` requires an explicit
   `Control` spec; there is no implicit control. Faces are resolved against the

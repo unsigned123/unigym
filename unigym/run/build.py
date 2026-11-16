@@ -40,6 +40,7 @@ from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
 from unigym.robots import build_robot_profile
 from unigym.robots.base import validate_body_bindings
+from unigym.runtime.actions import OrderedActionSpec
 from unigym.runtime.controllers import (
     articulation_facts,
     build_control_plan,
@@ -337,44 +338,44 @@ def _adapter_self_command_dim(adapter: Adapter) -> int:
 
 
 def _body_controls(env: EnvBackend) -> list[ControlRuntime]:
-    """The body control faces (one per articulation, action face == name)."""
-    return [c for c in (env.controls or {}).values() if c.action_face == c.articulation]
+    """The explicit body control groups (one per articulation)."""
+    return [c for c in (env.controls or {}).values() if c.role == "body"]
 
 
 def _body_control_for(env: EnvBackend, articulation: str) -> ControlRuntime:
-    """The body control face of one articulation (or its first control)."""
+    """The explicit body control group of one articulation (or its first)."""
     controls = list((env.controls or {}).values())
     for control in controls:
-        if control.articulation == articulation and control.action_face == articulation:
+        if control.articulation == articulation and control.role == "body":
             return control
     for control in controls:
         if control.articulation == articulation:
             return control
-    raise RuntimeError(f"articulation {articulation!r} has no control face")
+    raise RuntimeError(f"articulation {articulation!r} has no control group")
 
 
 def _build_adapter_groups(spec: RunSpec) -> dict[str, tuple[tuple[str, str], ...]]:
-    """``{adapter_name: tuple[(articulation, group), ...]}`` from controls.
+    """``{adapter_name: tuple[(articulation, group), ...]}`` from policies.
 
-    This is the authoritative control partition: the config's
-    ``controls[]`` names exactly which action group each adapter drives.
-    Group identity is ``(articulation, name)``.  One group cannot be claimed
-    by two adapters; profile-derived extra faces and articulated props are
-    NOT implicitly added here (an adapter that emits them must have them
-    declared as control groups).
+    This is the authoritative policy partition: the config's ``policies:``
+    bindings name exactly which action group each adapter drives.  Group
+    identity is ``(articulation, name)``.  One group cannot be claimed by two
+    policies; profile-derived extra groups and articulated props are NOT
+    implicitly added here (an adapter that emits them must have them declared
+    as action groups and bound to a policy).
     """
     groups: dict[str, list[tuple[str, str]]] = {}
     owners: dict[tuple[str, str], str] = {}
-    for group in getattr(spec, "controls", ()) or ():
-        identity = (str(group.articulation), str(group.name))
-        owner = str(group.adapter)
-        prev = owners.get(identity)
-        if prev is not None:
-            raise ValueError(
-                f"control group {identity!r} is claimed by two adapters: " f"{prev!r} and {owner!r}"
-            )
-        owners[identity] = owner
-        groups.setdefault(owner, []).append(identity)
+    for binding in getattr(spec, "policies", ()) or ():
+        for identity in binding.groups:
+            prev = owners.get(identity)
+            if prev is not None:
+                raise ValueError(
+                    f"action group {identity!r} is claimed by two policies: "
+                    f"{prev!r} and {binding.adapter!r}"
+                )
+            owners[identity] = str(binding.adapter)
+            groups.setdefault(str(binding.adapter), []).append(identity)
     return {owner: tuple(keys) for owner, keys in groups.items()}
 
 
@@ -456,9 +457,9 @@ def _profile_for(art: ArticulationSpec) -> _ProfileSeed:
 
 
 def _control_articulations(spec: RunSpec) -> list[ArticulationSpec]:
-    """The articulation specs named by the run's controls[] (declaration order)."""
+    """The articulation specs named by the run's action groups (declaration order)."""
     names: list[str] = []
-    for group in spec.controls:
+    for group in spec.action_spec.groups:
         if group.articulation not in names:
             names.append(group.articulation)
     by_name = {art.name: art for art in spec.articulations}
@@ -670,21 +671,13 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
     """Build the effective profile of every profile-backed control articulation."""
     builds: dict[str, _ProfileBuild] = {}
     for art in _control_articulations(spec):
-        groups = [g for g in spec.controls if g.articulation == art.name]
         try:
             seed = _profile_for(art)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
-            # profile-less articulations are legal only when every control
-            # declares its joints/q0 explicitly (e.g. a future prop face);
-            # a `joint_set` selector REQUIRES a profile.
-            if any(g.joint_set is not None for g in groups):
-                raise ValueError(
-                    f"control articulation {art.name!r} has no RobotProfile "
-                    f"(unknown robot type) and at least one control group "
-                    f"selects a `joint_set` | hint: use a registered robot "
-                    f"articulation or declare every group's explicit "
-                    f"`joints` + `q0`"
-                ) from None
+            # profile-less articulations are legal when every action group
+            # declares its joints explicitly (the action surface has no
+            # profile-set selector); the run still needs one profile-backed
+            # robot articulation (checked by the caller).
             continue
         profile, asset_format = _effective_profile(art, seed["profile"], info)
         builds[art.name] = {
@@ -745,32 +738,26 @@ def _reject_removed_actuator_sources(cfg: dict[str, JsonValue]) -> None:
 def _build_actuation_plans(
     articulations: Sequence[ArticulationSpec],
     profiles: Mapping[str, RobotProfile],
-    controls: Sequence[ControlRuntime],
+    action_spec: OrderedActionSpec,
     backend: str,
 ) -> dict[str, tuple[ResolvedActuationGroup, ...]]:
     """Resolve each driven articulation's actuation plan (exactly-once).
 
-    The coverage universe is the control-driven joints of each articulation;
-    passive joints are excluded and every driven joint must be covered by
-    exactly one declared group.
+    The coverage universe is the action-group driven joints of each
+    articulation; passive joints are excluded and every driven joint must be
+    covered by exactly one declared group.
     """
-    by_articulation: dict[str, list[ControlRuntime]] = {}
-    for control in controls:
-        if control.prop:
-            continue
-        by_articulation.setdefault(control.articulation, []).append(control)
+    driven_by_articulation: dict[str, list[str]] = {}
+    for group in action_spec.groups:
+        driven = driven_by_articulation.setdefault(group.articulation, [])
+        for joint in group.joints:
+            if joint not in driven:
+                driven.append(joint)
     plans: dict[str, tuple[ResolvedActuationGroup, ...]] = {}
     for art in articulations:
-        art_controls = by_articulation.get(art.name, [])
-        if not art_controls:
+        driven = driven_by_articulation.get(art.name, [])
+        if not driven:
             continue
-        driven: list[str] = []
-        seen: set[str] = set()
-        for control in art_controls:
-            for joint in control.joint_names:
-                if joint not in seen:
-                    seen.add(joint)
-                    driven.append(joint)
         groups = art.actuation
         if groups is None or not groups:
             raise ValueError(
@@ -789,7 +776,6 @@ def _build_actuation_plans(
         )
         for row in resolved:
             validate_actuation_group(row.group, backend=backend)
-        validate_drive_law_matrix(resolved, art_controls)
         plans[art.name] = resolved
     return plans
 
@@ -811,11 +797,11 @@ def _build_robot_and_props(
     builds = _control_profiles(spec, info)
     if not builds:
         raise ValueError(
-            "no profile-backed control articulation: declare a top-level "
-            "`controls:` group over a registered robot articulation "
-            "(v104 authoring shape) | hint: e.g. controls: [{name: g1, "
-            "adapter: <name>, articulation: g1, drive: position_pd, "
-            "target: position}]"
+            "no profile-backed control articulation: declare an `action_spec:` "
+            "group over a registered robot articulation (split authoring "
+            "shape) | hint: e.g. action_spec: [{name: g1, articulation: g1, "
+            "joints: [...], target: position, role: body}] plus a policies: "
+            "binding {adapter: <name>, groups: [[g1, g1]]}"
         )
     first_name = next(iter(builds))
     profile = builds[first_name]["profile"]
@@ -1579,18 +1565,26 @@ def build_instance(spec: RunSpec) -> RunInstance:
     adapter = robot["adapter"]
     prop_manager = robot["prop_manager"]
     generates_command = robot["generates_command"]
-    # RunSpec.controls is authoritative.  Build one
-    # ControlRuntime per declared group by expanding `joint_set` from the
-    # profile (or using explicit `joints`) -- once.  The same resolved
-    # controls freeze into the read-only plan; no guessing path remains.
-    control_runtimes = build_control_runtimes(spec.controls, spec.articulations, profiles)
-    control_plan = build_control_plan(spec.controls, control_runtimes)
+    # RunSpec.action_spec/policies are authoritative.  The actuation laws are
+    # resolved first (they own the physical drive), then one ControlRuntime is
+    # derived per action group from (group + policy binding + actuation law +
+    # backend addresses).  The same resolved rows freeze into the plan.
     actuation_plans = _build_actuation_plans(
         spec.articulations,
         profiles,
-        control_runtimes,
+        spec.action_spec,
         info.name,
     )
+    control_runtimes = build_control_runtimes(
+        spec.action_spec,
+        spec.policies,
+        spec.articulations,
+        profiles,
+        actuation_plans,
+    )
+    for art_name, plan in actuation_plans.items():
+        validate_drive_law_matrix(plan, [c for c in control_runtimes if c.articulation == art_name])
+    control_plan = build_control_plan(control_runtimes)
     sensing = _build_sensing(
         spec,
         cfg,
@@ -1632,11 +1626,11 @@ def build_instance(spec: RunSpec) -> RunInstance:
     env.adapter_groups = _build_adapter_groups(spec)
     if spec.adapter_name:
         adapter._unigym_name = spec.adapter_name
-        # articulated-prop action faces are declared by ``objects:`` sugar and
+        # articulated-prop action groups are declared by ``objects:`` sugar and
         # materialized by the backend as prop control runtimes; the emitting
-        # adapter owns them (the config's controls[] cannot name them).
+        # adapter owns them (the config's action_spec cannot name them).
         prop_faces = tuple(
-            (c.articulation, c.action_face) for c in (env.controls or {}).values() if c.prop
+            (c.articulation, c.name) for c in (env.controls or {}).values() if c.prop
         )
         if prop_faces:
             owned = tuple(env.adapter_groups.get(spec.adapter_name, ()))

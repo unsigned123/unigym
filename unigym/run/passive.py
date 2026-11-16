@@ -19,13 +19,13 @@ __all__ = ["declare_passive_joints", "declare_world_passive_joints"]
 
 def declare_passive_joints(
     entry: dict[str, JsonValue],
-    controls: Sequence[JsonValue],
+    action_spec: Sequence[JsonValue],
 ) -> None:
-    """Declare profile joints no emitted control group drives as passive.
+    """Declare profile joints no emitted action group drives as passive.
 
     Args:
         entry: One ``articulations[]`` mapping (mutated in place).
-        controls: The emitted top-level ``controls[]`` groups.
+        action_spec: The emitted top-level ``action_spec`` groups.
     """
     if entry.get("passive_joints"):
         return
@@ -52,19 +52,14 @@ def declare_passive_joints(
             if joint not in actuated:
                 actuated.append(joint)
     driven: set[str] = set()
-    for group in controls or ():
+    for group in action_spec or ():
         if not isinstance(group, dict):
             continue
         if group.get("articulation") not in (None, art_name):
             continue
         joints = group.get("joints")
-        if joints:
-            if isinstance(joints, (list, tuple)):
-                driven.update(str(joint) for joint in joints)
-        else:
-            joint_set = group.get("joint_set")
-            if isinstance(joint_set, str):
-                driven.update(sets.get(joint_set, ()))
+        if isinstance(joints, (list, tuple)):
+            driven.update(str(joint) for joint in joints)
     passive: list[JsonValue] = []
     for joint in actuated:
         if joint not in driven:
@@ -74,11 +69,13 @@ def declare_passive_joints(
 
 
 def declare_world_passive_joints(cfg: dict[str, JsonValue]) -> None:
-    """Declare profile joints of every world articulation no control drives."""
-    raw_controls = cfg.get("controls")
-    controls: list[JsonValue] = list(raw_controls) if isinstance(raw_controls, list) else []
+    """Declare profile joints of every world articulation no action group drives."""
+    raw_action_spec = cfg.get("action_spec")
+    action_spec: list[JsonValue] = (
+        list(raw_action_spec) if isinstance(raw_action_spec, list) else []
+    )
     raw_entries = cfg.get("articulations")
     entries: list[JsonValue] = list(raw_entries) if isinstance(raw_entries, list) else []
     for entry in entries:
         if is_json_object(entry):
-            declare_passive_joints(entry, controls)
+            declare_passive_joints(entry, action_spec)

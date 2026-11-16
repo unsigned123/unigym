@@ -251,8 +251,9 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
     from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
+    from unigym.actuators.ir import resolve_actuation_groups
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
-    from unigym.runtime.controls import ControlGroup
 
     inventory = robot_rigid_bodies(str(g1_usd))
     paths = [body.path for body in inventory]
@@ -274,17 +275,26 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     profile = _profile()
     spec = _spec(g1_usd, passive_joints=profile.joint_sets["hand"])
     realization = _realize(spec)
-    group = ControlGroup.from_mapping(
-        {
-            "name": ARTICULATION,
-            "adapter": "manual",
-            "articulation": ARTICULATION,
-            "joints": list(profile.joint_sets["body"]),
-            "drive": "position_pd",
-            "target": "position",
-        }
+    body_joints = tuple(profile.joint_sets["body"])
+    group = OrderedActionGroup(
+        name=ARTICULATION,
+        articulation=ARTICULATION,
+        joints=body_joints,
+        target="position",
+        role="body",
     )
-    controls = build_control_runtimes((group,), (spec,), {ARTICULATION: profile})
+    plans = {
+        ARTICULATION: resolve_actuation_groups(
+            spec.actuation, articulation=ARTICULATION, joints=body_joints
+        )
+    }
+    controls = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (PolicyBinding(adapter="manual", groups=((ARTICULATION, ARTICULATION),)),),
+        (spec,),
+        {ARTICULATION: profile},
+        plans,
+    )
     terrain_cfg = {
         "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
     }
@@ -325,23 +335,33 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.actuators.ir import resolve_actuation_groups
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
-    from unigym.runtime.controls import ControlGroup
 
     profile = _profile()
     spec = _spec(g1_usd, passive_joints=profile.joint_sets["hand"])
     realization = _realize(spec)
-    group = ControlGroup.from_mapping(
-        {
-            "name": ARTICULATION,
-            "adapter": "manual",
-            "articulation": ARTICULATION,
-            "joints": list(profile.joint_sets["body"]),
-            "drive": "position_pd",
-            "target": "position",
-        }
+    body_joints = tuple(profile.joint_sets["body"])
+    group = OrderedActionGroup(
+        name=ARTICULATION,
+        articulation=ARTICULATION,
+        joints=body_joints,
+        target="position",
+        role="body",
     )
-    controls = build_control_runtimes((group,), (spec,), {ARTICULATION: profile})
+    plans = {
+        ARTICULATION: resolve_actuation_groups(
+            spec.actuation, articulation=ARTICULATION, joints=body_joints
+        )
+    }
+    controls = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (PolicyBinding(adapter="manual", groups=((ARTICULATION, ARTICULATION),)),),
+        (spec,),
+        {ARTICULATION: profile},
+        plans,
+    )
     terrain_cfg = {
         "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
     }

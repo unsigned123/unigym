@@ -43,7 +43,7 @@ import logging
 import os
 import tempfile
 from argparse import Namespace
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
@@ -295,29 +295,21 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
     return entry
 
 
-def _controls_entries(
+def _action_entries(
     robot: JsonValue,
     adapter: JsonValue,
-) -> list[dict[str, JsonValue]]:
-    """Builder convenience: the top-level ``controls:`` groups.
+) -> tuple[list[dict[str, JsonValue]], list[dict[str, JsonValue]]]:
+    """Builder convenience: the top-level ``action_spec`` groups + policy.
 
-    The body group is named after the articulation (the historical action
-    face) and selects ``joint_set: body``; profile-declared extra faces
-    (``hand`` / ``right_hand`` / ...) select their same-named joint set.
-    Joints are resolved once at build time -- the builder never copies a
-    joint list and never infers a set from the group name.
+    The body group is named after the articulation (``role: body``) and uses
+    the profile's ``body`` joint set explicitly.  Profile-declared extra
+    action sets (``hand`` / ``right_hand`` / ...) become ``role: aux`` groups
+    with their explicit ordered joints.  One policy binding names the adapter
+    that owns every emitted group.
     """
     entry = _articulation_entry(robot)
     name = str(entry["name"])
     adapter_name = str(_adapter_section(adapter).get("name") or "manual")
-    body: dict[str, JsonValue] = {
-        "name": name,
-        "adapter": adapter_name,
-        "articulation": name,
-        "drive": "position_pd",
-        "target": "position",
-    }
-    groups: list[dict[str, JsonValue]] = [body]
     profile: RobotProfile | None = None
     try:
         from unigym.robots import build_robot_profile
@@ -325,25 +317,49 @@ def _controls_entries(
         profile = build_robot_profile(entry)
     except (AttributeError, KeyError, NotImplementedError, ValueError):
         profile = None
-    if profile is not None:
-        body["joint_set"] = "body"
-        # Only profile-declared extra faces are emitted here: an adapter that
-        # emits a face the profile does not declare
-        # (e.g. the G1 ``hand`` face) must get it from its config's
-        # ``controls[]`` -- the partition is the single authority.
-        terms: Mapping[str, Sequence[str]] = profile.action_faces or {}
-        for face in terms:
-            groups.append(
-                {
-                    "name": str(face),
-                    "adapter": adapter_name,
-                    "articulation": name,
-                    "joint_set": str(face),
-                    "drive": "position_pd",
-                    "target": "position",
-                }
-            )
-    return groups
+    if profile is None:
+        raise NotImplementedError(
+            f"Run(robot={robot!r}) cannot derive explicit action joints: the "
+            f"robot has no registered profile | hint: pass a registered "
+            f"robot name, or declare `articulations:` + `action_spec:` + "
+            f"`policies:` explicitly in a config"
+        )
+    body_joints = [str(joint) for joint in profile.joint_sets.get("body", ())]
+    if not body_joints:
+        raise NotImplementedError(
+            f"Run(robot={robot!r}): the profile declares no `body` joint set; "
+            f"declare an explicit action_spec group"
+        )
+    body_joints_json: list[JsonValue] = [str(joint) for joint in body_joints]
+    groups: list[dict[str, JsonValue]] = [
+        {
+            "name": name,
+            "articulation": name,
+            "joints": body_joints_json,
+            "target": "position",
+            "role": "body",
+        }
+    ]
+    # Only profile-declared extra action sets are emitted here: an adapter
+    # that emits a group the profile does not declare must get it from its
+    # config's action_spec -- the partition is the single authority.
+    for face, face_joints in (profile.action_faces or {}).items():
+        groups.append(
+            {
+                "name": str(face),
+                "articulation": name,
+                "joints": [str(joint) for joint in face_joints],
+                "target": "position",
+                "role": "aux",
+            }
+        )
+    policies: list[dict[str, JsonValue]] = [
+        {
+            "adapter": adapter_name,
+            "groups": [[name, str(group["name"])] for group in groups],
+        }
+    ]
+    return groups, policies
 
 
 def _minimal_cfg(
@@ -351,7 +367,8 @@ def _minimal_cfg(
     run_name: str,
     seed: int,
     articulations: list[dict[str, JsonValue]],
-    controls: list[dict[str, JsonValue]],
+    action_spec: list[dict[str, JsonValue]],
+    policies: list[dict[str, JsonValue]],
     backend: str,
     num_envs: int,
     adapter: dict[str, JsonValue],
@@ -380,7 +397,8 @@ def _minimal_cfg(
         "mode": "collect",
         "adapter": copy.deepcopy(adapter),
         "articulations": _json_list(copy.deepcopy(articulations)),
-        "controls": _json_list(copy.deepcopy(controls)),
+        "action_spec": _json_list(copy.deepcopy(action_spec)),
+        "policies": _json_list(copy.deepcopy(policies)),
         "env": env_section,
         "command": command_section,
         "collect": collect_section,
@@ -584,16 +602,17 @@ class Run:
                 raw["adapter"] = _adapter_section(adapter)
             if robot is not None:
                 entry = _articulation_entry(robot)
-                cfg_controls = _controls_entries(
+                cfg_action_spec, cfg_policies = _action_entries(
                     robot, adapter if adapter is not None else raw.get("adapter")
                 )
-                _declare_passive_joints(entry, cfg_controls)
+                _declare_passive_joints(entry, cfg_action_spec)
                 arts = _list_section(raw, "articulations")
                 if arts:
                     arts[0] = entry
                 else:
                     arts.append(entry)
-                raw["controls"] = _json_list(cfg_controls)
+                raw["action_spec"] = _json_list(cfg_action_spec)
+                raw["policies"] = _json_list(cfg_policies)
         for key, value in overrides.items():
             raw[key] = copy.deepcopy(value)
         self._raw_cfg = raw
@@ -642,13 +661,14 @@ class Run:
         articulation_entry = _articulation_entry(robot)
         adapter_section = _adapter_section(adapter)
         backend_label = backend or "mujoco"
-        minimal_controls = _controls_entries(robot, adapter_section)
-        _declare_passive_joints(articulation_entry, minimal_controls)
+        minimal_action_spec, minimal_policies = _action_entries(robot, adapter_section)
+        _declare_passive_joints(articulation_entry, minimal_action_spec)
         raw = _minimal_cfg(
             run_name="minimal_run",
             seed=0 if seed is None else int(seed),
             articulations=[articulation_entry],
-            controls=minimal_controls,
+            action_spec=minimal_action_spec,
+            policies=minimal_policies,
             backend=backend_label,
             num_envs=1 if num_envs is None else int(num_envs),
             adapter=adapter_section,
@@ -1081,7 +1101,7 @@ class Run:
         views: list[dict[str, JsonValue]] = []
         for name, art in (getattr(env, "articulations", {}) or {}).items():
             body = next(
-                (c for c in controls.values() if c.articulation == name and c.action_face == name),
+                (c for c in controls.values() if c.articulation == name and c.role == "body"),
                 None,
             )
             model = getattr(art, "model", None)

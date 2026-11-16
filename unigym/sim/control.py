@@ -4,8 +4,8 @@ A :class:`ControlSpec` is an immutable declaration of one or more control
 faces.  Every face keeps both halves of the existing control contract next to
 each other: the action face (``name`` / ``joints`` / ``q0``) and the actuation
 gains (``kp`` / ``kd`` plus optional limits).  The builder lowers the faces to
-the existing ``controls[]`` and ``articulations[].actuation[]`` tables; this
-module never imports a backend or an engine.
+the existing ``action_spec`` / ``policies`` / ``articulations[].actuation[]``
+tables; this module never imports a backend or an engine.
 
 Only :meth:`Control.position_pd` is exposed in the first spike.  Its drive is
 ``position_pd`` and its target is the existing ``position`` kind, so the

@@ -20,16 +20,16 @@ def _cfg(scene_preset: object) -> dict:
         "articulations": [
             {"name": "arm", "joints": [{"name": "shoulder"}, {"name": "elbow"}]},
         ],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder", "elbow"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             },
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
 

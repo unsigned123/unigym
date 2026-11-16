@@ -269,6 +269,7 @@ def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
             target="position",
             required=True,
             prop=True,
+            role="aux",
         )
     return controls
 
@@ -278,11 +279,7 @@ def _bind_control_order(env, controls) -> None:
     env._control_order = [controls[n] for n in env.action_entry_names if n in controls]
     for art in env.articulations.values():
         body = next(
-            (
-                c
-                for c in env._control_order
-                if c.articulation == art.name and c.action_face == art.name
-            ),
+            (c for c in env._control_order if c.articulation == art.name and c.role == "body"),
             None,
         )
         perm = (
@@ -342,8 +339,8 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
     """Resolve every self-describing action onto the flat action-term input.
 
     Entries are routed by ``(entry.articulation, entry.group)`` to the
-    control whose ``(articulation, action_face)`` matches; the action-term
-    name stays an internal backend detail (``control.action_face``).
+    control whose ``(articulation, name)`` matches; the action-term name
+    stays an internal backend detail (``control.action_face``).
     """
     if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
         raise TypeError(
@@ -351,7 +348,7 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
         )
     by_key: dict[tuple[str, str], ControlRuntime] = {}
     for control in env._control_order:
-        identity = (control.articulation, control.action_face)
+        identity = (control.articulation, control.name)
         if identity in by_key:
             raise ValueError(
                 f"{_LABEL}: control group {identity!r} is declared by more "
@@ -380,9 +377,9 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
             f"accepted control groups: {accepted}"
         )
     missing = [
-        (c.articulation, c.action_face)
+        (c.articulation, c.name)
         for c in env._control_order
-        if c.required and (c.articulation, c.action_face) not in entries
+        if c.required and (c.articulation, c.name) not in entries
     ]
     if missing:
         raise ValueError(
@@ -392,7 +389,7 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
     n = env.num_envs
     chunks = []
     for control in env._control_order:
-        identity = (control.articulation, control.action_face)
+        identity = (control.articulation, control.name)
         face = control.action_face
         term = env.action_manager.get_term(face)
         dim = int(term.action_dim)

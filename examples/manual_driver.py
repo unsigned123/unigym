@@ -22,9 +22,8 @@ from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mujoco.env import MujocoEnv
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner import ExternalRunner
-from unigym.runtime.actions import NamedAction
+from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec, PolicyBinding
 from unigym.runtime.controllers import build_control_runtimes
-from unigym.runtime.controls import ControlGroup
 from unigym.scenes.articulation import ArticulationSpec
 from unigym.terminations import TerminationGroup
 
@@ -81,17 +80,20 @@ def make_env():
             joints=("hinge",),
         )
     }
-    group = ControlGroup.from_mapping(
-        {
-            "name": "tiny",
-            "adapter": "manual",
-            "articulation": "tiny",
-            "joints": ["hinge"],
-            "drive": "position_pd",
-            "target": "position",
-        }
+    group = OrderedActionGroup(
+        name="tiny",
+        articulation="tiny",
+        joints=("hinge",),
+        target="position",
+        role="body",
     )
-    controls = build_control_runtimes((group,), (articulation,), {"tiny": profile})
+    controls = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (PolicyBinding(adapter="manual", groups=(("tiny", "tiny"),)),),
+        (articulation,),
+        {"tiny": profile},
+        actuation_plans,
+    )
     env = MujocoEnv(
         robot_profile=profile,
         adapter=ManualAdapter(),

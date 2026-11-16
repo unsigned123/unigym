@@ -48,22 +48,22 @@ def test_cfg_with_articulations_needs_no_robot_injection():
         "env": {"backend": "isaaclab2", "num_envs": 1},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
     run = Run(cfg)
 
     assert [art["name"] for art in run.cfg["articulations"]] == ["arm"]
-    assert run.cfg["controls"][0]["articulation"] == "arm"
+    assert run.cfg["action_spec"][0]["articulation"] == "arm"
 
 
 def test_robot_declaration_dict_passes_actuation_through():
@@ -97,16 +97,16 @@ def _live_cfg(**env_params):
         "env": {"backend": "isaaclab2", "num_envs": 1, "params": env_params},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
 
@@ -140,7 +140,8 @@ def test_spec_keeps_a_renamed_profile_backed_articulation():
     cfg = _live_cfg()
     cfg["articulations"][0]["name"] = "humanoid"
     cfg["articulations"][0]["params"] = {"profile": "g1"}
-    cfg["controls"][0]["articulation"] = "humanoid"
+    cfg["action_spec"][0]["articulation"] = "humanoid"
+    cfg["policies"][0]["groups"] = [["humanoid", "arm"]]
 
     spec = Run(cfg).spec
 

@@ -18,7 +18,7 @@ from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
 
 ARTICULATION_NAME = "arm"
-CONTROL_NAME = "body"
+CONTROL_NAME = ARTICULATION_NAME
 JOINT_NAME = "shoulder"
 
 
@@ -26,9 +26,8 @@ class FakeBackend(EnvBackend):
     """One-articulation, one-joint fake backend (CPU, deterministic).
 
     The articulation ``arm`` owns the joint ``shoulder``; the single body
-    control group ``body`` drives it.  The action face is the articulation
-    name (``arm``), because the ``EnvBackend`` body-face rule requires
-    ``action_face == articulation``.
+    control group is also named ``arm`` (action identity ``(arm, arm)``) with
+    an explicit ``role == "body"``.
 
     Every step replaces the scalar joint position with the named action's
     position target, publishes ``joint_pos``/``prev_action`` in the observation
@@ -77,7 +76,7 @@ class FakeBackend(EnvBackend):
         self.controls: dict[str, ControlRuntime] = {
             CONTROL_NAME: ControlRuntime(
                 name=CONTROL_NAME,
-                action_face=ARTICULATION_NAME,
+                action_face=CONTROL_NAME,
                 adapter="manual",
                 articulation=ARTICULATION_NAME,
                 joint_names=self.joint_names,
@@ -85,6 +84,7 @@ class FakeBackend(EnvBackend):
                 drive="position_pd",
                 target="position",
                 required=True,
+                role="body",
             )
         }
         self._body_control = self.controls[CONTROL_NAME]
@@ -173,7 +173,7 @@ class FakeBackend(EnvBackend):
                 f"actions must be a sequence of NamedAction, got {type(actions).__name__}"
             )
         control = self._body_control
-        key = (control.articulation, control.action_face)
+        key = (control.articulation, control.name)
         entries: dict[tuple[str, str], NamedAction] = {}
         for entry in actions:
             if not isinstance(entry, NamedAction):

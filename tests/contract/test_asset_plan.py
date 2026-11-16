@@ -179,16 +179,16 @@ def _run_config(asset: str) -> dict:
         "env": {"backend": "isaaclab2", "num_envs": 1},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
         "objects": {"types": [{"name": "cup", "type": "articulation", "asset": asset}]},
     }
 

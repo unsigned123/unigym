@@ -405,7 +405,7 @@ def build_adapter(section: dict, num_envs: int, device: str) -> Adapter:
     # express that per-class signature, so the callable view is established by
     # the runtime class check above.
     adapter = cast(Callable[..., Adapter], constructor)(num_envs=num_envs, device=device, **params)
-    # registry identity: the build-time controls[] partition and the
+    # registry identity: the build-time policies partition and the
     # runner's group validation resolve ownership by this name (never by
     # joint-order / action-face inference).
     adapter._unigym_name = name

@@ -129,7 +129,7 @@ def _policy_runtimes(env) -> list:
     return [
         c
         for c in (getattr(env, "controls", {}) or {}).values()
-        if getattr(c, "action_face", None) == getattr(c, "articulation", None)
+        if getattr(c, "role", None) == "body"
     ]
 
 

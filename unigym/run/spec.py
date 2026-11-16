@@ -35,12 +35,12 @@ from unigym.backends.registry import (
     validate_backend_options,
 )
 from unigym.core.paths import expand_placeholders
-from unigym.runtime.controls import (
-    ControlError,
-    ControlGroup,
-    normalize_controls,
-    validate_controls,
+from unigym.runtime.actions import (
+    OrderedActionSpec,
+    PolicyBinding,
 )
+from unigym.runtime.controllers import validate_policy_bindings
+from unigym.runtime.controls import ControlError
 from unigym.scenes.articulation import (
     ArticulationError,
     ArticulationSpec,
@@ -110,9 +110,12 @@ class RunSpec:
     #: the normalized articulation list (the old ``robot:`` block
     #: was removed).  Articulations are pure authoring data (no control mode).
     articulations: tuple[ArticulationSpec, ...]
-    #: the explicit control groups: every driven joint is covered by
-    #: exactly one group; undriven joints are declared in passive_joints.
-    controls: tuple[ControlGroup, ...]
+    #: the ordered action groups: every driven joint is covered by exactly
+    #: one group; undriven joints are declared in passive_joints.
+    action_spec: OrderedActionSpec
+    #: the policy bindings: which adapter owns which ``(articulation, group)``
+    #: action group, plus optional control_dt/agent metadata.
+    policies: tuple[PolicyBinding, ...]
     adapter: dict[str, JsonValue]
     adapter_name: str | None
     adapter_params: dict[str, JsonValue]
@@ -278,15 +281,16 @@ def _normalize_articulations(
     the old top-level ``robot:`` block fails fast with the new shape; the
     ``articulations[]`` list is normalized into the frozen neutral IR.  The
     articulation-level ``control:`` block is rejected by the
-    articulation normalizer (drives live in ``controls[]``).
+    articulation normalizer (drives live in ``action_spec`` + ``policies``).
     """
     from unigym.errors import ConfigError
 
     if "robot" in cfg:
         raise ConfigError(
             "the top-level `robot:` block was removed in v101 A2; declare "
-            "`articulations: [{name: <robot>, params: ...}]` plus a "
-            "top-level `controls:` list instead -- there is no alias"
+            "`articulations: [{name: <robot>, params: ...}]` plus top-level "
+            "`action_spec:` groups and `policies:` bindings instead -- there "
+            "is no alias"
         )
     try:
         return normalize_articulations(cfg.get("articulations"))
@@ -294,46 +298,72 @@ def _normalize_articulations(
         raise ConfigError(f"{source}: {exc}") from exc
 
 
-def _normalize_controls(
+def _normalize_action_authoring(
     cfg: dict[str, JsonValue],
     articulations: tuple[ArticulationSpec, ...],
     source: str,
-) -> tuple[ControlGroup, ...]:
-    """Normalize/validate ``cfg['controls']`` against the articulations.
+) -> tuple[OrderedActionSpec, tuple[PolicyBinding, ...]]:
+    """Normalize/validate ``cfg['action_spec']`` + ``cfg['policies']``.
 
-    A run that declares articulations must declare controls.  Every
-    driven joint belongs to exactly one group; undriven joints are listed in
-    the owning articulation's ``passive_joints`` (validated here).
+    The split authoring surface is mandatory: ``action_spec`` declares every
+    ordered action group (explicit joints) and ``policies`` binds those groups
+    to the adapter that produces them.  The removed ``controls:`` block is
+    rejected with a teaching error (no alias).  Every action group must name a
+    declared articulation, every policy binding must reference a declared
+    group, and no group may be owned by two policies.
     """
     from unigym.errors import ConfigError
 
-    entries = cfg.get("controls")
-    if not entries or not isinstance(entries, (list, tuple, Mapping)):
+    if "controls" in cfg:
         raise ConfigError(
-            f"{source}: no controls declared; the v104 shape requires a "
-            f"top-level `controls:` list (one group per driven joint set): "
-            f"`controls: [{{name: <face>, adapter: <name>, articulation: "
-            f"<name>, drive: position_pd, target: position}}]`"
+            f"{source}: the top-level `controls:` block was removed; declare "
+            f"`action_spec:` action groups (name/articulation/joints/target/"
+            f"role) plus `policies:` bindings (adapter/groups[/control_dt/"
+            f"agent]) instead -- there is no alias"
         )
-    parsed_entries: list[ControlGroup | Mapping[str, JsonValue]]
-    if isinstance(entries, Mapping):
-        entry_source: Mapping[str, JsonValue] | list[ControlGroup | Mapping[str, JsonValue]] = (
-            entries
+    raw_spec = cfg.get("action_spec")
+    if raw_spec is None or not isinstance(raw_spec, (list, tuple)) or not raw_spec:
+        raise ConfigError(
+            f"{source}: no action_spec declared; the authoring shape requires "
+            f"a top-level `action_spec:` list, e.g. `action_spec: [{{name: "
+            f"legs, articulation: go1, joints: [...], target: position, "
+            f"role: body}}]`"
         )
-    else:
-        parsed_entries = []
-        for entry in entries:
-            if isinstance(entry, (ControlGroup, Mapping)):
-                parsed_entries.append(entry)
-            else:
-                raise ConfigError(f"{source}: controls entries must be mappings, " f"got {entry!r}")
-        entry_source = parsed_entries
     try:
-        controls = normalize_controls(entry_source)
-        validate_controls(articulations, controls)
+        action_spec = OrderedActionSpec.from_mapping(raw_spec)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{source}: action_spec: {exc}") from exc
+    declared_articulations = {art.name for art in articulations}
+    for group in action_spec.groups:
+        if group.articulation not in declared_articulations:
+            raise ConfigError(
+                f"{source}: action group {group.name!r} names articulation "
+                f"{group.articulation!r}, which is not declared; declared "
+                f"articulations: {sorted(declared_articulations)}"
+            )
+    raw_policies = cfg.get("policies")
+    if raw_policies is None or not isinstance(raw_policies, (list, tuple)) or not raw_policies:
+        raise ConfigError(
+            f"{source}: no policies declared; the authoring shape requires a "
+            f"top-level `policies:` list, e.g. `policies: [{{adapter: manual, "
+            f"groups: [[go1, legs]]}}]`"
+        )
+    policies: list[PolicyBinding] = []
+    for index, entry in enumerate(raw_policies):
+        if isinstance(entry, PolicyBinding):
+            policies.append(entry)
+        elif isinstance(entry, Mapping):
+            try:
+                policies.append(PolicyBinding.from_mapping(entry))
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(f"{source}: policies[{index}]: {exc}") from exc
+        else:
+            raise ConfigError(f"{source}: policies[{index}] must be a mapping, got {entry!r}")
+    try:
+        validate_policy_bindings(action_spec.groups, policies)
     except ControlError as exc:
         raise ConfigError(f"{source}: {exc}") from exc
-    return controls
+    return action_spec, tuple(policies)
 
 
 def _contains_asset_ref(value: JsonValue) -> bool:
@@ -642,7 +672,7 @@ def build_spec(
     _route_content(cfg, env_cfg, backend_label)
     world_base = _validate_world_base(cfg, env_cfg, backend_label)
     articulations = _normalize_articulations(cfg, args.config)
-    controls = _normalize_controls(cfg, articulations, args.config)
+    action_spec, policies = _normalize_action_authoring(cfg, articulations, args.config)
     num_envs = _as_positive_int(env_cfg.get("num_envs"), "env.num_envs")
     total_steps = _as_positive_int(col_cfg.get("steps"), "collect.steps")
     # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
@@ -671,7 +701,8 @@ def build_spec(
         world_base=world_base,
         scene_preset=scene_preset,
         articulations=articulations,
-        controls=controls,
+        action_spec=action_spec,
+        policies=policies,
         adapter=adapter_cfg,
         adapter_name=adapter_name,
         adapter_params=adapter_params,

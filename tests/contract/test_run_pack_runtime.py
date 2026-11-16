@@ -53,16 +53,16 @@ def _plain_cfg() -> dict[str, JsonValue]:
         "world_base": {"mjcf": "model.xml"},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
 

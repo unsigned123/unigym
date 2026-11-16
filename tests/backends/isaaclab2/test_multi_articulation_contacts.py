@@ -102,18 +102,15 @@ def _g1_realization(spec, profile):
     return build_robot_realization(profile, spec=spec, params={}, asset_plan=None)
 
 
-def _control(name, profile):
-    from unigym.runtime.controls import ControlGroup
+def _action(name, profile):
+    from unigym.runtime.actions import OrderedActionGroup
 
-    return ControlGroup.from_mapping(
-        {
-            "name": name,
-            "adapter": "manual",
-            "articulation": name,
-            "joints": list(profile.joint_sets["body"]),
-            "drive": "position_pd",
-            "target": "position",
-        }
+    return OrderedActionGroup(
+        name=name,
+        articulation=name,
+        joints=tuple(profile.joint_sets["body"]),
+        target="position",
+        role="body",
     )
 
 
@@ -129,6 +126,8 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
     from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
+    from unigym.actuators.ir import resolve_actuation_groups
+    from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
 
     cart_profile = _cartpole_profile()
@@ -166,10 +165,32 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
     )
     assert manager is not None
 
+    cart_action = _action(CARTPOLE, cart_profile)
+    g1_action = _action(G1, g1_profile)
+    plans = {
+        CARTPOLE: resolve_actuation_groups(
+            cart_spec.actuation,
+            articulation=CARTPOLE,
+            joints=cart_action.joints,
+        ),
+        G1: resolve_actuation_groups(
+            g1_spec.actuation,
+            articulation=G1,
+            joints=g1_action.joints,
+            passive_joints=g1_spec.passive_joints,
+        ),
+    }
     controls = build_control_runtimes(
-        (_control(CARTPOLE, cart_profile), _control(G1, g1_profile)),
+        OrderedActionSpec((cart_action, g1_action)),
+        (
+            PolicyBinding(
+                adapter="manual",
+                groups=((CARTPOLE, CARTPOLE), (G1, G1)),
+            ),
+        ),
         (cart_spec, g1_spec),
         {CARTPOLE: cart_profile, G1: g1_profile},
+        plans,
     )
     terrain_cfg = {
         "ground": AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())

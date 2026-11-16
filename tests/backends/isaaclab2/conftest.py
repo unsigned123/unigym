@@ -63,8 +63,8 @@ def _build_env(
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.robots.base import RobotProfile
+    from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
-    from unigym.runtime.controls import ControlGroup
     from unigym.scenes.articulation import ArticulationSpec
 
     articulation_cfg = _cartpole_articulation_cfg(usd)
@@ -90,17 +90,27 @@ def _build_env(
             ),
         ),
     )
-    group = ControlGroup.from_mapping(
-        {
-            "name": ARTICULATION,
-            "adapter": "manual",
-            "articulation": ARTICULATION,
-            "joints": list(JOINT_ORDER),
-            "drive": "position_pd",
-            "target": "position",
-        }
+    group = OrderedActionGroup(
+        name=ARTICULATION,
+        articulation=ARTICULATION,
+        joints=JOINT_ORDER,
+        target="position",
+        role="body",
     )
-    controls = build_control_runtimes((group,), (articulation,), {ARTICULATION: profile})
+    from unigym.actuators.ir import resolve_actuation_groups
+
+    plans = {
+        ARTICULATION: resolve_actuation_groups(
+            articulation.actuation, articulation=ARTICULATION, joints=JOINT_ORDER
+        )
+    }
+    controls = build_control_runtimes(
+        OrderedActionSpec((group,)),
+        (PolicyBinding(adapter="manual", groups=((ARTICULATION, ARTICULATION),)),),
+        (articulation,),
+        {ARTICULATION: profile},
+        plans,
+    )
     terrain_cfg = {
         "ground": AssetBaseCfg(
             prim_path="/World/ground",

@@ -34,8 +34,8 @@ from unigym.terminations import TerminationState
 
 
 def _control_group_key(control) -> tuple[str, str]:
-    """The routing identity of one control runtime: ``(articulation, group)``."""
-    return (str(control.articulation), str(control.action_face))
+    """The routing identity of one control runtime: ``(articulation, name)``."""
+    return (str(control.articulation), str(control.name))
 
 
 def _normalize_group_key(entry, adapter_name: str) -> tuple[str, str]:
@@ -94,7 +94,7 @@ def _adapter_groups(instance):
     """The control groups the instance's adapter owns (build-time partition).
 
     The run's build step derives ``env.adapter_groups`` from
-    ``RunSpec.controls``; this helper reads that partition for the run's
+    ``RunSpec.policies``; this helper reads that partition for the run's
     adapter and normalizes every entry to its ``(articulation, group)``
     identity.  A run with no controls (test doubles) keeps the historical
     no-validation path returning ``None``.  No joint-order inference is
@@ -119,9 +119,7 @@ def _adapter_groups(instance):
     if not name:
         # test doubles / direct construction: the body control groups are a
         # cardinality fact, not a guess.
-        owned = tuple(
-            _control_group_key(c) for c in controls.values() if c.action_face == c.articulation
-        )
+        owned = tuple(_control_group_key(c) for c in controls.values() if c.role == "body")
         if owned:
             return owned
         raise ValueError(
@@ -135,6 +133,35 @@ def _adapter_groups(instance):
             f"declared groups: {[(c.name, c.adapter) for c in controls.values()]}"
         )
     return owned
+
+
+def _all_adapter_groups(instance):
+    """Every declared ``(articulation, group)`` identity across policies.
+
+    :class:`~unigym.runner.external.ExternalRunner` is driven by the caller,
+    not by one adapter: its action surface is the whole action spec, so its
+    validation partition is the union of every policy binding.
+    """
+    env = getattr(instance, "env", None)
+    groups = getattr(env, "adapter_groups", None)
+    if groups:
+        merged: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for adapter_name, entries in groups.items():
+            for key in _normalize_group_keys(entries, str(adapter_name)):
+                if key in seen:
+                    raise ValueError(
+                        f"action group {key!r} is declared by more than one "
+                        f"policy; the external action surface must be unique"
+                    )
+                seen.add(key)
+                merged.append(key)
+        return tuple(merged)
+    controls = getattr(env, "controls", None)
+    if not controls:
+        return None
+    owned = tuple(_control_group_key(c) for c in controls.values())
+    return owned or None
 
 
 def _joint_limits_by_articulation(env):
@@ -211,6 +238,13 @@ class SyncRunner:
         """
         spec = instance.spec
         runner_cfg = spec.runner or {}
+        declared = getattr(getattr(instance, "env", None), "adapter_groups", None) or {}
+        if len(declared) > 1:
+            raise ValueError(
+                "SyncRunner v0 supports exactly one policy adapter; the run "
+                f"declares {sorted(declared)} | hint: bind every action group "
+                "to one composite adapter, or drive the run with ExternalRunner"
+            )
         auto_reset = getattr(instance, "auto_reset", None)
         if auto_reset is None:
             auto_reset = runner_cfg.get("auto_reset", True)
@@ -257,7 +291,7 @@ class SyncRunner:
         self.auto_reset = bool(auto_reset)
         self.adapter_name = getattr(adapter, "_unigym_name", None) or type(adapter).__name__
         self.controls = dict(getattr(env, "controls", None) or {})
-        # v104.3: the build-time controls[] partition names exactly the
+        # v104.3: the build-time policies partition names exactly the
         # control groups this adapter owns, normalized to their
         # (articulation, group) identity.  None = no control surface
         # (test doubles / direct construction) -> historical behavior.
@@ -334,7 +368,7 @@ class SyncRunner:
                 f"missing={missing}, extra={extra}, "
                 f"declared={list(self.adapter_groups)}"
             )
-        by_group = {(c.articulation, c.action_face): c for c in self.controls.values()}
+        by_group = {(c.articulation, c.name): c for c in self.controls.values()}
         for identity, entry in entries.items():
             control = by_group.get(identity)
             if control is None:

@@ -285,28 +285,26 @@ def _configure_robot_scene(
             "isaaclab2 backend: a run must declare at least one articulation "
             "with an ArticulationCfg realization"
         )
-    # The body action term name is the body control's action face, which the
-    # contract already requires to equal its articulation name.  Resolve it
-    # from the neutral control runtimes instead of hard-coding a robot name:
-    # the articulation name is the single source of truth for the action entry.
+    # The body action term name is the body control's action face (kept as a
+    # legacy backend term identity).  Resolve the body group from its explicit
+    # role instead of inferring it from the articulation name.
     single_name = ars[0].name if ars else None
     body_controls = [
         control
         for control in tuple(controls or ())
         if not control.prop
-        and control.action_face == control.articulation
+        and control.role == "body"
         and (single_name is None or control.articulation == single_name)
     ]
     if len(body_controls) != 1:
         accepted = [
-            (control.name, control.articulation, control.action_face)
-            for control in tuple(controls or ())
+            (control.name, control.articulation, control.role) for control in tuple(controls or ())
         ]
         raise ValueError(
             "isaaclab2 backend: the single-articulation path needs exactly "
-            "one non-prop body control (action_face == articulation), got "
+            "one non-prop body control (role == 'body'), got "
             f"{len(body_controls)}; accepted controls (name, articulation, "
-            f"action_face): {accepted}"
+            f"role): {accepted}"
         )
     body_control = body_controls[0]
     term_name = str(body_control.action_face)
@@ -743,11 +741,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             art.addresses.get("policy_joints") or (adapter.joint_order or robot_profile.joint_order)
         )
         body_control = next(
-            (
-                c
-                for c in self._control_order
-                if c.articulation == art.name and c.action_face == art.name
-            ),
+            (c for c in self._control_order if c.articulation == art.name and c.role == "body"),
             self._control_order[0] if self._control_order else None,
         )
         if body_control is not None:

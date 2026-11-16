@@ -10,7 +10,7 @@ from unigym.run.build import (
     _build_actuation_plans,
     _reject_removed_actuator_sources,
 )
-from unigym.runtime.controllers import ControlRuntime
+from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.scenes.articulation import ArticulationSpec, JointSpec
 
 
@@ -28,17 +28,12 @@ def _profile(name: str = "arm", sets: dict | None = None) -> RobotProfile:
     )
 
 
-def _control(name: str, art: str, joints: tuple[str, ...], drive: str = "position_pd"):
-    return ControlRuntime(
-        name=name,
-        action_face=name,
-        adapter="manual",
-        articulation=art,
-        joint_names=joints,
-        q0=(0.0,) * len(joints),
-        drive=drive,
-        target="position" if drive in ("position_pd", "position_servo") else drive,
-    )
+def _action(name: str, art: str, joints: tuple[str, ...], target: str = "position"):
+    return OrderedActionGroup(name=name, articulation=art, joints=joints, target=target)
+
+
+def _spec(*groups: OrderedActionGroup) -> OrderedActionSpec:
+    return OrderedActionSpec(tuple(groups))
 
 
 def _group(name: str = "body", joints=("shoulder", "elbow"), law="standard_pd") -> ActuationGroup:
@@ -47,7 +42,7 @@ def _group(name: str = "body", joints=("shoulder", "elbow"), law="standard_pd") 
 
 
 def test_plan_covers_exactly_the_driven_joints_in_declaration_order():
-    """The per-articulation plan resolves against the control-driven joints."""
+    """The per-articulation plan resolves against the action-driven joints."""
     spec = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"), JointSpec("elbow"), JointSpec("finger")),
@@ -56,7 +51,10 @@ def test_plan_covers_exactly_the_driven_joints_in_declaration_order():
     )
 
     plans = _build_actuation_plans(
-        (spec,), {"arm": _profile()}, (_control("body", "arm", ("shoulder", "elbow")),), "mujoco"
+        (spec,),
+        {"arm": _profile()},
+        _spec(_action("body", "arm", ("shoulder", "elbow"))),
+        "mujoco",
     )
 
     assert [row.joint_names for row in plans["arm"]] == [("shoulder", "elbow")]
@@ -68,7 +66,10 @@ def test_plan_fails_when_a_driven_articulation_omits_actuation():
 
     with pytest.raises(ValueError, match="declares driven joints but no `actuation`"):
         _build_actuation_plans(
-            (spec,), {"arm": _profile()}, (_control("body", "arm", ("shoulder",)),), "mujoco"
+            (spec,),
+            {"arm": _profile()},
+            _spec(_action("body", "arm", ("shoulder",))),
+            "mujoco",
         )
 
 
@@ -85,11 +86,16 @@ def test_plan_requires_a_profile_for_joint_set_addressing():
     )
 
     with pytest.raises(ActuationError, match="joint_set 'body' is unknown"):
-        _build_actuation_plans((spec,), {}, (_control("body", "arm", ("shoulder",)),), "mujoco")
+        _build_actuation_plans(
+            (spec,),
+            {},
+            _spec(_action("body", "arm", ("shoulder",))),
+            "mujoco",
+        )
 
 
-def test_plan_is_per_articulation_and_excludes_prop_controls():
-    """Each articulation gets its own plan; prop controls are ignored."""
+def test_plan_is_per_articulation_and_ignores_non_action_joints():
+    """Each articulation gets its own plan from its action groups only."""
     left = ArticulationSpec(
         name="left",
         joints=(JointSpec("shoulder"),),
@@ -100,17 +106,6 @@ def test_plan_is_per_articulation_and_excludes_prop_controls():
         joints=(JointSpec("shoulder"),),
         actuation=(_group(joints=("shoulder",)),),
     )
-    prop = ControlRuntime(
-        name="door",
-        action_face="door",
-        adapter="manual",
-        articulation="left",
-        joint_names=("hinge",),
-        q0=(0.0,),
-        drive="position_servo",
-        target="position",
-        prop=True,
-    )
     profiles = {
         "left": _profile("left", {"body": ("shoulder",)}),
         "right": _profile("right", {"body": ("shoulder",)}),
@@ -119,10 +114,9 @@ def test_plan_is_per_articulation_and_excludes_prop_controls():
     plans = _build_actuation_plans(
         (left, right),
         profiles,
-        (
-            _control("left", "left", ("shoulder",)),
-            _control("right", "right", ("shoulder",)),
-            prop,
+        _spec(
+            _action("left", "left", ("shoulder",)),
+            _action("right", "right", ("shoulder",)),
         ),
         "mujoco",
     )
@@ -131,11 +125,11 @@ def test_plan_is_per_articulation_and_excludes_prop_controls():
 
 
 @pytest.mark.parametrize(
-    ("drive", "law"),
+    ("target", "law"),
     [("torque", "direct_torque"), ("velocity", "direct_velocity")],
 )
-def test_plan_accepts_direct_drive_laws_on_mujoco_family(drive, law):
-    """torque/velocity plans resolve to their explicit direct-drive law."""
+def test_plan_accepts_direct_drive_laws_on_mujoco_family(target, law):
+    """torque/velocity targets resolve to their explicit direct-drive law."""
     spec = ArticulationSpec(
         name="arm",
         joints=(JointSpec("shoulder"),),
@@ -145,41 +139,19 @@ def test_plan_accepts_direct_drive_laws_on_mujoco_family(drive, law):
     plans = _build_actuation_plans(
         (spec,),
         {"arm": _profile()},
-        (_control("body", "arm", ("shoulder",), drive=drive),),
+        _spec(_action("body", "arm", ("shoulder",), target=target)),
         "mujoco",
     )
 
     assert [row.group.law for row in plans["arm"]] == [law]
 
 
-@pytest.mark.parametrize("drive", ["effort", "current"])
-def test_plan_rejects_unserved_direct_drive_controls(drive):
-    """effort/current fail at plan time with the teaching error."""
-    spec = ArticulationSpec(
-        name="arm",
-        joints=(JointSpec("shoulder"),),
-        actuation=(_group(joints=("shoulder",)),),
-    )
-
-    with pytest.raises(ActuationError, match="no native direct-drive actuation law"):
-        _build_actuation_plans(
-            (spec,),
-            {"arm": _profile()},
-            (_control("body", "arm", ("shoulder",), drive=drive),),
-            "mujoco",
-        )
-
-
 @pytest.mark.parametrize("backend", ["isaaclab2", "isaaclab3"])
 @pytest.mark.parametrize(
-    ("law", "drive"),
-    [
-        ("computed_torque_pd", "position_pd"),
-        ("direct_torque", "torque"),
-        ("direct_velocity", "velocity"),
-    ],
+    "law",
+    ["computed_torque_pd", "direct_torque", "direct_velocity"],
 )
-def test_plan_backend_gate_rejects_non_standard_laws(backend, law, drive):
+def test_plan_backend_gate_rejects_non_standard_laws(backend, law):
     """IsaacLab support is standard_pd only; direct drive is not faked."""
     spec = ArticulationSpec(
         name="g1",
@@ -191,7 +163,7 @@ def test_plan_backend_gate_rejects_non_standard_laws(backend, law, drive):
         _build_actuation_plans(
             (spec,),
             {"g1": _profile("g1")},
-            (_control("g1", "g1", ("shoulder",), drive=drive),),
+            _spec(_action("g1", "g1", ("shoulder",))),
             backend,
         )
 
@@ -215,9 +187,9 @@ def test_plan_backend_gate_accepts_mujoco_family_non_standard_laws():
             "arm": _profile("arm", {"body": ("shoulder",)}),
             "hand": _profile("hand", {"body": ("finger",)}),
         },
-        (
-            _control("arm", "arm", ("shoulder",)),
-            _control("hand", "hand", ("finger",), drive="position_servo"),
+        _spec(
+            _action("arm", "arm", ("shoulder",)),
+            _action("hand", "hand", ("finger",)),
         ),
         "mjwarp",
     )

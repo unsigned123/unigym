@@ -17,7 +17,6 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, TypeGuard, cast
 
 from unigym._typing import JsonValue
-from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 
 from .control import ControlSpec
 from .errors import (
@@ -235,16 +234,16 @@ class SimulationBuilder:
             device=device,
         )
         spec = run.spec
-        manual_controls = [control for control in spec.controls if control.adapter == "manual"]
-        if not manual_controls:
-            control_adapters = sorted({control.adapter for control in spec.controls})
+        manual_policies = [binding for binding in spec.policies if binding.adapter == "manual"]
+        if not manual_policies:
+            control_adapters = sorted({binding.adapter for binding in spec.policies})
             adapter_label = spec.adapter_name or (control_adapters[0] if control_adapters else None)
             raise SimulationConfigError(
-                "SimulationBuilder.from_config needs at least one manual control face "
-                f"to expose an external action table; this config declares adapter "
-                f"{adapter_label!r} with control adapter(s) "
-                f"{control_adapters or ['<none>']}. Declare a controls[] group with "
-                "adapter: manual -- the facade is not a policy-adapter driver."
+                "SimulationBuilder.from_config needs at least one manual policy "
+                f"binding to expose an external action table; this config declares adapter "
+                f"{adapter_label!r} with policy adapter(s) "
+                f"{control_adapters or ['<none>']}. Declare an action_spec group bound "
+                "with adapter: manual -- the facade is not a policy-adapter driver."
             )
         env_cfg = spec.cfg.get("env")
         if not isinstance(env_cfg, Mapping):
@@ -410,9 +409,9 @@ class SimulationBuilder:
     def _to_cfg(self) -> dict[str, JsonValue]:
         """Assemble the declaration tables of the existing run-config document.
 
-        The builder is the single owner of ``articulations[]`` and
-        ``controls[]``; the world contributes only its own fragment, which
-        ``Run(cfg, world=world)`` merges exactly once.  The emitted
+        The builder is the single owner of ``articulations[]``,
+        ``action_spec[]`` and ``policies[]``; the world contributes only its
+        own fragment, which ``Run(cfg, world=world)`` merges exactly once.  The emitted
         ``dt``/``physics_dt`` arithmetic is re-checked here because this
         document is the contract handed to ``Run``.  The emitted
         ``runner.auto_reset: false`` is the facade reset policy: ``step`` never
@@ -426,7 +425,7 @@ class SimulationBuilder:
             raise NoWorldError(
                 "builder.world declares no world asset; set a scene_preset or world_base"
             )
-        for key in ("articulations", "controls"):
+        for key in ("articulations", "action_spec", "policies"):
             if key in fragment:
                 raise SimulationConfigError(
                     f"the world fragment must not declare {key!r}; "
@@ -463,7 +462,8 @@ class SimulationBuilder:
             "runner": {"auto_reset": False},
         }
         cfg["articulations"] = _json_objects(self._articulation_entries())
-        cfg["controls"] = _json_objects(self._control_entries())
+        cfg["action_spec"] = _json_objects(self._action_entries())
+        cfg["policies"] = _json_objects(self._policy_entries())
         cameras = self._camera_entries()
         if cameras:
             cfg["cameras"] = _json_objects(cameras)
@@ -471,7 +471,9 @@ class SimulationBuilder:
 
     def _articulation_entries(self) -> list[dict[str, JsonValue]]:
         """The ``articulations[]`` table with explicit actuation groups."""
-        controls = self._control_entries()
+        from unigym.run.passive import declare_passive_joints as _declare_passive_joints
+
+        action_spec = self._action_entries()
         entries: list[dict[str, JsonValue]] = []
         for handle in self._articulations:
             control = handle.control
@@ -485,9 +487,30 @@ class SimulationBuilder:
             if ref is not None and handle.name != ref.id:
                 entry["params"] = {"profile": ref.id}
             entry["actuation"] = self._actuation_entries(control, handle)
-            _declare_passive_joints(entry, controls)
+            joints = self._joint_init_entries(control, handle)
+            if joints:
+                entry["joints"] = joints
+            _declare_passive_joints(entry, action_spec)
             entries.append(entry)
         return entries
+
+    def _joint_init_entries(
+        self,
+        control: ControlSpec,
+        handle: ArticulationHandle,
+    ) -> dict[str, JsonValue]:
+        """Per-joint standby positions (q0 is a joint fact, not an action one)."""
+        inits: dict[str, JsonValue] = {}
+        for face_name, face in control.faces.items():
+            for joint, value in face.q0.items():
+                if joint not in handle.faces[face_name]:
+                    raise SimulationConfigError(
+                        f"articulation {handle.name!r} control face {face_name!r} q0 "
+                        f"names joint {joint!r} outside its face joints "
+                        f"{list(handle.faces[face_name])}"
+                    )
+                inits[str(joint)] = {"init": float(value)}
+        return inits
 
     def _actuation_entries(
         self,
@@ -513,8 +536,8 @@ class SimulationBuilder:
             groups.append(group)
         return groups
 
-    def _control_entries(self) -> list[dict[str, JsonValue]]:
-        """The ``controls[]`` table with explicit joints and q0 overrides."""
+    def _action_entries(self) -> list[dict[str, JsonValue]]:
+        """The ``action_spec`` table with explicit joints."""
         entries: list[dict[str, JsonValue]] = []
         for handle in self._articulations:
             control = handle.control
@@ -524,17 +547,33 @@ class SimulationBuilder:
                     f"config-mode builders are not implemented in this slice"
                 )
             for face_name, face in control.faces.items():
-                group: dict[str, JsonValue] = {
-                    "name": face.name,
-                    "adapter": "manual",
-                    "articulation": handle.name,
-                    "joints": _json_names(handle.faces[face_name]),
-                    "drive": face.drive,
-                    "target": face.target,
-                }
-                if face.q0:
-                    group["q0"] = _json_float_map(face.q0)
-                entries.append(group)
+                entries.append(
+                    {
+                        "name": face.name,
+                        "articulation": handle.name,
+                        "joints": _json_names(handle.faces[face_name]),
+                        "target": face.target,
+                        "role": (
+                            "body" if face.joint_set == "body" or face.name == "body" else "aux"
+                        ),
+                    }
+                )
+        return entries
+
+    def _policy_entries(self) -> list[dict[str, JsonValue]]:
+        """One manual policy binding per articulation's action groups."""
+        entries: list[dict[str, JsonValue]] = []
+        for handle in self._articulations:
+            control = handle.control
+            if control is None:
+                raise SimulationConfigError(
+                    f"articulation {handle.name!r} has no control declaration; "
+                    f"config-mode builders are not implemented in this slice"
+                )
+            groups: list[JsonValue] = [
+                [handle.name, str(face.name)] for face in control.faces.values()
+            ]
+            entries.append({"adapter": "manual", "groups": groups})
         return entries
 
     def _camera_entries(self) -> list[dict[str, JsonValue]]:
@@ -795,10 +834,12 @@ class SimulationBuilder:
     def _check_face_names_available(self, label: str, control: ControlSpec) -> None:
         """Refuse control-face names another articulation already owns.
 
-        ``controls[].name`` is a global group key, so two articulations that
-        both fall back to the same default face name (for example
-        ``joint_set="body"`` -> face ``"body"``) would collide in
-        ``build_spec``.  Refuse here, while the caller can still name the face.
+        The simulation facade still exposes one global ``faces`` table
+        (``Simulation.act`` keys actions by face name), so two articulations
+        that both fall back to the same default face name (for example
+        ``joint_set="body"`` -> face ``"body"``) would collide in the facade
+        even though core action identity is ``(articulation, group)``.  Refuse
+        here, while the caller can still name the face.
         """
         declared = {
             face_name: handle.name

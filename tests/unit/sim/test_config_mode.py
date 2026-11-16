@@ -31,9 +31,11 @@ def _config_text(*, include_timing: bool = True) -> str:
             "world_base: {mjcf: world.xml}",
             "collect: {steps: 12}",
             "articulations: [{name: arm, joints: [{name: shoulder}]}]",
-            "controls:",
-            "  - {name: arm, adapter: manual, articulation: arm,",
-            "     joints: [shoulder], drive: position_pd, target: position}",
+            "action_spec:",
+            "  - {name: arm, articulation: arm, joints: [shoulder],",
+            "     target: position, role: body}",
+            "policies:",
+            "  - {adapter: manual, groups: [[arm, arm]]}",
             "",
         ]
     )
@@ -95,5 +97,5 @@ def test_from_config_needs_at_least_one_manual_control_face(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(SimulationConfigError, match="manual control face"):
+    with pytest.raises(SimulationConfigError, match="manual policy"):
         SimulationBuilder.from_config(path)

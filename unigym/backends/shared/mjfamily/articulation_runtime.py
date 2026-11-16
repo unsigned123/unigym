@@ -271,16 +271,13 @@ def _add_prop_controls(env, controls: dict) -> None:
             target="position",
             required=False,
             prop=True,
+            role="aux",
         )
 
 
 def _body_control(env, art_name):
     for control in env._control_order:
-        if (
-            not control.prop
-            and control.articulation == art_name
-            and control.action_face == art_name
-        ):
+        if not control.prop and control.articulation == art_name and control.role == "body":
             return control
     for control in env._control_order:
         if not control.prop and control.articulation == art_name:
@@ -401,8 +398,8 @@ class _ActuatorTargetFeed:
 
     def __call__(self, targets: dict, e: int) -> np.ndarray:
         out = np.zeros(len(self._sources), dtype=np.float64)
-        for index, (control_name, column) in enumerate(self._sources):
-            out[index] = targets[control_name][e, column]
+        for index, (control_key, column) in enumerate(self._sources):
+            out[index] = targets[control_key][e, column]
         return out
 
 
@@ -617,10 +614,11 @@ def build_actuator_seam(
             compiled_universe.append(str(env._mj_name_map.backend_name(art.name, joint)))
     env._compiled_joint_names = tuple(dict.fromkeys(compiled_universe))
 
-    owner: dict[tuple[str, str], tuple[str, int]] = {}
+    owner: dict[tuple[str, str], tuple[tuple[str, str], int]] = {}
     for control in controls:
+        key = (str(control.articulation), str(control.name))
         for index, joint in enumerate(control.joint_names):
-            owner[(str(control.articulation), str(joint))] = (control.name, index)
+            owner[(str(control.articulation), str(joint))] = (key, index)
 
     acts: list[ActuatorBase] = []
     feeds: list[_ActuatorTargetFeed] = []
@@ -690,9 +688,11 @@ def settle_targets(env) -> dict:
     for control in env._control_order:
         width = len(control.joint_names)
         if control.prop or target_for_drive(control.drive) != "position":
-            targets[control.name] = np.zeros((1, width), dtype=np.float64)
+            targets[(control.articulation, control.name)] = np.zeros((1, width), dtype=np.float64)
         else:
-            targets[control.name] = control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
+            targets[(control.articulation, control.name)] = (
+                control.q0.detach().cpu().numpy()[None, :].astype(np.float64)
+            )
     return targets
 
 

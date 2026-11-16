@@ -6,10 +6,10 @@ driven.  It is authoring data only: ``law`` must name a registered
 translate gains, limits or parts into a law-specific config (that capability
 work belongs to the backend translation step).
 
-``controls[]`` (action faces / target ownership) and actuation groups are
+``action_spec`` groups (action target ownership) and actuation groups are
 independent; :func:`validate_actuation_groups` only proves group addressing
 and one-group-per-joint coverage, while :func:`validate_drive_law_matrix`
-proves that each declared control drive is served by a compatible law.
+proves that each derived control drive is served by a compatible law.
 
 The neutral law/drive matrix is explicit: ``position_pd`` -> ``standard_pd``
 or ``computed_torque_pd``, ``position_servo`` -> ``native_servo``,

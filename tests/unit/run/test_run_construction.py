@@ -18,16 +18,16 @@ def _cfg() -> dict[str, JsonValue]:
         "world_base": {"mjcf": "model.xml"},
         "collect": {"steps": 1},
         "articulations": [{"name": "arm", "joints": [{"name": "shoulder"}]}],
-        "controls": [
+        "action_spec": [
             {
                 "name": "arm",
-                "adapter": "manual",
                 "articulation": "arm",
                 "joints": ["shoulder"],
-                "drive": "position_pd",
                 "target": "position",
+                "role": "body",
             }
         ],
+        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
     }
 
 
@@ -63,9 +63,11 @@ def test_from_config_and_load_accept_the_keyword(tmp_path: Path) -> None:
                 "world_base: {mjcf: model.xml}",
                 "collect: {steps: 1}",
                 "articulations: [{name: arm, joints: [{name: shoulder}]}]",
-                "controls:",
-                "  - {name: arm, adapter: manual, articulation: arm,",
-                "     joints: [shoulder], drive: position_pd, target: position}",
+                "action_spec:",
+                "  - {name: arm, articulation: arm, joints: [shoulder],",
+                "     target: position, role: body}",
+                "policies:",
+                "  - {adapter: manual, groups: [[arm, arm]]}",
             ]
         ),
         encoding="utf-8",

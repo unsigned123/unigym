@@ -477,9 +477,9 @@ def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
             raise BackendContractError(
                 f"control {key!r} q0 must be a float32 tensor of shape " f"({len(rt.joint_names)},)"
             )
-    bodies = [c for c in controls.values() if c.action_face == c.articulation]
+    bodies = [c for c in controls.values() if c.role == "body"]
     if not bodies:
-        raise BackendContractError("controls declares no body/articulation face")
+        raise BackendContractError("controls declares no explicit body group (role == 'body')")
     return bodies
 
 
