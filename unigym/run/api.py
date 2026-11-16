@@ -57,7 +57,7 @@ from unigym._typing import (
     is_json_object,
     is_object_sequence,
 )
-from unigym.backends.registry import backend_info
+from unigym.backends.registry import Trait, backend_info
 from unigym.run.passive import (
     declare_passive_joints as _declare_passive_joints,
     declare_world_passive_joints as _declare_world_passive_joints,
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     import torch
 
     from unigym.adapters.base import Adapter
-    from unigym.env.backends.base import StateWriteBackend
+    from unigym.env.backends.base import EnvBackend
     from unigym.model.live import LiveModel
     from unigym.runtime.actions import NamedAction
     from unigym.runtime.controllers import (
@@ -1298,18 +1298,21 @@ class Run:
     # ------------------------------------------------------------------ #
     # explicit state writes (optional backend face)
     # ------------------------------------------------------------------ #
-    def _state_write_env(self) -> StateWriteBackend:
-        """The live env, gated on the optional state-write protocol."""
-        from unigym.env.backends.base import supports_state_write
-
+    def _state_write_env(self) -> EnvBackend:
+        """The live env, gated on the optional ``STATE_WRITE`` trait."""
         env = self.build().env
-        if not supports_state_write(env):
+        if Trait.STATE_WRITE not in backend_info(self.spec.backend).traits:
             raise NotImplementedError(
-                f"{type(env).__name__} does not implement the state-write "
-                f"contract (set_root_state / set_joint_state / settle); the "
-                f"face is optional and this backend declares it absent"
+                f"backend {self.spec.backend!r} does not declare the "
+                f"STATE_WRITE trait (set_root_state / set_joint_state / "
+                f"settle); the face is optional and this backend declares "
+                f"it absent"
             )
         return env
+
+    def _state_write_method(self, name: str) -> Callable[..., torch.Tensor]:
+        """One state-write backend method (the trait gate guarantees it)."""
+        return getattr(self._state_write_env(), name)
 
     def set_root_state(
         self,
@@ -1326,7 +1329,8 @@ class Run:
         Delegates to the live backend; no implicit ``settle``.  See
         ``docs/state_write_contract.md``.
         """
-        return self._state_write_env().set_root_state(
+        write = self._state_write_method("set_root_state")
+        return write(
             env_ids,
             name=name,
             pos_w=pos_w,
@@ -1348,7 +1352,8 @@ class Run:
 
         Delegates to the live backend; no implicit ``settle``.
         """
-        return self._state_write_env().set_joint_state(
+        write = self._state_write_method("set_joint_state")
+        return write(
             env_ids,
             articulation=articulation,
             joint_names=joint_names,
@@ -1358,7 +1363,7 @@ class Run:
 
     def settle(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> torch.Tensor:
         """Recompute derived state after writes (all envs when ids None)."""
-        return self._state_write_env().settle(env_ids)
+        return self._state_write_method("settle")(env_ids)
 
 
 def load(

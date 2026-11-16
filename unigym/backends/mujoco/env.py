@@ -166,7 +166,12 @@ from unigym.backends.shared.mjfamily.articulation_runtime import (
 # props is ON : box-family props are appended to the MjSpec and
 # served by props/mujoco_backend.py (object/* record keys + held groups).
 BACKEND_CAPABILITIES = BackendCapabilities(
-    recorder=True, cameras=True, contacts=True, props=True, multi_env=True
+    recorder=True,
+    cameras=True,
+    contacts=True,
+    props=True,
+    multi_env=True,
+    state_write=True,
 )
 
 

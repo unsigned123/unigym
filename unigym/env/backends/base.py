@@ -65,11 +65,14 @@ control keys drive the record-before-reset loop and are excluded from records.
 
 Optional state-write face
 =========================
-:class:`StateWriteBackend` is a SEPARATE optional Protocol (world frame,
-wxyz, name-addressed).  It is intentionally not part of the required
-:class:`EnvBackend` validator: unimplemented backends stay valid collection
-backends, and ``Run`` raises ``NotImplementedError`` when called.  The
-contract lives in ``docs/state_write_contract.md``.
+State write is an **optional registry trait**, ``Trait.STATE_WRITE`` (projected
+from ``BackendCapabilities.state_write``).  It is intentionally not part of the
+required :class:`EnvBackend` validator: unimplemented backends stay valid
+collection backends, and ``Run`` raises ``NotImplementedError`` when called on
+a backend that does not declare the trait.  The three methods
+(``set_root_state`` / ``set_joint_state`` / ``settle``) are ordinary backend
+methods, not a second Protocol.  The contract lives in
+``docs/state_write_contract.md``.
 
 Failure semantics
 =================
@@ -207,6 +210,9 @@ class BackendCapabilities:
     snapshot: bool = False  # mjSTATE-exact snapshot()/restore() (rewind,
     # Round B B1: mujoco only; isaaclab v1 stays
     # False -> the rewind gate fail-fasts)
+    state_write: bool = False  # explicit world-frame state writes
+    # (set_root_state/set_joint_state/settle;
+    # docs/state_write_contract.md)
 
     @classmethod
     def full(cls) -> BackendCapabilities:
@@ -225,6 +231,7 @@ class BackendCapabilities:
             cameras=True,
             contacts=True,
             multi_env=True,
+            state_write=True,
         )
 
     def traits(self) -> frozenset[Trait]:
@@ -251,6 +258,7 @@ class BackendCapabilities:
             "contacts": (Trait.CONTACTS_GROUPS,),
             "multi_env": (Trait.MULTI_ENV,),
             "snapshot": (Trait.SNAPSHOT,),
+            "state_write": (Trait.STATE_WRITE,),
         }
         out: set[Trait] = set()
         for feat, enabled in {
@@ -263,6 +271,7 @@ class BackendCapabilities:
             "contacts": self.contacts,
             "multi_env": self.multi_env,
             "snapshot": self.snapshot,
+            "state_write": self.state_write,
         }.items():
             if enabled:
                 out.update(groups[feat])
@@ -312,62 +321,10 @@ class EnvBackend(Protocol):
 
 
 # --------------------------------------------------------------------------- #
-# optional state-write contract (world frame, wxyz, name-addressed)
+# state-write helpers (world frame, wxyz, name-addressed)
 # --------------------------------------------------------------------------- #
-@runtime_checkable
-class StateWriteBackend(Protocol):
-    """The optional batched state-write face (docs/state_write_contract.md).
-
-    The three methods are deliberately NOT part of :class:`EnvBackend`: a
-    backend may serve collection without being writable, and existing fakes
-    stay structurally valid.  ``Run`` gates calls on
-    :func:`supports_state_write`.
-
-    Every input is world frame; quaternions are wxyz and normalized by the
-    implementation; linear velocity is taken at the root link/body origin
-    (not the CoM).  ``env_ids=None`` means every env.  The returned tensor is
-    the normalized int64 id selection in input order.
-    """
-
-    def set_root_state(
-        self,
-        env_ids: Sequence[int] | torch.Tensor | None,
-        *,
-        name: str,
-        pos_w: torch.Tensor,
-        quat_wxyz: torch.Tensor,
-        lin_vel_w: torch.Tensor,
-        ang_vel_w: torch.Tensor,
-    ) -> torch.Tensor: ...
-
-    def set_joint_state(
-        self,
-        env_ids: Sequence[int] | torch.Tensor | None,
-        *,
-        articulation: str,
-        joint_names: Sequence[str],
-        position: torch.Tensor,
-        velocity: torch.Tensor | None = None,
-    ) -> torch.Tensor: ...
-
-    def settle(
-        self,
-        env_ids: Sequence[int] | torch.Tensor | None,
-    ) -> torch.Tensor: ...
-
-
-_STATE_WRITE_METHODS = ("set_root_state", "set_joint_state", "settle")
-
-
-def supports_state_write(env: object) -> TypeGuard[StateWriteBackend]:
-    """True when *env* implements the optional state-write protocol.
-
-    A capability probe, never a fallback: the caller must still raise the
-    explicit error for a backend that declares the face absent.
-    """
-    return all(callable(getattr(env, name, None)) for name in _STATE_WRITE_METHODS)
-
-
+# The three methods (set_root_state / set_joint_state / settle) are ordinary
+# backend methods gated by Trait.STATE_WRITE; see docs/state_write_contract.md.
 def normalize_state_env_ids(
     env_ids: Sequence[int] | torch.Tensor | None,
     num_envs: int,

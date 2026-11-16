@@ -65,6 +65,8 @@ class Trait(Enum):
     JOINT_PERMUTATION = "JOINT_PERMUTATION"  # policy/il orders + inverse perm
     # --- env shape (optional: single-env backends omit it) ---
     MULTI_ENV = "MULTI_ENV"  # native N>1 parallel-env runs
+    # --- state writes (optional: collection-only backends omit it) ---
+    STATE_WRITE = "STATE_WRITE"  # explicit world-frame simulator state writes
     # --- env layout (exactly one ENV_LAYOUT_* per registered backend) ---
     ENV_LAYOUT_TILED = "ENV_LAYOUT_TILED"  # env_spacing; one view spans envs
     ENV_LAYOUT_COINCIDENT = "ENV_LAYOUT_COINCIDENT"  # same-coordinate worlds
@@ -542,6 +544,7 @@ MUJOCO_TRAITS = _CORE | frozenset(
         Trait.SPAWN_XY_YAW,
         Trait.MOCAP,
         Trait.SNAPSHOT,
+        Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
         # Model introspection: the compiled MjModel carries them all
         Trait.MODEL_ADDRESSES,
         Trait.MODEL_MASS_INERTIA,
@@ -615,6 +618,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
         Trait.EVENTS_DR,
         Trait.INIT_POSE,
         Trait.SPAWN_XY_YAW,
+        Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
         # The USD prim hierarchy is the isaaclab model face
         Trait.MODEL_USD_PRIMS,
     }

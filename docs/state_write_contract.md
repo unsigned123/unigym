@@ -18,11 +18,13 @@ run.set_joint_state(
 run.settle(env_ids=None) -> torch.Tensor
 ```
 
-The backend protocol is `unigym.env.backends.base.StateWriteBackend`.
-It is a **separate optional Protocol**: the required `EnvBackend` validator
-does not include these methods, so a backend (or fake) that only collects
-remains valid.  `Run` raises `NotImplementedError` when the live backend does
-not implement the face.
+The state-write face is an **optional registry trait**:
+`unigym.backends.registry.Trait.STATE_WRITE`, projected from
+`BackendCapabilities.state_write`.  The required `EnvBackend` validator does not
+include these methods, so a backend (or fake) that only collects remains valid.
+The three methods are ordinary backend methods, not a second Protocol.
+`Run` raises `NotImplementedError` naming the backend and the trait when the
+live backend does not declare `STATE_WRITE`.
 
 `env_ids` is a sequence or tensor of environment ids.  `None` means every env.
 The input order is preserved (a repeated id is a repeated write).  Every
