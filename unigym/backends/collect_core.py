@@ -152,8 +152,9 @@ def read_state(env, e: int = 0) -> dict:
     if env._has_freejoint:
         pos_w = d.qpos[0:3].copy()
         quat_w = d.qpos[3:7].copy()  # freejoint: wxyz
-        lin_vel_w = d.qvel[0:3].copy()  # world (freejoint)
-        ang_vel_w = d.qvel[3:6].copy()  # world (measured)
+        lin_vel_w = d.qvel[0:3].copy()  # world (freejoint, body origin)
+        ang_vel_b = d.qvel[3:6].copy()  # MuJoCo freejoint angular is body-local
+        ang_vel_w = quat.to_rotmat(quat_w) @ ang_vel_b
     else:
         # fixed base -- qpos[0:7]/qvel[0:6] belong to the
         # robot's own hinges here (GR1 waist/arms), NOT a base frame.
@@ -161,6 +162,7 @@ def read_state(env, e: int = 0) -> dict:
         pos_w = env._fixed_base_pos_w.copy()
         quat_w = env._fixed_base_quat_w.copy()
         lin_vel_w = np.zeros(3)
+        ang_vel_b = np.zeros(3)
         ang_vel_w = np.zeros(3)
     rot = quat.to_rotmat(quat_w)  # world <- body
     gravity_b = rot.T @ np.asarray([0.0, 0.0, -1.0])
@@ -174,5 +176,5 @@ def read_state(env, e: int = 0) -> dict:
         "lin_vel_w": lin_vel_w,
         "ang_vel_w": ang_vel_w,
         "lin_vel_b": rot.T @ lin_vel_w,
-        "ang_vel_b": rot.T @ ang_vel_w,
+        "ang_vel_b": ang_vel_b,
     }

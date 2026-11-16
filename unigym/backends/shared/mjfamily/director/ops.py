@@ -247,11 +247,16 @@ class MujocoDirectorOps(_OpsBase):
                     "use teleport joints writes for per-joint motion",
                 )
             raise _fail(f"unknown prop {name!r}", f"declared props: {sorted(self.prop_names())}")
-        _, _, vadr = self._free[name]
+        _, qadr, vadr = self._free[name]
         d = self.env.mj_data
         d.qvel[vadr : vadr + 3] = lin
         if ang is not None:
-            d.qvel[vadr + 3 : vadr + 6] = ang
+            # MuJoCo freejoint angular qvel is BODY-frame; the director input
+            # is world frame, so rotate by R.T before the write.
+            from unigym.core import quat
+
+            rot = quat.to_rotmat(np.asarray(d.qpos[qadr + 3 : qadr + 7], dtype=np.float64))
+            d.qvel[vadr + 3 : vadr + 6] = rot.T @ np.asarray(ang, dtype=np.float64)
         mujoco.mj_forward(self.env.mj_model, self.env.mj_data)
         return {"setvel": name, "lin": list(lin), "ang": list(ang) if ang else None}
 

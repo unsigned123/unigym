@@ -26,8 +26,10 @@ def build_tiny_env(
     plans: bool = True,
     params: dict | None = None,
     contact_manager=None,
+    prop_manager=None,
     asset_plan=None,
     artifact_dir=None,
+    adapter=None,
 ):
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.actuators import ActuationGroup
@@ -84,7 +86,7 @@ def build_tiny_env(
     actuation_plans = {ARTICULATION: resolved_plan} if plans else None
     return MujocoEnv(
         robot_profile=profile,
-        adapter=ManualAdapter(),
+        adapter=ManualAdapter() if adapter is None else adapter,
         num_envs=num_envs,
         episode_length_s=100.0,
         decimation=4,
@@ -97,6 +99,7 @@ def build_tiny_env(
         profiles={ARTICULATION: profile},
         actuation_plans=actuation_plans,
         contact_manager=contact_manager,
+        prop_manager=prop_manager,
         asset_plan=asset_plan,
         artifact_dir=artifact_dir,
     )
@@ -119,8 +122,10 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         params: dict | None = None,
         mjcf: Path | None = None,
         contact_manager=None,
+        prop_manager=None,
         asset_plan=None,
         artifact_dir=None,
+        adapter=None,
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -133,8 +138,10 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             plans=plans,
             params=params,
             contact_manager=contact_manager,
+            prop_manager=prop_manager,
             asset_plan=asset_plan,
             artifact_dir=artifact_dir,
+            adapter=adapter,
         )
         created.append(env)
         return env

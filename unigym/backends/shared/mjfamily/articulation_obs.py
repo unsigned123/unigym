@@ -56,7 +56,9 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         pos_w = d.qpos[a : a + 3].copy()
         quat_w = d.qpos[a + 3 : a + 7].copy()
         lin_vel_w = d.qvel[art.free_dof_adr : art.free_dof_adr + 3].copy()
-        ang_vel_w = d.qvel[art.free_dof_adr + 3 : art.free_dof_adr + 6].copy()
+        # MuJoCo freejoint angular qvel is BODY-frame; world = R @ local.
+        ang_vel_b = d.qvel[art.free_dof_adr + 3 : art.free_dof_adr + 6].copy()
+        ang_vel_w = quat.to_rotmat(quat_w) @ ang_vel_b
     else:
         spawn = art.spawn or {}
         if spawn:
@@ -68,6 +70,7 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         pos_w = np.asarray(pos[:3], dtype=np.float64)
         quat_w = np.asarray([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)], dtype=np.float64)
         lin_vel_w = np.zeros(3)
+        ang_vel_b = np.zeros(3)
         ang_vel_w = np.zeros(3)
     rot = quat.to_rotmat(quat_w)
     gravity_b = rot.T @ np.asarray([0.0, 0.0, -1.0])
@@ -81,7 +84,7 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         "lin_vel_w": lin_vel_w,
         "ang_vel_w": ang_vel_w,
         "lin_vel_b": rot.T @ lin_vel_w,
-        "ang_vel_b": rot.T @ ang_vel_w,
+        "ang_vel_b": ang_vel_b,
     }
 
 

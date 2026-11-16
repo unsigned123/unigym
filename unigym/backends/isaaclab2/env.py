@@ -65,7 +65,12 @@ if TYPE_CHECKING:  # pragma: no cover
     from unigym.runtime.actions import NamedAction
 
 
-from unigym.env.backends.base import BackendCapabilities
+from unigym.env.backends.base import (
+    BackendCapabilities,
+    normalize_state_env_ids,
+    normalize_state_quat,
+    validate_state_tensor,
+)
 
 BACKEND_CAPABILITIES = BackendCapabilities.full()
 
@@ -1157,6 +1162,166 @@ class IsaaclabEnv(ManagerBasedEnv):
                 )
             )
         return extra
+
+    # ------------------------------------------------------------------ #
+    # optional state-write face (docs/state_write_contract.md)
+    # ------------------------------------------------------------------ #
+    def _state_root_asset(self, name: str):
+        """Resolve *name* to a writable root asset; fail honestly otherwise."""
+        art = self.articulations.get(name)
+        if art is not None:
+            asset = art.asset
+            if bool(getattr(asset, "is_fixed_base", False)):
+                raise ValueError(
+                    f"isaaclab2 backend: articulation {name!r} has a fixed root; "
+                    f"set_root_state needs a free root (use set_joint_state "
+                    f"for its joints)"
+                )
+            return asset
+        if self.prop_manager is not None:
+            handler = self.prop_manager.handler(name)
+            if handler is not None:
+                asset = handler.asset
+                if asset is None:
+                    raise ValueError(
+                        f"isaaclab2 backend: prop {name!r} has no writable "
+                        f"asset (static stage decoration or unbound); "
+                        f"set_root_state needs a dynamic prop"
+                    )
+                if bool(getattr(asset, "is_fixed_base", False)):
+                    raise ValueError(
+                        f"isaaclab2 backend: prop {name!r} has a fixed "
+                        f"(anchored) root; set_root_state needs a free dynamic "
+                        f"prop"
+                    )
+                return asset
+        declared = sorted(self.articulations)
+        props = list(self.prop_manager.names) if self.prop_manager is not None else []
+        raise ValueError(
+            f"isaaclab2 backend: set_root_state names unknown body {name!r}; "
+            f"declared articulations: {declared}, props: {props}"
+        )
+
+    def _joint_ids(self, art, joint_names: Sequence[str]) -> list[int]:
+        """Resolve explicit joint names to the asset's joint indices."""
+        index = {name: i for i, name in enumerate(art.asset.joint_names)}
+        missing = sorted(set(joint_names) - set(index))
+        if missing:
+            raise ValueError(
+                f"isaaclab2 backend: joint names {missing} are not asset joints "
+                f"of articulation {art.name!r} | asset joints: "
+                f"{list(art.asset.joint_names)}"
+            )
+        return [index[name] for name in joint_names]
+
+    def set_root_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Write a free root's world pose/velocity through the link writer.
+
+        ``name`` is a declared free-root articulation or a dynamic prop.
+        Uses ``write_root_link_pose_to_sim`` / ``write_root_link_velocity_to_sim``
+        (link-origin semantics), never the CoM-default convenience writers.
+        Does not call :meth:`settle`.
+        """
+        self._raise_if_closed()
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        rows = ids.numel()
+        pos = validate_state_tensor(pos_w, field="pos_w", rows=rows, cols=3, device=self.device)
+        quat_in = validate_state_tensor(
+            quat_wxyz, field="quat_wxyz", rows=rows, cols=4, device=self.device
+        )
+        lin = validate_state_tensor(
+            lin_vel_w, field="lin_vel_w", rows=rows, cols=3, device=self.device
+        )
+        ang = validate_state_tensor(
+            ang_vel_w, field="ang_vel_w", rows=rows, cols=3, device=self.device
+        )
+        unit_quat = normalize_state_quat(quat_in, rows=rows, device=self.device)
+        asset = self._state_root_asset(name)
+        pose = torch.cat((pos, unit_quat), dim=-1).to(dtype=torch.float32)
+        velocity = torch.cat((lin, ang), dim=-1).to(dtype=torch.float32)
+        asset.write_root_link_pose_to_sim(root_pose=pose, env_ids=ids)
+        asset.write_root_link_velocity_to_sim(root_velocity=velocity, env_ids=ids)
+        return ids
+
+    def set_joint_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Write absolute joint positions (and optional velocities) by name.
+
+        ``joint_names`` fixes the ``position``/``velocity`` columns.
+        ``velocity=None`` writes positions only (velocities stay unchanged).
+        Does not call :meth:`settle`.
+        """
+        self._raise_if_closed()
+        art = self.articulations.get(articulation)
+        if art is None:
+            raise ValueError(
+                f"isaaclab2 backend: set_joint_state names unknown articulation "
+                f"{articulation!r}; declared: {sorted(self.articulations)}"
+            )
+        if isinstance(joint_names, (str, bytes)):
+            raise TypeError("joint_names must be a sequence of joint names, not a string")
+        names = tuple(str(name) for name in joint_names)
+        if not names:
+            raise ValueError("joint_names must be non-empty")
+        if len(set(names)) != len(names):
+            raise ValueError(f"joint_names carries duplicate names: {names}")
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        rows = ids.numel()
+        pos = validate_state_tensor(
+            position, field="position", rows=rows, cols=len(names), device=self.device
+        )
+        vel = (
+            None
+            if velocity is None
+            else validate_state_tensor(
+                velocity, field="velocity", rows=rows, cols=len(names), device=self.device
+            )
+        )
+        joint_ids = self._joint_ids(art, names)
+        pos = pos.to(dtype=torch.float32)
+        if vel is None:
+            art.asset.write_joint_position_to_sim(position=pos, joint_ids=joint_ids, env_ids=ids)
+        else:
+            art.asset.write_joint_state_to_sim(
+                position=pos,
+                velocity=vel.to(dtype=torch.float32),
+                joint_ids=joint_ids,
+                env_ids=ids,
+            )
+        return ids
+
+    def settle(self, env_ids: Sequence[int] | torch.Tensor | None) -> torch.Tensor:
+        """Flush pending target data, forward the view, refresh the cache.
+
+        Mirrors the reset chain ordering: ``scene.write_data_to_sim()`` ->
+        ``sim.forward()`` -> camera re-pose -> ``obs_cache`` refresh.  Callers
+        must settle after writes before reading observations or
+        contact/camera-dependent state.
+        """
+        self._raise_if_closed()
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        self.scene.write_data_to_sim()
+        self.sim.forward()
+        if self.camera_manager is not None:
+            self.camera_manager.on_reset(ids)
+        self._refresh_obs_cache()
+        return ids
 
     # ------------------------------------------------------------------ #
     # episode reset (per-env subset; also covers the batch case)

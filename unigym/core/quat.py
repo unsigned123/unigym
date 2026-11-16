@@ -29,7 +29,7 @@ is a review-flagged smell; see test_arch quat soft-gate).
 from __future__ import annotations
 
 import math
-from typing import cast
+from typing import cast, overload
 
 import numpy as np
 import torch
@@ -89,6 +89,14 @@ def to_xyzw(q, dst: str = XYZW):
     if isinstance(q, torch.Tensor):
         return q[..., _REORDER]
     return np.asarray(q)[..., _REORDER]
+
+
+@overload
+def normalize(q: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def normalize(q: np.ndarray) -> np.ndarray: ...
 
 
 def normalize(q):

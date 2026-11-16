@@ -63,6 +63,14 @@ body control's joint count, ``Ki`` is variable-length.  All tensors live on
 ``device``.  The record keys are written to disk by collect.py; the 2
 control keys drive the record-before-reset loop and are excluded from records.
 
+Optional state-write face
+=========================
+:class:`StateWriteBackend` is a SEPARATE optional Protocol (world frame,
+wxyz, name-addressed).  It is intentionally not part of the required
+:class:`EnvBackend` validator: unimplemented backends stay valid collection
+backends, and ``Run`` raises ``NotImplementedError`` when called.  The
+contract lives in ``docs/state_write_contract.md``.
+
 Failure semantics
 =================
 * A backend missing any contract member raises :class:`BackendContractError`
@@ -81,6 +89,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 
 import torch
 
+from ...core import quat
 from ...runtime.actions import NamedAction
 
 if TYPE_CHECKING:
@@ -300,6 +309,141 @@ class EnvBackend(Protocol):
     def to_il_order(self, x_pol: torch.Tensor) -> torch.Tensor: ...
 
     def close(self) -> None: ...
+
+
+# --------------------------------------------------------------------------- #
+# optional state-write contract (world frame, wxyz, name-addressed)
+# --------------------------------------------------------------------------- #
+@runtime_checkable
+class StateWriteBackend(Protocol):
+    """The optional batched state-write face (docs/state_write_contract.md).
+
+    The three methods are deliberately NOT part of :class:`EnvBackend`: a
+    backend may serve collection without being writable, and existing fakes
+    stay structurally valid.  ``Run`` gates calls on
+    :func:`supports_state_write`.
+
+    Every input is world frame; quaternions are wxyz and normalized by the
+    implementation; linear velocity is taken at the root link/body origin
+    (not the CoM).  ``env_ids=None`` means every env.  The returned tensor is
+    the normalized int64 id selection in input order.
+    """
+
+    def set_root_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor: ...
+
+    def set_joint_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor: ...
+
+    def settle(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+    ) -> torch.Tensor: ...
+
+
+_STATE_WRITE_METHODS = ("set_root_state", "set_joint_state", "settle")
+
+
+def supports_state_write(env: object) -> TypeGuard[StateWriteBackend]:
+    """True when *env* implements the optional state-write protocol.
+
+    A capability probe, never a fallback: the caller must still raise the
+    explicit error for a backend that declares the face absent.
+    """
+    return all(callable(getattr(env, name, None)) for name in _STATE_WRITE_METHODS)
+
+
+def normalize_state_env_ids(
+    env_ids: Sequence[int] | torch.Tensor | None,
+    num_envs: int,
+    *,
+    device: str | torch.device = "cpu",
+) -> torch.Tensor:
+    """Normalize a state-write env selection to a 1-D int64 tensor.
+
+    ``None`` selects every env.  Input order is preserved (a repeated id is a
+    repeated write, matching ``reset_envs``); ids outside ``[0, num_envs)``
+    fail fast.  Floating/bool id tensors are a teaching error, not coerced.
+    """
+    if env_ids is None:
+        return torch.arange(num_envs, dtype=torch.int64, device=device)
+    if isinstance(env_ids, (str, bytes)):
+        raise TypeError(
+            f"env_ids must be a sequence of ints or a tensor, got " f"{type(env_ids).__name__}"
+        )
+    ids = env_ids if isinstance(env_ids, torch.Tensor) else torch.as_tensor(list(env_ids))
+    if ids.ndim != 1:
+        raise ValueError(f"env_ids must be 1-D, got shape {tuple(ids.shape)}")
+    if ids.dtype != torch.int64:
+        if ids.is_floating_point() or ids.dtype == torch.bool:
+            raise TypeError(f"env_ids must carry integer ids, got dtype {ids.dtype}")
+        ids = ids.to(torch.int64)
+    ids = ids.to(device=device)
+    if ids.numel():
+        low, high = int(ids.min()), int(ids.max())
+        if low < 0 or high >= num_envs:
+            raise ValueError(f"env_ids {ids.tolist()} are outside [0, num_envs={num_envs})")
+    return ids
+
+
+def validate_state_tensor(
+    value: torch.Tensor,
+    *,
+    field: str,
+    rows: int,
+    cols: int,
+    device: str | torch.device,
+) -> torch.Tensor:
+    """Validate one ``(rows, cols)`` state-write tensor (shape/type/device/finite)."""
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{field} must be a torch.Tensor, got {type(value).__name__}")
+    if tuple(value.shape) != (rows, cols):
+        raise ValueError(f"{field} shape {tuple(value.shape)} != required ({rows}, {cols})")
+    if not value.is_floating_point():
+        raise TypeError(f"{field} must be a floating tensor, got dtype {value.dtype}")
+    expected = str(torch.device(device))
+    if str(value.device) != expected:
+        raise ValueError(f"{field} is on device {value.device}, expected {expected}")
+    if not bool(torch.isfinite(value).all()):
+        raise ValueError(f"{field} contains non-finite values")
+    return value
+
+
+def _require_state_tensor(value: object, *, field: str) -> torch.Tensor:
+    """Narrow a dual-dtype math result to a tensor (runtime-checked)."""
+    if not isinstance(value, torch.Tensor):  # pragma: no cover - core invariant
+        raise TypeError(f"{field} did not produce a torch.Tensor")
+    return value
+
+
+def normalize_state_quat(
+    quat_wxyz: torch.Tensor,
+    *,
+    rows: int,
+    device: str | torch.device,
+    field: str = "quat_wxyz",
+) -> torch.Tensor:
+    """Validate + normalize a ``(rows, 4)`` wxyz quaternion (core-owned math)."""
+    value = validate_state_tensor(quat_wxyz, field=field, rows=rows, cols=4, device=device)
+    norms = value.square().sum(dim=-1).sqrt()
+    if bool((norms <= 1e-12).any()):
+        raise ValueError(f"{field} contains a zero-norm quaternion")
+    return _require_state_tensor(quat.normalize(value), field=field)
 
 
 # --------------------------------------------------------------------------- #

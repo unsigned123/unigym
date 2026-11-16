@@ -427,6 +427,15 @@ class PropHandler:
         """Cache the spawned asset handle + per-spec roll quat (after init)."""
         raise NotImplementedError
 
+    @property
+    def asset(self):
+        """The backend-bound native asset handle (None when static/unbound).
+
+        Read-only: the handler owns binding, the backend may call the asset's
+        public pose/velocity writers for explicit state writes.
+        """
+        return getattr(self, "_asset", None)
+
     def get_world_pose(self, env):
         """``(pos (N,3), quat (N,4) wxyz)`` world root pose, or None.
 
@@ -790,6 +799,18 @@ class PropManager:
     # ------------------------------------------------------------------ #
     # runtime
     # ------------------------------------------------------------------ #
+    def handler(self, name: str) -> PropHandler | None:
+        """Return the declared handler for *name* (None when absent)."""
+        for handler in self._handlers:
+            if handler.spec.name == name:
+                return handler
+        return None
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Declared prop names in declaration order."""
+        return tuple(handler.spec.name for handler in self._handlers)
+
     def bind_env(self, env) -> None:
         for h in self._handlers:
             h.bind_env(env)

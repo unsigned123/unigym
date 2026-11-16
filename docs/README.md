@@ -19,5 +19,7 @@ Usage documents:
 
 - [Actions](actions.md) - joint-addressed runtime values, authoring templates,
   per-joint routing/coverage and policy ownership rules.
+- [State-write contract](state_write_contract.md) - optional world-frame,
+  wxyz, name-addressed root/joint writes and settle ordering.
 - [Simulation facade](sim_facade.md) - experimental `unigym.sim` usage, scope,
   error taxonomy and residual limits.

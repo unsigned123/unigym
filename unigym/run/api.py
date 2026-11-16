@@ -66,7 +66,10 @@ from unigym.camera import CameraSet
 from unigym.run.spec import RunSpec, build_spec
 
 if TYPE_CHECKING:
+    import torch
+
     from unigym.adapters.base import Adapter
+    from unigym.env.backends.base import StateWriteBackend
     from unigym.model.live import LiveModel
     from unigym.runtime.actions import NamedAction
     from unigym.runtime.controllers import (
@@ -1291,6 +1294,71 @@ class Run:
             n = max(int(self.spec.total_steps) - int(runner.ticks_done), 0)
         for _ in range(int(n)):
             yield self.step()
+
+    # ------------------------------------------------------------------ #
+    # explicit state writes (optional backend face)
+    # ------------------------------------------------------------------ #
+    def _state_write_env(self) -> StateWriteBackend:
+        """The live env, gated on the optional state-write protocol."""
+        from unigym.env.backends.base import supports_state_write
+
+        env = self.build().env
+        if not supports_state_write(env):
+            raise NotImplementedError(
+                f"{type(env).__name__} does not implement the state-write "
+                f"contract (set_root_state / set_joint_state / settle); the "
+                f"face is optional and this backend declares it absent"
+            )
+        return env
+
+    def set_root_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Write world-frame root state for *name* (all envs when ids None).
+
+        Delegates to the live backend; no implicit ``settle``.  See
+        ``docs/state_write_contract.md``.
+        """
+        return self._state_write_env().set_root_state(
+            env_ids,
+            name=name,
+            pos_w=pos_w,
+            quat_wxyz=quat_wxyz,
+            lin_vel_w=lin_vel_w,
+            ang_vel_w=ang_vel_w,
+        )
+
+    def set_joint_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Write absolute joint state by name (all envs when ids None).
+
+        Delegates to the live backend; no implicit ``settle``.
+        """
+        return self._state_write_env().set_joint_state(
+            env_ids,
+            articulation=articulation,
+            joint_names=joint_names,
+            position=position,
+            velocity=velocity,
+        )
+
+    def settle(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> torch.Tensor:
+        """Recompute derived state after writes (all envs when ids None)."""
+        return self._state_write_env().settle(env_ids)
 
 
 def load(
