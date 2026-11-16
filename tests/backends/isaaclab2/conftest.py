@@ -29,6 +29,26 @@ def simulation_app() -> Iterator[object]:
     launcher.app.close()
 
 
+@pytest.fixture
+def fresh_stage(simulation_app: object) -> None:
+    """Give one test a fresh USD stage before it spawns scene prims.
+
+    Tests that build through ``env_factory`` already call
+    ``sim_utils.create_new_stage()`` per build; this named fixture covers the
+    direct-builder tests (``test_sim_facade.py``) whose builds reuse the shared
+    Kit stage.  Without it, a ``/World/light`` prim left by a previous test
+    collides with the next spawn.
+
+    Stage provisioning only: ``new_stage()`` also stops the Kit timeline as a
+    side effect, so the next ``SimulationContext`` never starts while the
+    timeline is still playing (the multi-build hang, see
+    ``plans/artifacts/kit-multi-build-hang.md``).
+    """
+    import isaaclab.sim as sim_utils
+
+    sim_utils.create_new_stage()
+
+
 def _cartpole_articulation_cfg(usd: Path):
     """The built-in Cartpole articulation, pointed at the provisioned USD."""
     from isaaclab_assets.robots.cartpole import CARTPOLE_CFG

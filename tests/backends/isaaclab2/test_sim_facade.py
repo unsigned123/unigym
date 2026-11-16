@@ -18,7 +18,7 @@ from tests._support.sim_facade_script import ARTICULATION_LABEL, run_facade_acce
 
 pytestmark = [
     pytest.mark.sim,
-    pytest.mark.usefixtures("simulation_app"),
+    pytest.mark.usefixtures("simulation_app", "fresh_stage"),
     pytest.mark.requires_test_packs("g1"),
 ]
 

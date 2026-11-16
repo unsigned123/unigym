@@ -89,7 +89,7 @@ def test_settle_returns_the_selected_ids_and_keeps_the_clock(cartpole_env):
 
 def test_set_joint_state_rejects_unknown_names_and_bad_shapes(cartpole_env):
     """Unknown joint names and wrong shapes fail at the boundary."""
-    with pytest.raises(ValueError, match=r"not asset joints.*\['wrist'\]"):
+    with pytest.raises(ValueError, match=r"\['wrist'\].*not asset joints"):
         cartpole_env.set_joint_state(
             None,
             articulation=ARTICULATION,
