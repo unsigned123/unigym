@@ -48,7 +48,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 
 import torch
 
@@ -81,10 +81,33 @@ def _require_text(value: object, what: str) -> str:
     return value
 
 
+def _is_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Whether *value* is a mapping with opaque keys and values."""
+    return isinstance(value, Mapping)
+
+
+def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    """Whether *value* is a non-string sequence."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
 def _require_mapping(entry: object, what: str) -> Mapping[str, object]:
-    if not isinstance(entry, Mapping):
+    """Validate one declaration mapping and return a string-keyed copy."""
+    if not _is_mapping(entry):
         raise TypeError(f"{what} expects a mapping, got {type(entry).__name__}")
-    return entry
+    data: dict[str, object] = {}
+    for key, value in entry.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{what} requires string keys, got key {key!r}")
+        data[key] = value
+    return data
+
+
+def _optional_text(value: object, what: str) -> str | None:
+    """Validate an optional non-empty string."""
+    if value is None:
+        return None
+    return _require_text(value, what)
 
 
 def _reject_unknown_keys(
@@ -210,7 +233,7 @@ class OrderedActionGroup:
         _reject_unknown_keys(data, allowed, "OrderedActionGroup.from_mapping")
         _require_keys(data, allowed, "OrderedActionGroup.from_mapping")
         raw_joints = data["joints"]
-        if isinstance(raw_joints, (str, bytes)) or not isinstance(raw_joints, Sequence):
+        if not _is_sequence(raw_joints):
             raise ValueError(
                 "OrderedActionGroup.from_mapping joints must be an explicit "
                 "list/tuple of joint names (selectors such as joint_set are "
@@ -300,7 +323,7 @@ class OrderedActionSpec:
             ValueError: *entries* is empty or constructor validation fails
                 (duplicate identity, overlapping joints, bad group).
         """
-        if isinstance(entries, (str, bytes, Mapping)) or not isinstance(entries, Sequence):
+        if isinstance(entries, Mapping) or not _is_sequence(entries):
             raise TypeError(
                 "OrderedActionSpec.from_mapping expects a sequence of "
                 "OrderedActionGroup or mapping entries, "
@@ -310,8 +333,12 @@ class OrderedActionSpec:
         for index, entry in enumerate(entries):
             if isinstance(entry, OrderedActionGroup):
                 groups.append(entry)
-            elif isinstance(entry, Mapping):
-                groups.append(OrderedActionGroup.from_mapping(entry))
+            elif _is_mapping(entry):
+                groups.append(
+                    OrderedActionGroup.from_mapping(
+                        _require_mapping(entry, f"OrderedActionSpec.from_mapping entry {index}")
+                    )
+                )
             else:
                 raise TypeError(
                     "OrderedActionSpec.from_mapping entry must be an "
@@ -494,7 +521,7 @@ class OrderedActionSpec:
                     f"{entry.values.device} differs from {reference_identity!r} "
                     f"device {reference.values.device}; mixed devices are not allowed"
                 )
-        chunks = []
+        chunks: list[torch.Tensor] = []
         for group, _, _ in spans:
             entry = entries[(group.articulation, group.name)]
             if entry.joint_names == group.joints:
@@ -535,6 +562,53 @@ class OrderedActionSpec:
 # independent policy binding (Stage A3a: authoring surface only, no run/build
 # wiring yet)
 # --------------------------------------------------------------------------- #
+def _normalize_binding_groups(groups: object, what: str) -> tuple[tuple[str, str], ...]:
+    """Validate and normalize one binding's declaration-ordered identities."""
+    if not _is_sequence(groups):
+        raise ValueError(
+            f"{what} must be a non-empty sequence of "
+            f"(articulation, group) pairs, got {type(groups).__name__}"
+        )
+    if not groups:
+        raise ValueError(f"{what} must contain at least one (articulation, group) pair")
+    identities: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pair in groups:
+        if not _is_sequence(pair):
+            raise ValueError(
+                f"{what} entries must be 2-item (articulation, group) sequences, "
+                f"got {type(pair).__name__}"
+            )
+        if len(pair) != 2:
+            raise ValueError(
+                f"{what} entry must have exactly 2 items (articulation, group), "
+                f"got {tuple(pair)!r}"
+            )
+        identity = (
+            _require_text(pair[0], "PolicyBinding group articulation"),
+            _require_text(pair[1], "PolicyBinding group name"),
+        )
+        if identity in seen:
+            raise ValueError(
+                "PolicyBinding: duplicate group identity " f"(articulation, group)={identity!r}"
+            )
+        seen.add(identity)
+        identities.append(identity)
+    return tuple(identities)
+
+
+def _normalize_control_dt(value: object, what: str) -> float | None:
+    """Validate and normalize an optional positive finite control period."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{what} must be a positive finite number or None, got {value!r}")
+    number = float(value)
+    if not math.isfinite(number) or number <= 0.0:
+        raise ValueError(f"{what} must be a positive finite number or None, got {value!r}")
+    return number
+
+
 @dataclass(frozen=True)
 class PolicyBinding:
     """Which adapter and action groups a policy declares it produces.
@@ -563,56 +637,13 @@ class PolicyBinding:
 
     def __post_init__(self):
         _require_text(self.adapter, "PolicyBinding.adapter")
-        if isinstance(self.groups, (str, bytes)) or not isinstance(self.groups, Sequence):
-            raise ValueError(
-                "PolicyBinding.groups must be a non-empty sequence of "
-                f"(articulation, group) pairs, got {type(self.groups).__name__}"
-            )
-        raw_groups = tuple(self.groups)
-        if not raw_groups:
-            raise ValueError(
-                "PolicyBinding.groups must contain at least one " "(articulation, group) pair"
-            )
-        groups: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for pair in raw_groups:
-            if isinstance(pair, (str, bytes)) or not isinstance(pair, Sequence):
-                raise ValueError(
-                    "PolicyBinding.groups entries must be 2-item "
-                    "(articulation, group) sequences, "
-                    f"got {type(pair).__name__}"
-                )
-            if len(pair) != 2:
-                raise ValueError(
-                    "PolicyBinding.groups entry must have exactly 2 items "
-                    f"(articulation, group), got {tuple(pair)!r}"
-                )
-            identity = (
-                _require_text(pair[0], "PolicyBinding group articulation"),
-                _require_text(pair[1], "PolicyBinding group name"),
-            )
-            if identity in seen:
-                raise ValueError(
-                    "PolicyBinding: duplicate group identity " f"(articulation, group)={identity!r}"
-                )
-            seen.add(identity)
-            groups.append(identity)
-        object.__setattr__(self, "groups", tuple(groups))
-        if self.control_dt is not None:
-            if isinstance(self.control_dt, bool) or not isinstance(self.control_dt, (int, float)):
-                raise ValueError(
-                    "PolicyBinding.control_dt must be a positive finite number "
-                    f"or None, got {self.control_dt!r}"
-                )
-            value = float(self.control_dt)
-            if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(
-                    "PolicyBinding.control_dt must be a positive finite number "
-                    f"or None, got {self.control_dt!r}"
-                )
-            object.__setattr__(self, "control_dt", value)
-        if self.agent is not None:
-            _require_text(self.agent, "PolicyBinding.agent")
+        object.__setattr__(
+            self, "groups", _normalize_binding_groups(self.groups, "PolicyBinding.groups")
+        )
+        object.__setattr__(
+            self, "control_dt", _normalize_control_dt(self.control_dt, "PolicyBinding.control_dt")
+        )
+        _optional_text(self.agent, "PolicyBinding.agent")
 
     @classmethod
     def from_mapping(cls, entry: Mapping[str, object]) -> PolicyBinding:
@@ -620,7 +651,9 @@ class PolicyBinding:
 
         Accepted keys are exactly ``adapter``, ``groups``, ``control_dt`` and
         ``agent``; ``adapter`` and ``groups`` are required.  ``groups`` must
-        be a non-empty list of 2-item lists/tuples ``[articulation, group]``.
+        be a non-empty sequence of 2-item ``(articulation, group)``
+        sequences (lists or tuples); declaration order is preserved.  The
+        parser does not resolve identities against any spec or run object.
         Construction runs the regular :class:`PolicyBinding` validation
         (normalization included).
 
@@ -632,25 +665,18 @@ class PolicyBinding:
 
         Raises:
             TypeError: *entry* is not a mapping.
-            ValueError: Unknown or missing keys, or constructor validation
-                fails (empty identities, duplicates, bad dt/agent).
+            ValueError: Non-string/unknown/missing keys, or constructor
+                validation fails (empty identities, duplicates, bad dt/agent).
         """
         data = _require_mapping(entry, "PolicyBinding.from_mapping")
         allowed = ("adapter", "groups", "control_dt", "agent")
         _reject_unknown_keys(data, allowed, "PolicyBinding.from_mapping")
         _require_keys(data, ("adapter", "groups"), "PolicyBinding.from_mapping")
-        groups = data["groups"]
-        if isinstance(groups, (str, bytes)) or not isinstance(groups, Sequence):
-            raise ValueError(
-                "PolicyBinding.from_mapping groups must be a non-empty list "
-                "of [articulation, group] pairs, "
-                f"got {type(groups).__name__}"
-            )
         return cls(
-            adapter=cast("str", data["adapter"]),
-            groups=cast("tuple[tuple[str, str], ...]", groups),
-            control_dt=cast("float | None", data.get("control_dt")),
-            agent=cast("str | None", data.get("agent")),
+            adapter=_require_text(data["adapter"], "PolicyBinding.adapter"),
+            groups=_normalize_binding_groups(data["groups"], "PolicyBinding.groups"),
+            control_dt=_normalize_control_dt(data.get("control_dt"), "PolicyBinding.control_dt"),
+            agent=_optional_text(data.get("agent"), "PolicyBinding.agent"),
         )
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 import torch
 
@@ -408,6 +410,7 @@ def _binding_mapping(**overrides):
 
 
 def test_policy_binding_normalizes_groups_to_tuple_of_tuples():
+    """Construction normalizes declared group pairs to a tuple of tuples."""
     binding = PolicyBinding(
         adapter="sonic_g1",
         groups=[["g1", "body"], ("g1", "hand")],
@@ -424,6 +427,7 @@ def test_policy_binding_normalizes_groups_to_tuple_of_tuples():
 
 
 def test_policy_binding_defaults_optional_fields_to_none():
+    """Omitted control_dt and agent are stored as None."""
     binding = PolicyBinding("sonic_g1", (("g1", "body"),))
 
     assert binding.control_dt is None
@@ -431,12 +435,14 @@ def test_policy_binding_defaults_optional_fields_to_none():
 
 
 def test_policy_binding_allows_same_group_name_on_different_articulations():
+    """Identities are (articulation, group), so one group name may repeat."""
     binding = PolicyBinding("sonic_g1", (("g1", "body"), ("g2", "body")))
 
     assert binding.groups == (("g1", "body"), ("g2", "body"))
 
 
 def test_policy_binding_rejects_duplicate_identity():
+    """A repeated (articulation, group) identity fails construction."""
     with pytest.raises(ValueError, match="duplicate group identity"):
         PolicyBinding("sonic_g1", (("g1", "body"), ("g1", "body")))
 
@@ -485,6 +491,7 @@ def test_policy_binding_rejects_duplicate_identity():
     ],
 )
 def test_policy_binding_rejects_invalid_fields(kwargs, match):
+    """Malformed adapter/groups/control_dt/agent fields fail with teaching errors."""
     fields = {"adapter": "sonic_g1", "groups": (("g1", "body"),)}
     fields.update(kwargs)
 
@@ -492,7 +499,18 @@ def test_policy_binding_rejects_invalid_fields(kwargs, match):
         PolicyBinding(**fields)
 
 
+def test_policy_binding_is_frozen():
+    """A policy binding is immutable after construction."""
+    binding = PolicyBinding.from_mapping(_binding_mapping())
+
+    with pytest.raises(FrozenInstanceError):
+        binding.adapter = "other"
+    with pytest.raises(FrozenInstanceError):
+        binding.groups = ()
+
+
 def test_group_from_mapping_builds_and_freezes_joints():
+    """Group parsing produces the validated group with tuple joints."""
     group = OrderedActionGroup.from_mapping(_group_mapping(joints=["hip", "knee"]))
 
     assert group == OrderedActionGroup("body", "g1", ("hip", "knee"), "position")
@@ -500,11 +518,13 @@ def test_group_from_mapping_builds_and_freezes_joints():
 
 
 def test_group_from_mapping_rejects_unknown_keys():
+    """An undeclared group key is rejected with the allowed-key list."""
     with pytest.raises(ValueError, match="does not accept"):
         OrderedActionGroup.from_mapping(_group_mapping(extra=1))
 
 
 def test_group_from_mapping_rejects_joint_set_selector():
+    """joint_set is resolved outside this parser and is not an accepted key."""
     entry = _group_mapping()
     entry["joint_set"] = "g1_body"
 
@@ -513,6 +533,7 @@ def test_group_from_mapping_rejects_joint_set_selector():
 
 
 def test_group_from_mapping_requires_all_keys():
+    """Every group declaration key is required."""
     entry = _group_mapping()
     del entry["target"]
 
@@ -520,17 +541,25 @@ def test_group_from_mapping_requires_all_keys():
         OrderedActionGroup.from_mapping(entry)
 
 
-def test_group_from_mapping_requires_explicit_joints():
+@pytest.mark.parametrize(
+    "joints",
+    ["hip", 3, None, {"hip": 1}],
+    ids=["str", "int", "none", "mapping"],
+)
+def test_group_from_mapping_rejects_non_sequence_joints(joints):
+    """Non-sequence joints share the explicit-joints teaching error."""
     with pytest.raises(ValueError, match="explicit"):
-        OrderedActionGroup.from_mapping(_group_mapping(joints="hip"))
+        OrderedActionGroup.from_mapping(_group_mapping(joints=joints))
 
 
 def test_group_from_mapping_requires_mapping():
+    """A group declaration must be a mapping, not a positional sequence."""
     with pytest.raises(TypeError, match="expects a mapping"):
         OrderedActionGroup.from_mapping(("body", "g1", ("hip",), "position"))
 
 
 def test_spec_from_mapping_accepts_mappings_and_groups_in_declared_order():
+    """Spec parsing preserves the declared group order across entry kinds."""
     spec = OrderedActionSpec.from_mapping(
         [
             _group_mapping(name="body", articulation="g1", joints=["hip"]),
@@ -549,6 +578,7 @@ def test_spec_from_mapping_accepts_mappings_and_groups_in_declared_order():
 
 
 def test_spec_from_mapping_rejects_empty_sequence():
+    """An empty group sequence fails spec construction."""
     with pytest.raises(ValueError, match="at least one group"):
         OrderedActionSpec.from_mapping([])
 
@@ -559,26 +589,31 @@ def test_spec_from_mapping_rejects_empty_sequence():
     ids=["str", "bytes", "mapping"],
 )
 def test_spec_from_mapping_rejects_strings_bytes_and_mappings(entries):
+    """Strings, bytes and a single mapping are not valid spec containers."""
     with pytest.raises(TypeError, match="expects a sequence"):
         OrderedActionSpec.from_mapping(entries)
 
 
 def test_spec_from_mapping_rejects_non_sequence():
+    """A non-sequence spec container is rejected."""
     with pytest.raises(TypeError, match="expects a sequence"):
         OrderedActionSpec.from_mapping(42)
 
 
 def test_spec_from_mapping_rejects_unknown_entry_type():
+    """An entry that is neither a group nor a mapping is rejected by index."""
     with pytest.raises(TypeError, match="OrderedActionGroup or mapping"):
         OrderedActionSpec.from_mapping([_group_mapping(), object()])
 
 
 def test_spec_from_mapping_propagates_group_validation():
+    """Duplicate identities are caught by the group validation."""
     with pytest.raises(ValueError, match="duplicate group identity"):
         OrderedActionSpec.from_mapping([_group_mapping(), _group_mapping()])
 
 
 def test_binding_from_mapping_normalizes_groups():
+    """Mapping parsing normalizes groups and optional fields."""
     binding = PolicyBinding.from_mapping(
         _binding_mapping(
             groups=[["g1", "body"], ["g1", "hand"]],
@@ -593,18 +628,34 @@ def test_binding_from_mapping_normalizes_groups():
 
 
 def test_binding_from_mapping_defaults_optional_fields():
+    """Optional binding fields absent from the mapping default to None."""
     binding = PolicyBinding.from_mapping(_binding_mapping())
 
     assert (binding.control_dt, binding.agent) == (None, None)
 
 
 def test_binding_from_mapping_rejects_unknown_keys():
+    """An undeclared binding key is rejected with the allowed-key list."""
     with pytest.raises(ValueError, match="does not accept"):
         PolicyBinding.from_mapping(_binding_mapping(extra=1))
 
 
+def test_binding_from_mapping_rejects_mixed_non_string_keys():
+    """A non-string key fails with a teaching error naming the field and key."""
+    entry = _binding_mapping()
+    entry["extra"] = 1
+    entry[3] = "oops"
+
+    with pytest.raises(
+        ValueError,
+        match=r"PolicyBinding\.from_mapping requires string keys, got key 3",
+    ):
+        PolicyBinding.from_mapping(entry)
+
+
 @pytest.mark.parametrize("key", ["adapter", "groups"])
 def test_binding_from_mapping_requires_keys(key):
+    """Required binding keys are enforced."""
     entry = _binding_mapping()
     del entry[key]
 
@@ -614,11 +665,13 @@ def test_binding_from_mapping_requires_keys(key):
 
 @pytest.mark.parametrize("groups", ["g1", 3], ids=["str", "int"])
 def test_binding_from_mapping_rejects_non_sequence_groups(groups):
-    with pytest.raises(ValueError, match="groups must be a non-empty list"):
+    """A non-sequence groups value is rejected before pair validation."""
+    with pytest.raises(ValueError, match="groups must be a non-empty sequence"):
         PolicyBinding.from_mapping(_binding_mapping(groups=groups))
 
 
 def test_binding_from_mapping_rejects_empty_groups():
+    """An empty groups sequence is rejected."""
     with pytest.raises(ValueError, match="at least one"):
         PolicyBinding.from_mapping(_binding_mapping(groups=[]))
 
@@ -633,19 +686,36 @@ def test_binding_from_mapping_rejects_empty_groups():
     ids=["short-pair", "long-pair", "empty-group-name"],
 )
 def test_binding_from_mapping_rejects_bad_pairs(groups, match):
+    """Two-item pairs with non-empty text identities are required."""
     with pytest.raises(ValueError, match=match):
         PolicyBinding.from_mapping(_binding_mapping(groups=groups))
 
 
 def test_binding_from_mapping_requires_mapping():
+    """A binding declaration must be a mapping."""
     with pytest.raises(TypeError, match="expects a mapping"):
         PolicyBinding.from_mapping(("sonic_g1", [["g1", "body"]]))
 
 
-def test_policy_binding_is_independent_of_run_config():
-    import unigym.runtime.actions as actions
+def test_policy_binding_group_order_follows_declaration_not_spec_order():
+    """Binding identities keep declaration order and are not aligned to spec order."""
+    spec = OrderedActionSpec.from_mapping(
+        [
+            _group_mapping(name="body", joints=["hip"]),
+            _group_mapping(name="hand", joints=["finger"]),
+        ]
+    )
+    binding = PolicyBinding.from_mapping(_binding_mapping(groups=[["g1", "hand"], ["g1", "body"]]))
 
-    binding = PolicyBinding.from_mapping({"adapter": "sonic_g1", "groups": [("g1", "body")]})
+    assert [group.name for group in spec.groups] == ["body", "hand"]
+    assert binding.groups == (("g1", "hand"), ("g1", "body"))
+    assert set(binding.groups) == {(group.articulation, group.name) for group in spec.groups}
 
-    assert binding.groups == (("g1", "body"),)
-    assert "ControlGroup" not in vars(actions)
+
+def test_policy_binding_declares_groups_without_a_run_or_spec():
+    """A binding names identities independently of any spec or run object."""
+    binding = PolicyBinding.from_mapping(_binding_mapping(groups=[["g1", "body"], ["g2", "hand"]]))
+    spec = OrderedActionSpec.from_mapping([_group_mapping()])
+
+    assert binding.groups == (("g1", "body"), ("g2", "hand"))
+    assert ("g2", "hand") not in {(group.articulation, group.name) for group in spec.groups}
