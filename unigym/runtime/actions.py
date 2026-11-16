@@ -20,6 +20,12 @@ Backends:
 
 This module must stay torch-only (importable by adapters/base.py without
 isaaclab/mujoco; the mujoco resolver imports mujoco lazily).
+
+Stage A0 adds declaration-ordered action templates
+(:class:`ActionDim` / :class:`OrderedActionGroup` / :class:`OrderedActionSpec`):
+a spec fixes the group order and each group's joint order, so a flattened
+action vector is stable and self-describing (``idx articulation group joint
+target``).
 """
 
 from __future__ import annotations
@@ -38,6 +44,191 @@ if TYPE_CHECKING:
 
 #: legal NamedAction target kinds (must equal the owning ControlRuntime.target)
 LEGAL_ACTION_KINDS = ("position", "velocity", "torque", "effort", "current")
+
+__all__ = [
+    "LEGAL_ACTION_KINDS",
+    "ActionDim",
+    "IsaaclabJointResolver",
+    "JointResolver",
+    "MujocoJointResolver",
+    "NamedAction",
+    "OrderedActionGroup",
+    "OrderedActionSpec",
+    "ResolvedJointTargets",
+]
+
+
+def _require_text(value: object, what: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{what} must be a non-empty string, got {value!r}")
+    return value
+
+
+# --------------------------------------------------------------------------- #
+# declaration-ordered action templates (Stage A0)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ActionDim:
+    """One flattened action dimension of an :class:`OrderedActionSpec`.
+
+    Attributes:
+        index: zero-based position in the flattened action vector.
+        articulation: owning articulation name.
+        group: owning action-group name within that articulation.
+        joint: joint name addressed by this dimension.
+        target: legal action kind (see :data:`LEGAL_ACTION_KINDS`).
+    """
+
+    index: int
+    articulation: str
+    group: str
+    joint: str
+    target: str
+
+    def __post_init__(self):
+        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
+            raise ValueError(f"ActionDim.index must be a non-negative integer, got {self.index!r}")
+        _require_text(self.articulation, "ActionDim.articulation")
+        _require_text(self.group, "ActionDim.group")
+        _require_text(self.joint, "ActionDim.joint")
+        _require_text(self.target, "ActionDim.target")
+        if self.target not in LEGAL_ACTION_KINDS:
+            raise ValueError(
+                f"ActionDim.target must be one of {list(LEGAL_ACTION_KINDS)}, "
+                f"got {self.target!r}"
+            )
+
+
+@dataclass(frozen=True)
+class OrderedActionGroup:
+    """One named, declaration-ordered action group of an articulation.
+
+    Attributes:
+        name: action-face name (unique per articulation).
+        articulation: owning articulation name.
+        joints: joint names in declaration order (stored as a tuple).
+        target: legal action kind (see :data:`LEGAL_ACTION_KINDS`).
+    """
+
+    name: str
+    articulation: str
+    joints: tuple[str, ...]
+    target: str
+
+    def __post_init__(self):
+        _require_text(self.name, "OrderedActionGroup.name")
+        _require_text(self.articulation, "OrderedActionGroup.articulation")
+        if isinstance(self.joints, (str, bytes)) or not isinstance(self.joints, Sequence):
+            raise ValueError(
+                "OrderedActionGroup.joints must be a sequence of joint names, "
+                f"got {type(self.joints).__name__}"
+            )
+        joints = tuple(self.joints)
+        if not joints:
+            raise ValueError(f"OrderedActionGroup {self.name!r}: joints must be non-empty")
+        for joint in joints:
+            _require_text(joint, "OrderedActionGroup joint name")
+        dupes = sorted({joint for joint in joints if joints.count(joint) > 1})
+        if dupes:
+            raise ValueError(f"OrderedActionGroup {self.name!r}: duplicate joints {dupes}")
+        if self.target not in LEGAL_ACTION_KINDS:
+            raise ValueError(
+                f"OrderedActionGroup.target must be one of {list(LEGAL_ACTION_KINDS)}, "
+                f"got {self.target!r}"
+            )
+        object.__setattr__(self, "joints", joints)
+
+
+@dataclass(frozen=True)
+class OrderedActionSpec:
+    """A declaration-ordered sequence of action groups.
+
+    Groups must be non-empty, their ``(articulation, name)`` identity unique,
+    and no two groups of one articulation may own the same joint.  Order is
+    preserved exactly as declared; :meth:`dim_table` flattens it into
+    ``ActionDim`` rows.
+    """
+
+    groups: tuple[OrderedActionGroup, ...]
+
+    def __post_init__(self):
+        if isinstance(self.groups, (str, bytes)) or not isinstance(self.groups, Sequence):
+            raise ValueError(
+                "OrderedActionSpec.groups must be a sequence of OrderedActionGroup, "
+                f"got {type(self.groups).__name__}"
+            )
+        groups = tuple(self.groups)
+        if not groups:
+            raise ValueError("OrderedActionSpec.groups must contain at least one group")
+        identities: set[tuple[str, str]] = set()
+        joint_owner: dict[tuple[str, str], str] = {}
+        for group in groups:
+            if not isinstance(group, OrderedActionGroup):
+                raise ValueError(
+                    "OrderedActionSpec.groups entries must be OrderedActionGroup, "
+                    f"got {type(group).__name__}"
+                )
+            identity = (group.articulation, group.name)
+            if identity in identities:
+                raise ValueError(
+                    "OrderedActionSpec: duplicate group identity "
+                    f"(articulation, name)={identity!r}"
+                )
+            identities.add(identity)
+            for joint in group.joints:
+                key = (group.articulation, joint)
+                previous = joint_owner.get(key)
+                if previous is not None:
+                    raise ValueError(
+                        f"OrderedActionSpec: articulation {group.articulation!r} has "
+                        f"overlapping joints between groups {previous!r} and "
+                        f"{group.name!r} (joint {joint!r})"
+                    )
+                joint_owner[key] = group.name
+        object.__setattr__(self, "groups", groups)
+
+    @property
+    def dim(self) -> int:
+        """Return the total flattened action dimension."""
+        return sum(len(group.joints) for group in self.groups)
+
+    def dim_table(self) -> tuple[ActionDim, ...]:
+        """Return the declaration-ordered action dimensions."""
+        rows: list[ActionDim] = []
+        index = 0
+        for group in self.groups:
+            for joint in group.joints:
+                rows.append(
+                    ActionDim(
+                        index=index,
+                        articulation=group.articulation,
+                        group=group.name,
+                        joint=joint,
+                        target=group.target,
+                    )
+                )
+                index += 1
+        return tuple(rows)
+
+    def __str__(self) -> str:
+        """Render the compact ``idx articulation group joint target`` table."""
+        rows: list[tuple[str, ...]] = [("idx", "articulation", "group", "joint", "target")]
+        rows.extend(
+            (str(row.index), row.articulation, row.group, row.joint, row.target)
+            for row in self.dim_table()
+        )
+        widths = [max(len(row[column]) for row in rows) for column in range(5)]
+        return "\n".join(
+            "  ".join(cell.ljust(widths[column]) for column, cell in enumerate(row)).rstrip()
+            for row in rows
+        )
+
+    def __repr__(self) -> str:
+        """Return a concise one-line summary."""
+        groups = ", ".join(
+            f"{group.articulation}/{group.name}:{len(group.joints)}" for group in self.groups
+        )
+        return f"OrderedActionSpec(dim={self.dim}, groups=[{groups}])"
 
 
 # --------------------------------------------------------------------------- #
