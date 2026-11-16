@@ -65,6 +65,7 @@ __all__ = [
     "LEGAL_ACTION_KINDS",
     "LEGAL_ACTION_ROLES",
     "ActionDim",
+    "ActionGroupValue",
     "IsaaclabJointResolver",
     "JointResolver",
     "MujocoJointResolver",
@@ -267,6 +268,48 @@ class OrderedActionGroup:
             target=_require_text(data["target"], "OrderedActionGroup.from_mapping target"),
             role=_require_text(data.get("role", "aux"), "OrderedActionGroup.from_mapping role"),
         )
+
+
+@dataclass(frozen=True)
+class ActionGroupValue:
+    """One authoring template group projected out of runtime action values.
+
+    This is a diagnostic/data-consumer projection, never a routing identity.
+    It pairs the declared group with a tensor whose columns are exactly
+    ``group.joints`` in declaration order, so ``values[:, i]`` is
+    ``group.joints[i]``'s column.
+
+    Attributes:
+        group: the declared authoring group that owns the projection.
+        values: ``(N, len(group.joints))`` tensor in group-joint order.
+    """
+
+    group: OrderedActionGroup
+    values: torch.Tensor
+
+    def __post_init__(self):
+        if not isinstance(self.group, OrderedActionGroup):
+            raise ValueError(
+                "ActionGroupValue.group must be an OrderedActionGroup, "
+                f"got {type(self.group).__name__}"
+            )
+        if not isinstance(self.values, torch.Tensor):
+            raise ValueError(
+                "ActionGroupValue.values must be a torch tensor, "
+                f"got {type(self.values).__name__}"
+            )
+        if self.values.ndim != 2:
+            raise ValueError(
+                "ActionGroupValue.values must be (N, len(group.joints)), "
+                f"got {tuple(self.values.shape)}"
+            )
+        if self.values.shape[1] != len(self.group.joints):
+            raise ValueError(
+                "ActionGroupValue.values has "
+                f"{self.values.shape[1]} columns but group "
+                f"{self.group.articulation!r}/{self.group.name!r} declares "
+                f"{len(self.group.joints)} joints"
+            )
 
 
 @dataclass(frozen=True)
@@ -552,6 +595,76 @@ class OrderedActionSpec:
                 block = entry.values.index_select(1, gather)
             chunks.append(block)
         return torch.cat(chunks, dim=1)
+
+    def project_groups(self, actions: Sequence[NamedAction]) -> tuple[ActionGroupValue, ...]:
+        """Project runtime action entries onto the declared groups (tolerant).
+
+        Unlike :meth:`flatten`, this authoring projection accepts adapters that
+        split one group across several entries or merge several groups into one
+        entry.  Columns are matched by joint identity only.  The result is
+        ordered by spec declaration order and by each group's joint order.
+
+        This is a data/diagnostic projection.  Backends must not use it to
+        route physics.
+
+        Args:
+            actions: NamedAction entries in any order; every addressed joint
+                must be unique.
+
+        Returns:
+            One :class:`ActionGroupValue` per spec group, in declaration order.
+
+        Raises:
+            TypeError: *actions* is not a sequence or an entry is not a
+                NamedAction.
+            ValueError: An addressed joint is duplicated, a spec joint is
+                missing, or an entry kind differs from the template target.
+        """
+        if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
+            raise TypeError(
+                "OrderedActionSpec.project_groups expects a sequence of NamedAction, "
+                f"got {type(actions).__name__}"
+            )
+        columns: dict[tuple[str, str], tuple[NamedAction, int]] = {}
+        for entry in actions:
+            if not isinstance(entry, NamedAction):
+                raise TypeError(
+                    "OrderedActionSpec.project_groups expects a sequence of "
+                    f"NamedAction, got {type(entry).__name__} entry"
+                )
+            for column, joint in enumerate(entry.joint_names):
+                key = (entry.articulation, joint)
+                if key in columns:
+                    raise ValueError(
+                        "OrderedActionSpec.project_groups: articulation "
+                        f"{key[0]!r} joint {key[1]!r} is addressed by more than "
+                        "one action column"
+                    )
+                columns[key] = (entry, column)
+
+        projected: list[ActionGroupValue] = []
+        for group in self.groups:
+            chunks: list[torch.Tensor] = []
+            for joint in group.joints:
+                key = (group.articulation, joint)
+                found = columns.get(key)
+                if found is None:
+                    raise ValueError(
+                        "OrderedActionSpec.project_groups: articulation "
+                        f"{key[0]!r} joint {key[1]!r} is not addressed by any "
+                        "action entry"
+                    )
+                entry, column = found
+                if entry.kind != group.target:
+                    raise ValueError(
+                        "OrderedActionSpec.project_groups: articulation "
+                        f"{key[0]!r} joint {key[1]!r} has action kind "
+                        f"{entry.kind!r} but the template expects target "
+                        f"{group.target!r}"
+                    )
+                chunks.append(entry.values[:, column])
+            projected.append(ActionGroupValue(group=group, values=torch.stack(chunks, dim=1)))
+        return tuple(projected)
 
     def __str__(self) -> str:
         """Render the compact ``idx articulation group joint target`` table."""

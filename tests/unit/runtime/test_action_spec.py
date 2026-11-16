@@ -9,6 +9,7 @@ import torch
 
 from unigym.runtime.actions import (
     ActionDim,
+    ActionGroupValue,
     NamedAction,
     OrderedActionGroup,
     OrderedActionSpec,
@@ -719,3 +720,156 @@ def test_policy_binding_declares_groups_without_a_run_or_spec():
 
     assert binding.groups == (("g1", "body"), ("g2", "hand"))
     assert ("g2", "hand") not in {(group.articulation, group.name) for group in spec.groups}
+
+
+# --------------------------------------------------------------------------- #
+# OrderedActionSpec.project_groups (tolerant authoring projection)
+# --------------------------------------------------------------------------- #
+def _named(articulation, joint_names, values, *, group="body", kind="position"):
+    return NamedAction(
+        articulation=articulation,
+        group=group,
+        values=values,
+        joint_names=joint_names,
+        kind=kind,
+    )
+
+
+def test_project_groups_returns_declaration_and_group_joint_order():
+    spec = _spec(
+        OrderedActionGroup("body", "go1", ("hip", "knee"), "position"),
+        OrderedActionGroup("hand", "go1", ("finger",), "effort"),
+    )
+    hand = _named(
+        "go1",
+        ("finger",),
+        torch.tensor([[3.0]]),
+        group="hand",
+        kind="effort",
+    )
+    body = _named("go1", ("knee", "hip"), torch.tensor([[20.0, 10.0]]))
+
+    projected = spec.project_groups((hand, body))
+
+    assert len(projected) == 2
+    assert all(isinstance(value, ActionGroupValue) for value in projected)
+    assert projected[0].group is spec.groups[0]
+    assert projected[1].group is spec.groups[1]
+    assert torch.equal(projected[0].values, torch.tensor([[10.0, 20.0]]))
+    assert torch.equal(projected[1].values, torch.tensor([[3.0]]))
+
+
+def test_project_groups_tolerates_one_group_split_across_entries():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee"), "position"))
+    knee = _named("go1", ("knee",), torch.tensor([[2.0]]))
+    hip = _named("go1", ("hip",), torch.tensor([[1.0]]))
+
+    projected = spec.project_groups((knee, hip))
+
+    assert torch.equal(projected[0].values, torch.tensor([[1.0, 2.0]]))
+
+
+def test_project_groups_tolerates_several_groups_merged_into_one_entry():
+    spec = _spec(
+        OrderedActionGroup("body", "go1", ("hip", "knee"), "position"),
+        OrderedActionGroup("aux", "go1", ("ankle",), "position"),
+    )
+    merged = _named("go1", ("ankle", "hip", "knee"), torch.tensor([[3.0, 1.0, 2.0]]))
+
+    projected = spec.project_groups((merged,))
+
+    assert torch.equal(projected[0].values, torch.tensor([[1.0, 2.0]]))
+    assert torch.equal(projected[1].values, torch.tensor([[3.0]]))
+
+
+def test_project_groups_keeps_same_joint_names_on_two_articulations_separate():
+    spec = _spec(
+        OrderedActionGroup("body", "go1", ("hip",), "position"),
+        OrderedActionGroup("body", "go2", ("hip",), "position"),
+    )
+    go1 = _named("go1", ("hip",), torch.tensor([[10.0]]))
+    go2 = _named("go2", ("hip",), torch.tensor([[20.0]]))
+
+    projected = spec.project_groups((go2, go1))
+
+    assert torch.equal(projected[0].values, torch.tensor([[10.0]]))
+    assert torch.equal(projected[1].values, torch.tensor([[20.0]]))
+
+
+def test_project_groups_rejects_missing_joint_column():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip", "knee"), "position"))
+
+    with pytest.raises(ValueError, match="not addressed") as excinfo:
+        spec.project_groups((_named("go1", ("hip",), torch.tensor([[1.0]])),))
+
+    message = str(excinfo.value)
+    assert "'go1'" in message
+    assert "'knee'" in message
+
+
+def test_project_groups_rejects_duplicate_joint_column():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip",), "position"))
+    first = _named("go1", ("hip",), torch.tensor([[1.0]]), group="first")
+    second = _named("go1", ("hip",), torch.tensor([[2.0]]), group="second")
+
+    with pytest.raises(ValueError, match="more than one") as excinfo:
+        spec.project_groups((first, second))
+
+    message = str(excinfo.value)
+    assert "'go1'" in message
+    assert "'hip'" in message
+
+
+def test_project_groups_rejects_wrong_kind_naming_articulation_and_joint():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip",), "position"))
+    entry = _named("go1", ("hip",), torch.tensor([[1.0]]), kind="velocity")
+
+    with pytest.raises(ValueError, match="template expects target") as excinfo:
+        spec.project_groups((entry,))
+
+    message = str(excinfo.value)
+    assert "'go1'" in message
+    assert "'hip'" in message
+    assert "'velocity'" in message
+    assert "'position'" in message
+
+
+@pytest.mark.parametrize("actions", ["hip", b"hip", 3], ids=["str", "bytes", "int"])
+def test_project_groups_rejects_non_sequence(actions):
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip",), "position"))
+
+    with pytest.raises(TypeError, match="sequence of NamedAction"):
+        spec.project_groups(actions)
+
+
+def test_project_groups_rejects_non_named_action_entries():
+    spec = _spec(OrderedActionGroup("body", "go1", ("hip",), "position"))
+
+    with pytest.raises(TypeError, match="NamedAction"):
+        spec.project_groups((object(),))
+
+
+def test_project_groups_agrees_with_the_flat_layout():
+    spec = _two_robot_spec()
+    flat = torch.randn(4, spec.dim, dtype=torch.float64)
+
+    named = spec.unflatten(flat)
+    projected = spec.project_groups(named)
+
+    assert torch.equal(projected[0].values, flat[:, :3])
+    assert torch.equal(projected[1].values, flat[:, 3:])
+    assert torch.equal(spec.flatten(named), flat)
+
+
+def test_action_group_value_rejects_non_tensor_values():
+    group = OrderedActionGroup("body", "go1", ("hip", "knee"), "position")
+
+    with pytest.raises(ValueError, match="torch tensor"):
+        ActionGroupValue(group, [[1.0, 2.0]])
+
+
+def test_action_group_value_requires_one_column_per_group_joint():
+    group = OrderedActionGroup("body", "go1", ("hip", "knee"), "position")
+
+    with pytest.raises(ValueError, match="columns"):
+        ActionGroupValue(group, torch.zeros(1, 1))
