@@ -12,7 +12,7 @@ owns the record shape and the small helpers the registries share:
 
 The module is standard-library only and imports no engine, backend or pack
 module.  Provenance is process/diagnostic data: it is never serialized into a
-run config, ledger, shard or ``to_config`` output.
+run config, ledger or shard output.
 """
 
 from __future__ import annotations

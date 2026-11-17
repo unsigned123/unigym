@@ -177,3 +177,41 @@ def test_load_robot_profile_is_lazily_exported() -> None:
     from unigym.robots.data import load_robot_profile as data_loader
 
     assert robots.load_robot_profile is data_loader
+
+
+def test_loader_parses_actuation_groups(tmp_path: Path) -> None:
+    """``actuation`` uses the existing ActuationGroup mapping shape."""
+    path = _write(
+        tmp_path / "robot.yaml",
+        _document(
+            actuation=[
+                {
+                    "name": "body",
+                    "law": "standard_pd",
+                    "joint_set": "body",
+                    "gains": {"kp": 20.0, "kd": 1.0},
+                }
+            ]
+        ),
+    )
+
+    profile = load_robot_profile(path)
+
+    assert len(profile.actuation) == 1
+    assert profile.actuation[0].name == "body"
+    assert profile.actuation[0].joint_set == "body"
+    assert profile.actuation[0].gains == {"kp": 20.0, "kd": 1.0}
+
+
+def test_loader_rejects_a_malformed_actuation_list(tmp_path: Path) -> None:
+    """A non-list or an invalid group fails with the file and field named."""
+    path = _write(tmp_path / "robot.yaml", _document(actuation={"name": "body"}))
+    with pytest.raises(RobotDataError, match="actuation"):
+        load_robot_profile(path)
+
+    path = _write(
+        tmp_path / "robot.yaml",
+        _document(actuation=[{"name": "body", "law": "no_such_law", "joint_set": "body"}]),
+    )
+    with pytest.raises(RobotDataError, match="actuation"):
+        load_robot_profile(path)

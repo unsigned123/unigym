@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from dataclasses import FrozenInstanceError
+
 from unigym.assets.asset_ref import AssetRef
+from unigym.actuators.ir import ActuationGroup
 from unigym.robots.base import BodyBinding, BodyBindingError, RobotProfile
 
 
@@ -88,3 +91,64 @@ def test_profile_has_no_body_parts_or_robot_asset_fields():
     assert "body_parts" not in fields
     assert "assets" in fields
     assert not hasattr(robot_base, "RobotAsset")
+
+
+def _actuation(**overrides: object) -> dict[str, object]:
+    """One valid standard-PD body group for the two-joint test profile."""
+    entry: dict[str, object] = {
+        "name": "body",
+        "law": "standard_pd",
+        "joint_set": "body",
+        "gains": {"kp": 20.0, "kd": 1.0},
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_profile_actuation_accepts_a_covering_group_and_stays_frozen() -> None:
+    """A valid group becomes normalized ActuationGroup data on a frozen profile."""
+    profile = _profile(
+        joint_sets={"body": ("a", "b")},
+        default_joint_pos={"a": 0.0, "b": 0.0},
+        actuation=[_actuation()],
+    )
+    assert len(profile.actuation) == 1
+    assert isinstance(profile.actuation[0], ActuationGroup)
+    assert profile.actuation[0].joint_set == "body"
+    with pytest.raises(FrozenInstanceError):
+        profile.actuation = ()  # type: ignore[misc]
+
+
+def test_profile_empty_actuation_is_legal() -> None:
+    """A passive profile may declare no actuation."""
+    assert _profile().actuation == ()
+    assert _profile(actuation=()).actuation == ()
+
+
+@pytest.mark.parametrize(
+    ("actuation", "match"),
+    [
+        ([_actuation(), _actuation()], "must be unique"),
+        ([_actuation(name="bad", joint_set="missing")], "unknown"),
+        ([_actuation(joints=("missing",), joint_set=None)], "unknown joints"),
+    ],
+)
+def test_profile_actuation_rejects_invalid_groups(actuation, match: str) -> None:
+    """Duplicate names, unresolved sets and unknown joints fail fast."""
+    with pytest.raises(ValueError, match=match):
+        _profile(
+            joint_sets={"body": ("a", "b")},
+            default_joint_pos={"a": 0.0, "b": 0.0},
+            actuation=actuation,
+        )
+
+
+def test_profile_actuation_rejects_incomplete_coverage() -> None:
+    """A non-empty actuation tuple must cover every declared non-passive joint."""
+    entry = _actuation(joints=("a",), joint_set=None)
+    with pytest.raises(ValueError, match=r"do not cover joints \['b'\]"):
+        _profile(
+            joint_sets={"body": ("a", "b")},
+            default_joint_pos={"a": 0.0, "b": 0.0},
+            actuation=[entry],
+        )

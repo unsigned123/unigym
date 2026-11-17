@@ -9,7 +9,8 @@ import pytest
 import torch
 
 from unigym.packs import discover_set
-from unigym.packs.packset import PackSet, RobotRef
+from unigym.packs.packset import PackSet
+from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.runner.external import ExternalRunner
 from unigym.runner.state import read_extra
@@ -45,7 +46,7 @@ def _isolate_robot_registry() -> Iterator[None]:
     restore_robot_registry(snapshot)
 
 
-def _facade_pack() -> tuple[PackSet, RobotRef]:
+def _facade_pack() -> tuple[PackSet, RobotProfile]:
     """The lane-owned acceptance pack and its one tiny-arm robot ref."""
     pack_set = discover_set([FACADE_PACK])
     return pack_set, pack_set.pack("facade_mjcf").robot(ROBOT_ID)
@@ -97,7 +98,7 @@ def test_shared_script_builds_distinct_rows(num_envs: int, tiny_mjcf: Path) -> N
 
     evidence = run_facade_acceptance(
         pack_set=pack_set,
-        robot_id=ref.id,
+        robot_id=ref.name,
         world=World.base(mjcf=str(tiny_mjcf)),
         backend="mujoco",
         expected_joint_names=JOINT_ORDER,

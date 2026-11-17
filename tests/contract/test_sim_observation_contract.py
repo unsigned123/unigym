@@ -28,7 +28,6 @@ def _handle() -> ArticulationHandle:
     )
     return ArticulationHandle(
         name="arm",
-        ref=None,
         profile=profile,
         control=None,
         action_groups={},

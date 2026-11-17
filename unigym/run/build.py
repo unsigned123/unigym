@@ -555,17 +555,26 @@ _REALIZER_PARAMS = (
 """Robot-section params owned by the backend realizer, never the profile."""
 
 
-def _profile_for(art: ArticulationSpec) -> _ProfileSeed:
+def _profile_for(
+    art: ArticulationSpec,
+    injected: Mapping[str, RobotProfile] | None = None,
+) -> _ProfileSeed:
     """Build the neutral :class:`RobotProfile` of one robot articulation.
 
-    ``params.profile`` is the reserved selector for runs whose articulation
-    name is not the robot type (e.g. a second ``g1b`` articulation reuses
-    the ``g1`` profile); it never reaches the profile factory.  The
-    realizer-only params (``prim_path``, ``spawn_options``,
-    ``collision_group``, ``debug_vis``, ``soft_joint_pos_limit_factor``) are
-    split off before the neutral factory and returned for the backend robot
-    realizer; they are never profile data.
+    An injected profile for ``art.name`` (the programmatic
+    ``Run(robot=<RobotProfile>)`` path) is used as-is: no registry lookup, no
+    pack lookup and no activation.  Otherwise ``params.profile`` is the
+    reserved selector for runs whose articulation name is not the robot type
+    (e.g. a second ``g1b`` articulation reuses the ``g1`` profile); it never
+    reaches the profile factory.  The realizer-only params (``prim_path``,
+    ``spawn_options``, ``collision_group``, ``debug_vis``,
+    ``soft_joint_pos_limit_factor``) are split off before the neutral factory
+    and returned for the backend robot realizer; they are never profile data.
     """
+    if injected is not None:
+        profile = injected.get(art.name)
+        if profile is not None:
+            return {"profile": profile, "params": {}, "spec": art}
     section = _profile_section(art)
     raw_params = section.get("params")
     params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
@@ -673,6 +682,59 @@ def _effective_profile(
             f"asset format {asset_format!r} for ids {missing}"
         )
     return effective, asset_format
+
+
+def _prepare_articulation_models(
+    spec: RunSpec, info: BackendInfo, asset_plan: AssetPlan | None
+) -> RunSpec:
+    """Select and resolve the backend's asset format for every articulation.
+
+    Only the format the backend will actually load is resolved: a ``release:``
+    reference in the selected format becomes an existing absolute path, a
+    ``pack:``/relative reference resolves through the run's asset boundary
+    when one exists, and every other declared format keeps its declaration (a
+    MuJoCo build must not fail because an unused USD download is absent).  The
+    spec itself stays pure authoring data; the build works on a replaced copy.
+
+    A profile-backed config articulation (no inline ``model``) receives the
+    selected profile asset as its inline model, so the backend composes the
+    same asset the profile names.  An articulation whose declared formats do
+    not intersect the backend's preference list keeps its declaration: control
+    articulations re-select in :func:`_effective_profile` and fail there with
+    the teaching error, while a non-control declaration is simply not composed.
+    """
+    from unigym.assets.asset_ref import AssetRefError
+    from unigym.assets.release import is_release_ref, resolve_release_ref
+
+    injected = spec.robot_profiles or {}
+    prepared: list[ArticulationSpec] = []
+    changed = False
+    for art in spec.articulations:
+        assets = art.model
+        if assets is None:
+            profile = injected.get(art.name)
+            assets = None if profile is None else profile.assets
+        if assets is None:
+            prepared.append(art)
+            continue
+        try:
+            asset_format = select_asset_format(assets, info.asset_formats)
+        except AssetRefError:
+            prepared.append(art)
+            continue
+        reference = getattr(assets, asset_format)
+        if is_release_ref(reference):
+            selected = replace(assets, **{asset_format: resolve_release_ref(reference)})
+        elif asset_plan is not None and not os.path.isabs(reference):
+            selected = replace(assets, **{asset_format: asset_plan.resolve(reference)})
+        else:
+            selected = assets
+        if art.model is not None and selected is assets:
+            prepared.append(art)
+            continue
+        prepared.append(replace(art, model=selected))
+        changed = True
+    return replace(spec, articulations=tuple(prepared)) if changed else spec
 
 
 def _selected_asset_path(
@@ -795,9 +857,10 @@ def _reject_inventory_mode_refs(
 def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBuild]:
     """Build the effective profile of every profile-backed control articulation."""
     builds: dict[str, _ProfileBuild] = {}
+    injected = spec.robot_profiles
     for art in _control_articulations(spec):
         try:
-            seed = _profile_for(art)
+            seed = _profile_for(art, injected)
         except (AttributeError, KeyError, NotImplementedError, ValueError):
             # profile-less articulations are legal when every action group
             # declares its joints explicitly (the action surface has no
@@ -805,10 +868,13 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
             # robot articulation (checked by the caller).
             continue
         profile, asset_format = _effective_profile(art, seed["profile"], info)
+        spec_art = seed["spec"]
+        if spec_art.actuation is None and profile.actuation:
+            spec_art = replace(spec_art, actuation=profile.actuation)
         builds[art.name] = {
             "profile": profile,
             "params": seed["params"],
-            "spec": art,
+            "spec": spec_art,
             "asset_format": asset_format,
         }
     return builds
@@ -883,14 +949,16 @@ def _build_actuation_plans(
         driven = driven_by_articulation.get(art.name, [])
         if not driven:
             continue
+        profile = profiles.get(art.name)
         groups = art.actuation
+        if groups is None and profile is not None and profile.actuation:
+            groups = profile.actuation
         if groups is None or not groups:
             raise ValueError(
                 f"articulation {art.name!r} declares driven joints but no "
                 f"`actuation`; declare at least one ActuationGroup covering "
                 f"the driven joints {driven} (there is no implicit default law)"
             )
-        profile = profiles.get(art.name)
         joint_sets = dict(profile.joint_sets) if profile is not None else None
         resolved = resolve_actuation_groups(
             groups,
@@ -1698,6 +1766,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
 
     asset_plan = _boundary_asset_plan(pack_runtime, env_cfg)
+    spec = _prepare_articulation_models(spec, info, asset_plan)
 
     robot = _build_robot_and_props(
         spec, cfg, info, device, num_envs, env_spacing, config_dir, asset_plan

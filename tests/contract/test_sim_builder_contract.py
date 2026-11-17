@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from unigym.camera import Camera
-from unigym.packs.packset import PackSet, RobotRef
+from unigym.packs.packset import PackSet
+from unigym.robots.base import RobotProfile
 from unigym.sim import (
     Control,
     ControlSpec,
     DeferredFeatureError,
-    ForeignHandleError,
     NoControlError,
     NoWorldError,
     SimulationBuilder,
@@ -187,7 +186,7 @@ def test_add_articulation_requires_an_explicit_control(tmp_path: Path) -> None:
 
 
 def test_add_articulation_resolves_groups_and_owns_the_handle(tmp_path: Path) -> None:
-    """The handle carries the ref, profile, control and resolved action groups."""
+    """The handle carries the profile, control and resolved action groups."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
     control = _control()
@@ -196,9 +195,9 @@ def test_add_articulation_resolves_groups_and_owns_the_handle(tmp_path: Path) ->
 
     assert builder.articulations == (handle,)
     assert handle.name == "arm"
-    assert handle.ref == ref
     assert handle.control is control
-    assert handle.profile.name == ref.id
+    assert handle.profile is ref
+    assert handle.profile.name == ref.name
     assert set(handle.action_groups) == {"body"}
     assert handle.action_groups["body"].joints == ("shoulder", "elbow")
 
@@ -296,20 +295,12 @@ def test_add_camera_requires_a_name(tmp_path: Path) -> None:
         _builder(pack_set).add_camera({"rig": {"type": "world"}})
 
 
-def test_foreign_pack_ref_is_refused_before_loading(tmp_path: Path) -> None:
-    """A ref from another pack scope is a foreign handle, not a pack error."""
-    pack_set, ref = write_sim_pack(tmp_path)
+def test_add_articulation_requires_a_robot_profile(tmp_path: Path) -> None:
+    """The builder consumes a complete RobotProfile, never an opaque handle."""
+    pack_set, _ref = write_sim_pack(tmp_path)
 
-    with pytest.raises(ForeignHandleError, match="not in this pack set"):
-        _builder(pack_set).add_articulation(replace(ref, pack="other_pack"), control=_control())
-
-
-def test_mismatched_pack_version_is_refused(tmp_path: Path) -> None:
-    """The ref version must match the set's manifest version."""
-    pack_set, ref = write_sim_pack(tmp_path)
-
-    with pytest.raises(ForeignHandleError, match="version"):
-        _builder(pack_set).add_articulation(replace(ref, pack_version="9.9.9"), control=_control())
+    with pytest.raises(SimulationConfigError, match="expects a RobotProfile"):
+        _builder(pack_set).add_articulation(object(), control=_control())
 
 
 def test_body_attach_is_deferred(tmp_path: Path) -> None:
@@ -337,9 +328,11 @@ def test_build_without_world_is_refused_without_sealing(tmp_path: Path) -> None:
 
 
 def test_fixture_pack_set_is_explicit(tmp_path: Path) -> None:
-    """The fixture pack set exposes exactly the written pack and ref."""
-    pack_set, ref = write_sim_pack(tmp_path)
+    """The fixture pack set exposes exactly the written pack and profile."""
+    pack_set, profile = write_sim_pack(tmp_path)
 
-    assert [pack.name for pack in pack_set.packs()] == [ref.pack]
-    assert isinstance(ref, RobotRef)
-    assert ref.is_data is True
+    assert any(
+        profile.name == declared.name for pack in pack_set.packs() for declared in pack.robots()
+    )
+    assert isinstance(profile, RobotProfile)
+    assert profile.assets is None

@@ -44,9 +44,8 @@ import logging
 import os
 import tempfile
 from argparse import Namespace
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
-from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
@@ -274,29 +273,148 @@ def _adapter_section(adapter: JsonValue) -> dict[str, JsonValue]:
     )
 
 
+def _robot_profile(value: object) -> RobotProfile | None:
+    """Return *value* when it is a complete RobotProfile, else ``None``."""
+    from unigym.robots.base import RobotProfile
+
+    return value if isinstance(value, RobotProfile) else None
+
+
 def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
     """Builder convenience: one ``articulations[]`` entry.
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
     config alias: it emits the same authoring shape a yaml file declares
     (``{name, params?, actuation?}`` -- no articulation-level control).  A
+    complete :class:`~unigym.robots.base.RobotProfile` contributes its name
+    only: its assets/actuation/topology ride on the profile itself.  A
     declaration dict passes ``actuation`` through verbatim; the bare string
     form carries no actuation, so a live build fails under the hard cut.
     """
     entry: dict[str, JsonValue]
-    if isinstance(robot, str):
+    profile = _robot_profile(robot)
+    if profile is not None:
+        entry = {"name": profile.name}
+        if profile.assets is not None:
+            entry["model"] = dict(profile.assets.to_dict())
+    elif isinstance(robot, str):
         entry = {"name": robot}
     elif isinstance(robot, dict):
         entry = copy.deepcopy(robot)
         entry.pop("control", None)
     else:
         raise NotImplementedError(
-            "a RobotProfile INSTANCE is not representable in the current "
-            "config schema (robot is a {name, params} declaration built by "
-            'build_robot_profile). Pass robot="<registered robot>" with '
-            "params in the config instead"
+            "Run(robot=...) expects a RobotProfile, a registered robot name, "
+            f"or a robot declaration mapping, got {type(robot).__name__}"
         )
     return entry
+
+
+def _action_spec_payload(value: object) -> list[JsonValue]:
+    """Materialize an ``OrderedActionSpec`` or sequence as a JSON group list."""
+    from unigym.runtime.actions import OrderedActionSpec
+
+    if isinstance(value, OrderedActionSpec):
+        return [
+            {
+                "name": group.name,
+                "articulation": group.articulation,
+                "joints": [joint for joint in group.joints],
+                "target": group.target,
+                "role": group.role,
+            }
+            for group in value.groups
+        ]
+    return _json_list(value)
+
+
+def _policy_payload(value: object) -> list[JsonValue]:
+    """Materialize ``PolicyBinding`` objects or mappings as a JSON binding list."""
+    from unigym.runtime.actions import PolicyBinding
+
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise TypeError(
+            f"policies expects a sequence of PolicyBinding or mappings, got {type(value).__name__}"
+        )
+    payload: list[JsonValue] = []
+    for binding in value:
+        if isinstance(binding, PolicyBinding):
+            entry: dict[str, JsonValue] = {
+                "adapter": binding.adapter,
+                "groups": [[articulation, group] for articulation, group in binding.groups],
+            }
+            if binding.control_dt is not None:
+                entry["control_dt"] = binding.control_dt
+            if binding.agent is not None:
+                entry["agent"] = binding.agent
+            payload.append(entry)
+        elif isinstance(binding, Mapping):
+            payload.append(copy.deepcopy(dict(binding)))
+        else:
+            raise TypeError(
+                "policies entries must be PolicyBinding or mappings, "
+                f"got {type(binding).__name__}"
+            )
+    return payload
+
+
+def _pack_robot_profiles(
+    spec: RunSpec,
+    runtime: PackRuntime,
+) -> dict[str, RobotProfile]:
+    """Load pack robot profiles for config selectors the registry does not own.
+
+    A config's ``params.profile`` selector (or articulation name) stays a
+    registry lookup for registered robots; an unregistered selector falls back
+    to the pack runtime's declared ``kind: robot`` providers.  An articulation
+    that already has an explicitly injected profile is skipped entirely: the
+    injected profile is used as-is, never replaced by a pack lookup.  The
+    returned mapping is keyed by articulation name, the profile-injection
+    identity; several articulations may share one selector and each receives
+    the same resolved profile.  The cross-pack lookup goes through
+    :class:`~unigym.packs.packset.PackSet`, so a robot id declared by more than
+    one pack fails with the shared ambiguity error instead of silently taking
+    the first manifest.
+    """
+    from unigym.packs.packset import PackSet
+    from unigym.robots import ROBOT_REGISTRY
+
+    injected = spec.robot_profiles or {}
+    wanted: dict[str, list[str]] = {}
+    for art in spec.articulations:
+        if art.name in injected:
+            continue
+        raw = art.params.get("profile") if art.params else None
+        selector = raw if isinstance(raw, str) and raw else art.name
+        if selector not in ROBOT_REGISTRY:
+            wanted.setdefault(selector, []).append(art.name)
+    if not wanted:
+        return {}
+    packs = PackSet.from_runtime(runtime)
+    available = {info.name for info in packs.providers("robot")}
+    resolved: dict[str, RobotProfile] = {}
+    for selector, art_names in wanted.items():
+        if selector not in available:
+            continue
+        profile = packs.robot(selector)
+        for art_name in art_names:
+            resolved[art_name] = profile
+    return resolved
+
+
+def _explicit_action_authoring(
+    action_spec: object,
+    policies: object,
+) -> tuple[object, object]:
+    """Validate the explicit action/policy pair the profile path requires."""
+    if action_spec is None or policies is None:
+        raise NotImplementedError(
+            "Run(robot=<RobotProfile>) requires explicit action_spec= and "
+            "policies=; the profile path never derives an action layout from "
+            "the body joint set (declare an OrderedActionSpec and PolicyBinding "
+            "tuple, or use the legacy string/mapping robot form)"
+        )
+    return action_spec, policies
 
 
 def _action_entries(
@@ -314,13 +432,14 @@ def _action_entries(
     entry = _articulation_entry(robot)
     name = str(entry["name"])
     adapter_name = str(_adapter_section(adapter).get("name") or "manual")
-    profile: RobotProfile | None = None
-    try:
-        from unigym.robots import build_robot_profile
+    profile: RobotProfile | None = _robot_profile(robot)
+    if profile is None:
+        try:
+            from unigym.robots import build_robot_profile
 
-        profile = build_robot_profile(entry)
-    except (AttributeError, KeyError, NotImplementedError, ValueError):
-        profile = None
+            profile = build_robot_profile(entry)
+        except (AttributeError, KeyError, NotImplementedError, ValueError):
+            profile = None
     if profile is None:
         raise NotImplementedError(
             f"Run(robot={robot!r}) cannot derive explicit action joints: the "
@@ -371,8 +490,8 @@ def _minimal_cfg(
     run_name: str,
     seed: int,
     articulations: list[dict[str, JsonValue]],
-    action_spec: list[dict[str, JsonValue]],
-    policies: list[dict[str, JsonValue]],
+    action_spec: Sequence[object],
+    policies: Sequence[object],
     backend: str,
     num_envs: int,
     adapter: dict[str, JsonValue],
@@ -401,8 +520,8 @@ def _minimal_cfg(
         "mode": "collect",
         "adapter": copy.deepcopy(adapter),
         "articulations": _json_list(copy.deepcopy(articulations)),
-        "action_spec": _json_list(copy.deepcopy(action_spec)),
-        "policies": _json_list(copy.deepcopy(policies)),
+        "action_spec": _action_spec_payload(copy.deepcopy(action_spec)),
+        "policies": _policy_payload(copy.deepcopy(policies)),
         "env": env_section,
         "command": command_section,
         "collect": collect_section,
@@ -496,14 +615,23 @@ class Run:
             level.
         cameras: Camera-spec dicts (``unigym.Camera.*``) or a ``CameraSet``.
         adapter: ``None`` (ManualAdapter) / a registered adapter name.
-        robot: A registered robot name or robot declaration mapping
+        robot: A complete :class:`~unigym.robots.base.RobotProfile`, a
+            registered robot name, or a robot declaration mapping
             (``{name, params?, actuation?}``).  Required for world/minimal
             construction; optional when *cfg* already declares articulations.
             An explicitly provided robot replaces the first articulation and
-            its controls in *cfg*.  The declaration-dict form is how a
-            programmatic run declares ``actuation``; the bare string form
-            remains representable but a live build fails because it carries
-            no actuation (there is no implicit default law).
+            its controls in *cfg*.  A profile supplies its own assets,
+            actuation and topology; the legacy string/dict forms remain for
+            config compatibility.
+        action_spec: Explicit action layout for the profile path (an
+            ``OrderedActionSpec`` or its group mappings).  Required with
+            ``robot=<RobotProfile>``; the profile path never derives it from
+            the body joint set.
+        policies: Explicit ``PolicyBinding`` sequence for the profile path.
+        robot_profiles: Optional complete profiles keyed by articulation name
+            for a config that declares articulations without a registry
+            lookup (the facade declaration path).  Non-serialized: the
+            profiles bypass only the factory lookup.
         backend: Environment backend (default ``"mujoco"``).
         backend_options: Backend-private options mapping
             (``env.backend_options``), e.g.
@@ -530,6 +658,9 @@ class Run:
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
+        action_spec: object | None = None,
+        policies: Sequence[object] | None = None,
+        robot_profiles: Mapping[str, RobotProfile] | None = None,
         backend: str | None = None,
         backend_options: dict[str, JsonValue] | None = None,
         num_envs: int | None = None,
@@ -565,8 +696,8 @@ class Run:
 
             raise ConfigError(
                 "Run(world=...) / Run.minimal(...) needs an explicit robot: "
-                'pass robot="<registered robot>" (or a robot declaration '
-                "{name, params?}); there is no implicit default robot"
+                "pass a RobotProfile, a registered robot name, or a robot "
+                "declaration {name, params?}; there is no implicit default robot"
             )
         self._world = world
         self._backend_options = (
@@ -581,6 +712,8 @@ class Run:
                 cameras=cameras,
                 adapter=adapter,
                 robot=robot,
+                action_spec=action_spec,
+                policies=policies,
                 backend=backend,
                 num_envs=num_envs,
                 seed=seed,
@@ -606,17 +739,31 @@ class Run:
                 raw["adapter"] = _adapter_section(adapter)
             if robot is not None:
                 entry = _articulation_entry(robot)
-                cfg_action_spec, cfg_policies = _action_entries(
-                    robot, adapter if adapter is not None else raw.get("adapter")
-                )
-                _declare_passive_joints(entry, cfg_action_spec)
+                profile = _robot_profile(robot)
+                if profile is not None:
+                    cfg_action_spec, cfg_policies = _explicit_action_authoring(
+                        action_spec, policies
+                    )
+                else:
+                    cfg_action_spec, cfg_policies = _action_entries(
+                        robot, adapter if adapter is not None else raw.get("adapter")
+                    )
+                _declare_passive_joints(entry, cfg_action_spec, profile=profile)
                 arts = _list_section(raw, "articulations")
                 if arts:
                     arts[0] = entry
                 else:
                     arts.append(entry)
-                raw["action_spec"] = _json_list(cfg_action_spec)
-                raw["policies"] = _json_list(cfg_policies)
+                raw["action_spec"] = _action_spec_payload(cfg_action_spec)
+                raw["policies"] = _policy_payload(cfg_policies)
+            elif action_spec is not None or policies is not None:
+                if action_spec is None or policies is None:
+                    raise NotImplementedError(
+                        "Run(action_spec=..., policies=...) requires both; a run "
+                        "config supplies them through cfg"
+                    )
+                raw["action_spec"] = _action_spec_payload(action_spec)
+                raw["policies"] = _policy_payload(policies)
         for key, value in overrides.items():
             raw[key] = copy.deepcopy(value)
         self._raw_cfg = raw
@@ -638,6 +785,13 @@ class Run:
         )
         self._spec: RunSpec | None = None
         self._pack_runtime: PackRuntime | None = pack_runtime
+        profile = _robot_profile(robot)
+        injected: dict[str, RobotProfile] = {}
+        if profile is not None:
+            injected[profile.name] = profile
+        if robot_profiles is not None:
+            injected.update(robot_profiles)
+        self._robot_profiles: Mapping[str, RobotProfile] | None = injected or None
         self._discover_runtime = bool(discover_runtime)
         self._instance: RunInstance | None = None
         self._runner: Runner | None = None
@@ -655,6 +809,8 @@ class Run:
         cameras: CameraSet | JsonValue,
         adapter: JsonValue,
         robot: JsonValue,
+        action_spec: object | None,
+        policies: Sequence[object] | None,
         backend: str | None,
         num_envs: int | None,
         seed: int | None,
@@ -665,8 +821,14 @@ class Run:
         articulation_entry = _articulation_entry(robot)
         adapter_section = _adapter_section(adapter)
         backend_label = backend or "mujoco"
-        minimal_action_spec, minimal_policies = _action_entries(robot, adapter_section)
-        _declare_passive_joints(articulation_entry, minimal_action_spec)
+        profile = _robot_profile(robot)
+        if profile is not None:
+            minimal_action_spec, minimal_policies = _explicit_action_authoring(
+                action_spec, policies
+            )
+        else:
+            minimal_action_spec, minimal_policies = _action_entries(robot, adapter_section)
+        _declare_passive_joints(articulation_entry, minimal_action_spec, profile=profile)
         raw = _minimal_cfg(
             run_name="minimal_run",
             seed=0 if seed is None else int(seed),
@@ -697,6 +859,8 @@ class Run:
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
+        action_spec: object | None = None,
+        policies: Sequence[object] | None = None,
         backend: str | None = None,
         backend_options: dict[str, JsonValue] | None = None,
         num_envs: int | None = None,
@@ -719,6 +883,8 @@ class Run:
             cameras=cameras,
             adapter=adapter,
             robot=robot,
+            action_spec=action_spec,
+            policies=policies,
             backend=backend,
             backend_options=backend_options,
             num_envs=num_envs,
@@ -889,7 +1055,18 @@ class Run:
             runtime = discover(entry_points=True)
             runtime.activate_all()
             self._pack_runtime = runtime
-        spec = build_spec(cfg, self._args(), runtime=runtime)
+        spec = build_spec(
+            cfg,
+            self._args(),
+            runtime=runtime,
+            robot_profiles=self._robot_profiles,
+        )
+        if runtime is not None:
+            resolved = _pack_robot_profiles(spec, runtime)
+            if resolved:
+                merged = dict(resolved)
+                merged.update(spec.robot_profiles or {})
+                spec = replace(spec, robot_profiles=merged)
         if self._world is not None:
             terrain = self._world.terrain_value()
             if terrain is not None:
@@ -1046,8 +1223,7 @@ class Run:
 
         This is the config the engine consumes: it carries the internal
         ``env.params.scene_provider*`` routing keys a preset resolution
-        writes.  Use :meth:`to_config` for the authoring surface a reload
-        accepts (internal keys stripped, ``scene_preset:`` re-emitted).
+        writes.
         """
         return self.spec.cfg
 
@@ -1172,33 +1348,6 @@ class Run:
     def adapter(self) -> Adapter:
         """The live adapter of the built instance (builds on first access)."""
         return self.build().adapter
-
-    def to_config(self, path: str | os.PathLike[str]) -> str:
-        """Write the run's authoring config as yaml; return its path.
-
-        The document is the *authoring* surface, not the effective
-        ``spec.cfg``: the internal ``env.params.scene_provider*`` routing keys
-        are removed and the run's original ``scene_preset:`` declaration is
-        re-emitted, so the file reloads through ``reject_legacy_scene_keys``
-        and resolves to the same run.  The world asset serializes as the
-        run-level ``world_base: {mjcf: <path>}`` declaration; it is never an
-        ``env.params`` key.
-
-        Args:
-            path: Destination file (parent directories are created).
-        """
-        out = Path(path)
-        if out.parent and not out.parent.exists():
-            out.parent.mkdir(parents=True, exist_ok=True)
-        from unigym.scene_presets import serialize_scene_preset
-
-        cfg = serialize_scene_preset(self.spec.cfg, self.spec.scene_preset)
-        if "props" in cfg:
-            # Serialize the content block on its current surface spelling
-            # (``objects:``); the long-lived alias reloads it identically.
-            cfg["objects"] = cfg.pop("props")
-        out.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
-        return str(out)
 
     # ------------------------------------------------------------------ #
     # live faces

@@ -10,7 +10,8 @@ import torch
 import yaml
 
 from unigym.packs import discover_set
-from unigym.packs.packset import PackSet, RobotRef
+from unigym.packs.packset import PackSet
+from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.scenes import Scene
 from unigym.scenes.terrain import Terrain
@@ -59,7 +60,7 @@ def _write_fixture_pack(
     *,
     source_robot: Path,
     usd: Path,
-) -> tuple[PackSet, RobotRef, tuple[str, ...]]:
+) -> tuple[PackSet, RobotProfile, tuple[str, ...]]:
     """Write one lane-owned pack whose G1 profile carries the resolved USD.
 
     This is the same lane-owned fixture pack the recorded ``N == 1`` evidence
@@ -119,7 +120,7 @@ def test_isaaclab2_runs_the_shared_facade_script_for_two_envs(
 
     evidence = run_facade_acceptance(
         pack_set=pack_set,
-        robot_id=robot.id,
+        robot_id=robot.name,
         world=_world(tmp_path),
         backend="isaaclab2",
         expected_joint_names=body_order,
@@ -245,7 +246,7 @@ def test_isaaclab2_rebuilds_the_facade_in_one_process(
 
     first = run_facade_acceptance(
         pack_set=pack_set,
-        robot_id=robot.id,
+        robot_id=robot.name,
         world=world,
         backend="isaaclab2",
         expected_joint_names=body_order,
@@ -263,7 +264,7 @@ def test_isaaclab2_rebuilds_the_facade_in_one_process(
     _clear_scene_prims()
     second = run_facade_acceptance(
         pack_set=pack_set,
-        robot_id=robot.id,
+        robot_id=robot.name,
         world=world,
         backend="isaaclab2",
         expected_joint_names=body_order,

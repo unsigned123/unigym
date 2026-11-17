@@ -117,9 +117,9 @@ SimulationBuilder(
   world fragment may not declare `articulations` / `action_spec` / `policies`;
   the builder is the single owner of those tables. `builder.terrain` is sugar for
   `builder.world.terrain`.
-- `add_articulation(ref, *, name=None, control=...)` requires an explicit
+- `add_articulation(profile, *, name=None, control=...)` requires an explicit
   `Control` spec; there is no implicit control. Authoring action groups are
-  resolved against the pack profile, their authoring identity is
+  resolved against the `RobotProfile`, their authoring identity is
   `(articulation, name)`, and the groups of one articulation must be disjoint.
   This identity is a facade/authoring handle, not a runtime routing key.
 - `add_camera(entry, *, name=None)` accepts an existing `unigym.Camera.*`
@@ -133,23 +133,26 @@ SimulationBuilder(
 
 ## Pack acquisition
 
-The facade never discovers packs. Every robot reference must belong to the
-builder's explicit `PackSet`:
+The facade never discovers packs. Declaration-mode articulations are complete
+`RobotProfile` objects; a config-mode run that references pack resources must
+belong to the builder's explicit `PackSet`:
 
 ```python
 import unigym.packs
 
-packs = unigym.packs.installed()          # configured manifest-only scope
-packs = unigym.packs.require("acme")      # filtered to exactly "acme"
+packs = unigym.packs.installed()                  # configured manifest-only scope
+packs = unigym.packs.require("acme")              # filtered to exactly "acme"
+packs = unigym.packs.require("acme", entry_points=False)  # manifest-only
 packs = unigym.packs.discover_set(["/path/to/pack/root"])
 ```
 
-`packs.pack(name).robot(id)` mints a `RobotRef` without importing pack Python.
-`add_articulation` validates pack membership and the manifest version, then
-loads the neutral robot profile through one explicit
-`pack_set.to_runtime().activate(pack)` call; that activation registers the
-robot process-wide (the existing pack boundary). Two packs that declare the
-same robot id conflict at activation.
+`packs.pack(name).robot(id)` returns the complete `RobotProfile` (a resource
+document is read directly; an entrypoint factory must return a profile) without
+activating the pack or mutating the robot registry.
+`SimulationBuilder.add_articulation(profile, control=...)` consumes that
+profile directly: no pack lookup, no activation and no implicit default
+control. A renamed articulation (`name=...`) emits the existing
+`params.profile` selector from `profile.name`.
 
 `builder.pack_runtime` is the activation-capable runtime over the same set. A
 world preset is declared explicitly:
@@ -338,25 +341,23 @@ All facade errors derive from `unigym.errors.UniGymError`. `NoWorldError` and
 | `ConfigModeError` | `add_articulation` / `add_camera` / `world=` on a `from_config` builder. |
 | `DeferredFeatureError` | A declared out-of-scope feature: `attach=BodyHandle` cameras, or camera frames at `N > 1`. |
 
-## Config round-trip
+## Config loading
 
-`Simulation.to_config(path)` delegates to `Run.to_config(path)` and writes the
-existing authoring surface (the world, articulation, control and camera
-tables). The document also reloads through `Run.from_config`.
+`SimulationBuilder.from_config` builds a facade over an existing run config
+(the world, articulation, control and camera tables), through the one
+`Run.from_config` parser.
 
 ```python
-sim.to_config("sim.yaml")
-
 reloaded = SimulationBuilder.from_config("sim.yaml", pack_set=packs)
-sim2 = reloaded.build()
+sim = reloaded.build()
 ```
 
-The round-trip is **semantic**, not identity-preserving: same labels,
-articulation/control routing, camera table, world asset, `dt` / `physics_dt` /
-`substeps`, seed and backend, and the same reset observation on the same
-backend and seed. Handles are not serialized and pack refs are not resurrected.
+The document must load semantically: same labels, articulation/control
+routing, camera table, world asset, `dt` / `physics_dt` / `substeps`, seed and
+backend, and the same reset observation on the same backend and seed. Handles
+are not serialized and pack refs are not resurrected.
 
-`from_config` uses the one `Run.from_config` parser and passes
+`from_config` passes
 `discover_runtime=False`: a config that references a pack needs `pack_set=` and
 fails with a teaching `ConfigError` naming `pack_set=` / `pack_runtime=`
 instead of falling back to ambient entry-point discovery. It refuses a config
@@ -396,7 +397,7 @@ In scope for `SIM_API_VERSION = 4`:
 - `mujoco` and `isaaclab2` backend acceptance; `mjwarp` and `isaaclab3` are
   not part of the spike claim (`mjwarp` supports `N > 1`; it is out of this
   spike's lane/fixture scope, not out of capability).
-- Explicit `to_config` / `from_config` semantic round-trip.
+- Explicit `from_config` semantic loading.
 
 Non-goals:
 

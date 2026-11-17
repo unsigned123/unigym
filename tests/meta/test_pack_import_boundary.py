@@ -167,7 +167,7 @@ def test_pack_set_queries_import_no_engine_or_pack_code(tmp_path: Path) -> None:
         "wrapped = packs.PackSet.from_runtime(discover(["
         f"{str(root)!r}"
         "]))\n"
-        "assert wrapped.pack('acme_robot').robot('acme.arm').is_data\n"
+        "assert wrapped.pack('acme_robot').robot('acme.arm').name == 'acme.arm'\n"
         "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
         f"{sorted(_HEAVY_ROOTS)!r})\n"
         "assert not heavy, heavy\n"

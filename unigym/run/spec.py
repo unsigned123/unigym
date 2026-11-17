@@ -53,6 +53,9 @@ from unigym.scene_presets import (
     reject_legacy_scene_keys,
 )
 
+if TYPE_CHECKING:
+    from unigym.robots.base import RobotProfile
+
 #: Placeholder spellings that make a config an asset-bearing document.  They
 #: are resolved (or rejected as removed) by ``expand_placeholders``; the
 #: composition boundary must supply an explicit runtime/context for them.
@@ -107,12 +110,6 @@ class RunSpec:
     #: the run-level world declaration (``{mjcf: <path>}``), kept OUT of
     #: ``backend_params``.  Required for mujoco-family backends.
     world_base: JsonValue
-    #: the raw ``scene_preset:`` *declaration* this run was constructed from
-    #: (a catalog id string or the inline provider mapping).  Build never
-    #: reads it: the effective routing lives in ``cfg``.  It is kept so
-    #: :meth:`Run.to_config` can re-emit the authoring surface instead of the
-    #: internal ``env.params.scene_provider*`` keys.
-    scene_preset: JsonValue
     #: the normalized articulation list (the old ``robot:`` block
     #: was removed).  Articulations are pure authoring data (no control mode).
     articulations: tuple[ArticulationSpec, ...]
@@ -160,6 +157,10 @@ class RunSpec:
     #: the caller's pack runtime (non-serialized): benchmark pack discovery
     #: reads its ``benchmarks`` catalog face.  Never written to cfg/ledger.
     pack_runtime: PackRuntime | None = None
+    #: complete RobotProfile objects injected by the programmatic profile
+    #: path, keyed by articulation name.  Non-serialized: these bypass the
+    #: registry factory lookup only.
+    robot_profiles: Mapping[str, RobotProfile] | None = None
 
 
 def _route_content(
@@ -332,17 +333,20 @@ def _normalize_action_authoring(
             f"agent]) instead -- there is no alias"
         )
     raw_spec = cfg.get("action_spec")
-    if raw_spec is None or not isinstance(raw_spec, (list, tuple)) or not raw_spec:
-        raise ConfigError(
-            f"{source}: no action_spec declared; the authoring shape requires "
-            f"a top-level `action_spec:` list, e.g. `action_spec: [{{name: "
-            f"legs, articulation: go1, joints: [...], target: position, "
-            f"role: body}}]`"
-        )
-    try:
-        action_spec = OrderedActionSpec.from_mapping(raw_spec)
-    except (TypeError, ValueError) as exc:
-        raise ConfigError(f"{source}: action_spec: {exc}") from exc
+    if isinstance(raw_spec, OrderedActionSpec):
+        action_spec = raw_spec
+    else:
+        if raw_spec is None or not isinstance(raw_spec, (list, tuple)) or not raw_spec:
+            raise ConfigError(
+                f"{source}: no action_spec declared; the authoring shape requires "
+                f"a top-level `action_spec:` list, e.g. `action_spec: [{{name: "
+                f"legs, articulation: go1, joints: [...], target: position, "
+                f"role: body}}]`"
+            )
+        try:
+            action_spec = OrderedActionSpec.from_mapping(raw_spec)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"{source}: action_spec: {exc}") from exc
     declared_articulations = {art.name for art in articulations}
     for group in action_spec.groups:
         if group.articulation not in declared_articulations:
@@ -387,7 +391,12 @@ def _normalize_action_authoring(
 
 
 def _contains_asset_ref(value: JsonValue) -> bool:
-    """True when *value* carries a pack reference or a removed asset token."""
+    """True when *value* carries a pack reference or a removed token.
+
+    ``release:`` references are deliberately excluded: they are resolved by
+    the ``unigym.asset_release`` provider (or the ``unigym_robots`` fallback)
+    and never need a pack runtime.
+    """
     if isinstance(value, str):
         return value.startswith("pack:") or any(marker in value for marker in _ASSET_REF_MARKERS)
     if isinstance(value, dict):
@@ -439,9 +448,11 @@ def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) ->
     """True when a run config needs an explicit runtime at its boundary.
 
     A catalog ``scene_preset`` (or an unregistered inline provider), a
-    benchmark/both run, an adapter other than the built-in ``manual``, any
-    pack/asset reference string or a prop-template selection needs the
-    runtime.  The helper is the one composition-boundary decision shared by
+    benchmark/both run, an adapter other than the built-in ``manual``, a
+    ``pack:`` reference (or asset placeholder token), or a prop-template
+    selection needs the runtime.  A ``release:`` reference does not: it is
+    resolved by the ``unigym.asset_release`` provider or the ``unigym_robots``
+    fallback.  The helper is the one composition-boundary decision shared by
     ``Run``, ``collect_cli`` and ``describe_cli``; it does not build or cache a
     runtime.
     """
@@ -586,6 +597,7 @@ def build_spec(
     args: Namespace | SimpleNamespace,
     *,
     runtime: PackRuntime | None = None,
+    robot_profiles: Mapping[str, RobotProfile] | None = None,
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec.
 
@@ -617,9 +629,6 @@ def build_spec(
         backend_param_keys=info.backend_param_keys,
         known_backends=tuple(known_backends()),
     )
-    # The declaration is the authoring surface to_config re-emits; the
-    # resolved config below carries only the internal routing keys.
-    scene_preset = copy.deepcopy(cfg.get("scene_preset"))
     # The preset resolves BEFORE placeholder expansion so the pack's
     # ${UNIGYM_REPO} tokens ride the same single expansion point as the run yaml.
     cfg = _require_config(
@@ -770,7 +779,6 @@ def build_spec(
         backend_params=_require_config(env_cfg.get("params") or {}, "env.params"),
         backend_options=backend_options,
         world_base=world_base,
-        scene_preset=scene_preset,
         articulations=articulations,
         action_spec=action_spec,
         policies=policies,
@@ -817,4 +825,5 @@ def build_spec(
         total_steps=total_steps,
         device=device,
         pack_runtime=runtime,
+        robot_profiles=robot_profiles,
     )

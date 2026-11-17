@@ -6,12 +6,10 @@ from argparse import Namespace
 
 import pytest
 import torch
-import yaml
 
 from tests._support.fakes.backend import FakeBackend
 from unigym.adapters.manual import ManualAdapter
 from unigym.errors import ConfigError
-from unigym.run.api import Run
 from unigym.run.build import _core_termination_group
 from unigym.run.spec import build_spec
 from unigym.runner.external import ExternalRunner
@@ -162,22 +160,6 @@ def test_external_mode_rejects_reset_on_termination_true():
 
     with pytest.raises(ConfigError, match="requires runner.reset_on_termination: false"):
         build_spec(_external_cfg(runner=runner), _args())
-
-
-@pytest.mark.parametrize("mode", ["core", "external"])
-def test_config_round_trip_preserves_termination_mode(tmp_path, mode):
-    """``to_config`` re-emits the top-level mode and it re-parses identically."""
-    cfg = _external_cfg() if mode == "external" else _cfg()
-    cfg["termination_mode"] = mode
-    source = tmp_path / f"{mode}.yaml"
-    source.write_text(yaml.safe_dump(cfg), encoding="utf-8")
-    out = tmp_path / f"{mode}.out.yaml"
-
-    Run.from_config(str(source)).to_config(out)
-
-    reloaded = yaml.safe_load(out.read_text(encoding="utf-8"))
-    assert reloaded["termination_mode"] == mode
-    assert build_spec(reloaded, _args()).termination_mode == mode
 
 
 @pytest.mark.parametrize(

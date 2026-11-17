@@ -25,8 +25,8 @@ The builder adds static instances to the closed scene IR
 (:mod:`unigym.scenes.scene_ir`) through the registered payload generators.
 A ``dynamic=True`` primitive takes the content/props path instead: it is
 declared in ``objects.types``, built by the props manager as a free body
-(freejoint + mass/inertia) and therefore survives
-:meth:`unigym.Run.to_config`.
+(freejoint + mass/inertia) and therefore stays in the run config as an
+authoring declaration.
 """
 
 from __future__ import annotations
@@ -554,7 +554,7 @@ class World:
         DYNAMIC free body through the existing content/props path: the
         declaration joins the world's ``objects.types`` block, so the
         props manager builds a freejoint body with mass/inertia and the
-        object survives :meth:`Run.to_config`.  Static and dynamic objects
+        declaration stays in the run config.  Static and dynamic objects
         may be mixed in one world; a plane cannot be dynamic.
         """
         if self._built:
@@ -877,9 +877,8 @@ class World:
 
         ``dynamic=True`` objects are NOT scene instances: they are dynamic
         free bodies built by the props manager, so they persist in the
-        run config (and through :meth:`Run.to_config`) instead of the
-        process-local inline scene registry.  Returns an empty mapping
-        when no dynamic object was added.
+        run config instead of the process-local inline scene registry.
+        Returns an empty mapping when no dynamic object was added.
         """
         if not self._dynamic:
             return {}

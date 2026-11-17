@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from unigym.packs.packset import PackSet, RobotRef
+from unigym.packs.packset import PackSet
+from unigym.robots.base import RobotProfile
 from unigym.runtime.actions import OrderedActionGroup
 from unigym.sim import Control, SimulationBuilder
 from unigym.sim.errors import PendingActionError
@@ -15,7 +16,7 @@ from unigym.sim.pending import PendingActions, StagedAction
 from tests._support.sim_fixtures import write_sim_pack
 
 
-def _groups(pack_set: PackSet, ref: RobotRef) -> dict[str, OrderedActionGroup]:
+def _groups(pack_set: PackSet, ref: RobotProfile) -> dict[str, OrderedActionGroup]:
     """Two articulation-scoped action groups with distinct group names."""
     builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
     first = builder.add_articulation(

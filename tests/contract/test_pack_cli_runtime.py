@@ -247,7 +247,6 @@ def test_legacy_pack_modules_are_not_importable() -> None:
         "ProviderInfo",
         "ProviderOrigin",
         "ResourceInfo",
-        "RobotRef",
         "ScenePresetRef",
         "SceneProviderRef",
         "discover_set",

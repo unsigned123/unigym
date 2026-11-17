@@ -779,6 +779,14 @@ class PackRuntime:
         if not isinstance(value, str) or not value:
             raise PackError(f"asset reference {value!r} must be a non-empty string")
 
+        from unigym.assets.release import is_release_ref, resolve_release_ref
+
+        if is_release_ref(value):
+            try:
+                return Path(resolve_release_ref(value))
+            except ValueError as err:
+                raise PackError(f"asset reference {value!r}: {err}") from err
+
         path = Path(value).expanduser()
         if path.is_absolute():
             return path
@@ -821,6 +829,67 @@ class PackRuntime:
                 f"use runtime.activate({entry.pack!r}) to activate the pack"
             )
         return self.resource(entry.pack, entry.resource)
+
+    def robot_profile(self, pack: str, item_id: str) -> RobotProfile:
+        """Load the complete robot profile of one ``kind: robot`` provider.
+
+        A resource-backed provider reloads its declared ``unigym.robot/1``
+        document and needs no pack activation.  An entrypoint-backed provider
+        imports its factory through the pack's explicit ``python/`` boundary
+        and calls it with no parameters.  Neither path registers a robot or
+        mutates any registry; provenance stays with the pack/provider metadata.
+        """
+        from unigym.robots import load_robot_profile
+        from unigym.robots.base import RobotProfile
+
+        manifest = self.catalog.get(pack)
+        items = tuple(
+            item
+            for item in manifest.provides.get("providers", ())
+            if item.kind == "robot" and item.id == item_id
+        )
+        if not items:
+            known = sorted(
+                item.id for item in manifest.provides.get("providers", ()) if item.kind == "robot"
+            )
+            raise PackError(
+                f"pack {pack!r} has no robot id {item_id!r}; known robot ids "
+                f"on {pack!r}: {known}"
+            )
+        item = items[0]
+        where = f"pack {pack!r} provider id {item_id!r}"
+        if item.resource is not None:
+            try:
+                profile = load_robot_profile(self.resource(pack, item.resource))
+            except ValueError as err:
+                raise PackError(
+                    f"{where} resource {item.resource!r} failed to load: {err}"
+                ) from err
+        else:
+            entrypoint = item.entrypoint
+            assert entrypoint is not None  # schema guarantees exactly one locator
+            python_dir = _import_boundary(manifest, entrypoint)
+            _add_to_sys_path(python_dir)
+            try:
+                target = _resolve_entrypoint(entrypoint)
+            except Exception as err:
+                raise PackError(
+                    f"{where} entrypoint {entrypoint!r} failed to import: {err}"
+                ) from err
+            try:
+                profile = target()
+            except Exception as err:
+                raise PackError(
+                    f"{where} entrypoint {entrypoint!r} failed to build a robot profile: {err}"
+                ) from err
+        if not isinstance(profile, RobotProfile):
+            raise PackError(f"{where} must return a RobotProfile, got {type(profile).__name__}")
+        if profile.name != item_id:
+            raise PackError(
+                f"{where} declares profile name {profile.name!r}; the profile "
+                f"name must equal the provider id {item_id!r}"
+            )
+        return profile
 
     def activate(self, pack: str) -> ActivationHandle:
         """Activate *pack* once and return the cached handle.

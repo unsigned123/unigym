@@ -2,8 +2,8 @@
 
 The helper writes one real ``unigym.pack/1`` manifest plus one
 ``unigym.robot/1`` document under a caller-owned ``tmp_path`` root and returns
-the read-only :class:`~unigym.packs.packset.PackSet` with the minted
-:class:`~unigym.packs.packset.RobotRef`.  Names are derived from the unique
+the read-only :class:`~unigym.packs.packset.PackSet` with the loaded
+:class:`~unigym.robots.base.RobotProfile`.  Names are derived from the unique
 temporary root (plus an optional tag) so activation cannot collide with another
 test's fixture in the process-wide robot registry.
 """
@@ -16,7 +16,8 @@ from pathlib import Path
 
 import yaml
 
-from unigym.packs.packset import PackSet, RobotRef, discover_set
+from unigym.packs.packset import PackSet, discover_set
+from unigym.robots.base import RobotProfile
 
 __all__ = ["write_sim_pack"]
 
@@ -37,7 +38,7 @@ def write_sim_pack(
     version: str = "1.0.0",
     joint_sets: Mapping[str, Sequence[str]] | None = None,
     default_joint_pos: Mapping[str, float] | None = None,
-) -> tuple[PackSet, RobotRef]:
+) -> tuple[PackSet, RobotProfile]:
     """Write one manifest + robot document and discover the pack set over it."""
     token = _token(root, tag)
     pack_name = f"pack_{token}"

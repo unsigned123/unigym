@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, Mapping, NewType
+from typing import TYPE_CHECKING, Iterable, Mapping, NewType
+
+if TYPE_CHECKING:
+    from unigym.actuators.ir import ActuationGroup
 
 from unigym.assets.asset_ref import AssetRef, AssetRefError
 
@@ -230,6 +233,11 @@ class RobotProfile:
         full_joint_order: optional explicit full-articulation joint order
             (document order) used by :attr:`full_joint_names`; ``None``
             derives the set union in declaration order.
+        actuation: the neutral :class:`~unigym.actuators.ir.ActuationGroup`
+            records that physically drive this robot's joints.  Empty is
+            legal (a passive robot, or a run that declares explicit
+            actuation); a non-empty tuple must address declared joints and
+            cover every non-passive declared joint exactly once.
 
     Read-only properties (derived from the data above):
 
@@ -249,6 +257,7 @@ class RobotProfile:
     body_bindings: Mapping[CanonicalBodyId, BodyBinding]
     base_height: float | None = None
     full_joint_order: tuple[str, ...] | None = None
+    actuation: tuple[ActuationGroup, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -280,6 +289,31 @@ class RobotProfile:
                 raise ValueError("RobotProfile full_joint_order must not be empty")
             if len(set(full_order)) != len(full_order):
                 raise ValueError("RobotProfile full_joint_order contains duplicate names")
+        universe: list[str] = list(full_order or ())
+        if not universe:
+            for joints in sets.values():
+                for joint in joints:
+                    if joint not in universe:
+                        universe.append(joint)
+
+        raw_actuation = self.actuation or ()
+        actuation: tuple[ActuationGroup, ...] = ()
+        if raw_actuation:
+            from unigym.actuators.ir import (
+                ActuationError,
+                normalize_actuation_groups,
+                validate_actuation_groups,
+            )
+
+            try:
+                actuation = normalize_actuation_groups(raw_actuation)
+                validate_actuation_groups(
+                    actuation,
+                    joints=tuple(universe),
+                    joint_sets=sets,
+                )
+            except ActuationError as exc:
+                raise ValueError(f"RobotProfile actuation: {exc}") from exc
 
         base_height = self.base_height
         if base_height is not None:
@@ -337,6 +371,7 @@ class RobotProfile:
         object.__setattr__(self, "body_bindings", bindings)
         object.__setattr__(self, "base_height", base_height)
         object.__setattr__(self, "full_joint_order", full_order)
+        object.__setattr__(self, "actuation", actuation)
 
     # ------------------------------------------------------------------ #
     # read-only derived properties (no backend fields)

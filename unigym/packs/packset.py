@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from unigym.provenance import ProviderInfo, ProviderOrigin
 from unigym.scenes.provider_params import (
@@ -38,12 +39,14 @@ from .catalog import CatalogEntry, PackCatalog
 from .runtime import PackRuntime, discover
 from .schema import FACE_NAMES, PackManifestV1
 
+if TYPE_CHECKING:
+    from unigym.robots.base import RobotProfile
+
 __all__ = [
     "AssetResourceRef",
     "PackInfo",
     "PackSet",
     "ResourceInfo",
-    "RobotRef",
     "ScenePresetRef",
     "SceneProviderRef",
     "discover_set",
@@ -54,24 +57,6 @@ __all__ = [
 _PRESET_FACE = "scene_presets"
 _PROVIDER_FACE = "providers"
 _ASSET_FACE = "assets"
-
-
-@dataclass(frozen=True)
-class RobotRef:
-    """An inert handle for one ``kind: robot`` manifest provider."""
-
-    pack: str
-    pack_version: str
-    id: str
-    kind: str | None
-    resource: str | None
-    entrypoint: str | None
-    origin: ProviderOrigin
-
-    @property
-    def is_data(self) -> bool:
-        """Whether the robot resolves from a declared document (no pack Python)."""
-        return self.resource is not None
 
 
 @dataclass(frozen=True)
@@ -263,6 +248,7 @@ class PackInfo:
     root: Path
     requires: Mapping[str, str] = field(compare=False)
     origin: ProviderOrigin
+    _runtime: PackRuntime = field(repr=False, compare=False)
     _entries: tuple[CatalogEntry, ...] = field(default=(), repr=False, compare=False)
     _resources: tuple[ResourceInfo, ...] = field(default=(), repr=False, compare=False)
     _providers: tuple[ProviderInfo, ...] = field(default=(), repr=False, compare=False)
@@ -304,17 +290,9 @@ class PackInfo:
             activation_entrypoint=self._entrypoint,
         )
 
-    def _robot_ref(self, entry: CatalogEntry) -> RobotRef:
-        """Mint one robot handle from this pack's catalog entry."""
-        return RobotRef(
-            pack=self.name,
-            pack_version=self.version,
-            id=entry.id,
-            kind=entry.kind,
-            resource=entry.resource,
-            entrypoint=entry.entrypoint,
-            origin=self._origin(entry),
-        )
+    def _robot_profile(self, entry: CatalogEntry) -> RobotProfile:
+        """Load the complete robot profile for one provider entry."""
+        return self._runtime.robot_profile(self.name, entry.id)
 
     def _asset_ref(self, entry: CatalogEntry) -> AssetResourceRef:
         """Mint one asset handle from this pack's catalog entry."""
@@ -364,14 +342,19 @@ class PackInfo:
             origin=self._origin(entry),
         )
 
-    def robot(self, id: str) -> RobotRef:
-        """Mint the handle for one ``kind: robot`` provider declared by this pack."""
-        return self._robot_ref(self._provider_entry("robot", id))
+    def robot(self, id: str) -> RobotProfile:
+        """Load one complete :class:`RobotProfile` provider declared by this pack.
 
-    def robots(self) -> tuple[RobotRef, ...]:
-        """Every robot handle this pack declares, in manifest order."""
+        A resource-backed provider reloads its ``unigym.robot/1`` document; an
+        entrypoint-backed provider calls its factory.  Neither path mutates the
+        robot registry, and a resource profile needs no pack activation.
+        """
+        return self._robot_profile(self._provider_entry("robot", id))
+
+    def robots(self) -> tuple[RobotProfile, ...]:
+        """Every robot profile this pack declares, in manifest order."""
         return tuple(
-            self._robot_ref(entry)
+            self._robot_profile(entry)
             for entry in self._entries
             if entry.face == _PROVIDER_FACE and entry.kind == "robot"
         )
@@ -513,6 +496,7 @@ def _pack_info(
         _resources=resources,
         _providers=providers,
         _entrypoint=manifest.entrypoint,
+        _runtime=runtime,
     )
 
 
@@ -624,7 +608,7 @@ class PackSet:
             )
         )
 
-    def robot(self, id: str) -> RobotRef:
+    def robot(self, id: str) -> RobotProfile:
         """Cross-pack edge lookup for one ``kind: robot`` provider id."""
         owners = self._provider_owners("robot", id)
         if len(owners) == 1:
@@ -639,9 +623,9 @@ class PackSet:
             f"known robot ids: {known} (packs: {packs})"
         )
 
-    def robots(self) -> tuple[RobotRef, ...]:
-        """Every robot handle in this set, pack order then manifest order."""
-        return tuple(ref for pack in self._packs for ref in pack.robots())
+    def robots(self) -> tuple[RobotProfile, ...]:
+        """Every robot profile in this set, pack order then manifest order."""
+        return tuple(profile for pack in self._packs for profile in pack.robots())
 
     def asset(self, id: str) -> AssetResourceRef:
         """Cross-pack edge lookup for one resource-backed ``assets`` catalog id."""
@@ -717,7 +701,7 @@ class PackSet:
 
     def resource_path(
         self,
-        ref: RobotRef | ScenePresetRef | SceneProviderRef | AssetResourceRef,
+        ref: ScenePresetRef | SceneProviderRef | AssetResourceRef,
     ) -> Path:
         """Resolve a resource-backed handle's declared resource under its pack root.
 
@@ -731,21 +715,13 @@ class PackSet:
                 f"entrypoint {ref.entrypoint!r}, not a resource; use "
                 f"runtime.activate({ref.pack!r}) to activate the pack"
             )
-        if isinstance(ref, RobotRef):
-            if ref.resource is None:
-                raise PackError(
-                    f"pack {ref.pack!r} provider id {ref.id!r} declares entrypoint "
-                    f"{ref.entrypoint!r}, not a resource; use "
-                    f"runtime.activate({ref.pack!r}) to activate the pack"
-                )
-            face = _PROVIDER_FACE
-        elif isinstance(ref, ScenePresetRef):
+        if isinstance(ref, ScenePresetRef):
             face = _PRESET_FACE
         elif isinstance(ref, AssetResourceRef):
             face = _ASSET_FACE
         else:
             raise PackError(
-                "resource_path requires a RobotRef, ScenePresetRef, SceneProviderRef "
+                "resource_path requires a ScenePresetRef, SceneProviderRef "
                 f"or AssetResourceRef, got {type(ref).__name__}"
             )
         entry = self._runtime.catalog.entry(face, ref.id)
@@ -791,17 +767,22 @@ def installed() -> PackSet:
     return PackSet(discover())
 
 
-def require(*names: str) -> PackSet:
+def require(*names: str, entry_points: bool = True) -> PackSet:
     """Return the filtered pack set over exactly *names* in the installed scope.
 
     Requirement resolution is not performed: each name must be installed in
     the same configured discovery scope.  A missing name fails before any
     handle exists and names the installed packs.
+
+    Installed ``unigym.packs`` entry points are resolved by default (the UX
+    for ``pip install``-ed packs such as ``unigym-robots``); pass
+    ``entry_points=False`` for the manifest-only scope :func:`installed`
+    exposes.
     """
     invalid = [name for name in names if not isinstance(name, str) or not name]
     if invalid:
         raise PackError(f"required pack names must be non-empty strings, got {invalid!r}")
-    full = installed()
+    full = PackSet(discover(entry_points=entry_points))
     available = {pack.name for pack in full.packs()}
     missing = [name for name in names if name not in available]
     if missing:

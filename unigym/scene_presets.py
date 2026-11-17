@@ -47,7 +47,6 @@ __all__ = [
     "load_scene_preset",
     "reject_legacy_scene_keys",
     "resolve_scene_plan",
-    "serialize_scene_preset",
 ]
 
 SCHEMA_ID = "unigym.scene_preset/1"
@@ -767,43 +766,6 @@ def apply_scene_preset(
         params["scene_provider_preset"] = plan.preset_id
     for key, value in plan.backend_params.items():
         params[key] = _thaw(value)
-    return out
-
-
-def serialize_scene_preset(
-    cfg: Mapping[str, JsonValue], declaration: JsonValue
-) -> dict[str, JsonValue]:
-    """Write an effective config's scene declaration on the authoring surface.
-
-    ``RunSpec.cfg`` is the *effective* config:
-    :func:`apply_scene_preset` routed the preset into the internal
-    ``env.params.scene_provider*`` keys, and those keys are refused as
-    authoring keys by :func:`reject_legacy_scene_keys`.  This is the one
-    place that reverses that routing for a serialized document: the internal
-    keys are dropped and the run's original ``scene_preset:`` *declaration*
-    is re-emitted, so the document reloads through the same authoring gate
-    it was constructed from.
-
-    Args:
-        cfg: The effective run config (``RunSpec.cfg``); not mutated.
-        declaration: The declaration the run was constructed from -- a
-            catalog id string or the inline provider mapping, or ``None``
-            when the run declared no preset.
-
-    Returns:
-        A deep copy of *cfg* without the internal routing keys and carrying
-        ``scene_preset`` when a declaration was recorded.
-    """
-    thawed = _thaw(cfg)
-    assert isinstance(thawed, dict)  # _thaw maps any Mapping to a fresh dict
-    out = thawed
-    env = out.get("env")
-    params = env.get("params") if isinstance(env, dict) else None
-    if isinstance(params, dict):
-        for key in _INTERNAL_ENV_KEYS:
-            params.pop(key, None)
-    if declaration is not None:
-        out["scene_preset"] = copy.deepcopy(declaration)
     return out
 
 

@@ -1,11 +1,13 @@
 """Declaration-only :class:`SimulationBuilder` for the experimental facade.
 
 The builder owns no engine object, imports no backend module at construction
-time and never starts a process.  It validates declarations against one
-explicit :class:`~unigym.packs.packset.PackSet` and mints identity-scoped
-handles.  ``build()`` is the single transition to live state and belongs to the
-next implementation slice; this slice raises :class:`NotImplementedError`
-instead of fabricating a partially live simulation.
+time and never starts a process.  Articulations are declared from complete
+:class:`~unigym.robots.base.RobotProfile` objects (no pack lookup); an explicit
+:class:`~unigym.packs.packset.PackSet` is still accepted for config-mode pack
+resources.  It mints identity-scoped handles.  ``build()`` is the single
+transition to live state and belongs to the next implementation slice; this
+slice raises :class:`NotImplementedError` instead of fabricating a partially
+live simulation.
 """
 
 from __future__ import annotations
@@ -33,12 +35,11 @@ from .handles import (
     CameraHandle,
     _check_owner,
 )
-from .profile import load_profile_for_ref
 from .simulation import Simulation
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
-    from unigym.packs.packset import PackRuntime, PackSet, RobotRef
+    from unigym.packs.packset import PackRuntime, PackSet
     from unigym.robots.base import RobotProfile
     from unigym.run.api import Run
     from unigym.run.spec import RunSpec
@@ -104,7 +105,8 @@ class SimulationBuilder:
         seed: the deterministic seed (>= 0).
         num_envs: the environment count (>= 1; ``N > 1`` is supported on the
             ``mujoco`` and ``isaaclab2`` lanes).
-        pack_set: the explicit pack scope every robot ref is validated against.
+        pack_set: an optional explicit pack scope for config-mode resources;
+            profile declarations need no pack lookup.
         name: the run label.
         steps: the collect budget (>= 1).
         episode_length_s: the episode duration in seconds (> 0).
@@ -121,7 +123,7 @@ class SimulationBuilder:
         substeps: int | None = None,
         seed: int = 0,
         num_envs: int = 1,
-        pack_set: PackSet,
+        pack_set: PackSet | None = None,
         name: str = "simulation",
         steps: int = 1000,
         episode_length_s: float = 20.0,
@@ -204,7 +206,7 @@ class SimulationBuilder:
         self._owner = object()
         self._sealed = False
         self._sim: Simulation | None = None
-        self._pack_runtime: PackRuntime | None = pack_set.to_runtime()
+        self._pack_runtime: PackRuntime | None = None if pack_set is None else pack_set.to_runtime()
         self._config_mode = False
         self._run: Run | None = None
         self._spec: RunSpec | None = None
@@ -323,19 +325,30 @@ class SimulationBuilder:
 
     def add_articulation(
         self,
-        ref: RobotRef,
+        profile: RobotProfile,
         *,
         name: str | None = None,
         control: ControlSpec | None = None,
     ) -> ArticulationHandle:
-        """Declare one pack robot and resolve every control group against its profile."""
+        """Declare one robot profile and resolve every control group against it.
+
+        The argument is the complete :class:`~unigym.robots.base.RobotProfile`
+        (for example ``packs.pack("unigym_robots").robot("go2")``); the builder
+        performs no pack lookup and needs no pack scope.
+        """
         self._check_declarable("add_articulation")
+        from unigym.robots.base import RobotProfile
+
+        if not isinstance(profile, RobotProfile):
+            raise SimulationConfigError(
+                f"add_articulation expects a RobotProfile, got {type(profile).__name__}"
+            )
         if control is None:
             raise NoControlError(
-                f"add_articulation(ref={getattr(ref, 'id', ref)!r}) needs control=; "
+                f"add_articulation(profile={profile.name!r}) needs control=; "
                 f"there is no implicit default control"
             )
-        label = ref.id if name is None else name
+        label = profile.name if name is None else name
         if not isinstance(label, str) or not label.strip():
             raise SimulationConfigError(
                 f"articulation label must be a non-empty string, got {label!r}"
@@ -344,17 +357,9 @@ class SimulationBuilder:
             raise SimulationConfigError(
                 f"articulation label {label!r} is already declared; labels must be unique"
             )
-        pack_set = self._pack_set
-        if pack_set is None:
-            raise SimulationConfigError(
-                "a declaration-mode builder needs an explicit pack_set; "
-                "there is no ambient pack discovery"
-            )
-        profile = load_profile_for_ref(pack_set, ref)
         action_groups = self._resolve_groups(label, profile, control)
         handle = ArticulationHandle(
             name=label,
-            ref=ref,
             profile=profile,
             control=control,
             action_groups=action_groups,
@@ -483,14 +488,15 @@ class SimulationBuilder:
                     f"config-mode builders are not implemented in this slice"
                 )
             entry: dict[str, JsonValue] = {"name": handle.name}
-            ref = handle.ref
-            if ref is not None and handle.name != ref.id:
-                entry["params"] = {"profile": ref.id}
+            if handle.name != handle.profile.name:
+                entry["params"] = {"profile": handle.profile.name}
+            if handle.profile.assets is not None:
+                entry["model"] = dict(handle.profile.assets.to_dict())
             entry["actuation"] = self._actuation_entries(control, handle)
             joints = self._joint_init_entries(control, handle)
             if joints:
                 entry["joints"] = joints
-            _declare_passive_joints(entry, action_spec)
+            _declare_passive_joints(entry, action_spec, profile=handle.profile)
             entries.append(entry)
         return entries
 
@@ -625,7 +631,8 @@ class SimulationBuilder:
         run = Run(
             cfg,
             world=world,
-            pack_runtime=self.pack_runtime,
+            pack_runtime=self._pack_runtime,
+            robot_profiles={handle.name: handle.profile for handle in self._articulations},
             no_artifacts=not self._artifacts,
             device=self._device,
         )
@@ -789,7 +796,6 @@ class SimulationBuilder:
             handles.append(
                 ArticulationHandle(
                     name=name,
-                    ref=None,
                     profile=profile,
                     control=None,
                     action_groups=groups_by_articulation.get(name, {}),

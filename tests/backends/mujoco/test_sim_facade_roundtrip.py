@@ -1,4 +1,4 @@
-"""A facade config round-trip reproduces the same reset joint state and actions."""
+"""A facade config loads to the same declared control and action groups."""
 
 from __future__ import annotations
 
@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 import torch
+import yaml
 
-from unigym.packs.packset import PackSet
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.runtime.actions import OrderedActionGroup
-from unigym.sim import BindingError, Control, SimulationBuilder
-from unigym.world import World
+from unigym.sim import BindingError, SimulationBuilder
 from tests._support.sim_fixtures import write_sim_pack
 
 
@@ -24,64 +23,61 @@ def _isolate_robot_registry() -> Iterator[None]:
     restore_robot_registry(snapshot)
 
 
-def _source_builder(tmp_path: Path, tiny_mjcf: Path) -> tuple[SimulationBuilder, PackSet]:
-    """A declared builder over the two-joint pack robot and tiny MJCF world."""
+def _write_config(tmp_path: Path, tiny_mjcf: Path) -> tuple[Path, str]:
+    """Write one config that references the two-joint pack robot."""
     pack_set, ref = write_sim_pack(
         tmp_path / "pack",
         joint_sets={"body": ("shoulder", "elbow")},
         default_joint_pos={"shoulder": 0.1, "elbow": -0.2},
     )
-    builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
-    builder.world = World.base(mjcf=str(tiny_mjcf))
-    builder.add_articulation(
-        ref,
-        name="body",
-        control=Control.position_pd(joint_set="body", kp=20.0, kd=1.0),
-    )
-    return builder, pack_set
-
-
-def _write_roundtrip(source: SimulationBuilder, path: Path) -> None:
-    """Build, write the authoring config and close the source simulation."""
-    sim = source.build()
-    try:
-        sim.to_config(path)
-    finally:
-        sim.close()
-
-
-def test_config_round_trip_reproduces_the_reset_joint_positions(
-    tmp_path: Path, tiny_mjcf: Path
-) -> None:
-    """to_config -> from_config -> build -> reset is bit-identical to the source."""
-    builder, pack_set = _source_builder(tmp_path, tiny_mjcf)
-    source = builder.build()
-    try:
-        source_obs = source.reset()
-        source_pos = source_obs.articulations[source.articulations[0]].joint_pos.clone()
-        written = source.to_config(tmp_path / "roundtrip.yaml")
-    finally:
-        source.close()
-
-    loaded = SimulationBuilder.from_config(written, pack_set=pack_set)
-    sim = loaded.build()
-    try:
-        loaded_obs = sim.reset()
-        loaded_pos = loaded_obs.articulations[sim.articulations[0]].joint_pos
-    finally:
-        sim.close()
-
-    assert sim.backend == source.backend == "mujoco"
-    assert tuple(handle.name for handle in loaded.articulations) == ("body",)
-    assert tuple(loaded.articulations[0].action_groups) == ("body",)
-    assert torch.equal(source_pos, loaded_pos)
+    cfg = {
+        "run_name": "facade_roundtrip",
+        "seed": 0,
+        "env": {
+            "backend": "mujoco",
+            "num_envs": 1,
+            "episode_length_s": 20.0,
+            "decimation": 4,
+            "sim_dt": 0.005,
+        },
+        "world_base": {"mjcf": str(tiny_mjcf)},
+        "runner": {"auto_reset": False},
+        "adapter": {"name": "manual"},
+        "command": {"name": "fixed", "dim": 0, "values": []},
+        "collect": {"steps": 1},
+        "articulations": [
+            {
+                "name": "body",
+                "params": {"profile": ref.name},
+                "actuation": [
+                    {
+                        "name": "body",
+                        "law": "standard_pd",
+                        "joints": ["shoulder", "elbow"],
+                        "gains": {"kp": 20.0, "kd": 1.0},
+                    }
+                ],
+            }
+        ],
+        "action_spec": [
+            {
+                "name": "body",
+                "articulation": "body",
+                "joints": ["shoulder", "elbow"],
+                "target": "position",
+                "role": "body",
+            }
+        ],
+        "policies": [{"adapter": "manual", "groups": [["body", "body"]]}],
+    }
+    path = tmp_path / "sim.yaml"
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    return path, pack_set
 
 
 def test_config_mode_acts_through_the_runtime_target(tmp_path: Path, tiny_mjcf: Path) -> None:
     """A control=None config handle stages the RunSpec action group."""
-    builder, pack_set = _source_builder(tmp_path, tiny_mjcf)
-    path = tmp_path / "roundtrip.yaml"
-    _write_roundtrip(builder, path)
+    path, pack_set = _write_config(tmp_path, tiny_mjcf)
 
     loaded = SimulationBuilder.from_config(path, pack_set=pack_set)
     sim = loaded.build()

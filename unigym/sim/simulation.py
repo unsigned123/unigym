@@ -33,7 +33,6 @@ only, so importing ``unigym.sim`` stays torch-free.
 from __future__ import annotations
 
 import math
-import os
 from collections.abc import Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, overload, runtime_checkable
@@ -690,10 +689,6 @@ class Simulation:
                     f"'env_ids'; legal ids [0, {self.num_envs})"
                 )
         return ids
-
-    def to_config(self, path: str | os.PathLike[str]) -> str:
-        """Write the owning run's authoring config; repeated calls are safe."""
-        return self._run.to_config(path)
 
     def close(self) -> None:
         """Close the owned run (and its runner/instance); idempotent."""

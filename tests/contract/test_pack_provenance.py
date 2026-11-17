@@ -25,7 +25,6 @@ from unigym.packs import (
     PackError,
     PackSet,
     ProviderOrigin,
-    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
     discover_set,
@@ -311,15 +310,14 @@ def test_resource_only_robot_ref_resolves_without_python(
 
     packs = require("acme_robots")
     robot = packs.pack("acme_robots").robot("acme.arm")
-    assert isinstance(robot, RobotRef)
-    assert robot.is_data is True
-    assert robot.entrypoint is None
-    assert robot.origin.pack == "acme_robots"
-    assert robot.origin.pack_version == "2.1.0"
-    assert robot.origin.root == str(root.resolve())
-    assert robot.origin.resource == "robots/acme_arm.yaml"
+    assert robot.name == "acme.arm"
     assert packs.robot("acme.arm") == robot
-    assert packs.resource_path(robot) == (root / "robots" / "acme_arm.yaml").resolve()
+    provider = packs.pack("acme_robots").providers("robot")[0]
+    assert provider.entrypoint is None
+    assert provider.origin.pack == "acme_robots"
+    assert provider.origin.pack_version == "2.1.0"
+    assert provider.origin.root == str(root.resolve())
+    assert provider.origin.resource == "robots/acme_arm.yaml"
     assert "acme_pack" not in sys.modules
 
 
@@ -434,60 +432,3 @@ def test_from_runtime_does_not_call_discovery(
 
     monkeypatch.setattr("unigym.packs.packset.discover", boom)
     assert PackSet.from_runtime(runtime).packs() == packs.packs()
-
-
-def test_run_config_never_serializes_provenance(tmp_path: Path) -> None:
-    """Provenance is process data; ``to_config`` output carries none of it."""
-    from unigym.run.api import Run
-
-    cfg = {
-        "run_name": "provcheck_run",
-        "seed": 1,
-        "env": {"backend": "mujoco", "num_envs": 1},
-        "world_base": {"mjcf": str(tmp_path / "world.xml")},
-        "collect": {"steps": 1},
-        "articulations": [
-            {"name": "arm", "joints": [{"name": "shoulder"}, {"name": "elbow"}]},
-        ],
-        "action_spec": [
-            {
-                "name": "arm",
-                "articulation": "arm",
-                "joints": ["shoulder", "elbow"],
-                "target": "position",
-                "role": "body",
-            },
-        ],
-        "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
-    }
-    run = Run(cfg)
-
-    written = run.to_config(tmp_path / "provcheck_run.yaml")
-    text = Path(written).read_text(encoding="utf-8")
-
-    for token in (
-        "provenance",
-        "discovered_by",
-        "provider_origin",
-        "ProviderOrigin",
-        "pack_version",
-        "location_imported",
-        "activation_entrypoint",
-        "pack_runtime",
-    ):
-        assert token not in text
-    assert '"origin"' not in text
-    assert "origin:" not in text
-
-    def _keys(node: object) -> list[str]:
-        if isinstance(node, dict):
-            keys: list[str] = []
-            for key, value in node.items():
-                keys.append(str(key))
-                keys.extend(_keys(value))
-            return keys
-        if isinstance(node, list):
-            return [key for value in node for key in _keys(value)]
-        return []
-
-    assert not {"origin", "provenance", "provider_origin"} & set(_keys(yaml.safe_load(text)))

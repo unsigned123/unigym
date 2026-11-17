@@ -18,7 +18,6 @@ from unigym.scene_presets import (
     apply_scene_preset,
     load_scene_preset,
     reject_legacy_scene_keys,
-    serialize_scene_preset,
 )
 from unigym.scenes.providers import (
     register_scene_provider,
@@ -286,74 +285,6 @@ def test_inline_provider_form_uses_a_process_local_registry(
     assert spec.backend_params["scene_provider"] == "acme.table_top"
     assert spec.backend_params["scene_provider_params"] == {"style": 2}
     assert spec.backend_params["scene_provider_preset"] is None
-
-
-def test_provider_backed_catalog_preset_round_trips_through_serialization(
-    tmp_path: Path,
-) -> None:
-    """A catalog preset re-emits its declaration and resolves to the same run."""
-    runtime = _runtime(tmp_path, PROVIDER_BACKED)
-    first = build_spec(_cfg(scene_preset="acme_scene.tabletop"), _args(), runtime=runtime)
-
-    authored = serialize_scene_preset(first.cfg, first.scene_preset)
-    # Mirror Run.to_config's surface spelling for the content block.
-    authored["objects"] = authored.pop("props")
-
-    assert first.scene_preset == "acme_scene.tabletop"
-    assert authored["scene_preset"] == "acme_scene.tabletop"
-    assert "scene_provider" not in authored["env"]["params"]
-    assert "scene_provider_params" not in authored["env"]["params"]
-    assert "scene_provider_preset" not in authored["env"]["params"]
-    second = build_spec(authored, _args(), runtime=runtime)
-    assert second.cfg == first.cfg
-    assert second.scene_preset == first.scene_preset
-
-
-def test_provider_backed_inline_run_round_trips_through_to_config(
-    tmp_path: Path, _scene_registry
-) -> None:
-    """Run.to_config writes the authoring surface and reloads to the same run."""
-    register_scene_provider("acme.table_top", _table_top)
-    cfg = _cfg(
-        scene_preset={
-            "provider": "acme.table_top",
-            "params": {"style": 2},
-            "world": {"mjcf": str(tmp_path / WORLD)},
-            "objects": {"types": [{"name": "run_box"}], "filler": "f", "sets": {"cup": 1}},
-            "backend_params": {
-                "mujoco": {
-                    "base": {"joint": "fixed"},
-                    "initializer": {"type": "tabletop_initializer", "params": {"seed": 3}},
-                }
-            },
-        }
-    )
-    first = Run(cfg)
-
-    written = first.to_config(tmp_path / "roundtrip.yaml")
-
-    text = Path(written).read_text(encoding="utf-8")
-    assert "scene_provider" not in text
-    assert "scene_preset" in text
-    reloaded = Run.from_config(written)
-    assert reloaded.spec.scene_preset == first.spec.scene_preset
-    assert reloaded.cfg == first.cfg
-
-
-def test_content_only_preset_round_trips_through_serialization(tmp_path: Path) -> None:
-    """A content-only preset keeps round-tripping once its declaration is re-emitted."""
-    runtime = _runtime(tmp_path)
-    first = build_spec(_cfg(scene_preset="acme_scene.tabletop"), _args(), runtime=runtime)
-
-    authored = serialize_scene_preset(first.cfg, first.scene_preset)
-    # Mirror Run.to_config's surface spelling for the content block.
-    authored["objects"] = authored.pop("props")
-
-    assert authored["scene_preset"] == "acme_scene.tabletop"
-    assert "scene_provider" not in authored["env"]["params"]
-    second = build_spec(authored, _args(), runtime=runtime)
-    assert second.cfg == first.cfg
-    assert second.scene_preset == first.scene_preset
 
 
 def test_unknown_preset_id_names_the_id_and_known_ids(tmp_path: Path) -> None:

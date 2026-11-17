@@ -354,6 +354,23 @@ def test_requires_pack_runtime_boundary_decision(overrides, expected):
     assert requires_pack_runtime(_cfg(**overrides)) is expected
 
 
+def test_requires_pack_runtime_ignores_release_asset_refs():
+    """A ``release:`` asset resolves through its provider, not a pack runtime."""
+    cfg = _cfg(
+        articulations=[
+            {
+                "name": "g1",
+                "model": {
+                    "mjcf": "release:g1-mjcf",
+                    "usd": "release:g1-29dof-usd",
+                },
+            }
+        ]
+    )
+
+    assert requires_pack_runtime(cfg) is False
+
+
 def test_requires_pack_runtime_detects_an_unregistered_inline_provider():
     """An inline provider that is not process-local needs the pack runtime."""
     cfg = _cfg(scene_preset={"provider": "acme.tabletop", "params": {"seed": 1}})

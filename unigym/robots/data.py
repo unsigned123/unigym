@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import yaml
 
@@ -30,6 +30,9 @@ from .base import (
     CanonicalBodyId,
     RobotProfile,
 )
+
+if TYPE_CHECKING:
+    from unigym.actuators.ir import ActuationGroup
 
 SCHEMA_ID = "unigym.robot/1"
 """The one robot document schema this loader accepts."""
@@ -44,6 +47,7 @@ _OPTIONAL_KEYS = (
     "assets",
     "extra_action_sets",
     "full_joint_order",
+    "actuation",
 )
 _TOP_LEVEL_KEYS = frozenset((*_REQUIRED_KEYS, *_OPTIONAL_KEYS))
 
@@ -108,6 +112,27 @@ def _assets(path: Path, value: object) -> AssetRef | None:
         )
     except AssetRefError as err:
         raise _error(path, "assets", str(err)) from err
+
+
+def _actuation(path: Path, value: object) -> tuple[ActuationGroup, ...]:
+    """Normalize the optional ``actuation`` group list."""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise _error(
+            path,
+            "actuation",
+            f"expected a list of ActuationGroup mappings, got {type(value).__name__}",
+        )
+    from unigym.actuators.ir import ActuationError, normalize_actuation_groups
+
+    entries = list(value)
+    if not all(isinstance(entry, Mapping) for entry in entries):
+        raise _error(path, "actuation", "every entry must be a mapping")
+    try:
+        return normalize_actuation_groups(entries)
+    except ActuationError as err:
+        raise _error(path, "actuation", str(err)) from err
 
 
 def load_robot_profile(path: str | Path) -> RobotProfile:
@@ -187,6 +212,7 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             body_bindings=_body_bindings(document_path, document.get("body_bindings")),
             base_height=document.get("base_height"),
             full_joint_order=document.get("full_joint_order"),
+            actuation=_actuation(document_path, document.get("actuation")),
         )
     except (TypeError, ValueError) as err:
         if isinstance(err, RobotDataError):

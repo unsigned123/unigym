@@ -99,3 +99,18 @@ def test_from_config_needs_at_least_one_manual_control_group(tmp_path: Path) -> 
 
     with pytest.raises(SimulationConfigError, match="manual policy"):
         SimulationBuilder.from_config(path)
+
+
+def test_from_config_release_asset_does_not_require_a_pack_set(tmp_path: Path) -> None:
+    """A ``release:`` asset resolves through its provider, not a pack runtime."""
+    text = _config_text().replace(
+        "articulations: [{name: arm, joints: [{name: shoulder}]}]",
+        "articulations: [{name: arm, model: {mjcf: 'release:arm-mjcf'}, "
+        "joints: [{name: shoulder}]}]",
+    )
+    path = tmp_path / "run.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    builder = SimulationBuilder.from_config(path)
+
+    assert builder.world is None

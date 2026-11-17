@@ -57,7 +57,12 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
             obs = sim.step()
             facade.append((obs.raw[joint_pos_key], obs.raw[joint_vel_key]))
 
-        raw_run = Run(sim.run.spec.cfg, no_artifacts=True, device="cpu")
+        raw_run = Run(
+            sim.run.spec.cfg,
+            robot_profiles={handle.name: handle.profile},
+            no_artifacts=True,
+            device="cpu",
+        )
         raw_runner = raw_run.runner("external")
         raw = []
         for action in actions:

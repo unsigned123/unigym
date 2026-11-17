@@ -32,13 +32,14 @@ import unigym.packs
 
 packs = unigym.packs.require("acme_robots")   # filtered scope, or installed()
 pack = packs.pack("acme_robots")              # the only pack handle
-robot = pack.robot("acme.arm")                # RobotRef, no activation
-path = packs.resource_path(robot)             # declared resource path
+robot = pack.robot("acme.arm")                # RobotProfile, no activation
+path = packs.resource_path(pack.asset("acme.cup"))  # declared resource path
 ```
 
-`packs.pack(name).robot(id)` / `.asset(id)` / `.scene_preset(id)` /
-`.scene_provider(id)` mint refs from manifests without importing pack Python or
-mutating a registry. `packs.robots()` / `.scene_presets()` / `.providers()` are
+`packs.pack(name).robot(id)` loads the complete `RobotProfile` (resource
+document or entrypoint factory) without mutating the robot registry.
+`.asset(id)` / `.scene_preset(id)` / `.scene_provider(id)` mint inert refs from
+manifests without importing pack Python. `packs.robots()` / `.scene_presets()` / `.providers()` are
 the cross-pack views; `packs.origins()` reports where each pack was discovered.
 See [`docs/pack_api.md`](docs/pack_api.md#pack-objects) for the full query
 surface.

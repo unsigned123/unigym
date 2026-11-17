@@ -48,7 +48,6 @@ def _handle(owner: object, name: str = "arm", group: str = "arm") -> Articulatio
     template = OrderedActionGroup(name=group, articulation=name, joints=joints, target="position")
     return ArticulationHandle(
         name=name,
-        ref=None,
         profile=profile,
         control=control,
         action_groups={group: template},

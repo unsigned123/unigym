@@ -57,7 +57,6 @@ from unigym.pack_api import (
     ProviderInfo,
     ProviderOrigin,
     ResourceInfo,
-    RobotRef,
     ScenePresetRef,
     SceneProvider,
     SceneProviderContext,
@@ -85,7 +84,6 @@ from unigym.packs import (
     ProviderInfo,
     ProviderOrigin,
     ResourceInfo,
-    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
     discover_set,
@@ -109,8 +107,7 @@ and `asset_path` no longer exist. Pack code reaches its own resources only
 through `PackContext`, and every resource resolves through `PackRuntime`.
 `unigym.packs` exports `PackError` and the read-only pack-object front door
 (`installed`, `require`, `discover_set`, `PackSet`, `PackInfo`, `ProviderInfo`,
-`ResourceInfo`, `ProviderOrigin`, `RobotRef`, `AssetResourceRef`,
-`ScenePresetRef`, `SceneProviderRef`); `MANIFEST_NAME`, `FACE_NAMES` and the
+`ResourceInfo`, `ProviderOrigin`, `AssetResourceRef`, `ScenePresetRef`, `SceneProviderRef`); `MANIFEST_NAME`, `FACE_NAMES` and the
 manifest types live in `unigym.packs.schema`. Importing `unigym.pack_api` or
 `unigym.packs` never imports pack Python.
 
@@ -641,7 +638,14 @@ extra_action_sets
 base_body / foot_bodies / body_sets   (canonical body ids)
 body_bindings                          (canonical id -> per-format native name)
 base_height                            (free-base spawn height, or None)
+actuation                              (ActuationGroup tuple; may be empty)
 ```
+
+`actuation` declares the physical drive groups for the profile's joints. A
+non-empty tuple must name declared joints and cover every non-passive declared
+joint exactly once (duplicate group names, unknown `joint_set` references and
+overlaps fail). An empty tuple is legal for passive robots or for a run that
+passes actuation explicitly; it is never silently filled from a pack.
 
 `foot_bodies` is semantic metadata (it never implies a sensor). `body_bindings`
 is robot metadata, not backend logic: the backend's selected asset format picks
@@ -859,13 +863,18 @@ assets:
 - required: `schema` (exactly `unigym.robot/1`), `name`, `joint_sets`,
   `default_joint_pos`;
 - optional: `base_body`, `base_height`, `foot_bodies`, `body_sets`,
-  `body_bindings`, `assets`, `extra_action_sets`, `full_joint_order`;
+  `body_bindings`, `assets`, `extra_action_sets`, `full_joint_order`,
+  `actuation` (the same `ActuationGroup` mapping shape a run accepts);
 - only top-level unknown keys fail; `body_bindings.<id>.<format>` is data, not
   a top-level field;
 - `body_bindings` builds `BodyBinding(canonical=<key>, names=<value>)`;
 - `assets` uses the same `{mjcf|urdf|usd: <ref>}` mapping as `AssetRef`; a
   `pack:` reference stays an unresolved string; `assets: null` and an omitted
-  key both become `None`;
+  key both become `None`; a `release:<id>` reference stays declarative in the
+  document and resolves to an existing absolute path only at the run/build
+  boundary (through the `unigym.asset_release` entry point, or the optional
+  `unigym_robots.asset_path` helper); the asset must already be downloaded and
+  resolution never builds a world;
 - every other invariant stays with `RobotProfile`; errors name the file, the
   field and the expected/actual form. The legacy `action_faces` key is
   rejected with a teaching error naming `extra_action_sets` (no alias).
@@ -903,7 +912,10 @@ provides:
 
 For a manifest `kind: robot` item:
 
-- the item declares exactly one locator:
+- `pack.robot(id)` loads the profile without activating: a resource is read
+  directly and an entrypoint factory is called and must return a
+  `RobotProfile`; no registry mutation happens on this path;
+- activation still registers the same items for run configs:
   - `resource: robots/<name>.yaml` loads one `unigym.robot/1` document at
     activation and registers a constant, parameterless factory under the item
     id; a run config that passes non-empty `params` to it is a teaching
@@ -935,7 +947,7 @@ in `unigym.robots`; `unigym.pack_api.register_robot` is the pack-facing wrapper.
 The registry lives for the process lifetime, like `ADAPTER_REGISTRY`.
 
 Registry provenance is process/diagnostic data and is never serialized into a
-run config, ledger, shard or `to_config` output.  `ROBOT_REGISTRY` stays the
+run config, ledger or shard output.  `ROBOT_REGISTRY` stays the
 authoritative name -> factory mapping; origins live in a private side table:
 
 - `register_robot(name, factory, *, origin=None)` keeps the legacy call shape.
@@ -1016,11 +1028,8 @@ top-level `world_base`, `objects` and `env.params.initializer` / `base` merge
 last and win. The consumed `scene_preset:` key is removed after resolution;
 there is no `RunSpec.scene` field and no `scene:` alias. The resolved routing
 lives on the effective config (`RunSpec.cfg` / `Run.cfg`) as the internal
-`env.params.scene_provider*` keys, which are never authoring keys.
-`Run.to_config` writes the authoring surface instead: it drops those internal
-keys and re-emits the run's original `scene_preset:` declaration (a catalog id
-or the inline mapping), so a provider-backed preset round-trips through
-`Run.from_config` -> build with its semantics preserved. A catalog declaration
+`env.params.scene_provider*` keys, which are never authoring keys. The
+authoring document is the run yaml that was loaded: a catalog declaration
 needs its pack runtime on reload, exactly like the original document.
 
 A preset document is a closed `unigym.scene_preset/1` mapping:
@@ -1236,7 +1245,7 @@ schema is valid. A later invalid item leaves no earlier scene provider
 registered.
 
 Provenance is process/diagnostic data and is never serialized into a run
-config, ledger, shard or `to_config` output.  `ProviderOrigin` is the shared
+config, ledger or shard output.  `ProviderOrigin` is the shared
 record owned by `unigym.provenance`; the scene, robot and adapter registries
 reuse it rather than defining their own.  It also carries the declared
 `resource` locator and the `location_imported` entry-point seam flag (an
@@ -1400,8 +1409,10 @@ scope; `unigym.packs.require(*names)` returns the filtered view over exactly
 the named packs and fails before a handle exists when a name is missing or is
 not a non-empty string. `unigym.packs.discover_set(roots)` is the lower-level
 explicit-root constructor over the same data. All return a read-only `PackSet`.
-None resolves installed entry points, imports pack Python, activates a pack or
-mutates a registry.
+`require(*names, entry_points=True)` resolves installed `unigym.packs` entry
+points by default (the `pip install` UX); pass `entry_points=False` for the
+manifest-only scope `installed()` exposes. `installed()` never resolves entry
+points, and none of these calls activates a pack or mutates a registry.
 
 ```python
 import unigym.packs
@@ -1409,7 +1420,7 @@ import unigym.packs
 packs = unigym.packs.require("acme")          # filtered explicit dependency
 all_packs = unigym.packs.installed()           # whole configured scope
 pack = packs.pack("acme")                      # PackInfo (canonical)
-robot = pack.robot("acme.arm")                 # RobotRef
+robot = pack.robot("acme.arm")                 # RobotProfile
 asset = pack.asset("acme.cup")                 # AssetResourceRef
 preset = pack.scene_preset("acme.tabletop")    # ScenePresetRef
 provider = pack.scene_provider("acme.table_top")  # SceneProviderRef
@@ -1434,11 +1445,11 @@ pack). `PackSet.robot(id)` / `.asset(id)` / `.scene_preset(id)` /
 ids and an ambiguous id names every owning pack. `resources(face="scenes")`
 fails with the `scene_presets` replacement hint.
 
-`RobotRef`, `AssetResourceRef`, `ScenePresetRef` and `SceneProviderRef` are
-frozen dataclasses, equal by value, holding `pack`, `pack_version`, `id` and a
+`AssetResourceRef`, `ScenePresetRef` and `SceneProviderRef` are frozen
+dataclasses, equal by value, holding `pack`, `pack_version`, `id` and a
 `ProviderOrigin` (kind `manifest`, pack/version/root, face, item id, resource
-or entrypoint). A `RobotRef` also exposes `is_data` (resource-backed, no pack
-Python needed). `ScenePresetRef.resource` names the declared resource;
+or entrypoint). `pack.robot(id)` is not a ref: it returns the complete
+`RobotProfile` (see below). `ScenePresetRef.resource` names the declared resource;
 `SceneProviderRef.entrypoint` names the declared entrypoint and
 `SceneProviderRef.params_schema` is the normalized manifest parameter schema
 (or `None` when the provider declares no parameters). Minting, comparing and
@@ -1451,12 +1462,14 @@ items are represented by `ProviderInfo` (with `active=None`, `pack`,
 `face_counts` but never fabricate a path. `active` is `True` only on live
 registry queries (`robot_providers()`, `adapter_providers()`, ...).
 
-`PackSet.resource_path(ref)` resolves a robot, asset or scene-preset resource
-under its pack root with the usual inside-root and existence rules.
-`resource_path` on an entrypoint-backed handle (a `SceneProviderRef` or an
-entrypoint-backed `RobotRef`) raises the "activate the pack" teaching error.
-`PackSet.to_runtime()` returns an activation-capable runtime over the same
-catalog and does not activate.
+`PackSet.resource_path(ref)` resolves an asset or scene-preset resource under
+its pack root with the usual inside-root and existence rules. An entrypoint-only
+handle (`SceneProviderRef`) has no path and raises the "activate the pack"
+teaching error. Robot providers are loaded as profiles instead:
+`pack.robot(id)` reads a resource-backed `unigym.robot/1` document directly (no
+activation, no registry mutation) or calls an entrypoint factory and requires a
+`RobotProfile`. `PackSet.to_runtime()` returns an activation-capable runtime
+over the same catalog and does not activate.
 `PackSet.from_runtime(runtime, *, origins=None)` builds the same read-only set
 over an existing runtime without rediscovering roots or re-reading manifests.
 `origins` overrides the pack-level discovery origin per pack name: a string is

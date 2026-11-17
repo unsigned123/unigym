@@ -77,7 +77,7 @@ def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) ->
 
     assert cfg["articulations"] == [
         {
-            "name": ref.id,
+            "name": ref.name,
             "actuation": [
                 {
                     "name": "body",
@@ -92,13 +92,13 @@ def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) ->
     assert cfg["action_spec"] == [
         {
             "name": "body",
-            "articulation": ref.id,
+            "articulation": ref.name,
             "joints": ["shoulder", "elbow"],
             "target": "position",
             "role": "body",
         }
     ]
-    assert cfg["policies"] == [{"adapter": "manual", "groups": [[ref.id, "body"]]}]
+    assert cfg["policies"] == [{"adapter": "manual", "groups": [[ref.name, "body"]]}]
 
 
 def test_explicit_joints_keep_declaration_order(tmp_path: Path) -> None:
@@ -177,7 +177,7 @@ def test_a_renamed_articulation_keeps_its_profile_selector(tmp_path: Path) -> No
 
     assert cfg["articulations"][0] == {
         "name": "arm",
-        "params": {"profile": ref.id},
+        "params": {"profile": ref.name},
         "actuation": [
             {
                 "name": "body",
@@ -281,7 +281,7 @@ def test_world_fragment_is_merged_by_run_once(tmp_path: Path) -> None:
     assert "world_base" not in cfg
     spec = _spec_for(builder)
     assert spec.world_base == {"mjcf": "world.xml"}
-    assert [entry.name for entry in spec.articulations] == [ref.id]
+    assert [entry.name for entry in spec.articulations] == [ref.name]
     assert [group.name for group in spec.action_spec.groups] == ["body"]
 
 
@@ -311,7 +311,7 @@ def test_world_objects_are_merged_exactly_once(tmp_path: Path) -> None:
 
     spec = _spec_for(builder)
 
-    assert [entry.name for entry in spec.articulations] == [ref.id]
+    assert [entry.name for entry in spec.articulations] == [ref.name]
     props = spec.props
     assert isinstance(props, dict)
     types = props["types"]

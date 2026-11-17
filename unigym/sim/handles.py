@@ -25,7 +25,6 @@ from .control import ControlSpec
 from .errors import ForeignHandleError, SimulationConfigError
 
 if TYPE_CHECKING:
-    from unigym.packs.packset import RobotRef
     from unigym.runtime.actions import OrderedActionGroup
 
 __all__ = [
@@ -50,7 +49,6 @@ class ArticulationHandle:
 
     Attributes:
         name: the articulation label used in the run config.
-        ref: the pack robot reference, or ``None`` for a config-mode handle.
         profile: the neutral, backend-independent profile.
         control: the explicit control preset, or ``None`` in config mode.
         action_groups: read-only group name -> :class:`OrderedActionGroup`
@@ -59,7 +57,6 @@ class ArticulationHandle:
     """
 
     name: str
-    ref: RobotRef | None
     profile: RobotProfile
     control: ControlSpec | None
     action_groups: Mapping[str, OrderedActionGroup]

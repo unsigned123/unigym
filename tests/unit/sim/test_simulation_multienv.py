@@ -40,7 +40,6 @@ def _handle(owner: object) -> ArticulationHandle:
     control = Control.position_pd(joints=joints, group="arm", kp=1.0, kd=0.1)
     return ArticulationHandle(
         name="arm",
-        ref=None,
         profile=profile,
         control=control,
         action_groups={

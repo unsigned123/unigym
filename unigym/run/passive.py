@@ -17,49 +17,71 @@ from unigym._typing import JsonValue, is_json_object
 __all__ = ["declare_passive_joints", "declare_world_passive_joints"]
 
 
+def _driven_joints(action_spec: object, art_name: object) -> set[str]:
+    """The joint names any action group drives for one articulation."""
+    driven: set[str] = set()
+    groups = getattr(action_spec, "groups", None)
+    if groups is not None:
+        entries: Sequence[object] = tuple(groups)
+    elif isinstance(action_spec, Sequence) and not isinstance(action_spec, (str, bytes)):
+        entries = tuple(action_spec)
+    else:
+        return driven
+    for group in entries:
+        if isinstance(group, dict):
+            articulation = group.get("articulation")
+            joints = group.get("joints")
+        else:
+            articulation = getattr(group, "articulation", None)
+            joints = getattr(group, "joints", None)
+        if articulation not in (None, art_name):
+            continue
+        if isinstance(joints, (list, tuple)):
+            driven.update(str(joint) for joint in joints)
+    return driven
+
+
 def declare_passive_joints(
     entry: dict[str, JsonValue],
-    action_spec: Sequence[JsonValue],
+    action_spec: object,
+    *,
+    profile: object | None = None,
 ) -> None:
     """Declare profile joints no emitted action group drives as passive.
 
     Args:
         entry: One ``articulations[]`` mapping (mutated in place).
-        action_spec: The emitted top-level ``action_spec`` groups.
+        action_spec: The emitted top-level ``action_spec`` groups (a
+            sequence of mappings or a complete ``OrderedActionSpec``).
+        profile: An optional complete ``RobotProfile``; when absent the
+            entry's registry declaration is resolved instead.
     """
     if entry.get("passive_joints"):
         return
     art_name = entry.get("name")
-    section = copy.deepcopy(entry)
-    raw_params = section.get("params")
-    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
-    selector = params.pop("profile", None)
-    if selector is not None:
-        # `params.profile` selects the profile for a renamed
-        # articulation (e.g. g1b); it never reaches the profile factory.
-        section["params"] = params
-        section["name"] = str(selector)
-    try:
-        from unigym.robots import build_robot_profile
+    if profile is None:
+        section = copy.deepcopy(entry)
+        raw_params = section.get("params")
+        params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, dict) else {}
+        selector = params.pop("profile", None)
+        if selector is not None:
+            # `params.profile` selects the profile for a renamed
+            # articulation (e.g. g1b); it never reaches the profile factory.
+            section["params"] = params
+            section["name"] = str(selector)
+        try:
+            from unigym.robots import build_robot_profile
 
-        profile = build_robot_profile(section)
-    except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
-        return
+            profile = build_robot_profile(section)
+        except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
+            return
     sets = dict(profile.joint_sets)
     actuated: list[str] = []
     for joints in sets.values():
         for joint in joints:
             if joint not in actuated:
                 actuated.append(joint)
-    driven: set[str] = set()
-    for group in action_spec or ():
-        if not isinstance(group, dict):
-            continue
-        if group.get("articulation") not in (None, art_name):
-            continue
-        joints = group.get("joints")
-        if isinstance(joints, (list, tuple)):
-            driven.update(str(joint) for joint in joints)
+    driven = _driven_joints(action_spec, art_name)
     passive: list[JsonValue] = []
     for joint in actuated:
         if joint not in driven:

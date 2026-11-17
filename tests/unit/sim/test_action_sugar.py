@@ -67,7 +67,6 @@ def _handle(
     }
     return ArticulationHandle(
         name=name,
-        ref=None,
         profile=profile,
         control=control,
         action_groups=action_groups,

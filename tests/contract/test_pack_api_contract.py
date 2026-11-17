@@ -709,7 +709,6 @@ def test_public_pack_api_exports() -> None:
         "ProviderInfo",
         "ProviderOrigin",
         "ResourceInfo",
-        "RobotRef",
         "ScenePresetRef",
         "SceneProvider",
         "SceneProviderContext",

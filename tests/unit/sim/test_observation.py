@@ -31,7 +31,6 @@ def _handle(
     )
     return ArticulationHandle(
         name=name,
-        ref=None,
         profile=profile,
         control=None,
         action_groups={},

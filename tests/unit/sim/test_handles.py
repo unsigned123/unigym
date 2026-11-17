@@ -55,7 +55,6 @@ def _handle(*, owner: object | None = None) -> ArticulationHandle:
     """A directly constructed handle with two disjoint action groups."""
     return ArticulationHandle(
         name="arm",
-        ref=None,
         profile=_profile(),
         control=None,
         action_groups={
@@ -108,7 +107,6 @@ def test_action_group_key_must_match_the_group_name() -> None:
     with pytest.raises(SimulationConfigError, match="does not match its group name"):
         ArticulationHandle(
             name="arm",
-            ref=None,
             profile=_profile(),
             control=None,
             action_groups={"other": _group(("shoulder",))},
@@ -121,7 +119,6 @@ def test_action_group_must_belong_to_the_enclosing_articulation() -> None:
     with pytest.raises(SimulationConfigError, match="declared for articulation"):
         ArticulationHandle(
             name="arm",
-            ref=None,
             profile=_profile(),
             control=None,
             action_groups={"body": _group(("shoulder",), articulation="other")},

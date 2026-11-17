@@ -24,13 +24,13 @@ from unigym.packs import (
     ProviderInfo,
     ProviderOrigin,
     ResourceInfo,
-    RobotRef,
     ScenePresetRef,
     SceneProviderRef,
     installed,
     require,
 )
 from unigym.packs.runtime import PackRuntime
+from unigym.robots.base import RobotProfile
 from unigym.scene_presets import ScenePresetError, load_scene_preset
 from unigym.scenes.provider_params import ProviderParamSpec
 from unigym.world import World
@@ -257,7 +257,7 @@ def test_resource_path_preset_and_provider(packs: PackSet) -> None:
     with pytest.raises(PackError, match="declared by pack 'acme_content', not 'acme_code'"):
         packs.resource_path(foreign)
 
-    with pytest.raises(PackError, match="requires a RobotRef, ScenePresetRef, SceneProviderRef"):
+    with pytest.raises(PackError, match="requires a ScenePresetRef, SceneProviderRef"):
         packs.resource_path("acme_content.tabletop")  # type: ignore[arg-type]
 
 
@@ -345,20 +345,25 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
     monkeypatch.setenv("UNIGYM_PACKS", str(root))
     monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
 
+    from unigym.robots import ROBOT_REGISTRY, snapshot_robots
+
+    registry_before = snapshot_robots()
     packs = require("acme_robot")
     pack = packs.pack("acme_robot")
     robot = pack.robot("acme.arm")
-    assert isinstance(robot, RobotRef)
-    assert robot.is_data is True
-    assert (robot.pack, robot.pack_version, robot.id) == ("acme_robot", "2.1.0", "acme.arm")
-    assert robot.resource == "robots/acme_arm.yaml"
-    assert robot.entrypoint is None
-    assert robot.origin.kind == "manifest"
-    assert robot.origin.item_id == "acme.arm"
-    assert robot.origin.resource == "robots/acme_arm.yaml"
+    assert snapshot_robots() == registry_before
+    assert "acme.arm" not in ROBOT_REGISTRY
+    assert isinstance(robot, RobotProfile)
+    assert robot.name == "acme.arm"
+    assert robot.joint_sets == {"body": ("shoulder",)}
     assert packs.robot("acme.arm") == robot
     assert packs.robots() == (robot,)
-    assert packs.resource_path(robot) == (root / "robots" / "acme_arm.yaml").resolve()
+    provider = pack.providers("robot")[0]
+    assert provider.name == "acme.arm"
+    assert provider.origin.kind == "manifest"
+    assert provider.origin.item_id == "acme.arm"
+    assert provider.origin.resource == "robots/acme_arm.yaml"
+    assert provider.resource == "robots/acme_arm.yaml"
 
     asset = pack.asset("acme.cup")
     assert isinstance(asset, AssetResourceRef)
@@ -427,3 +432,96 @@ def test_duplicate_catalog_ids_fail_at_pack_set_construction(
 
     with pytest.raises(PackError, match="duplicate 'scene_presets' id 'shared.item'"):
         installed()
+
+
+def test_pack_robot_entrypoint_calls_the_factory_without_registry_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entrypoint robot provider returns a RobotProfile and registers nothing."""
+    root = tmp_path / "entry_robot"
+    (root / "python").mkdir(parents=True)
+    (root / "python" / "acme_entry_robot.py").write_text(
+        "from unigym.robots.base import RobotProfile\n"
+        "\n"
+        "\n"
+        "def make_profile():\n"
+        "    return RobotProfile(\n"
+        "        name='acme.entry',\n"
+        "        joint_sets={'body': ('j',)},\n"
+        "        default_joint_pos={'j': 0.0},\n"
+        "        assets=None,\n"
+        "        extra_action_sets={},\n"
+        "        base_body=None,\n"
+        "        foot_bodies=(),\n"
+        "        body_sets={},\n"
+        "        body_bindings={},\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    (root / "unigym.pack.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema": "unigym.pack/1",
+                "name": "entry_robot",
+                "version": "1.0.0",
+                "api": 1,
+                "trust": "code",
+                "provides": {
+                    "providers": [
+                        {
+                            "id": "acme.entry",
+                            "kind": "robot",
+                            "entrypoint": "acme_entry_robot:make_profile",
+                        }
+                    ]
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNIGYM_PACKS", str(root))
+    monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
+
+    from unigym.robots import ROBOT_REGISTRY, snapshot_robots
+
+    before = snapshot_robots()
+    robot = require("entry_robot").pack("entry_robot").robot("acme.entry")
+    assert isinstance(robot, RobotProfile)
+    assert robot.name == "acme.entry"
+    assert snapshot_robots() == before
+    assert "acme.entry" not in ROBOT_REGISTRY
+    assert "acme_entry_robot" in sys.modules
+
+
+def test_require_can_extend_scope_with_installed_entry_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``require(..., entry_points=True)`` resolves the opt-in entry-point scope."""
+    root = tmp_path / "entry_pack"
+    root.mkdir()
+    (root / "unigym.pack.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema": "unigym.pack/1",
+                "name": "entry_pack",
+                "version": "1.0.0",
+                "api": 1,
+                "trust": "content",
+                "provides": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("UNIGYM_PACKS", raising=False)
+    monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
+    monkeypatch.setattr(
+        "unigym.packs.runtime._entry_point_roots",
+        lambda: [(root, "entry_pack")],
+    )
+
+    assert require("entry_pack", entry_points=True).pack("entry_pack").name == "entry_pack"
+    assert require("entry_pack").pack("entry_pack").name == "entry_pack"
+    with pytest.raises(PackError, match="not installed"):
+        require("entry_pack", entry_points=False)

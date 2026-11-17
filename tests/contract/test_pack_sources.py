@@ -273,7 +273,7 @@ def test_invalid_env_pack_entries_fail_with_context(
     assert "empty" in message
 
 
-def test_empty_explicit_roots_do_not_fall_back_to_config(
+def test_empty_explicit_roots_do_not_fall_back_to_the_overlay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     deps = tmp_path / "deps"

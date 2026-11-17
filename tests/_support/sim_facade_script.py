@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import torch
 
-from unigym.packs.packset import PackSet, RobotRef
+from unigym.packs.packset import PackSet
+from unigym.robots.base import RobotProfile
 from unigym.sim import Control, PendingActionError, SimulationBuilder
 from unigym.world import World
 
@@ -39,11 +40,16 @@ articulation (the body group), so the acceptance articulation is labelled
 """
 
 
-def _robot_ref(pack_set: PackSet, robot_id: str) -> RobotRef:
-    """The one declared robot ref with this id, across the explicit pack set."""
-    matches = [ref for pack in pack_set.packs() for ref in pack.robots() if ref.id == robot_id]
+def _robot_profile(pack_set: PackSet, robot_id: str) -> RobotProfile:
+    """The one declared robot profile with this id, across the explicit pack set."""
+    matches = [
+        (pack.name, profile)
+        for pack in pack_set.packs()
+        for profile in pack.robots()
+        if profile.name == robot_id
+    ]
     if not matches:
-        declared = sorted(ref.id for pack in pack_set.packs() for ref in pack.robots())
+        declared = sorted(profile.name for pack in pack_set.packs() for profile in pack.robots())
         raise AssertionError(
             f"facade acceptance robot {robot_id!r} is not declared by the pack set; "
             f"declared robots: {declared}"
@@ -51,9 +57,9 @@ def _robot_ref(pack_set: PackSet, robot_id: str) -> RobotRef:
     if len(matches) > 1:
         raise AssertionError(
             f"facade acceptance robot {robot_id!r} is declared by several packs: "
-            f"{sorted(ref.pack for ref in matches)}"
+            f"{sorted(pack for pack, _profile in matches)}"
         )
-    return matches[0]
+    return matches[0][1]
 
 
 def _position_target(joint_count: int, step: int, num_envs: int) -> torch.Tensor:
@@ -84,7 +90,7 @@ def run_facade_acceptance(
 
     Args:
         pack_set: the explicit pack scope naming the robot.
-        robot_id: the robot ref id declared by one pack of ``pack_set``.
+        robot_id: the robot profile id declared by one pack of ``pack_set``.
         world: the lane-owned world declaration (the world owns the asset for
             the MJCF lane; an IsaacLab lane declares its own ground).
         backend: the registered backend name forwarded to the builder.
@@ -126,7 +132,7 @@ def run_facade_acceptance(
     )
     builder.world = world
     robot = builder.add_articulation(
-        _robot_ref(pack_set, robot_id), name=ARTICULATION_LABEL, control=control
+        _robot_profile(pack_set, robot_id), name=ARTICULATION_LABEL, control=control
     )
 
     sim = builder.build()
