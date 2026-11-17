@@ -9,20 +9,21 @@ import torch
 
 from unigym.runner.sinks.collect import CollectSink, action_group_contract
 from unigym.runtime.actions import ActionGroupValue, NamedAction, OrderedActionGroup
+from unigym.runtime.controllers import ControlRuntime
 
 
-def _sink(action_groups=None):
+def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, env=None):
     records: list[dict] = []
-    writer = SimpleNamespace(meta={}, append=records.append)
+    writer = SimpleNamespace(meta={}, append=records.append, shard_count=0)
     sink = CollectSink(
         writer=writer,
-        logger=None,
+        logger=logger,
         filter_chain=[],
-        language_gen=None,
+        language_gen=language_gen,
         lang_interval=1,
         recorder=SimpleNamespace(enabled=False),
-        adapter=SimpleNamespace(),
-        env=SimpleNamespace(controls={}),
+        adapter=SimpleNamespace() if adapter is None else adapter,
+        env=SimpleNamespace(controls={}) if env is None else env,
         num_envs=1,
         total_steps=2,
         device="cpu",
@@ -216,6 +217,77 @@ def test_collect_projection_errors_name_joints(targets, match):
 
     with pytest.raises(ValueError, match=match):
         sink.on_step(0, _bundle(targets, 0))
+
+
+def _policy_runtime(name: str, articulation: str) -> ControlRuntime:
+    return ControlRuntime(
+        name=name,
+        adapter="manual",
+        articulation=articulation,
+        joint_names=("hip", "knee"),
+        q0=(0.0, 0.0),
+        drive="position_pd",
+        target="position",
+        role="body",
+    )
+
+
+def _named_state_extra() -> dict:
+    return {
+        "articulation/go2/base_lin_vel_b": torch.tensor([[1.0, 2.0, 0.0]]),
+        "articulation/go2/base_ang_vel_b": torch.tensor([[0.0, 0.0, 3.0]]),
+        "articulation/go2/base_pos_w": torch.tensor([[0.0, 0.0, 0.5]]),
+    }
+
+
+def test_language_state_keys_follow_the_articulation_not_the_group_name():
+    """A group name different from the articulation still resolves extra keys."""
+    seen: dict = {}
+
+    class _Language:
+        def describe(self, states, cmd):
+            seen.update(states)
+            return ["cmd"] * len(cmd)
+
+    runtime = _policy_runtime("legs", "go2")
+    adapter = SimpleNamespace(build_language_states=lambda extra, cmd: dict(extra))
+    sink, records = _sink(
+        language_gen=_Language(),
+        adapter=adapter,
+        env=SimpleNamespace(controls={"go2/legs": runtime}),
+    )
+    bundle = _bundle((), 0)
+    bundle["extra"].update(_named_state_extra())
+
+    sink.on_step(0, bundle)
+
+    assert records[0]["language"] == ["cmd"]
+    assert seen["vx"].tolist() == [1.0]
+    assert seen["vy"].tolist() == [2.0]
+    assert seen["wz"].tolist() == [3.0]
+    assert seen["base_z"].tolist() == [0.5]
+
+
+def test_step_metrics_state_keys_follow_the_articulation_not_the_group_name():
+    """Per-runtime metrics read ``articulation/<articulation>/...`` extra keys."""
+    steps: list[dict] = []
+    runtime = _policy_runtime("legs", "go2")
+    sink, _ = _sink(
+        logger=SimpleNamespace(log_step=lambda t, metrics: steps.append(metrics)),
+        env=SimpleNamespace(controls={"go2/legs": runtime}),
+    )
+
+    sink.on_step_end(
+        0,
+        {
+            "extra": _named_state_extra(),
+            "alive": torch.tensor([True]),
+            "term_metrics": {},
+        },
+    )
+
+    assert steps[0]["vx"] == 1.0
+    assert steps[0]["base_z"] == 0.5
 
 
 def test_direct_construction_falls_back_to_per_entry_columns():

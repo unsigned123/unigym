@@ -169,8 +169,12 @@ def _policy_runtime(env):
 
 
 def _state_key(rt, leaf: str) -> str:
-    """Recorded per-articulation state key (``articulation/<name>/<leaf>``)."""
-    return f"articulation/{rt.name}/{leaf}"
+    """Recorded per-articulation state key (``articulation/<articulation>/<leaf>``).
+
+    The namespace is the articulation, never the control-runtime (action-group)
+    name: state extra keys are published as ``articulation/<articulation>/...``.
+    """
+    return f"articulation/{rt.articulation}/{leaf}"
 
 
 class CollectSink:
