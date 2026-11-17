@@ -18,6 +18,7 @@ def build_tiny_env(
     mjcf: Path,
     *,
     num_envs: int = 1,
+    episode_length_s: float | None = 100.0,
     drive: str = "position_pd",
     target: str = "position",
     law: str = "standard_pd",
@@ -88,7 +89,7 @@ def build_tiny_env(
         robot_profile=profile,
         adapter=ManualAdapter() if adapter is None else adapter,
         num_envs=num_envs,
-        episode_length_s=100.0,
+        episode_length_s=episode_length_s,
         decimation=4,
         sim_dt=0.005,
         world_base={"mjcf": str(mjcf)},
@@ -113,6 +114,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
     def make(
         num_envs: int = 1,
         *,
+        episode_length_s: float | None = 100.0,
         drive: str = "position_pd",
         target: str = "position",
         law: str = "standard_pd",
@@ -130,6 +132,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
             num_envs=num_envs,
+            episode_length_s=episode_length_s,
             drive=drive,
             target=target,
             law=law,

@@ -435,7 +435,7 @@ class CollectSink:
             "seed": self.seed,
             "policy_dt": self.policy_dt,
             "episode_length_s": self.episode_length_s,
-            "episode_length_range": [self.dur_lo, self.dur_hi],
+            "episode_length_range": (None if self.dur_lo is None else [self.dur_lo, self.dur_hi]),
             # per-articulation neutral facts (v5; no flat primary order)
             "articulations": {
                 rt.articulation: articulation_facts(self.env.articulations[rt.articulation], rt)

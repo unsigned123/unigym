@@ -496,17 +496,18 @@ def _minimal_cfg(
     num_envs: int,
     adapter: dict[str, JsonValue],
     steps: int,
-    episode_length_s: float,
+    episode_length_s: float | None,
 ) -> dict[str, JsonValue]:
     """The programmatic base config (existing schema only; no YAML).
 
     The world asset is NOT injected here: callers pass it explicitly via
-    ``world_base`` / a :class:`~unigym.world.World` declaration.
+    ``world_base`` / a :class:`~unigym.world.World` declaration.  A ``None``
+    duration is preserved as the external-mode "no core clock" spelling.
     """
     env_section: dict[str, JsonValue] = {
         "backend": backend,
         "num_envs": int(num_envs),
-        "episode_length_s": float(episode_length_s),
+        "episode_length_s": (None if episode_length_s is None else float(episode_length_s)),
         "decimation": 4,
         "sim_dt": 0.005,
         "params": {},
@@ -719,6 +720,7 @@ class Run:
                 seed=seed,
                 steps=steps,
                 episode_length_s=episode_length_s,
+                termination_mode=overrides.get("termination_mode"),
             )
             if world_base is not None:
                 raw["world_base"] = _world_base_section(world_base)
@@ -816,8 +818,14 @@ class Run:
         seed: int | None,
         steps: int | None,
         episode_length_s: float | None,
+        termination_mode: str | None = None,
     ) -> dict[str, JsonValue]:
-        """The programmatic base config (existing schema; no world asset)."""
+        """The programmatic base config (existing schema; no world asset).
+
+        ``episode_length_s=None`` means the caller wants the core clock off
+        when ``termination_mode`` is ``external``; otherwise it keeps the
+        legacy 10 s default.
+        """
         articulation_entry = _articulation_entry(robot)
         adapter_section = _adapter_section(adapter)
         backend_label = backend or "mujoco"
@@ -840,7 +848,13 @@ class Run:
             adapter=adapter_section,
             steps=_DEFAULT_STEPS if steps is None else int(steps),
             episode_length_s=(
-                _DEFAULT_EPISODE_LENGTH_S if episode_length_s is None else float(episode_length_s)
+                None
+                if episode_length_s is None and termination_mode == "external"
+                else (
+                    _DEFAULT_EPISODE_LENGTH_S
+                    if episode_length_s is None
+                    else float(episode_length_s)
+                )
             ),
         )
         if world is not None:

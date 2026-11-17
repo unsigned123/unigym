@@ -418,7 +418,7 @@ Deferred (exact follow-up, not open questions):
 | Subset `joints=` action groups | Full-group values only in this spike. |
 | Same-asset cross-backend run | No dual-format (MJCF + USD/URDF) test pack in both lanes. |
 | Per-env action masks | No consumer yet. |
-| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `raw`. |
+| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `raw`. `None` disables the core clock and is only valid with `termination_mode: external` (an omitted value is `None` there, since the task owns truncation). |
 
 ## Honest residuals
 

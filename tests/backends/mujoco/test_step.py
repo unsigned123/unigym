@@ -131,6 +131,36 @@ def test_one_entry_spans_multiple_physical_controls_of_one_articulation():
     assert targets[("arm", "lower")].tolist() == [[1.0]]
 
 
+def test_disabled_episode_clock_never_reports_a_due_row(tiny_env_factory):
+    """With no core clock, stepping past the legacy 10 s default never resets."""
+    env = tiny_env_factory(episode_length_s=None)
+    action = _action(env, [[0.0, 0.0]])
+
+    # 0.02 s per policy step * 520 = 10.4 s, beyond the old 10 s default.
+    for _ in range(520):
+        _, extra = env.step(action)
+        assert extra["reset_env_ids"].tolist() == []
+        assert extra["should_reset"] is False
+
+
+@pytest.mark.parametrize("num_envs", [1, 2], ids=["single", "multi"])
+def test_null_clock_snapshot_and_restore_keep_the_clock_disabled(tiny_env_factory, num_envs):
+    """Snapshotting a null-clock env stores ``None`` and restores it without a crash."""
+    env = tiny_env_factory(num_envs=num_envs, episode_length_s=None)
+    action = _action(env, [[0.0, 0.0]] * num_envs)
+
+    snapshot = env.snapshot()
+
+    assert snapshot["extra"]["episode_dur"] is None
+    _, extra = env.step(action)
+    assert extra["reset_env_ids"].tolist() == []
+    assert env.restore(snapshot) == 0
+    assert env.snapshot()["extra"]["episode_dur"] is None
+    _, extra = env.step(action)
+    assert extra["reset_env_ids"].tolist() == []
+    assert extra["should_reset"] is False
+
+
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
     """One named-position tick moves the joints and honors the obs/extra contract."""
     control = tiny_env.controls[("tiny", "tiny")]

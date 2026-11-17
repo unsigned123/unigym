@@ -592,6 +592,41 @@ def _parse_termination_mode(
     return value
 
 
+def _validate_episode_clock(
+    env_cfg: dict[str, JsonValue],
+    termination_mode: str,
+    config_path: str,
+) -> None:
+    """Reject ambiguous episode-clock ownership.
+
+    ``episode_length_s: null`` disables the core clock and is only meaningful
+    when the task layer owns time-based truncation.  A numeric duration in
+    external mode would create two independent clocks, so it is rejected
+    rather than silently competing with the task's ``max_steps``.
+    """
+    from unigym.errors import ConfigError
+
+    value = env_cfg.get("episode_length_s")
+    if termination_mode == "core":
+        if "episode_length_s" in env_cfg and value is None:
+            raise ConfigError(
+                f"{config_path}: episode_length_s: null disables the core "
+                "episode clock, so it requires termination_mode: external | "
+                "hint: give a positive numeric duration for core mode, or "
+                "switch to termination_mode: external and let the task's "
+                "max_steps own truncation"
+            )
+        return
+    if value is not None:
+        raise ConfigError(
+            f"{config_path}: termination_mode: external with a numeric "
+            f"episode_length_s={value!r} would create two independent clocks "
+            "(core duration and the task's own budget) | hint: set "
+            "episode_length_s: null and let the task max_steps own "
+            "truncation, or use termination_mode: core"
+        )
+
+
 def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
@@ -759,6 +794,7 @@ def build_spec(
     # a reserved key (not deserialized here; inject via SyncRunner).
     runner_cfg = _require_config(cfg.get("runner") or {}, "runner")
     termination_mode = _parse_termination_mode(cfg, runner_cfg, args.config)
+    _validate_episode_clock(env_cfg, termination_mode, args.config)
     output_root_value = cfg.get("output_root", "data_out")
     output_root = output_root_value if isinstance(output_root_value, str) else "data_out"
     run_name = _require_str(cfg.get("run_name"), "run_name")

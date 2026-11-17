@@ -225,7 +225,7 @@ class _RunMeta(TypedDict, total=False):
     steps: int
     policy_dt: float | None
     episode_length_s: JsonValue
-    episode_length_range: list[float]
+    episode_length_range: list[float] | None
     schema_version: int
     articulations: dict[str, dict[str, JsonValue]]
     command_dim: int
@@ -1218,7 +1218,14 @@ def _build_sensing(
         if not isinstance(events_factory, _EventsBuilder):
             raise TypeError("backend events factory is not callable")
         events_cfg = events_factory(events_section)
-    episode_length_s = env_section.get("episode_length_s", 10.0)
+    # ``external`` mode owns truncation, so an omitted episode_length_s means
+    # no core clock; core mode keeps the legacy 10 s default.
+    if "episode_length_s" in env_section:
+        episode_length_s = env_section["episode_length_s"]
+    elif getattr(spec, "termination_mode", "core") == "external":
+        episode_length_s = None
+    else:
+        episode_length_s = 10.0
     # the recorder binds an explicitly declared in-scene camera
     # only (recorder.camera_ref REQUIRED; no self-built camera path).  The
     # camera_manager MUST be built before this call (above).
@@ -1437,8 +1444,8 @@ def _build_sinks(
     out_dir: str,
     seed: int,
     episode_length_s: JsonValue,
-    dur_lo: float,
-    dur_hi: float,
+    dur_lo: float | None,
+    dur_hi: float | None,
     command_dim: int,
     bench_cfg: dict[str, JsonValue],
     task_meta: _TaskMeta | None,
@@ -1902,7 +1909,11 @@ def build_instance(spec: RunSpec) -> RunInstance:
     from unigym.adapters.base import Adapter
     from unigym.env.episode import parse_episode_length
 
-    dur_lo, dur_hi = parse_episode_length(episode_length_s)
+    if episode_length_s is None:
+        # external-mode null: no core clock, so there is no sampled range.
+        dur_lo = dur_hi = None
+    else:
+        dur_lo, dur_hi = parse_episode_length(episode_length_s)
 
     meta: _RunMeta = {
         "framework": "unigym",
@@ -1915,7 +1926,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "steps": total_steps,
         "policy_dt": policy_dt,
         "episode_length_s": episode_length_s,
-        "episode_length_range": [dur_lo, dur_hi],
+        "episode_length_range": None if dur_lo is None else [dur_lo, dur_hi],
         # v5 data schema: neutral per-articulation body/contact facts
         # (no body_parts, no foot_names, no foot-derived records).
         "schema_version": DATA_SCHEMA_VERSION,

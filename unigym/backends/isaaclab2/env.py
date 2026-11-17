@@ -454,7 +454,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         adapter,
         terrain_cfg,
         num_envs: int,
-        episode_length_s: float,
+        episode_length_s: float | None,
         env_spacing: float = 4.0,
         decimation: int = 4,
         sim_dt: float = 0.005,
@@ -490,7 +490,8 @@ class IsaaclabEnv(ManagerBasedEnv):
             num_envs: parallel env count (>1 requires the multi_env
                 capability; gated in build_env_backend).
             episode_length_s: sampled episode duration (s; scalar or
-                ``[lo, hi]`` pair parsed by ``parse_episode_length``).
+                ``[lo, hi]`` pair parsed by ``parse_episode_length``), or
+                ``None`` to disable the core clock in external mode.
             env_spacing: scene grid spacing between cloned envs (m).
             decimation: sim steps per policy step (policy dt = decimation *
                 ``sim_dt``).
@@ -578,7 +579,9 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._closing = False
         self._asset_scene: ComposedAssetScene | None = None
         self.artifact_paths: dict[str, str] = {}
-        self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
+        self._dur_lo, self._dur_hi = (
+            (None, None) if episode_length_s is None else parse_episode_length(episode_length_s)
+        )
         self._init_pose = build_init_pose_cfg(init_pose)
         self._articulation_specs = tuple(articulations or ())
         self._profiles = dict(profiles or {})
@@ -591,8 +594,10 @@ class IsaaclabEnv(ManagerBasedEnv):
 
         cfg = _IsaaclabEnvCfg()
         cfg.decimation = decimation
-        # internal resets are driven by our own counter
-        cfg.episode_length_s = max(self._dur_hi, 1e6)
+        # internal resets are driven by our own counter.  A disabled core clock
+        # still needs a finite value for IsaacLab's own config; the wrapper
+        # forces the due mask empty instead of passing infinity.
+        cfg.episode_length_s = 1e9 if self._dur_hi is None else max(self._dur_hi, 1e6)
         cfg.sim.device = device
         cfg.sim.dt = sim_dt
         cfg.sim.render_interval = decimation
@@ -812,7 +817,11 @@ class IsaaclabEnv(ManagerBasedEnv):
         # ---- episode bookkeeping (per-env) ----
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
+        self._episode_dur: torch.Tensor | None = (
+            None
+            if self._dur_lo is None
+            else sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
+        )
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -838,7 +847,11 @@ class IsaaclabEnv(ManagerBasedEnv):
 
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
+        self._episode_dur = (
+            None
+            if self._dur_lo is None
+            else sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
+        )
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -1119,9 +1132,14 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._time_in_episode += self.step_dt
         self._refresh_obs_cache(raw_action, cmd)
         extra = self._build_extra()
-        due = self._time_in_episode >= self._episode_dur
-        extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1)
-        extra["should_reset"] = bool(due.any())
+        if self._episode_dur is None:
+            # external termination mode: the task owns every reset decision.
+            extra["reset_env_ids"] = torch.empty(0, dtype=torch.int64, device=self.device)
+            extra["should_reset"] = False
+        else:
+            due = self._time_in_episode >= self._episode_dur
+            extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1)
+            extra["should_reset"] = bool(due.any())
         if self.camera_manager is not None:
             # step-tail posing: the render inside the NEXT step's sim.step
             # captures this pose (the classic re-pose semantics,
@@ -1399,9 +1417,10 @@ class IsaaclabEnv(ManagerBasedEnv):
         self.sim.forward()
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
-        self._episode_dur[env_ids] = sample_durations(
-            self._dur_lo, self._dur_hi, env_ids.numel(), self.device
-        )
+        if self._episode_dur is not None:
+            self._episode_dur[env_ids] = sample_durations(
+                self._dur_lo, self._dur_hi, env_ids.numel(), self.device
+            )
         if self.camera_manager is not None:
             # re-pose body/chase rigs to the spawn state (the reference chain
             # called _sync_depth_camera_pose at this exact point)

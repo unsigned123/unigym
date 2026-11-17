@@ -162,6 +162,101 @@ def test_external_mode_rejects_reset_on_termination_true():
         build_spec(_external_cfg(runner=runner), _args())
 
 
+def test_external_mode_accepts_an_explicit_null_episode_length():
+    """``episode_length_s: null`` disables the core clock in external mode."""
+    cfg = _external_cfg()
+    cfg["env"]["episode_length_s"] = None
+
+    spec = build_spec(cfg, _args())
+
+    assert spec.termination_mode == "external"
+    assert spec.cfg["env"]["episode_length_s"] is None
+
+
+def test_external_mode_accepts_an_omitted_episode_length():
+    """External mode owns truncation, so an absent clock is accepted as None."""
+    cfg = _external_cfg()
+    assert "episode_length_s" not in cfg["env"]
+
+    spec = build_spec(cfg, _args())
+
+    assert spec.termination_mode == "external"
+    assert "episode_length_s" not in spec.cfg["env"]
+
+
+@pytest.mark.parametrize(
+    ("termination_mode", "env_section", "expected"),
+    [
+        ("external", {}, None),
+        ("external", {"episode_length_s": None}, None),
+        ("core", {}, 10.0),
+        ("core", {"episode_length_s": 2.5}, 2.5),
+    ],
+    ids=["external-omitted", "external-null", "core-default", "core-explicit"],
+)
+def test_episode_clock_resolution_respects_the_termination_mode(
+    termination_mode, env_section, expected
+):
+    """An omitted clock is disabled for external mode but keeps 10 s for core."""
+    from types import SimpleNamespace
+
+    from unigym.adapters.manual import ManualAdapter
+    from unigym.backends.registry import backend_info
+    from unigym.run.build import _build_sensing
+
+    spec = SimpleNamespace(
+        enable_cameras=False,
+        direct=False,
+        articulations=(),
+        termination_mode=termination_mode,
+    )
+    sensing = _build_sensing(
+        spec,
+        {"env": env_section},
+        backend_info("mujoco"),
+        "cpu",
+        1,
+        {},
+        {},
+        {},
+        {},
+        ManualAdapter(),
+        0.02,
+        None,
+    )
+
+    assert sensing["episode_length_s"] == expected
+
+
+def test_core_mode_rejects_a_null_episode_length():
+    """Core mode always owns time, so a null clock is a teaching error."""
+    cfg = _cfg()
+    cfg["env"]["episode_length_s"] = None
+
+    with pytest.raises(ConfigError, match="episode_length_s: null"):
+        build_spec(cfg, _args())
+
+
+def test_core_mode_keeps_the_numeric_duration_unchanged():
+    """A numeric core duration still passes through untouched."""
+    cfg = _cfg()
+    cfg["env"]["episode_length_s"] = 2.5
+
+    spec = build_spec(cfg, _args())
+
+    assert spec.termination_mode == "core"
+    assert spec.cfg["env"]["episode_length_s"] == 2.5
+
+
+def test_external_mode_rejects_a_numeric_episode_length():
+    """Two independent clocks (core duration and task budget) are refused."""
+    cfg = _external_cfg()
+    cfg["env"]["episode_length_s"] = 10.0
+
+    with pytest.raises(ConfigError, match="two independent clocks"):
+        build_spec(cfg, _args())
+
+
 @pytest.mark.parametrize(
     "value", ["task", "", 1, None, True], ids=["unknown", "empty", "int", "none", "bool"]
 )
@@ -169,3 +264,11 @@ def test_unknown_termination_mode_is_rejected(value):
     """Only ``core`` and ``external`` are supported termination modes."""
     with pytest.raises(ConfigError, match="termination_mode=.* is not supported"):
         build_spec(_cfg(termination_mode=value), _args())
+
+
+def test_parse_episode_length_rejects_none():
+    """The numeric-only parser leaves the null-clock branch to its callers."""
+    from unigym.env.episode import parse_episode_length
+
+    with pytest.raises(ValueError, match="disables the core episode clock"):
+        parse_episode_length(None)

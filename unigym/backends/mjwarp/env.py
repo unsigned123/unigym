@@ -195,7 +195,9 @@ class MjwarpEnv(WarpBatchMixin):
         num_envs: native N>1 batched worlds (one warp ``nworld=N`` Data; N
             CPU mirrors).  Cameras are per-world; director ops /
             anchored articulation props still fail fast at N>1.
-        episode_length_s: scalar or [lo, hi] (``env.episode_length_s``).
+        episode_length_s: scalar, [lo, hi], or ``None`` (``env.episode_length_s``).
+            ``None`` disables the core clock (external termination mode); the
+            backend then never reports a time-due row.
         decimation / sim_dt: policy/sim rate chain (4 x 0.005 -> 50 Hz).
             The XML default timestep (0.002) is overridden to ``sim_dt``.
         world_base: the run-level world declaration from the config's
@@ -332,7 +334,7 @@ class MjwarpEnv(WarpBatchMixin):
         robot_profile,
         adapter,
         num_envs: int = 1,
-        episode_length_s: float = 10.0,
+        episode_length_s: float | None = 10.0,
         decimation: int = 4,
         sim_dt: float = 0.005,
         backend_params: Optional[dict] = None,
@@ -739,10 +741,14 @@ class MjwarpEnv(WarpBatchMixin):
         self.obs_cache: dict = {}
 
         # ---- episode bookkeeping (per-env) ----
-        self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
+        if episode_length_s is None:
+            self._dur_lo = self._dur_hi = None
+            self._episode_dur: torch.Tensor | None = None
+        else:
+            self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
+            self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, n, self.device)
         self._episode_id = torch.zeros(n, dtype=torch.int64)
         self._time_in_episode = torch.zeros(n)
-        self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, n, self.device)
 
         # Cameras bind after the model/data exist (renderers, cam ids)
         if self.camera_manager is not None:
@@ -1232,9 +1238,14 @@ class MjwarpEnv(WarpBatchMixin):
         state = self._read_state()
         self._refresh_obs_cache(raw_action, cmd)
         extra = self._build_extra(state)
-        due = self._time_in_episode >= self._episode_dur
-        extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1).to(torch.int64)
-        extra["should_reset"] = bool(due.any())
+        if self._episode_dur is None:
+            # external termination mode: the task owns every reset decision.
+            extra["reset_env_ids"] = torch.empty(0, dtype=torch.int64, device=self.device)
+            extra["should_reset"] = False
+        else:
+            due = self._time_in_episode >= self._episode_dur
+            extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1).to(torch.int64)
+            extra["should_reset"] = bool(due.any())
         if self.camera_manager is not None:
             # step-tail posing (tick-read contract): the NEXT render (inside
             # the next obs refresh) captures this pose
@@ -1309,9 +1320,10 @@ class MjwarpEnv(WarpBatchMixin):
             self._prop_targets[rows, cols] = 0.0
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
-        self._episode_dur[env_ids] = sample_durations(
-            self._dur_lo, self._dur_hi, env_ids.numel(), self.device
-        )
+        if self._episode_dur is not None:
+            self._episode_dur[env_ids] = sample_durations(
+                self._dur_lo, self._dur_hi, env_ids.numel(), self.device
+            )
         if self.camera_manager is not None:
             # re-pose the rigs to the spawn state BEFORE the refresh, so the
             # post-reset render/read sees the spawn view (pose first, read after)
@@ -1390,7 +1402,9 @@ class MjwarpEnv(WarpBatchMixin):
                 # deliberately stays out -- counter dichotomy)
                 "extra": {
                     "time_in_episode": self._time_in_episode.clone(),
-                    "episode_dur": self._episode_dur.clone(),
+                    "episode_dur": (
+                        None if self._episode_dur is None else self._episode_dur.clone()
+                    ),
                 },
             }
         bufs = []
@@ -1410,7 +1424,7 @@ class MjwarpEnv(WarpBatchMixin):
             },
             "extra": {
                 "time_in_episode": self._time_in_episode.clone(),
-                "episode_dur": self._episode_dur.clone(),
+                "episode_dur": None if self._episode_dur is None else self._episode_dur.clone(),
             },
         }
 
@@ -1478,7 +1492,8 @@ class MjwarpEnv(WarpBatchMixin):
         if "time_in_episode" in extra:
             self._time_in_episode = extra["time_in_episode"].clone()
         if "episode_dur" in extra:
-            self._episode_dur = extra["episode_dur"].clone()
+            dur = extra["episode_dur"]
+            self._episode_dur = None if dur is None else dur.clone()
         return 0
 
     # ------------------------------------------------------------------ #

@@ -109,7 +109,9 @@ class SimulationBuilder:
             profile declarations need no pack lookup.
         name: the run label.
         steps: the collect budget (>= 1).
-        episode_length_s: the episode duration in seconds (> 0).
+        episode_length_s: the episode duration in seconds (> 0), or ``None``
+            to disable the core clock.  ``None`` is only valid with
+            ``termination_mode: external``; the task then owns truncation.
         artifacts: whether to write run artifacts.
         device: the backend device string.
     """
@@ -257,8 +259,11 @@ class SimulationBuilder:
         physics_dt = _positive_float(env_cfg.get("sim_dt"), "run config env.sim_dt")
         decimation = _positive_int(env_cfg.get("decimation"), "run config env.decimation")
         dt = _positive_float(physics_dt * decimation, "run config env.sim_dt * env.decimation")
-        episode_length_s = _positive_float(
-            env_cfg.get("episode_length_s"), "run config env.episode_length_s"
+        raw_episode_length_s = env_cfg.get("episode_length_s")
+        episode_length_s = (
+            None
+            if raw_episode_length_s is None and spec.termination_mode == "external"
+            else _positive_float(raw_episode_length_s, "run config env.episode_length_s")
         )
         builder = cls.__new__(cls)
         builder._backend = spec.backend

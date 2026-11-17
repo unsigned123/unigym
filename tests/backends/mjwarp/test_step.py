@@ -385,3 +385,21 @@ def test_step_rejects_a_mapping_action_payload(tiny_env):
 
     with pytest.raises(TypeError, match=r"sequence of NamedAction"):
         tiny_env.step({"tiny": entry})
+
+
+@pytest.mark.parametrize("num_envs", [1, 2], ids=["single", "multi"])
+def test_null_clock_snapshot_and_restore_keep_the_clock_disabled(tiny_env_factory, num_envs):
+    """Snapshotting a null-clock env stores ``None`` and restores it without a crash."""
+    env = tiny_env_factory(num_envs=num_envs, episode_length_s=None)
+    action = _action(env, [[0.0, 0.0]] * num_envs)
+
+    snapshot = env.snapshot()
+
+    assert snapshot["extra"]["episode_dur"] is None
+    _, extra = env.step(action)
+    assert extra["reset_env_ids"].tolist() == []
+    assert env.restore(snapshot) == 0
+    assert env.snapshot()["extra"]["episode_dur"] is None
+    _, extra = env.step(action)
+    assert extra["reset_env_ids"].tolist() == []
+    assert extra["should_reset"] is False
