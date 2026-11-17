@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from unigym._typing import JsonValue
-from unigym.assets.asset_ref import select_asset_format
+from unigym.robots.assets import select_backend_asset, select_robot_asset
 from unigym.robots.base import RobotProfile
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
@@ -102,8 +102,10 @@ def build_robot_realization(
 
     Raises:
         AssetRefError: The effective asset (``spec.model`` when set, otherwise
-            ``profile.assets``) has no USD or URDF reference.  A ``spec.model``
-            without a supported format never falls back to ``profile.assets``.
+            ``profile.assets``) has no USD or URDF reference, or the profile's
+            ``asset_backends`` does not allow this backend for the selected
+            format.  A ``spec.model`` without a supported format never falls
+            back to ``profile.assets``.
         ValueError: The articulation declares no run-level ``actuation``
             groups.
     """
@@ -113,8 +115,18 @@ def build_robot_realization(
     from ..actuators.plan import build_actuator_plan
     from .builder import build_articulation_cfg
 
-    assets = spec.model if spec.model is not None else profile.assets
-    asset_format = select_asset_format(assets, backend_info("isaaclab2").asset_formats)
+    backend = backend_info("isaaclab2")
+    if spec.model is None or spec.model == profile.assets:
+        asset_format, _ = select_robot_asset(
+            profile, backend=backend.name, backend_formats=backend.asset_formats
+        )
+    else:
+        asset_format, _ = select_backend_asset(
+            spec.model,
+            asset_backends=profile.asset_backends,
+            backend=backend.name,
+            backend_formats=backend.asset_formats,
+        )
     if not spec.actuation:
         raise ValueError(
             f"articulation {spec.name!r}: the IsaacLab realizer requires "

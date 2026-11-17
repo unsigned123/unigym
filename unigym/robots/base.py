@@ -15,13 +15,15 @@ realizer, which owns actuator tables, prim paths and spawn conversion.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Iterable, Mapping, NewType
 
 if TYPE_CHECKING:
     from unigym.actuators.ir import ActuationGroup
 
-from unigym.assets.asset_ref import AssetRef, AssetRefError
+from unigym._typing import JsonValue
+from unigym.assets.asset_ref import ASSET_FORMATS, AssetRef, AssetRefError
 
 __all__ = [
     "BodyBinding",
@@ -203,6 +205,31 @@ def _canonical_ids(value: object, what: str) -> tuple[CanonicalBodyId, ...]:
     )
 
 
+def _freeze_asset_option(value: object, where: str) -> object:
+    """Validate one JSON option value and return a defensive copy.
+
+    Nested mappings become read-only ``MappingProxyType`` copies at every
+    level.  JSON lists are copied and their items validated but stay lists:
+    the value must remain dumpable as JSON/YAML, so sequence immutability is
+    by documentation only.  Anything that is not a JSON mapping/list/scalar is
+    rejected instead of stored as opaque metadata.
+    """
+    if isinstance(value, Mapping):
+        frozen: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{where} keys must be strings, got {key!r}")
+            frozen[key] = _freeze_asset_option(item, f"{where}[{key!r}]")
+        return MappingProxyType(frozen)
+    if isinstance(value, (list, tuple)):
+        return [_freeze_asset_option(item, f"{where}[{index}]") for index, item in enumerate(value)]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise ValueError(
+        f"{where} must be JSON-compatible (mapping, list or scalar), " f"got {type(value).__name__}"
+    )
+
+
 @dataclass(frozen=True)
 class RobotProfile:
     """The backend-neutral authoring profile of one robot.
@@ -219,6 +246,19 @@ class RobotProfile:
             policy standby pose (must match the policy's q0 by name).
         assets: the neutral :class:`AssetRef` (or ``None`` when the asset is
             owned by a scene/pack resource).
+        asset_backends: per-format backend allow-list
+            (``{format: (backend names)}``).  An absent format means no
+            restriction beyond the backend's declared format support; an
+            empty mapping keeps the historical backend-only gate.  Every key
+            must name a non-empty resource in :attr:`assets`.
+        asset_options: opaque per-format import-boundary metadata
+            (``{format: mapping}``).  Values must be JSON-compatible; nested
+            mappings are stored as read-only copies, while JSON lists are
+            copied but stay lists (treat sequences as read-only too; they stay
+            mutable so a profile can be dumped back to JSON/YAML).  Core
+            validates and stores it but does not interpret it in this slice; a
+            realizer may expose it to its own import boundary through
+            :func:`unigym.robots.assets.asset_options_for`.
         extra_action_sets: neutral named action sets beyond the primary body
             group (``{set_name: (joint names in term input order)}``); this
             is authoring data, not a backend capability.
@@ -255,6 +295,8 @@ class RobotProfile:
     foot_bodies: tuple[CanonicalBodyId, ...]
     body_sets: Mapping[str, tuple[CanonicalBodyId, ...]]
     body_bindings: Mapping[CanonicalBodyId, BodyBinding]
+    asset_backends: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    asset_options: Mapping[str, Mapping[str, JsonValue]] = field(default_factory=dict)
     base_height: float | None = None
     full_joint_order: tuple[str, ...] | None = None
     actuation: tuple[ActuationGroup, ...] = ()
@@ -332,6 +374,86 @@ class RobotProfile:
                 assets = AssetRef.from_mapping(assets, "RobotProfile assets")
             except AssetRefError as exc:
                 raise ValueError(str(exc)) from exc
+
+        if self.asset_backends is not None and not isinstance(self.asset_backends, Mapping):
+            raise ValueError(
+                f"RobotProfile asset_backends must be a mapping, "
+                f"got {type(self.asset_backends).__name__}"
+            )
+        raw_backends = dict(self.asset_backends or {})
+        unknown_backends = sorted(
+            str(asset_format) for asset_format in raw_backends if asset_format not in ASSET_FORMATS
+        )
+        if unknown_backends:
+            raise ValueError(
+                f"RobotProfile asset_backends declares unknown format(s) "
+                f"{unknown_backends}; allowed formats are {list(ASSET_FORMATS)}"
+            )
+        asset_backends: dict[str, tuple[str, ...]] = {}
+        for asset_format, backends in raw_backends.items():
+            key = str(asset_format)
+            if assets is None or not getattr(assets, key, None):
+                raise ValueError(
+                    f"RobotProfile asset_backends[{key!r}] requires a declared " f"{key!r} asset"
+                )
+            if isinstance(backends, (str, bytes)) or not isinstance(backends, Iterable):
+                raise ValueError(
+                    f"RobotProfile asset_backends[{key!r}] must be a sequence of "
+                    f"backend names, got {backends!r}"
+                )
+            raw_names = tuple(backends)
+            if not raw_names:
+                raise ValueError(f"RobotProfile asset_backends[{key!r}] must not be empty")
+            if any(not isinstance(name, str) or not name.strip() for name in raw_names):
+                raise ValueError(
+                    f"RobotProfile asset_backends[{key!r}] backend names must be "
+                    f"non-empty strings, got {raw_names!r}"
+                )
+            names = tuple(str(name) for name in raw_names)
+            if len(set(names)) != len(names):
+                raise ValueError(
+                    f"RobotProfile asset_backends[{key!r}] backend names must be "
+                    f"unique, got {names!r}"
+                )
+            asset_backends[key] = names
+
+        if self.asset_options is not None and not isinstance(self.asset_options, Mapping):
+            raise ValueError(
+                f"RobotProfile asset_options must be a mapping, "
+                f"got {type(self.asset_options).__name__}"
+            )
+        raw_options = dict(self.asset_options or {})
+        unknown_options = sorted(
+            str(asset_format) for asset_format in raw_options if asset_format not in ASSET_FORMATS
+        )
+        if unknown_options:
+            raise ValueError(
+                f"RobotProfile asset_options declares unknown format(s) "
+                f"{unknown_options}; allowed formats are {list(ASSET_FORMATS)}"
+            )
+        asset_options: dict[str, Mapping[str, JsonValue]] = {}
+        for asset_format, options in raw_options.items():
+            key = str(asset_format)
+            if assets is None or not getattr(assets, key, None):
+                raise ValueError(
+                    f"RobotProfile asset_options[{key!r}] requires a declared " f"{key!r} asset"
+                )
+            if not isinstance(options, Mapping):
+                raise ValueError(
+                    f"RobotProfile asset_options[{key!r}] must be a mapping, " f"got {options!r}"
+                )
+            copied: dict[str, object] = {}
+            for name, value in options.items():
+                if not isinstance(name, str):
+                    raise ValueError(
+                        f"RobotProfile asset_options[{key!r}] keys must be "
+                        f"strings, got {name!r}"
+                    )
+                copied[name] = _freeze_asset_option(
+                    value, f"RobotProfile asset_options[{key!r}][{name!r}]"
+                )
+            asset_options[key] = MappingProxyType(copied)
+
         base_body = self.base_body
         if base_body is not None:
             base_body = normalize_canonical_body_id(base_body, "RobotProfile base_body")
@@ -369,6 +491,8 @@ class RobotProfile:
         object.__setattr__(self, "foot_bodies", foot_bodies)
         object.__setattr__(self, "body_sets", body_sets)
         object.__setattr__(self, "body_bindings", bindings)
+        object.__setattr__(self, "asset_backends", asset_backends)
+        object.__setattr__(self, "asset_options", asset_options)
         object.__setattr__(self, "base_height", base_height)
         object.__setattr__(self, "full_joint_order", full_order)
         object.__setattr__(self, "actuation", actuation)

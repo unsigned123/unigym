@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
+
 import pytest
 
-from unigym.assets.asset_ref import AssetRef
+from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.backends.registry import BackendInfo
 from unigym.contacts.base import ALL_BODIES
 from unigym.robots.base import BodyBinding, RobotProfile
@@ -18,6 +20,7 @@ from unigym.run.build import (
     _camera_base_mount,
     _contact_group_table,
     _effective_profile,
+    _prepare_articulation_models,
     _required_body_ids,
 )
 from unigym.scenes.articulation import (
@@ -307,6 +310,109 @@ def test_camera_base_mount_uses_the_per_articulation_selected_format():
     out = _camera_base_mount(cameras, {"arm": profile}, {"arm": "urdf"})
 
     assert out[0]["rig"]["attach"] == "pelvis_urdf"
+
+
+def test_effective_profile_respects_asset_backends() -> None:
+    """A format restricted to other backends is skipped, not selected."""
+    profile = replace(
+        _profile(),
+        assets=AssetRef(mjcf="/assets/arm.xml", usd="/assets/arm.usd"),
+        asset_backends={"mjcf": ("mjwarp",), "usd": ("mujoco",)},
+    )
+    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf", "usd"))
+
+    effective, asset_format = _effective_profile(ArticulationSpec(name="arm"), profile, info)
+
+    assert asset_format == "usd"
+    assert effective.assets is not None
+    assert effective.assets.usd == "/assets/arm.usd"
+
+
+def test_effective_profile_rejects_formats_restricted_to_other_backends() -> None:
+    """No allowed declared format raises the teaching selection error."""
+    profile = replace(
+        _profile(),
+        assets=AssetRef(mjcf="/assets/arm.xml"),
+        asset_backends={"mjcf": ("isaaclab2",)},
+    )
+    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+
+    with pytest.raises(AssetRefError, match="restrictions"):
+        _effective_profile(ArticulationSpec(name="arm"), profile, info)
+
+
+def test_effective_profile_drops_metadata_for_undefined_override_formats() -> None:
+    """An inline model override keeps only metadata for formats it declares."""
+    profile = replace(
+        _profile(),
+        assets=AssetRef(mjcf="/assets/arm.xml", usd="/assets/arm.usd"),
+        asset_backends={"mjcf": ("mujoco",), "usd": ("isaaclab2",)},
+        asset_options={"usd": {"scale": 1.0}},
+    )
+    spec = ArticulationSpec(name="arm", model=AssetRef(mjcf="/override/arm.xml"))
+    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+
+    effective, asset_format = _effective_profile(spec, profile, info)
+
+    assert asset_format == "mjcf"
+    assert dict(effective.asset_backends) == {"mjcf": ("mujoco",)}
+    assert dict(effective.asset_options) == {}
+
+
+@dataclass(frozen=True)
+class _Plan:
+    """Minimal asset boundary: records which reference was resolved."""
+
+    def resolve(self, reference: str) -> str:
+        return f"/resolved/{reference}"
+
+
+@dataclass(frozen=True)
+class _Spec:
+    """RunSpec stand-in carrying only what model preparation reads."""
+
+    articulations: tuple[ArticulationSpec, ...]
+    robot_profiles: dict[str, RobotProfile] | None = None
+
+
+def test_prepare_articulation_models_respects_asset_backends() -> None:
+    """Profile-backed models resolve the format the backend is allowed to use."""
+    profile = replace(
+        _profile(),
+        assets=AssetRef(mjcf="arm.xml", usd="arm.usd"),
+        asset_backends={"mjcf": ("mjwarp",), "usd": ("mujoco",)},
+    )
+    spec = _Spec(
+        articulations=(ArticulationSpec(name="arm"),),
+        robot_profiles={"arm": profile},
+    )
+    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf", "usd"))
+
+    prepared = _prepare_articulation_models(spec, info, _Plan())
+
+    model = prepared.articulations[0].model
+    assert model is not None
+    assert model.usd == "/resolved/arm.usd"
+    assert model.mjcf == "arm.xml"
+
+
+def test_prepare_articulation_models_leaves_forbidden_formats_uncomposed() -> None:
+    """A profile whose only format is restricted elsewhere is not injected."""
+    profile = replace(
+        _profile(),
+        assets=AssetRef(mjcf="arm.xml"),
+        asset_backends={"mjcf": ("isaaclab2",)},
+    )
+    spec = _Spec(
+        articulations=(ArticulationSpec(name="arm"),),
+        robot_profiles={"arm": profile},
+    )
+    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+
+    prepared = _prepare_articulation_models(spec, info, _Plan())
+
+    assert prepared is spec
+    assert prepared.articulations[0].model is None
 
 
 def test_v5_articulation_facts_serialize_body_and_contact_vocabulary():

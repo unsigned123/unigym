@@ -152,3 +152,67 @@ def test_profile_actuation_rejects_incomplete_coverage() -> None:
             default_joint_pos={"a": 0.0, "b": 0.0},
             actuation=[entry],
         )
+
+
+def test_profile_asset_backends_require_declared_formats_and_valid_names() -> None:
+    """asset_backends keys need a resource; backend lists are non-empty and unique."""
+    profile = _profile(
+        assets={"mjcf": "robot.xml", "usd": "robot.usd"},
+        asset_backends={"mjcf": ("mujoco", "mjwarp"), "usd": ("isaaclab2",)},
+    )
+    assert dict(profile.asset_backends) == {
+        "mjcf": ("mujoco", "mjwarp"),
+        "usd": ("isaaclab2",),
+    }
+
+    with pytest.raises(ValueError, match="unknown format"):
+        _profile(assets={"mjcf": "robot.xml"}, asset_backends={"obj": ("mujoco",)})
+    with pytest.raises(ValueError, match="requires a declared"):
+        _profile(assets={"mjcf": "robot.xml"}, asset_backends={"usd": ("isaaclab2",)})
+    with pytest.raises(ValueError, match="must not be empty"):
+        _profile(assets={"mjcf": "robot.xml"}, asset_backends={"mjcf": ()})
+    with pytest.raises(ValueError, match="unique"):
+        _profile(
+            assets={"mjcf": "robot.xml"},
+            asset_backends={"mjcf": ("mujoco", "mujoco")},
+        )
+    with pytest.raises(ValueError, match="non-empty strings"):
+        _profile(assets={"mjcf": "robot.xml"}, asset_backends={"mjcf": ("",)})
+
+
+def test_profile_asset_options_require_a_declared_asset_and_a_mapping() -> None:
+    """asset_options is per-format metadata; orphan formats and non-mappings fail."""
+    profile = _profile(
+        assets={"usd": "robot.usd"},
+        asset_options={"usd": {"scale": 1.0, "up_axis": "z"}},
+    )
+    assert dict(profile.asset_options["usd"]) == {"scale": 1.0, "up_axis": "z"}
+
+    with pytest.raises(ValueError, match="requires a declared"):
+        _profile(assets={"usd": "robot.usd"}, asset_options={"mjcf": {}})
+    with pytest.raises(ValueError, match="must be a mapping"):
+        _profile(assets={"usd": "robot.usd"}, asset_options={"usd": []})
+    with pytest.raises(ValueError, match="unknown format"):
+        _profile(assets={"usd": "robot.usd"}, asset_options={"obj": {}})
+
+
+def test_profile_asset_options_freeze_nested_mappings_and_copy_lists() -> None:
+    """Nested option mappings are read-only copies; JSON lists are copied."""
+    options = {"usd": {"rigid_props": {"mass": 1.0}, "tags": ["a", "b"]}}
+    profile = _profile(assets={"usd": "robot.usd"}, asset_options=options)
+
+    nested = profile.asset_options["usd"]["rigid_props"]
+    with pytest.raises(TypeError):
+        nested["mass"] = 2.0  # type: ignore[index]
+    # the source mapping is not aliased into the profile
+    options["usd"]["rigid_props"]["mass"] = 9.0
+    assert nested["mass"] == 1.0
+    assert profile.asset_options["usd"]["tags"] == ["a", "b"]
+
+
+def test_profile_asset_options_reject_non_json_values() -> None:
+    """Opaque metadata still has to be JSON-compatible."""
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        _profile(assets={"usd": "robot.usd"}, asset_options={"usd": {"mesh": object()}})
+    with pytest.raises(ValueError, match="keys must be strings"):
+        _profile(assets={"usd": "robot.usd"}, asset_options={"usd": {1: "one"}})

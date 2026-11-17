@@ -26,6 +26,7 @@ import numpy as np
 
 from unigym._typing import JsonValue, is_json_object, is_object_sequence
 from unigym.assets.asset_ref import select_asset_format
+from unigym.robots.assets import select_robot_asset
 from unigym.actuators.ir import (
     ResolvedActuationGroup,
     resolve_actuation_groups,
@@ -643,15 +644,29 @@ def _effective_profile(
     the selected backend format is then required separately.
 
     With an effective ``AssetRef`` the selected format is the first declared
-    backend-preferred format present on it (no fallback/conversion).  A
-    profile with no effective ``AssetRef`` is legal for backends whose
+    backend-preferred format present on it that ``asset_backends`` allows for
+    this backend (no fallback/conversion); restrictions/options for formats an
+    inline ``model`` override does not declare are dropped from the effective
+    copy.  A profile with no effective ``AssetRef`` is legal for backends whose
     provider/scene owns the asset (for example the MuJoCo-family scene MJCF);
     there is no asset format to select, so the run layer uses the backend's
     first declared format as the ``BodyBinding`` native-name key.
     """
+    effective_assets = art.model if art.model is not None else profile.assets
+    declared = set(effective_assets.to_dict()) if effective_assets is not None else set()
     effective = replace(
         profile,
-        assets=art.model if art.model is not None else profile.assets,
+        assets=effective_assets,
+        asset_backends={
+            asset_format: backends
+            for asset_format, backends in profile.asset_backends.items()
+            if asset_format in declared
+        },
+        asset_options={
+            asset_format: options
+            for asset_format, options in profile.asset_options.items()
+            if asset_format in declared
+        },
         base_body=art.base_body if art.base_body is not None else profile.base_body,
         foot_bodies=(art.foot_bodies if art.foot_bodies is not None else profile.foot_bodies),
         body_sets=art.body_sets if art.body_sets is not None else profile.body_sets,
@@ -659,7 +674,9 @@ def _effective_profile(
     if effective.assets is None:
         asset_format = info.asset_formats[0]
     else:
-        asset_format = select_asset_format(effective.assets, info.asset_formats)
+        asset_format, _ = select_robot_asset(
+            effective, backend=info.name, backend_formats=info.asset_formats
+        )
     required = _required_body_ids(effective, art.contacts)
     validate_body_bindings(effective.body_bindings, required_ids=required, formats=None)
     if art.contacts is not None:
@@ -698,7 +715,9 @@ def _prepare_articulation_models(
 
     A profile-backed config articulation (no inline ``model``) receives the
     selected profile asset as its inline model, so the backend composes the
-    same asset the profile names.  An articulation whose declared formats do
+    same asset the profile names; its selection goes through
+    :func:`~unigym.robots.assets.select_robot_asset`, so ``asset_backends`` is
+    enforced here as well.  An articulation whose declared formats do
     not intersect the backend's preference list keeps its declaration: control
     articulations re-select in :func:`_effective_profile` and fail there with
     the teaching error, while a non-control declaration is simply not composed.
@@ -711,17 +730,25 @@ def _prepare_articulation_models(
     changed = False
     for art in spec.articulations:
         assets = art.model
-        if assets is None:
+        if assets is not None:
+            try:
+                asset_format = select_asset_format(assets, info.asset_formats)
+            except AssetRefError:
+                prepared.append(art)
+                continue
+        else:
             profile = injected.get(art.name)
-            assets = None if profile is None else profile.assets
-        if assets is None:
-            prepared.append(art)
-            continue
-        try:
-            asset_format = select_asset_format(assets, info.asset_formats)
-        except AssetRefError:
-            prepared.append(art)
-            continue
+            if profile is None or profile.assets is None:
+                prepared.append(art)
+                continue
+            assets = profile.assets
+            try:
+                asset_format, _ = select_robot_asset(
+                    profile, backend=info.name, backend_formats=info.asset_formats
+                )
+            except AssetRefError:
+                prepared.append(art)
+                continue
         reference = getattr(assets, asset_format)
         if is_release_ref(reference):
             selected = replace(assets, **{asset_format: resolve_release_ref(reference)})

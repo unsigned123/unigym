@@ -22,6 +22,7 @@ from unigym.provenance import (
     RegistrySnapshot,
 )
 
+from .assets import asset_options_for, select_backend_asset, select_robot_asset
 from .base import (
     BodyBinding,
     BodyBindingError,
@@ -289,6 +290,7 @@ __all__ = [
     "ProviderOrigin",
     "RobotProfile",
     "RobotRegistrySnapshot",
+    "asset_options_for",
     "attribute_robot",
     "build_robot_profile",
     "load_robot_profile",
@@ -298,6 +300,8 @@ __all__ = [
     "restore_robots",
     "robot_origin",
     "robot_providers",
+    "select_backend_asset",
+    "select_robot_asset",
     "snapshot_robot_registry",
     "snapshot_robots",
     "validate_body_bindings",

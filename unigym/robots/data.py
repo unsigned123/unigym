@@ -1,7 +1,8 @@
 """Load external ``unigym.robot/1`` robot profile documents.
 
 The document is authoring data only: joint sets, standby pose, canonical base
-and foot facts, per-format body bindings, declared assets, extra action sets and an
+and foot facts, per-format body bindings, declared assets (with optional
+per-format backend restrictions and opaque options), extra action sets and an
 optional full joint order.  Loading builds a backend-neutral
 :class:`~unigym.robots.base.RobotProfile` and never imports a backend, an
 engine or pack Python.
@@ -45,6 +46,8 @@ _OPTIONAL_KEYS = (
     "body_sets",
     "body_bindings",
     "assets",
+    "asset_backends",
+    "asset_options",
     "extra_action_sets",
     "full_joint_order",
     "actuation",
@@ -112,6 +115,32 @@ def _assets(path: Path, value: object) -> AssetRef | None:
         )
     except AssetRefError as err:
         raise _error(path, "assets", str(err)) from err
+
+
+def _asset_backends(path: Path, value: object) -> Mapping[str, tuple[str, ...]]:
+    """Validate the optional ``asset_backends`` top-level shape."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise _error(
+            path,
+            "asset_backends",
+            f"expected a mapping of format -> backend names, got {type(value).__name__}",
+        )
+    return cast(Mapping[str, tuple[str, ...]], value)
+
+
+def _asset_options(path: Path, value: object) -> Mapping[str, Mapping[str, JsonValue]]:
+    """Validate the optional ``asset_options`` top-level shape."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise _error(
+            path,
+            "asset_options",
+            f"expected a mapping of format -> option mapping, got {type(value).__name__}",
+        )
+    return cast(Mapping[str, Mapping[str, JsonValue]], value)
 
 
 def _actuation(path: Path, value: object) -> tuple[ActuationGroup, ...]:
@@ -210,6 +239,8 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             foot_bodies=() if raw_foot_bodies is None else raw_foot_bodies,
             body_sets={} if raw_body_sets is None else raw_body_sets,
             body_bindings=_body_bindings(document_path, document.get("body_bindings")),
+            asset_backends=_asset_backends(document_path, document.get("asset_backends")),
+            asset_options=_asset_options(document_path, document.get("asset_options")),
             base_height=document.get("base_height"),
             full_joint_order=document.get("full_joint_order"),
             actuation=_actuation(document_path, document.get("actuation")),

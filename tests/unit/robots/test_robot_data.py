@@ -215,3 +215,47 @@ def test_loader_rejects_a_malformed_actuation_list(tmp_path: Path) -> None:
     )
     with pytest.raises(RobotDataError, match="actuation"):
         load_robot_profile(path)
+
+
+def test_loader_is_idempotent_for_asset_backends_and_options(tmp_path: Path) -> None:
+    """Reloading a document rebuilt from the profile yields an equal profile.
+
+    There is no profile dump helper, so this is loader idempotence over the
+    profile's public mappings, not a YAML round-trip of an arbitrary document.
+    """
+    document = _document(
+        asset_backends={"usd": ["isaaclab2"]},
+        asset_options={"usd": {"scale": 1.0, "up_axis": "z"}},
+    )
+    profile = load_robot_profile(_write(tmp_path / "robot.yaml", document))
+
+    assert dict(profile.asset_backends) == {"usd": ("isaaclab2",)}
+    assert dict(profile.asset_options["usd"]) == {"scale": 1.0, "up_axis": "z"}
+
+    second = _document(
+        asset_backends={key: list(value) for key, value in profile.asset_backends.items()},
+        asset_options={key: dict(value) for key, value in profile.asset_options.items()},
+    )
+    again = load_robot_profile(_write(tmp_path / "robot2.yaml", second))
+
+    assert again.asset_backends == profile.asset_backends
+    assert {key: dict(value) for key, value in again.asset_options.items()} == {
+        key: dict(value) for key, value in profile.asset_options.items()
+    }
+
+
+def test_loader_wraps_orphan_asset_metadata(tmp_path: Path) -> None:
+    """asset_backends/asset_options keys must name an asset the document declares."""
+    path = _write(
+        tmp_path / "robot.yaml",
+        _document(asset_backends={"mjcf": ["mujoco"]}),
+    )
+    with pytest.raises(RobotDataError, match="asset_backends"):
+        load_robot_profile(path)
+
+    path = _write(
+        tmp_path / "robot.yaml",
+        _document(asset_options={"mjcf": {"scale": 1.0}}),
+    )
+    with pytest.raises(RobotDataError, match="asset_options"):
+        load_robot_profile(path)

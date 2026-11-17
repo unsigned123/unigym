@@ -522,8 +522,12 @@ fmt, path = resolve_asset_instance(
 )
 ```
 
-`select_asset_format` is the underlying per-backend preference rule; call it
-directly when only the selected format name is needed.
+`select_asset_format` is the underlying per-backend preference rule for a raw
+`AssetRef`; call it directly when only the selected format name is needed.
+When a `RobotProfile` is available, use
+`unigym.robots.select_robot_asset(profile, backend=..., backend_formats=...)`
+instead: it applies the same preference order plus the profile's
+`asset_backends` allow-list; the raw helper ignores that profile metadata.
 
 `resolve_asset_instance` selects the backend's preferred declared format,
 requires the resolved path to be absolute and to exist, and never converts or
@@ -856,6 +860,11 @@ body_bindings:
     usd: /World/base
 assets:
   usd: pack:acme/robots/acme_arm.usd
+asset_backends:
+  usd: [isaaclab2]
+asset_options:
+  usd:
+    scale: 1.0
 ```
 
 `unigym.robots.load_robot_profile(path)` builds the neutral `RobotProfile`:
@@ -863,8 +872,9 @@ assets:
 - required: `schema` (exactly `unigym.robot/1`), `name`, `joint_sets`,
   `default_joint_pos`;
 - optional: `base_body`, `base_height`, `foot_bodies`, `body_sets`,
-  `body_bindings`, `assets`, `extra_action_sets`, `full_joint_order`,
-  `actuation` (the same `ActuationGroup` mapping shape a run accepts);
+  `body_bindings`, `assets`, `asset_backends`, `asset_options`,
+  `extra_action_sets`, `full_joint_order`, `actuation` (the same
+  `ActuationGroup` mapping shape a run accepts);
 - only top-level unknown keys fail; `body_bindings.<id>.<format>` is data, not
   a top-level field;
 - `body_bindings` builds `BodyBinding(canonical=<key>, names=<value>)`;
@@ -875,6 +885,27 @@ assets:
   boundary (through the `unigym.asset_release` entry point, or the optional
   `unigym_robots.asset_path` helper); the asset must already be downloaded and
   resolution never builds a world;
+- `asset_backends` is optional (`{format: [backend, ...]}`): every key must be
+  a declared format with a non-empty `assets` resource, and every backend list
+  must be non-empty, unique and made of non-empty names. An absent format
+  means the backend's declared format support is the only gate; an empty
+  mapping keeps that historical behavior.
+  `unigym.robots.select_robot_asset(profile, backend=..., backend_formats=...)`
+  combines the declaration, the backend preference order and the allow-list,
+  skips formats the backend may not use and never falls back to an
+  incompatible format. `select_asset_format` remains the raw
+  `AssetRef`/scene rule. The public `select_backend_asset` helper validates the
+  same allow-list shape itself (string values would otherwise substring-match
+  a backend name);
+- `asset_options` is optional (`{format: mapping}`); every key must name a
+  declared asset and the value must be a mapping whose values are
+  JSON-compatible (mappings, lists or scalars). Nested mappings are stored as
+  read-only copies; JSON lists are copied but stay lists, so treat sequences
+  as read-only too (that keeps a profile dumpable). It is validated metadata
+  only in this slice and is exposed through
+  `unigym.robots.asset_options_for(profile, format)`; no backend behavior is
+  implied. `AssetRef` carries one resource per format, so multiple variants of
+  the same format are not representable and are deferred;
 - every other invariant stays with `RobotProfile`; errors name the file, the
   field and the expected/actual form. The legacy `action_faces` key is
   rejected with a teaching error naming `extra_action_sets` (no alias).
