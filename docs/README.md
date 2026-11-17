@@ -19,6 +19,8 @@ Usage documents:
 
 - [Actions](actions.md) - joint-addressed runtime values, authoring templates,
   per-joint routing/coverage and policy ownership rules.
+- [World and `World.flat()`](world.md) - World/EnvSpec ownership, flat-ground
+  resolution per backend, `<option>` inheritance and residual limits.
 - [State-write contract](state_write_contract.md) - optional world-frame,
   wxyz, name-addressed root/joint writes and settle ordering.
 - [Simulation facade](sim_facade.md) - experimental `unigym.sim` usage, scope,

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import copy
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -63,21 +63,21 @@ from unigym.world_primitives import (
 )
 
 if TYPE_CHECKING:
-    from unigym.actuators.ir import ActuationGroup
     from unigym.packs.runtime import PackRuntime
-    from unigym.robots.base import RobotProfile
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
 
 
 class WorldFragment(TypedDict, total=False):
-    """The run-config fragment a :class:`World` contributes."""
+    """The run-config fragment a :class:`World` contributes.
+
+    A world owns only the environment: the scene/ground and static or
+    dynamic object declarations.  Robots, action layouts and policy bindings
+    are owned by the run/EnvSpec layer and never appear here.
+    """
 
     scene_preset: str | dict[str, JsonValue]
     world_base: dict[str, JsonValue]
-    articulations: list[dict[str, JsonValue]]
-    action_spec: list[dict[str, JsonValue]]
-    policies: list[dict[str, JsonValue]]
     objects: dict[str, JsonValue]
 
 
@@ -198,6 +198,13 @@ class _TerrainBuilder:
 class World:
     """A declarative world (scene preset / provider / inline objects).
 
+    A world owns only the environment: ground/scene and static or dynamic
+    objects.  It never emits robots, action layouts or policy bindings in its
+    fragment (never ``articulations`` / ``action_spec`` / ``policies``).
+    Robot identity, spawn, action layout and policy bindings belong to the
+    run/EnvSpec layer.  :meth:`flat` is the robot-free backend-neutral
+    ground used by RL examples.
+
     Construct one through the factories; the object is cheap and mutable
     until a :class:`~unigym.run.api.Run` consumes it.  ``Run(world=...)``
     merges :meth:`fragment` into the run config and marks the world built
@@ -217,17 +224,29 @@ class World:
         self._dynamic: list[_Primitive] = []
         self._built = False
         self._flat_ground = False
+        self._flat = False
         self._terrain: Terrain | None = None
         self._terrain_explicit = False
         self._terrain_replace_floor = True
         self._terrain_builder: _TerrainBuilder | None = None
-        self._articulations: list[dict[str, JsonValue]] = []
-        self._action_spec: list[dict[str, JsonValue]] = []
-        self._policies: list[dict[str, JsonValue]] = []
 
     # ------------------------------------------------------------------ #
     # factories
     # ------------------------------------------------------------------ #
+    @classmethod
+    def flat(cls) -> World:
+        """A backend-neutral flat ground with no robot and no world asset.
+
+        The declaration is deliberately empty: the world contributes no
+        scene preset and no explicit asset.  The run layer resolves it to the
+        backend's neutral ground (the MuJoCo family injects the packaged flat
+        ground MJCF; a backend with a native flat ground keeps its own).  No
+        robot, action layout or policy binding is ever owned here.
+        """
+        world = cls()
+        world._flat = True
+        return world
+
     @classmethod
     def from_preset(
         cls,
@@ -631,186 +650,6 @@ class World:
                 )
         return [self.add(obj, dynamic=dynamic) for obj in batch]
 
-    def articulation(
-        self,
-        name: str,
-        *,
-        model: str | Mapping[str, JsonValue] | None = None,
-        control: object | None = None,
-        root: str | None = None,
-        spawn: Mapping[str, JsonValue] | None = None,
-        joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]] | None = None,
-        base_body: str | None = None,
-        foot_bodies: Sequence[str] | None = None,
-        body_sets: Mapping[str, Sequence[str]] | None = None,
-        contacts: JsonValue = None,
-        passive_joints: Sequence[object] | None = None,
-        actuation: Sequence[ActuationGroup | Mapping[str, JsonValue]] | None = None,
-        params: Mapping[str, JsonValue] | None = None,
-        adapter: str = "manual",
-        drive: str = "position_pd",
-        target: str | None = None,
-    ) -> World:
-        """Declare one articulation on this world (emits ``articulations[]``).
-
-        The declaration is the neutral shape: an articulation is
-        ``root + model + joints + actuation`` (no articulation-level control
-        mode).  ``model`` may be a path string or a mapping
-        (``{"mjcf": <path>}``; ``urdf``/``usd`` are accepted by the IR for
-        future backends).  The drive is emitted as one explicit ``action_spec``
-        group named after the articulation (``role: body``) plus
-        profile-declared extra action sets (``role: aux``); the ``policies``
-        binding names the adapter that owns them.
-
-        ``actuation`` is the physical ctrl law (the neutral
-        :class:`~unigym.actuators.ir.ActuationGroup` list) and is emitted
-        verbatim on the articulation.  A driven articulation needs it: the run
-        build has no implicit default law.  When actuation is declared the
-        ``drive`` is checked against the resolved laws, so a mismatched drive
-        fails here instead of at the physics seam.
-
-        Builder form::
-
-            world = World.base(mjcf=".../base_skin.xml")
-            world.articulation(
-                "g1",
-                model={"mjcf": ".../g1_29dof_with_hand.xml"},
-                joints={"left_hip_pitch": {}},
-                actuation=[{"name": "legs", "law": "standard_pd",
-                            "joints": ["left_hip_pitch"],
-                            "gains": {"kp": 40.0, "kd": 1.0}}],
-                adapter="manual")
-
-        Args:
-            name: Unique articulation name (the neutral ``unigym_name``;
-                backend prefixes never appear on this surface).
-            model: ``{mjcf|urdf|usd: <path>}`` or a bare MJCF path.
-            control: REMOVED (v104); passing it fails with a teaching error.
-            root: ``free`` (default) / ``fixed`` / ``welded``.
-            spawn: Root spawn declaration (``pos`` + optional ``yaw``).
-            joints: Per-joint declarations (mapping or list of mappings).
-            base_body: Optional canonical base body id (inherits the profile).
-            foot_bodies: Optional canonical foot body ids (inherits/empties).
-            body_sets: Optional canonical named body sets.
-            contacts: Optional contact sensor inventory (``all`` / ``none`` /
-                a group list / a normalized inventory).
-            passive_joints: Joints the articulation owns but does not drive.
-            actuation: The articulation's physical drive declarations
-                (``ActuationGroup`` records or their mappings).
-            params: Optional backend knobs.
-            adapter: The adapter name owning this articulation's action groups.
-            drive: The body drive (default ``position_pd``); it derives the
-                emitted action ``target`` and is validated against the
-                declared actuation laws when ``actuation`` is given.
-            target: Optional explicit target kind; when omitted it is derived
-                from ``drive`` (an explicit mismatch fails).
-
-        Returns:
-            This world (builder chaining).
-        """
-        if not isinstance(name, str) or not name:
-            raise ValueError("World.articulation: name must be a non-empty " "string")
-        if control is not None:
-            raise ValueError(
-                f"World.articulation {name!r}: the articulation-level "
-                f"`control` declaration was removed in v104; declare the "
-                f"drive as a top-level `action_spec:` group plus a `policies:` "
-                f"binding (adapter/drive/target arguments)"
-            )
-        from unigym.actuators.ir import ActuationError, normalize_actuation_groups
-        from unigym.runtime.controls import ControlError, target_for_drive
-
-        try:
-            expected_target = target_for_drive(str(drive))
-        except ControlError as exc:
-            raise ValueError(f"World.articulation {name!r}: {exc}") from exc
-        if target is not None and str(target) != expected_target:
-            raise ValueError(
-                f"World.articulation {name!r}: drive {drive!r} requires "
-                f"target {expected_target!r}, got {target!r}"
-            )
-        try:
-            actuation_groups = normalize_actuation_groups(actuation)
-        except ActuationError as exc:
-            raise ValueError(f"World.articulation {name!r}: actuation: {exc}") from exc
-        entry: dict[str, JsonValue] = {"name": name}
-        if model is not None:
-            entry["model"] = (
-                {"mjcf": str(model)} if isinstance(model, str) else copy.deepcopy(dict(model))
-            )
-        if root is not None:
-            entry["root"] = str(root)
-        if spawn is not None:
-            entry["spawn"] = copy.deepcopy(dict(spawn))
-        if joints is not None:
-            entry["joints"] = _joints_json(joints)
-        if base_body is not None:
-            entry["base_body"] = str(base_body)
-        if foot_bodies is not None:
-            entry["foot_bodies"] = [str(body) for body in foot_bodies]
-        if body_sets is not None:
-            entry["body_sets"] = {
-                str(name): [str(body) for body in bodies] for name, bodies in body_sets.items()
-            }
-        if contacts is not None:
-            entry["contacts"] = copy.deepcopy(contacts)
-        if passive_joints is not None:
-            entry["passive_joints"] = [str(j) for j in passive_joints]
-        if params is not None:
-            entry["params"] = copy.deepcopy(dict(params))
-        if any(existing["name"] == name for existing in self._articulations):
-            raise ValueError(f"World.articulation: duplicate articulation name {name!r}")
-        profile = _world_profile(entry)
-        declared = _joint_names_from_declaration(joints) if joints is not None else []
-        if not declared and profile is not None:
-            declared = [str(joint) for joint in profile.joint_sets.get("body", ())]
-        if not declared:
-            raise ValueError(
-                f"World.articulation {name!r}: the action_spec group needs "
-                f"explicit ordered joints; declare `joints:` or use a "
-                f"registered robot profile with a `body` joint set"
-            )
-        if actuation:
-            entry["actuation"] = _actuation_json(actuation_groups)
-            _validate_world_drive(
-                name,
-                str(drive),
-                expected_target,
-                declared,
-                actuation_groups,
-                profile,
-            )
-        self._articulations.append(entry)
-        declared_json: list[JsonValue] = [str(joint) for joint in declared]
-        groups: list[dict[str, JsonValue]] = [
-            {
-                "name": name,
-                "articulation": name,
-                "joints": declared_json,
-                "target": expected_target,
-                "role": "body",
-            }
-        ]
-        if profile is not None:
-            for action_set, set_joints in profile.extra_action_sets.items():
-                groups.append(
-                    {
-                        "name": str(action_set),
-                        "articulation": name,
-                        "joints": [str(joint) for joint in set_joints],
-                        "target": "position",
-                        "role": "aux",
-                    }
-                )
-        self._action_spec.extend(groups)
-        self._policies.append(
-            {
-                "adapter": str(adapter),
-                "groups": [[name, str(group["name"])] for group in groups],
-            }
-        )
-        return self
-
     def flat_ground(self) -> World:
         """Add a ground slab to an inline world (no-op for bundle worlds).
 
@@ -835,6 +674,11 @@ class World:
     def built(self) -> bool:
         """True once a consuming :class:`Run` has compiled the world."""
         return self._built
+
+    @property
+    def is_flat(self) -> bool:
+        """True when this is the robot-free :meth:`World.flat` declaration."""
+        return self._flat
 
     def static_declarations(self) -> list[dict[str, JsonValue]]:
         """The engine-neutral static primitive declarations (``World.add``).
@@ -893,10 +737,10 @@ class World:
         Returns either ``{"scene_preset": "<catalog id>"}``, the inline
         ``{"scene_preset": {"provider": ..., "params": ...}}`` form, or
         ``{"world_base": {mjcf|urdf|usd: ...}}``, plus an ``objects:`` block
-        when the world declared dynamic free bodies and an
-        ``articulations:`` block when :meth:`articulation` was called.
-        ``world_base`` is a TOP-LEVEL run config key; it never rides
-        ``env.params``.
+        when the world declared dynamic free bodies.  A world never emits
+        robots, action layouts or policy bindings: those are owned by the
+        run/EnvSpec layer.  ``world_base`` is a TOP-LEVEL run config key; it
+        never rides ``env.params``.
         """
         fragment = WorldFragment()
         if self._scene_preset_ref is not None:
@@ -911,11 +755,6 @@ class World:
                 }
             if self._world_base is not None:
                 fragment["world_base"] = copy.deepcopy(self._world_base)
-        if self._articulations:
-            fragment["articulations"] = [copy.deepcopy(entry) for entry in self._articulations]
-        if self._action_spec:
-            fragment["action_spec"] = [copy.deepcopy(entry) for entry in self._action_spec]
-            fragment["policies"] = [copy.deepcopy(entry) for entry in self._policies]
         dynamic = self.dynamic_declarations()
         if dynamic:
             fragment["objects"] = dynamic
@@ -928,13 +767,6 @@ class World:
             cfg["scene_preset"] = copy.deepcopy(fragment["scene_preset"])
         if "world_base" in fragment:
             cfg["world_base"] = copy.deepcopy(fragment["world_base"])
-        if "articulations" in fragment:
-            _merge_articulations(cfg, fragment["articulations"])
-        if "action_spec" in fragment:
-            _merge_action_spec(cfg, fragment["action_spec"])
-            declared_policies = fragment.get("policies")
-            if declared_policies is not None:
-                _merge_policies(cfg, declared_policies)
         dynamic = fragment.get("objects")
         if dynamic:
             # Preserve the config's own spelling (objects: surface wins,
@@ -953,244 +785,6 @@ class World:
     def _mark_built(self) -> None:
         """Seal the world after the env compiles (mutations now fail)."""
         self._built = True
-
-
-def _json_number_value(value: float | Mapping[str, float]) -> JsonValue:
-    """One gain/limit value as JSON (scalar or a name-keyed number map)."""
-    if isinstance(value, Mapping):
-        table: dict[str, JsonValue] = {str(key): float(item) for key, item in value.items()}
-        return table
-    return float(value)
-
-
-def _actuation_json(entries: Sequence[ActuationGroup]) -> list[JsonValue]:
-    """Serialize neutral actuation groups onto the authoring shape."""
-    out: list[JsonValue] = []
-    for group in entries:
-        data: dict[str, JsonValue] = {"name": group.name, "law": group.law}
-        if group.joints is not None:
-            data["joints"] = [str(joint) for joint in group.joints]
-        if group.joint_set is not None:
-            data["joint_set"] = str(group.joint_set)
-        if group.gains:
-            gains: dict[str, JsonValue] = {
-                str(key): _json_number_value(value) for key, value in group.gains.items()
-            }
-            data["gains"] = gains
-        if group.effort_limit is not None:
-            data["effort_limit"] = _json_number_value(group.effort_limit)
-        if group.velocity_limit is not None:
-            data["velocity_limit"] = _json_number_value(group.velocity_limit)
-        if group.command:
-            data["command"] = copy.deepcopy(dict(group.command))
-        if group.parts is not None:
-            data["parts"] = [str(part) for part in group.parts]
-        out.append(data)
-    return out
-
-
-def _validate_world_drive(
-    name: str,
-    drive: str,
-    target: str,
-    declared: Sequence[str],
-    groups: Sequence[ActuationGroup],
-    profile: RobotProfile | None,
-) -> None:
-    """Check the declared drive against the actuation laws it resolves to.
-
-    The action group owns the target kind and the actuation groups own the
-    physical law; the runtime drive is their explicit combination.  A world
-    declaration that names an incompatible drive fails here instead of at the
-    backend ctrl seam.  Joints the actuation does not address are left to the
-    run's exactly-once coverage check.
-    """
-    from unigym.actuators.ir import ActuationError, resolve_group_joints
-    from unigym.runtime.controllers import drive_for_target_laws
-    from unigym.runtime.controls import ControlError
-
-    joint_sets = dict(profile.joint_sets) if profile is not None else None
-    try:
-        resolved = resolve_group_joints(groups, articulation=name, joint_sets=joint_sets)
-    except ActuationError as exc:
-        raise ValueError(f"World.articulation {name!r}: actuation: {exc}") from exc
-    law_by_joint = {str(joint): row.group.law for row in resolved for joint in row.joint_names}
-    laws = [law_by_joint[str(joint)] for joint in declared if str(joint) in law_by_joint]
-    if not laws:
-        return
-    try:
-        derived = drive_for_target_laws(target, laws, what=f"World.articulation {name!r}")
-    except ControlError as exc:
-        raise ValueError(str(exc)) from exc
-    if derived != drive:
-        raise ValueError(
-            f"World.articulation {name!r}: drive {drive!r} does not match the "
-            f"declared actuation laws {sorted(set(laws))} for target "
-            f"{target!r} (they resolve to {derived!r})"
-        )
-
-
-def _joints_json(
-    joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]],
-) -> JsonValue:
-    """A deep-copied JSON view of a ``joints:`` declaration."""
-    if isinstance(joints, Mapping):
-        return copy.deepcopy(dict(joints))
-    return [copy.deepcopy(dict(entry)) for entry in joints]
-
-
-def _joint_names_from_declaration(
-    joints: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]],
-) -> list[str]:
-    """Joint names from a ``joints:`` declaration (mapping or list form)."""
-    if isinstance(joints, Mapping):
-        return [str(name) for name in joints]
-    names: list[str] = []
-    for entry in joints:
-        if "name" in entry:
-            names.append(str(entry["name"]))
-    return names
-
-
-def _world_profile(entry: dict[str, JsonValue]):
-    """Resolve the robot profile of a world articulation, or ``None``.
-
-    ``params.profile`` selects a registered profile for a renamed
-    articulation (the same rule the run builder applies); an unregistered
-    robot type has no profile and must declare explicit joints.
-    """
-    from unigym.robots import build_robot_profile
-
-    section: dict[str, JsonValue] = {"name": entry.get("name")}
-    raw_params = entry.get("params")
-    params = dict(raw_params) if isinstance(raw_params, dict) else {}
-    selector = params.pop("profile", None)
-    if selector is not None:
-        section["name"] = str(selector)
-    section["params"] = params
-    try:
-        return build_robot_profile(section)
-    except (AttributeError, KeyError, NotImplementedError, TypeError, ValueError):
-        return None
-
-
-def _merge_action_spec(
-    cfg: dict[str, JsonValue],
-    declared: list[dict[str, JsonValue]],
-) -> None:
-    """Merge world-declared action groups into the config by identity."""
-    existing = cfg.get("action_spec")
-    merged: list[JsonValue] = (
-        [copy.deepcopy(entry) for entry in existing] if isinstance(existing, list) else []
-    )
-    index: dict[tuple[str, str], int] = {}
-    for position, entry in enumerate(merged):
-        if isinstance(entry, dict):
-            articulation = entry.get("articulation")
-            name = entry.get("name")
-            if isinstance(articulation, str) and isinstance(name, str):
-                index[(articulation, name)] = position
-    for entry in declared:
-        key = (str(entry["articulation"]), str(entry["name"]))
-        position = index.get(key)
-        if position is None:
-            index[key] = len(merged)
-            merged.append(copy.deepcopy(entry))
-        else:
-            merged[position] = copy.deepcopy(entry)
-    cfg["action_spec"] = merged
-
-
-def _merge_policies(
-    cfg: dict[str, JsonValue],
-    declared: list[dict[str, JsonValue]],
-) -> None:
-    """Merge world-declared policy bindings into the config by adapter."""
-    existing = cfg.get("policies")
-    merged: list[JsonValue] = (
-        [copy.deepcopy(entry) for entry in existing] if isinstance(existing, list) else []
-    )
-    index: dict[str, int] = {}
-    for position, entry in enumerate(merged):
-        if isinstance(entry, dict):
-            adapter = entry.get("adapter")
-            if isinstance(adapter, str):
-                index[adapter] = position
-    for entry in declared:
-        adapter = str(entry["adapter"])
-        position = index.get(adapter)
-        groups = entry.get("groups")
-        declared_groups: list[JsonValue] = (
-            [copy.deepcopy(group) for group in groups] if isinstance(groups, list) else []
-        )
-        if position is None:
-            index[adapter] = len(merged)
-            merged.append(
-                {
-                    "adapter": adapter,
-                    "groups": declared_groups,
-                }
-            )
-            continue
-        current = merged[position]
-        assert isinstance(current, dict)
-        current_groups = current.get("groups")
-        merged_groups: list[JsonValue] = (
-            [copy.deepcopy(group) for group in current_groups]
-            if isinstance(current_groups, list)
-            else []
-        )
-        seen = {
-            (str(group[0]), str(group[1]))
-            for group in merged_groups
-            if isinstance(group, (list, tuple)) and len(group) == 2
-        }
-        for group in declared_groups:
-            if not isinstance(group, (list, tuple)) or len(group) != 2:
-                merged_groups.append(group)
-                continue
-            key = (str(group[0]), str(group[1]))
-            if key not in seen:
-                seen.add(key)
-                merged_groups.append(group)
-        current["groups"] = merged_groups
-    cfg["policies"] = merged
-
-
-def _merge_articulations(
-    cfg: dict[str, JsonValue],
-    declared: list[dict[str, JsonValue]],
-) -> None:
-    """Merge world-declared articulations into the config list by name.
-
-    A world entry with the same ``name`` replaces the existing declaration
-    in place (so the programmatic ``Run(robot="g1")`` stub is upgraded to
-    the world's asset-bearing entry); new names append.  Mixing two
-    policy articulations still fails later in ``normalize_articulations``.
-    """
-    existing = cfg.get("articulations")
-    if not existing:
-        initial: list[JsonValue] = [copy.deepcopy(entry) for entry in declared]
-        cfg["articulations"] = initial
-        return
-    existing_list: list[JsonValue] = existing if isinstance(existing, list) else []
-    merged: list[JsonValue] = [copy.deepcopy(entry) for entry in existing_list]
-    index: dict[str, int] = {}
-    for position, entry in enumerate(merged):
-        if isinstance(entry, dict):
-            name_value = entry.get("name")
-            if isinstance(name_value, str):
-                index[name_value] = position
-    for entry in declared:
-        name_value = entry["name"]
-        assert isinstance(name_value, str)
-        position = index.get(name_value)
-        if position is None:
-            index[name_value] = len(merged)
-            merged.append(copy.deepcopy(entry))
-        else:
-            merged[position] = copy.deepcopy(entry)
-    cfg["articulations"] = merged
 
 
 def _unique_name(world: World, stem: str) -> str:

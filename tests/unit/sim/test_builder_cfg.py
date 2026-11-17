@@ -340,17 +340,25 @@ def test_empty_world_fragment_is_refused(tmp_path: Path) -> None:
         builder._to_cfg()
 
 
-def test_world_fragment_may_not_own_articulations_or_action_tables(tmp_path: Path) -> None:
+def test_world_fragment_never_owns_articulations_or_action_tables(tmp_path: Path) -> None:
     """The builder is the single owner of the articulation/action tables."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = SimulationBuilder(backend="mujoco", dt=0.02, physics_dt=0.005, pack_set=pack_set)
     world = World.base(mjcf="world.xml")
-    world.articulation("other", model={"mjcf": "other.xml"}, joints=[{"name": "joint"}])
+    world.add(Box((0.2, 0.2, 0.2), name="crate", pos=(0.0, 0.0, 0.1)), dynamic=True)
     builder.world = world
     builder.add_articulation(ref, control=_body_control())
 
-    with pytest.raises(SimulationConfigError, match="must not declare"):
-        builder._to_cfg()
+    fragment = world.fragment()
+    assert "articulations" not in fragment
+    assert "action_spec" not in fragment
+    assert "policies" not in fragment
+    assert set(fragment) == {"world_base", "objects"}
+
+    cfg = builder._to_cfg()
+    assert [entry["name"] for entry in cfg["articulations"]] == [ref.name]
+    assert cfg["action_spec"]
+    assert cfg["policies"]
 
 
 def test_at_least_one_articulation_is_required(tmp_path: Path) -> None:

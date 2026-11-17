@@ -24,17 +24,36 @@ Composition mechanisms:
   backend-private :class:`MjNameMap`; neutral runtime surfaces never see a
   backend name.
 
+World settings versus articulation settings:
+
+``<option>`` is a model-global block and ``MjSpec.attach`` never transfers a
+child's option values (MuJoCo only warns and keeps the parent's).  The single
+articulation **attach** route (a world base without the ``<!-- articulations
+-->`` marker, e.g. the packaged flat ground) therefore inherits the
+articulation's *explicitly declared* ``<option>`` attributes when the world
+base does not declare the same attribute.  The articulation asset stays the
+source of its solver/contact settings (``cone``, ``impratio``, ...); the world
+base stays the source of the attributes it declares.  An attribute declared by
+both with different values fails fast instead of silently picking one.  The
+marker/``<include>`` route keeps MuJoCo's own include merge untouched (an
+included articulation's explicit option applies; this is the historical fused
+``scene.xml`` behavior).  The multi-asset route keeps the world base's options
+only: two articulation assets do not have a defined precedence, so a caller
+that needs non-default physics must declare it on the world base.
+
 No articulation declares ``model.mjcf`` -> :func:`compose_articulation_spec`
 returns ``None`` and the caller keeps the historical fused load path.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import os
 import uuid
 import warnings
+import xml.etree.ElementTree as ElementTree
 from collections.abc import Mapping, Sequence
 from xml.sax.saxutils import escape
 
@@ -91,6 +110,63 @@ def _child_names(spec) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...
         return tuple(str(element.name) for element in table if element.name)
 
     return names(spec.bodies), names(spec.joints), names(spec.actuators)
+
+
+def _authored_option(spec, path: str) -> dict[str, str]:
+    """The ``<option>`` attributes this spec explicitly declares.
+
+    Reads the source document so an attribute written with its default value
+    (``cone="pyramidal"``) still counts as an explicit declaration, then
+    unions in the MjSpec-authored fields (an option that arrived through
+    ``<include>`` never appears in the direct element).
+    """
+    fields: dict[str, str] = {}
+    try:
+        node = ElementTree.parse(path).getroot().find("option")
+    except (OSError, ElementTree.ParseError):
+        node = None
+    if node is not None:
+        fields.update(node.attrib)
+    if spec.authored.option:
+        resolved = ElementTree.fromstring(spec.to_xml()).find("option")
+        if resolved is not None:
+            for key, value in resolved.attrib.items():
+                fields.setdefault(key, value)
+    return fields
+
+
+def _inherit_single_articulation_option(
+    spec, child, *, articulation: str, world_base: str, articulation_path: str
+) -> None:
+    """Copy the child's explicitly declared ``<option>`` fields into *spec*.
+
+    Runs before ``MjSpec.attach`` (which keeps the parent's option values and
+    only warns).  Attributes the world base declared keep the world's value;
+    an overlapping attribute with a different value is a declaration
+    conflict and fails fast.
+    """
+    child_fields = _authored_option(child, articulation_path)
+    if not child_fields:
+        return
+    base_fields = _authored_option(spec, world_base)
+    conflicts: list[str] = []
+    for field in child_fields:
+        child_value = getattr(child.option, field)
+        if field in base_fields:
+            if getattr(spec.option, field) != child_value:
+                conflicts.append(
+                    f"{field}: world_base={getattr(spec.option, field)!r} "
+                    f"articulation {articulation!r}={child_value!r}"
+                )
+            continue
+        setattr(spec.option, field, copy.copy(child_value))
+    if conflicts:
+        raise ConfigError(
+            "articulation composition: conflicting <option> declarations "
+            f"between {world_base!r} and articulation {articulation!r}: "
+            + "; ".join(conflicts)
+            + " | hint: declare the attribute on exactly one side"
+        )
 
 
 def compose_articulation_spec(
@@ -255,6 +331,10 @@ def _compose_attach(
         prefix = _prefix_for(name, auto_prefix)
         prefixes[name] = prefix
         child = mujoco.MjSpec.from_file(path)
+        if len(assets) == 1 and not auto_prefix:
+            _inherit_single_articulation_option(
+                spec, child, articulation=name, world_base=base, articulation_path=path
+            )
         frame_pos = frame_quat = None
         if place:
             frame_pos, frame_quat = _frame_pose(spawns.get(name) or {})

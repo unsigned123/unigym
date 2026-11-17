@@ -57,10 +57,7 @@ from unigym._typing import (
     is_object_sequence,
 )
 from unigym.backends.registry import Trait, backend_info
-from unigym.run.passive import (
-    declare_passive_joints as _declare_passive_joints,
-    declare_world_passive_joints as _declare_world_passive_joints,
-)
+from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from unigym.camera import CameraSet
 from unigym.run.spec import RunSpec, build_spec
 
@@ -280,7 +277,10 @@ def _robot_profile(value: object) -> RobotProfile | None:
     return value if isinstance(value, RobotProfile) else None
 
 
-def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
+def _articulation_entry(
+    robot: JsonValue,
+    spawn: Mapping[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
     """Builder convenience: one ``articulations[]`` entry.
 
     The public ``Run(robot=...)`` knob is a builder convenience, not a
@@ -290,6 +290,8 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
     only: its assets/actuation/topology ride on the profile itself.  A
     declaration dict passes ``actuation`` through verbatim; the bare string
     form carries no actuation, so a live build fails under the hard cut.
+    ``spawn`` is the run-owned root spawn mapping (``pos``/``yaw``); it never
+    lives on a :class:`~unigym.world.World`.
     """
     entry: dict[str, JsonValue]
     profile = _robot_profile(robot)
@@ -307,6 +309,14 @@ def _articulation_entry(robot: JsonValue) -> dict[str, JsonValue]:
             "Run(robot=...) expects a RobotProfile, a registered robot name, "
             f"or a robot declaration mapping, got {type(robot).__name__}"
         )
+    if spawn is not None:
+        if not isinstance(spawn, Mapping):
+            raise TypeError(f"spawn= expects a mapping {{pos, yaw?}}, got {type(spawn).__name__}")
+        declared = copy.deepcopy(dict(spawn))
+        raw_pos = declared.get("pos")
+        if isinstance(raw_pos, (list, tuple)):
+            declared["pos"] = [float(value) for value in raw_pos]
+        entry["spawn"] = declared
     return entry
 
 
@@ -547,6 +557,29 @@ def _world_base_section(world_base: JsonValue) -> dict[str, JsonValue]:
     )
 
 
+def _flat_ground_world_base() -> dict[str, JsonValue]:
+    """The packaged MuJoCo flat-ground MJCF a ``World.flat()`` resolves to.
+
+    The declaration lives in ``unigym.assets`` (neutral package data), so the
+    run layer needs no backend import.  ``World.flat()`` owns no asset itself;
+    only a backend that *consumes* ``world_base`` receives this resolution.
+    The packaged asset declares no ``<option>``: the composition engine
+    inherits a single articulation's explicitly authored solver/contact
+    options, so the robot asset stays the source of those values.
+    """
+    from importlib.resources import files
+
+    resource = files("unigym.assets").joinpath("worlds", "flat_ground.xml")
+    if not resource.is_file():  # pragma: no cover - packaging defect
+        from unigym.errors import ConfigError
+
+        raise ConfigError(
+            "World.flat(): the packaged flat-ground asset is missing from "
+            "unigym.assets/worlds/flat_ground.xml"
+        )
+    return {"mjcf": str(resource)}
+
+
 def _camera_entries(
     cameras: CameraSet | JsonValue,
 ) -> list[dict[str, JsonValue]]:
@@ -624,6 +657,9 @@ class Run:
             its controls in *cfg*.  A profile supplies its own assets,
             actuation and topology; the legacy string/dict forms remain for
             config compatibility.
+        spawn: Optional run-owned root spawn mapping (``{"pos": (x, y, z),
+            "yaw": radians?}``) written on the robot articulation entry.  The
+            world never owns a robot or its spawn.
         action_spec: Explicit action layout for the profile path (an
             ``OrderedActionSpec`` or its group mappings).  Required with
             ``robot=<RobotProfile>``; the profile path never derives it from
@@ -659,6 +695,7 @@ class Run:
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
+        spawn: Mapping[str, JsonValue] | None = None,
         action_spec: object | None = None,
         policies: Sequence[object] | None = None,
         robot_profiles: Mapping[str, RobotProfile] | None = None,
@@ -713,6 +750,7 @@ class Run:
                 cameras=cameras,
                 adapter=adapter,
                 robot=robot,
+                spawn=spawn,
                 action_spec=action_spec,
                 policies=policies,
                 backend=backend,
@@ -730,7 +768,6 @@ class Run:
             raw = copy.deepcopy(cfg)
             if world is not None:
                 world.apply(raw)
-                _declare_world_passive_joints(raw)
             if world_base is not None:
                 raw["world_base"] = _world_base_section(world_base)
             if self._backend_options is not None:
@@ -740,7 +777,7 @@ class Run:
             if adapter is not None:
                 raw["adapter"] = _adapter_section(adapter)
             if robot is not None:
-                entry = _articulation_entry(robot)
+                entry = _articulation_entry(robot, spawn)
                 profile = _robot_profile(robot)
                 if profile is not None:
                     cfg_action_spec, cfg_policies = _explicit_action_authoring(
@@ -811,6 +848,7 @@ class Run:
         cameras: CameraSet | JsonValue,
         adapter: JsonValue,
         robot: JsonValue,
+        spawn: Mapping[str, JsonValue] | None,
         action_spec: object | None,
         policies: Sequence[object] | None,
         backend: str | None,
@@ -826,7 +864,7 @@ class Run:
         when ``termination_mode`` is ``external``; otherwise it keeps the
         legacy 10 s default.
         """
-        articulation_entry = _articulation_entry(robot)
+        articulation_entry = _articulation_entry(robot, spawn)
         adapter_section = _adapter_section(adapter)
         backend_label = backend or "mujoco"
         profile = _robot_profile(robot)
@@ -859,7 +897,6 @@ class Run:
         )
         if world is not None:
             world.apply(raw)
-            _declare_world_passive_joints(raw)
         if cameras is not None:
             raw["cameras"] = _json_list(_camera_entries(cameras))
         return raw
@@ -873,6 +910,7 @@ class Run:
         cameras: CameraSet | JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
+        spawn: Mapping[str, JsonValue] | None = None,
         action_spec: object | None = None,
         policies: Sequence[object] | None = None,
         backend: str | None = None,
@@ -897,6 +935,7 @@ class Run:
             cameras=cameras,
             adapter=adapter,
             robot=robot,
+            spawn=spawn,
             action_spec=action_spec,
             policies=policies,
             backend=backend,
@@ -1035,6 +1074,35 @@ class Run:
             cfg = copy.deepcopy(cfg)
             _section(cfg, "env")["backend"] = self._backend
         backend = str(_existing_section(cfg, "env").get("backend", "isaaclab"))
+        info = backend_info(backend)
+        if (
+            self._world is not None
+            and self._world.is_flat
+            and "world_base" not in cfg
+            and "scene_preset" not in cfg
+        ):
+            # World.flat() is backend-neutral: the run layer resolves it to
+            # the backend's own ground.  The MuJoCo family consumes an MJCF
+            # world_base; a backend with a native flat terrain preset (e.g.
+            # IsaacLab2) receives that declaration instead.
+            if info.world_base_consumer:
+                cfg = copy.deepcopy(cfg)
+                cfg["world_base"] = _flat_ground_world_base()
+            elif "terrain" not in cfg and Trait.TERRAIN in info.traits:
+                cfg = copy.deepcopy(cfg)
+                cfg["terrain"] = {"name": "flat", "params": {}}
+            else:
+                # A backend with neither a world_base consumer nor a flat
+                # terrain would silently simulate nothing; fail at the spec
+                # boundary instead (e.g. the isaaclab3 stub).
+                from unigym.errors import ConfigError
+
+                raise ConfigError(
+                    f"World.flat(): backend {backend!r} has no flat-ground "
+                    "resolution (it consumes neither `world_base` nor a flat "
+                    "`terrain` preset); declare an explicit world asset "
+                    "(`World.base(...)` or `World.from_preset(...)`) instead"
+                )
         static_shapes: tuple[JsonValue, ...] = ()
         if self._world is not None and not backend_info(backend).scene_provider_consumer:
             if not self._world.unmapped_static_scene:

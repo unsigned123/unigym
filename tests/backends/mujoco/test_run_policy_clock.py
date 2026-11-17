@@ -79,16 +79,24 @@ def _clock_cfg(mjcf: Path, control_dt: float | None) -> dict:
     }
 
 
-def test_world_articulation_emits_actuation_and_builds(tiny_mjcf: Path) -> None:
-    """A driven world articulation supplies its own actuation (no build failure)."""
-    world = World.base(mjcf=str(tiny_mjcf))
-    world.articulation("tiny", actuation=ACTUATION, adapter="manual")
-    run = Run(world=world, robot="tiny", inspect=True)
+def test_run_owned_articulation_supplies_actuation_on_flat_world(tiny_mjcf: Path) -> None:
+    """The run (never the World) owns the robot asset and its actuation."""
+    run = Run(
+        world=World.flat(),
+        robot={
+            "name": "tiny",
+            "model": {"mjcf": str(tiny_mjcf)},
+            "actuation": ACTUATION,
+        },
+        adapter="manual",
+        inspect=True,
+    )
     try:
         instance = run.build()
 
         emitted = run.cfg["articulations"][0]["actuation"]
         assert emitted == ACTUATION
+        assert run.cfg["world_base"]["mjcf"].endswith("flat_ground.xml")
         assert ("tiny", "tiny") in instance.env.controls
         assert instance.env.controls[("tiny", "tiny")].drive == "position_pd"
     finally:

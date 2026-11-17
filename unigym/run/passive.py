@@ -1,10 +1,10 @@
 """Passive-joint authoring sugar for the programmatic builders.
 
 A profile declares its full actuated vocabulary (``joint_sets``) and
-every control group selects an explicit subset.  The programmatic builders
-(``Run(robot=...)`` / ``World``) are authoring sugar, so the remaining
-profile joints are written into ``passive_joints`` instead of inventing a
-runtime action group.  An explicit caller declaration always wins.
+every control group selects an explicit subset.  The programmatic builder
+(``Run(robot=...)``) is authoring sugar, so the remaining profile joints are
+written into ``passive_joints`` instead of inventing a runtime action group.
+An explicit caller declaration always wins.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from __future__ import annotations
 import copy
 from collections.abc import Sequence
 
-from unigym._typing import JsonValue, is_json_object
+from unigym._typing import JsonValue
 
-__all__ = ["declare_passive_joints", "declare_world_passive_joints"]
+__all__ = ["declare_passive_joints"]
 
 
 def _driven_joints(action_spec: object, art_name: object) -> set[str]:
@@ -88,16 +88,3 @@ def declare_passive_joints(
             passive.append(joint)
     if passive:
         entry["passive_joints"] = passive
-
-
-def declare_world_passive_joints(cfg: dict[str, JsonValue]) -> None:
-    """Declare profile joints of every world articulation no action group drives."""
-    raw_action_spec = cfg.get("action_spec")
-    action_spec: list[JsonValue] = (
-        list(raw_action_spec) if isinstance(raw_action_spec, list) else []
-    )
-    raw_entries = cfg.get("articulations")
-    entries: list[JsonValue] = list(raw_entries) if isinstance(raw_entries, list) else []
-    for entry in entries:
-        if is_json_object(entry):
-            declare_passive_joints(entry, action_spec)

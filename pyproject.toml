@@ -234,6 +234,7 @@ include = ["unigym*"]
 # inside the distribution and resolve through importlib.resources.
 [tool.setuptools.package-data]
 "unigym" = ["py.typed"]
+"unigym.assets" = ["worlds/*.xml"]
 "unigym.webui" = ["*.html", "assets/*"]
 "unigym.props" = ["*.urdf"]
 

@@ -113,10 +113,13 @@ SimulationBuilder(
   (`abs_tol=1e-12`). There is no silent re-quantization.
 - Visible defaults are shown above; there are no hidden world, control or
   action defaults.
-- `builder.world` is required and must declare a non-empty world asset. The
-  world fragment may not declare `articulations` / `action_spec` / `policies`;
-  the builder is the single owner of those tables. `builder.terrain` is sugar for
-  `builder.world.terrain`.
+- `builder.world` is required and must declare a non-empty world asset. A
+  `World` fragment only contributes the environment (`scene_preset` /
+  `world_base` / `objects`): it never declares `articulations` / `action_spec` /
+  `policies`, which are run/facade-owned. `builder.terrain` is sugar for
+  `builder.world.terrain`. `World.flat()` is not accepted here yet (it
+  declares no asset and raises `NoWorldError`); use `Run(world=World.flat(),
+  ...)` directly. See [World and `World.flat()`](world.md).
 - `add_articulation(profile, *, name=None, control=...)` requires an explicit
   `Control` spec; there is no implicit control. Authoring action groups are
   resolved against the `RobotProfile`, their authoring identity is
