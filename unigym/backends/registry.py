@@ -111,6 +111,8 @@ class Trait(Enum):
     MODEL_MOCAP = "MODEL_MOCAP"  # mocap body carriers
     MODEL_EQ_SLOTS = "MODEL_EQ_SLOTS"  # equality slots
     MODEL_USD_PRIMS = "MODEL_USD_PRIMS"  # USD prim hierarchy
+    # --- native escape hatch (external packs only; unstable) ---
+    NATIVE_HANDLE = "NATIVE_HANDLE"  # env.native(backend) -> NativeHandle
 
 
 # --------------------------------------------------------------------------- #
@@ -550,6 +552,7 @@ MUJOCO_TRAITS = _CORE | frozenset(
         Trait.MODEL_MASS_INERTIA,
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
+        Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
 
@@ -586,6 +589,7 @@ MJWARP_TRAITS = _CORE | frozenset(
         Trait.MODEL_MASS_INERTIA,
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
+        Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
 
@@ -622,6 +626,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
         Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
         # The USD prim hierarchy is the isaaclab model face
         Trait.MODEL_USD_PRIMS,
+        Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
 

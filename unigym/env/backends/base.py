@@ -142,6 +142,8 @@ class BackendCapabilities:
     state_write: bool = False  # explicit world-frame state writes
     # (set_root_state/set_joint_state/settle;
     # docs/state_write_contract.md)
+    native_handle: bool = False  # env.native(backend) -> NativeHandle
+    # (external packs only; docs/native_handle.md)
 
     @classmethod
     def full(cls) -> BackendCapabilities:
@@ -161,6 +163,7 @@ class BackendCapabilities:
             contacts=True,
             multi_env=True,
             state_write=True,
+            native_handle=True,
         )
 
     def traits(self) -> frozenset[Trait]:
@@ -188,6 +191,7 @@ class BackendCapabilities:
             "multi_env": (Trait.MULTI_ENV,),
             "snapshot": (Trait.SNAPSHOT,),
             "state_write": (Trait.STATE_WRITE,),
+            "native_handle": (Trait.NATIVE_HANDLE,),
         }
         out: set[Trait] = set()
         for feat, enabled in {
@@ -201,6 +205,7 @@ class BackendCapabilities:
             "multi_env": self.multi_env,
             "snapshot": self.snapshot,
             "state_write": self.state_write,
+            "native_handle": self.native_handle,
         }.items():
             if enabled:
                 out.update(groups[feat])

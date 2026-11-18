@@ -25,5 +25,7 @@ Usage documents:
   resolution per backend, `<option>` inheritance and residual limits.
 - [State-write contract](state_write_contract.md) - optional world-frame,
   wxyz, name-addressed root/joint writes and settle ordering.
+- [NativeHandle escape hatch](native_handle.md) - external-pack-only,
+  unstable `run.native`/`env.native` identity handles; core must not use it.
 - [Simulation facade](sim_facade.md) - experimental `unigym.sim` usage, scope,
   error taxonomy and residual limits.

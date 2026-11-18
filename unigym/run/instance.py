@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from unigym.backends.registry import Trait, backend_info, build_name
+
 from .spec import RunSpec
 
 if TYPE_CHECKING:
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
     from unigym.contacts.manager import ContactManager
     from unigym.director import Director
     from unigym.env.backends.base import EnvBackend
+    from unigym.env.native import NativeHandle
     from unigym.io.writer import ShardWriter
     from unigym.logger import DataCollectLogger
     from unigym.model.live import LiveModel
@@ -63,6 +66,10 @@ if TYPE_CHECKING:
 
         def restore(self, state: object) -> None:
             """Restore a state captured by :meth:`snapshot`."""
+            ...
+
+        def native(self, backend: str) -> NativeHandle:
+            """Return the backend's unstable native escape hatch."""
             ...
 
 
@@ -206,6 +213,44 @@ class RunInstance:
                 live binding yet (mujoco/mjwarp today).
         """
         return self.live_for()
+
+    def native(self, backend: str) -> NativeHandle:
+        """Return the live backend's unstable native escape hatch.
+
+        Args:
+            backend: A backend spelling (canonical or the legacy
+                ``isaaclab`` alias); it is canonicalized and must match this
+                run's live backend.
+
+        Returns:
+            A :class:`~unigym.env.native.NativeHandle` of identity
+            references (external packs only; unstable).
+
+        Raises:
+            ValueError: *backend* does not match the live backend.
+            NotImplementedError: The live backend does not declare the
+                ``NATIVE_HANDLE`` trait (or exposes no native method).
+        """
+        live = build_name(self.spec.backend)
+        requested = build_name(backend)
+        if requested != live:
+            raise ValueError(
+                f"native(backend={backend!r}) does not match this run's live "
+                f"backend {self.spec.backend!r} (canonical: requested "
+                f"{requested!r}, live {live!r})"
+            )
+        if Trait.NATIVE_HANDLE not in backend_info(live).traits:
+            raise NotImplementedError(
+                f"backend {live!r} does not declare the NATIVE_HANDLE trait "
+                f"(env.native is an external-pack-only escape hatch)"
+            )
+        method = getattr(self.env, "native", None)
+        if not callable(method):
+            raise NotImplementedError(
+                f"backend {live!r} declares NATIVE_HANDLE but its env exposes "
+                f"no native() method"
+            )
+        return self.env.native(live)
 
     def close(self) -> None:
         """Idempotent teardown: bridge -> recorder (if it owns one) -> env."""

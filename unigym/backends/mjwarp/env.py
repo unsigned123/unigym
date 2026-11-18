@@ -110,6 +110,7 @@ else:
 
 from unigym.env.backends.base import EnvStep
 from unigym.env.episode import parse_episode_length, sample_durations
+from unigym.env.native import NativeHandle
 from unigym.env.obs import ObservationConfig, ObservationRegistry
 from unigym.backends.obs_schema import build_schema
 from unigym.backends.mjwarp.model import (
@@ -170,6 +171,7 @@ BACKEND_CAPABILITIES = BackendCapabilities(
     props=True,
     multi_env=True,
     state_write=True,
+    native_handle=True,
 )
 
 
@@ -786,23 +788,49 @@ class MjwarpEnv(WarpBatchMixin):
         return self._perm_pol2il
 
     # The camera rigs consume the raw simulator handles
+    def native(self, backend: str) -> NativeHandle:
+        """Return identity references to this backend's native objects.
+
+        External-pack escape hatch only (``docs/native_handle.md``): the
+        handle is unstable and never copies, settles, or writes state.
+        """
+        if backend != "mjwarp":
+            raise ValueError(f"mjwarp backend native() expects backend='mjwarp', got {backend!r}")
+        return NativeHandle(
+            "mjwarp",
+            {
+                "model": self.mj_model,
+                "data": self.mj_data,
+                "datas": self.mj_datas,
+                "warp_model": self._wm,
+                "warp_data": self._wdata,
+            },
+        )
+
     @property
     def mj_model(self):
         """The live ``mujoco.MjModel`` (camera rigs + director ops).
 
         backend-internal; neutral code must use ``BackendInfo.model_handle``
         (``env.mj_model`` is a backend handle, never a neutral surface).
+        External packs must use ``env.native("mjwarp")``.
         """
         return self._model
 
     @property
     def mj_data(self):
-        """The live ``mujoco.MjData`` (rendering must NOT solve on it)."""
+        """The live ``mujoco.MjData`` (rendering must NOT solve on it).
+
+        backend-internal; external packs must use ``env.native("mjwarp")``.
+        """
         return self._data
 
     @property
     def mj_datas(self):
-        """All per-env ``MjData`` handles (index 0 is ``mj_data``)."""
+        """All per-env ``MjData`` handles (index 0 is ``mj_data``).
+
+        backend-internal; external packs must use ``env.native("mjwarp")``.
+        """
         return self._datas
 
     def sync_writes(self, e: int = 0) -> None:
