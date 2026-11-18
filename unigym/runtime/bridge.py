@@ -882,7 +882,8 @@ class Bridge:
         poll_interval: parked StepGate polling period (s).
         state_dir: serve-registry json directory (None = UNIGYM_SERVE_DIR
             or /tmp).  The registry file is removed on clean close.
-        obs_catalog: the run's obs catalog key list (carried into the
+        observation_keys: the run's canonical observation record keys
+            (carried into the
             registry for the daemon's /info face).
         paused: start with the step-gate PAUSED (`unigym debug
             --pause`): the engine parks at the FIRST step boundary and
@@ -935,7 +936,7 @@ class Bridge:
         config: str | None = None,
         out_dir: str | None = None,
         state_dir: str | None = None,
-        obs_catalog: Iterable[str] | None = None,
+        observation_keys: Iterable[str] | None = None,
         paused: bool = False,
         log_path: str | None = None,
         config_doc: Mapping[str, JsonValue] | None = None,
@@ -950,7 +951,7 @@ class Bridge:
         if camera is not None and names and camera not in names:
             raise BridgeError(f"camera {camera!r} not instantiated " f"(cameras: {names})")
         # the run's obs catalog key list (carried in registry v2)
-        self.obs_catalog_keys = sorted(obs_catalog) if obs_catalog is not None else []
+        self.observation_keys = sorted(observation_keys) if observation_keys is not None else []
         self.frame_capacity = int(frame_capacity)
         self.poll_interval = float(poll_interval)
         try:
@@ -1058,7 +1059,7 @@ class Bridge:
 
         # ---- serve registry v2 (breaking schema change; design §2) ------------
         # {run_id, pid, shm, output_dir, log_path, start_ts, cameras[]} is
-        # the v2 core; config/camera/gpu/obs_catalog ride along as the
+        # the v2 core; config/camera/gpu/observation_keys ride along as the
         # daemon's display/preflight face.  port/auth/webui_url/curl_base/
         # tunnel_hint are RETIRED (the run has no port and no token).
         self._state_path = None
@@ -1074,7 +1075,7 @@ class Bridge:
             "camera": self.camera,
             "config": config,
             "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
-            "obs_catalog_keys": self.obs_catalog_keys,
+            "observation_keys": self.observation_keys,
             "started": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         # default registry home is <runtime_dir>/serve;
@@ -1845,7 +1846,7 @@ class Bridge:
                 "gate": self._gate.state,
                 "camera": self.camera,
                 "cameras": list[JsonValue](self.camera_names),
-                "obs_catalog_keys": list[JsonValue](self.obs_catalog_keys),
+                "observation_keys": list[JsonValue](self.observation_keys),
                 "pid": os.getpid(),
                 "frame_id": _u64(buf, H_FPTR) >> 8,
                 "frames_dropped": self._frames_dropped,

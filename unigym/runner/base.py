@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     import torch
 
+    from unigym.env.obs import ObsSnapshot
     from unigym.runtime.actions import NamedAction
 
 
@@ -26,8 +27,8 @@ class StepResult:
     """One policy tick's product (see module docstring)."""
 
     t: int
-    obs: Mapping[str, object]
-    extra: Mapping[str, object]
+    obs: ObsSnapshot
+    record: Mapping[str, object]
     reset_env_ids: torch.Tensor
     terminated: torch.Tensor | None
 

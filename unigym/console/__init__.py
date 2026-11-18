@@ -5,7 +5,7 @@ hooks; docs/contracts/console_contract.md is the contract twin):
 
 * ``stepping.py``   StepGate state machine (pause / request_step / wait
   park loop) -- replaces the bridge's inline freeze loop.
-* ``inspector.py``  Inspector: fixed queries (summary/obs/extra), the
+* ``inspector.py``  Inspector: fixed queries (summary/obs/record), the
   pass-through eval (direct eval/exec, full
   builtins -- module docstring for the rationale), the deterministic
   inline/npz formatting rule and the npz dump
@@ -77,10 +77,10 @@ def parse_console(obj) -> tuple[str, dict]:
                 f"inspect: unexpected key(s) {sorted(extra)} " f"(expected {{type, target, key?}})"
             )
         target = obj.get("target")
-        if target not in ("summary", "obs", "extra"):
-            raise ConsoleError(f"inspect: 'target' must be summary|obs|extra," f" got {target!r}")
+        if target not in ("summary", "obs", "record"):
+            raise ConsoleError(f"inspect: 'target' must be summary|obs|record," f" got {target!r}")
         payload: dict = {"target": target}
-        if target in ("obs", "extra"):
+        if target in ("obs", "record"):
             key = obj.get("key")
             if not isinstance(key, str) or not key:
                 raise ConsoleError(
@@ -108,8 +108,8 @@ def parse_console(obj) -> tuple[str, dict]:
             f"(expected {{type, source?, keys?, path?}})"
         )
     source = obj.get("source", "all")
-    if source not in ("obs", "extra", "all"):
-        raise ConsoleError(f"save_npz: 'source' must be obs|extra|all, got {source!r}")
+    if source not in ("obs", "record", "all"):
+        raise ConsoleError(f"save_npz: 'source' must be obs|record|all, got {source!r}")
     payload = {"source": source}
     keys = obj.get("keys")
     if keys is not None:

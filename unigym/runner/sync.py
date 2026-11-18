@@ -449,6 +449,9 @@ class SyncRunner:
         """Reset the run-scoped iteration state (cmd / obs frame)."""
         all_ids = torch.arange(self.env.num_envs, device=self.env.device)
         self._cmd = None if self.sampler is None else self.sampler.reset(all_ids)
+        observations = getattr(self.env, "observations", None)
+        if getattr(observations, "command", False):
+            self.env.obs.set_command(self._cmd)
         self._obs_frame = None
         self._started = True
 
@@ -509,7 +512,7 @@ class SyncRunner:
             None if self._action_spec is None else self._action_spec.project_groups(targets)
         )
         # 4) physics (interval DR events applied internally)
-        obs, extra = env.step(targets, raw_action=raw, cmd=cmd)
+        step = env.step(targets, raw_action=raw, cmd=cmd)
         # 5) command resample (self-commanding adapter: cmd stays None)
         if sampler is not None:
             if policy_dt is None:
@@ -519,19 +522,29 @@ class SyncRunner:
                     f"explicit policy period"
                 )
             cmd = sampler.update(policy_dt, cmd)
+        # 5b) command/prev_action injection AFTER the sampler update: the
+        # observation always carries the post-sampler command, never the
+        # pre-step value.
+        observations = getattr(env, "observations", None)
+        if getattr(observations, "command", False):
+            env.obs.set_command(cmd)
+        if getattr(observations, "prev_action", False):
+            env.obs.set_prev_action(raw)
+        obs_snapshot = env.obs.snapshot()
         # 6) obs frame (embeds this step's action, rolling history)
-        obs_frame = adapter.compute_obs(env.obs_cache, cmd, env)
+        obs_frame = adapter.compute_obs(obs_snapshot, env)
         # dataset-facing frame (default returns obs_frame itself: the
         # recorded "obs" stays the policy frame unless an adapter
         # overrides compute_obs_collect)
-        obs_collect = adapter.compute_obs_collect(obs_frame, env.obs_cache, cmd, env)
+        obs_collect = adapter.compute_obs_collect(obs_frame, obs_snapshot, env)
         # effective recorded/language command: sampler output, or the
         # adapter's self-generated cascade command (available after act)
         eff_cmd = cmd
         if eff_cmd is None and generates_command:
             eff_cmd = adapter.last_command
         # unified termination check (pure tensor ops, no RNG consumption)
-        term_state = TerminationState.from_extra(extra, joint_pos_limits=self._term_joint_limits)
+        record = step.record
+        term_state = TerminationState.from_extra(record, joint_pos_limits=self._term_joint_limits)
         terminated = self.term_group.check(term_state)
         alive = (~terminated) & torch.isfinite(obs_frame).all(dim=-1)
         term_metrics = {
@@ -545,9 +558,10 @@ class SyncRunner:
             "t": t,
             "raw": raw,
             "targets": targets,
+            "obs": obs_snapshot,
             "obs_frame": obs_frame,
             "obs_collect": obs_collect,
-            "extra": extra,
+            "record": record,
             "cmd": eff_cmd,
             "action_group_values": group_values,
             "terminated": terminated,
@@ -573,14 +587,14 @@ class SyncRunner:
             self._notify_rewind(dict(getattr(rb, "info", {}) or {}))
             return StepResult(
                 t=t,
-                obs=obs,
-                extra=extra,
+                obs=obs_snapshot,
+                record=record,
                 reset_env_ids=torch.zeros(0, dtype=torch.int64, device=device),
                 terminated=terminated,
             )
         self._tick = t + 1
         # reset policy: episode clock due | (terminated | custom mask)
-        due = extra["reset_env_ids"]
+        due = step.reset_env_ids
         added = None
         if self.reset_mask_fn is not None:
             added = torch.as_tensor(self.reset_mask_fn(bundle), dtype=torch.int64, device=device)
@@ -597,10 +611,16 @@ class SyncRunner:
                 adapter.on_reset(due)
                 if sampler is not None:
                     cmd = sampler.reset(due)
+                if getattr(observations, "command", False):
+                    env.obs.set_command(cmd)
+                if getattr(observations, "prev_action", False):
+                    env.obs.set_prev_action(None)
         self.sink.on_step_end(t, bundle)
         self._obs_frame = obs_frame
         self._cmd = cmd
-        return StepResult(t=t, obs=obs, extra=extra, reset_env_ids=due, terminated=terminated)
+        return StepResult(
+            t=t, obs=obs_snapshot, record=record, reset_env_ids=due, terminated=terminated
+        )
 
     def run(self, stop_when: Callable[[], bool] | None = None) -> dict:
         """Run the rollout; returns the sink's summary dict.
@@ -634,7 +654,7 @@ class SyncRunner:
         ``env_ids=None`` resets every env.  This is the protocol's external
         reset entry point (R3 drivers); the collect loop never calls it and
         the tick-order/RNG path is untouched.  The returned StepResult has
-        empty obs/extra because no policy tick was stepped.
+        empty observation/record because no policy tick was stepped.
         """
         env = self.env
         fresh = not self._started
@@ -650,7 +670,18 @@ class SyncRunner:
             self.adapter.on_reset(due)
             if self.sampler is not None and not (fresh and env_ids is None):
                 self._cmd = self.sampler.reset(due)
-        return StepResult(t=int(self._tick), obs={}, extra={}, reset_env_ids=due, terminated=None)
+            observations = getattr(env, "observations", None)
+            if getattr(observations, "command", False):
+                env.obs.set_command(self._cmd)
+            if getattr(observations, "prev_action", False):
+                env.obs.set_prev_action(None)
+        return StepResult(
+            t=int(self._tick),
+            obs=env.obs.snapshot(),
+            record=env.record(),
+            reset_env_ids=due,
+            terminated=None,
+        )
 
     def close(self) -> None:
         """No-op: the synchronous runner owns no loop/thread to stop."""

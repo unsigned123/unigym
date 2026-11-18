@@ -69,7 +69,7 @@ def test_trace_expr_records_authoring_projection_keys(tmp_path):
 
     exec(
         build_dump_expr(str(path)),
-        {"np": np, "torch": torch, "bundle": bundle, "obs_cache": {}},
+        {"np": np, "torch": torch, "bundle": bundle, "obs": {}, "record": {}},
     )
 
     with np.load(path) as data:
@@ -85,7 +85,7 @@ def test_trace_expr_falls_back_to_joint_addressed_keys(tmp_path):
 
     exec(
         build_dump_expr(str(path)),
-        {"np": np, "torch": torch, "bundle": bundle, "obs_cache": {}},
+        {"np": np, "torch": torch, "bundle": bundle, "obs": {}, "record": {}},
     )
 
     with np.load(path) as data:

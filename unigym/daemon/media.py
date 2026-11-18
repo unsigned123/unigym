@@ -855,7 +855,7 @@ def run_info_document(run_id: str, gateway: MediaGateway | None = None) -> dict:
         },
         "render_source": st.get("render_source"),
         "capture_backend": st.get("capture_backend"),
-        "obs_catalog_keys": list(entry.get("obs_catalog_keys") or []),
+        "observation_keys": list(entry.get("observation_keys") or []),
         "output_dir": entry.get("output_dir"),
         "log_path": entry.get("log_path"),
         "registry": entry.get("registry_path"),

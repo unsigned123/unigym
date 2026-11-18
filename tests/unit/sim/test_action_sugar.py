@@ -9,7 +9,6 @@ import torch
 
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
-from unigym.runner.state import read_extra
 from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
     ArticulationHandle,
@@ -93,8 +92,8 @@ def _sim(handle: ArticulationHandle, runner: FakeRunner) -> Simulation:
         env=runner.env,
         run=run,
         owner=handle._owner,
-        state=read_extra(runner.env),
-        obs_cache=dict(runner.env.obs_cache),
+        state=runner.env.record(),
+        obs=runner.env.obs.snapshot(),
         t=0,
     )
 

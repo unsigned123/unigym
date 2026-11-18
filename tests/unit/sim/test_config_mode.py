@@ -34,6 +34,7 @@ def _config_text(*, include_timing: bool = True) -> str:
             "action_spec:",
             "  - {name: arm, articulation: arm, joints: [shoulder],",
             "     target: position, role: body}",
+            "observations: {robot: [arm]}",
             "policies:",
             "  - {adapter: manual, groups: [[arm, arm]]}",
             "",

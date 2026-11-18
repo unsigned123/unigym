@@ -5,7 +5,7 @@ each run writes its own serve registry v2 (/tmp/unigym-serve-<id>.json,
 unigym/runtime/bridge.py):
 
     {schema: 2, run_id, pid, shm, output_dir, log_path, start_ts,
-     cameras[], camera, config, gpu, obs_catalog_keys}
+     cameras[], camera, config, gpu, observation_keys}
 
 The port/auth/webui_url/curl_base/tunnel_hint fields are RETIRED (runs have
 no HTTP port and no token -- the daemon media gateway terminates all

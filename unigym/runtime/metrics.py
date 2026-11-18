@@ -257,8 +257,8 @@ class MetricsWriter:
     @staticmethod
     def _episode_steps(env_ids: torch.Tensor, bundle: Mapping[str, JsonValue]) -> list[int]:
         """Per-ended-env policy step count (time_in_episode / step_dt)."""
-        extra = bundle.get("extra")
-        times = extra.get("time_in_episode") if isinstance(extra, Mapping) else None
+        record = bundle.get("record")
+        times = record.get("time_in_episode") if isinstance(record, Mapping) else None
         env = bundle.get("env")
         step_dt = getattr(env, "step_dt", None)
         if times is None or not isinstance(step_dt, (int, float)) or step_dt <= 0:

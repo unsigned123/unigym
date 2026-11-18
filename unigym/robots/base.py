@@ -283,7 +283,7 @@ class RobotProfile:
 
         joint_order: the ``body`` set as a list.
         full_joint_names: :attr:`full_joint_order` or the union of every
-            declared set.  Published by the ObsCatalog joint keys.
+            declared set.  Published by the observation schema joint keys.
     """
 
     name: str

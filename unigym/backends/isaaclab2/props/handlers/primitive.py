@@ -45,14 +45,12 @@ from unigym.props.base import (
     PropHandler,
     PropPlacement,
     PropSpec,
-    quat_rotate_inverse,
 )
 from unigym.props.primitive import (
     material_colors,
     resolve_mass,
     validate_primitive_spec,
 )
-from unigym.adapters.base import RawObsRequest
 
 
 def _build_primitive_spawn(spec: PropSpec, c: dict):
@@ -101,8 +99,8 @@ def _build_primitive_spawn(spec: PropSpec, c: dict):
 class PrimitiveProp(PropHandler):
     """Dynamic cylinder / capsule prop (freejoint rigid body).
 
-    State keys default to ``<name>_pos_b`` / ``<name>_vel_b`` in the robot
-    body frame (the box-family convention); ``state_keys`` overrides them.
+    World root pose feeds the typed ``ObjectObs`` views; no body-frame
+    request keys are published.
     """
 
     def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
@@ -113,13 +111,6 @@ class PrimitiveProp(PropHandler):
         self.placement = PropPlacement(spec.placement)
         self._roll_quat = _roll_quat(spec.init_roll)
         self._asset = None
-        keys = list(spec.state_keys)
-        if keys:
-            self._pos_key = keys[0]
-            self._vel_key = keys[1] if len(keys) > 1 else keys[0].replace("_pos_", "_vel_")
-        else:
-            self._pos_key = f"{spec.name}_pos_b"
-            self._vel_key = f"{spec.name}_vel_b"
 
     # ------------------------------------------------------------------ #
     # scene configuration
@@ -169,28 +160,6 @@ class PrimitiveProp(PropHandler):
         self._asset.write_root_pose_to_sim(pose, env_ids=env_ids)
         vel = torch.zeros(n, 6, device=env.device, dtype=world_pos.dtype)
         self._asset.write_root_velocity_to_sim(vel, env_ids=env_ids)
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Body-frame ``<name>_pos_b`` / ``<name>_vel_b`` state tensors."""
-        if self._asset is None or not hasattr(self._asset, "data"):
-            return {}
-        robot = env.robot
-        rd = robot.data
-        bd = self._asset.data
-        base_quat = rd.root_quat_w
-        rel = bd.root_pos_w - rd.root_pos_w
-        pos_b = quat_rotate_inverse(base_quat, rel)
-        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w
-        vel_b = quat_rotate_inverse(base_quat, rel_v)
-        return {self._pos_key: pos_b, self._vel_key: vel_b}
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare the two body-frame obs keys this prop exposes."""
-        return [
-            RawObsRequest(self._pos_key, 3, "prop"),
-            RawObsRequest(self._vel_key, 3, "prop"),
-        ]
 
     def get_world_pose(self, env):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""

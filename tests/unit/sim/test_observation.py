@@ -7,6 +7,7 @@ import torch
 
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.sim import ArticulationHandle, CameraHandle, ObservationError
+from unigym.env.obs import ObsSnapshot, ObservationSchema
 from unigym.sim.observation import build_observation
 
 
@@ -70,7 +71,7 @@ def _build(
     state: dict[str, object],
     handle: ArticulationHandle,
     *,
-    obs_cache: dict[str, object] | None = None,
+    snapshot_values: dict[str, object] | None = None,
     cameras: tuple[CameraHandle, ...] = (),
     t: int = 0,
     num_envs: int = 1,
@@ -83,7 +84,13 @@ def _build(
         t=t,
         num_envs=num_envs,
         state=state,
-        obs_cache={} if obs_cache is None else obs_cache,
+        snapshot=ObsSnapshot(
+            snapshot_values or {},
+            schema=ObservationSchema({}),
+            num_envs=num_envs,
+            device="cpu",
+            t=t,
+        ),
         handles=(handle,),
         cameras=cameras,
         reset_env_ids=(
@@ -141,7 +148,6 @@ def test_optional_prev_action_and_command_are_absent_then_copied() -> None:
     """The two optional cached tensors are None when absent and exact when present."""
     handle = _handle()
     state = _state(handle)
-    prefix = f"articulation/{handle.name}"
 
     absent = _build(state, handle)
     assert absent.articulations[handle].prev_action is None
@@ -152,41 +158,11 @@ def test_optional_prev_action_and_command_are_absent_then_copied() -> None:
     present = _build(
         state,
         handle,
-        obs_cache={f"{prefix}/prev_action": prev_action, f"{prefix}/command": command},
+        snapshot_values={"prev_action": prev_action, "command": command},
     )
     record = present.articulations[handle]
     assert record.prev_action is prev_action
     assert record.command is command
-
-
-def test_obs_cache_keeps_non_tensor_record_entries_exactly() -> None:
-    """A record-like cache entry survives the exact copy; projection ignores it."""
-    handle = _handle()
-    state = _state(handle)
-    prefix = f"articulation/{handle.name}"
-    prev_action = torch.tensor([[0.1, 0.2]])
-    probe = {"probe": [1, 2]}
-    cache: dict[str, object] = {
-        "contact_ops/foo": probe,
-        "contact_ops/bar": ["raw", 3],
-        f"{prefix}/prev_action": prev_action,
-    }
-
-    obs = _build(state, handle, obs_cache=cache)
-
-    assert dict(obs.obs_cache) == cache
-    assert obs.obs_cache["contact_ops/foo"] is probe
-    assert obs.articulations[handle].prev_action is prev_action
-
-
-def test_expected_cached_key_present_but_not_a_tensor_is_refused() -> None:
-    """Projected cache keys keep the tensor contract despite the loose copy."""
-    handle = _handle()
-    state = _state(handle)
-    prefix = f"articulation/{handle.name}"
-
-    with pytest.raises(ObservationError, match=f"{prefix}/prev_action"):
-        _build(state, handle, obs_cache={f"{prefix}/prev_action": {"oops": 1}})
 
 
 def test_camera_frames_require_a_published_image_key() -> None:
@@ -203,7 +179,7 @@ def test_camera_frames_require_a_published_image_key() -> None:
         state,
         handle,
         cameras=(rgb_camera, depth_camera, silent_camera),
-        obs_cache={
+        snapshot_values={
             "cam/rgb_cam/rgb": rgb,
             "cam/depth_cam/depth": depth,
         },
@@ -231,22 +207,22 @@ def test_contact_keys_are_collected_and_other_keys_stay_in_raw() -> None:
     obs = _build(state, handle)
 
     assert obs.contacts["contact/left_foot"] is contact
-    assert "object/cube/pos" in obs.raw
+    assert "object/cube/pos" in obs.record
     assert "object/cube/pos" not in obs.contacts
 
 
-def test_raw_is_the_live_state_without_bookkeeping_keys() -> None:
-    """reset_env_ids/should_reset never reach raw; the cache stays separate."""
+def test_record_is_the_live_state_without_bookkeeping_keys() -> None:
+    """reset_env_ids/should_reset never reach the record; obs stays separate."""
     handle = _handle()
     state = _state(handle)
-    cache = {"joint_pos": torch.tensor([[0.25, 0.5]])}
+    values = {"contact/left_foot": torch.tensor([[True]])}
 
-    obs = _build(state, handle, obs_cache=cache)
+    obs = _build(state, handle, snapshot_values=values)
 
-    assert "reset_env_ids" not in obs.raw
-    assert "should_reset" not in obs.raw
-    assert set(obs.raw) == set(state) - {"reset_env_ids", "should_reset"}
-    assert dict(obs.obs_cache) == cache
+    assert "reset_env_ids" not in obs.record
+    assert "should_reset" not in obs.record
+    assert set(obs.record) == set(state) - {"reset_env_ids", "should_reset"}
+    assert dict(obs.obs.values) == values
 
 
 def test_raw_rejects_a_value_that_is_neither_tensor_nor_bool() -> None:
@@ -362,18 +338,3 @@ def test_terminated_mask_shape_and_dtype_are_validated(
 
     with pytest.raises(ObservationError, match=match):
         _build(state, handle, num_envs=2, terminated=terminated)
-
-
-def test_optional_cached_rows_follow_num_envs() -> None:
-    """A projected optional cache tensor also carries num_envs rows."""
-    handle = _handle()
-    state = _state(handle, num_envs=2)
-    prefix = f"articulation/{handle.name}"
-
-    with pytest.raises(ObservationError, match="env rows"):
-        _build(
-            state,
-            handle,
-            num_envs=2,
-            obs_cache={f"{prefix}/prev_action": torch.zeros(1, 2)},
-        )

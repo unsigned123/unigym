@@ -131,6 +131,7 @@ def _write_config(tmp_path: Path, runner_lines: tuple[str, ...]) -> Path:
                 "action_spec:",
                 "  - {name: arm, articulation: arm, joints: [shoulder],",
                 "     target: position, role: body}",
+                "observations: {robot: [arm]}",
                 "policies:",
                 "  - {adapter: manual, groups: [[arm, arm]]}",
                 *runner_lines,

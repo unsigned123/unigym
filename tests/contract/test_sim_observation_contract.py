@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from unigym.robots.base import BodyBinding, RobotProfile
+from unigym.env.obs import ObsSnapshot, ObservationSchema
 from unigym.sim import ArticulationHandle, CameraHandle, Observation, ObservationError
 from unigym.sim.observation import build_observation
 
@@ -61,7 +62,7 @@ def _observation() -> tuple[Observation, ArticulationHandle, CameraHandle]:
         t=2,
         num_envs=1,
         state=_state(),
-        obs_cache=cache,
+        snapshot=ObsSnapshot(cache, schema=ObservationSchema({}), num_envs=1, device="cpu", t=2),
         handles=(handle,),
         cameras=(camera,),
         reset_env_ids=torch.tensor([0], dtype=torch.int64),
@@ -76,9 +77,9 @@ def test_observation_mappings_are_frozen_views() -> None:
     obs, handle, _ = _observation()
 
     with pytest.raises(TypeError):
-        operator.setitem(obs.raw, "extra", torch.zeros(1))
+        operator.setitem(obs.record, "extra", torch.zeros(1))
     with pytest.raises(TypeError):
-        operator.setitem(obs.obs_cache, "extra", torch.zeros(1))
+        operator.setitem(obs.obs.values, "extra", torch.zeros(1))
     with pytest.raises(TypeError):
         operator.setitem(obs.articulations, handle, None)
 
@@ -102,14 +103,13 @@ def test_articulations_are_keyed_by_handle_identity() -> None:
     assert obs.articulations[handle].handle is handle
 
 
-def test_raw_and_obs_cache_stay_distinguishable() -> None:
-    """raw is the live state minus bookkeeping; obs_cache is the step obs copy."""
+def test_record_and_snapshot_stay_distinguishable() -> None:
+    """record is the live state minus bookkeeping; obs is the typed snapshot."""
     obs, handle, _ = _observation()
 
-    assert obs.raw is not obs.obs_cache
-    assert set(obs.raw) == set(_state()) - {"reset_env_ids", "should_reset"}
-    assert set(obs.obs_cache) == {"cam/cam/rgb"}
-    assert obs.articulations[handle].joint_pos is obs.raw["articulation/arm/joint_pos"]
+    assert set(obs.record) == set(_state()) - {"reset_env_ids", "should_reset"}
+    assert set(obs.obs.values) == {"cam/cam/rgb"}
+    assert obs.articulations[handle].joint_pos is obs.record["articulation/arm/joint_pos"]
 
 
 def test_reset_masks_are_distinct_frozen_fields() -> None:
@@ -132,7 +132,7 @@ def test_num_envs_is_validated(num_envs: object) -> None:
             t=0,
             num_envs=num_envs,
             state=_state(),
-            obs_cache={},
+            snapshot=ObsSnapshot({}, schema=ObservationSchema({}), num_envs=1, device="cpu"),
             handles=(_handle(),),
             cameras=(),
             reset_env_ids=torch.zeros(0, dtype=torch.int64),
@@ -141,8 +141,8 @@ def test_num_envs_is_validated(num_envs: object) -> None:
         )
 
 
-def test_projection_does_not_build_a_second_observation_catalog() -> None:
-    """The projection adds no keys to raw or obs_cache beyond the two sources."""
+def test_projection_adds_no_keys_beyond_the_two_sources() -> None:
+    """The projection adds no keys to record or the snapshot."""
     state = _state()
     cache = {"cam/cam/rgb": torch.zeros(1, 4, 4, 3)}
     handle = _handle()
@@ -152,7 +152,7 @@ def test_projection_does_not_build_a_second_observation_catalog() -> None:
         t=0,
         num_envs=1,
         state=state,
-        obs_cache=cache,
+        snapshot=ObsSnapshot(cache, schema=ObservationSchema({}), num_envs=1, device="cpu"),
         handles=(handle,),
         cameras=(camera,),
         reset_env_ids=torch.zeros(0, dtype=torch.int64),
@@ -160,8 +160,8 @@ def test_projection_does_not_build_a_second_observation_catalog() -> None:
         terminated=None,
     )
 
-    assert set(obs.raw) == set(state) - {"reset_env_ids", "should_reset"}
-    assert set(obs.obs_cache) == set(cache)
+    assert set(obs.record) == set(state) - {"reset_env_ids", "should_reset"}
+    assert set(obs.obs.values) == set(cache)
     assert set(obs.contacts) == set()
     assert set(state) == {
         "articulation/arm/joint_pos",
@@ -188,7 +188,7 @@ def test_missing_state_key_raises_the_public_observation_error() -> None:
             t=0,
             num_envs=1,
             state=state,
-            obs_cache={},
+            snapshot=ObsSnapshot({}, schema=ObservationSchema({}), num_envs=1, device="cpu"),
             handles=(handle,),
             cameras=(),
             reset_env_ids=torch.zeros(0, dtype=torch.int64),

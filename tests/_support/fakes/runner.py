@@ -6,14 +6,11 @@ explicit reset chain, a public tick clock, configurable due/terminated row
 masks and deterministic fault injection.  It owns no loop and no thread;
 ``run()`` refuses instead of inventing a policy.
 
-The small ``*StateEnv`` classes implement the private reset-time extra seam
-(``_build_extra`` / ``_read_state`` / ``_extra``) so the shared reader can be
-proved branch by branch without a real engine.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -44,9 +41,6 @@ class FakeRunner:
     by the reset result, so callers can prove the facade clock follows
     ``ticks_done`` rather than a stale result tick.  ``last_actions`` is the
     exact mapping of the most recent ``step``/``tick`` call (the lowered
-    action contract read by facade tests).  ``cache_extra`` is merged into the
-    returned observation cache, so callers can publish non-tensor record
-    entries without adding a production seam.
 
     ``terminated_rows`` and ``due_rows`` make the step result's termination
     mask and episode-clock due mask configurable.  They are reported only: the
@@ -71,7 +65,6 @@ class FakeRunner:
         self.fail_next_tick = False
         self.reset_t: int | None = None
         self.last_actions: tuple[NamedAction, ...] | None = None
-        self.cache_extra: dict[str, object] = {}
         self.terminated_rows = _row_ids(terminated_rows, num_envs, "terminated_rows")
         self.due_rows = _row_ids(due_rows, num_envs, "due_rows")
         self._ticks = 0
@@ -97,12 +90,8 @@ class FakeRunner:
             self.fail_next_tick = False
             self._ticks += 1
             raise RuntimeError("FakeRunner engine failure")
-        obs, extra = self.env.step(actions_override)
-        if self.cache_extra:
-            obs = {**obs, **self.cache_extra}
-        backend_ids = extra["reset_env_ids"]
-        if not isinstance(backend_ids, torch.Tensor):
-            raise RuntimeError("FakeBackend extra reset_env_ids is not a tensor")
+        step = self.env.step(actions_override)
+        backend_ids = step.reset_env_ids
         reset_ids = (
             backend_ids if not self.due_rows else torch.tensor(self.due_rows, dtype=torch.int64)
         )
@@ -111,8 +100,8 @@ class FakeRunner:
             terminated[list(self.terminated_rows)] = True
         result = StepResult(
             t=self._ticks,
-            obs=obs,
-            extra=extra,
+            obs=step.obs,
+            record=step.record,
             reset_env_ids=reset_ids,
             terminated=terminated,
         )
@@ -129,8 +118,8 @@ class FakeRunner:
             due = self.env.reset_envs(torch.as_tensor(list(env_ids), dtype=torch.int64))
         return StepResult(
             t=self._ticks if self.reset_t is None else self.reset_t,
-            obs={},
-            extra={},
+            obs=self.env.obs.snapshot(),
+            record=self.env.record(),
             reset_env_ids=due,
             terminated=None,
         )
@@ -143,55 +132,3 @@ class FakeRunner:
         """Close the shared backend (idempotent)."""
         self._closed = True
         self.env.close()
-
-
-class BuildStateEnv:
-    """Reset-time extra seam with both ``_read_state`` and ``_build_extra``."""
-
-    def __init__(self) -> None:
-        self.device = "cpu"
-        self.read_calls = 0
-        self.build_calls = 0
-
-    def _read_state(self) -> dict[str, object]:
-        """Return the reader payload the builder must consume."""
-        self.read_calls += 1
-        return {"reader": "state"}
-
-    def _build_extra(self, state: Mapping[str, object]) -> dict[str, object]:
-        """Build the extra from the reader payload."""
-        self.build_calls += 1
-        return {"built_from": dict(state)}
-
-
-class BuildOnlyEnv:
-    """Reset-time extra seam with only the no-argument ``_build_extra``."""
-
-    def __init__(self) -> None:
-        self.device = "cpu"
-        self.build_calls = 0
-
-    def _build_extra(self) -> dict[str, object]:
-        """Build the extra without a reader payload."""
-        self.build_calls += 1
-        return {"built": True}
-
-
-class ExtraOnlyEnv:
-    """Minimal double exposing only the ``_extra`` fallback."""
-
-    def __init__(self) -> None:
-        self.device = "cpu"
-        self.extra_calls = 0
-
-    def _extra(self) -> dict[str, object]:
-        """Return the fallback extra mapping."""
-        self.extra_calls += 1
-        return {"fallback": True}
-
-
-class DeviceOnlyEnv:
-    """Minimal double with no extra face at all."""
-
-    def __init__(self) -> None:
-        self.device = "cpu"

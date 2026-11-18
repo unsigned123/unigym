@@ -36,7 +36,7 @@ def resolve_target_expr(target: str) -> tuple[str, str, str | None]:
     if target == "robot":
         expr = (
             "_src = dict((extra or {}) if isinstance(extra, dict) "
-            "else {}); _src.update(obs_cache if isinstance(obs_cache, "
+            "else {}); _src.update(obs if isinstance(obs, "
             "dict) else {}); _v = _src.get('base_pos_w'); "
             "[float(x) for x in (_v[0] if hasattr(_v, 'ndim') and "
             "_v.ndim == 2 else _v)]"

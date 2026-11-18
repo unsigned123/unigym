@@ -130,7 +130,7 @@ _CONSOLE_INSPECT: dict[str, JsonValue] = {
     "type": "object",
     "properties": {
         "type": {"const": "inspect"},
-        "target": {"enum": ["summary", "obs", "extra"]},
+        "target": {"enum": ["summary", "obs", "record"]},
         "key": {"type": "string", "minLength": 1},
     },
     "required": ["target"],
@@ -141,7 +141,7 @@ _CONSOLE_INSPECT: dict[str, JsonValue] = {
             "then": {"required": ["key"]},
         },
         {
-            "if": {"properties": {"target": {"const": "extra"}}, "required": ["target"]},
+            "if": {"properties": {"target": {"const": "record"}}, "required": ["target"]},
             "then": {"required": ["key"]},
         },
     ],
@@ -156,7 +156,7 @@ _CONSOLE_EVAL: dict[str, JsonValue] = {
     "restricted namespace is gone -- full builtins, "
     "imports, assignments, multi-line statements all "
     "execute; injected convenience names np torch "
-    "obs_cache extra bundle adapter env; the last "
+    "obs record bundle adapter env; the last "
     "expression's value is returned; errors land in "
     "result.error, the run never dies)",
 }
@@ -186,7 +186,7 @@ CONSOLE_SCHEMA: dict[str, JsonValue] = {
             "type": "object",
             "properties": {
                 "type": {"const": "save_npz"},
-                "source": {"enum": ["obs", "extra", "all"]},
+                "source": {"enum": ["obs", "record", "all"]},
                 "keys": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                 "path": {"type": "string", "minLength": 1},
             },
@@ -220,7 +220,10 @@ INSPECT_SCHEMA: dict[str, JsonValue] = {
         },
         {
             "type": "object",
-            "properties": {"target": {"const": "extra"}, "key": {"type": "string", "minLength": 1}},
+            "properties": {
+                "target": {"const": "record"},
+                "key": {"type": "string", "minLength": 1},
+            },
             "required": ["key"],
             "additionalProperties": False,
         },
@@ -239,7 +242,7 @@ SAVE_NPZ_SCHEMA: dict[str, JsonValue] = {
     "version": SCHEMA_VERSION,
     "type": "object",
     "properties": {
-        "source": {"enum": ["obs", "extra", "all"]},
+        "source": {"enum": ["obs", "record", "all"]},
         "keys": {"type": "array", "minItems": 1, "items": {"type": "string"}},
         "path": {"type": "string", "minLength": 1},
     },

@@ -219,15 +219,15 @@ class Director:
 
     def on_episode_end(self, env_ids, bundle) -> None:
         """Snapshot + clear per-env directed marks (contract §7)."""
-        extra = bundle.get("extra") if isinstance(bundle, dict) else None
+        record = bundle.get("record") if isinstance(bundle, dict) else None
         for ei in np.asarray(env_ids).reshape(-1).tolist():
             ei = int(ei)
             self._ep_flags.append(
                 {
                     "env_id": ei,
                     "episode_id": (
-                        int(extra["episode_id"][ei])
-                        if isinstance(extra, dict) and "episode_id" in extra
+                        int(record["episode_id"][ei])
+                        if isinstance(record, dict) and "episode_id" in record
                         else None
                     ),
                     "directed": ei in self._directed,

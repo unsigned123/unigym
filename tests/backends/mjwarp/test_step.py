@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 import torch
 
-from unigym.env.backends.base import check_extra_info, check_obs_cache
 from unigym.runtime.actions import NamedAction
 
 pytestmark = pytest.mark.sim
@@ -20,37 +19,27 @@ def _action(env, values):
 
 def test_named_action_step_advances_joints_and_returns_contract_shaped_output(tiny_env):
     """One named-position tick moves the joints and honors the obs/extra contract."""
-    control = tiny_env.controls[("tiny", "tiny")]
 
-    obs, extra = tiny_env.step(_action(tiny_env, [[0.3, -0.2]]))
+    step = tiny_env.step(_action(tiny_env, [[0.3, -0.2]]))
 
-    check_obs_cache(obs, tiny_env.num_envs, device=tiny_env.device)
-    check_obs_cache(tiny_env.obs_cache, tiny_env.num_envs, device=tiny_env.device)
-    check_extra_info(
-        extra,
-        tiny_env.num_envs,
-        len(control.joint_names),
-        device=tiny_env.device,
-    )
-
-    joint_pos = extra["articulation/tiny/joint_pos"]
+    joint_pos = step.record["articulation/tiny/joint_pos"]
     assert 0.0 < joint_pos[0, 0] <= 0.3
     assert -0.2 <= joint_pos[0, 1] < 0.0
-    assert extra["should_reset"] is False
-    assert tuple(extra["reset_env_ids"].shape) == (0,)
-    assert extra["episode_id"].tolist() == [1]
+    assert step.should_reset is False
+    assert tuple(step.reset_env_ids.shape) == (0,)
+    assert step.record["episode_id"].tolist() == [1]
 
 
 def test_named_action_step_keeps_batch_rows_independent(tiny_env_factory):
     """Different per-row targets drive different per-row joints in one batch."""
     env = tiny_env_factory(num_envs=2)
 
-    _, extra = env.step(_action(env, [[0.4, -0.3], [0.2, 0.1]]))
+    step = env.step(_action(env, [[0.4, -0.3], [0.2, 0.1]]))
 
-    joint_pos = extra["articulation/tiny/joint_pos"]
+    joint_pos = step.record["articulation/tiny/joint_pos"]
     assert joint_pos[0, 0] > joint_pos[1, 0] > 0.0
     assert joint_pos[0, 1] < 0.0 < joint_pos[1, 1]
-    assert extra["episode_id"].tolist() == [1, 1]
+    assert step.record["episode_id"].tolist() == [1, 1]
 
 
 def test_reset_envs_resets_only_the_selected_row_and_returns_its_id(tiny_env_factory):
@@ -63,12 +52,12 @@ def test_reset_envs_resets_only_the_selected_row_and_returns_its_id(tiny_env_fac
     assert returned.tolist() == [1]
     assert returned.dtype == torch.int64
 
-    _, extra = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
-    joint_pos = extra["articulation/tiny/joint_pos"]
+    step = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
+    joint_pos = step.record["articulation/tiny/joint_pos"]
     assert float(joint_pos[1].abs().max()) < 0.01
     assert float(joint_pos[0].abs().max()) > 0.01
-    assert extra["episode_id"].tolist() == [1, 2]
-    assert extra["time_in_episode"].tolist() == pytest.approx([0.04, 0.02])
+    assert step.record["episode_id"].tolist() == [1, 2]
+    assert step.record["time_in_episode"].tolist() == pytest.approx([0.04, 0.02])
 
 
 def test_reset_all_resets_every_row_and_returns_the_full_id_range(tiny_env_factory):
@@ -81,10 +70,10 @@ def test_reset_all_resets_every_row_and_returns_the_full_id_range(tiny_env_facto
     assert returned.tolist() == [0, 1]
     assert returned.dtype == torch.int64
 
-    _, extra = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
-    assert float(extra["articulation/tiny/joint_pos"].abs().max()) < 0.01
-    assert extra["episode_id"].tolist() == [2, 2]
-    assert extra["time_in_episode"].tolist() == pytest.approx([0.02, 0.02])
+    step = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
+    assert float(step.record["articulation/tiny/joint_pos"].abs().max()) < 0.01
+    assert step.record["episode_id"].tolist() == [2, 2]
+    assert step.record["time_in_episode"].tolist() == pytest.approx([0.02, 0.02])
 
 
 def test_reset_envs_empty_is_a_noop_and_preserves_requested_id_order(tiny_env_factory):
@@ -96,9 +85,9 @@ def test_reset_envs_empty_is_a_noop_and_preserves_requested_id_order(tiny_env_fa
     assert empty.numel() == 0
     assert empty.dtype == torch.int64
 
-    _, extra = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
-    assert extra["episode_id"].tolist() == [1, 1]
-    assert extra["time_in_episode"].tolist() == pytest.approx([0.04, 0.04])
+    step = env.step(_action(env, [[0.0, 0.0], [0.0, 0.0]]))
+    assert step.record["episode_id"].tolist() == [1, 1]
+    assert step.record["time_in_episode"].tolist() == pytest.approx([0.04, 0.04])
 
     returned = env.reset_envs(torch.tensor([1, 0], dtype=torch.int64))
     assert returned.tolist() == [1, 0]
@@ -123,9 +112,9 @@ def test_joint_addressed_entry_routes_even_without_a_group(tiny_env):
         control.target,
     )
 
-    _, extra = tiny_env.step((entry,))
+    step = tiny_env.step((entry,))
 
-    assert extra["articulation/tiny/joint_pos"].abs().max() < 0.01
+    assert step.record["articulation/tiny/joint_pos"].abs().max() < 0.01
 
 
 @pytest.mark.parametrize("kind", ["torque", "velocity", "effort", "current"])
@@ -152,11 +141,11 @@ def test_direct_torque_writes_the_target_torque(tiny_env_factory):
     """A torque control runs the compiled motors with the requested torque."""
     env = tiny_env_factory(drive="torque", target="torque", law="direct_torque", gains={})
 
-    _, extra = env.step(_action(env, [[2.0, -1.0]]))
+    step = env.step(_action(env, [[2.0, -1.0]]))
 
-    applied = extra["articulation/tiny/applied_torque"]
+    applied = step.record["articulation/tiny/applied_torque"]
     assert applied[0].tolist() == pytest.approx([2.0, -1.0])
-    joint_vel = extra["articulation/tiny/joint_vel"]
+    joint_vel = step.record["articulation/tiny/joint_vel"]
     assert joint_vel[0, 0] > 0.0
     assert joint_vel[0, 1] < 0.0
 
@@ -172,9 +161,9 @@ def test_direct_velocity_writes_the_target_velocity(tiny_env_factory, tiny_veloc
     )
 
     for _ in range(10):
-        _, extra = env.step(_action(env, [[1.0, -1.0]]))
+        step = env.step(_action(env, [[1.0, -1.0]]))
 
-    joint_vel = extra["articulation/tiny/joint_vel"]
+    joint_vel = step.record["articulation/tiny/joint_vel"]
     assert joint_vel[0, 0] > 0.5
     assert joint_vel[0, 1] < -0.5
 
@@ -248,8 +237,8 @@ def test_direct_torque_accepts_a_unit_gain_general_actuator(tiny_env_factory, ti
         gains={},
     )
 
-    _, extra = env.step(_action(env, [[2.0, -1.0]]))
-    applied = extra["articulation/tiny/applied_torque"]
+    step = env.step(_action(env, [[2.0, -1.0]]))
+    applied = step.record["articulation/tiny/applied_torque"]
     assert applied[0].tolist() == pytest.approx([2.0, -1.0])
 
 
@@ -309,9 +298,9 @@ def test_direct_torque_keeps_batch_rows_independent(tiny_env_factory):
         num_envs=2, drive="torque", target="torque", law="direct_torque", gains={}
     )
 
-    _, extra = env.step(_action(env, [[1.0, -1.0], [2.0, 0.5]]))
+    step = env.step(_action(env, [[1.0, -1.0], [2.0, 0.5]]))
 
-    applied = extra["articulation/tiny/applied_torque"]
+    applied = step.record["articulation/tiny/applied_torque"]
     assert applied[0].tolist() == pytest.approx([1.0, -1.0])
     assert applied[1].tolist() == pytest.approx([2.0, 0.5])
 
@@ -329,9 +318,9 @@ def test_mjwarp_rejects_unserved_direct_drives_at_build(tiny_env_factory, drive,
 def test_computed_torque_pd_is_a_supported_non_standard_law(tiny_env_factory):
     """A computed_torque_pd group builds the seam and still tracks a target."""
     env = tiny_env_factory(law="computed_torque_pd")
-    _, extra = env.step(_action(env, [[0.3, -0.2]]))
+    step = env.step(_action(env, [[0.3, -0.2]]))
 
-    joint_pos = extra["articulation/tiny/joint_pos"]
+    joint_pos = step.record["articulation/tiny/joint_pos"]
     assert 0.0 < joint_pos[0, 0] <= 0.3
 
     env.reset_all()
@@ -396,10 +385,10 @@ def test_null_clock_snapshot_and_restore_keep_the_clock_disabled(tiny_env_factor
     snapshot = env.snapshot()
 
     assert snapshot["extra"]["episode_dur"] is None
-    _, extra = env.step(action)
-    assert extra["reset_env_ids"].tolist() == []
+    step = env.step(action)
+    assert step.reset_env_ids.tolist() == []
     assert env.restore(snapshot) == 0
     assert env.snapshot()["extra"]["episode_dur"] is None
-    _, extra = env.step(action)
-    assert extra["reset_env_ids"].tolist() == []
-    assert extra["should_reset"] is False
+    step = env.step(action)
+    assert step.reset_env_ids.tolist() == []
+    assert step.should_reset is False

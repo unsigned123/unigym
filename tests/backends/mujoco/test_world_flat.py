@@ -125,6 +125,7 @@ def test_world_flat_builds_with_a_profile_asset_on_mujoco(robot_asset: Path) -> 
         spawn={"pos": (0.0, 0.0, 0.4)},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
+        observations={"robot": ["flatbot"]},
         backend="mujoco",
         inspect=True,
     )
@@ -159,6 +160,7 @@ def test_world_flat_inherits_the_single_articulation_contact_options(
         spawn={"pos": (0.0, 0.0, 0.4)},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
+        observations={"robot": ["flatbot"]},
         backend="mujoco",
         inspect=True,
     )
@@ -187,6 +189,7 @@ def test_world_flat_rejects_conflicting_world_and_articulation_options(
         spawn={"pos": (0.0, 0.0, 0.4)},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
+        observations={"robot": ["flatbot"]},
         backend="mujoco",
         inspect=True,
     )

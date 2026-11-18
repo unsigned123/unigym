@@ -19,6 +19,7 @@ import torch
 from unigym.actuators import ActuationGroup
 from unigym.actuators.ir import resolve_actuation_groups
 from unigym.adapters.manual import ManualAdapter
+from unigym.env.obs import ObservationConfig
 from unigym.backends.mujoco.env import MujocoEnv
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner import ExternalRunner
@@ -108,6 +109,7 @@ def make_env():
         controls=controls,
         profiles={"tiny": profile},
         actuation_plans=actuation_plans,
+        observations=ObservationConfig(robot=("tiny",)),
     )
     env.adapter_joint_targets = {"manual": {("tiny", "hinge"): "position"}}
     return env

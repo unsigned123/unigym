@@ -40,18 +40,14 @@ from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
 from unigym._typing import JsonValue, is_json_object
-from unigym.cameras.manager import validate_image_frame
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.core import quat
 
 from unigym.env.episode import parse_episode_length, sample_durations
 from .init_pose import build_init_pose_cfg, sample_init_pose
 from .terrains.native import NativeTerrainPreset
-from unigym.env.obs_catalog import (
-    build_obs_catalog,
-    canonicalize_obs_requests,
-    split_articulation_key,
-)
+from unigym.env.obs import ObservationConfig, ObservationRegistry
+from unigym.backends.obs_schema import build_schema
 
 from typing import TYPE_CHECKING
 
@@ -67,6 +63,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 from unigym.env.backends.base import (
     BackendCapabilities,
+    EnvStep,
     normalize_state_env_ids,
     normalize_state_quat,
     validate_state_tensor,
@@ -479,6 +476,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         scene_provider_params: Mapping[str, object] | None = None,
         scene_provider_preset: str | None = None,
         artifact_dir: str | Path | None = None,
+        observations: ObservationConfig | None = None,
     ):
         """Build the collect env: cfg stack, scene fields and manager seams.
 
@@ -516,7 +514,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             prop_manager: optional :class:`unigym.props.PropManager`;
                 its ``setup_scene`` adds interactive prop (door/ball/generic)
                 fields to the scene, ``on_reset`` re-places them each episode,
-                and ``get_state`` injects per-step prop state into obs_cache
+                and ``get_world_poses`` feeds the typed object observation views
                 for adapters that request it.
             lighting: optional dict from yaml ``env.lighting``; configures a
                 DomeLight (sky fill) and/or overrides the DistantLight to
@@ -534,7 +532,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 ``sync_pose`` runs at each step tail; ``on_reset`` after each
                 reset chain; ``tick_and_read`` fills the image obs keys of
                 the cache (shape-validated against the manager's
-                ImageObsRequests).
+                camera frames).
             contact_manager: optional
                 :class:`unigym.contacts.ContactManager` (built by collect.py
                 from yaml ``contacts``, docs/contracts/contacts_contract.md).  Its
@@ -542,7 +540,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 (``setup_scene``); ``bind_env`` resolves bodies + grabs the
                 sensor handles; ``read()`` is merged into ``extra`` as
                 ``contact/<name>`` keys every step (record channel L2) and
-                into obs_cache for adapter-requested keys.
+                into the typed observation registry for selected groups.
             director_cfg: optional yaml ``director`` dict; mounts the virtual
                 gripper scene fields (director_contract §4.3).
             device: torch device string for the sim (default ``cuda:0``).
@@ -572,6 +570,8 @@ class IsaaclabEnv(ManagerBasedEnv):
                 scene the env writes ``scene.json`` / ``resolution.json`` /
                 ``payload_index.json`` / ``compose.txt`` / ``describe.json``
                 there.  ``None`` disables the write.
+            observations: the run's ``ObservationConfig`` (config-declared
+                observation sources).
         """
         # teardown state is initialised before the parent constructor so a
         # failure there still leaves close()/the guards well-defined
@@ -583,6 +583,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             (None, None) if episode_length_s is None else parse_episode_length(episode_length_s)
         )
         self._init_pose = build_init_pose_cfg(init_pose)
+        self.observations = observations
         self._articulation_specs = tuple(articulations or ())
         self._profiles = dict(profiles or {})
         if backend_options:
@@ -718,6 +719,10 @@ class IsaaclabEnv(ManagerBasedEnv):
             self.camera_manager.bind_env(self)
         if self.contact_manager is not None:
             self.contact_manager.bind_env(self)
+        self.observations = (
+            observations if observations is not None else ObservationConfig.from_mapping({})
+        )
+        self._obs_sites = self._resolve_obs_sites(self.observations.site)
 
         # ---- DR events: base class only auto-applies startup for the exact
         # ManagerBasedEnv class, so a subclass must apply it itself. One initial
@@ -776,43 +781,22 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._perm_il2pol = torch.tensor([il_names.index(n) for n in pol_names], device=self.device)
         self._perm_pol2il = torch.argsort(self._perm_il2pol)
         self._q0_art = art.q0_art
-        self._joint_gathers: dict = {}
 
-        # ---- obs cache: fill only what the adapter requested ----
-        self._obs_requests = adapter.get_obs_requests()
-        if self.contact_manager is not None:
-            self.contact_manager.register_obs_requests({r.key for r in self._obs_requests})
-        self._obs_requests = canonicalize_obs_requests(self._obs_requests)
-        # rebuild the catalogs with the wired managers (camera/contact/props)
-        entries = {}
-        requestable = set()
-        self.obs_catalogs = {}
-        for a in self.articulations.values():
-            cat = build_obs_catalog(
-                a.profile,
+        # ---- typed observation registry (config-declared sources) ----
+        self.obs = ObservationRegistry(
+            self.observations,
+            build_schema(
+                self.observations,
+                env=self,
                 camera_manager=self.camera_manager,
-                prop_manager=self.prop_manager,
                 contact_manager=self.contact_manager,
-                zero_fill_props=True,
-                articulation_joint_names=list(a.joint_names),
-                articulation=a.name,
-            )
-            a.catalog = cat
-            self.obs_catalogs[a.name] = cat
-            entries.update(cat.entries)
-            requestable |= cat.requestable
-        from unigym.env.obs_catalog import ObsCatalog
-
-        self.obs_catalog = ObsCatalog(entries, requestable)
-        for req in self._obs_requests:
-            self.obs_catalog.validate_request(req)
-            if split_articulation_key(req.key)[1] in (
-                "joint_pos_rel",
-                "joint_vel",
-                "applied_torque",
-            ):
-                self._joint_gather(req.joint_names, req)
-        self.obs_cache: dict = {}
+                prop_manager=self.prop_manager,
+                sites=tuple(name for name, _ in self._obs_sites),
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
+        )
+        self._t = 0
 
         # ---- episode bookkeeping (per-env) ----
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
@@ -834,16 +818,27 @@ class IsaaclabEnv(ManagerBasedEnv):
         from . import articulation_runtime as _articulation_runtime
 
         self.prop_manager = None
-        self._obs_requests = adapter.get_obs_requests()
-        if self._obs_requests:  # pragma: no cover - rejected pre-super
-            raise NotImplementedError(
-                "isaaclab2 backend: adapter obs requests are not supported "
-                "with multiple articulations"
-            )
         _articulation_runtime.bind_articulations(self)
         if self.contact_manager is not None:
             self.contact_manager.bind_env(self)
-        self.obs_cache: dict = {}
+        self.observations = getattr(self, "observations", None) or ObservationConfig.from_mapping(
+            {}
+        )
+        self._obs_sites = self._resolve_obs_sites(self.observations.site)
+        self.obs = ObservationRegistry(
+            self.observations,
+            build_schema(
+                self.observations,
+                env=self,
+                camera_manager=self.camera_manager,
+                contact_manager=self.contact_manager,
+                prop_manager=None,
+                sites=tuple(name for name, _ in self._obs_sites),
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
+        )
+        self._t = 0
 
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
@@ -975,130 +970,86 @@ class IsaaclabEnv(ManagerBasedEnv):
     # ------------------------------------------------------------------ #
     # obs cache
     # ------------------------------------------------------------------ #
-    def _articulation_for_key(self, key):
-        name, _ = split_articulation_key(key)
-        if name is None:
-            if len(self.articulations) != 1:
-                raise ValueError(
-                    f"isaaclab2 backend: obs key {key!r} does not name an "
-                    f"articulation; this run has {sorted(self.articulations)}"
-                )
-            return next(iter(self.articulations.values()))
-        try:
-            return self.articulations[name]
-        except KeyError:
-            raise ValueError(
-                f"isaaclab2 backend: obs key {key!r} names unknown "
-                f"articulation {name!r}; declared: "
-                f"{sorted(self.articulations)}"
-            ) from None
+    def _resolve_obs_sites(self, declared) -> list:
+        """isaaclab2 has no site readback face: selected sites fail at build.
 
-    def _joint_gather(self, names, req=None) -> torch.Tensor:
-        art = (
-            self._articulation_for_key(req.key)
-            if req is not None
-            else next(iter(self.articulations.values()))
-        )
-        key = (art.name, tuple(names))
-        g = self._joint_gathers.get(key)
-        if g is None:
-            index = {n: i for i, n in enumerate(art.joint_names)}
-            missing = sorted(set(names) - set(index))
-            if missing:
-                raise ValueError(
-                    f"isaaclab2 backend: obs joint names {missing} are not "
-                    f"asset joints of articulation {art.name!r}"
-                )
-            g = torch.tensor([index[n] for n in names], dtype=torch.int64, device=self.device)
-            self._joint_gathers[key] = g
-        return g
+        BLOCKED: a real site inventory/readback needs a backend scene-site
+        trait.  Failing here keeps the schema honest (no advertised key that
+        ``env.obs.site`` cannot serve).
+        """
+        from unigym.backends.obs_schema import require_sites
 
-    def _joint_obs(self, req) -> torch.Tensor:
-        """Serve a joint-vector request by name gather over the articulation."""
-        art = self._articulation_for_key(req.key)
-        base = split_articulation_key(req.key)[1]
-        g = self._joint_gather(req.joint_names, req)
-        d = art.asset.data
-        if base == "joint_pos_rel":
-            return d.joint_pos[:, g] - art.q0_art[g]
-        if base == "applied_torque":
-            return d.applied_torque[:, g]
-        return d.joint_vel[:, g]
+        require_sites("isaaclab2", declared, inventory=None)
+        return []
 
-    def _refresh_obs_cache(
-        self, raw_action: torch.Tensor | None = None, cmd: torch.Tensor | None = None
-    ) -> None:
-        if self._partitioned:
-            from . import articulation_runtime as _articulation_runtime
-
-            _articulation_runtime.refresh_obs_cache(self, raw_action, cmd)
-        # prop state (when present) -- injected every step so adapters that
-        # request prop keys (door/ball) read live values. No props -> the fetch
-        # loop below zero-fills any prop key the adapter still requests.
-        if self.prop_manager is not None:
-            prop_state = self.prop_manager.get_state(self)
-            for k, v in prop_state.items():
-                self.obs_cache[k] = v
-        d = self.robot.data
-        # feat/camera-obs: image keys come from the CameraManager (interval
-        # sampling + placeholder fallback live there); entries are already
-        # shape/dtype-validated inside tick_and_read, and re-checked below
-        # against each request's shape branch.
+    def _refresh_obs(self, raw_action=None, cmd=None) -> None:
+        """Refresh the typed observation registry exactly once per step."""
+        self.obs.t = int(self._t)
+        schema = self.obs.schema
         if self.camera_manager is not None:
-            for k, v in self.camera_manager.tick_and_read().items():
-                self.obs_cache[k] = v
-        # feat/contact-manager: adapter-requested contact/<name> keys are
-        # injected every step (same serve pattern as prop keys above); NOT
-        # requested -> never enters the obs cache, recording unaffected.
-        if self.contact_manager is not None and self.contact_manager.obs_keys():
-            for k, v in self.contact_manager.read().items():
-                if k in self.contact_manager.obs_keys():
-                    self.obs_cache[k] = v
-        fetch = {
-            "gravity_b": lambda: d.projected_gravity_b,
-            # joint_pos_rel / joint_vel are served per-request by
-            # _joint_obs (name gather over the full articulation)
-            "command": lambda: cmd,
-            "prev_action": lambda: raw_action,
-            # additive obs sources
-            "base_ang_vel_b": lambda: d.root_ang_vel_b,
-            "base_yaw": lambda: math_utils.euler_xyz_from_quat(d.root_quat_w)[2].unsqueeze(-1),
-            # additive obs source (recovery-switching termination state)
-            "base_pos_w": lambda: d.root_pos_w,
-            # additive obs source (SymmLoco projected_forward_vec needs
-            # the full base orientation; pure-raw quat in (w,x,y,z))
-            "base_quat_w": lambda: d.root_quat_w,
-        }
-        for req in self._obs_requests:
-            # camera-served keys (ImageObsRequest or depth alias): validate
-            # by FULL SHAPE + dtype (the manager contract), not last-dim
-            if self.camera_manager is not None and req.key in self.camera_manager.obs_keys():
-                val = self.obs_cache.get(req.key)
-                if val is not None:
-                    validate_image_frame(
-                        self.camera_manager.frame_request(req.key), val, self.num_envs
+            for key, value in self.camera_manager.tick_and_read().items():
+                if key in schema:
+                    self.obs.set_camera(key, value)
+        if self.contact_manager is not None:
+            for key, value in self.contact_manager.read().items():
+                if key in schema:
+                    self.obs.set_contact(key[len("contact/") :], value)
+            for name in self.observations.contact:
+                if self.contact_manager.has_detail(name):
+                    self.obs.set_contact_detail_provider(
+                        name,
+                        lambda name=name: self.contact_manager.read_detail(name),
                     )
-                continue
-            base = split_articulation_key(req.key)[1]
-            if base in ("joint_pos_rel", "joint_vel", "applied_torque"):
-                val = self._joint_obs(req)
-            elif base not in fetch:
-                # prop-provided key (or zero-fill when no props configured):
-                # validate shape if it was injected by the PropManager this step.
-                v = self.obs_cache.get(req.key)
-                if v is None:
-                    v = torch.zeros(self.num_envs, req.dim, device=self.device)
-                    self.obs_cache[req.key] = v
-                elif v.shape[-1] != req.dim:
-                    raise ValueError(f"obs '{req.key}' dim {v.shape[-1]} != requested {req.dim}")
-                continue
-            else:
-                val = fetch[base]()
-            if val is None:
-                continue  # passthrough value not provided this call; keep stale entry
-            if val.shape[-1] != req.dim:
-                raise ValueError(f"obs '{req.key}' dim {val.shape[-1]} != requested {req.dim}")
-            self.obs_cache[req.key] = val
+        if self.prop_manager is not None:
+            self.prop_manager.on_step(self)
+            poses = self.prop_manager.get_world_poses(self)
+            for name in self.observations.object:
+                if name in poses:
+                    pos, quat_w = poses[name]
+                    self.obs.set_object(name, "pos", pos)
+                    self.obs.set_object(name, "quat", quat_w)
+            joints = self.prop_manager.get_articulation_joint_states(self)
+            for name in self.observations.object:
+                for joint_name, value in (joints.get(name) or {}).items():
+                    if f"object/{name}/joints/{joint_name}" in schema:
+                        self.obs.set_object(name, f"joints/{joint_name}", value)
+        self._refresh_articulations()
+        if self.observations.command:
+            self.obs.set_command(cmd)
+        if self.observations.prev_action:
+            self.obs.set_prev_action(raw_action)
+
+    def _refresh_articulations(self) -> None:
+        for name in self.observations.robot:
+            art = self.articulations[name]
+            d = art.asset.data
+            perm = art.perm_il2pol
+            full_q = d.joint_pos
+            q0 = art.q0_art
+            self.obs.set_robot(name, "joint_pos", full_q[:, perm])
+            self.obs.set_robot(name, "joint_pos_rel", full_q - q0)
+            self.obs.set_robot(name, "joint_vel", d.joint_vel[:, perm])
+            self.obs.set_robot(name, "joint_vel_full", d.joint_vel)
+            self.obs.set_robot(name, "applied_torque", d.applied_torque[:, perm])
+            self.obs.set_robot(name, "gravity_b", d.projected_gravity_b)
+            self.obs.set_robot(name, "base_pos_w", d.root_pos_w)
+            self.obs.set_robot(name, "base_quat_w", d.root_quat_w)
+            self.obs.set_robot(name, "base_lin_vel_w", d.root_lin_vel_w)
+            self.obs.set_robot(name, "base_ang_vel_w", d.root_ang_vel_w)
+            self.obs.set_robot(name, "base_lin_vel_b", d.root_lin_vel_b)
+            self.obs.set_robot(name, "base_ang_vel_b", d.root_ang_vel_b)
+            self.obs.set_robot(
+                name,
+                "base_yaw",
+                math_utils.euler_xyz_from_quat(d.root_quat_w)[2].unsqueeze(-1),
+            )
+
+    def record(self) -> dict[str, object]:
+        """The current record mapping (canonical keys + bookkeeping)."""
+        record: dict[str, object] = dict(self.obs.record())
+        record["time_in_episode"] = self._time_in_episode.clone()
+        record["episode_id"] = self._episode_id.clone()
+        return record
 
     # ------------------------------------------------------------------ #
     # stepping
@@ -1108,7 +1059,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
-    ) -> tuple[dict, dict]:
+    ) -> EnvStep:
         """Advance one policy step.
 
         Args:
@@ -1117,11 +1068,11 @@ class IsaaclabEnv(ManagerBasedEnv):
                 control joint must be addressed exactly once.  Entry joint
                 names are resolved onto the term's flat input slice
                 (preserve_order terms; resolver cached per name-tuple).
-            raw_action: adapter raw action (policy order) -> obs_cache["prev_action"].
-            cmd: current command tensor -> obs_cache["command"].
+            raw_action: adapter raw action (policy order) -> the prev_action slot.
+            cmd: current command tensor -> the command slot.
 
         Returns:
-            (obs_cache copy, extra_info). ``extra["reset_env_ids"]`` lists the
+            an ``EnvStep``. ``step.reset_env_ids`` lists the
             envs whose episode clock reached its duration (caller records this
             step first, then calls :meth:`reset_envs with the same ids).
             ``extra["should_reset"]`` (bool) part of the stable extra face.
@@ -1130,22 +1081,29 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._raise_if_closed()
         super().step(self._route_named_actions(actions))
         self._time_in_episode += self.step_dt
-        self._refresh_obs_cache(raw_action, cmd)
-        extra = self._build_extra()
+        self._refresh_obs(raw_action, cmd)
         if self._episode_dur is None:
             # external termination mode: the task owns every reset decision.
-            extra["reset_env_ids"] = torch.empty(0, dtype=torch.int64, device=self.device)
-            extra["should_reset"] = False
+            reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
+            should_reset = False
         else:
             due = self._time_in_episode >= self._episode_dur
-            extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1)
-            extra["should_reset"] = bool(due.any())
+            reset_ids = torch.nonzero(due).squeeze(-1).to(torch.int64)
+            should_reset = bool(due.any())
         if self.camera_manager is not None:
             # step-tail posing: the render inside the NEXT step's sim.step
             # captures this pose (the classic re-pose semantics,
             # now rig-driven; see cameras/rigs.py)
             self.camera_manager.sync_pose()
-        return dict(self.obs_cache), extra
+        step = EnvStep(
+            t=int(self._t),
+            obs=self.obs.snapshot(),
+            record=self.record(),
+            reset_env_ids=reset_ids,
+            should_reset=should_reset,
+        )
+        self._t += 1
+        return step
 
     def _route_named_actions(self, actions: Sequence[NamedAction]) -> torch.Tensor:
         """Resolve + gather joint-addressed actions onto the flat term input.
@@ -1159,27 +1117,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         from . import articulation_runtime as _articulation_runtime
 
         return _articulation_runtime.route_actions(self, actions)
-
-    def _build_extra(self) -> dict:
-        """Per-step recorded quantities, read post-step like the verify script."""
-        from . import articulation_runtime as _articulation_runtime
-
-        extra = _articulation_runtime.build_extra(self)
-        contact_values = self.contact_manager.read() if self.contact_manager is not None else None
-        if contact_values is not None:
-            extra.update(contact_values)
-        if self.prop_manager is not None:
-            from unigym.props.object_state import build_object_extra
-
-            self.prop_manager.on_step(self)
-            extra.update(
-                build_object_extra(
-                    self.prop_manager,
-                    self.prop_manager.get_world_poses(self),
-                    joint_states=self.prop_manager.get_articulation_joint_states(self),
-                )
-            )
-        return extra
 
     # ------------------------------------------------------------------ #
     # optional state-write face (docs/state_write_contract.md)
@@ -1328,7 +1265,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         """Flush pending target data, forward the view, refresh the cache.
 
         Mirrors the reset chain ordering: ``scene.write_data_to_sim()`` ->
-        ``sim.forward()`` -> camera re-pose -> ``obs_cache`` refresh.  Callers
+        ``sim.forward()`` -> camera re-pose -> observation refresh.  Callers
         must settle after writes before reading observations or
         contact/camera-dependent state.
         """
@@ -1338,7 +1275,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         self.sim.forward()
         if self.camera_manager is not None:
             self.camera_manager.on_reset(ids)
-        self._refresh_obs_cache()
+        self._refresh_obs()
         return ids
 
     # ------------------------------------------------------------------ #
@@ -1438,7 +1375,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 # scene.update(0) pairing is the verified combo.
                 self.sim.render()
                 self.scene.update(dt=0)
-        self._refresh_obs_cache()  # cache now reflects spawn state
+        self._refresh_obs()  # registry now reflects spawn state
         return env_ids
 
     def reset_all(self) -> torch.Tensor:

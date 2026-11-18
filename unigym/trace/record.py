@@ -4,7 +4,7 @@ Transport ``console_eval_dump.v1`` -- the recorder parks the engine
 (``pause``), then per sampled tick: ``step(every) -> status -> console
 eval-dump``.  The eval expression (one multi-statement block, trailing
 expression returned) assembles the tick bundle from the run's injected
-namespace (``np torch obs_cache bundle``) and writes the tick npz DIRECTLY
+namespace (``np torch obs record bundle``) and writes the tick npz DIRECTLY
 in contract §2 key layout -- one req-ack per tick, zero run-side changes.
 
 The loop talks to an :class:`RecorderOps` transport so unit tests can
@@ -27,7 +27,7 @@ SOURCE_KIND = "unigym"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # One console eval per sampled tick.  Contract keys (§2): obs/<key> from
-# obs_cache (images excluded: ndim >= 3), extra/<key> from bundle['extra'],
+# obs (images excluded: ndim >= 3), record/<key> from bundle['record'],
 # action/<name> from bundle['action_group_values'] (the spec+prop-derived
 # authoring projection; historical action/<group> keys) or, when absent, one
 # per-entry action/<articulation>/<comma-joined joints> key from
@@ -38,7 +38,7 @@ _arrs = {{}}
 def _as_np(v):
     return v.detach().cpu().numpy() if torch.is_tensor(v) else np.asarray(v)
 _b = bundle if isinstance(bundle, dict) else {{}}
-_oc = obs_cache if isinstance(obs_cache, dict) else {{}}
+_oc = obs if isinstance(obs, dict) else {{}}
 for _k, _v in _oc.items():
     try:
         _a = _as_np(_v)
@@ -46,7 +46,7 @@ for _k, _v in _oc.items():
         continue
     if _a.ndim <= 2 and _a.dtype.kind in 'bfiu':
         _arrs['obs/' + str(_k)] = _a
-for _k, _v in (_b.get('extra') or {{}}).items():
+for _k, _v in (_b.get('record') or {{}}).items():
     if _v is None or isinstance(_v, (str, bytes, bool, int, float)):
         continue
     try:
@@ -54,7 +54,7 @@ for _k, _v in (_b.get('extra') or {{}}).items():
     except Exception:
         continue
     if _a.ndim <= 2 and _a.dtype.kind in 'bfiu':
-        _arrs['extra/' + str(_k)] = _a
+        _arrs['record/' + str(_k)] = _a
 _targets = _b.get('targets') or ()
 _proj = _b.get('action_group_values')
 _pairs = []

@@ -47,8 +47,8 @@ def test_observed_joint_tensors_match_the_step_extra(tmp_path: Path, tiny_mjcf: 
 
     prefix = f"articulation/{handle.name}"
     record = obs.articulations[handle]
-    joint_pos = obs.raw[f"{prefix}/joint_pos"]
-    joint_vel = obs.raw[f"{prefix}/joint_vel"]
+    joint_pos = obs.record[f"{prefix}/joint_pos"]
+    joint_vel = obs.record[f"{prefix}/joint_vel"]
     assert isinstance(joint_pos, torch.Tensor)
     assert isinstance(joint_vel, torch.Tensor)
 

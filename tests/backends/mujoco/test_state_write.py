@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 import torch
 
-from unigym.adapters.base import RawObsRequest
-from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mujoco.env import _one_dof_joint_id
 from unigym.props import build_prop_manager
 
@@ -239,24 +237,9 @@ def test_non_one_dof_joints_are_rejected():
         _one_dof_joint_id(model, "ball", "ball", ARTICULATION)
 
 
-class _BaseStateAdapter(ManualAdapter):
-    """Requests base state so settle has a cache entry to refresh."""
-
-    def get_obs_requests(self):
-        return [
-            RawObsRequest("base_pos_w", 3, "robot", articulation=ARTICULATION),
-            RawObsRequest("base_quat_w", 4, "robot", articulation=ARTICULATION),
-            RawObsRequest("base_ang_vel_b", 3, "robot", articulation=ARTICULATION),
-        ]
-
-    @property
-    def obs_dim(self) -> int:
-        return 10
-
-
-def test_settle_refreshes_obs_cache_and_angular_derivations(tiny_env_factory):
+def test_settle_refreshes_observations_and_angular_derivations(tiny_env_factory):
     """settle runs mj_forward and republishes world/base angular cache values."""
-    env = tiny_env_factory(adapter=_BaseStateAdapter())
+    env = tiny_env_factory()
     env.set_root_state(
         None,
         name=ARTICULATION,
@@ -269,14 +252,14 @@ def test_settle_refreshes_obs_cache_and_angular_derivations(tiny_env_factory):
     returned = env.settle(None)
 
     assert returned.tolist() == [0]
-    assert env.obs_cache["articulation/tiny/base_pos_w"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_pos_w"][0].tolist() == pytest.approx(
         [0.2, -0.1, 0.9]
     )
-    assert env.obs_cache["articulation/tiny/base_quat_w"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_quat_w"][0].tolist() == pytest.approx(
         _quat_90_x()[0].tolist()
     )
     # body-local angular qvel for a world +z angular velocity under Rx(90).
-    assert env.obs_cache["articulation/tiny/base_ang_vel_b"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_ang_vel_b"][0].tolist() == pytest.approx(
         [0.0, 1.0, 0.0], abs=1e-6
     )
     state = env._read_state()

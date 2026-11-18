@@ -25,6 +25,7 @@ def build_tiny_env(
     law: str = "standard_pd",
     gains: dict | None = None,
     parts: tuple[str, ...] | None = None,
+    control_joints: tuple[str, ...] = JOINT_ORDER,
     plans: bool = True,
     params: dict | None = None,
     contact_manager=None,
@@ -32,11 +33,13 @@ def build_tiny_env(
     asset_plan=None,
     artifact_dir=None,
     adapter=None,
+    observations=None,
 ):
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.mujoco.env import MujocoEnv
     from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
@@ -57,7 +60,7 @@ def build_tiny_env(
     actuation = ActuationGroup(
         name="body",
         law=law,
-        joints=JOINT_ORDER,
+        joints=control_joints,
         gains={"kp": KP, "kd": KD} if gains is None else gains,
         parts=parts,
     )
@@ -65,11 +68,12 @@ def build_tiny_env(
         name=ARTICULATION,
         spawn={"pos": [0.0, 0.0, 0.8]} if spawn is None else spawn,
         actuation=(actuation,),
+        passive_joints=tuple(j for j in JOINT_ORDER if j not in control_joints),
     )
     group = OrderedActionGroup(
         name=CONTROL,
         articulation=ARTICULATION,
-        joints=JOINT_ORDER,
+        joints=control_joints,
         target=target,
         role="body",
     )
@@ -77,6 +81,7 @@ def build_tiny_env(
         articulation.actuation,
         articulation=ARTICULATION,
         joints=JOINT_ORDER,
+        passive_joints=tuple(j for j in JOINT_ORDER if j not in control_joints),
     )
     controls = build_control_runtimes(
         OrderedActionSpec((group,)),
@@ -104,6 +109,11 @@ def build_tiny_env(
         prop_manager=prop_manager,
         asset_plan=asset_plan,
         artifact_dir=artifact_dir,
+        observations=(
+            observations
+            if observations is not None
+            else ObservationConfig(robot=(ARTICULATION,), command=True, prev_action=True)
+        ),
     )
 
 
@@ -122,6 +132,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         law: str = "standard_pd",
         gains: dict | None = None,
         parts: tuple[str, ...] | None = None,
+        control_joints: tuple[str, ...] = JOINT_ORDER,
         plans: bool = True,
         params: dict | None = None,
         mjcf: Path | None = None,
@@ -130,6 +141,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         asset_plan=None,
         artifact_dir=None,
         adapter=None,
+        observations=None,
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -141,6 +153,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             law=law,
             gains=gains,
             parts=parts,
+            control_joints=control_joints,
             plans=plans,
             params=params,
             contact_manager=contact_manager,
@@ -148,6 +161,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             asset_plan=asset_plan,
             artifact_dir=artifact_dir,
             adapter=adapter,
+            observations=observations,
         )
         created.append(env)
         return env

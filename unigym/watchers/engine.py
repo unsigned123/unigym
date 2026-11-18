@@ -568,7 +568,7 @@ class WatcherEngine:
         return {"path": str(path), "camera": cam}
 
     def _dump(self, spec: WatchSpec, t: int) -> dict:
-        """One npz on the trace key face (obs/... extra/... + tick)."""
+        """One npz on the trace key face (obs/... record/... + tick)."""
         if self.out_dir is None:
             return {"skipped": "no output dir"}
         if self.dumps >= _DUMP_BUDGET:
@@ -580,7 +580,7 @@ class WatcherEngine:
         if ctx is None:
             return {"skipped": "no tick evaluated yet"}
         arrays: dict = {"tick": np.asarray(int(t))}
-        for prefix, src in (("obs/", ctx.obs_cache), ("extra/", ctx.extra)):
+        for prefix, src in (("obs/", ctx.obs), ("record/", ctx.record)):
             for k in sorted(src):
                 try:
                     arrays[prefix + k] = _to_numpy(src[k])

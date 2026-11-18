@@ -20,9 +20,8 @@ carries, "equivalent combination").  Runtime:
   qpos and zero the joint velocity (no carry-over across episodes);
 * ``get_world_poses`` -- ``{name: (pos (3,), quat (4,) wxyz)}`` from
   ``data.xpos``/``data.xquat`` for the object/* record layer;
-* ``get_state`` -- body-frame ``<name>_pos_b``/``<name>_vel_b`` relative
-  to the robot base (pelvis), mirroring the isaaclab handlers' obs
-  semantics for adapters that request prop keys.
+* ``get_joint_states`` -- articulation-prop joint positions for the typed
+  object observation views.
 
 Record tensors are batched to ``(num_envs, ...)`` (one row per env
 ``MjData``) so the object layer is backend-agnostic.
@@ -35,7 +34,6 @@ from typing import Any
 import numpy as np
 import torch
 
-from unigym.adapters.base import RawObsRequest
 from unigym.props.articulation import validate_joints, validate_latch
 from unigym.props.base import PropHandler, PropPlacement, PropSpec
 from unigym.props import container as container_mod
@@ -90,16 +88,6 @@ class MujocoPropHandler(PropHandler):
         self.num_envs = num_envs
         self.device = device
         self.placement = PropPlacement(spec.placement)
-        self._pos_key = f"{spec.name}_pos_b"
-        self._vel_key = f"{spec.name}_vel_b"
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare the body-frame obs keys this prop exposes."""
-        return [
-            RawObsRequest(self._pos_key, 3, "prop"),
-            RawObsRequest(self._vel_key, 3, "prop"),
-        ]
 
 
 class MujocoBallProp(MujocoPropHandler):
@@ -114,8 +102,6 @@ class MujocoBallProp(MujocoPropHandler):
             )
         resolve_mass(spec, default=0.1)
         super().__init__(spec, num_envs, device, base_dir)
-        self._pos_key = "ball_pos_b"
-        self._vel_key = "ball_vel_b"
 
 
 class MujocoGenericProp(MujocoPropHandler):
@@ -124,25 +110,6 @@ class MujocoGenericProp(MujocoPropHandler):
     def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         super().__init__(spec, num_envs, device, base_dir)
         self.static = bool(spec.type == "usd" and spec.spawn.get("static", False))
-        if spec.state_keys:
-            self._pos_key = spec.state_keys[0]
-            self._vel_key = (
-                spec.state_keys[1]
-                if len(spec.state_keys) > 1
-                else spec.state_keys[0].replace("_pos_", "_vel_")
-            )
-        self._quat_key = self._pos_key.replace("_pos_", "_quat_")
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare the body-frame obs keys (none for static stage props)."""
-        if self.static:
-            return []
-        return [
-            RawObsRequest(self._pos_key, 3, "prop"),
-            RawObsRequest(self._vel_key, 3, "prop"),
-            RawObsRequest(self._quat_key, 4, "prop"),
-        ]
 
 
 class MujocoPrimitiveProp(MujocoPropHandler):
@@ -151,10 +118,6 @@ class MujocoPrimitiveProp(MujocoPropHandler):
     def __init__(self, spec: PropSpec, num_envs: int, device: str, base_dir: str | None = None):
         validate_primitive_spec(spec)
         super().__init__(spec, num_envs, device, base_dir)
-        keys = list(spec.state_keys)
-        if keys:
-            self._pos_key = keys[0]
-            self._vel_key = keys[1] if len(keys) > 1 else keys[0].replace("_pos_", "_vel_")
 
 
 class MujocoBoxProp(MujocoGenericProp):
@@ -166,8 +129,6 @@ class MujocoBoxProp(MujocoGenericProp):
             spec.urdf_path = None
         else:
             spec.urdf_path = container_mod.generate_box_urdf(spec)
-        if not spec.state_keys:
-            spec.state_keys = [f"{spec.name}_pos_b", f"{spec.name}_vel_b"]
         super().__init__(spec, num_envs, device, base_dir)
 
     @property
@@ -195,11 +156,6 @@ class MujocoArticulationProp(MujocoPropHandler):
         super().__init__(spec, num_envs, device, base_dir)
         self._asset = None
         self._jidx: dict[str, int] = {}
-
-    @property
-    def state_requests(self) -> list:
-        """No obs face: the articulation state is the record-key family."""
-        return []
 
 
 class MujocoUsdArticulationProp(MujocoArticulationProp):
@@ -519,40 +475,6 @@ class MujocoPropBackend:
         """``{name: MujocoPropArticulation}`` (director joint writes)."""
         return dict(self._articulations)
 
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Body-frame obs keys relative to the robot base (pelvis).
-
-        ``<name>_pos_b``: R_b^T (prop_pos - base_pos);
-        ``<name>_vel_b``: R_b^T (prop_vel - base_vel) -- the mujoco mirror
-        of the isaaclab handlers' obs semantics.
-        ``<name>_quat_b``: the prop orientation relative
-        to the base, ``q_b^-1 (x) q_prop`` (wxyz) -- the decision
-        package's obj_pose quat source (requested keys only, never a
-        default).
-        """
-        datas = getattr(env, "mj_datas", None) or [env.mj_data]
-        base = int(getattr(env, "_base_body_id"))
-        out: dict[str, torch.Tensor] = {}
-        for name, bid in self._ids.items():
-            poss, vels, quats = [], [], []
-            for d in datas:
-                bp = d.xpos[base]
-                bq = d.xquat[base]
-                bv = d.qvel[0:3]
-                rot_t = _quat_to_rotmat_t(bq)
-                bq_conj = np.array([bq[0], -bq[1], -bq[2], -bq[3]])
-                rel = d.xpos[bid] - bp
-                jadr = self._vadr[name]
-                vel = d.qvel[jadr : jadr + 3] - bv
-                poss.append(torch.tensor(rot_t @ rel, dtype=torch.float32))
-                vels.append(torch.tensor(rot_t @ vel, dtype=torch.float32))
-                q = np.asarray(d.xquat[bid], dtype=np.float64)
-                quats.append(torch.tensor(_quat_mul_np(bq_conj, q), dtype=torch.float32))
-            out[f"{name}_pos_b"] = torch.stack(poss, dim=0)
-            out[f"{name}_vel_b"] = torch.stack(vels, dim=0)
-            out[f"{name}_quat_b"] = torch.stack(quats, dim=0)
-        return out
-
     def close(self) -> None:
         """Release prop handles and the articulation backends."""
         self._ids.clear()
@@ -562,34 +484,3 @@ class MujocoPropBackend:
             art.close()
         self._articulations.clear()
         self._env = None
-
-
-def _quat_mul_np(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Hamilton product a (x) b, wxyz, plain numpy.
-
-    Same convention
-    as core.quat.mul; kept local so this module stays torch-only-facing.
-    """
-    w1, x1, y1, z1 = (float(v) for v in a)
-    w2, x2, y2, z2 = (float(v) for v in b)
-    return np.array(
-        [
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        ]
-    )
-
-
-def _quat_to_rotmat_t(quat_wxyz: np.ndarray) -> np.ndarray:
-    """Rotation-matrix TRANSPOSE (world <- body -> body <- world)."""
-    w, x, y, z = (float(v) for v in quat_wxyz)
-    rot = np.asarray(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-        ]
-    )
-    return rot.T

@@ -65,7 +65,7 @@ def _req_int(params: dict, key: str, errors: list, *, minimum: int = 1) -> None:
 
 
 def _req_key(
-    params: dict, key: str, errors: list, keys: list[str], prefixes=("obs/", "extra/", "action/")
+    params: dict, key: str, errors: list, keys: list[str], prefixes=("obs/", "record/", "action/")
 ) -> None:
     k = params.get(key)
     if not isinstance(k, str) or not k:
@@ -85,10 +85,10 @@ def _req_entity(params: dict, key: str, errors: list, keys: list[str]) -> None:
         return
     if e in ("base", "pelvis", "robot"):
         return
-    if keys and f"extra/object/{e}/pos" not in keys:
-        obj_keys = [k for k in keys if k.startswith("extra/object/")] or keys
+    if keys and f"record/object/{e}/pos" not in keys:
+        obj_keys = [k for k in keys if k.startswith("record/object/")] or keys
         errors.append(
-            f"{key}: unknown prop {e!r} (no extra/object/{e}/pos key; " f"available: {obj_keys})"
+            f"{key}: unknown prop {e!r} (no record/object/{e}/pos key; " f"available: {obj_keys})"
         )
 
 
@@ -255,10 +255,10 @@ def _log_check(ctx: WatchContext, p: dict) -> WatchResult:
 # --------------------------------------------------------------------------- #
 def _entity_quat(ctx: WatchContext, entity: str, env: int):
     name = {
-        "base": "extra/base_quat_w",
-        "pelvis": "extra/base_quat_w",
-        "robot": "extra/base_quat_w",
-    }.get(entity, f"extra/object/{entity}/quat")
+        "base": "record/base_quat_w",
+        "pelvis": "record/base_quat_w",
+        "robot": "record/base_quat_w",
+    }.get(entity, f"record/object/{entity}/quat")
     return ctx.key(name), name
 
 
@@ -302,9 +302,9 @@ def _height_check(ctx: WatchContext, p: dict) -> WatchResult:
         desc = f"outside band {band}"
     else:
         fired, _, _ = ctx.compare(
-            "extra/base_pos_w"
+            "record/base_pos_w"
             if p["entity"] in ("base", "pelvis", "robot")
-            else f"extra/object/{p['entity']}/pos",
+            else f"record/object/{p['entity']}/pos",
             p.get("op", "lt"),
             float(p["z"]),
             dim=2,
@@ -356,7 +356,7 @@ def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
             "joint_limit: env has no policy_joint_pos_limits (backend " "without declared limits)"
         )
     lim = _limit_magnitude(limits)  # (N, J) or (J,)
-    q = _to_np(ctx.key(p.get("key", "extra/joint_pos"))).astype(float)
+    q = _to_np(ctx.key(p.get("key", "record/joint_pos"))).astype(float)
     margin = float(p.get("margin", 0.1))
     band = lim - margin
     viol = np.abs(q) >= band
@@ -429,8 +429,8 @@ def _v_contact(p, keys):
     g = p.get("group")
     if not isinstance(g, str) or not g:
         e.append(_err(p, "group", "a contact group name string"))
-    elif keys and f"extra/contact/{g}" not in keys:
-        groups = [k[len("extra/contact/") :] for k in keys if k.startswith("extra/contact/")]
+    elif keys and f"record/contact/{g}" not in keys:
+        groups = [k[len("record/contact/") :] for k in keys if k.startswith("record/contact/")]
         e.append(
             f"group: unknown contact group {g!r} (available: "
             f"{groups or 'none declared in this config'})"
@@ -563,7 +563,7 @@ TEMPLATE_REGISTRY: dict[str, dict] = {
         2,
         _v_joint_limit,
         _joint_limit_check,
-        "margin?<num>=0.1, key?<trace key>=extra/joint_pos",
+        "margin?<num>=0.1, key?<trace key>=record/joint_pos",
         {},
     ),
 }

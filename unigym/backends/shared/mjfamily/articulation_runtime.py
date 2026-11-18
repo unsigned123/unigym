@@ -23,9 +23,6 @@ from unigym.actuators.ir import (
     validate_actuation_group,
     validate_drive_law_matrix,
 )
-from unigym.backends.shared.mjfamily.articulation_obs import (
-    articulation_catalog,
-)
 from unigym.backends.shared.mjfamily.model.ir_access import (
     actuator_by_joint,
     body_id,
@@ -36,7 +33,6 @@ from unigym.backends.shared.mjfamily.name_map import (
     MjArticulationBinding,
     MjControlBinding,
 )
-from unigym.env.obs_catalog import ObsCatalog
 from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
@@ -300,7 +296,7 @@ def _bind_articulation_limits(env, art_order, model) -> None:
         body = _body_control(env, art.name)
         # the record/extra policy-order view is the body control's order (the
         # ``jadr_pol`` semantics); the full asset order stays on
-        # ``jadr_art`` / ``robot_joint_names`` for the obs catalog.
+        # ``jadr_art`` / ``robot_joint_names`` for the observation schema.
         if body is not None:
             art.jadr_pol = np.asarray(body.addresses["jadr"], dtype=np.int64)
             art.jdr_pol = np.asarray(body.addresses["jdr"], dtype=np.int64)
@@ -379,16 +375,6 @@ def init_tables(env, model, *, label=None) -> None:
     env._control_order += [c for c in controls.values() if c.prop]
 
     _bind_articulation_limits(env, art_order, model)
-
-    entries: dict = {}
-    requestable: set = set()
-    env.obs_catalogs = {}
-    for art in art_order:
-        art.catalog = articulation_catalog(art)
-        env.obs_catalogs[art.name] = art.catalog
-        entries.update(art.catalog.entries)
-        requestable |= art.catalog.requestable
-    env.obs_catalog = ObsCatalog(entries, requestable)
 
 
 # --------------------------------------------------------------------------- #

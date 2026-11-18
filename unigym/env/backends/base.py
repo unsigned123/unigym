@@ -9,18 +9,18 @@ Contract surface (consumed by collect.py / adapters)
 ====================================================
 
 Methods:
-``step(actions, raw_action=None, cmd=None) -> (obs_cache, extra)``
+``step(actions, raw_action=None, cmd=None) -> EnvStep``
     Advance one policy step.  ``actions`` is a ``Sequence[NamedAction]``
     (joint-addressed action batches routed by ``(articulation, joint)``;
     each entry's values are ``(N, dim)`` absolute joint position targets
     (rad) and ``joint_names`` names every column — backends resolve the
     names to simulator addresses, cached per name-tuple).  ``raw_action`` is
     the adapter's raw action (policy order) which must land in
-    ``obs_cache["prev_action"]``; ``cmd`` is the current command tensor which
-    must land in ``obs_cache["command"]``.
-    Returns ``(obs_cache, extra)``: the (copied) observation cache dict and
-    the per-step extra-info dict holding the 15 record keys + 2 control keys
-    (see ``EXTRA_INFO_KEYS``).
+    ``obs.prev_action``; ``cmd`` is the current command tensor which
+    must land in ``obs.command``.
+    Returns an :class:`EnvStep` carrying the typed observation snapshot,
+    the record mapping (canonical artifact keys + bookkeeping) and the reset
+    masks.
 ``reset_envs(env_ids) -> env_ids``
     Reset the given env subset through the FULL backend reset chain (scene
     teleport, DR events, manager resets, per-backend bookkeeping, obs-cache
@@ -32,9 +32,8 @@ Methods:
     Release backend/simulation resources.
 
 Attributes:
-``obs_cache: dict``
-    Raw quantities the adapter requested via ``adapter.get_obs_requests()``;
-    values are ``(N, dim)`` tensors on ``device``, refreshed every step.
+``obs: ObservationRegistry``
+    The config-declared typed observation registry; refreshed once per step.
 ``controls: Mapping[tuple[str, str], ControlRuntime]``
     The ONLY per-control surface (v104.2): one runtime per explicit drive
     group, keyed by the physical ``(articulation, name)`` row label -- a
@@ -55,13 +54,6 @@ Attributes:
     Soft joint limits in policy order, each ``(N, J)``; ``None`` when the
     backend cannot provide them (termination checks degrade gracefully).
 ``num_envs: int``  /  ``device: str | torch.device``
-
-extra-info key set (EXTRA_INFO_KEYS)
-====================================
-Shapes are ``(N, ...)`` with ``N`` = num_envs, ``J`` = the policy
-body control's joint count, ``Ki`` is variable-length.  All tensors live on
-``device``.  The record keys are written to disk by collect.py; the 2
-control keys drive the record-before-reset loop and are excluded from records.
 
 Optional state-write face
 =========================
@@ -88,22 +80,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
 
 from ...core import quat
+from ..obs import ObsSnapshot
 from ...runtime.actions import NamedAction
 
 if TYPE_CHECKING:
     from ...backends.registry import Trait, TraitScope
     from ...runtime.controllers import ArticulationRuntime, ControlRuntime
-
-
-class _ObsRequestLike(Protocol):
-    """One adapter observation request (only the cache key is read)."""
-
-    key: str
 
 
 @runtime_checkable
@@ -125,64 +112,6 @@ def _as_backend_info(value: object) -> _BackendInfoLike | None:
     return value if isinstance(value, _BackendInfoLike) else None
 
 
-def _is_obs_request_sequence(
-    value: object,
-) -> TypeGuard[Sequence[_ObsRequestLike]]:
-    """True for an iterable of observation requests (not a str/mapping)."""
-    return (
-        hasattr(value, "__iter__")
-        and not isinstance(value, (str, bytes))
-        and not isinstance(value, Mapping)
-    )
-
-
-# --------------------------------------------------------------------------- #
-# extra-info key specification (15 record keys + 2 control keys)
-# --------------------------------------------------------------------------- #
-@dataclass(frozen=True)
-class ExtraKeySpec:
-    """Shape/dtype contract for one ``extra`` key.
-
-    ``dims`` entries are ints or the template letters ``"J"`` (policy joints)
-    / ``"K"`` (variable length; also dtype-wildcard axis via ``-1``).
-    ``batch=False`` marks keys without the leading ``N``
-    env dim (``reset_env_ids`` is a plain id vector).  ``dtype`` is a
-    ``torch.dtype``; ``should_reset`` uses the pseudo-marker ``"py_bool"``
-    for a plain python bool.
-    """
-
-    dims: tuple[int | str, ...]
-    dtype: torch.dtype | str
-    batch: bool = True
-
-
-EXTRA_INFO_KEYS: dict[str, ExtraKeySpec] = {
-    # ---- per-joint recorded quantities (policy order) ----
-    "joint_pos": ExtraKeySpec(dims=("J",), dtype=torch.float32),
-    "joint_vel": ExtraKeySpec(dims=("J",), dtype=torch.float32),
-    "applied_torque": ExtraKeySpec(dims=("J",), dtype=torch.float32),
-    # ---- base frame (world ``*_w`` / base frame ``*_b``) ----
-    "gravity_b": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    "base_pos_w": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    "base_quat_w": ExtraKeySpec(dims=(4,), dtype=torch.float32),  # (w,x,y,z)
-    "base_lin_vel_w": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    "base_ang_vel_w": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    "base_lin_vel_b": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    "base_ang_vel_b": ExtraKeySpec(dims=(3,), dtype=torch.float32),
-    # ---- episode bookkeeping ----
-    "time_in_episode": ExtraKeySpec(dims=(), dtype=torch.float32),
-    "episode_id": ExtraKeySpec(dims=(), dtype=torch.int64),
-    # ---- control keys (never recorded) ----
-    "reset_env_ids": ExtraKeySpec(dims=("K",), dtype=torch.int64, batch=False),
-    "should_reset": ExtraKeySpec(dims=(), dtype="py_bool"),
-}
-
-RECORD_KEYS = tuple(
-    k for k, s in EXTRA_INFO_KEYS.items() if k not in ("reset_env_ids", "should_reset")
-)
-CONTROL_KEYS = ("reset_env_ids", "should_reset")
-
-
 # --------------------------------------------------------------------------- #
 # capability bits
 # --------------------------------------------------------------------------- #
@@ -198,7 +127,7 @@ class BackendCapabilities:
     events: bool = False  # yaml randomization.events (per-step/reset DR)
     props: bool = False  # yaml props (interactive door/ball/generic)
     recorder: bool = False  # yaml recorder.enabled RGB recording
-    depth_camera: bool = False  # adapter depth-alias obs requests (explicit `depth` camera)
+    depth_camera: bool = False  # selected observation cameras serve depth
     init_pose: bool = False  # yaml init_pose (randomized fallen spawn)
     cameras: bool = False  # camera obs (yaml cameras / adapter image obs;
     # docs/contracts/camera_contract.md)
@@ -279,6 +208,20 @@ class BackendCapabilities:
 
 
 # --------------------------------------------------------------------------- #
+# per-step product
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class EnvStep:
+    """One backend step's typed observation/record product."""
+
+    t: int
+    obs: ObsSnapshot
+    record: Mapping[str, object]
+    reset_env_ids: torch.Tensor
+    should_reset: bool
+
+
+# --------------------------------------------------------------------------- #
 # the protocol
 # --------------------------------------------------------------------------- #
 @runtime_checkable
@@ -292,7 +235,7 @@ class EnvBackend(Protocol):
     # attributes (populated by the backend implementation)
     num_envs: int
     device: str | torch.device
-    obs_cache: dict[str, torch.Tensor]
+    obs: object
     controls: dict[tuple[str, str], ControlRuntime]
     articulations: dict[str, ArticulationRuntime]
     perm_il2pol: torch.Tensor
@@ -304,10 +247,9 @@ class EnvBackend(Protocol):
         actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
-    ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor | bool],
-    ]: ...
+    ) -> EnvStep: ...
+
+    def record(self) -> dict[str, object]: ...
 
     def reset_envs(self, env_ids: torch.Tensor) -> torch.Tensor: ...
 
@@ -403,20 +345,6 @@ def normalize_state_quat(
     return _require_state_tensor(quat.normalize(value), field=field)
 
 
-# --------------------------------------------------------------------------- #
-# ObsCache contract (comment-only spec; enforced structurally below)
-# --------------------------------------------------------------------------- #
-# obs_cache is a plain dict, refreshed by the backend every step:
-#   * keys  == exactly the requests from adapter.get_obs_requests()
-#     (Request.key strings such as "gravity_b", "joint_pos_rel", "joint_vel",
-#     "command", "prev_action", "depth_image", ... plus prop-manager keys).
-#   * values are (N, request.dim) tensors on env.device; image-style entries
-#     are (N, C, H, W) with shape[0] == N.
-#   * "command"/"prev_action" are passthrough: when the caller passes None
-#     the backend keeps the previous entry (or zero-fills on the first step).
-# Adapters own scaling/stacking; the backend never interprets values.
-
-
 class BackendContractError(AssertionError):
     """Raised when a backend violates the structural EnvBackend contract."""
 
@@ -424,124 +352,6 @@ class BackendContractError(AssertionError):
 # --------------------------------------------------------------------------- #
 # structural validator (pure torch, offline-runnable)
 # --------------------------------------------------------------------------- #
-def _resolve_dims(
-    spec: ExtraKeySpec,
-    n_joints: int,
-) -> tuple[int, ...]:
-    table: dict[str, int] = {"J": n_joints, "K": -1}  # -1 == wildcard axis
-    out: list[int] = []
-    for d in spec.dims:
-        if isinstance(d, str):
-            if d not in table:
-                raise BackendContractError(f"unknown dim template {d!r}")
-            out.append(table[d])
-        else:
-            out.append(int(d))
-    return tuple(out)
-
-
-def _shape_matches(actual: tuple[int, ...], expected: tuple[int, ...]) -> bool:
-    """Axis-wise shape match; a -1 axis in *expected* is a wildcard."""
-    return len(actual) == len(expected) and all(e == -1 or a == e for a, e in zip(actual, expected))
-
-
-_EXTRA_BOOKKEEPING = frozenset({"time_in_episode", "episode_id", "reset_env_ids", "should_reset"})
-
-
-def _extra_candidates(
-    extra: dict[str, torch.Tensor | bool],
-    key: str,
-) -> list[str]:
-    """Record keys serving *key*: bare (legacy) or namespaced (v103.5).
-
-    Per-articulation state is published as ``articulation/<name>/<key>``;
-    the validator accepts every namespace (one for a single-policy run),
-    never inventing a primary.
-    """
-    if key in _EXTRA_BOOKKEEPING:
-        return [key] if key in extra else []
-    suffix = "/" + key
-    return [
-        k
-        for k in extra
-        if isinstance(k, str) and k.startswith("articulation/") and k.endswith(suffix)
-    ]
-
-
-def check_extra_info(
-    extra: dict[str, torch.Tensor | bool],
-    num_envs: int,
-    n_joints: int,
-    device: str | torch.device = "cpu",
-) -> None:
-    """Validate one ``step()`` extra dict against ``EXTRA_INFO_KEYS``.
-
-    Checks key completeness (record keys + 2 control keys), shapes and
-    dtypes.  Per-articulation record keys are resolved under
-    ``articulation/<name>/...`` (v103.5).  Raises
-    :class:`BackendContractError` on the first violation.
-    """
-    resolved = {k: _extra_candidates(extra, k) for k in EXTRA_INFO_KEYS}
-    missing = [k for k, c in resolved.items() if not c]
-    if missing:
-        raise BackendContractError(
-            f"extra missing keys {missing}; " f"required: {sorted(EXTRA_INFO_KEYS)}"
-        )
-    for key, spec in EXTRA_INFO_KEYS.items():
-        for actual_key in resolved[key]:
-            val = extra[actual_key]
-            dims = _resolve_dims(spec, n_joints)  # "K" -> -1 wildcard
-            expected_shape = ((num_envs,) if spec.batch else ()) + dims
-            if spec.dtype == "py_bool":
-                if not isinstance(val, (bool, torch.Tensor)) or (
-                    isinstance(val, torch.Tensor) and val.dtype != torch.bool
-                ):
-                    raise BackendContractError(
-                        f"extra['{actual_key}'] must be a python bool or "
-                        f"bool tensor, got {type(val).__name__}"
-                    )
-                continue
-            if not isinstance(val, torch.Tensor):
-                raise BackendContractError(
-                    f"extra['{actual_key}'] must be a torch tensor, got " f"{type(val).__name__}"
-                )
-            if not _shape_matches(tuple(val.shape), expected_shape):
-                raise BackendContractError(
-                    f"extra['{actual_key}'].shape {tuple(val.shape)} != " f"{expected_shape}"
-                )
-            if val.dtype != spec.dtype:
-                raise BackendContractError(
-                    f"extra['{actual_key}'].dtype {val.dtype} != {spec.dtype}"
-                )
-            if str(val.device) != str(torch.device(device)):
-                raise BackendContractError(
-                    f"extra['{actual_key}'] on device {val.device}, " f"expected {device}"
-                )
-
-
-def check_obs_cache(
-    obs: dict[str, torch.Tensor],
-    num_envs: int,
-    device: str | torch.device = "cpu",
-) -> None:
-    """Validate obs-cache entries: (N, ...) tensors on ``device``."""
-    if not isinstance(obs, dict):
-        raise BackendContractError(f"obs_cache must be a dict, got {type(obs).__name__}")
-    for key, val in obs.items():
-        if not isinstance(val, torch.Tensor):
-            raise BackendContractError(
-                f"obs_cache['{key}'] must be a torch tensor, " f"got {type(val).__name__}"
-            )
-        if val.shape[0] != num_envs:
-            raise BackendContractError(
-                f"obs_cache['{key}'].shape[0] {val.shape[0]} != num_envs " f"{num_envs}"
-            )
-        if str(val.device) != str(torch.device(device)):
-            raise BackendContractError(
-                f"obs_cache['{key}'] on device {val.device}, expected {device}"
-            )
-
-
 def _validate_control_runtimes(env: EnvBackend) -> list[ControlRuntime]:
     """Validate ``env.controls`` / ``env.articulations``; return body controls."""
     controls = env.controls
@@ -623,7 +433,7 @@ def assert_backend_contract(
 
     Pure-torch and offline-runnable.  With ``exercise_step=True`` the
     validator additionally calls ``env.step`` once with zero targets and
-    validates the returned extra/obs_cache against the specifications —
+    validates the returned observation snapshot/record against the schema —
     safe for in-process fakes, never call it on a live simulation backend.
     """
     # 1) member presence (explicit: a None/placeholder attribute must fail)
@@ -631,7 +441,7 @@ def assert_backend_contract(
     attrs = (
         "num_envs",
         "device",
-        "obs_cache",
+        "obs",
         "controls",
         "articulations",
         "perm_il2pol",
@@ -679,8 +489,9 @@ def assert_backend_contract(
             or any(not isinstance(t, torch.Tensor) or tuple(t.shape) != (n, j) for t in lim)
         ):
             raise BackendContractError("policy_joint_pos_limits must be None or ((N, J), (N, J))")
-    if not isinstance(env.obs_cache, dict):
-        raise BackendContractError("obs_cache must be a dict")
+    schema = getattr(env.obs, "schema", None)
+    if schema is None:
+        raise BackendContractError("obs registry must expose an ObservationSchema")
 
     # 4) optional live exercise (fakes / offline tests only)
     if exercise_step:
@@ -694,31 +505,38 @@ def assert_backend_contract(
             )
             for rt in body_controls
         )
-        obs, extra = env.step(actions)
-        check_extra_info(extra, n, j, device=env.device)
-        check_obs_cache(obs, n, device=env.device)
-        check_obs_cache(env.obs_cache, n, device=env.device)
+        step = env.step(actions)
+        if not isinstance(step.obs, ObsSnapshot):
+            raise BackendContractError("step().obs must be an ObsSnapshot")
+        for key, value in step.obs.values.items():
+            if not isinstance(value, torch.Tensor):
+                raise BackendContractError(f"obs[{key!r}] must be a torch tensor")
+            if value.shape[0] != n:
+                raise BackendContractError(
+                    f"obs[{key!r}].shape[0] {value.shape[0]} != num_envs {n}"
+                )
+            if str(value.device) != str(torch.device(env.device)):
+                raise BackendContractError(f"obs[{key!r}] on {value.device}, expected {env.device}")
+        record = env.record()
+        for key in env.obs.schema.record_keys():
+            if key not in record:
+                raise BackendContractError(f"record missing schema key {key!r}")
+        for key in ("time_in_episode", "episode_id"):
+            if key not in record:
+                raise BackendContractError(f"record missing bookkeeping key {key!r}")
 
 
 # --------------------------------------------------------------------------- #
 # capability gate (used by build_env_backend; needs no backend instance)
 # --------------------------------------------------------------------------- #
 def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
-    """Map capability name -> requested? from ``build_env_backend`` kwargs."""
-    adapter = kwargs.get("adapter")
-    req_keys: set[str]
-    try:
-        if adapter is None:
-            raise TypeError("no adapter: no obs requests to infer")
-        get_requests = getattr(adapter, "get_obs_requests", None)
-        if not callable(get_requests):
-            raise TypeError("adapter exposes no get_obs_requests")
-        raw_requests = get_requests()
-        if not _is_obs_request_sequence(raw_requests):
-            raise TypeError("adapter obs requests expose no string key")
-        req_keys = {r.key for r in raw_requests}
-    except Exception:  # best effort: capability inference only -> no requests
-        req_keys = set()
+    """Map capability name -> requested? from ``build_env_backend`` kwargs.
+
+    Capability inference is config/trait driven: the observation declaration
+    names the selected cameras and sensors, never an adapter request list.
+    """
+    observations = kwargs.get("observations")
+    camera_names = tuple(getattr(observations, "camera", ()) or ())
     recorder = kwargs.get("recorder")
     raw_n = kwargs.get("num_envs")
     try:
@@ -727,13 +545,20 @@ def requested_features(kwargs: Mapping[str, object]) -> dict[str, bool]:
         n_envs = int(raw_n)
     except (TypeError, ValueError):
         n_envs = 1
+    camera_manager = kwargs.get("camera_manager")
+    camera_keys = set(camera_manager.obs_keys()) if camera_manager is not None else set()
+    depth_requested = any(
+        key.startswith(f"cam/{name}/") and key.endswith("/depth")
+        for name in camera_names
+        for key in camera_keys
+    )
     return {
         "events": kwargs.get("events_cfg") is not None,
         "props": kwargs.get("prop_manager") is not None,
         "recorder": (recorder is not None and bool(getattr(recorder, "enabled", False))),
-        "depth_camera": bool({"depth_image", "depth_image_raw"} & req_keys),
+        "depth_camera": depth_requested,
         "init_pose": kwargs.get("init_pose") is not None,
-        "cameras": kwargs.get("camera_manager") is not None,
+        "cameras": camera_manager is not None,
         "contacts": kwargs.get("contact_manager") is not None,
         "multi_env": n_envs > 1,
         # director is not a capability bit: the registry trait table is its

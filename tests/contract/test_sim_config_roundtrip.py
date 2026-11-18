@@ -35,6 +35,7 @@ _CONFIG = {
         }
     ],
     "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+    "observations": {"robot": ["arm"]},
     "cameras": [{"name": "top", "rig": {"type": "world"}}],
 }
 

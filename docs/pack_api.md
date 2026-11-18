@@ -594,11 +594,9 @@ Cameras are declared explicitly under the run's `cameras:` list. The manager
 serves `cam/<name>/rgb` and `cam/<name>/depth`; a camera only renders the
 streams named in its `types` (default `["rgb", "depth"]`).
 
-Depth is served only by an explicitly declared camera. The adapter-facing
-`depth_image` / `depth_image_raw` obs aliases map to a declared camera named
-`depth`; if an adapter requests either alias and the run declares no `depth`
-camera, the run fails with a teaching error. There is no implicit depth shim
-camera.
+Depth is served only by an explicitly declared camera selected through
+`observations.camera`; adapters read it as `CameraObs.depth`. There is no
+implicit depth shim and no legacy depth-image alias key.
 
 Migration from the removed top-level `camera_depth:` key: declare the camera
 under `cameras:` and reproduce the classic depth-encoder geometry explicitly:
@@ -626,9 +624,8 @@ effective profile's `base_body`. The removed `CameraSpec.depth_body_default`
 factory has no replacement; code that constructed it must declare the same
 `CameraSpec` explicitly under `cameras:`.
 
-The `depth_image` alias applies
-`preprocess_depth` and therefore requires the classic `106x60` render; use
-`depth_image_raw` plus adapter-side preprocessing for any other geometry.
+Metric depth is read as `CameraObs.depth`; there is no legacy depth-image
+alias key.  Preprocessing stays with the adapter.
 
 ### Robot profiles and backend realization
 

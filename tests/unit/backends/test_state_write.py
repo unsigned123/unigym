@@ -110,6 +110,7 @@ def _cfg() -> dict[str, JsonValue]:
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
 

@@ -189,6 +189,7 @@ def _run_config(asset: str) -> dict:
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
         "objects": {"types": [{"name": "cup", "type": "articulation", "asset": asset}]},
     }
 

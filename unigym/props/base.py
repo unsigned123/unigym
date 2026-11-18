@@ -1,6 +1,6 @@
 """PropManager: interactive prop (door / ball / generic) scene + state manager.
 
-Loads interactive props that expose per-step state to ``obs_cache`` for adapters
+Loads interactive props that expose typed per-step object state
 to consume. Each prop *type* is spawned once per environment (cloned by
 GridCloner); at
 reset the manager re-samples a random placement ``(x, y, z, yaw)`` from the
@@ -36,7 +36,7 @@ The manager is domain-neutral : it knows nothing about hands,
 grasps or held semantics.  Any hand-contact criterion is a DECLARED contact
 group (yaml ``contacts:`` with ``{contact_group: ...}`` / ``{prop: ...}``
 references -- contacts/base.py) consumed by the ContactManager; the
-``object/<name>/{pos,quat}`` record keys (props/object_state.py) are the
+``object/<name>/{pos,quat}`` typed observation keys are the
 only object-key family the manager emits.
 
 The manager is isaaclab-free at import time (cfg classes resolved lazily via
@@ -53,7 +53,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     import torch
 
-    from ..adapters.base import RawObsRequest
     from unigym.assets.plan import AssetPlan
 
 from .asset_ir import AssetDefinition, iter_asset_bodies, joint_names
@@ -124,8 +123,6 @@ class PropSpec:
     """
     placement: dict = field(default_factory=dict)
     """``{mode, x_range, y_range, z_range, yaw_range(deg), height_offset}``."""
-    state_keys: list[str] = field(default_factory=list)
-    """obs_cache keys this prop exposes (e.g. ``["door_pos", "door_angle"]``)."""
     init_roll: float = 0.0
     """Root roll (rad) baked into the spawn init quaternion; 0 for z-up URDFs."""
     size: list | None = None
@@ -439,22 +436,13 @@ class PropHandler:
     def get_world_pose(self, env):
         """``(pos (N,3), quat (N,4) wxyz)`` world root pose, or None.
 
-        Consumed by the object/* record-key layer (props/object_state);
+        Consumed by the typed object observation views;
         handlers without a root pose (door) return None.
         """
         return None
 
     def on_reset(self, env_ids, env) -> None:
         """Re-sample placement + reset prop state for the given env subset."""
-        raise NotImplementedError
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Return ``{state_key: (N, D) tensor}`` for this prop."""
-        raise NotImplementedError
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare obs_cache keys (RawObsRequest format) for this prop."""
         raise NotImplementedError
 
 
@@ -478,7 +466,7 @@ class PropBackendCap(Protocol):
     implicit: a capability object exposes BOTH entry points, exactly one of
     which does work per backend (the other is a documented no-op).  The
     post-build lifecycle is single-form (``bind_env`` / ``on_reset`` /
-    ``get_state``).  :class:`PropManager` implements this surface; the
+    typed pose/joint readback).  :class:`PropManager` implements this surface; the
     per-variant ``PropHandler`` chain (isaaclab) and the mujoco
     representation tiers hang off it.
 
@@ -523,10 +511,6 @@ class PropBackendCap(Protocol):
 
     def on_reset(self, env_ids, env) -> None:
         """Re-sample placement + reset prop state for the env subset."""
-        ...
-
-    def get_state(self, env) -> dict:
-        """``{state_key: (N, D) tensor}`` per-prop state surface."""
         ...
 
 
@@ -826,7 +810,7 @@ class PropManager:
         """Per-control-step hook : latch polls live here.
 
         Handlers without an ``on_step`` are skipped;
-        the env backend calls this once per step before the record extras are
+        the env backend calls this once per step before the observation record is
         built, so a latch unlock from this step's poll is visible to the
         same step's ``object/<name>/joints/*`` keys.
         """
@@ -836,12 +820,6 @@ class PropManager:
             hook = getattr(h, "on_step", None)
             if hook is not None:
                 hook(env)
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        out: dict[str, torch.Tensor] = {}
-        for h in self._handlers:
-            out.update(h.get_state(env))
-        return out
 
     def get_world_poses(self, env) -> dict[str, tuple]:
         """``{name: (pos (N,3), quat (N,4) wxyz)}`` per prop (object layer)."""
@@ -854,7 +832,7 @@ class PropManager:
 
     def get_articulation_joint_states(self, env) -> dict:
         """``{name: {jname: (N,1)}}`` for wired articulation handlers
-        (state surface; consumed by object_state + the record
+        (state surface; consumed by the typed object views + the record
         extras).  Empty when no articulation prop is wired."""
         out: dict = {}
         for h in self._handlers:
@@ -895,8 +873,6 @@ class PropManager:
         return any(s.type in ("usd", "usd_articulation") for s in self.specs)
 
     @property
-    def state_requests(self) -> list[RawObsRequest]:
-        out: list[RawObsRequest] = []
-        for h in self._handlers:
-            out.extend(h.state_requests)
-        return out
+    def observation_joints(self) -> dict[str, tuple[str, ...]]:
+        """``{name: declared joint names}`` for the object observation face."""
+        return {h.spec.name: tuple(getattr(h, "joints", None) or ()) for h in self._handlers}

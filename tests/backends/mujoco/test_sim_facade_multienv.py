@@ -13,7 +13,6 @@ from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
 from unigym.runner.external import ExternalRunner
-from unigym.runner.state import read_extra
 from unigym.sim import (
     ArticulationHandle,
     Control,
@@ -86,7 +85,7 @@ def _targets(num_envs: int) -> torch.Tensor:
 
 def _joint_pos(obs, prefix: str) -> torch.Tensor:
     """The raw production-position tensor of one observation."""
-    value = obs.raw[f"{prefix}/joint_pos"]
+    value = obs.record[f"{prefix}/joint_pos"]
     assert isinstance(value, torch.Tensor)
     return value
 
@@ -147,7 +146,7 @@ def test_reset_subset_restores_only_the_named_row(tiny_mjcf: Path) -> None:
         reset_pos = _joint_pos(obs, prefix)
         assert torch.equal(reset_pos[0], post_step[0]), "row 0 was touched by a row-1 reset"
         assert torch.equal(reset_pos[1], spawn[1]), "row 1 was not restored to its spawn state"
-        time_in_episode = obs.raw["time_in_episode"]
+        time_in_episode = obs.record["time_in_episode"]
         assert isinstance(time_in_episode, torch.Tensor)
         assert torch.allclose(time_in_episode, torch.tensor([0.02, 0.0]))
     finally:
@@ -165,7 +164,7 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
         first = sim.step()
         assert first.reset_due_env_ids.tolist() == []
         assert first.reset_env_ids.tolist() == []
-        time_in_episode = first.raw["time_in_episode"]
+        time_in_episode = first.record["time_in_episode"]
         assert isinstance(time_in_episode, torch.Tensor)
         assert torch.allclose(time_in_episode, torch.full((2,), 0.02))
 
@@ -174,7 +173,7 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
 
         assert second.reset_due_env_ids.tolist() == [0, 1]
         assert second.reset_env_ids.tolist() == []
-        due_clock = second.raw["time_in_episode"]
+        due_clock = second.record["time_in_episode"]
         assert isinstance(due_clock, torch.Tensor)
         assert torch.allclose(
             due_clock, torch.full((2,), 0.04)
@@ -185,7 +184,7 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
         assert cleared.reset_env_ids.tolist() == [0, 1]
         assert cleared.reset_due_env_ids.tolist() == []
         assert cleared.terminated is None
-        cleared_clock = cleared.raw["time_in_episode"]
+        cleared_clock = cleared.record["time_in_episode"]
         assert isinstance(cleared_clock, torch.Tensor)
         assert cleared_clock.tolist() == [0.0, 0.0]
     finally:
@@ -206,19 +205,19 @@ def test_reader_after_subset_reset_agrees_row_wise(tiny_mjcf: Path) -> None:
         )
         stepped = sim.step()
         post_step = _joint_pos(stepped, prefix).clone()
-        step_state = read_extra(runner.env)
+        step_state = runner.env.record()
         for key in PROJECTED_KEYS:
             read = step_state[f"{prefix}/{key}"]
             assert isinstance(read, torch.Tensor)
             assert torch.equal(
-                stepped.raw[f"{prefix}/{key}"], read
+                stepped.record[f"{prefix}/{key}"], read
             ), f"the state reader disagrees with the step extra on {key}"
 
         obs = sim.reset(env_ids=[1])
-        state = read_extra(runner.env)
+        state = runner.env.record()
 
         for key in PROJECTED_KEYS:
-            raw = obs.raw[f"{prefix}/{key}"]
+            raw = obs.record[f"{prefix}/{key}"]
             read = state[f"{prefix}/{key}"]
             assert isinstance(raw, torch.Tensor)
             assert isinstance(read, torch.Tensor)

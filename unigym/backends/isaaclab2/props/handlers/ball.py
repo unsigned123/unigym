@@ -28,9 +28,7 @@ from unigym.props.base import (
     _quat_mul,
     _roll_quat,
     _yaw_quat,
-    quat_rotate_inverse,
 )
-from unigym.adapters.base import RawObsRequest
 
 
 def _build_sphere_spawn(spec: PropSpec, c: dict):
@@ -152,33 +150,6 @@ class BallProp(PropHandler):
         # park the ball's velocity (no carry-over from the previous episode)
         vel = torch.zeros(n, 6, device=env.device, dtype=world_pos.dtype)
         self._asset.write_root_velocity_to_sim(vel, env_ids=env_ids)
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Body-frame state tensors for this prop."""
-        if self._asset is None or not hasattr(self._asset, "data"):
-            return {}
-        robot = env.robot
-        rd = robot.data
-        bd = self._asset.data
-        base_quat = rd.root_quat_w  # (N, 4) wxyz
-        # ball position relative to base, in body frame
-        rel = bd.root_pos_w - rd.root_pos_w  # (N, 3) world
-        ball_pos_b = quat_rotate_inverse(base_quat, rel)
-        # ball velocity relative to base, in body frame
-        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w  # (N, 3) world
-        ball_vel_b = quat_rotate_inverse(base_quat, rel_v)
-        return {
-            "ball_pos_b": ball_pos_b,
-            "ball_vel_b": ball_vel_b,
-        }
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare the obs keys this prop exposes."""
-        return [
-            RawObsRequest("ball_pos_b", 3, "prop"),
-            RawObsRequest("ball_vel_b", 3, "prop"),
-        ]
 
     def get_world_pose(self, env):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""

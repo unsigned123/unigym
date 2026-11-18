@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import torch
-import isaaclab.utils.math as math_utils
 from isaaclab.envs.mdp.actions import JointPositionActionCfg
 
 from unigym.backends.isaaclab2.naming import (
@@ -24,7 +23,6 @@ from unigym.backends.isaaclab2.naming import (
 )
 from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.env.naming import ENV_REGEX_NS
-from unigym.env.obs_catalog import ObsCatalog, ObsSpec, build_obs_catalog
 from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import (
     ArticulationRuntime,
@@ -35,9 +33,7 @@ from unigym.scenes.articulation import resolve_spawn_quat
 
 __all__ = [
     "bind_articulations",
-    "build_extra",
     "configure_scene",
-    "refresh_obs_cache",
     "reset_articulations",
     "route_actions",
     "sync_articulation_controls",
@@ -63,14 +59,6 @@ def validate_options(
     Contact groups ARE supported with multiple articulations (each group
     owns one articulation); the remaining options below stay rejected.
     """
-    requests = adapter.get_obs_requests()
-    if requests:
-        raise NotImplementedError(
-            f"{_LABEL}: adapter obs requests are not supported with "
-            f"multiple articulations; every articulation is published "
-            f"under articulation/<name>/... (use an external/manual driver) "
-            f"| requested: {sorted({r.key for r in requests})}"
-        )
     for option, value in (
         ("prop_manager", prop_manager),
         ("camera_manager", camera_manager),
@@ -193,9 +181,6 @@ def _articulation_runtime(env, spec, profile, asset) -> ArticulationRuntime:
     )
     art.asset = asset
     art.q0_art = q0_art
-    art.catalog = build_obs_catalog(
-        profile, articulation_joint_names=list(asset_names), articulation=spec.name
-    )
     return art
 
 
@@ -309,17 +294,6 @@ def _bind_control_order(env, controls) -> None:
         env._joint_limits_by_articulation[art.name] = (lim[:, perm, 0], lim[:, perm, 1])
 
 
-def _bind_obs_catalogs(env) -> None:
-    entries: dict[str, ObsSpec] = {}
-    requestable: set[str] = set()
-    env.obs_catalogs = {}
-    for art in env.articulations.values():
-        entries.update(art.catalog.entries)
-        requestable |= art.catalog.requestable
-        env.obs_catalogs[art.name] = art.catalog
-    env.obs_catalog = ObsCatalog(entries, requestable)
-
-
 def bind_articulations(env) -> None:
     """Bind every articulation/control runtime after ``super().__init__``."""
     specs = tuple(env._articulation_specs)
@@ -335,8 +309,6 @@ def bind_articulations(env) -> None:
     env._perm_il2pol = first_art.perm_il2pol
     env._perm_pol2il = torch.argsort(env._perm_il2pol)
     env._q0_art = first_art.q0_art
-    env._joint_gathers = {}
-    _bind_obs_catalogs(env)
 
 
 def sync_articulation_controls(env, articulation: str) -> None:
@@ -385,52 +357,6 @@ def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
     return torch.cat(
         [buffers[control.addresses.get("term", control.name)] for control in order], dim=-1
     )
-
-
-def _articulation_extra(env, art) -> dict:
-    d = art.asset.data
-    prefix = f"articulation/{art.name}"
-    return {
-        f"{prefix}/joint_pos": d.joint_pos[:, art.perm_il2pol].clone(),
-        f"{prefix}/joint_vel": d.joint_vel[:, art.perm_il2pol].clone(),
-        f"{prefix}/applied_torque": d.applied_torque[:, art.perm_il2pol].clone(),
-        f"{prefix}/gravity_b": d.projected_gravity_b.clone(),
-        f"{prefix}/base_pos_w": d.root_pos_w.clone(),
-        f"{prefix}/base_quat_w": d.root_quat_w.clone(),
-        f"{prefix}/base_lin_vel_w": d.root_lin_vel_w.clone(),
-        f"{prefix}/base_ang_vel_w": d.root_ang_vel_w.clone(),
-        f"{prefix}/base_lin_vel_b": d.root_lin_vel_b.clone(),
-        f"{prefix}/base_ang_vel_b": d.root_ang_vel_b.clone(),
-    }
-
-
-def build_extra(env) -> dict:
-    """Global bookkeeping + every articulation's namespaced state."""
-    extra = {
-        "time_in_episode": env._time_in_episode.clone(),
-        "episode_id": env._episode_id.clone(),
-    }
-    for art in env.articulations.values():
-        extra.update(_articulation_extra(env, art))
-    return extra
-
-
-def refresh_obs_cache(env, raw_action=None, cmd=None) -> None:
-    """Publish every articulation under ``articulation/<name>/...``."""
-    del raw_action, cmd
-    for art in env.articulations.values():
-        d = art.asset.data
-        prefix = f"articulation/{art.name}"
-        env.obs_cache[f"{prefix}/joint_pos_rel"] = d.joint_pos - art.q0_art
-        env.obs_cache[f"{prefix}/joint_vel"] = d.joint_vel.clone()
-        env.obs_cache[f"{prefix}/applied_torque"] = d.applied_torque.clone()
-        env.obs_cache[f"{prefix}/gravity_b"] = d.projected_gravity_b.clone()
-        env.obs_cache[f"{prefix}/base_pos_w"] = d.root_pos_w.clone()
-        env.obs_cache[f"{prefix}/base_quat_w"] = d.root_quat_w.clone()
-        env.obs_cache[f"{prefix}/base_ang_vel_b"] = d.root_ang_vel_b.clone()
-        env.obs_cache[f"{prefix}/base_yaw"] = math_utils.euler_xyz_from_quat(d.root_quat_w)[
-            2
-        ].unsqueeze(-1)
 
 
 def reset_articulations(env, env_ids) -> None:

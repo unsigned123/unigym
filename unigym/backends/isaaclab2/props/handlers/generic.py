@@ -31,12 +31,8 @@ from unigym.props.base import (
     _quat_mul,
     _roll_quat,
     _yaw_quat,
-    quat_rotate_inverse,
 )
 from ..spawn import _build_urdf_spawn, _build_usd_spawn
-from unigym.adapters.base import RawObsRequest
-
-_STATE_PREFIX = "prop"  # default state-key prefix; name-specific keys override
 
 
 def _static_init_state(
@@ -70,24 +66,6 @@ class GenericProp(PropHandler):
         self.placement = PropPlacement(spec.placement)
         self._roll_quat = _roll_quat(spec.init_roll)
         self._asset = None
-        # state-key names: spec.state_keys overrides the default prefix so two
-        # generic props in one scene don't collide (e.g. ["box_pos_b", ...]).
-        # Falls back to prop_pos_b / prop_vel_b when the spec leaves it empty.
-        if spec.state_keys:
-            self._pos_key = spec.state_keys[0]
-            self._vel_key = (
-                spec.state_keys[1]
-                if len(spec.state_keys) > 1
-                else (spec.state_keys[0].replace("_pos_", "_vel_"))
-            )
-        else:
-            self._pos_key = f"{_STATE_PREFIX}_pos_b"
-            self._vel_key = f"{_STATE_PREFIX}_vel_b"
-        # additive decision-package feed: the orientation key rides the
-        # pos key's stem; backends that emit it (mujoco get_state) serve
-        # it, the rest leave obs_cache without it -- the adapter degrades
-        # honestly to quat None
-        self._quat_key = self._pos_key.replace("_pos_", "_quat_")
 
     # ------------------------------------------------------------------ #
     # scene configuration
@@ -175,36 +153,6 @@ class GenericProp(PropHandler):
         self._asset.write_root_pose_to_sim(pose, env_ids=env_ids)
         vel = torch.zeros(n, 6, device=env.device, dtype=world_pos.dtype)
         self._asset.write_root_velocity_to_sim(vel, env_ids=env_ids)
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Body-frame state tensors for this prop."""
-        if self._asset is None or not hasattr(self._asset, "data"):
-            return {}
-        robot = env.robot
-        rd = robot.data
-        bd = self._asset.data
-        base_quat = rd.root_quat_w
-        rel = bd.root_pos_w - rd.root_pos_w
-        pos_b = quat_rotate_inverse(base_quat, rel)
-        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w
-        vel_b = quat_rotate_inverse(base_quat, rel_v)
-        return {self._pos_key: pos_b, self._vel_key: vel_b}
-
-    @property
-    def state_requests(self) -> list[RawObsRequest]:
-        """Declare the obs keys this prop exposes (none for static props)."""
-        if self.static:
-            # stage decoration: no obs face at all
-            return []
-        return [
-            RawObsRequest(self._pos_key, 3, "prop"),
-            RawObsRequest(self._vel_key, 3, "prop"),
-            # §2: the catalog face of the additive quat feed (the
-            # mujoco backend emits it; backends without the emission
-            # never fill obs_cache -- "requested keys only", the
-            # adapter's .get() degrades to None)
-            RawObsRequest(self._quat_key, 4, "prop"),
-        ]
 
     def get_world_pose(self, env):
         """``(pos (N,3), quat (N,4) wxyz)`` world-frame root pose (clones)."""

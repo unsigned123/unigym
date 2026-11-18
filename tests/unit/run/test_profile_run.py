@@ -72,6 +72,7 @@ def test_run_profile_path_builds_with_profile_assets_and_actuation(tmp_path: Pat
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=1,
@@ -113,6 +114,7 @@ def test_profile_release_assets_resolve_only_at_build(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=1,
@@ -144,6 +146,7 @@ def test_mujoco_build_does_not_resolve_an_unselected_release_format(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=1,
@@ -217,6 +220,7 @@ def test_injected_profile_wins_over_a_pack_profile_with_the_same_id(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=1,
@@ -280,6 +284,7 @@ def test_pack_profiles_cover_every_articulation_sharing_a_selector(
                 "groups": [["left", "left"], ["right", "right"]],
             }
         ],
+        "observations": {"robot": ["left", "right"]},
     }
     run = Run(
         dict(config),
@@ -337,6 +342,7 @@ def test_config_mode_composes_the_selected_profile_asset(
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["tiny", "tiny"]]}],
+        "observations": {"robot": ["tiny"]},
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -366,6 +372,7 @@ def test_run_spawn_full_quaternion_reaches_the_articulation_entry(tmp_path: Path
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        observations={"robot": ["tiny"]},
         spawn={"pos": (0.1, 0.2, 0.9), "quat_wxyz": (1.0, 0.0, 0.0, 1.0)},
         action_spec=ACTION_SPEC,
         policies=POLICIES,

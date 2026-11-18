@@ -37,6 +37,7 @@ def build_tiny_env(
     contact_manager=None,
     asset_plan=None,
     adapter=None,
+    observations=None,
 ):
     """Construct the real warp backend from the fixture MJCF (CPU, no managers)."""
     for module_name in ("mujoco_warp", "warp"):
@@ -45,6 +46,7 @@ def build_tiny_env(
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.mjwarp.env import MjwarpEnv
     from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
@@ -111,6 +113,11 @@ def build_tiny_env(
         prop_manager=prop_manager,
         contact_manager=contact_manager,
         asset_plan=asset_plan,
+        observations=(
+            observations
+            if observations is not None
+            else ObservationConfig(robot=(ARTICULATION,), command=True, prev_action=True)
+        ),
     )
 
 
@@ -136,6 +143,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         contact_manager=None,
         asset_plan=None,
         adapter=None,
+        observations=None,
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -153,6 +161,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             contact_manager=contact_manager,
             asset_plan=asset_plan,
             adapter=adapter,
+            observations=observations,
         )
         created.append(env)
         return env

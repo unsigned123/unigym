@@ -121,15 +121,13 @@ _ADAPTER_SOURCE = (
     "class AcmeAdapter(Adapter):\n"
     "    def __init__(self, num_envs=1, device='cpu', **kwargs):\n"
     "        pass\n\n"
-    "    def get_obs_requests(self):\n"
-    "        return []\n\n"
     "    @property\n"
     "    def obs_dim(self):\n"
     "        return 0\n\n"
     "    @property\n"
     "    def control_dt(self):\n"
     "        return 0.02\n\n"
-    "    def compute_obs(self, obs_cache, cmd, env):\n"
+    "    def compute_obs(self, obs, env):\n"
     "        return None\n\n"
     "    def act(self, obs):\n"
     "        return None\n\n"
@@ -168,9 +166,6 @@ class _TestAdapter(Adapter):
     def __init__(self, num_envs=1, device="cpu", **kwargs):
         pass
 
-    def get_obs_requests(self):
-        return []
-
     @property
     def obs_dim(self):
         return 0
@@ -179,7 +174,7 @@ class _TestAdapter(Adapter):
     def control_dt(self):
         return 0.02
 
-    def compute_obs(self, obs_cache, cmd, env):
+    def compute_obs(self, obs, env):
         return None
 
     def act(self, obs):

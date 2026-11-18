@@ -69,6 +69,7 @@ def _write_config(tmp_path: Path, tiny_mjcf: Path) -> tuple[Path, str]:
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["body", "body"]]}],
+        "observations": {"robot": ["body"]},
     }
     path = tmp_path / "sim.yaml"
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
@@ -86,7 +87,7 @@ def test_config_mode_acts_through_the_runtime_target(tmp_path: Path, tiny_mjcf: 
         group = handle.action_groups["body"]
         sim.act(group, torch.tensor([[0.3, -0.4]], dtype=torch.float32))
         obs = sim.step()
-        assert obs.raw[f"articulation/{handle.name}/joint_pos"].shape == (1, 2)
+        assert obs.record[f"articulation/{handle.name}/joint_pos"].shape == (1, 2)
         with pytest.raises(BindingError, match="does not match the declared template"):
             sim.act(
                 OrderedActionGroup(

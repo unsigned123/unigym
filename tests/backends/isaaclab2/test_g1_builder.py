@@ -248,6 +248,7 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
     from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
@@ -309,6 +310,7 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
         sim_dt=0.005,
         device="cuda:0",
         articulations=(spec,),
+        observations=ObservationConfig(robot=(spec.name,)),
         controls=controls,
         profiles={ARTICULATION: profile},
         robot_realizations={ARTICULATION: realization},
@@ -335,6 +337,7 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.env.obs import ObservationConfig
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
@@ -376,6 +379,7 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
         sim_dt=0.005,
         device="cuda:0",
         articulations=(spec,),
+        observations=ObservationConfig(robot=(spec.name,)),
         controls=controls,
         profiles={ARTICULATION: profile},
         robot_realizations={ARTICULATION: realization},

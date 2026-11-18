@@ -8,7 +8,6 @@ import torch
 from unigym.run.api import Run
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner.base import StepResult
-from unigym.runner.state import read_extra
 from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
     ArticulationHandle,
@@ -68,8 +67,8 @@ def _sim(*, runner: FakeRunner | None = None, num_envs: int = 2) -> Simulation:
         env=live.env,
         run=run,
         owner=owner,
-        state=read_extra(live.env),
-        obs_cache=dict(live.env.obs_cache),
+        state=live.env.record(),
+        obs=live.env.obs.snapshot(),
         t=0,
     )
 
@@ -97,7 +96,7 @@ class _BadResetRunner(FakeRunner):
         return StepResult(
             t=result.t,
             obs=result.obs,
-            extra=result.extra,
+            record=result.record,
             reset_env_ids=self.bad_ids,
             terminated=result.terminated,
         )
@@ -116,7 +115,7 @@ class _BadTerminatedRunner(FakeRunner):
         return StepResult(
             t=result.t,
             obs=result.obs,
-            extra=result.extra,
+            record=result.record,
             reset_env_ids=result.reset_env_ids,
             terminated=self.bad_terminated,
         )
@@ -150,7 +149,7 @@ def test_step_reports_due_and_terminated_without_resetting_rows() -> None:
     assert obs.terminated is not None
     assert obs.terminated.tolist() == [False, True]
     assert obs.articulations[sim.articulations[0]].joint_pos.tolist() == [[0.25], [0.75]]
-    time_in_episode = obs.raw["time_in_episode"]
+    time_in_episode = obs.record["time_in_episode"]
     assert isinstance(time_in_episode, torch.Tensor)
     assert time_in_episode.tolist() == [1.0, 1.0]
 
@@ -167,7 +166,7 @@ def test_reset_after_a_due_tick_clears_due_and_episode_clock() -> None:
     assert obs.reset_env_ids.tolist() == [0, 1]
     assert obs.reset_due_env_ids.tolist() == []
     assert obs.terminated is None
-    time_in_episode = obs.raw["time_in_episode"]
+    time_in_episode = obs.record["time_in_episode"]
     assert isinstance(time_in_episode, torch.Tensor)
     assert time_in_episode.tolist() == [0.0, 0.0]
 
@@ -185,10 +184,10 @@ def test_reset_subset_restores_only_the_named_row() -> None:
     assert obs.reset_due_env_ids.tolist() == []
     assert obs.terminated is None
     assert obs.articulations[handle].joint_pos.tolist() == [[0.25], [0.0]]
-    time_in_episode = obs.raw["time_in_episode"]
+    time_in_episode = obs.record["time_in_episode"]
     assert isinstance(time_in_episode, torch.Tensor)
     assert time_in_episode.tolist() == [1.0, 0.0]
-    episode_id = obs.raw["episode_id"]
+    episode_id = obs.record["episode_id"]
     assert isinstance(episode_id, torch.Tensor)
     assert episode_id.tolist() == [0, 1]
 

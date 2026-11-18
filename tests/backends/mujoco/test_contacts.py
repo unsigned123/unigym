@@ -135,6 +135,7 @@ def test_run_sensing_manager_binds_in_the_constructor(tiny_env_factory, tiny_mjc
     from types import SimpleNamespace
 
     from unigym.adapters.manual import ManualAdapter
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.registry import backend_info
     from unigym.run.build import _build_sensing
     from unigym.scenes.articulation import ArticulationSpec
@@ -166,6 +167,7 @@ def test_run_sensing_manager_binds_in_the_constructor(tiny_env_factory, tiny_mjc
         ManualAdapter(),
         0.02,
         None,
+        ObservationConfig(robot=("tiny",)),
     )
     manager = sensing["contact_manager"]
     assert manager is not None

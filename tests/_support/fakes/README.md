@@ -9,7 +9,7 @@ objects. This directory is not collected and contains no tests.
 | --- | --- | --- |
 | `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row |
 | `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
-| `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) plus the private reset-time extra seam (`_build_extra`/`_read_state`/`_extra`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `last_actions` records the lowered action mapping of the last tick, `cache_extra` merges record-like entries into the returned observation cache, `terminated_rows` / `due_rows` set the step result's `(N,)` termination mask and episode-clock due ids (reported only, never reset during `step`), `close` is idempotent, `fail_next_tick` raises once after advancing the clock; the `*StateEnv` doubles are stateless apart from call counters |
+| `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `last_actions` records the lowered action mapping of the last tick, `terminated_rows` / `due_rows` set the step result's `(N,)` termination mask and episode-clock due ids (reported only, never reset during `step`), `close` is idempotent, `fail_next_tick` raises once after advancing the clock |
 
 Every Python module in this directory (except the package marker) must appear
 in the manifest table; `tests/meta/test_stub_policy.py` enforces this.
@@ -30,13 +30,13 @@ Behavior:
 - `step(actions, raw_action=None, cmd=None)` consumes `dict[str, NamedAction]`,
   requires the named action group, validates kind/batch/joint coverage and
   replaces the scalar joint position with the target. `raw_action` is copied to
-  `obs_cache["prev_action"]`; `cmd`, when supplied, is copied to
-  `obs_cache["command"]`.
-- `obs_cache` always carries `joint_pos` and `prev_action` (plus `command` only
-  when a command was supplied).
-- `extra` carries the 13 namespaced per-articulation record keys under
-  `articulation/arm/<key>`, the two bare bookkeeping keys `time_in_episode` and
-  `episode_id`, and the control keys `reset_env_ids` / `should_reset`.
+  the typed `prev_action` slot; `cmd`, when supplied, is copied to the
+  `command` slot.
+- `env.obs` is a config-declared `ObservationRegistry` and publishes the full
+  robot state plus the two runtime slots.
+- `record()` carries the canonical `articulation/arm/<key>` keys and the
+  bookkeeping keys `time_in_episode` / `episode_id`; `step()` returns an
+  `EnvStep` with the typed snapshot and reset masks.
 - `perm_il2pol` / `perm_pol2il` are the identity permutation; policy joint
   limits are `(N, J)` float32 tensors.
 - `close()` is idempotent.
@@ -62,5 +62,5 @@ Limitations (deliberate, no production seam is added for them):
 One fake per external boundary: do not add per-test fakes, a fake hierarchy or
 a configurable universal fake. `backend.py` is the conformance reference;
 `closing.py` is the close-boundary fault injector; `runner.py` is the
-single-tick runner seam and the reset-time extra-reader seam family. Add a new
+single-tick runner seam. Add a new
 manifest row only when a new external boundary appears.

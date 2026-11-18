@@ -17,6 +17,8 @@ Process documents:
 
 Usage documents:
 
+- [Observations](observations.md) - config-declared typed observation registry,
+  snapshots, records and artifact keys.
 - [Actions](actions.md) - joint-addressed runtime values, authoring templates,
   per-joint routing/coverage and policy ownership rules.
 - [World and `World.flat()`](world.md) - World/EnvSpec ownership, flat-ground

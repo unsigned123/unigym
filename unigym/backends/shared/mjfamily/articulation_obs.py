@@ -1,9 +1,10 @@
-"""Articulation observation + record + termination keys.
+"""Articulation observation + record publication (MuJoCo family).
 
-Every articulation publishes its robot state under ``articulation/<name>/``.
-These helpers are shared by the CPU ``MujocoEnv`` and the ``MjwarpEnv`` (same
-``MjModel``/``MjData`` family); every function takes the live env and only
-touches data-shaped attributes.
+Every declared observation robot publishes its full typed state into
+``env.obs`` (the config-declared :class:`~unigym.env.obs.ObservationRegistry`)
+under ``articulation/<name>/...``.  The CPU ``MujocoEnv`` and the ``MjwarpEnv``
+share these helpers; every function takes the live env and only touches
+data-shaped attributes.
 """
 
 from __future__ import annotations
@@ -12,39 +13,57 @@ import numpy as np
 import torch
 
 from unigym.core import quat
-from unigym.env.obs_catalog import ObsCatalog, build_obs_catalog
 from unigym.scenes.articulation import resolve_spawn_quat
 
 
 def refresh_obs_sources(env) -> None:
-    """Inject camera/contact/prop-served keys into ``env.obs_cache``."""
+    """Publish camera/contact/object/site sources once per step.
+
+    Contacts are read exactly once per refresh; only the groups selected by
+    ``observations.contact`` enter the registry.  Cameras declared only for
+    recording never render here (the manager's obs-rig split owns that), and
+    object poses come from the prop backend's typed world-pose face.
+    """
+    registry = env.obs
+    schema = registry.schema
     if env.camera_manager is not None:
-        for k, v in env.camera_manager.tick_and_read().items():
-            env.obs_cache[k] = v
-    if env.contact_manager is not None and env.contact_manager.obs_keys():
-        for k, v in env.contact_manager.read().items():
-            if k in env.contact_manager.obs_keys():
-                env.obs_cache[k] = v
+        for key, value in env.camera_manager.tick_and_read().items():
+            if key in schema:
+                registry.set_camera(key, value)
     if env.contact_manager is not None:
-        for req in env._obs_requests:
-            if req.key.startswith("contact_ops/"):
-                name = req.key.split("/", 1)[1]
-                if name in {s.name for s in env.contact_manager.specs}:
-                    env.obs_cache[req.key] = env.contact_manager.read_detail(name)
+        contacts = env.contact_manager.read()
+        for key, value in contacts.items():
+            if key in schema:
+                registry.set_contact(key[len("contact/") :], value)
+        for name in registry.config.contact:
+            if env.contact_manager.has_detail(name):
+                registry.set_contact_detail_provider(
+                    name, lambda name=name: env.contact_manager.read_detail(name)
+                )
     if env.prop_backend is not None:
-        requested = {r.key for r in env._obs_requests}
-        for k, v in env.prop_backend.get_state(env).items():
-            if k in requested:
-                env.obs_cache[k] = v
-
-
-def articulation_catalog(articulation) -> ObsCatalog:
-    """The per-articulation obs catalog, keys under ``articulation/<name>``."""
-    return build_obs_catalog(
-        articulation.profile,
-        articulation_joint_names=articulation.robot_joint_names,
-        articulation=articulation.name,
-    )
+        poses = env.prop_backend.get_world_poses(env)
+        for name in registry.config.object:
+            if name in poses:
+                pos, quat_w = poses[name]
+                registry.set_object(name, "pos", torch.as_tensor(pos, dtype=torch.float32))
+                registry.set_object(name, "quat", torch.as_tensor(quat_w, dtype=torch.float32))
+        joints = env.prop_backend.get_joint_states(env)
+        for name in registry.config.object:
+            for joint_name, value in (joints.get(name) or {}).items():
+                key = f"object/{name}/joints/{joint_name}"
+                if key in schema:
+                    registry.set_object(
+                        name, f"joints/{joint_name}", torch.as_tensor(value, dtype=torch.float32)
+                    )
+    for site_name, site_id in getattr(env, "_obs_sites", ()):
+        if env.num_envs == 1:
+            value = torch.tensor(env._data.site_xpos[site_id], dtype=torch.float32).unsqueeze(0)
+        else:
+            value = torch.stack(
+                [torch.tensor(d.site_xpos[site_id], dtype=torch.float32) for d in env._datas],
+                dim=0,
+            )
+        registry.set_site(site_name, value)
 
 
 def read_articulation_state(env, art, e: int = 0) -> dict:
@@ -89,82 +108,68 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
     }
 
 
-def articulation_extra(env, art) -> dict:
-    """Namespaced state keys for ONE articulation (termination/record face)."""
-    f32 = torch.float32
-    states = [read_articulation_state(env, art, ee) for ee in range(env.num_envs)]
-
-    def stack(values, dtype=f32):
-        return torch.stack([torch.as_tensor(v, dtype=dtype) for v in values], dim=0)
-
-    prefix = f"articulation/{art.name}"
-    out = {
-        f"{prefix}/joint_pos": stack([s["q_pol"] for s in states]),
-        f"{prefix}/joint_vel": stack([s["v_pol"] for s in states]),
-        f"{prefix}/applied_torque": stack(
-            [env._datas[ee].qfrc_actuator[art.jdr_pol] for ee in range(env.num_envs)]
-        ),
-        f"{prefix}/gravity_b": stack([s["gravity_b"] for s in states]),
-        f"{prefix}/base_pos_w": stack([s["pos_w"] for s in states]),
-        f"{prefix}/base_quat_w": stack([s["quat_w"] for s in states]),
-        f"{prefix}/base_lin_vel_w": stack([s["lin_vel_w"] for s in states]),
-        f"{prefix}/base_ang_vel_w": stack([s["ang_vel_w"] for s in states]),
-        f"{prefix}/base_lin_vel_b": stack([s["lin_vel_b"] for s in states]),
-        f"{prefix}/base_ang_vel_b": stack([s["ang_vel_b"] for s in states]),
-    }
-    return out
+def _stack(values, dtype=torch.float32) -> torch.Tensor:
+    return torch.stack([torch.as_tensor(v, dtype=dtype) for v in values], dim=0)
 
 
 def refresh_articulation_obs(env) -> None:
-    """Publish every articulation under ``articulation/<name>/...``."""
+    """Publish every declared observation robot under ``articulation/<name>``."""
+    registry = env.obs
     f32 = torch.float32
-    for art in env._articulation_order:
-        prefix = f"articulation/{art.name}"
+    for name in registry.config.robot:
+        art = env.articulations[name]
         states = [read_articulation_state(env, art, e) for e in range(env.num_envs)]
-        q = torch.stack(
-            [
-                torch.as_tensor(env._datas[e].qpos[art.jadr_art] - art.q0_mj, dtype=f32)
-                for e in range(env.num_envs)
-            ],
-            dim=0,
+        registry.set_robot(
+            name,
+            "joint_pos",
+            _stack([s["q_pol"] for s in states], dtype=f32),
         )
-        v = torch.stack(
-            [
-                torch.as_tensor(env._datas[e].qvel[art.jdr_art], dtype=f32)
-                for e in range(env.num_envs)
-            ],
-            dim=0,
+        registry.set_robot(
+            name,
+            "joint_pos_rel",
+            _stack(
+                [env._datas[e].qpos[art.jadr_art] - art.q0_mj for e in range(env.num_envs)],
+                dtype=f32,
+            ),
         )
-        tau = torch.stack(
-            [
-                torch.as_tensor(env._datas[e].qfrc_actuator[art.jdr_art], dtype=f32)
-                for e in range(env.num_envs)
-            ],
-            dim=0,
+        registry.set_robot(name, "joint_vel", _stack([s["v_pol"] for s in states], dtype=f32))
+        registry.set_robot(
+            name,
+            "joint_vel_full",
+            _stack(
+                [env._datas[e].qvel[art.jdr_art] for e in range(env.num_envs)],
+                dtype=f32,
+            ),
         )
-        env.obs_cache[f"{prefix}/joint_pos_rel"] = q
-        env.obs_cache[f"{prefix}/joint_vel"] = v
-        env.obs_cache[f"{prefix}/applied_torque"] = tau
+        registry.set_robot(
+            name,
+            "applied_torque",
+            _stack(
+                [env._datas[e].qfrc_actuator[art.jdr_pol] for e in range(env.num_envs)],
+                dtype=f32,
+            ),
+        )
         for source, target in (
             ("gravity_b", "gravity_b"),
             ("pos_w", "base_pos_w"),
             ("quat_w", "base_quat_w"),
+            ("lin_vel_w", "base_lin_vel_w"),
+            ("ang_vel_w", "base_ang_vel_w"),
+            ("lin_vel_b", "base_lin_vel_b"),
             ("ang_vel_b", "base_ang_vel_b"),
         ):
-            env.obs_cache[f"{prefix}/{target}"] = torch.stack(
-                [torch.as_tensor(s[source], dtype=f32) for s in states], dim=0
-            )
-        env.obs_cache[f"{prefix}/base_yaw"] = torch.stack(
-            [
-                torch.as_tensor([float(np.arctan2(s["rot"][1, 0], s["rot"][0, 0]))], dtype=f32)
-                for s in states
-            ],
-            dim=0,
+            registry.set_robot(name, target, _stack([s[source] for s in states], dtype=f32))
+        registry.set_robot(
+            name,
+            "base_yaw",
+            _stack(
+                [np.asarray([float(np.arctan2(s["rot"][1, 0], s["rot"][0, 0]))]) for s in states],
+                dtype=f32,
+            ),
         )
 
 
-def refresh_obs_cache(env, raw_action=None, cmd=None) -> None:
-    """The namespaced observation refresh (bound at construction)."""
-    del raw_action, cmd
+def refresh_obs(env) -> None:
+    """The single per-step registry refresh (sources + robot state)."""
     refresh_obs_sources(env)
     refresh_articulation_obs(env)

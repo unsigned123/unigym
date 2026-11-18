@@ -35,6 +35,7 @@ from unigym.backends.registry import (
     validate_backend_options,
 )
 from unigym.core.paths import expand_placeholders
+from unigym.env.obs import ObservationConfig, ObsConfigError
 from unigym.runtime.actions import (
     OrderedActionSpec,
     PolicyBinding,
@@ -126,6 +127,8 @@ class RunSpec:
     props: JsonValue
     cameras: JsonValue
     contacts: JsonValue
+    #: the parsed ``observations:`` declaration (config-declared sources).
+    observations: ObservationConfig
     director: dict[str, JsonValue] | None
     recorder: dict[str, JsonValue]
     bridges: dict[str, JsonValue]
@@ -786,6 +789,10 @@ def build_spec(
     _route_content(cfg, env_cfg, backend_label)
     world_base = _validate_world_base(cfg, env_cfg, backend_label)
     articulations = _normalize_articulations(cfg, args.config)
+    try:
+        observations = ObservationConfig.from_mapping(cfg.get("observations"))
+    except ObsConfigError as exc:
+        raise ConfigError(f"{args.config}: {exc}") from exc
     action_spec, policies = _normalize_action_authoring(cfg, articulations, args.config)
     num_envs = _as_positive_int(env_cfg.get("num_envs"), "env.num_envs")
     total_steps = _as_positive_int(col_cfg.get("steps"), "collect.steps")
@@ -825,6 +832,7 @@ def build_spec(
         props=cfg.get("props"),
         cameras=cfg.get("cameras"),
         contacts=cfg.get("contacts"),
+        observations=observations,
         director=director,
         recorder=_require_config(cfg.get("recorder") or {}, "recorder"),
         bridges={
