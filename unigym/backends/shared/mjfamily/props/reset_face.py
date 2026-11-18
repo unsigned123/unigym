@@ -13,10 +13,10 @@ public contract and only the CURRENT reset env is touched.  The settle
 loop is the actuator-aware zero-action face the reset chain already
 used.
 
-The GR1 robot-body stages keep their engine-side call site
-(``MujocoEnv._apply_reset_protocol``); :func:`wire_reset_face`
-only hands the stage spec through, so the execution order and the RNG
-consumption order stay bitwise (determinism red line).
+The robot-body reset stages (when a pack initializer declares them) run
+in :meth:`InitializerBase.apply_robot_stages`, called once after
+``apply`` inside the backend reset chain, so the execution order and the
+RNG consumption order stay bitwise (determinism red line).
 
 ``_probe_region_placement`` is the region-bound candidate-probe face
 (the backend's collision-query seam the placement sampler reaches
@@ -31,15 +31,12 @@ callbacks to its state-write methods.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
 from unigym.core import quat as quat_math
 from unigym.initializers import InitializerBase, ResetPrimitives
-
-if TYPE_CHECKING:  # pragma: no cover - typing-only
-    from unigym.robots.gr1_reset import Gr1ResetSpec
 
 _ZERO_TOL = 1e-12
 
@@ -189,7 +186,7 @@ def resolve_base_height(params: dict, profile) -> float:
     effective profile's ``base_height``; with neither the fallback is
     ``0.0``.  ``base.joint: fixed`` absorbs the legacy spawn_height param:
     a world-fixed base has no freejoint and no spawn drop -> height 0.0
-    (the GR1 tabletop scenes' declared behavior, bitwise).  A free-base
+    (the fixed-base tabletop scenes' declared behavior, bitwise).  A free-base
     declaration fails fast until the base migration lands.
     """
     base_decl = params.get("base")
@@ -401,6 +398,37 @@ def build_reset_primitives(env) -> ResetPrimitives:
     def probe_candidate(rule, position, yaw, clearance):
         return _probe_region_placement(env, rule, position, yaw, clearance)
 
+    def resolve_articulation(profile_name: str) -> str:
+        """Resolve a robot profile name to the run's articulation name.
+
+        The same profile may back an articulation renamed by
+        ``articulations[].params.profile``; robot-stage writers use this
+        instead of assuming the names are equal.  Ambiguous or unknown
+        profile names fail with the declared articulation list.
+        """
+        key = str(profile_name)
+        arts = getattr(env, "articulations", None) or {}
+        matches = sorted(
+            str(name)
+            for name, art in arts.items()
+            if getattr(getattr(art, "profile", None), "name", None) == key
+        )
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"ResetPrimitives.resolve_articulation({key!r}): profile name "
+                f"is ambiguous over articulations {matches} | declared: {sorted(arts)}"
+            )
+        if key in arts:
+            profile = getattr(arts[key], "profile", None)
+            if profile is None or getattr(profile, "name", None) == key:
+                return key
+        raise ValueError(
+            f"ResetPrimitives.resolve_articulation({key!r}): no articulation "
+            f"carries this profile name | declared: {sorted(arts)}"
+        )
+
     return ResetPrimitives(
         model=m,
         settle_fn=env._settle_substeps,
@@ -412,32 +440,30 @@ def build_reset_primitives(env) -> ResetPrimitives:
         prop_names=frozenset(s.name for s in env.prop_manager.specs)
         if env.prop_manager is not None
         else frozenset(),
+        resolve_articulation=resolve_articulation,
         resolve_region=resolve_region,
         object_collision_bounds=object_collision_bounds,
         probe_candidate=probe_candidate,
     )
 
 
-def wire_reset_face(
-    env, params: dict, profile
-) -> Tuple[Optional[InitializerBase], Optional[Gr1ResetSpec]]:
+def wire_reset_face(env, params: dict, profile) -> Optional[InitializerBase]:
     """Dispatch the declared reset face (the six-step contract).
 
     read the segment (``initializer`` or the legacy ``reset`` sugar in
     :func:`unigym.initializers.normalize_initializer_spec`) -> registry
     lookup -> validate (inside build) -> resolve against the compiled
-    model.  The per-episode apply + the name-neutrality check run in
-    the backend's reset chain.  Returns ``(initializer, stage_spec)``
-    (``(None, None)`` when no reset face is declared -- the legacy
-    reset, bit-identical); the stage spec comes from the initializer's
-    own ``stage_spec`` face and validates through the legacy
-    ``Gr1ResetSpec`` stage face.
+    model.  The per-episode apply, the optional robot-stage hook and the
+    name-neutrality check run in the backend's reset chain.  Returns the
+    initializer (``None`` when no reset face is declared -- the legacy
+    reset, bit-identical).  Protocol validation belongs to the selected
+    initializer/pack, never to core.
     """
     from unigym.initializers import build_initializer, normalize_initializer_spec
 
     init_cfg = normalize_initializer_spec(params)
     if init_cfg is None:
-        return None, None
+        return None
     initializer = build_initializer(init_cfg, profile, build_reset_primitives(env))
     if initializer.places_props and env.prop_backend is None:
         raise ValueError(
@@ -446,9 +472,4 @@ def wire_reset_face(
             "need the injected prop bodies"
         )
     initializer.resolve()
-    stage = initializer.stage_spec()
-    if stage is None:
-        return initializer, None
-    from unigym.robots.gr1_reset import Gr1ResetSpec
-
-    return initializer, Gr1ResetSpec(stage)
+    return initializer

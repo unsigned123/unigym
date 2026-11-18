@@ -3,8 +3,8 @@
 For models whose actuators are affine POSITION servos in the MJCF itself
 (``force = gainprm[0]*ctrl + biasprm[1]*q = k*(ctrl - q)``): the software
 law only relays the target angle -- the model-side servo closes the loop
-(docs/audits/v063_gr1_control_chain_audit.md §5: the GR1 Fourier hands,
-kp=2 / thumb-yaw kp=4, ctrlrange [0, ~1.74]; negative targets clamp to
+(the reference stack's Fourier hands: kp=2 / thumb-yaw kp=4,
+ctrlrange [0, ~1.74]; negative targets clamp to
 the range floor 0, exactly the audited stack's clip semantics).
 
 Group fields: none beyond addressing.  ``kp``/``kd`` are DELIBERATELY

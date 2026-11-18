@@ -8,9 +8,9 @@ The built-ins:
 
 * ``standard_pd``       the explicit-PD law;
 * ``computed_torque_pd`` tau = M_part @ (kp*e - kd*dq) + qfrc_bias with a
-  fresh M/bias read per substep, per-part blocked (the GR1 body semantics);
+  fresh M/bias read per substep, per-part blocked (the reference body semantics);
 * ``native_servo``      ctrl = clip(target, ctrlrange) passthrough for models
-  whose actuators are affine position servos (the GR1 hand semantics);
+  whose actuators are affine position servos (the reference hand semantics);
 * ``direct_torque``     ctrl = clip(target torque, ctrlrange) over compiled
   motor actuators;
 * ``direct_velocity``   ctrl = clip(target velocity, ctrlrange) over compiled

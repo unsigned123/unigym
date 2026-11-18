@@ -669,7 +669,7 @@ There is no asset format to select in that case, so the run layer uses the
 backend's first declared format as the binding-key format; a backend robot
 realizer that needs an asset (IsaacLab) still fails explicitly.
 `base_height` is the neutral free-base spawn height: G1
-declares `0.78`, GR1 and other robots declare `None`. `ArticulationSpec.spawn`
+declares `0.78`; other robots declare `None`. `ArticulationSpec.spawn`
 is the run-level spawn authority; when it is absent, an explicit
 `env.params.spawn_height` wins over the profile `base_height`, whose final
 fallback is `0.0`.
@@ -796,10 +796,10 @@ explicitly.  When `spec.spawn` is absent, `default_pos` is
 the builder fails because there is no spawn default.  Neutral actuation is
 declared on the articulation (`ArticulationSpec.actuation`) and translated by
 the backend; `env.params.actuators`, the articulation `actuation` gains and the top-level
-`actuator:` override are removed.  GR1 declares no neutral USD/URDF asset, so
-the backend realizer rejects it because its effective asset has no compatible
-format, not because of its name.  Its MJCF remains a scene resource, not a
-neutral robot asset.
+`actuator:` override are removed.  A profile that declares no neutral
+USD/URDF asset is rejected by the backend realizer because its effective
+asset has no compatible format, not because of its name.  A pack-owned MJCF
+remains a scene resource, not a neutral robot asset.
 
 The drive/law matrix is explicit and closed:
 
@@ -832,14 +832,12 @@ machine-readable backend capability matrix.
 Dynamic `register_robot` / manifest `kind: robot` registration is the explicit
 external-robot path: a pack registers a backend-neutral factory or resource
 and `build_robot_profile(name)` resolves it without a core factory table.
-G1 and GR1 neutral profiles are pack data, not core built-ins.
+G1's neutral profile is pack data, not a core built-in.
 
-Migration note: `unigym.robots.g1`, `unigym.robots.gr1`,
-`unigym.robots.g1_constants`, `unigym.robots.gr1_constants` and the
-`make_g1_profile` / `make_gr1_profile` factories are removed. Install and
-activate a robot pack before calling `build_robot_profile` for those names.
-`GR1_COTRAIN_POSE` remains in `unigym.robots.gr1_reset` because it is reset
-semantics, not neutral profile data.
+Migration note: `unigym.robots.g1`, `unigym.robots.g1_constants` and the
+`make_g1_profile` factory are removed. Install and activate a robot pack
+before calling `build_robot_profile` for that name. Robot-specific reset
+stages live with the pack initializer that owns them, never in core.
 
 ### Robot data documents
 

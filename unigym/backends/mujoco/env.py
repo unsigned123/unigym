@@ -283,7 +283,7 @@ class MujocoEnv:
                 rewrites the declared body's SPEC pose before compile
                 (the declared yaw IS the base's world yaw; the baked
                 quat is replaced).  For fixed-base models whose base
-                pose is baked into the XML (the GR1 tabletop robot:
+                pose is baked into the XML (a fixed-base robot:
                 no freejoint, spawn_xy/spawn_yaw have no qpos to land
                 in).  ABSENT -> the XML-baked pose (bit-identical).
                 Fail-closed: the body must exist, pos finite 3-vector,
@@ -308,21 +308,22 @@ class MujocoEnv:
                 scene-preset wiring declares ``initializer`` instead --
                 this block transposes to an anonymous inline initializer
                 at dispatch, see ``initializer``).  ABSENT -> the legacy
-                reset, bit-identical.  Keys: protocol ("gr1_cotrain");
+                reset, bit-identical.  Keys: protocol (passed through to
+                the selected initializer/pack, which validates it);
                 seed (the stream; same seed -> bit-identical resets);
-                settle_substeps (default 250); cotrain_noise (default
-                0.2); elbow_joints / elbow_mix (defaults = the audit's
-                r/l_elbow_pitch 0.7/0.3); placement (SplitA declarative
-                range table, requires wired props).
+                settle_substeps (the pack default when omitted);
+                cotrain_noise (the pack default when omitted);
+                elbow_joints / elbow_mix (the pack defaults when
+                omitted); placement (SplitA declarative range table,
+                requires wired props).
             initializer: scene-preset reset face:
                 {type: <registry name> | module: "pkg.mod:factory",
                 params: {...}} dispatched through INITIALIZER_REGISTRY
-                (validate -> resolve -> per-episode apply -> the sampled
-                names must all be declared props).  The builtin
-                splita_tabletop type carries the SplitA placement
-                vocabulary (the legacy ``placement`` fields, flat) plus
-                the robot-stage keys; the GR1 stage chain runs after
-                apply() in the unchanged order over the SAME stream.
+                (validate -> resolve -> per-episode apply -> the optional
+                apply_robot_stages hook -> the sampled names must all be
+                declared props).  The initializer/pack owns its protocol
+                vocabulary; robot stages run after apply() in the pack's
+                fixed order over the SAME stream.
                 Declaring both initializer and reset is an error.
             base: scene-preset base declaration ({joint: fixed}); fixed
                 absorbs the legacy spawn_height param (height 0.0, no
@@ -700,11 +701,11 @@ class MujocoEnv:
 
         # ---- reset dispatch (scene presets): the declared initializer
         # block resolves through INITIALIZER_REGISTRY (six-step
-        # contract); the legacy ``reset`` block rides the compat sugar
-        # and the GR1 robot-body stages keep their engine-side call
-        # site below (unchanged order, shared stream -- determinism
-        # red line).  See unigym/backends/shared/mjfamily/props/reset_face.py.
-        (self._initializer, self._reset_spec) = wire_reset_face(self, params, robot_profile)
+        # contract); the legacy ``reset`` block rides the compat sugar.
+        # The optional pack-owned robot stages run inside the reset chain
+        # right after apply() (shared stream -- determinism red line).
+        # See unigym/backends/shared/mjfamily/props/reset_face.py.
+        self._initializer = wire_reset_face(self, params, robot_profile)
 
         # ---- compatibility alias for the first articulation ----
         # The authoritative per-articulation tables live on the
@@ -1267,13 +1268,12 @@ class MujocoEnv:
 
         The initializer samples + writes the prop freejoints (its own
         stream); the name-neutrality check gates the sample against the
-        declared props.  The GR1 robot-body stages follow in the
-        unchanged engine-side order (settle -> elbow -> cotrain over the
-        SAME stream: placement draws first, then the noise draws -- the
-        determinism red line).  The single post-stage forward is the
-        reset tail's own mj_forward (the settle already advanced the
-        physics; the stage writes only need derived quantities
-        refreshed).
+        declared props.  The initializer's optional ``apply_robot_stages``
+        hook runs once afterwards, over the SAME stream (placement draws
+        first, then stage noise -- the determinism red line).  The single
+        post-stage forward is the reset tail's own mj_forward (the settle
+        already advanced the physics; the stage writes only need derived
+        quantities refreshed).
         """
         prev = self._active_data
         prev_env_id = self._active_reset_env_id
@@ -1296,17 +1296,7 @@ class MujocoEnv:
                     f"mujoco backend: initializer sampled undeclared prop "
                     f"names {unknown} | declared props: {sorted(declared)}"
                 )
-            if self._reset_spec is not None:
-                from unigym.robots.gr1_reset import apply_gr1_reset_stages
-
-                apply_gr1_reset_stages(
-                    self._model,
-                    self._active_data,
-                    self._initializer.rng,
-                    self._reset_spec,
-                    settle_fn=self._settle_substeps,
-                    forward=False,
-                )
+            self._initializer.apply_robot_stages()
         finally:
             self._active_data = prev
             self._active_reset_env_id = prev_env_id
@@ -1338,8 +1328,7 @@ class MujocoEnv:
                     f"mujoco backend: record_sites site {sname!r} not "
                     f"found in the MJ model | hint: site names come "
                     f"from the scene XML ('<site name=...' entries); "
-                    f"the GR1 tabletop scene carries "
-                    f"gripper0_{{left,right}}_grip_site"
+                    f"check the scene's declared grip sites"
                 )
             sites.append((sname, sid))
         return sites
@@ -1458,9 +1447,10 @@ class MujocoEnv:
                 # forward)
                 self.prop_backend.on_reset([e], self)
             if self._initializer is not None:
-                # scene-preset initializer: placement apply -> the GR1
-                # robot-body stages (unchanged order), all inside one
-                # shared stream; the tail forward below covers the writes.
+                # scene-preset initializer: placement apply -> the
+                # pack-owned robot stages (unchanged order), all inside
+                # one shared stream; the tail forward below covers the
+                # writes.
                 self._apply_reset_protocol(e)
             if self._boost_body_id >= 0:
                 d.xfrc_applied[self._boost_body_id][2] += self._boost_fz

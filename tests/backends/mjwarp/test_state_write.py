@@ -186,6 +186,26 @@ def test_set_root_state_clears_warmstart_and_settle_keeps_it_cleared(tiny_env):
     assert not _device_warmstart(env, 0).any()
 
 
+def test_set_joint_state_outside_reset_clears_the_touched_env_warmstart(tiny_env):
+    """Outside a reset a joint write drops the touched env's warm start."""
+    env = tiny_env
+    for _ in range(3):
+        env.step(_action(env, [[0.0, 0.0]]))
+
+    assert float(np.linalg.norm(env.mj_datas[0].qacc_warmstart)) > 0.0
+    assert float(np.linalg.norm(_device_warmstart(env, 0))) > 0.0
+
+    env.set_joint_state(
+        None,
+        articulation=ARTICULATION,
+        joint_names=("elbow",),
+        position=torch.tensor([[0.25]]),
+    )
+
+    assert not env.mj_datas[0].qacc_warmstart.any()
+    assert not _device_warmstart(env, 0).any()
+
+
 def test_set_root_state_rejects_a_fixed_articulation_root(tiny_env_factory, tiny_mjcf, tmp_path):
     """A root without a freejoint uses set_joint_state, not set_root_state."""
     fixed = tmp_path / "tiny_arm_fixed.xml"

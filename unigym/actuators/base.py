@@ -15,7 +15,7 @@ laws subclass + ``@register``):
   slot out of bounds / duplicate coverage is checked by the backend seam);
 * ``set_targets(qpos_targets)`` -- the backend feeds the joint-ordered
   target vector once per control step (held constant across the substeps,
-  the audited GR1 no-interpolation semantics);
+  the audited no-interpolation semantics);
 * ``step(model, data)`` -- the backend calls once per sim substep; the
   law writes only its own ctrl slots;
 * ``snapshot_internal()/restore_internal()`` -- stateful-law rewind face;
@@ -295,7 +295,7 @@ class ActuatorBase:
         receive the drive target (torque or velocity) named by the control's
         ``target``.  Called once per control step by the backend, BEFORE the
         decimation loop; the law holds it constant across the substeps (the
-        audited GR1 stack semantics: goal set once, ctrl recomputed per
+        audited stack semantics: goal set once, ctrl recomputed per
         substep).
         """
         t = np.asarray(qpos_targets, dtype=np.float64).reshape(-1)

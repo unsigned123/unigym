@@ -124,11 +124,18 @@ world angular velocity is `R @ qvel[3:6]`.
 - **float32 staging.** Warp state fields are float32; the CPU mirror is
   float64.  Writes go through the existing `_copy_field` staging path, so
   readback is float32-accurate rather than CPU-mujoco bit-identical.
-- **Warm start.** Every state write clears the touched mirror's
-  `qacc_warmstart` before the push (and pushes it), so a solve after the write
-  never reuses a warm start from the pre-write state.  `settle` runs
+- **Warm start.** Outside the reset chain every state write clears the
+  touched mirror's `qacc_warmstart` before the push (and pushes it), so a
+  solve after the write never reuses a warm start from the pre-write state.
+  Reset-chain exception: `set_joint_state` preserves `qacc_warmstart` for the
+  ACTIVE reset env (`_active_reset_env_id == e`), because the robot-stage
+  writes run after the settle pass and that post-settle solver seed is part of
+  replay determinism; the reset tail push carries it to the device.  Other
+  envs touched in the same call still clear their warm start.  `settle` runs
   `mjw.forward`, which recomputes `qacc`/`qacc_smooth` but not
-  `qacc_warmstart`; the next `step` therefore starts from zero.
+  `qacc_warmstart`; after the reset tail the active env therefore keeps the
+  post-settle seed, while ordinary writes still leave the next `step` starting
+  from zero.
 - **No CPU step.** `settle` must never call CPU `mujoco.mj_step` or
   `_settle_substeps`; that would desync the device.  Derived values are
   engine-specific and are not claimed to be bitwise equal to CPU MuJoCo.

@@ -489,7 +489,7 @@ def build_obs_catalog(
             state key is namespaced under (required; v103.5).
         record_sites: optional tuple of MJ site names the backend records
             (T3.2 EEF site family: ``site/<name>/pos`` world-frame
-            record keys, e.g. the GR1 grip sites the pack criteria's far
+            record keys, e.g. the grip sites the pack criteria's far
             predicates consume).  Record-only (never obs_cache); empty /
             ``None`` (the default) joins nothing -- zero behavior diff.
 
