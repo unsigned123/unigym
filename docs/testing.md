@@ -248,6 +248,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_assets` | `tests/unit/assets/**` |
 | `domain_backends` | `tests/unit/backends/**` |
 | `domain_sim` | `tests/unit/sim/**` |
+| `domain_initializers` | `tests/unit/initializers/**` |
 | `backend_agnostic` | no specific backend |
 | `backend_mujoco` | `tests/backends/mujoco/**` or conformance fixture |
 | `backend_mjwarp` | `tests/backends/mjwarp/**` or conformance fixture |

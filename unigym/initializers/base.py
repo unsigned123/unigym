@@ -67,8 +67,14 @@ class ResetPrimitives:
 
     An initializer NEVER touches engine handles directly: sampling reads
     ``model`` (read-only) and every mutation goes through a primitive.
-    ``write_freejoint(name, pos, yaw)`` is the prop freejoint write
-    (posed + zeroed velocity, the backend's own address table);
+    ``write_freejoint`` is the prop freejoint write:
+    ``(prop_name, pos(3,), yaw=None, *, quat_wxyz=None, lin_vel_w=None,
+    ang_vel_w=None)``.  Exactly one of ``yaw`` (pure +Z, the placement
+    sampler's call shape) or ``quat_wxyz`` (world-frame wxyz, normalized
+    by the primitive) is required; velocities are world-frame and
+    optional (absent writes zero).  The placement sampler still passes
+    ``yaw`` today; a pack needing arbitrary orientation constructs the
+    quaternion and calls the write directly.
     ``settle_fn(substeps)`` runs the backend's zero-action settle loop;
     ``forward()`` refreshes derived quantities; ``prop_extents(name)``
     yields the ``(half_xy, height)`` z-stack inputs and ``prop_names``
@@ -82,8 +88,9 @@ class ResetPrimitives:
     """The compiled backend model (read-only for initializers)."""
     settle_fn: Callable[[int], None]
     """Zero-action settle loop (substeps)."""
-    write_freejoint: Callable[[str, Any, float], None]
-    """``(prop_name, pos(3,), yaw_rad)`` -- pose + zero-velocity write."""
+    write_freejoint: Callable[..., None]
+    """``(prop_name, pos(3,), yaw=None, *, quat_wxyz=None, lin_vel_w=None,
+    ang_vel_w=None)`` -- world pose (+ optional world velocity) write."""
     joint_group: Callable[[str], Any]
     """Named joint group -> indices (robot-side seam; stub)."""
     set_targets: Callable[[Any, Any], None]
