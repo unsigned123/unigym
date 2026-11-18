@@ -76,10 +76,12 @@ method returns the normalized `int64` id tensor.  Ids outside
 cache.  It must be called before reading observations, contacts, or camera
 state that depends on the written pose.
 
-Ordering (both backends):
+Ordering (all backends):
 
 1. MuJoCo: `mj_forward` for each touched `MjData` (per-env loop; no
-   `mjBatch`).  IsaacLab: `scene.write_data_to_sim()` then `sim.forward()`.
+   `mjBatch`).  MJWarp: push each touched mirror, then one batched
+   `mjw.forward` and a mirror re-sync.  IsaacLab: `scene.write_data_to_sim()`
+   then `sim.forward()`.
 2. Re-pose camera rigs through the existing reset hook (`on_reset(env_ids)`).
 3. Refresh `obs_cache`.
 
@@ -95,15 +97,38 @@ episode state, not persistent configuration.
 
 ## 6. Backend mapping
 
-| Concept | MuJoCo (`MujocoEnv`) | IsaacLab 2 (`IsaaclabEnv`) |
-| --- | --- | --- |
-| articulation root | articulation's freejoint `qpos`/`qvel` | `write_root_link_pose_to_sim` + `write_root_link_velocity_to_sim` |
-| free rigid prop | prop backend `free_addresses(name)` | handler asset's `write_root_link_pose_to_sim` / `write_root_link_velocity_to_sim` |
-| angular velocity | world -> body-local `R.T @ ang_vel_w` in qvel | world input, passed through the existing wxyz -> PhysX boundary |
-| joint write | `jadr_art` / `jdr_art` qpos/qvel rows | `write_joint_state_to_sim(position, velocity, joint_ids, env_ids)` |
-| settle | `mj_forward` + obs refresh | `write_data_to_sim` + `sim.forward` + obs refresh |
+| Concept | MuJoCo (`MujocoEnv`) | MJWarp (`MjwarpEnv`) | IsaacLab 2 (`IsaaclabEnv`) |
+| --- | --- | --- | --- |
+| articulation root | articulation's freejoint `qpos`/`qvel` | same freejoint addresses on the per-env CPU mirror, then a per-world device push | `write_root_link_pose_to_sim` + `write_root_link_velocity_to_sim` |
+| free rigid prop | prop backend `free_addresses(name)` | same prop backend `free_addresses(name)` on the CPU mirror, then a per-world device push | handler asset's `write_root_link_pose_to_sim` / `write_root_link_velocity_to_sim` |
+| angular velocity | world -> body-local `R.T @ ang_vel_w` in qvel | same world -> body-local `R.T @ ang_vel_w` before staging | world input, passed through the existing wxyz -> PhysX boundary |
+| joint write | `jadr_art` / `jdr_art` qpos/qvel rows | same `jadr_art` / `jdr_art` rows on the CPU mirror, then a per-world device push | `write_joint_state_to_sim(position, velocity, joint_ids, env_ids)` |
+| settle | `mj_forward` + obs refresh | `mjw.forward(wm, wdata)` + mirror re-sync + obs refresh | `write_data_to_sim` + `sim.forward` + obs refresh |
 
 The MuJoCo freejoint convention is the one measured in the engine:
 `qvel[0:3]` is world-frame linear velocity and `qvel[3:6]` is **body-frame**
 angular velocity.  Observation and director helpers convert at the boundary;
 world angular velocity is `R @ qvel[3:6]`.
+
+### 6.1 MJWarp specifics
+
+- **Mirror write, then push.** `MjwarpEnv` keeps one batched Warp `Data`
+  (`nworld=N`) and N CPU `MjData` mirrors.  A write edits the selected
+  mirror rows only and immediately calls `_push_mirror_to_device(d, e)` for
+  each touched env, so the next `step` observes the write.  No implicit
+  step/reset/settle happens.
+- **Subset writes at N>1.** Only the selected device worlds are pushed;
+  untouched mirrors and device worlds keep their live state.  The batched
+  `mjw.forward` in `settle` recomputes derived quantities for every world but
+  never changes `qpos`/`qvel`/`time`, and every mirror is re-synced afterwards.
+- **float32 staging.** Warp state fields are float32; the CPU mirror is
+  float64.  Writes go through the existing `_copy_field` staging path, so
+  readback is float32-accurate rather than CPU-mujoco bit-identical.
+- **Warm start.** Every state write clears the touched mirror's
+  `qacc_warmstart` before the push (and pushes it), so a solve after the write
+  never reuses a warm start from the pre-write state.  `settle` runs
+  `mjw.forward`, which recomputes `qacc`/`qacc_smooth` but not
+  `qacc_warmstart`; the next `step` therefore starts from zero.
+- **No CPU step.** `settle` must never call CPU `mujoco.mj_step` or
+  `_settle_substeps`; that would desync the device.  Derived values are
+  engine-specific and are not claimed to be bitwise equal to CPU MuJoCo.

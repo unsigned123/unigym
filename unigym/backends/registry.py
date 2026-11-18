@@ -580,6 +580,7 @@ MJWARP_TRAITS = _CORE | frozenset(
         Trait.MOCAP,
         Trait.SPAWN_XY_YAW,
         Trait.SNAPSHOT,
+        Trait.STATE_WRITE,  # CPU mirror write + per-world device push
         # Same compiled MjModel as mujoco
         Trait.MODEL_ADDRESSES,
         Trait.MODEL_MASS_INERTIA,
