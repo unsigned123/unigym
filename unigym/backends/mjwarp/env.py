@@ -51,8 +51,14 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 import torch
 
-from unigym.env.backends.base import BackendCapabilities
+from unigym.env.backends.base import (
+    BackendCapabilities,
+    normalize_state_env_ids,
+    normalize_state_quat,
+    validate_state_tensor,
+)
 from unigym.cameras.manager import validate_image_frame
+from unigym.core import quat
 from unigym._optional import MissingExtraError
 
 # The camera backend needs a GL context (mujoco.Renderer); EGL is the
@@ -163,8 +169,32 @@ from unigym.runtime.actions import MujocoJointResolver, NamedAction
 # (N=1 CPU mirror renderer, N>1 native warp batch renderer).  The
 # actuator seam is the same software ctrl face as the mujoco backend.
 BACKEND_CAPABILITIES = BackendCapabilities(
-    recorder=True, cameras=True, contacts=True, props=True, multi_env=True
+    recorder=True,
+    cameras=True,
+    contacts=True,
+    props=True,
+    multi_env=True,
+    state_write=True,
 )
+
+
+def _one_dof_joint_id(model, backend_name: str, joint_name: str, articulation: str) -> int:
+    """Resolve one compiled joint id; reject free/ball joints."""
+    jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, backend_name)
+    if jid < 0:
+        raise ValueError(
+            f"mjwarp backend: joint {joint_name!r} of articulation "
+            f"{articulation!r} has no compiled joint {backend_name!r}"
+        )
+    jtype = int(model.jnt_type[jid])
+    if jtype in (int(mujoco.mjtJoint.mjJNT_FREE), int(mujoco.mjtJoint.mjJNT_BALL)):
+        kind = "free" if jtype == int(mujoco.mjtJoint.mjJNT_FREE) else "ball"
+        raise ValueError(
+            f"mjwarp backend: joint {joint_name!r} of articulation "
+            f"{articulation!r} is a {kind} joint; set_joint_state accepts "
+            f"only 1-DOF joints"
+        )
+    return int(jid)
 
 
 def _reject_removed_gain_params(params: dict, *, source: str) -> None:
@@ -863,6 +893,196 @@ class MjwarpEnv(WarpBatchMixin):
     def to_il_order(self, x_pol: torch.Tensor) -> torch.Tensor:
         """Gather ``(N, ...)`` policy-order joint tensors into MJ hinge order."""
         return x_pol[:, self._perm_pol2il]
+
+    # ------------------------------------------------------------------ #
+    # optional state-write face (docs/state_write_contract.md)
+    # ------------------------------------------------------------------ #
+    def _state_root_addresses(self, name: str) -> tuple[int, int]:
+        """Resolve *name* to ``(freejoint qpos adr, dof adr)``; fail honestly."""
+        art = self.articulations.get(name)
+        if art is not None:
+            if art.free_qpos_adr is None or art.free_dof_adr is None:
+                raise ValueError(
+                    f"mjwarp backend: articulation {name!r} has a fixed root; "
+                    f"set_root_state needs a free root (use set_joint_state "
+                    f"for its joints)"
+                )
+            return int(art.free_qpos_adr), int(art.free_dof_adr)
+        if self.prop_backend is not None:
+            if name in self.prop_backend.free_prop_names():
+                _, qadr, vadr = self.prop_backend.free_addresses(name)
+                return int(qadr), int(vadr)
+            if name in self.prop_backend.articulations():
+                raise ValueError(
+                    f"mjwarp backend: prop {name!r} is an articulation prop "
+                    f"with a model-anchored root; set_root_state needs a free "
+                    f"root or a free rigid prop"
+                )
+        declared = sorted(self.articulations)
+        props = sorted(self.prop_backend.free_prop_names()) if self.prop_backend is not None else []
+        raise ValueError(
+            f"mjwarp backend: set_root_state names unknown body {name!r}; "
+            f"declared articulations: {declared}, free rigid props: {props}"
+        )
+
+    def _joint_write_addresses(
+        self, art, joint_names: Sequence[str]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Map joint names to ``(jadr_art, jdr_art)`` rows; reject non-1-DOF."""
+        index = {name: i for i, name in enumerate(art.joint_names)}
+        missing = sorted(set(joint_names) - set(index))
+        if missing:
+            raise ValueError(
+                f"mjwarp backend: joint names {missing} are not asset joints of "
+                f"articulation {art.name!r} | asset joints: {list(art.joint_names)}"
+            )
+        qadr, dadr = [], []
+        for name in joint_names:
+            i = index[name]
+            backend = self._mj_name_map.backend_name(art.name, name)
+            _one_dof_joint_id(self._model, backend, name, art.name)
+            qadr.append(int(art.jadr_art[i]))
+            dadr.append(int(art.jdr_art[i]))
+        return (
+            np.asarray(qadr, dtype=np.int64),
+            np.asarray(dadr, dtype=np.int64),
+        )
+
+    @staticmethod
+    def _clear_warmstart(d) -> None:
+        """Drop the pre-write solver warm start (device push follows)."""
+        warm = getattr(d, "qacc_warmstart", None)
+        if warm is not None:
+            warm[:] = 0.0
+
+    def set_root_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Write a free root's world pose/velocity (mirror + device push).
+
+        ``name`` is a declared articulation with a free root or a free rigid
+        prop.  ``pos_w``/``lin_vel_w``/``ang_vel_w`` are world frame; linear
+        velocity is at the root body origin.  MuJoCo stores the freejoint's
+        angular qvel in the BODY frame, so the angular input is rotated by
+        ``R.T``.  Each selected mirror row is pushed to its warp world
+        immediately and the pre-write warm start is cleared.  Does not call
+        :meth:`settle`.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        rows = ids.numel()
+        pos = validate_state_tensor(pos_w, field="pos_w", rows=rows, cols=3, device=self.device)
+        quat_in = validate_state_tensor(
+            quat_wxyz, field="quat_wxyz", rows=rows, cols=4, device=self.device
+        )
+        lin = validate_state_tensor(
+            lin_vel_w, field="lin_vel_w", rows=rows, cols=3, device=self.device
+        )
+        ang = validate_state_tensor(
+            ang_vel_w, field="ang_vel_w", rows=rows, cols=3, device=self.device
+        )
+        unit_quat = normalize_state_quat(quat_in, rows=rows, device=self.device)
+        qadr, vadr = self._state_root_addresses(name)
+        pos_np = pos.detach().cpu().numpy().astype(np.float64)
+        quat_np = unit_quat.detach().cpu().numpy().astype(np.float64)
+        lin_np = lin.detach().cpu().numpy().astype(np.float64)
+        ang_np = ang.detach().cpu().numpy().astype(np.float64)
+        for row, e in enumerate(ids.tolist()):
+            d = self._datas[e]
+            d.qpos[qadr : qadr + 3] = pos_np[row]
+            d.qpos[qadr + 3 : qadr + 7] = quat_np[row]
+            d.qvel[vadr : vadr + 3] = lin_np[row]
+            rot = quat.to_rotmat(quat_np[row])
+            d.qvel[vadr + 3 : vadr + 6] = rot.T @ ang_np[row]
+            self._clear_warmstart(d)
+            self._push_mirror_to_device(d, e)
+        return ids
+
+    def set_joint_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Write absolute 1-DOF joint positions (and optional velocities).
+
+        ``joint_names`` is an explicit, duplicate-free name sequence; it fixes
+        the ``position``/``velocity`` columns.  ``velocity=None`` leaves every
+        selected joint's velocity unchanged.  Each selected mirror row is
+        pushed to its warp world immediately and the pre-write warm start is
+        cleared.  Does not call :meth:`settle`.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
+        art = self.articulations.get(articulation)
+        if art is None:
+            raise ValueError(
+                f"mjwarp backend: set_joint_state names unknown articulation "
+                f"{articulation!r}; declared: {sorted(self.articulations)}"
+            )
+        if isinstance(joint_names, (str, bytes)):
+            raise TypeError("joint_names must be a sequence of joint names, not a string")
+        names = tuple(str(name) for name in joint_names)
+        if not names:
+            raise ValueError("joint_names must be non-empty")
+        if len(set(names)) != len(names):
+            raise ValueError(f"joint_names carries duplicate names: {names}")
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        rows = ids.numel()
+        pos = validate_state_tensor(
+            position, field="position", rows=rows, cols=len(names), device=self.device
+        )
+        vel = (
+            None
+            if velocity is None
+            else validate_state_tensor(
+                velocity, field="velocity", rows=rows, cols=len(names), device=self.device
+            )
+        )
+        qadr, dadr = self._joint_write_addresses(art, names)
+        pos_np = pos.detach().cpu().numpy().astype(np.float64)
+        vel_np = None if vel is None else vel.detach().cpu().numpy().astype(np.float64)
+        for row, e in enumerate(ids.tolist()):
+            d = self._datas[e]
+            d.qpos[qadr] = pos_np[row]
+            if vel_np is not None:
+                d.qvel[dadr] = vel_np[row]
+            self._clear_warmstart(d)
+            self._push_mirror_to_device(d, e)
+        return ids
+
+    def settle(self, env_ids: Sequence[int] | torch.Tensor | None) -> torch.Tensor:
+        """Recompute Warp-derived state for the touched envs and refresh cache.
+
+        Pushes each touched mirror, runs ONE batched ``mjw.forward`` (it
+        recomputes derived quantities; it never changes qpos/qvel/time),
+        re-syncs every mirror from the device, re-poses camera rigs like the
+        reset tail, then refreshes ``obs_cache``.  No CPU ``mj_step`` and no
+        ``_settle_substeps``.  Callers must settle after writes before
+        reading observations or contact/camera-dependent state.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
+        ids = normalize_state_env_ids(env_ids, self.num_envs, device=self.device)
+        for e in ids.tolist():
+            self._push_mirror_to_device(self._datas[e], e)
+        mjw.forward(self._wm, self._wdata)
+        self._sync_all_mirrors()
+        if self.camera_manager is not None:
+            self.camera_manager.on_reset(ids)
+        self._refresh_obs_cache()
+        return ids
 
     # ------------------------------------------------------------------ #
     # obs cache
