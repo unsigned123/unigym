@@ -383,6 +383,9 @@ class MujocoEnv:
     _data: mujoco.MjData
     _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
+    # The reset env the initializer writes through ResetPrimitives; set
+    # around ``initializer.apply()`` and restored in a ``finally``.
+    _active_reset_env_id: int | None
     _closed: bool
     _closing: bool
 
@@ -601,6 +604,7 @@ class MujocoEnv:
         self._datas = [mujoco.MjData(self._model) for _ in range(n)]
         self._data = self._datas[0]  # legacy alias: tests/scene/director read it
         self._active_data = self._datas[0]
+        self._active_reset_env_id = None
         m = self._model
         self._decimation = int(decimation)
         self._sim_dt = float(sim_dt)
@@ -1272,7 +1276,9 @@ class MujocoEnv:
         refreshed).
         """
         prev = self._active_data
+        prev_env_id = self._active_reset_env_id
         self._active_data = self._datas[e]
+        self._active_reset_env_id = int(e)
         try:
             if self._initializer is None:
                 raise RuntimeError(
@@ -1303,6 +1309,7 @@ class MujocoEnv:
                 )
         finally:
             self._active_data = prev
+            self._active_reset_env_id = prev_env_id
 
     # ------------------------------------------------------------------ #
     # multi-articulation tables (backend-internal)

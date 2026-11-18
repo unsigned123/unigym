@@ -3,12 +3,15 @@
 The scene-preset consumption helpers for the mujoco backend.  An
 initializer never touches engine handles directly: sampling reads the
 model and every mutation goes through a :class:`ResetPrimitives`
-primitive built here (``write_freejoint`` is the prop freejoint path --
+primitive built here.  ``write_freejoint`` is the prop freejoint path --
 ``prop_backend.free_addresses`` -> world pose + optional world velocity,
-default zeroed qvel; the settle loop is the actuator-aware zero-action
-face the reset chain already used).  ``joint_group``/``set_targets``
-are the robot-side seams for future initializer types (interface stubs
-until the robot-body reset migrates, §5 route).
+default zeroed qvel.  ``set_root_state`` / ``set_joint_state`` are the
+robot-side writes: they bind to the backend's own state-write face
+(``env.set_root_state([active_id], ...)`` /
+``env.set_joint_state([active_id], ...)``), so the semantics match the
+public contract and only the CURRENT reset env is touched.  The settle
+loop is the actuator-aware zero-action face the reset chain already
+used.
 
 The GR1 robot-body stages keep their engine-side call site
 (``MujocoEnv._apply_reset_protocol``); :func:`wire_reset_face`
@@ -18,6 +21,12 @@ consumption order stay bitwise (determinism red line).
 ``_probe_region_placement`` is the region-bound candidate-probe face
 (the backend's collision-query seam the placement sampler reaches
 through ``ResetPrimitives.probe_candidate``).
+
+Scope: only the mujoco and mjwarp reset chains build this face.  The
+isaaclab2 backend does not construct ``ResetPrimitives`` and is not
+wired to the initializer reset face (its reset path stays its own); a
+future initializer-capable isaaclab2 reset would bind the same two
+callbacks to its state-write methods.
 """
 
 from __future__ import annotations
@@ -79,6 +88,44 @@ def _freejoint_unit_quat(value, *, name: str) -> np.ndarray:
     if norm <= _ZERO_TOL:
         raise ValueError(f"ResetPrimitives.write_freejoint({name!r}): quat_wxyz has zero norm")
     return quat / norm
+
+
+def _active_reset_env_id(env, *, method: str) -> int:
+    """The reset env the initializer is writing (set around ``apply``)."""
+    env_id = getattr(env, "_active_reset_env_id", None)
+    if env_id is None:
+        raise RuntimeError(
+            f"ResetPrimitives.{method}: robot writes are only valid while "
+            "the reset chain runs initializer.apply() (no active reset env)"
+        )
+    return int(env_id)
+
+
+def _reset_state_vector(value, *, method: str, field: str, size: int) -> np.ndarray:
+    """Validate one finite ``(size,)`` robot-state input (state-write shape)."""
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"ResetPrimitives.{method}: {field} must be numeric, " f"got {type(value).__name__}"
+        ) from exc
+    if array.shape != (size,):
+        raise ValueError(
+            f"ResetPrimitives.{method}: {field} must have shape ({size},), got {array.shape}"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(f"ResetPrimitives.{method}: {field} must be finite")
+    return array
+
+
+def _state_write_row(env, array: np.ndarray):
+    """One row on the env device for the backend's state-write face."""
+    import torch
+
+    tensor = torch.from_numpy(np.ascontiguousarray(array, dtype=np.float64))
+    return tensor.reshape(1, -1).to(env.device)
 
 
 def _probe_region_placement(env, rule, position, yaw, clearance):
@@ -229,16 +276,78 @@ def build_reset_primitives(env) -> ResetPrimitives:
         d.qvel[vadr : vadr + 3] = lin
         d.qvel[vadr + 3 : vadr + 6] = ang_body
 
-    def joint_group(name: str):
-        raise NotImplementedError(
-            "ResetPrimitives.joint_group: the robot-side joint seam "
-            "arrives with the robot-body reset migration"
+    def set_root_state(
+        name: str,
+        pos_w,
+        quat_wxyz,
+        lin_vel_w=None,
+        ang_vel_w=None,
+    ) -> None:
+        """Write a free root's world pose/velocity in the CURRENT reset env.
+
+        ``name`` addresses a declared free-root articulation or a free rigid
+        prop.  ``pos_w``/``lin_vel_w``/``ang_vel_w`` are world frame; linear
+        velocity is at the root body origin.  The wxyz quaternion is
+        normalized by the backend state-write face (zero-norm fails).  Both
+        velocities are optional; absent writes zero.  Does not settle.
+        """
+        env_id = _active_reset_env_id(env, method="set_root_state")
+        pos = _reset_state_vector(pos_w, method="set_root_state", field="pos_w", size=3)
+        quat = _reset_state_vector(quat_wxyz, method="set_root_state", field="quat_wxyz", size=4)
+        lin = np.zeros(3, dtype=float)
+        if lin_vel_w is not None:
+            lin = _reset_state_vector(lin_vel_w, method="set_root_state", field="lin_vel_w", size=3)
+        ang = np.zeros(3, dtype=float)
+        if ang_vel_w is not None:
+            ang = _reset_state_vector(ang_vel_w, method="set_root_state", field="ang_vel_w", size=3)
+        env.set_root_state(
+            [env_id],
+            name=str(name),
+            pos_w=_state_write_row(env, pos),
+            quat_wxyz=_state_write_row(env, quat),
+            lin_vel_w=_state_write_row(env, lin),
+            ang_vel_w=_state_write_row(env, ang),
         )
 
-    def set_targets(idx, vals) -> None:
-        raise NotImplementedError(
-            "ResetPrimitives.set_targets: the robot-side joint seam "
-            "arrives with the robot-body reset migration"
+    def set_joint_state(
+        articulation: str,
+        joint_names,
+        position,
+        velocity=None,
+    ) -> None:
+        """Write absolute 1-DOF joint positions in the CURRENT reset env.
+
+        ``joint_names`` is an explicit, duplicate-free name sequence; it
+        fixes the ``position``/``velocity`` columns.  ``velocity=None``
+        leaves every selected joint's velocity unchanged.  Does not settle.
+        """
+        env_id = _active_reset_env_id(env, method="set_joint_state")
+        if isinstance(joint_names, (str, bytes)):
+            raise TypeError(
+                "ResetPrimitives.set_joint_state: joint_names must be a "
+                "sequence of joint names, not a string"
+            )
+        names = tuple(str(joint_name) for joint_name in joint_names)
+        if not names:
+            raise ValueError("ResetPrimitives.set_joint_state: joint_names must be non-empty")
+        if len(set(names)) != len(names):
+            raise ValueError(
+                f"ResetPrimitives.set_joint_state: joint_names carries duplicate names: {names}"
+            )
+        pos = _reset_state_vector(
+            position, method="set_joint_state", field="position", size=len(names)
+        )
+        vel = None
+        if velocity is not None:
+            vel = _reset_state_vector(
+                velocity, method="set_joint_state", field="velocity", size=len(names)
+            )
+        env.set_joint_state(
+            [env_id],
+            articulation=str(articulation),
+            joint_names=names,
+            position=_state_write_row(env, pos),
+            velocity=None if vel is None else _state_write_row(env, vel),
         )
 
     def forward() -> None:
@@ -296,8 +405,8 @@ def build_reset_primitives(env) -> ResetPrimitives:
         model=m,
         settle_fn=env._settle_substeps,
         write_freejoint=write_freejoint,
-        joint_group=joint_group,
-        set_targets=set_targets,
+        set_root_state=set_root_state,
+        set_joint_state=set_joint_state,
         forward=forward,
         prop_extents=env._prop_extents,
         prop_names=frozenset(s.name for s in env.prop_manager.specs)
