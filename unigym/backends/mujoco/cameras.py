@@ -133,7 +133,7 @@ class _MjRigBase:
         rig = spec.rig or {}
         self.target_env = int(rig.get("target_env", 0))
         # per-camera MJ geom-group visibility override (mujoco
-        # only; the GR1 tabletop scene renders like the omniforge reference
+        # only; the tabletop scene renders like the omniforge reference
         # with group 0 hidden -- robosuite render_collision_mesh=False
         # parity).  Opt-in only: absent -> (), the historical plain option
         # is untouched (G1 default camera behavior stays bitwise).
@@ -1019,7 +1019,7 @@ class MjChaseRig(_MjRigBase):
         env = self._env
         if not getattr(env, "_has_freejoint", True):
             # fixed base -- qpos[0:7] belong to the robot's
-            # own hinges here (GR1 waist/arms), NOT a base frame; reading
+            # own hinges here (waist/arms), NOT a base frame; reading
             # them was stale handoff garbage.  The base frame IS
             # the configured spawn pose (construction-time constants,
             # backends/mujoco/env.py) and it never moves.

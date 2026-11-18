@@ -157,7 +157,7 @@ def read_state(env, e: int = 0) -> dict:
         ang_vel_w = quat.to_rotmat(quat_w) @ ang_vel_b
     else:
         # fixed base -- qpos[0:7]/qvel[0:6] belong to the
-        # robot's own hinges here (GR1 waist/arms), NOT a base frame.
+        # robot's own hinges here (waist/arms), NOT a base frame.
         # The base frame is the spawn pose and it never moves.
         pos_w = env._fixed_base_pos_w.copy()
         quat_w = env._fixed_base_quat_w.copy()

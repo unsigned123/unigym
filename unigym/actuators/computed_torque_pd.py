@@ -1,10 +1,10 @@
 """computed_torque_pd: tau = M_part @ (kp*(q* - q) - kd*dq) + qfrc_bias.
 
-The GR1 (Fourier) stack's software computed-torque law, per-part blocked
-(docs/audits/v063_gr1_control_chain_audit.md §3; design D2 -- the GR1 body
-law): the mass matrix is read FRESH on every substep via ``mj_fullM``;
-each part contributes its OWN diagonal block ``M[qvel_index][:, qvel_index]
-@ desired_torque`` -- cross-part coupling is dropped by construction
+The reference (Fourier) stack's software computed-torque law, per-part
+blocked (design D2 -- the reference body law): the mass matrix is read FRESH
+on every substep via ``mj_fullM``; each part contributes its OWN diagonal block
+``M[qvel_index][:, qvel_index] @ desired_torque`` -- cross-part coupling is
+dropped by construction
 (torso / right-arm / left-arm blocks in the audited stack, declared here
 by the group's ``parts`` regex list), and ``qfrc_bias`` (gravity +
 Coriolis) rides on top.  Targets are absolute joint positions held per
@@ -46,7 +46,7 @@ class ComputedTorquePdActuator(ActuatorBase):
             raise ValueError(
                 f"computed_torque_pd actuator group is missing {missing} | "
                 f"hint: a computed-torque law needs explicit gains (the "
-                f"audited GR1 stack runs kp=1000/kd=200 on all body "
+                f"audited stack runs kp=1000/kd=200 on all body "
                 f"joints); there is no silent default"
             )
         self._kp = resolve_gain_vector(joint_group["kp"], "kp", self._joint_names)

@@ -188,7 +188,7 @@ def rig_hide_geom_groups(rig, name: str) -> tuple[int, ...]:
     """Parse the mujoco-only ``hide_geom_groups`` rig key.
 
     Value: geom-group indices force-hidden in this camera's MjvOption
-    (BOTH the plain render and the RenderSpec capture path).  The GR1
+    (BOTH the plain render and the RenderSpec capture path).  The
     tabletop assets carry robosuite-style collision geoms in group 0;
     the omniforge reference stack renders every view with
     ``geomgroup[0] = 0`` (robosuite ``render_collision_mesh=False``) --

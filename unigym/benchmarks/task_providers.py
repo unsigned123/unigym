@@ -119,7 +119,7 @@ def _example_shape(slots: dict, tables: dict) -> dict:
     A single-metric presence task built from scalar slots.
 
     Mirrors the official mechanism: robocasa's task-class composition
-    (gr1_unified tabletop task classes assemble per-task criteria in
+    (the tabletop task classes assemble per-task criteria in
     Python; this provider is the declarative-image of that seam).
     Pure spec-builder: no IO, no runtime env, no backend touch; the
     loader runs the returned dict through rewrite_pack_references +

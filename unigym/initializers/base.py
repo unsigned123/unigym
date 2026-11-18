@@ -27,10 +27,10 @@ bind, ``apply`` -> place then commit.  The core never imports the pack;
 the type's registered class carries its own policy.
 
 The single RNG stream lives here (``params.seed``, default 0): ``apply``
-is the only consumer inside the interface, and the engine may share the
-stream (``.rng``) with its own residual reset stages while those still
-exist -- consumption order is a determinism red line (same seed ->
-bit-identical resets).
+and the optional :meth:`InitializerBase.apply_robot_stages` hook consume
+it in that fixed order (placement draws first, then stage noise) --
+consumption order is a determinism red line (same seed -> bit-identical
+resets).
 
 External initializers mount through the ``module`` key (the watchers
 callable precedent, resolved in the run process):
@@ -118,6 +118,12 @@ class ResetPrimitives:
     """``(prop_name) -> (half_xy, height)`` (z-stack sampler inputs)."""
     prop_names: frozenset = field(default_factory=frozenset)
     """Declared prop names (the name-neutrality reference set)."""
+    resolve_articulation: Callable[[str], str] = None  # type: ignore[assignment]
+    """``(profile_name) -> articulation_name`` for the CURRENT run.
+
+    The env articulation name may differ from the robot profile name
+    (``articulations[].params.profile``); robot-stage writers must resolve
+    it here instead of assuming ``profile.name``."""
     resolve_region: Callable[[str], Any] = None  # type: ignore[assignment]
     """Resolve a named region or raise PlacementCapabilityError if unsupported."""
     object_collision_bounds: Callable[[str], Any] = None  # type: ignore[assignment]
@@ -216,15 +222,15 @@ class InitializerBase(ABC):
         """
         return False
 
-    def stage_spec(self) -> Optional[dict]:
-        """Optional residual robot-stage spec (transition seam).
+    def apply_robot_stages(self) -> None:
+        """Optional robot-stage hook; default no-op.
 
-        The robot-body reset stages still run engine-side (their move to
-        the robots layer is the v068 route); an initializer type that
-        owns that knowledge returns its stage spec dict here (consumed
-        by the backend's legacy stage face).  Default: none.
+        Runs once after :meth:`apply` in the backend reset chain (before
+        the reset tail forward), so placement draws precede stage noise
+        on the shared ``self.rng`` stream.  An initializer type that owns
+        robot-body reset stages writes them here through ``self.primitives``;
+        the core never imports a robot module for it.
         """
-        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -351,8 +357,10 @@ def normalize_initializer_spec(params: dict) -> Optional[dict]:
     * ``params["reset"]`` -- the legacy T1.4 block (protocol + optional
       placement), transposed to an ANONYMOUS INLINE initializer of the
       ``splita_tabletop`` builtin: placement fields hoist to the top
-      level, the robot-stage keys ride along.  Existing non-scene
-      configs keep working unchanged (zero-migration guarantee).
+      level, the robot-stage keys and the protocol ride along.  Core
+      validates only the mapping shape; the selected initializer (and
+      its pack) owns protocol validation.  Existing non-scene configs
+      keep working unchanged (zero-migration guarantee).
 
     Declaring both is an ambiguity error.
     """
@@ -375,16 +383,10 @@ def normalize_initializer_spec(params: dict) -> Optional[dict]:
         return None
     if not isinstance(legacy, dict):
         raise ValueError(f"env.params.reset must be a mapping, got " f"{type(legacy).__name__}")
-    from unigym.robots.gr1_reset import GR1_RESET_PROTOCOL
-
     protocol = legacy.get("protocol")
-    if protocol != GR1_RESET_PROTOCOL:
-        raise ValueError(
-            f"env.params.reset.protocol {protocol!r} unknown | the "
-            f"legacy block transposes to the splita_tabletop "
-            f"initializer whose only protocol is "
-            f"{GR1_RESET_PROTOCOL!r}"
-        )
     placement = legacy.get("placement") or {}
     rest = {k: v for k, v in legacy.items() if k not in ("protocol", "placement")}
-    return {"type": "splita_tabletop", "params": {**placement, **rest, "protocol": protocol}}
+    params = {**placement, **rest}
+    if protocol is not None:
+        params["protocol"] = protocol
+    return {"type": "splita_tabletop", "params": params}
