@@ -28,6 +28,7 @@ def _cfg() -> dict[str, JsonValue]:
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
 
@@ -66,6 +67,7 @@ def test_from_config_and_load_accept_the_keyword(tmp_path: Path) -> None:
                 "action_spec:",
                 "  - {name: arm, articulation: arm, joints: [shoulder],",
                 "     target: position, role: body}",
+                "observations: {robot: [arm]}",
                 "policies:",
                 "  - {adapter: manual, groups: [[arm, arm]]}",
             ]

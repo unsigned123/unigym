@@ -1,21 +1,17 @@
-"""CameraManager: multi-rig combination with request-driven instantiation.
+"""CameraManager: multi-rig combination with config-driven instantiation.
 
 Responsibilities (design doc §1.1):
 
 * **Key space** — ``cam/<name>/<rgb|depth>`` obs keys plus the depth
-  aliases (``depth_image`` / ``depth_image_raw``) served only by an
-  explicitly declared camera named ``depth`` (no implicit shim camera).
-* **Request-driven instantiation** — of the yaml-declared cameras, those
-  actually consumed (adapter image requests or recorder ``camera_ref``)
-  are instantiated; unknown requested keys fail with the list of
-  available ones.  mujoco binds the FULL declared set instead (injected
-  cameras cost nothing until rendered) and splits the obs tick: only
-  requested rigs render per tick, the rest stay addressable by the
-  camera faces (declared-camera availability, camera unification).
+  keys; metric depth is served by a declared depth-capable camera.
+* **Config-driven instantiation** — of the yaml-declared cameras, those
+  selected by ``observations.camera`` (or a recorder ``camera_ref``) are
+  instantiated.  mujoco binds the FULL declared set instead (injected
+  cameras cost nothing until rendered) and splits the obs tick: only the
+  observation-selected rigs render per tick; video-only rigs stay
+  addressable by the camera faces and never enter ``env.obs``.
 * **Raw-value caching** — uint8 RGB / metric depth;
-  normalization stays with the adapter except the depth-alias
-  ``depth_image`` alias which reuses ``env/depth.py::preprocess_depth``
-  verbatim.
+  normalization stays with the adapter.
 * **Placeholder fallback** — before the first successful render the
   annotator output is degenerate; the manager serves an all-inf frame
   (depth) / all-zero frame (RGB) instead (generalization of the classic
@@ -40,17 +36,15 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from contextlib import contextmanager
 
 import numpy as np
 import torch
 
-from unigym.adapters.base import ImageObsRequest
 from unigym.backends.registry import BackendSelectionError, backend_info
-from unigym.env.depth import DEPTH_CROP_COLS, DEPTH_CROP_ROWS, preprocess_depth
 
 from .base import (
-    DEPTH_ALIAS_KEYS,
     apply_rate_keys,
     CameraRig,
     CameraSpec,
@@ -71,10 +65,6 @@ the plain publish path by construction (X2: bitwise-identical to the
 historical flagless render).  A rig stores ``None`` for this state, so
 the publish/WYSIWYG paths never re-render through the capture face for
 it."""
-
-# the ``depth_image`` alias reproduces the TSC 106x60 -> 58x87 crop
-# geometry; a declared camera of any other resolution would silently mis-crop.
-_PREPROCESS_SIZE = (60, 106)
 
 POSE_INLINE_RIG_TYPES = ("world",)
 """ux-7: rigs eligible for the transient pose-inline
@@ -102,13 +92,19 @@ EVERY other property (resolution, kind, types, hfov, depth_type, clips,
 ...) is construction-frozen and must go through a restart."""
 
 
-def validate_image_frame(req: ImageObsRequest, val: torch.Tensor, num_envs: int) -> None:
-    """Shape/dtype validation for one camera frame (offline-testable).
+@dataclass(frozen=True)
+class CameraFrameSpec:
+    """Shape/dtype contract of one served camera frame."""
 
-    Raises ``ValueError`` unless ``val`` is ``(num_envs, *req.shape)`` with
-    exactly ``req.dtype`` — the ImageObsRequest counterpart of the
-    RawObsRequest last-dim check.
-    """
+    key: str
+    shape: tuple[int, ...]
+    dtype: torch.dtype
+    source: str
+    camera: str
+
+
+def validate_image_frame(req: CameraFrameSpec, val: torch.Tensor, num_envs: int) -> None:
+    """Shape/dtype validation for one camera frame (offline-testable)."""
     expected = (num_envs, *req.shape)
     if tuple(val.shape) != expected:
         raise ValueError(
@@ -131,7 +127,6 @@ class CameraManager:
         self,
         specs: list[CameraSpec],
         rigs: list[CameraRig],
-        aliases: dict[str, tuple[str, bool]] | None = None,
         obs_served: set[str] | None = None,
         policy_hz: float | None = None,
     ):
@@ -143,20 +138,14 @@ class CameraManager:
         # need it.  None (probe/test managers) keeps the legacy per-tick
         # counter semantics (camera_contract §16.1).
         self.policy_hz = float(policy_hz) if policy_hz else None
-        # alias key -> (manager key, preprocess?)
-        self.aliases: dict[str, tuple[str, bool]] = dict(aliases or {})
         # obs-served rig split (declared-camera availability vs the obs
         # tick): a rig whose keys were REQUESTED (adapter obs / recorder
-        # / depth aliases) rides ``tick_and_read``; the other declared
+        # selection) rides ``tick_and_read``; the other declared
         # rigs stay addressable by the camera faces (get_view / capture
         # / properties) but never render on the obs tick.  ``None`` =
         # every rig is obs-served (the pre-split behavior).
         served = None if obs_served is None else set(obs_served)
-        if served is not None:
-            served |= {mkey for mkey, _ in self.aliases.values()}
-        self._obs_rigs = [
-            r for r in self.rigs if served is None or bool(set(r.spec.keys()) & served)
-        ]
+        self._obs_rigs = [r for r in self.rigs if served is None or r.spec.name in served]
         self._counter = 0
         self._last: dict[str, torch.Tensor] = {}
         self._warned: set[str] = set()
@@ -165,25 +154,12 @@ class CameraManager:
         self._last_read: dict[str, float] = {}
         self.num_envs: int | None = None
         self.device: str | torch.device | None = None
-        self._requests: dict[str, ImageObsRequest] = {}
+        self._requests: dict[str, CameraFrameSpec] = {}
         for spec in self.specs:
             for key in spec.keys():
-                self._requests[key] = ImageObsRequest(
+                self._requests[key] = CameraFrameSpec(
                     key, spec.frame_shape(key), spec.frame_dtype(key), "camera", spec.name
                 )
-        for alias, (mkey, pre) in self.aliases.items():
-            spec = self._spec_serving(mkey)
-            shape = spec.frame_shape(mkey)
-            if pre:
-                # preprocess_depth crops rows/cols -> shrink the locked shape
-                shape = (
-                    1,
-                    shape[1] + DEPTH_CROP_ROWS[1] - DEPTH_CROP_ROWS[0],
-                    shape[2] + DEPTH_CROP_COLS[1] - DEPTH_CROP_COLS[0],
-                )
-            self._requests[alias] = ImageObsRequest(
-                alias, shape, torch.float32, "camera", spec.name
-            )
 
     # ------------------------------------------------------------------ #
     # key space
@@ -194,22 +170,16 @@ class CameraManager:
         return [s.name for s in self.specs]
 
     def obs_keys(self) -> set:
-        """All obs-cache keys served (``cam/*`` + depth aliases)."""
+        """All served frame keys (``cam/<name>/<rgb|depth>``)."""
         return set(self._requests)
 
     def camera_keys(self) -> set:
         """Manager-native keys only (``cam/<name>/<type>``)."""
         return {k for k in self._requests if k.startswith("cam/")}
 
-    def frame_request(self, key: str) -> ImageObsRequest | None:
-        """The ImageObsRequest describing one served key (None if absent)."""
+    def frame_request(self, key: str) -> CameraFrameSpec | None:
+        """The frame contract of one served key (None if absent)."""
         return self._requests.get(key)
-
-    def _spec_serving(self, key: str) -> CameraSpec:
-        for spec in self.specs:
-            if key in spec.keys():
-                return spec
-        raise KeyError(f"no instantiated camera serves {key!r} " f"(cameras: {self.names})")
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -263,7 +233,7 @@ class CameraManager:
         Frames of cameras whose render schedule is not due are served from
         the last read (stale); pre-render placeholders are substituted per
         the module docstring.  Every returned tensor is validated against
-        its :class:`ImageObsRequest` (shape + dtype) — fail-fast on
+        its :class:`CameraFrameSpec` (shape + dtype) — fail-fast on
         annotator surprises.  The due check is WALL-CLOCK per
         camera (§16.1); no policy clock keeps the legacy counter bitwise.
         """
@@ -292,10 +262,7 @@ class CameraManager:
                         )
                 validate_image_frame(self._requests[key], val, self.num_envs)
                 self._last[key] = val
-        out = dict(self._last)
-        for alias, (mkey, pre) in self.aliases.items():
-            out[alias] = preprocess_depth(self._last[mkey]) if pre else self._last[mkey]
-        return out
+        return dict(self._last)
 
     def _read_due(self, rig: CameraRig, now: float) -> bool:
         """Wall-clock due for one rig (§16.1; pure logic in base)."""
@@ -325,13 +292,30 @@ class CameraManager:
         """
         rspec = None
         rig = None
-        for spec, rig in zip(self.specs, self.rigs):
-            if spec.name == name:
+        spec = None
+        for index, candidate in enumerate(self.specs):
+            if candidate.name == name:
+                spec = candidate
+                rig = self.rigs[index]
                 rspec = getattr(rig, "render_spec", None)
                 break
+        if spec is None:
+            return None
         if rspec is not None and rig is not None and callable(getattr(rig, "capture_render", None)):
             return rig.capture_render(rspec)["rgb"]
-        val = self._last.get(rgb_key(name))
+        key = rgb_key(name)
+        video_only = rig is not None and rig not in self._obs_rigs
+        val = None if video_only else self._last.get(key)
+        if video_only or val is None:
+            # Video-only rigs never ride the observation tick: render on
+            # EVERY recorder capture.  Caching here would freeze the first
+            # frame forever because nothing else refreshes this rig.
+            frames = rig.read(env_ids=read_env_ids(spec, rig))
+            val = frames.get(key)
+            if val is not None:
+                validate_image_frame(self._requests[key], val, self.num_envs)
+                if not video_only:
+                    self._last[key] = val
         if val is None:
             return None
         return val[env_idx].detach().cpu().numpy()
@@ -737,7 +721,7 @@ class CameraManager:
 # --------------------------------------------------------------------------- #
 def build_camera_manager(
     cameras_cfg,
-    obs_requests,
+    obs_cameras=(),
     enable_cameras: bool = False,
     refs=None,
     backend: str = "isaaclab",
@@ -745,11 +729,13 @@ def build_camera_manager(
     policy_hz: float | None = None,
     num_envs: int | None = None,
 ) -> CameraManager | None:
-    """Build a :class:`CameraManager` from yaml + adapter requests.
+    """Build a :class:`CameraManager` from yaml + the obs declaration.
 
     Args:
         cameras_cfg: yaml ``cameras:`` list (None/[] = none declared).
-        obs_requests: ``adapter.get_obs_requests()`` (Raw and/or Image).
+        obs_cameras: camera names selected by ``observations.camera`` -- only
+            these rigs render on the observation tick; cameras declared for
+            recording/video stay outside it.
         enable_cameras: the ``--enable_cameras`` CLI flag; isaaclab camera
             sensors need the kit camera pipeline, so a request without the
             flag is a hard error (fail-fast, not silent degradation).
@@ -780,46 +766,26 @@ def build_camera_manager(
         info = backend_info(backend)
     except BackendSelectionError as e:
         raise ValueError(f"unknown camera backend {backend!r} " "(isaaclab|mujoco|mjwarp)") from e
-    reqs = list(obs_requests or [])
-    req_keys = {r.key for r in reqs}
+    obs_names = set(obs_cameras or ())
     declared = fold_declared_intervals(cameras_cfg, policy_hz)
     dup = sorted({n for n in (s.name for s in declared) if [x.name for x in declared].count(n) > 1})
     if dup:
         raise ValueError(f"duplicate camera names in yaml cameras: {dup}")
 
-    alias_keys = [k for k in DEPTH_ALIAS_KEYS if k in req_keys]
-    available = {k for s in declared for k in s.keys()}
-    cam_req = {k for k in req_keys if k.startswith("cam/")}
-    image_req = {r.key for r in reqs if isinstance(r, ImageObsRequest)}
-    unknown = ((cam_req | image_req) - available) - set(DEPTH_ALIAS_KEYS)
+    available = {s.name for s in declared}
+    unknown = sorted(obs_names - available)
     if unknown:
         raise ValueError(
-            f"adapter requests unknown camera obs keys {sorted(unknown)}; "
-            f"declared cameras serve: {sorted(available)}"
-        )
-    if alias_keys and not any(s.name == "depth" for s in declared):
-        raise ValueError(
-            f"adapter requests depth obs alias keys {sorted(alias_keys)} but "
-            f"the run declares no 'depth' camera; depth is served only by an "
-            f"explicitly declared camera named 'depth' (there is no implicit "
-            f"shim) | hint: declare the camera under `cameras:` with "
-            f"rig.type=body, width=106, height=60, hfov_deg=87, far_clip=20 "
-            f"for the classic depth-encoder geometry, or stop requesting the "
-            f"alias"
+            f"observations.camera names unknown cameras {unknown}; "
+            f"declared cameras: {sorted(available)}"
         )
 
     refs = set(refs or [])
-    # obs-served key set: the rigs whose keys were actually requested
-    # (adapter obs + image obs) or referenced (recorder camera_ref --
-    # the recorder reads the obs CACHE, so a referenced camera must
-    # ride the obs tick); aliases resolve to their manager keys inside
-    # the manager.  Declared-but-unrequested cameras stay addressable
-    # by the camera faces without riding the obs tick.
-    ref_keys: set = set()
-    for spec in declared:
-        if spec.name in refs:
-            ref_keys |= set(spec.keys())
-    obs_served = cam_req | image_req | ref_keys
+    # obs-served rigs: exactly the names selected by observations.camera.
+    # A recorder-referenced camera is instantiated but never rides the obs
+    # tick (video is read through the camera face, not the observation
+    # registry).
+    obs_served = set(obs_names)
     included: list[CameraSpec] = []
     if info.bind_all_declared_cameras:
         # declared-camera availability (camera unification): every
@@ -829,15 +795,14 @@ def build_camera_manager(
         # the obs tick (the manager's obs-served split).
         included = list(declared)
     else:
-        # request-driven instantiation (every sensor prim is a
+        # config-selected instantiation (every sensor prim is a
         # real render product -- unrequested cameras stay unconstructed)
         for spec in declared:
             wanted = (
-                bool(set(spec.keys()) & cam_req)
+                spec.name in obs_names
                 or spec.name in refs
                 or spec.name == "free"  # debug-console fly
-                or (alias_keys and spec.name == "depth")  # camera contract:
-            )  # console §free; depth aliases need the declared depth camera
+            )
             if wanted:
                 included.append(spec)
             else:
@@ -846,35 +811,6 @@ def build_camera_manager(
                     f"requested by adapter/recorder -> not instantiated",
                     flush=True,
                 )
-
-    aliases: dict[str, tuple[str, bool]] = {}
-    if alias_keys:
-        depth_spec = next((s for s in included if s.name == "depth"), None)
-        if depth_spec is None:
-            raise ValueError(
-                "adapter requests depth alias obs but no declared 'depth' " "camera is instantiated"
-            )
-        if depth_key("depth") not in depth_spec.keys():
-            raise ValueError(
-                f"camera 'depth' must render the depth stream to serve the "
-                f"alias keys (types={list(depth_spec.types)})"
-            )
-        if (
-            "depth_image" in alias_keys
-            and (int(depth_spec.height), int(depth_spec.width)) != _PREPROCESS_SIZE
-        ):
-            raise ValueError(
-                "the 'depth_image' alias applies preprocess_depth "
-                f"(crop {_PREPROCESS_SIZE[0]}x{_PREPROCESS_SIZE[1]} -> "
-                f"58x87); camera 'depth' renders "
-                f"{depth_spec.width}x{depth_spec.height}. Use "
-                f"'depth_image_raw' + adapter-side preprocessing, or render "
-                f"the 106x60 geometry"
-            )
-        if "depth_image_raw" in alias_keys:
-            aliases["depth_image_raw"] = (depth_key("depth"), False)
-        if "depth_image" in alias_keys:
-            aliases["depth_image"] = (depth_key("depth"), True)
 
     if not included:
         return None
@@ -892,4 +828,4 @@ def build_camera_manager(
     check_camera_capabilities(backend, included, num_envs=num_envs)
 
     rigs = [build_rig(s, backend=backend, render_groups=render_groups) for s in included]
-    return CameraManager(included, rigs, aliases, obs_served=obs_served, policy_hz=policy_hz)
+    return CameraManager(included, rigs, obs_served=obs_served, policy_hz=policy_hz)

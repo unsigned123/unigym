@@ -240,7 +240,7 @@ class BackendInfo:
     camera_enable_required: bool = False
     """Cameras require the kit ``--enable_cameras`` pipeline."""
     bind_all_declared_cameras: bool = False
-    """Bind every declared camera rig (vs request-driven instantiation)."""
+    """Bind every declared camera rig (vs config-selected instantiation)."""
     world_base_consumer: bool = False
     """Consumes the run-level ``world_base: {mjcf|urdf|usd: ...}`` asset."""
     scene_provider_consumer: bool = False

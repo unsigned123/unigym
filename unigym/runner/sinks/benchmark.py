@@ -13,7 +13,7 @@ Callback contract (docs/contracts/runner_contract.md §3):
   normalization identical to CollectSink) and maintain the early-stop flag
   (``completed episodes >= min_episodes``) plus step counters;
 * ``on_episode_end(env_ids, bundle)`` -- BEFORE the reset chain: per env,
-  assemble ``EpisodeData`` (duration from ``extra["time_in_episode"]``,
+  assemble ``EpisodeData`` (duration from ``record["time_in_episode"]``,
   ``ended_by_termination`` from ``bundle["terminated"][env_id]`` -- the
   terminated mask covers ALL envs, so it must be indexed with the due id,
   never sliced by position), score it with each task (one task raising is
@@ -143,9 +143,9 @@ class BenchmarkSink:
     # per-step buffering (pre-reset data side, like CollectSink)
     # ------------------------------------------------------------------ #
     def on_step(self, t: int, bundle: dict) -> None:
-        extra = bundle["extra"]
+        record = bundle["record"]
         rec = {}
-        for k, v in extra.items():
+        for k, v in record.items():
             if k in ("should_reset", "reset_env_ids"):
                 continue
             rec[_record_key(k)] = v
@@ -158,13 +158,6 @@ class BenchmarkSink:
         eff_cmd = bundle["cmd"]
         if eff_cmd is not None:
             rec["command"] = eff_cmd
-            # v103.6b: `command` is per-articulation robot state.  The
-            # bundle carries one effective command (sampler / self-commanding
-            # adapter), so expose it under each declared policy articulation
-            # -- benchmark tasks read articulation/<name>/command and there
-            # is no primary binding.
-            for name in self.meta.get("articulations") or {}:
-                rec[f"articulation/{name}/command"] = eff_cmd
         for ei in range(self.num_envs):
             self.ep_bufs[ei].append(slice_step_for_env(rec, ei))
         self.steps_total = t + 1
@@ -194,7 +187,7 @@ class BenchmarkSink:
     # episode end (before-reset data side; reset chain is engine-driven)
     # ------------------------------------------------------------------ #
     def on_episode_end(self, env_ids, bundle: dict) -> None:
-        extra = bundle["extra"]
+        record = bundle["record"]
         terminated = bundle["terminated"]  # (N,) mask over ALL envs
         for ei in env_ids.tolist():
             steps = self.ep_bufs[ei]
@@ -206,9 +199,9 @@ class BenchmarkSink:
             ep = EpisodeData(
                 data=assemble_episode(steps),
                 env_id=int(ei),
-                episode_id=int(extra["episode_id"][ei]),
+                episode_id=int(record["episode_id"][ei]),
                 length=len(steps),
-                duration_s=float(extra["time_in_episode"][ei]),
+                duration_s=float(record["time_in_episode"][ei]),
                 # index by env id -- terminated is a full (N,) mask, NOT a
                 # per-due vector even when len(env_ids) == num_envs
                 ended_by_termination=bool(terminated[ei]),

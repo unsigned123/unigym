@@ -18,12 +18,12 @@ Lifecycle (driven by the env backends, mirroring props/cameras):
   handles (isaaclab) or indexes the MJ model (mujoco), and fails fast on
   resolution errors (no silent empty groups).
 * ``read() -> {contact/<name>: (N, ...) tensor on env.device}`` — every
-  policy step, merged into ``extra`` by the env backend's ``_build_extra``;
+  policy step and published once per step by the env backend;
   values are freshly allocated tensors (no aliasing of backend buffers).
 
-Obs path (plan §4, decoupled from recording): adapters may request
-``contact/<name>`` keys; the env backends inject the same values into
-``obs_cache`` for requested keys (last-dim validated against the request).
+Observation path: the run's ``observations.contact`` list selects groups;
+the backend reads every configured group once per step and publishes the
+selected values into the typed observation registry.
 """
 
 from __future__ import annotations
@@ -73,7 +73,6 @@ class ContactManager:
         self.specs: list[ContactGroupSpec] = list(specs)
         self.backend = backend
         self.device = device
-        self._obs_requested: set[str] = set()
         # director override table (sensor/record face ONLY --
         # physical contact computation is untouched; contract
         # director_contract.md §3.3).  name -> "on" | "off".
@@ -83,10 +82,6 @@ class ContactManager:
     def keys(self) -> list[str]:
         """All record keys served (``contact/<name>`` per group)."""
         return [contact_key(s.name) for s in self.specs]
-
-    def obs_keys(self) -> set[str]:
-        """Keys an adapter explicitly requested for obs (empty by default)."""
-        return set(self._obs_requested)
 
     def group_shape(self, name: str) -> tuple | None:
         """Per-env record shape of one group (batch axis stripped).
@@ -101,11 +96,6 @@ class ContactManager:
         spec = next(s for s in self.specs if s.name == name)
         b, f = axes(spec)
         return tuple(int(d) for d in spec.output_shape(1, b, f)[1:])
-
-    def register_obs_requests(self, requested_keys) -> None:
-        """Mark the subset of *requested_keys* served as obs (called once at
-        env construction with the adapter's request keys)."""
-        self._obs_requested = {k for k in requested_keys if k in set(self.keys())}
 
     # ---- director override face  --------------------------------- #
     def set_override(self, name: str, state: str) -> None:
@@ -170,6 +160,11 @@ class ContactManager:
         return out
 
     # ---- v057 detail face (decision package / slip criterion) ------------- #
+    def has_detail(self, name: str) -> bool:
+        """True when the bound backend implements the per-contact detail face."""
+        self._spec(name)
+        return callable(getattr(self.backend, "read_detail", None))
+
     def detail_keys(self) -> list[str]:
         """The ops detail keys served (``contact_ops/<name>`` per group)."""
         return [f"contact_ops/{s.name}" for s in self.specs]
@@ -252,7 +247,6 @@ def build_contact_manager(
     cfg,
     backend: str,
     device: str = "cpu",
-    adapter_requests: Optional[set] = None,
     contact_groups: Optional[Mapping[str, Mapping[str, tuple[str, ...]]]] = None,
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
@@ -274,8 +268,6 @@ def build_contact_manager(
         backend: env backend name (``isaaclab`` | ``mujoco``); anything else
             raises NotImplementedError BEFORE any sim state exists.
         device: env device the record tensors must live on.
-        adapter_requests: optional set of adapter obs-request keys used to
-            pre-register the obs subset (see ``register_obs_requests``).
         contact_groups: per-articulation native-body inventory backing the
             ``{contact_group: ...}`` references
             (``{articulation: {group: (native bodies)}}``).
@@ -320,7 +312,4 @@ def build_contact_manager(
         contact_assets=contact_assets,
         articulation_names=scope_names,
     )
-    mgr = ContactManager(specs, be, device=device)
-    if adapter_requests:
-        mgr.register_obs_requests(adapter_requests)
-    return mgr
+    return ContactManager(specs, be, device=device)

@@ -15,7 +15,7 @@ from unigym.provenance import (
     RegistrySnapshot,
 )
 
-from .base import Adapter, RawObsRequest  # noqa: F401  (package-level re-export)
+from .base import Adapter  # noqa: F401  (package-level re-export)
 from .params import (  # noqa: F401  (package-level re-export)
     REQUIRED,
     adapter_params_registry,

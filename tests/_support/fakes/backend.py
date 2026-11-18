@@ -13,7 +13,8 @@ from collections.abc import Sequence
 
 import torch
 
-from unigym.env.backends.base import EnvBackend
+from unigym.env.backends.base import EnvBackend, EnvStep
+from unigym.env.obs import ObservationConfig, ObservationRegistry, build_observation_schema
 from unigym.runtime.actions import NamedAction
 from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime
 
@@ -31,8 +32,8 @@ class FakeBackend(EnvBackend):
 
     Every step replaces the scalar joint position with the named action's
     position target, publishes ``joint_pos``/``prev_action`` in the observation
-    cache and the full extra-info record set, and advances the episode clock by
-    one second.  There is no physics, contact, camera, prop or event model.
+    registry and the full record set, and advances the episode clock by one
+    second.  There is no physics, contact, camera, prop or event model.
     ``joint_names`` defaults to the one-joint contract fixture; a caller that
     needs a multi-joint action group may declare more names (identity order).
     """
@@ -96,16 +97,29 @@ class FakeBackend(EnvBackend):
             torch.full((num_envs, joint_count), math.pi, dtype=torch.float32),
         )
 
-        self.obs_cache: dict[str, torch.Tensor] = {}
-        self._refresh_obs_cache()
+        self.observations = ObservationConfig(
+            robot=(ARTICULATION_NAME,), command=True, prev_action=True
+        )
+        self.obs = ObservationRegistry(
+            self.observations,
+            build_observation_schema(
+                self.observations,
+                full_joint_names={ARTICULATION_NAME: self.joint_names},
+                policy_joint_names={ARTICULATION_NAME: self.joint_names},
+            ),
+            num_envs=num_envs,
+            device=self.device,
+        )
+        self._t = 0
+        self._refresh_obs()
 
     def step(
         self,
         actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor | bool]]:
-        """Apply one named action, refresh the cache, return ``(obs, extra)``."""
+    ) -> EnvStep:
+        """Apply one named action, refresh the registry, return the step."""
         self._ensure_open()
         self._joint_pos = self._resolve_targets(actions)
         if raw_action is not None:
@@ -124,8 +138,16 @@ class FakeBackend(EnvBackend):
                 raise ValueError(f"cmd must be a tensor with leading dim {self.num_envs}")
             self._command = cmd.to(device=self.device).clone()
         self._time_in_episode += 1.0
-        self._refresh_obs_cache()
-        return dict(self.obs_cache), self._build_extra()
+        self._refresh_obs(raw_action, cmd)
+        step = EnvStep(
+            t=int(self._t),
+            obs=self.obs.snapshot(),
+            record=self.record(),
+            reset_env_ids=torch.empty(0, dtype=torch.int64, device=self.device),
+            should_reset=False,
+        )
+        self._t += 1
+        return step
 
     def reset_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Reset only the selected rows to the spawn state; return the ids."""
@@ -143,7 +165,7 @@ class FakeBackend(EnvBackend):
         self._prev_action[unique] = 0.0
         self._time_in_episode[unique] = 0.0
         self._episode_id[unique] += 1
-        self._refresh_obs_cache()
+        self._refresh_obs()
         return ids
 
     def reset_all(self) -> torch.Tensor:
@@ -204,39 +226,49 @@ class FakeBackend(EnvBackend):
         ordered = [columns[joint][0][:, columns[joint][1]] for joint in control.joint_names]
         return torch.stack(ordered, dim=1).to(device=self.device, dtype=torch.float32).clone()
 
-    def _refresh_obs_cache(self) -> None:
-        self.obs_cache["joint_pos"] = self._joint_pos.clone()
-        self.obs_cache["prev_action"] = self._prev_action.clone()
-        if self._command is not None:
-            self.obs_cache["command"] = self._command.clone()
-
-    def _build_extra(self) -> dict[str, torch.Tensor | bool]:
-        prefix = f"articulation/{ARTICULATION_NAME}"
+    def _refresh_obs(self, raw_action=None, cmd=None) -> None:
+        self.obs.t = int(self._t)
+        prefix_name = ARTICULATION_NAME
         zeros3 = torch.zeros(self.num_envs, 3, dtype=torch.float32, device=self.device)
-        return {
-            f"{prefix}/joint_pos": self._joint_pos.clone(),
-            f"{prefix}/joint_vel": torch.zeros_like(self._joint_pos),
-            f"{prefix}/applied_torque": torch.zeros_like(self._joint_pos),
-            f"{prefix}/gravity_b": torch.tensor(
-                [0.0, 0.0, -1.0], dtype=torch.float32, device=self.device
-            )
+        self.obs.set_robot(prefix_name, "joint_pos", self._joint_pos.clone())
+        self.obs.set_robot(prefix_name, "joint_pos_rel", self._joint_pos.clone())
+        self.obs.set_robot(prefix_name, "joint_vel", torch.zeros_like(self._joint_pos))
+        self.obs.set_robot(prefix_name, "applied_torque", torch.zeros_like(self._joint_pos))
+        self.obs.set_robot(
+            prefix_name,
+            "gravity_b",
+            torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=self.device)
             .expand(self.num_envs, 3)
             .clone(),
-            f"{prefix}/base_pos_w": zeros3.clone(),
-            f"{prefix}/base_quat_w": torch.tensor(
-                [1.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=self.device
-            )
+        )
+        self.obs.set_robot(prefix_name, "base_pos_w", zeros3.clone())
+        self.obs.set_robot(
+            prefix_name,
+            "base_quat_w",
+            torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=self.device)
             .expand(self.num_envs, 4)
             .clone(),
-            f"{prefix}/base_lin_vel_w": zeros3.clone(),
-            f"{prefix}/base_ang_vel_w": zeros3.clone(),
-            f"{prefix}/base_lin_vel_b": zeros3.clone(),
-            f"{prefix}/base_ang_vel_b": zeros3.clone(),
-            "time_in_episode": self._time_in_episode.clone(),
-            "episode_id": self._episode_id.clone(),
-            "reset_env_ids": torch.empty(0, dtype=torch.int64, device=self.device),
-            "should_reset": False,
-        }
+        )
+        for leaf in (
+            "base_lin_vel_w",
+            "base_ang_vel_w",
+            "base_lin_vel_b",
+            "base_ang_vel_b",
+        ):
+            self.obs.set_robot(prefix_name, leaf, zeros3.clone())
+        self.obs.set_robot(
+            prefix_name,
+            "base_yaw",
+            torch.zeros(self.num_envs, 1, dtype=torch.float32, device=self.device),
+        )
+        self.obs.set_command(cmd if cmd is not None else self._command)
+        self.obs.set_prev_action(raw_action if raw_action is not None else self._prev_action)
+
+    def record(self) -> dict[str, object]:
+        record: dict[str, object] = dict(self.obs.record())
+        record["time_in_episode"] = self._time_in_episode.clone()
+        record["episode_id"] = self._episode_id.clone()
+        return record
 
 
 __all__ = [

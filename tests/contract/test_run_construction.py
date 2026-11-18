@@ -35,7 +35,7 @@ def test_minimal_construction_without_robot_fails():
 
 def test_minimal_construction_accepts_explicit_robot():
     """An explicit registered robot name remains valid."""
-    run = Run(world=_world(), robot="fixture_arm")
+    run = Run(world=_world(), robot="fixture_arm", observations={"robot": ["fixture_arm"]})
 
     assert run.cfg["articulations"][0]["name"] == "fixture_arm"
 
@@ -58,6 +58,7 @@ def test_cfg_with_articulations_needs_no_robot_injection():
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
     run = Run(cfg)
@@ -77,14 +78,18 @@ def test_robot_declaration_dict_passes_actuation_through():
         }
     ]
 
-    run = Run(world=_world(), robot={"name": "fixture_arm", "actuation": actuation})
+    run = Run(
+        world=_world(),
+        robot={"name": "fixture_arm", "actuation": actuation},
+        observations={"robot": ["fixture_arm"]},
+    )
 
     assert run.cfg["articulations"][0]["actuation"] == actuation
 
 
 def test_bare_robot_string_live_build_fails_the_actuation_hard_cut():
     """Run(robot=...) stays representable but carries no actuation to build."""
-    run = Run(world=_world(), robot="fixture_arm")
+    run = Run(world=_world(), robot="fixture_arm", observations={"robot": ["fixture_arm"]})
 
     with pytest.raises(ValueError, match="no `actuation`"):
         run.build()
@@ -107,6 +112,7 @@ def _live_cfg(**env_params):
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
 

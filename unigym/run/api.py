@@ -617,6 +617,15 @@ def _camera_entries(
     )
 
 
+def _observation_section(value: JsonValue) -> JsonValue:
+    """Normalize an ``observations=`` constructor value to a config mapping."""
+    from unigym.env.obs import ObservationConfig
+
+    if isinstance(value, ObservationConfig):
+        return value.to_mapping()
+    return copy.deepcopy(value)
+
+
 class Run:
     """A lazy run builder + session.
 
@@ -655,6 +664,8 @@ class Run:
             path string normalized to ``mjcf``) merged into the run config top
             level.
         cameras: Camera-spec dicts (``unigym.Camera.*``) or a ``CameraSet``.
+        observations: The run's ``observations:`` declaration mapping (or an
+            :class:`~unigym.env.obs.ObservationConfig`).
         adapter: ``None`` (ManualAdapter) / a registered adapter name.
         robot: A complete :class:`~unigym.robots.base.RobotProfile`, a
             registered robot name, or a robot declaration mapping
@@ -701,6 +712,7 @@ class Run:
         world: World | None = None,
         world_base: JsonValue = None,
         cameras: CameraSet | JsonValue = None,
+        observations: JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
         spawn: Mapping[str, JsonValue] | None = None,
@@ -756,6 +768,7 @@ class Run:
             raw = self._assemble_minimal(
                 world=world,
                 cameras=cameras,
+                observations=observations,
                 adapter=adapter,
                 robot=robot,
                 spawn=spawn,
@@ -782,6 +795,8 @@ class Run:
                 _section(raw, "env")["backend_options"] = copy.deepcopy(self._backend_options)
             if cameras is not None:
                 raw["cameras"] = _json_list(_camera_entries(cameras))
+            if observations is not None:
+                raw["observations"] = _observation_section(observations)
             if adapter is not None:
                 raw["adapter"] = _adapter_section(adapter)
             if robot is not None:
@@ -854,6 +869,7 @@ class Run:
         *,
         world: World | None,
         cameras: CameraSet | JsonValue,
+        observations: JsonValue,
         adapter: JsonValue,
         robot: JsonValue,
         spawn: Mapping[str, JsonValue] | None,
@@ -907,6 +923,8 @@ class Run:
             world.apply(raw)
         if cameras is not None:
             raw["cameras"] = _json_list(_camera_entries(cameras))
+        if observations is not None:
+            raw["observations"] = _observation_section(observations)
         return raw
 
     @classmethod
@@ -916,6 +934,7 @@ class Run:
         world: World | None = None,
         world_base: JsonValue = None,
         cameras: CameraSet | JsonValue = None,
+        observations: JsonValue = None,
         adapter: JsonValue = None,
         robot: JsonValue | None = None,
         spawn: Mapping[str, JsonValue] | None = None,
@@ -941,6 +960,7 @@ class Run:
             world=world,
             world_base=world_base,
             cameras=cameras,
+            observations=observations,
             adapter=adapter,
             robot=robot,
             spawn=spawn,

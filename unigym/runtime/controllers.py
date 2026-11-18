@@ -42,7 +42,6 @@ from unigym.runtime.controls import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.env.backends.base import EnvBackend
-    from unigym.env.obs_catalog import ObsCatalog
     from unigym.robots.base import RobotProfile
     from unigym.scenes.articulation import (
         ArticulationSpec,
@@ -207,7 +206,6 @@ class ArticulationRuntime:
     q0_mj: np.ndarray | None = None
     free_qpos_adr: int | None = None
     free_dof_adr: int | None = None
-    catalog: ObsCatalog | None = None
 
     def __post_init__(self):
         if not self.name:

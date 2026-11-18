@@ -173,7 +173,7 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
 
     sim = builder.build()
     try:
-        spawn = sim.observe().raw[f"{prefix}/joint_pos"]
+        spawn = sim.observe().record[f"{prefix}/joint_pos"]
         assert isinstance(spawn, torch.Tensor)
         spawn = spawn.clone()
         sim.act(
@@ -181,7 +181,7 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
             targets,
         )
         stepped = sim.step()
-        post_step = stepped.raw[f"{prefix}/joint_pos"]
+        post_step = stepped.record[f"{prefix}/joint_pos"]
         assert isinstance(post_step, torch.Tensor)
         post_step = post_step.clone()
         assert not torch.equal(
@@ -193,7 +193,7 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
         assert obs.reset_env_ids.tolist() == [1]
         assert obs.reset_due_env_ids.tolist() == []
         assert obs.terminated is None
-        reset_pos = obs.raw[f"{prefix}/joint_pos"]
+        reset_pos = obs.record[f"{prefix}/joint_pos"]
         assert isinstance(reset_pos, torch.Tensor)
         assert torch.equal(reset_pos[0], post_step[0]), "row 0 was touched by a row-1 reset"
         assert torch.allclose(reset_pos[1], spawn[1], atol=1e-5), (

@@ -7,17 +7,16 @@ from collections.abc import Sequence
 import pytest
 import torch
 
+from unigym.env.obs import ObsSnapshot, ObservationSchema
 from unigym.run.api import Run
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runner.base import Runner, StepResult
-from unigym.runner.state import read_extra
 from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec
 from unigym.sim import (
     ArticulationHandle,
     Control,
     ForeignHandleError,
     MissingActionError,
-    ObservationError,
     PendingActionError,
     Simulation,
     SimulationClosedError,
@@ -86,8 +85,8 @@ def _sim(
         env=live.env,
         run=run,
         owner=token,
-        state=read_extra(live.env),
-        obs_cache=dict(live.env.obs_cache),
+        state=live.env.record(),
+        obs=live.env.obs.snapshot(),
         t=0,
     )
 
@@ -134,9 +133,9 @@ def test_act_stages_without_ticking_and_observe_serves_the_cache() -> None:
 
     assert runner.ticks_done == 0
     assert obs.t == 0
-    assert "reset_env_ids" not in obs.raw
-    assert "should_reset" not in obs.raw
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.0]]
+    assert "reset_env_ids" not in obs.record
+    assert "should_reset" not in obs.record
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.0]]
     record = obs.articulations[handle]
     assert record.joint_names == ("shoulder",)
     assert record.joint_pos.tolist() == [[0.0]]
@@ -154,7 +153,7 @@ def test_duplicate_group_act_keeps_the_first_staged_value() -> None:
         sim.act(group, _values(0.75))
 
     obs = sim.step()
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.25]]
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.25]]
 
 
 def test_step_requires_every_declared_group() -> None:
@@ -192,7 +191,7 @@ def test_same_group_name_on_two_articulations_is_distinct() -> None:
         run=_run(),
         owner=token,
         state=_two_state((left, right)),
-        obs_cache={},
+        obs=ObsSnapshot({}, schema=ObservationSchema({}), num_envs=1, device="cpu"),
         t=0,
     )
 
@@ -217,7 +216,7 @@ def test_step_applies_and_consumes_the_staged_action() -> None:
     obs = sim.step()
 
     assert obs.t == 0
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.5]]
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.5]]
     assert sim.t == 0
     assert sim.runner.ticks_done == 1
     with pytest.raises(PendingActionError, match="needs a staged action"):
@@ -231,7 +230,7 @@ def test_step_actions_sugar_stages_then_steps() -> None:
 
     obs = sim.step({group: _values(0.5)})
 
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.5]]
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.5]]
     assert sim.runner.ticks_done == 1
 
 
@@ -331,7 +330,7 @@ def test_reset_clears_pending_and_refreshes_the_state() -> None:
     obs = sim.reset()
 
     assert obs.t == sim.runner.ticks_done == 1
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.0]]
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.0]]
     with pytest.raises(PendingActionError, match="needs a staged action"):
         sim.step()
 
@@ -357,37 +356,6 @@ def test_reset_reports_the_rows_the_runner_reset() -> None:
 
     assert obs.reset_env_ids.tolist() == [0]
     assert obs.terminated is None
-
-
-def test_step_keeps_a_non_tensor_cache_entry_exactly() -> None:
-    """A record-like obs entry crosses the step cache boundary verbatim."""
-    runner = FakeRunner()
-    payload = {"probe": [1, 2]}
-    runner.cache_extra = {"contact_ops/foo": payload}
-    sim = _sim(runner=runner)
-    sim.act(_group(sim.articulations[0]), _values(0.5))
-
-    obs = sim.step()
-
-    assert obs.obs_cache["contact_ops/foo"] is payload
-    assert dict(obs.obs_cache)["contact_ops/foo"] == {"probe": [1, 2]}
-
-
-def test_bad_expected_cache_key_is_reported_after_the_tick_is_adopted() -> None:
-    """A non-tensor projected key fails without faulting or rewinding the clock."""
-    runner = FakeRunner()
-    runner.cache_extra = {"articulation/arm/prev_action": "not-a-tensor"}
-    sim = _sim(runner=runner)
-    sim.act(_group(sim.articulations[0]), _values(0.5))
-
-    with pytest.raises(ObservationError, match="articulation/arm/prev_action"):
-        sim.step()
-
-    assert sim.faulted is False
-    assert sim.t == 0
-    assert sim.runner.ticks_done == 1
-    with pytest.raises(ObservationError, match="articulation/arm/prev_action"):
-        sim.observe()
 
 
 def test_close_is_idempotent_and_refuses_live_calls() -> None:
@@ -460,7 +428,7 @@ def test_tensor_action_applies_every_row_at_n2() -> None:
         sim.act(group, torch.tensor([[9.0], [9.0]], dtype=torch.float32))
     obs = sim.step()
 
-    assert obs.obs_cache["joint_pos"].tolist() == [[0.25], [0.75]]
+    assert obs.obs.robot("arm").joint_pos.tolist() == [[0.25], [0.75]]
 
 
 def test_tensor_action_refuses_a_single_row_at_n2() -> None:
@@ -502,7 +470,6 @@ class _EchoEnv:
     def __init__(self) -> None:
         self.num_envs = 1
         self.device = "cpu"
-        self.obs_cache: dict[str, object] = {}
 
 
 class _EchoRunner:
@@ -520,8 +487,8 @@ class _EchoRunner:
         extra = _two_state(self._handles, values=values)
         result = StepResult(
             t=self.ticks_done,
-            obs={},
-            extra=extra,
+            obs=ObsSnapshot({}, schema=ObservationSchema({}), num_envs=1, device="cpu"),
+            record=extra,
             reset_env_ids=torch.empty(0, dtype=torch.int64),
             terminated=None,
         )

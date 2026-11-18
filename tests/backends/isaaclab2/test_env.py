@@ -44,8 +44,7 @@ def test_partitioned_isaaclab_accepts_a_contact_manager_before_env(simulation_ap
     from unigym.backends.isaaclab2.articulation_runtime import validate_options
 
     class _Adapter:
-        def get_obs_requests(self):
-            return []
+        pass
 
     validate_options(
         _Adapter(),
@@ -74,8 +73,7 @@ def test_partitioned_isaaclab_still_rejects_unsupported_options(simulation_app, 
     from unigym.backends.isaaclab2.articulation_runtime import validate_options
 
     class _Adapter:
-        def get_obs_requests(self):
-            return []
+        pass
 
     kwargs = {
         "events_cfg": None,

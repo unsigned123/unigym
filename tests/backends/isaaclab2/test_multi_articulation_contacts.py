@@ -123,6 +123,7 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
     from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
@@ -206,6 +207,7 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         sim_dt=0.005,
         device="cuda:0",
         articulations=(cart_spec, g1_spec),
+        observations=ObservationConfig(robot=(CARTPOLE, G1)),
         controls=controls,
         profiles={CARTPOLE: cart_profile, G1: g1_profile},
         robot_realizations={CARTPOLE: cartpole_articulation_cfg, G1: g1_realization},

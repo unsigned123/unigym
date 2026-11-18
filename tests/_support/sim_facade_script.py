@@ -141,7 +141,7 @@ def run_facade_acceptance(
         obs = sim.observe()
         record = obs.articulations[robot]
         prefix = f"articulation/{robot.name}"
-        raw_pos = obs.raw[f"{prefix}/joint_pos"]
+        raw_pos = obs.record[f"{prefix}/joint_pos"]
         assert isinstance(raw_pos, torch.Tensor)
         assert (
             obs.num_envs == num_envs
@@ -166,8 +166,8 @@ def run_facade_acceptance(
             sim.act(group, _position_target(len(joint_names), index, num_envs))
             obs = sim.step()
             record = obs.articulations[robot]
-            raw_pos = obs.raw[f"{prefix}/joint_pos"]
-            raw_vel = obs.raw[f"{prefix}/joint_vel"]
+            raw_pos = obs.record[f"{prefix}/joint_pos"]
+            raw_vel = obs.record[f"{prefix}/joint_vel"]
             assert isinstance(raw_pos, torch.Tensor)
             assert isinstance(raw_vel, torch.Tensor)
             assert obs.t == index, f"step {index}: producing tick {obs.t} != {index}"

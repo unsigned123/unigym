@@ -26,7 +26,6 @@ from collections.abc import Callable, Mapping, Sequence
 import numpy as np
 import torch
 
-from unigym.runner.state import read_extra
 from unigym.runner.sync import (
     SyncRunner,
     _adapter_joint_targets,
@@ -44,7 +43,7 @@ def _as_numpy(value):
 
 
 def _batch_infos(extra: dict, num_envs: int) -> dict:
-    """Per-env ``(N, ...)`` arrays from one batched extra dict.
+    """Per-env ``(N, ...)`` arrays from one batched record dict.
 
     ``reset_env_ids`` is an id vector (not an env-indexed field) and is
     dropped; scalar fields (e.g. ``should_reset``) are broadcast to ``(N,)``.
@@ -91,11 +90,11 @@ def _reject_mapping_action(action) -> None:
 
 
 class _GymBase(SyncRunner):
-    """Shared best-effort post-reset 17-key extra reader."""
+    """Shared post-reset record reader."""
 
-    def _extra_now(self) -> dict[str, object]:
-        """Best-effort post-reset 17-key extra (the shared seam reader)."""
-        return read_extra(self.env)
+    def _record_now(self) -> dict[str, object]:
+        """Post-reset record (canonical keys + bookkeeping)."""
+        return self.env.record()
 
 
 class GymEnvRunner(_GymBase):
@@ -155,8 +154,7 @@ class GymEnvRunner(_GymBase):
         super().reset(None)
         self._steps = 0
         self._finished = False
-        obs = dict(self.env.obs_cache)
-        return obs, self._extra_now()
+        return dict(self.env.obs.snapshot().record()), self._record_now()
 
     def step(self, action):
         """Advance one tick; return the Gymnasium 5-tuple.
@@ -179,9 +177,9 @@ class GymEnvRunner(_GymBase):
 
         result = self.tick(actions_override=actions)
         self._steps += 1
-        obs = result.obs
-        extra = result.extra
-        reward = float(self.reward_fn(obs, extra)) if self.reward_fn is not None else 0.0
+        obs = dict(result.obs.record())
+        extra = result.record
+        reward = float(self.reward_fn(result.obs, extra)) if self.reward_fn is not None else 0.0
         terminated = bool(result.terminated.any()) if result.terminated is not None else False
         due = bool(result.reset_env_ids.numel())
         step_truncated = self.max_steps is not None and self._steps >= self.max_steps
@@ -280,14 +278,16 @@ class GymVectorRunner(_GymBase):
     def reset(self, seed=None, options=None):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Reset all envs; return ``(post_reset_obs, batched_infos)``."""
         super().reset(None)
-        obs = dict(self.env.obs_cache)
-        return obs, _batch_infos(self._extra_now(), self.num_envs)
+        return (
+            dict(self.env.obs.snapshot().record()),
+            _batch_infos(self._record_now(), self.num_envs),
+        )
 
     def step(self, actions):
         """Advance one tick with SameStep autoreset; return the 5-tuple."""
         result = self.tick(actions_override=self._vector_actions(actions))
         obs_pre = result.obs
-        extra_pre = result.extra
+        extra_pre = result.record
         n = self.num_envs
 
         if self.reward_fn is None:
@@ -306,14 +306,14 @@ class GymVectorRunner(_GymBase):
         due_mask[due] = True
         truncateds = (due_mask & ~terminateds).astype(bool)
 
-        obs = dict(self.env.obs_cache)  # post-reset (SameStep)
-        infos = _batch_infos(self._extra_now(), n)
+        obs = dict(self.env.obs.snapshot().record())  # post-reset (SameStep)
+        infos = _batch_infos(self._record_now(), n)
         final_observation = np.empty(n, dtype=object)
         final_info = np.empty(n, dtype=object)
         final_observation[:] = None
         final_info[:] = None
         for env_id in due:
-            final_observation[env_id] = _per_env_values(obs_pre, int(env_id))
+            final_observation[env_id] = _per_env_values(obs_pre.record(), int(env_id))
             final_info[env_id] = _per_env_values(extra_pre, int(env_id))
         infos["final_observation"] = final_observation
         infos["final_info"] = final_info

@@ -149,9 +149,8 @@ class Simulation:
         env: the live env backend the runner steps.
         run: the run that owns the instance and the runner.
         owner: the identity token the handles carry.
-        state: the spawn state record from the request-free extra reader.
-        obs_cache: the spawn observation cache (copied verbatim; entries need
-            not be tensors).
+        state: the spawn record from ``env.record()``.
+        obs: the spawn typed :class:`~unigym.env.obs.ObsSnapshot`.
         t: the policy tick that produced ``state`` (``0`` at spawn).
     """
 
@@ -169,7 +168,7 @@ class Simulation:
         run: Run,
         owner: object,
         state: Mapping[str, object],
-        obs_cache: Mapping[str, object],
+        obs: object,
         t: int,
     ) -> None:
         import torch
@@ -252,7 +251,7 @@ class Simulation:
         self._action_groups = action_groups
         self._pending = PendingActions()
         self._state: dict[str, object] = dict(state)
-        self._obs_cache: dict[str, object] = dict(obs_cache)
+        self._obs = obs
         self._reset_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
         self._reset_due_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
         self._terminated: torch.Tensor | None = None
@@ -598,7 +597,7 @@ class Simulation:
         request = torch.arange(self.num_envs, dtype=torch.int64) if ids is None else ids
         try:
             result = self._runner.reset(None if ids is None else ids)
-            state = self._read_extra()
+            state = self._env.record()
             reset_env_ids = _reset_ids(
                 result.reset_env_ids,
                 "runner reset",
@@ -610,7 +609,7 @@ class Simulation:
             self._faulted = True
             raise
         self._state = dict(state)
-        self._obs_cache = dict(self._env.obs_cache)
+        self._obs = self._env.obs.snapshot()
         self._reset_env_ids = reset_env_ids
         self._reset_due_env_ids = torch.empty(0, dtype=torch.int64, device=self._env.device)
         self._terminated = None
@@ -720,7 +719,7 @@ class Simulation:
             t=self._state_t,
             num_envs=self.num_envs,
             state=self._state,
-            obs_cache=self._obs_cache,
+            snapshot=self._obs,
             handles=self.articulations,
             cameras=self.cameras,
             reset_env_ids=self._reset_env_ids,
@@ -757,8 +756,8 @@ class Simulation:
         )
         terminated = _terminated_mask(result.terminated, self.num_envs)
         reset_env_ids = torch.empty(0, dtype=torch.int64, device=self._env.device)
-        self._state = dict(result.extra)
-        self._obs_cache = dict(result.obs)
+        self._state = dict(result.record)
+        self._obs = result.obs
         self._reset_env_ids = reset_env_ids
         self._reset_due_env_ids = reset_due_env_ids
         self._terminated = terminated
@@ -806,12 +805,6 @@ class Simulation:
                 f"(dim,), got {values.ndim} dimensions"
             )
         return normalized.clone()
-
-    def _read_extra(self) -> dict[str, object]:
-        """Read the post-reset state through the shared request-free seam."""
-        from unigym.runner.state import read_extra
-
-        return read_extra(self._env)
 
     def _check_clock(self) -> None:
         """Refuse out-of-band ticking instead of applying a stale target."""

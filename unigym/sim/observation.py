@@ -1,11 +1,12 @@
 """The typed observation record of the experimental simulation facade.
 
 One :class:`Observation` is a read-only view of the state produced by one tick.
-``raw`` is the live state mapping (the step ``extra`` without its bookkeeping
-keys), ``obs_cache`` is an exact copy of the producing ``StepResult.obs`` and
-the typed fields are projections of ``raw``: every typed tensor is the backend
-tensor itself, never a re-derived catalog entry.  A missing required state key
-is an :class:`~unigym.sim.errors.ObservationError`; there is no zero-fill.
+``record`` is the producing record mapping (canonical artifact keys without
+the bookkeeping keys) and ``obs`` is the producing
+:class:`~unigym.env.obs.ObsSnapshot` (typed environment registry).  The typed
+fields are projections of ``record``; every typed tensor is the backend tensor
+itself.  A missing required state key is an
+:class:`~unigym.sim.errors.ObservationError`; there is no zero-fill.
 
 Every projected tensor has exactly ``num_envs`` rows: the row count is the
 declared env count, never inferred from one field, so a state with a wrong row
@@ -14,12 +15,8 @@ field is returned.  The two id masks are distinct: ``reset_env_ids`` names the
 rows the producing operation reset, ``reset_due_env_ids`` names the
 episode-clock due rows at the producing tick.
 
-The cache copy is value-preserving, not tensor-typed: a backend may publish
-record-like entries (for example ``contact_ops/...``) alongside tensors, so
-``obs_cache`` keeps every entry exactly as produced.  Only the keys this module
-projects (``articulation/<name>/prev_action``, ``.../command`` and
-``cam/<name>/rgb`` / ``.../depth``) must be tensors; one present-but-not-tensor
-projected key is an :class:`~unigym.sim.errors.ObservationError`.
+Typed camera and command/prev_action values come from the observation
+snapshot; only tensors are accepted for those projected slots.
 
 ``torch`` is not imported by this module at import time: it is imported lazily
 inside :func:`build_observation` and the private projection helpers, so
@@ -63,10 +60,9 @@ class Observation:
             (empty after a reset).
         terminated: the producing tick's termination mask, or ``None`` when
             the tick was a spawn/reset read.
-        raw: the live state mapping without ``reset_env_ids`` /
+        record: the producing record mapping without ``reset_env_ids`` /
             ``should_reset``.
-        obs_cache: an exact copy of the producing ``StepResult.obs``; values
-            are kept verbatim (tensors or record-like objects).
+        obs: the producing typed :class:`~unigym.env.obs.ObsSnapshot`.
     """
 
     t: int
@@ -77,15 +73,14 @@ class Observation:
     reset_env_ids: torch.Tensor
     reset_due_env_ids: torch.Tensor
     terminated: torch.Tensor | None
-    raw: Mapping[str, torch.Tensor | bool]
-    obs_cache: Mapping[str, object]
+    record: Mapping[str, torch.Tensor | bool]
+    obs: object
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "articulations", MappingProxyType(dict(self.articulations)))
         object.__setattr__(self, "cameras", MappingProxyType(dict(self.cameras)))
         object.__setattr__(self, "contacts", MappingProxyType(dict(self.contacts)))
-        object.__setattr__(self, "raw", MappingProxyType(dict(self.raw)))
-        object.__setattr__(self, "obs_cache", MappingProxyType(dict(self.obs_cache)))
+        object.__setattr__(self, "record", MappingProxyType(dict(self.record)))
 
 
 @dataclass(frozen=True, eq=False)
@@ -178,22 +173,20 @@ def _vector(state: Mapping[str, object], key: str, width: int, rows: int) -> tor
     return value
 
 
-def _optional_cached(
-    obs_cache: Mapping[str, object], key: str, num_envs: int
-) -> torch.Tensor | None:
-    """Read one optional projected ``(N, ...)`` cached tensor (absent -> ``None``)."""
+def _optional_cached(snapshot, key: str, num_envs: int) -> torch.Tensor | None:
+    """Read one optional projected ``(N, ...)`` snapshot tensor (absent -> None)."""
     import torch
 
-    if key not in obs_cache:
+    value = snapshot.get(key)
+    if value is None:
         return None
-    value = obs_cache[key]
     if not isinstance(value, torch.Tensor):
         raise ObservationError(
-            f"observation cache key {key!r} must be a torch.Tensor, " f"got {type(value).__name__}"
+            f"observation key {key!r} must be a torch.Tensor, " f"got {type(value).__name__}"
         )
     if value.ndim == 0 or value.shape[0] != num_envs:
         raise ObservationError(
-            f"observation cache key {key!r} must have {num_envs} env rows, "
+            f"observation key {key!r} must have {num_envs} env rows, "
             f"got shape {tuple(value.shape)}"
         )
     return value
@@ -232,7 +225,7 @@ def _default_positions(
 def _articulation_record(
     handle: ArticulationHandle,
     state: Mapping[str, object],
-    obs_cache: Mapping[str, object],
+    snapshot,
     num_envs: int,
 ) -> ArticulationObservation:
     """Project one articulation's namespaced state into its typed record."""
@@ -260,8 +253,8 @@ def _articulation_record(
         base_quat_w=base_quat_w,
         base_lin_vel_b=base_lin_vel_b,
         base_ang_vel_b=base_ang_vel_b,
-        prev_action=_optional_cached(obs_cache, f"{prefix}/prev_action", num_envs),
-        command=_optional_cached(obs_cache, f"{prefix}/command", num_envs),
+        prev_action=snapshot.prev_action.value,
+        command=snapshot.command.value,
     )
 
 
@@ -312,7 +305,7 @@ def build_observation(
     t: int,
     num_envs: int,
     state: Mapping[str, object],
-    obs_cache: Mapping[str, object],
+    snapshot,
     handles: Sequence[ArticulationHandle],
     cameras: Sequence[CameraHandle],
     reset_env_ids: torch.Tensor,
@@ -326,8 +319,7 @@ def build_observation(
         num_envs: the declared env count; every projected tensor must have
             exactly this many rows.
         state: the live state mapping (the step ``extra``).
-        obs_cache: the exact ``StepResult.obs`` copy (values kept verbatim;
-            only projected keys are required to be tensors).
+        snapshot: the producing typed ``ObsSnapshot`` (camera/command slots).
         handles: the declared articulation handles, in declaration order.
         cameras: the declared camera handles, in declaration order.
         reset_env_ids: the env rows this operation reset.
@@ -377,12 +369,12 @@ def build_observation(
         contacts[key] = value
 
     records = {
-        handle: _articulation_record(handle, state, obs_cache, num_envs) for handle in handles
+        handle: _articulation_record(handle, state, snapshot, num_envs) for handle in handles
     }
     frames: dict[CameraHandle, CameraFrame] = {}
     for camera in cameras:
-        rgb = _optional_cached(obs_cache, f"cam/{camera.name}/rgb", num_envs)
-        depth = _optional_cached(obs_cache, f"cam/{camera.name}/depth", num_envs)
+        rgb = _optional_cached(snapshot, f"cam/{camera.name}/rgb", num_envs)
+        depth = _optional_cached(snapshot, f"cam/{camera.name}/depth", num_envs)
         if rgb is None and depth is None:
             continue
         frames[camera] = CameraFrame(handle=camera, t=t, rgb=rgb, depth=depth)
@@ -396,6 +388,6 @@ def build_observation(
         reset_env_ids=reset_env_ids,
         reset_due_env_ids=reset_due_env_ids,
         terminated=terminated,
-        raw=raw,
-        obs_cache=obs_cache,
+        record=raw,
+        obs=snapshot,
     )

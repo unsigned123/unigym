@@ -124,6 +124,7 @@ def _cfg(**overrides):
             },
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
     cfg.update(overrides)
     return cfg
@@ -551,6 +552,7 @@ def _consumer_run_cfg() -> dict:
             }
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
 

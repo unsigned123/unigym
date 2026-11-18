@@ -28,7 +28,7 @@ deliberately plain (no meshes/textures); color is optional and cosmetic.
 The handler subclasses :class:`GenericProp` (root-pose tracking, free-joint
 dynamic rigid body) and adds: aabb validation, aabb metadata exposure
 (``aabb_center``/``aabb_half``), and world-frame ``get_world_pose`` for the
-``object/*`` record-key layer (props/object_state).
+``object/*`` typed observation layer.
 """
 
 from __future__ import annotations

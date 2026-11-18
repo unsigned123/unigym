@@ -278,11 +278,11 @@ class CollectSink:
         raw = bundle["raw"]
         targets = bundle["targets"]
         obs_collect = bundle["obs_collect"]
-        extra = bundle["extra"]
+        record = bundle["record"]
         eff_cmd = bundle["cmd"]
         # record (data invariant: record before reset)
         rec = {}
-        for k, v in extra.items():
+        for k, v in record.items():
             if k in ("should_reset", "reset_env_ids"):
                 continue
             rec[_record_key(k)] = v
@@ -311,9 +311,9 @@ class CollectSink:
         if self.language_gen is not None:
             if t % self.lang_interval == 0 or t == self.total_steps - 1:
                 rt = _policy_runtime(self.env)
-                lin = extra[_state_key(rt, "base_lin_vel_b")]
-                ang = extra[_state_key(rt, "base_ang_vel_b")]
-                pos = extra[_state_key(rt, "base_pos_w")]
+                lin = record[_state_key(rt, "base_lin_vel_b")]
+                ang = record[_state_key(rt, "base_ang_vel_b")]
+                pos = record[_state_key(rt, "base_pos_w")]
                 lang_extra = {
                     "vx": lin[:, 0],
                     "vy": lin[:, 1],
@@ -354,7 +354,7 @@ class CollectSink:
     # episode end (before-reset data side; reset chain is engine-driven)
     # ------------------------------------------------------------------ #
     def on_episode_end(self, env_ids, bundle: dict) -> None:
-        extra = bundle["extra"]
+        record = bundle["record"]
         due_list = env_ids.tolist()
         if self.filter_active:
             for ei in due_list:
@@ -362,7 +362,7 @@ class CollectSink:
                 self.ep_bufs[ei] = []
         else:
             for ei in due_list:
-                dur = float(extra["time_in_episode"][ei])
+                dur = float(record["time_in_episode"][ei])
                 self.logger.log_episode({"duration_s": dur}, kept=True)
         # recorder: write video if record_env's episode ended
         if self.recorder.enabled and self.recorder.record_env in due_list:
@@ -382,7 +382,7 @@ class CollectSink:
     # per-step metrics (kept after the reset chain, like the original loop)
     # ------------------------------------------------------------------ #
     def on_step_end(self, t: int, bundle: dict) -> None:
-        extra = bundle["extra"]
+        record = bundle["record"]
         alive = bundle["alive"]
         runtimes = _policy_runtimes(self.env)
         step_metrics = {
@@ -393,10 +393,10 @@ class CollectSink:
         for rt in runtimes:
             suffix = "" if len(runtimes) == 1 else f"/{rt.name}"
             step_metrics[f"vx{suffix}"] = float(
-                extra[_state_key(rt, "base_lin_vel_b")][:, 0].mean()
+                record[_state_key(rt, "base_lin_vel_b")][:, 0].mean()
             )
             step_metrics[f"base_z{suffix}"] = float(
-                extra[_state_key(rt, "base_pos_w")][:, 2].mean()
+                record[_state_key(rt, "base_pos_w")][:, 2].mean()
             )
         in_recovery = getattr(self.adapter, "in_recovery", None)
         if in_recovery is not None:  # P11: switch-state distribution

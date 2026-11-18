@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 import torch
 
-from unigym.adapters.base import RawObsRequest
-from unigym.adapters.manual import ManualAdapter
 from unigym.backends.mjwarp.env import BACKEND_CAPABILITIES
 
 ARTICULATION = "tiny"
@@ -358,21 +356,6 @@ def test_set_joint_state_rejects_unknown_names_and_bad_selections(tiny_env):
         )
 
 
-class _BaseStateAdapter(ManualAdapter):
-    """Requests base state so settle has a cache entry to refresh."""
-
-    def get_obs_requests(self):
-        return [
-            RawObsRequest("base_pos_w", 3, "robot", articulation=ARTICULATION),
-            RawObsRequest("base_quat_w", 4, "robot", articulation=ARTICULATION),
-            RawObsRequest("base_ang_vel_b", 3, "robot", articulation=ARTICULATION),
-        ]
-
-    @property
-    def obs_dim(self) -> int:
-        return 10
-
-
 def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_factory, tiny_mjcf):
     """settle runs mjw.forward + mirror sync without touching the episode clock."""
     from unigym.contacts.manager import build_contact_manager
@@ -390,7 +373,7 @@ def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_fa
         contact_assets={ARTICULATION: str(tiny_mjcf)},
         articulation_names=(ARTICULATION,),
     )
-    env = tiny_env_factory(adapter=_BaseStateAdapter(), contact_manager=manager)
+    env = tiny_env_factory(contact_manager=manager)
     before_episode = env._episode_id.clone()
     before_clock = env._time_in_episode.clone()
     before_ctrl = env.mj_datas[0].ctrl.copy()
@@ -408,13 +391,13 @@ def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_fa
     returned = env.settle(None)
 
     assert returned.tolist() == [0]
-    assert env.obs_cache["articulation/tiny/base_pos_w"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_pos_w"][0].tolist() == pytest.approx(
         [0.2, -0.1, 0.55], abs=1e-5
     )
-    assert env.obs_cache["articulation/tiny/base_quat_w"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_quat_w"][0].tolist() == pytest.approx(
         _quat_90_z()[0].tolist(), abs=1e-6
     )
-    assert env.obs_cache["articulation/tiny/base_ang_vel_b"][0].tolist() == pytest.approx(
+    assert env.record()["articulation/tiny/base_ang_vel_b"][0].tolist() == pytest.approx(
         [0.0, 0.0, 1.0], abs=1e-5
     )
     assert manager.read()["contact/robot"].count_nonzero() > 0

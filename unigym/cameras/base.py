@@ -15,14 +15,14 @@ Every camera *rig* named ``<name>`` serves up to two obs keys::
 
 Depth is served only by an explicitly declared camera.  When the run's
 ``cameras:`` list contains a camera named ``depth``, the manager also maps the
-adapter-facing ``depth_image`` / ``depth_image_raw`` aliases onto that camera's
+typed depth frame onto that camera's
 ``cam/depth/depth`` stream; without a declared ``depth`` camera the alias
 request fails with a teaching error (there is no implicit shim camera).
 
 Caching stores RAW values: uint8 RGB / metric depth; any
 normalization (crop/clip/normalize) belongs to the adapter — the only
-exception is the ``depth_image`` alias, which reproduces the original
-``env/depth.py::preprocess_depth`` behavior verbatim.
+typed depth frame reproduces the original
+crop behavior where declared.
 """
 
 from __future__ import annotations
@@ -47,10 +47,6 @@ def rgb_key(name: str) -> str:
 def depth_key(name: str) -> str:
     """Obs key of the depth stream of camera *name* (``cam/<name>/depth``)."""
     return f"cam/{name}/depth"
-
-
-DEPTH_ALIAS_KEYS = ("depth_image", "depth_image_raw")
-"""Adapter-facing depth obs aliases served by an explicitly declared ``depth`` camera."""
 
 
 # --------------------------------------------------------------------------- #

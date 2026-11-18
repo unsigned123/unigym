@@ -55,7 +55,7 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
         for action in actions:
             sim.act(group, action)
             obs = sim.step()
-            facade.append((obs.raw[joint_pos_key], obs.raw[joint_vel_key]))
+            facade.append((obs.record[joint_pos_key], obs.record[joint_vel_key]))
 
         raw_run = Run(
             sim.run.spec.cfg,
@@ -76,7 +76,7 @@ def test_facade_step_matches_the_raw_external_runner(tmp_path: Path, tiny_mjcf: 
                     ),
                 )
             )
-            raw.append((result.extra[joint_pos_key], result.extra[joint_vel_key]))
+            raw.append((result.record[joint_pos_key], result.record[joint_vel_key]))
 
         assert len(facade) == len(raw) == len(actions)
         for index, ((facade_pos, facade_vel), (raw_pos, raw_vel)) in enumerate(

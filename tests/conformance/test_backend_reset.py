@@ -53,12 +53,12 @@ def test_reset_envs_resets_only_selected_rows():
         expected_joint[1] = 0.0
         expected_prev = raw_action.clone()
         expected_prev[1] = 0.0
-        assert torch.equal(backend.obs_cache["joint_pos"], expected_joint)
-        assert torch.equal(backend.obs_cache["prev_action"], expected_prev)
+        assert torch.equal(backend.obs.robot(ARTICULATION_NAME).joint_pos, expected_joint)
+        assert torch.equal(backend.obs.prev_action.value, expected_prev)
 
-        _, extra = _step(backend, [[0.0], [0.0]])
-        assert extra["episode_id"].tolist() == [0, 1]
-        assert extra["time_in_episode"].tolist() == [2.0, 1.0]
+        step = _step(backend, [[0.0], [0.0]])
+        assert step.record["episode_id"].tolist() == [0, 1]
+        assert step.record["time_in_episode"].tolist() == [2.0, 1.0]
     finally:
         backend.close()
 
@@ -75,12 +75,12 @@ def test_reset_all_resets_every_row(num_envs):
 
         expected = torch.arange(num_envs, dtype=torch.int64)
         assert torch.equal(returned, expected)
-        assert torch.equal(backend.obs_cache["joint_pos"], torch.zeros(num_envs, 1))
-        assert torch.equal(backend.obs_cache["prev_action"], torch.zeros(num_envs, 1))
+        assert torch.equal(backend.obs.robot(ARTICULATION_NAME).joint_pos, torch.zeros(num_envs, 1))
+        assert torch.equal(backend.obs.prev_action.value, torch.zeros(num_envs, 1))
 
-        _, extra = _step(backend, [[0.0]] * num_envs)
-        assert extra["episode_id"].tolist() == [1] * num_envs
-        assert extra["time_in_episode"].tolist() == [1.0] * num_envs
+        step = _step(backend, [[0.0]] * num_envs)
+        assert step.record["episode_id"].tolist() == [1] * num_envs
+        assert step.record["time_in_episode"].tolist() == [1.0] * num_envs
     finally:
         backend.close()
 
@@ -90,15 +90,15 @@ def test_reset_envs_preserves_id_order_and_empty_is_noop():
     backend = FakeBackend(num_envs=2)
     try:
         _step(backend, [[0.5], [0.6]])
-        before = backend.obs_cache["joint_pos"].clone()
+        before = backend.obs.robot(ARTICULATION_NAME).joint_pos.clone()
 
         empty = backend.reset_envs(torch.empty(0, dtype=torch.int64))
         assert tuple(empty.shape) == (0,)
-        assert torch.equal(backend.obs_cache["joint_pos"], before)
+        assert torch.equal(backend.obs.robot(ARTICULATION_NAME).joint_pos, before)
 
         returned = backend.reset_envs(torch.tensor([1, 0], dtype=torch.int64))
         assert returned.tolist() == [1, 0]
-        assert torch.equal(backend.obs_cache["joint_pos"], torch.zeros(2, 1))
+        assert torch.equal(backend.obs.robot(ARTICULATION_NAME).joint_pos, torch.zeros(2, 1))
     finally:
         backend.close()
 

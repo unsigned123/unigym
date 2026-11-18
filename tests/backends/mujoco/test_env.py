@@ -167,6 +167,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None, names=("left"
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.mujoco.env import MujocoEnv
     from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
@@ -271,6 +272,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None, names=("left"
         controls=controls,
         profiles=profiles,
         actuation_plans=plans,
+        observations=ObservationConfig(robot=tuple(names)),
     )
     return env
 
@@ -289,10 +291,10 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
             for name, sign in (("left", 1.0), ("right", -1.0))
         )
 
-        _, extra = env.step(actions)
+        step = env.step(actions)
 
-        assert extra["articulation/left/joint_pos"][0, 0] > 0.0
-        assert extra["articulation/right/joint_pos"][0, 0] < 0.0
+        assert step.record["articulation/left/joint_pos"][0, 0] > 0.0
+        assert step.record["articulation/right/joint_pos"][0, 0] < 0.0
         assert env.controls[("left", "left")].joint_names == ("elbow", "shoulder")
         assert env.controls[("right", "right")].joint_names == ("elbow", "shoulder")
     finally:
@@ -311,12 +313,17 @@ def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
     try:
         assert set(env.controls) == {("go1", "legs"), ("go2", "legs")}
 
-        _, first = env.step((_legs_action("go1", 0.4), _legs_action("go2", -0.4)))
-        assert first["articulation/go1/joint_pos"][0, 0] > first["articulation/go2/joint_pos"][0, 0]
-
-        _, second = env.step((_legs_action("go1", -0.4), _legs_action("go2", 0.4)))
+        first = env.step((_legs_action("go1", 0.4), _legs_action("go2", -0.4)))
         assert (
-            second["articulation/go2/joint_pos"][0, 0] > second["articulation/go1/joint_pos"][0, 0]
+            first.record["articulation/go1/joint_pos"][0, 0]
+            > first.record["articulation/go2/joint_pos"][0, 0]
+        )
+        assert first.obs.robot("go1").joint_pos[0, 0] > first.obs.robot("go2").joint_pos[0, 0]
+
+        second = env.step((_legs_action("go1", -0.4), _legs_action("go2", 0.4)))
+        assert (
+            second.record["articulation/go2/joint_pos"][0, 0]
+            > second.record["articulation/go1/joint_pos"][0, 0]
         )
     finally:
         env.close()
@@ -331,10 +338,6 @@ class _TwoDogAdapter(Adapter):
     def __init__(self) -> None:
         self.calls = 0
 
-    def get_obs_requests(self):
-        """No raw observation requests (the runner test only routes actions)."""
-        return []
-
     @property
     def obs_dim(self) -> int:
         return 1
@@ -343,7 +346,7 @@ class _TwoDogAdapter(Adapter):
     def control_dt(self) -> float:
         return 0.02
 
-    def compute_obs(self, obs_cache, cmd, env):
+    def compute_obs(self, obs, env):
         """Return a finite one-column frame for the runner's alive check."""
         return torch.zeros(env.num_envs, 1)
 
@@ -372,7 +375,7 @@ class _CaptureSink:
         self.extras = []
 
     def on_step(self, t, bundle) -> None:
-        self.extras.append(bundle["extra"])
+        self.extras.append(bundle["record"])
 
     def on_episode_end(self, env_ids, bundle) -> None:
         """No episode bookkeeping."""

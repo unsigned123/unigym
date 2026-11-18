@@ -164,6 +164,13 @@ world preset is declared explicitly:
 builder.world = World.from_preset(preset, runtime=builder.pack_runtime)
 ```
 
+`builder.observations` is the explicit observation selection written into the
+generated run config. It contains every declared articulation as a robot source
+and every declared camera as a camera source; a caller may pass
+`SimulationBuilder(observations=...)` to write a different mapping verbatim.
+This is config generation (visible before `build()` and carried in
+`cfg["observations"]`), not a runtime default.
+
 ## Actions
 
 Actions use the ordered action template as an **authoring handle** at the
@@ -273,14 +280,14 @@ the first `step()` also returns `t == 0`, and after `N` steps `t == N - 1`.
 | `reset_env_ids` | The env rows **this operation performed** a reset on; empty after a step. |
 | `reset_due_env_ids` | The episode-clock **due** rows at the producing tick; empty after a reset. |
 | `terminated` | The producing tick's `(N,)` termination mask; `None` at spawn/reset. |
-| `raw` | The live state mapping (`extra` without `reset_env_ids` / `should_reset`). |
-| `obs_cache` | Exact copy of `StepResult.obs`; values are kept verbatim. |
+| `record` | The step record mapping (canonical artifact keys + bookkeeping). |
+| `obs` | The producing typed `ObsSnapshot` (`robot`/`contact`/`object`/`camera`/`site`/command slots). |
 
 `ArticulationObservation` exposes absolute `joint_pos`, derived
 `joint_pos_rel = joint_pos - q0`, `joint_vel`, `applied_torque`, `gravity_b`,
 `base_pos_w`, `base_quat_w` (`w-x-y-z`), `base_lin_vel_b`, `base_ang_vel_b`,
-and the optional cached `prev_action` / `command`. Every tensor keeps the
-leading env axis `(N, ...)`. `joint_names` is `profile.joint_order`, the order
+and the optional typed `prev_action` / `command` slots. Every tensor keeps
+the leading env axis `(N, ...)`. `joint_names` is `profile.joint_order`, the order
 of every `(N, J)` joint column.
 
 Projection rules:
@@ -289,16 +296,13 @@ Projection rules:
   type or has the wrong shape is an `ObservationError`; there is no zero-fill.
 - `q0` comes from `profile.default_joint_pos` in `joint_names` order. A joint
   without a default is an `ObservationError`.
-- `prev_action` / `command` are read from `obs_cache`; absent means `None`.
-  A present but non-tensor value is an `ObservationError`.
-- `raw` drops the state bookkeeping keys (`reset_env_ids` / `should_reset`) and
-  keeps every remaining live-state value verbatim; a value that is neither a
-  `torch.Tensor` nor a `bool` is an `ObservationError`.
-- Camera frames are read from `cam/<name>/rgb` / `cam/<name>/depth` in
-  `obs_cache`; the facade never renders on demand. With the manual adapter the
-  cache is normally empty, so no cameras appear.
-- `obs_cache` keeps non-tensor record entries (for example `contact_ops/...`)
-  verbatim; only the keys the facade projects must be tensors.
+- `prev_action` / `command` are read from the typed `ObsSnapshot` slots; absent
+  means `None`. A present but non-tensor value is an `ObservationError`.
+- `record` drops the state bookkeeping keys (`reset_env_ids` / `should_reset`)
+  and keeps every remaining record value verbatim.
+- Camera frames are read from the typed `ObsSnapshot` (`cam/<name>/rgb` /
+  `cam/<name>/depth`); the facade never renders on demand. With the manual
+  adapter the observation selection is robot-only, so no cameras appear.
 
 ## One-clock rule
 
@@ -415,23 +419,23 @@ Deferred (exact follow-up, not open questions):
 
 | Deferred | Reason |
 | --- | --- |
-| Camera frames / rendering | `Run` hard-codes `enable_cameras=False`; the manual adapter requests no images. |
+| Camera frames / rendering | `Run` hard-codes `enable_cameras=False`; the manual builder selects no cameras. |
 | `attach=BodyHandle` cameras | A canonical body id needs the build-selected native asset name. |
-| Typed contacts / props / object handles | `contact/` keys are not backend-symmetric in `extra`. |
+| Typed contacts / props / object handles | Only the selected `observations.contact` / `observations.object` sources are published. |
 | Subset `joints=` action groups | Full-group values only in this spike. |
 | Same-asset cross-backend run | No dual-format (MJCF + USD/URDF) test pack in both lanes. |
 | Per-env action masks | No consumer yet. |
-| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `raw`. `None` disables the core clock and is only valid with `termination_mode: external` (an omitted value is `None` there, since the task owns truncation). |
+| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `record`. `None` disables the core clock and is only valid with `termination_mode: external` (an omitted value is `None` there, since the task owns truncation). |
 
 ## Honest residuals
 
 - The facade configures the manual adapter; it is not a policy driver.
 - Pack activation registers the robot profile process-wide. This is the
   existing pack boundary, not a facade promise.
-- `read_extra` is called only at spawn and reset; a prop-enabled IsaacLab run
-  has an `_build_extra` prop-manager side effect that is out of spike scope.
+- `env.record()` is called only at spawn and reset; a prop-enabled IsaacLab
+  run's typed object publication is out of spike scope.
 - Camera frames are opportunistic: they appear only if the backend publishes
-  them in `obs_cache`.
+  the selected camera's frames in the observation registry.
 - The full IsaacLab 2 dog lane is external and remains unverified; the targeted
   `N == 1` and `N == 2` facade tests are recorded as passing in isolation.
 - The facade is experimental: this spike's independent review returned

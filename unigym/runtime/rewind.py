@@ -91,7 +91,7 @@ class RewindPayload(TypedDict):
 
     tick: int
     env: SnapshotValue
-    obs_cache: dict[str, SnapshotValue]
+    observations: dict[str, SnapshotValue]
     adapter: SnapshotValue
     providers: dict[str, SnapshotValue]
     episode_id: int | None
@@ -294,14 +294,14 @@ class RewindController:
             raise RewindGateError("snapshot: 'label' must be a non-empty " "string when given")
         bundle = self.bridge._bundle or {}
         tick = int(getattr(self.bridge, "_last_step", 0) or 0)
-        cache: Mapping[str, SnapshotValue] = getattr(self.env, "obs_cache", None) or {}
         payload: RewindPayload = {
             "tick": tick,
             "env": self.env.snapshot(),
-            # obs cache: passthrough keys ("command"/"prev_action") survive
-            # across steps by design, so the cache is part of the run state
-            # the next compute_obs consumes -- branch-A writes must not leak
-            "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
+            # typed observation registry: passthrough slots
+            # ("command"/"prev_action") survive across steps by design, so
+            # the registry is part of the run state the next compute_obs
+            # consumes -- branch-A writes must not leak
+            "observations": _snap_val(self.env.obs.rewind_state()),
             "adapter": (
                 self.adapter.snapshot_internal()
                 if callable(getattr(self.adapter, "snapshot_internal", None))
@@ -438,10 +438,9 @@ class RewindController:
         # live states ride the same net -- a provider failing mid-apply
         # rolls the earlier ones back, never a partial restore)
         bundle = self.bridge._bundle or {}
-        cache: Mapping[str, SnapshotValue] = getattr(self.env, "obs_cache", None) or {}
         safety: dict[str, SnapshotValue] = {
             "env": self.env.snapshot(),
-            "obs_cache": {k: _snap_val(v) for k, v in cache.items()},
+            "observations": _snap_val(self.env.obs.rewind_state()),
             "obs_frame": _snap_val(bundle.get("obs_frame")),
             "cmd": _snap_val(bundle.get("cmd")),
             "torch_rng": _torch_rng_state(),
@@ -459,10 +458,7 @@ class RewindController:
         applied: list[str] = []
         try:
             self.env.restore(payload["env"])
-            live_cache: dict[str, SnapshotValue] | None = getattr(self.env, "obs_cache", None)
-            if live_cache is not None:
-                live_cache.clear()
-                live_cache.update({k: _snap_val(v) for k, v in payload["obs_cache"].items()})
+            self.env.obs.restore_rewind_state(payload["observations"])
             if payload.get("adapter") is not None and callable(
                 getattr(self.adapter, "restore_internal", None)
             ):
@@ -483,10 +479,7 @@ class RewindController:
             # safety net rolls the pre-rewind state back and RE-RAISES
             # (never swallows)
             self.env.restore(safety["env"])
-            sc = getattr(self.env, "obs_cache", None)
-            if sc is not None:
-                sc.clear()
-                sc.update({k: _snap_val(v) for k, v in safety["obs_cache"].items()})
+            self.env.obs.restore_rewind_state(safety["observations"])
             _set_torch_rng(safety["torch_rng"])
             # Adapter rollback: restore order env -> adapter ->
             # providers mirroring the apply order -- a refused rewind no
@@ -695,8 +688,8 @@ def _episode_stamp(bundle: Mapping[str, JsonValue] | None) -> int | None:
     absent key (older payloads, doubles without ``extra``) answers
     None: the controller guard degrades to skip, never false-kills.
     """
-    extra = (bundle or {}).get("extra")
-    eid = extra.get("episode_id") if isinstance(extra, Mapping) else None
+    record = (bundle or {}).get("record")
+    eid = record.get("episode_id") if isinstance(record, Mapping) else None
     if eid is None:
         return None
     try:
@@ -713,11 +706,10 @@ def _clone(x: SnapshotValue) -> SnapshotValue:
 
 
 def _snap_val(x: SnapshotValue) -> SnapshotValue:
-    """Snapshot-safe copy of one obs_cache / obs-frame value.
+    """Snapshot-safe copy of one observation / obs-frame value.
 
-    The cache is tensor-first (the engine's passthrough keys), but the
-    The decision-package face legitimately parks structured payloads
-    in it too (``contact_ops/<name>`` -> ``list[dict]``).  Tensors take
+    The registry payload is tensor-first (values + passthrough slots) and
+    also carries structured per-contact detail lists.  Tensors take
     the detach-clone path; numpy copies; JSON-safe structures deepcopy
     (snapshot AND restore must hand out private copies -- a rewind
     re-run or a second restore of the same payload must never alias

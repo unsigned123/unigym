@@ -273,15 +273,6 @@ class PropArticulation(PropHandler):
         jp = self._asset.data.joint_pos
         return {n: jp[:, i : i + 1].clone() for n, i in self._jidx.items()}
 
-    @property
-    def state_requests(self) -> list:
-        """No obs face: the articulation state is the record-key family."""
-        return []
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Empty obs contribution (the state surface is the record keys)."""
-        return {}
-
 
 def _build_actuators(joints: dict[str, dict], c: dict) -> dict:
     """Implicit actuator cfgs from the declared joint table.

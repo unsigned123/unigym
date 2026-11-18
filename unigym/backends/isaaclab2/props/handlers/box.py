@@ -28,7 +28,7 @@ deliberately plain (no meshes/textures); color is optional and cosmetic.
 The handler subclasses :class:`GenericProp` (root-pose tracking, free-joint
 dynamic rigid body) and adds: aabb validation, aabb metadata exposure
 (``aabb_center``/``aabb_half``), and world-frame ``get_world_pose`` for the
-``object/*`` record-key layer (props/object_state).
+``object/*`` typed observation layer.
 """
 
 from __future__ import annotations
@@ -43,7 +43,6 @@ from unigym.props.base import (
     _quat_mul,
     _yaw_quat,
     quat_rotate,
-    quat_rotate_inverse,
 )
 from unigym.props import container as container_mod
 from unigym.props.container import (
@@ -125,8 +124,6 @@ class BoxProp(GenericProp):
             spec.urdf_path = None
         else:
             spec.urdf_path = container_mod.generate_box_urdf(spec)
-        if not spec.state_keys:
-            spec.state_keys = [f"{spec.name}_pos_b", f"{spec.name}_vel_b"]
         super().__init__(spec, num_envs=num_envs, device=device, base_dir=base_dir)
 
     # ---- isaaclab scene build ------------------------------------------ #
@@ -184,20 +181,6 @@ class BoxProp(GenericProp):
         self._asset.write_root_pose_to_sim(pose, env_ids=env_ids)
         vel = torch.zeros(n, 6, device=env.device, dtype=world_pos.dtype)
         self._asset.write_root_velocity_to_sim(vel, env_ids=env_ids)
-
-    def get_state(self, env) -> dict[str, torch.Tensor]:
-        """Body-frame state tensors for this prop."""
-        if self._asset is None or not hasattr(self._asset, "data"):
-            return {}
-        robot = env.robot
-        rd = robot.data
-        bd = self._asset.data
-        root_pos = self._logical_pos(bd.root_pos_w, bd.root_quat_w)
-        rel = root_pos - rd.root_pos_w
-        pos_b = quat_rotate_inverse(rd.root_quat_w, rel)
-        rel_v = bd.root_lin_vel_w - rd.root_lin_vel_w
-        vel_b = quat_rotate_inverse(rd.root_quat_w, rel_v)
-        return {self._pos_key: pos_b, self._vel_key: vel_b}
 
     # ---- aabb metadata (declared; relative to the prop origin) --------- #
     @property

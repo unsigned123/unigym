@@ -73,9 +73,9 @@ def _build(profile: RobotProfile, spec: ArticulationSpec, asset_format: str) -> 
     }
 
 
-def test_data_schema_version_is_v5():
-    """The run data schema is the explicit v5 cutover version."""
-    assert DATA_SCHEMA_VERSION == 5
+def test_data_schema_version_is_v6():
+    """The run data schema is the explicit v6 cutover version."""
+    assert DATA_SCHEMA_VERSION == 6
 
 
 def test_spec_overrides_win_over_profile_body_facts():

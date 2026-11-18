@@ -76,6 +76,7 @@ def _clock_cfg(mjcf: Path, control_dt: float | None) -> dict:
             }
         ],
         "policies": [policy],
+        "observations": {"robot": ["tiny"]},
     }
 
 
@@ -89,6 +90,7 @@ def test_run_owned_articulation_supplies_actuation_on_flat_world(tiny_mjcf: Path
             "actuation": ACTUATION,
         },
         adapter="manual",
+        observations={"robot": ["tiny"]},
         inspect=True,
     )
     try:
@@ -124,5 +126,17 @@ def test_policy_control_dt_falls_back_to_the_adapter_period(tiny_mjcf: Path) -> 
 
         assert instance.writer.meta["policy_dt"] == 0.02
         assert instance.env.controls[("tiny", "tiny")].control_dt == 0.02
+    finally:
+        run.close()
+
+
+def test_run_meta_carries_the_observation_schema(tiny_mjcf: Path) -> None:
+    """``meta['observations']`` is the schema snapshot; the catalog is gone."""
+    run = Run(_clock_cfg(tiny_mjcf, None), inspect=True)
+    try:
+        meta = run.build(inspect=True).writer.meta
+        assert meta["observations"]["version"] == 1
+        assert "articulation/tiny/joint_pos" in meta["observations"]["keys"]
+        assert "obs_catalog" not in meta
     finally:
         run.close()

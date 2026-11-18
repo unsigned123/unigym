@@ -27,7 +27,7 @@ ARTICULATION_EXTRA_KEYS = (
     "base_lin_vel_b",
     "base_ang_vel_b",
 )
-GLOBAL_EXTRA_KEYS = ("time_in_episode", "episode_id", "reset_env_ids", "should_reset")
+GLOBAL_EXTRA_KEYS = ("time_in_episode", "episode_id")
 EXPECTED_EXTRA_KEYS = {
     *(f"articulation/{ARTICULATION}/{name}" for name in ARTICULATION_EXTRA_KEYS),
     *GLOBAL_EXTRA_KEYS,
@@ -62,44 +62,45 @@ def _zero_action(env):
 
 
 def test_zero_action_advances_exactly_one_policy_step(cartpole_env):
-    """A zero named action advances one step and returns the (obs, extra) pair."""
-    obs, extra = cartpole_env.step(_zero_action(cartpole_env))
+    """A zero named action advances one step and returns the typed EnvStep."""
+    step = cartpole_env.step(_zero_action(cartpole_env))
 
-    assert isinstance(obs, dict)
-    assert isinstance(extra, dict)
+    assert step.obs.robot(ARTICULATION).joint_pos.shape == (1, len(CART_JOINTS))
+    assert isinstance(step.record, dict)
     assert cartpole_env.step_dt == pytest.approx(4 * 0.005)
-    assert extra["time_in_episode"].tolist() == pytest.approx([cartpole_env.step_dt])
+    assert step.record["time_in_episode"].tolist() == pytest.approx([cartpole_env.step_dt])
 
 
 def test_extra_key_set_is_the_cartpole_contract(cartpole_env):
-    """The step extra carries exactly the Cartpole articulation and bookkeeping keys."""
-    _, extra = cartpole_env.step(_zero_action(cartpole_env))
+    """The step record carries exactly the Cartpole articulation and bookkeeping keys."""
+    step = cartpole_env.step(_zero_action(cartpole_env))
 
-    assert set(extra) == EXPECTED_EXTRA_KEYS
+    assert set(step.record) == EXPECTED_EXTRA_KEYS
 
 
 def test_extra_tensors_carry_their_contracted_shapes_and_dtypes(cartpole_env):
-    """Every recorded extra tensor has the contracted batch shape and dtype."""
-    _, extra = cartpole_env.step(_zero_action(cartpole_env))
+    """Every recorded tensor has the contracted batch shape and dtype."""
+    step = cartpole_env.step(_zero_action(cartpole_env))
+    record = step.record
 
-    actual = {key: (tuple(extra[key].shape), extra[key].dtype) for key in ONE_ENV_TENSOR_SPECS}
+    actual = {key: (tuple(record[key].shape), record[key].dtype) for key in ONE_ENV_TENSOR_SPECS}
     assert actual == ONE_ENV_TENSOR_SPECS
 
 
 def test_first_step_requests_no_reset(cartpole_env):
     """A long episode's first step reports empty reset ids and no reset flag."""
-    _, extra = cartpole_env.step(_zero_action(cartpole_env))
+    step = cartpole_env.step(_zero_action(cartpole_env))
 
-    assert extra["reset_env_ids"].dtype == torch.int64
-    assert extra["reset_env_ids"].tolist() == []
-    assert extra["should_reset"] is False
+    assert step.reset_env_ids.dtype == torch.int64
+    assert step.reset_env_ids.tolist() == []
+    assert step.should_reset is False
 
 
 def test_two_env_step_batches_every_extra_over_both_rows(two_env):
-    """A two-env step batches every extra over both env rows."""
-    _, extra = two_env.step(_zero_action(two_env))
+    """A two-env step batches every record tensor over both env rows."""
+    step = two_env.step(_zero_action(two_env))
 
-    shapes = {key: tuple(extra[key].shape) for key in TWO_ENV_TENSOR_SHAPES}
+    shapes = {key: tuple(step.record[key].shape) for key in TWO_ENV_TENSOR_SHAPES}
     assert shapes == TWO_ENV_TENSOR_SHAPES
 
 

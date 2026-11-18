@@ -32,7 +32,7 @@ Benchmark packs (docs/contracts/benchmark_contract.md §10):
 Contact groups (docs/contracts/contacts_contract.md):
     yaml `contacts:` -> contact/<name> record keys (both backends; probe_contacts)
 Object state (slimmed): every prop records
-    object/<name>/{pos,quat} extras (props/object_state).  The auto
+    object/<name>/{pos,quat} record keys via the typed registry.  The auto
     held_<name>[__<group>] generation was RETIRED -- hand
     contact criteria are DECLARED contact groups now (see below).
 Declarative contacts (docs/contracts/contacts_contract.md):
@@ -68,8 +68,8 @@ Runtime bridge (docs/contracts/runtime_contract.md -- run with --serve):
                 (jpg frame / npz dump; ux-5, agent-facing)
     clean    -> remove zombie `unigym_*` shm segments + stale registries
  Debug console (docs/contracts/console_contract.md -- live on --serve runs):
-     inspect  -> eval expr in {np torch obs_cache extra bundle adapter env}
-                 / fixed obs|extra key query / run summary
+     inspect  -> eval expr in {np torch obs record bundle adapter env}
+                 / fixed obs|record key query / run summary
      step     -> advance n policy steps while paused (auto-pauses; the run
                  records every stepped step exactly like a live rollout)
  Agent session (ux-12, S3):
@@ -137,7 +137,7 @@ _COMMANDS: dict[str, tuple[str, str, str]] = {
     ),
     "pause": (_SELF, "_register_status", "freeze the rollout at the step boundary"),
     "resume": (_SELF, "_register_status", "continue a paused rollout"),
-    "inspect": (_SELF, "_register_status", "debug console: eval expr / obs|extra query / summary"),
+    "inspect": (_SELF, "_register_status", "debug console: eval expr / obs|record query / summary"),
     "step": (
         _SELF,
         "_register_status",
@@ -466,7 +466,7 @@ def _register_status(sub) -> None:
     cp.add_argument("--env", type=int, default=None, help="env_id (jpg mode only)")
     cp.add_argument(
         "--npz",
-        choices=["obs", "extra", "all"],
+        choices=["obs", "record", "all"],
         default=None,
         help="capture a console save_npz dump instead of a " "frame (source filter)",
     )
@@ -494,7 +494,7 @@ def _register_status(sub) -> None:
     rs.set_defaults(fn=lambda a, pt: cli.cmd_resume(a, pt))
 
     # ---- debug console (docs/contracts/console_contract.md) ------------------
-    ins = sub.add_parser("inspect", help="debug console: eval expr / obs|extra query / " "summary")
+    ins = sub.add_parser("inspect", help="debug console: eval expr / obs|record query / " "summary")
     ins.add_argument("run", help="run id (see `unigym runs`; 'latest' = newest)")
     ins.add_argument(
         "expr",
@@ -502,16 +502,16 @@ def _register_status(sub) -> None:
         default=None,
         help="python expression or statement (pass-through "
         "eval: full builtins/imports/assignments; "
-        "injected: np torch obs_cache extra bundle "
+        "injected: np torch obs record bundle "
         "adapter env)",
     )
     ins.add_argument(
         "--target",
-        choices=["summary", "obs", "extra"],
+        choices=["summary", "obs", "record"],
         default=None,
         help="fixed query (default: summary)",
     )
-    ins.add_argument("--key", default=None, help="obs/extra key (with --target)")
+    ins.add_argument("--key", default=None, help="obs/record key (with --target)")
     ins.add_argument("--timeout", type=float, default=10.0)
     ins.add_argument(
         "--json", action="store_true", help="single JSON document on stdout (errors too)"
@@ -713,7 +713,7 @@ def _register_status(sub) -> None:
         default=None,
         dest="param",
         metavar="KEY=VALUE",
-        help="template parameter, e.g. --param key=extra/"
+        help="template parameter, e.g. --param key=record/"
         "base_pos_w --param op=abs_gt --param value=0.2 "
         "(repeatable; JSON values)",
     )
@@ -723,7 +723,7 @@ def _register_status(sub) -> None:
         help="python predicate expression (console eval "
         "pass-through semantics; bound: t step sim_time "
         "episode env_id np key() action() contact() "
-        "pose() dist() obs_cache extra bundle adapter env)",
+        "pose() dist() obs record bundle adapter env)",
     )
     wt.add_argument(
         "--callable",

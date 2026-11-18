@@ -179,6 +179,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None):
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
+    from unigym.env.obs import ObservationConfig
     from unigym.backends.mjwarp.env import MjwarpEnv
     from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
@@ -281,6 +282,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None):
         controls=controls,
         profiles=profiles,
         actuation_plans=plans,
+        observations=ObservationConfig(robot=tuple(profiles)),
     )
     return env
 
@@ -299,10 +301,10 @@ def test_auto_prefix_multi_articulation_plans_translate_names_gains_and_parts(tm
             for name, sign in (("left", 1.0), ("right", -1.0))
         )
 
-        _, extra = env.step(actions)
+        step = env.step(actions)
 
-        assert extra["articulation/left/joint_pos"][0, 0] > 0.0
-        assert extra["articulation/right/joint_pos"][0, 0] < 0.0
+        assert step.record["articulation/left/joint_pos"][0, 0] > 0.0
+        assert step.record["articulation/right/joint_pos"][0, 0] < 0.0
         assert env.controls[("left", "left")].joint_names == ("elbow", "shoulder")
         assert env.controls[("right", "right")].joint_names == ("elbow", "shoulder")
     finally:
@@ -328,10 +330,11 @@ def test_two_articulations_may_share_the_group_name_legs(tmp_path, tiny_mjcf):
                 kind="position",
             ),
         )
-        _, extra = env.step(actions)
+        step = env.step(actions)
 
-        assert (
-            extra["articulation/left/joint_pos"][0, 0] > extra["articulation/right/joint_pos"][0, 0]
-        )
+        left = step.record["articulation/left/joint_pos"][0, 0]
+        right = step.record["articulation/right/joint_pos"][0, 0]
+        assert left > right
+        assert step.obs.robot("left").joint_pos[0, 0] > step.obs.robot("right").joint_pos[0, 0]
     finally:
         env.close()

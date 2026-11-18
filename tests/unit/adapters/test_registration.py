@@ -18,9 +18,6 @@ class _NamedAdapter(Adapter):
     def __init__(self, num_envs=1, device="cpu", **kwargs):
         pass
 
-    def get_obs_requests(self):
-        return []
-
     @property
     def obs_dim(self):
         return 0
@@ -29,7 +26,7 @@ class _NamedAdapter(Adapter):
     def control_dt(self):
         return 0.02
 
-    def compute_obs(self, obs_cache, cmd, env):
+    def compute_obs(self, obs, env):
         return None
 
     def act(self, obs):

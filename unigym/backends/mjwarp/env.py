@@ -57,7 +57,6 @@ from unigym.env.backends.base import (
     normalize_state_quat,
     validate_state_tensor,
 )
-from unigym.cameras.manager import validate_image_frame
 from unigym.core import quat
 from unigym._optional import MissingExtraError
 
@@ -109,21 +108,18 @@ else:
             """Stand-in base when the warp stack is absent (lane gate raises)."""
 
 
+from unigym.env.backends.base import EnvStep
 from unigym.env.episode import parse_episode_length, sample_durations
-from unigym.env.obs_catalog import (
-    build_obs_catalog,
-    canonicalize_obs_requests,
-    split_articulation_key,
-)
+from unigym.env.obs import ObservationConfig, ObservationRegistry
+from unigym.backends.obs_schema import build_schema
 from unigym.backends.mjwarp.model import (
     MjwarpModelProvider,
     body_id,
     site_id,
 )
 from unigym.backends.shared.mjfamily.articulation_obs import (
-    articulation_extra,
     read_articulation_state,
-    refresh_articulation_obs,
+    refresh_obs,
 )
 from unigym.backends.shared.mjfamily.articulation_runtime import (
     build_actuator_seam,
@@ -134,7 +130,6 @@ from unigym.backends.shared.mjfamily.articulation_runtime import (
 )
 from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, wire_reset_face
 from unigym.backends.shared.mjfamily.props.multienv import reject_model_global_unsupported
-from unigym.backends import collect_core
 from unigym.backends.mjwarp import sizing
 from unigym.backends.mjwarp.support import (  # noqa: F401 (re-exported)
     _mj_enum,
@@ -221,7 +216,7 @@ class MjwarpEnv(WarpBatchMixin):
     yaml ``env.params`` section via collect.py's ``backend_params``):
         robot_profile: RobotProfile (pure neutral constants; the
             simulator model is the MJ XML).
-        adapter: Adapter (declares obs requests / orders).
+        adapter: Adapter (action orders; observations come from the run config).
         num_envs: native N>1 batched worlds (one warp ``nworld=N`` Data; N
             CPU mirrors).  Cameras are per-world; director ops /
             anchored articulation props still fail fast at N>1.
@@ -392,6 +387,7 @@ class MjwarpEnv(WarpBatchMixin):
         backend_options=None,
         asset_plan=None,
         actuation_plans=None,
+        observations: ObservationConfig | None = None,
     ):
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -576,36 +572,13 @@ class MjwarpEnv(WarpBatchMixin):
             self._boost_fz = float(boost.get("force_z", 0.0))
         else:
             self._boost_body_id, self._boost_fz = -1, 0.0
-        # EEF site record family (env.params.record_sites):
-        # declarative per-step ``site/<name>/pos`` record keys (world
-        # frame) -- the pack criteria's far predicates consume the
-        # declared grip sites.  Additive only: absent/empty declaration -> no ids,
-        # no keys, zero behavior diff.  Unknown names fail fast here (the
-        # site names are the scene XML's, per the pack contract).
-        self._record_sites: list = []
-        _sites = params.get("record_sites")
-        if _sites is not None:
-            if not isinstance(_sites, (list, tuple)) or not all(
-                isinstance(s, str) and s for s in _sites
-            ):
-                raise ValueError(
-                    f"mujoco backend: env.params.record_sites must be a "
-                    f"list of site names, got {_sites!r}"
-                )
-            if len(set(_sites)) != len(_sites):
-                raise ValueError(
-                    f"mujoco backend: record_sites carries duplicate " f"names: {sorted(_sites)}"
-                )
-            for sname in _sites:
-                sid = site_id(self._model_ir, sname)
-                if sid < 0:
-                    raise ValueError(
-                        f"mujoco backend: record_sites site {sname!r} not "
-                        f"found in the MJ model | hint: site names come "
-                        f"from the scene XML ('<site name=...' entries); "
-                        f"check the scene's declared grip sites"
-                    )
-                self._record_sites.append((sname, sid))
+        # EEF site observation family (observations.site)
+        self.observations = (
+            observations
+            if observations is not None
+            else ObservationConfig.from_mapping(params.get("observations"))
+        )
+        self._obs_sites = self._resolve_obs_sites(self.observations.site)
         # ---- warp model + ONE batched device Data (nworld=N) ----
         # put_model snapshots the compiled model; every opt/timestep write
         # above has already landed, and the CPU MjModel stays the read face.
@@ -692,7 +665,6 @@ class MjwarpEnv(WarpBatchMixin):
         self._action_resolver = MujocoJointResolver(
             m, [], [], prop_actuators=self._prop_actuators, model_ir=self._model_ir
         )
-        self._joint_gathers: dict = {}
         first = next(
             (c for c in self._control_order if not c.prop and c.role == "body"),
             self._control_order[0] if self._control_order else None,
@@ -735,44 +707,21 @@ class MjwarpEnv(WarpBatchMixin):
         if self.contact_manager is not None:
             self.contact_manager.bind_env(self)
 
-        # ---- obs cache (exactly the adapter's requests) ----
-        self._obs_requests = adapter.get_obs_requests()
-        if self.contact_manager is not None:
-            self.contact_manager.register_obs_requests({r.key for r in self._obs_requests})
-        from unigym.env.obs_catalog import ObsCatalog
-
-        entries: dict = {}
-        requestable: set = set()
-        self.obs_catalogs = {}
-        for art in self._articulation_order:
-            cat = build_obs_catalog(
-                art.profile,
+        # ---- typed observation registry (config-declared sources) ----
+        self.obs = ObservationRegistry(
+            self.observations,
+            build_schema(
+                self.observations,
+                env=self,
                 camera_manager=self.camera_manager,
-                prop_manager=self.prop_manager,
                 contact_manager=self.contact_manager,
-                articulation_joint_names=list(art.joint_names),
-                record_sites=(
-                    tuple(name for name, _ in self._record_sites)
-                    if art is self._articulation_order[0]
-                    else None
-                ),
-                articulation=art.name,
-            )
-            art.catalog = cat
-            self.obs_catalogs[art.name] = cat
-            entries.update(cat.entries)
-            requestable |= cat.requestable
-        self.obs_catalog = ObsCatalog(entries, requestable)
-        self._obs_requests = canonicalize_obs_requests(self._obs_requests)
-        for req in self._obs_requests:
-            self.obs_catalog.validate_request(req)
-            if split_articulation_key(req.key)[1] in (
-                "joint_pos_rel",
-                "joint_vel",
-                "applied_torque",
-            ):
-                self._joint_gather(req.joint_names, req)
-        self.obs_cache: dict = {}
+                prop_manager=self.prop_manager,
+                sites=tuple(name for name, _ in self._obs_sites),
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
+        )
+        self._t = 0
 
         # ---- episode bookkeeping (per-env) ----
         if episode_length_s is None:
@@ -1083,7 +1032,7 @@ class MjwarpEnv(WarpBatchMixin):
         Pushes each touched mirror, runs ONE batched ``mjw.forward`` (it
         recomputes derived quantities; it never changes qpos/qvel/time),
         re-syncs every mirror from the device, re-poses camera rigs like the
-        reset tail, then refreshes ``obs_cache``.  No CPU ``mj_step`` and no
+        reset tail, then refreshes the typed observation registry.  No CPU ``mj_step`` and no
         ``_settle_substeps``.  Callers must settle after writes before
         reading observations or contact/camera-dependent state.
         """
@@ -1096,147 +1045,27 @@ class MjwarpEnv(WarpBatchMixin):
         self._sync_all_mirrors()
         if self.camera_manager is not None:
             self.camera_manager.on_reset(ids)
-        self._refresh_obs_cache()
+        self._refresh_obs()
         return ids
 
     # ------------------------------------------------------------------ #
-    # obs cache
+    # typed observation refresh + record
     # ------------------------------------------------------------------ #
-    def _articulation_for_key(self, key):
-        name, _ = split_articulation_key(key)
-        if name is None:
-            if len(self._articulation_order) != 1:
-                raise ValueError(
-                    f"mjwarp backend: obs key {key!r} does not name an "
-                    f"articulation; this run has "
-                    f"{sorted(self.articulations)}"
-                )
-            return self._articulation_order[0]
-        try:
-            return self.articulations[name]
-        except KeyError:
-            raise ValueError(
-                f"mjwarp backend: obs key {key!r} names unknown "
-                f"articulation {name!r}; declared: "
-                f"{sorted(self.articulations)}"
-            ) from None
+    def _refresh_obs(self, raw_action=None, cmd=None) -> None:
+        """Refresh env-owned observation sources exactly once per step."""
+        self.obs.t = int(self._t)
+        refresh_obs(self)
+        if self.observations.command:
+            self.obs.set_command(cmd)
+        if self.observations.prev_action:
+            self.obs.set_prev_action(raw_action)
 
-    def _joint_gather(self, names, req=None) -> tuple:
-        """Cached name->asset-index gather for one joint obs request."""
-        art = (
-            self._articulation_for_key(req.key) if req is not None else self._articulation_order[0]
-        )
-        key = (art.name, tuple(names))
-        cached = self._joint_gathers.get(key)
-        if cached is None:
-            index = {n: i for i, n in enumerate(art.joint_names)}
-            missing = sorted(set(names) - set(index))
-            if missing:
-                raise ValueError(
-                    f"mjwarp backend: obs joint names {missing} are not "
-                    f"asset joints of articulation {art.name!r}"
-                )
-            np_idx = np.asarray([index[n] for n in names], dtype=np.int64)
-            cached = (np_idx, torch.tensor(np_idx, dtype=torch.int64))
-            self._joint_gathers[key] = cached
-        return cached
-
-    def _joint_obs(self, req) -> torch.Tensor:
-        """Serve a joint-vector request by name gather over the MJ hinges."""
-        art = self._articulation_for_key(req.key)
-        base = split_articulation_key(req.key)[1]
-        np_idx, t_idx = self._joint_gather(req.joint_names, req)
-        q0 = art.q0.to(dtype=torch.float32)
-        rows = []
-        for d in self._datas:
-            if base == "joint_pos_rel":
-                q = torch.tensor(d.qpos[art.jadr_art][np_idx], dtype=torch.float32)
-                rows.append(q - q0[t_idx])
-                continue
-            if base == "applied_torque":
-                rows.append(torch.tensor(d.qfrc_actuator[art.jdr_art][np_idx], dtype=torch.float32))
-                continue
-            rows.append(torch.tensor(d.qvel[art.jdr_art][np_idx], dtype=torch.float32))
-        return torch.stack(rows, dim=0)
-
-    def _refresh_obs_cache(self, raw_action=None, cmd=None) -> None:
-        if len(self._articulation_order) > 1:
-            refresh_articulation_obs(self)
-        # Image keys come from the CameraManager — render + read at the
-        # fixed point of the tick-read contract (docs/contracts/camera_contract.md §6):
-        # the chase pose written at the PREVIOUS step tail is what this
-        # render captures; sync_pose at THIS step tail writes the next one.
-        if self.camera_manager is not None:
-            for k, v in self.camera_manager.tick_and_read().items():
-                self.obs_cache[k] = v
-        # feat/contact-manager: adapter-requested contact/<name> keys are
-        # injected every step; NOT requested -> never enters obs_cache,
-        # recording unaffected
-        if self.contact_manager is not None and self.contact_manager.obs_keys():
-            for k, v in self.contact_manager.read().items():
-                if k in self.contact_manager.obs_keys():
-                    self.obs_cache[k] = v
-        # Ops detail face: adapter-requested contact_ops/<name> keys
-        # carry the per-contact records (force/normal/v_t) for the
-        # decision package + slip criterion; backend without the detail
-        # face -> keys stay absent (the adapter degrades honestly)
-        if self.contact_manager is not None:
-            for req in self._obs_requests:
-                if req.key.startswith("contact_ops/"):
-                    name = req.key.split("/", 1)[1]
-                    if name in {s.name for s in self.contact_manager.specs}:
-                        self.obs_cache[req.key] = self.contact_manager.read_detail(name)
-        # feat/object-state: adapter-requested prop keys read live values
-        # (no props -> the fetch loop zero-fills as before)
-        if self.prop_backend is not None:
-            requested = {r.key for r in self._obs_requests}
-            for k, v in self.prop_backend.get_state(self).items():
-                if k in requested:
-                    self.obs_cache[k] = v
-        fetch = collect_core.fetch_table(self, cmd, raw_action)
-        for req in self._obs_requests:
-            self._serve_obs_request(req, fetch)
-
-    def _serve_obs_request(self, req, fetch) -> None:
-        """Validate/serve ONE adapter observation request."""
-        # camera-served keys (ImageObsRequest or depth alias): validate
-        # by FULL SHAPE + dtype (the manager contract), not last-dim
-        if self.camera_manager is not None and req.key in self.camera_manager.obs_keys():
-            val = self.obs_cache.get(req.key)
-            if val is not None:
-                validate_image_frame(self.camera_manager.frame_request(req.key), val, self.num_envs)
-            return
-        # contact-served keys: validate last-dim against the request
-        if self.contact_manager is not None and req.key in self.contact_manager.obs_keys():
-            val = self.obs_cache.get(req.key)
-            if val is not None and val.shape[-1] != req.dim:
-                raise ValueError(f"obs '{req.key}' dim {val.shape[-1]} != requested " f"{req.dim}")
-            return
-        # Ops detail keys: dict-record lists served above -- no
-        # tensor validation (the adapter consumes the records as-is)
-        if req.key.startswith("contact_ops/"):
-            return
-        base = split_articulation_key(req.key)[1]
-        if base in ("joint_pos_rel", "joint_vel", "applied_torque"):
-            val = self._joint_obs(req)
-        elif base not in fetch:
-            # prop-provided key (injected above by the prop backend when
-            # present) or zero-fill when no props configured -- isaaclab2/env.py
-            # parity; the fetch table itself never carried prop keys
-            v = self.obs_cache.get(req.key)
-            if v is None:
-                v = torch.zeros(self.num_envs, req.dim)
-                self.obs_cache[req.key] = v
-            elif v.shape[-1] != req.dim:
-                raise ValueError(f"obs '{req.key}' dim {v.shape[-1]} != requested " f"{req.dim}")
-            return
-        else:
-            val = fetch[base]()
-        if val is None:
-            return  # passthrough not provided this call; keep stale
-        if val.shape[-1] != req.dim:
-            raise ValueError(f"obs '{req.key}' dim {val.shape[-1]} != requested " f"{req.dim}")
-        self.obs_cache[req.key] = val
+    def record(self) -> dict[str, object]:
+        """The current record mapping (canonical keys + bookkeeping)."""
+        record: dict[str, object] = dict(self.obs.record())
+        record["time_in_episode"] = self._time_in_episode.clone()
+        record["episode_id"] = self._episode_id.clone()
+        return record
 
     # ------------------------------------------------------------------ #
     # state readout (post-step, shared by obs cache + extra)
@@ -1249,14 +1078,6 @@ class MjwarpEnv(WarpBatchMixin):
         the shared articulation record helper.
         """
         return read_articulation_state(self, self._articulation_order[0], e)
-
-    def _build_extra(self, state: dict, e: int = 0) -> dict:
-        """The recorded keys (per-articulation state namespaced)."""
-        del state, e
-        extra = collect_core.build_extra(self, None, include_state=False)
-        for art in self._articulation_order:
-            extra.update(articulation_extra(self, art))
-        return extra
 
     # ------------------------------------------------------------------ #
     # stepping (software PD @ sim rate, targets held per policy step)
@@ -1361,6 +1182,21 @@ class MjwarpEnv(WarpBatchMixin):
             height = max(height, float(m.geom_size[g][2]) * 2)
         return half_xy, height
 
+    def _resolve_obs_sites(self, declared) -> list:
+        """Resolve ``observations.site`` names against the MJ model."""
+        sites: list = []
+        for sname in tuple(declared or ()):
+            sid = site_id(self._model_ir, sname)
+            if sid < 0:
+                raise ValueError(
+                    f"mjwarp backend: observations.site {sname!r} not "
+                    f"found in the MJ model | hint: site names come "
+                    f"from the scene XML ('<site name=...' entries); "
+                    f"check the scene's declared grip sites"
+                )
+            sites.append((sname, sid))
+        return sites
+
     def _apply_reset_protocol(self, e: int = 0) -> None:
         """The declared reset chain: placement apply -> robot stages.
 
@@ -1423,7 +1259,7 @@ class MjwarpEnv(WarpBatchMixin):
         actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
-    ) -> tuple[dict, dict]:
+    ) -> EnvStep:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
         ``actions`` is a ``Sequence[NamedAction]`` (the adapter's
@@ -1462,22 +1298,28 @@ class MjwarpEnv(WarpBatchMixin):
             else:
                 self._warp_step_all()
         self._time_in_episode += self.step_dt
-        state = self._read_state()
-        self._refresh_obs_cache(raw_action, cmd)
-        extra = self._build_extra(state)
+        self._refresh_obs(raw_action, cmd)
         if self._episode_dur is None:
             # external termination mode: the task owns every reset decision.
-            extra["reset_env_ids"] = torch.empty(0, dtype=torch.int64, device=self.device)
-            extra["should_reset"] = False
+            reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
+            should_reset = False
         else:
             due = self._time_in_episode >= self._episode_dur
-            extra["reset_env_ids"] = torch.nonzero(due).squeeze(-1).to(torch.int64)
-            extra["should_reset"] = bool(due.any())
+            reset_ids = torch.nonzero(due).squeeze(-1).to(torch.int64)
+            should_reset = bool(due.any())
         if self.camera_manager is not None:
             # step-tail posing (tick-read contract): the NEXT render (inside
             # the next obs refresh) captures this pose
             self.camera_manager.sync_pose()
-        return dict(self.obs_cache), extra
+        step = EnvStep(
+            t=int(self._t),
+            obs=self.obs.snapshot(),
+            record=self.record(),
+            reset_env_ids=reset_ids,
+            should_reset=should_reset,
+        )
+        self._t += 1
+        return step
 
     # ------------------------------------------------------------------ #
     # reset (per-env subset)
@@ -1556,7 +1398,7 @@ class MjwarpEnv(WarpBatchMixin):
             # re-pose the rigs to the spawn state BEFORE the refresh, so the
             # post-reset render/read sees the spawn view (pose first, read after)
             self.camera_manager.on_reset(env_ids)
-        self._refresh_obs_cache()  # cache reflects the spawn state
+        self._refresh_obs()  # registry reflects the spawn state
         return env_ids
 
     def reset_all(self) -> torch.Tensor:
@@ -1629,6 +1471,7 @@ class MjwarpEnv(WarpBatchMixin):
                 # back with the rewind (episode_id is process truth and
                 # deliberately stays out -- counter dichotomy)
                 "extra": {
+                    "obs_t": int(self._t),
                     "time_in_episode": self._time_in_episode.clone(),
                     "episode_dur": (
                         None if self._episode_dur is None else self._episode_dur.clone()
@@ -1651,6 +1494,7 @@ class MjwarpEnv(WarpBatchMixin):
                 "mj_time": float(self._datas[0].time),
             },
             "extra": {
+                "obs_t": int(self._t),
                 "time_in_episode": self._time_in_episode.clone(),
                 "episode_dur": None if self._episode_dur is None else self._episode_dur.clone(),
             },
@@ -1717,6 +1561,8 @@ class MjwarpEnv(WarpBatchMixin):
                 self._copy_warmstart(d, e)
             self._sync_all_mirrors()
         extra = state.get("extra") or {}
+        if "obs_t" in extra:
+            self._t = int(extra["obs_t"])
         if "time_in_episode" in extra:
             self._time_in_episode = extra["time_in_episode"].clone()
         if "episode_dur" in extra:

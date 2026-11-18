@@ -45,10 +45,17 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
     """The builder owns the run-name, env arithmetic and the manual adapter."""
     pack_set, ref = write_sim_pack(tmp_path)
     builder = _builder(pack_set)
-    builder.add_articulation(ref, control=_body_control())
+    handle = builder.add_articulation(ref, control=_body_control())
 
     cfg = builder._to_cfg()
 
+    assert cfg["observations"] == builder.observations
+    assert cfg["observations"] == {
+        "robot": [handle.name],
+        "camera": [],
+        "command": False,
+        "prev_action": False,
+    }
     assert cfg["run_name"] == "simulation"
     assert cfg["output_root"] == "data_out"
     assert cfg["seed"] == 0
@@ -65,6 +72,26 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
         "sim_dt": 0.005,
         "params": {},
     }
+
+
+def test_to_cfg_honours_a_caller_observation_override(tmp_path: Path) -> None:
+    """An explicit observations= mapping is written verbatim, not synthesized."""
+    pack_set, ref = write_sim_pack(tmp_path)
+    declared = {"robot": ["body"], "command": True}
+    builder = SimulationBuilder(
+        backend="mujoco",
+        dt=0.02,
+        physics_dt=0.005,
+        pack_set=pack_set,
+        observations=declared,
+    )
+    builder.world = World.base(mjcf="world.xml")
+    builder.add_articulation(ref, control=_body_control())
+
+    cfg = builder._to_cfg()
+
+    assert cfg["observations"] == declared
+    assert builder.observations == declared
 
 
 def test_to_cfg_emits_explicit_articulation_and_action_tables(tmp_path: Path) -> None:

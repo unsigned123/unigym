@@ -35,6 +35,7 @@ def _cfg(**overrides):
             },
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
     cfg.update(overrides)
     return cfg
@@ -202,6 +203,7 @@ def test_episode_clock_resolution_respects_the_termination_mode(
 
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.registry import backend_info
+    from unigym.env.obs import ObservationConfig
     from unigym.run.build import _build_sensing
 
     spec = SimpleNamespace(
@@ -223,6 +225,7 @@ def test_episode_clock_resolution_respects_the_termination_mode(
         ManualAdapter(),
         0.02,
         None,
+        ObservationConfig(robot=()),
     )
 
     assert sensing["episode_length_s"] == expected

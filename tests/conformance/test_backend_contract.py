@@ -10,15 +10,10 @@ from tests._support.fakes.backend import (
     CONTROL_NAME,
     FakeBackend,
 )
-from unigym.env.backends.base import (
-    RECORD_KEYS,
-    assert_backend_contract,
-    check_extra_info,
-    check_obs_cache,
-)
+from unigym.env.backends.base import assert_backend_contract
 from unigym.runtime.actions import NamedAction
 
-_BOOKKEEPING_KEYS = frozenset({"time_in_episode", "episode_id", "reset_env_ids", "should_reset"})
+_BOOKKEEPING_KEYS = frozenset({"time_in_episode", "episode_id"})
 
 
 @pytest.fixture(params=(1, 2), ids=("N1", "N2"))
@@ -57,26 +52,23 @@ def test_fake_backend_satisfies_env_backend_contract(num_envs):
         backend.close()
 
 
-def test_step_publishes_contract_shaped_obs_and_extra(env):
-    """Obs/extra keys, shapes, dtypes and the record namespace are valid."""
+def test_step_publishes_schema_shaped_obs_and_record(env):
+    """Obs/record keys, shapes and dtypes follow the observation schema."""
     control = env.controls[(ARTICULATION_NAME, CONTROL_NAME)]
-    obs, extra = _step(env, [[0.0]] * env.num_envs)
+    step = _step(env, [[0.0]] * env.num_envs)
 
-    check_obs_cache(obs, env.num_envs, device=env.device)
-    check_obs_cache(env.obs_cache, env.num_envs, device=env.device)
-    check_extra_info(extra, env.num_envs, len(control.joint_names), env.device)
-
-    assert set(obs) == {"joint_pos", "prev_action"}
-    assert tuple(obs["joint_pos"].shape) == (env.num_envs, len(control.joint_names))
-    assert tuple(obs["prev_action"].shape) == (env.num_envs, len(control.joint_names))
-
-    namespaced = {key for key in RECORD_KEYS if key not in _BOOKKEEPING_KEYS}
-    expected = {f"articulation/{ARTICULATION_NAME}/{key}" for key in namespaced}
-    expected |= _BOOKKEEPING_KEYS
-    assert set(extra) == expected
-    assert extra["should_reset"] is False
-    assert tuple(extra["reset_env_ids"].shape) == (0,)
-    assert extra["reset_env_ids"].dtype == torch.int64
+    assert step.obs.schema is env.obs.schema
+    for key, value in step.obs.values.items():
+        assert isinstance(value, torch.Tensor)
+        assert value.shape[0] == env.num_envs
+    assert tuple(step.obs.robot(ARTICULATION_NAME).joint_pos.shape) == (
+        env.num_envs,
+        len(control.joint_names),
+    )
+    assert step.should_reset is False
+    assert step.reset_env_ids.numel() == 0
+    assert set(step.record) >= _BOOKKEEPING_KEYS
+    assert f"articulation/{ARTICULATION_NAME}/joint_pos" in step.record
 
 
 def test_step_applies_named_action_and_passes_raw_action_through(env):
@@ -91,23 +83,23 @@ def test_step_applies_named_action_and_passes_raw_action_through(env):
         control.joint_names,
         control.target,
     )
-    obs, extra = env.step((action,), raw_action=raw_action)
+    step = env.step((action,), raw_action=raw_action)
 
-    assert torch.equal(obs["joint_pos"], values)
-    assert torch.equal(obs["prev_action"], raw_action)
-    assert torch.equal(extra[f"articulation/{ARTICULATION_NAME}/joint_pos"], values)
+    assert torch.equal(step.obs.robot(ARTICULATION_NAME).joint_pos, values)
+    assert torch.equal(step.obs.prev_action.value, raw_action)
+    assert torch.equal(step.record[f"articulation/{ARTICULATION_NAME}/joint_pos"], values)
 
 
 def test_step_publishes_command_only_when_supplied(env):
-    """A supplied command lands in obs_cache; absent command keeps the cache key absent."""
+    """A supplied command lands in the registry; no command -> absent slot."""
     command = torch.arange(env.num_envs, dtype=torch.float32).reshape(env.num_envs, 1)
 
-    obs, _ = _step(env, [[0.0]] * env.num_envs)
-    assert "command" not in obs
+    step = _step(env, [[0.0]] * env.num_envs)
+    assert step.obs.command.value is None
 
-    obs, _ = _step(env, [[0.0]] * env.num_envs, cmd=command)
-    assert torch.equal(obs["command"], command)
-    assert torch.equal(env.obs_cache["command"], command)
+    step = _step(env, [[0.0]] * env.num_envs, cmd=command)
+    assert torch.equal(step.obs.command.value, command)
+    assert torch.equal(env.obs.command.value, command)
 
 
 def test_step_is_deterministic_for_same_state_and_actions(env):
@@ -124,20 +116,20 @@ def test_step_is_deterministic_for_same_state_and_actions(env):
 
     other = FakeBackend(num_envs=env.num_envs)
     try:
-        obs_a, extra_a = env.step(actions)
-        obs_b, extra_b = other.step(actions)
+        step_a = env.step(actions)
+        step_b = other.step(actions)
     finally:
         other.close()
 
-    assert set(obs_a) == set(obs_b)
-    for key in obs_a:
-        assert torch.equal(obs_a[key], obs_b[key]), key
-    assert set(extra_a) == set(extra_b)
-    for key in extra_a:
-        if isinstance(extra_a[key], torch.Tensor):
-            assert torch.equal(extra_a[key], extra_b[key]), key
+    assert set(step_a.obs.values) == set(step_b.obs.values)
+    for key in step_a.obs.values:
+        assert torch.equal(step_a.obs.values[key], step_b.obs.values[key]), key
+    assert set(step_a.record) == set(step_b.record)
+    for key in step_a.record:
+        if isinstance(step_a.record[key], torch.Tensor):
+            assert torch.equal(step_a.record[key], step_b.record[key]), key
         else:
-            assert extra_a[key] == extra_b[key], key
+            assert step_a.record[key] == step_b.record[key], key
 
 
 def test_identity_permutation_round_trips(env):

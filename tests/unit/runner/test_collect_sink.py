@@ -46,7 +46,7 @@ def _bundle(targets, t, projection=None):
         "targets": targets,
         "action_group_values": projection,
         "obs_collect": torch.zeros(1, 1),
-        "extra": {
+        "record": {
             "time_in_episode": torch.tensor([1.0]),
             "episode_id": torch.tensor([0], dtype=torch.int64),
         },
@@ -257,7 +257,7 @@ def test_language_state_keys_follow_the_articulation_not_the_group_name():
         env=SimpleNamespace(controls={"go2/legs": runtime}),
     )
     bundle = _bundle((), 0)
-    bundle["extra"].update(_named_state_extra())
+    bundle["record"].update(_named_state_extra())
 
     sink.on_step(0, bundle)
 
@@ -280,7 +280,7 @@ def test_step_metrics_state_keys_follow_the_articulation_not_the_group_name():
     sink.on_step_end(
         0,
         {
-            "extra": _named_state_extra(),
+            "record": _named_state_extra(),
             "alive": torch.tensor([True]),
             "term_metrics": {},
         },

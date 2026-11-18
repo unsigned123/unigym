@@ -11,7 +11,7 @@ here:
   a non-empty ``WatchResult.actions`` overrides for that one fire.
 * :class:`WatchContext` -- the information interface handed to every
   predicate evaluation.  Its KEY FACE is the trace contract key face
-  (docs/contracts/trace_contract.md §2): ``obs/<key>``, ``extra/<key>``,
+  (docs/contracts/trace_contract.md §2): ``obs/<key>``, ``record/<key>``,
   ``action/<name>``, ``action/raw`` -- recorded keys, watcher-reference
   keys and candidate-listing keys are ONE table (§8.4).  Convenience
   accessors (pose/dist/contact/action) reuse exactly that face.
@@ -59,7 +59,7 @@ class Level(str, enum.Enum):
 # trigger action surface (design §2.3 -- all reuse existing pieces)
 PAUSE = "pause"  # StepGate.pause() -- parks the engine THIS tick
 CAPTURE = "capture"  # broadcast-camera jpeg + sidecar (watcher/tick/value)
-DUMP = "dump"  # obs+extra npz (save_npz key face) at <out>/watch/dump
+DUMP = "dump"  # obs+record npz (save_npz key face) at <out>/watch/dump
 MARK = "mark"  # events.jsonl watcher event (the timeline)
 NOTIFY = "notify"  # status surface (armed/fired/last + webui badge)
 DIRECT = "direct"  # P2: director op via the registered handler
@@ -201,7 +201,7 @@ class WatchContext:
 
     Built per tick by the engine; handed to template checks, bound into
     the expr namespace and passed to callable ``check(ctx)``.  All
-    accessors read the single data face (bundle + obs_cache); nothing
+    accessors read the single data face (bundle + observation snapshot); nothing
     here mutates run state.
     """
 
@@ -219,14 +219,18 @@ class WatchContext:
         return self.t
 
     @property
-    def extra(self) -> dict:
-        ex = self.bundle.get("extra")
-        return ex if isinstance(ex, dict) else {}
+    def record(self) -> dict:
+        rec = self.bundle.get("record")
+        if isinstance(rec, dict):
+            return rec
+        getter = getattr(self.env, "record", None)
+        return getter() if callable(getter) else {}
 
     @property
-    def obs_cache(self) -> dict:
-        src = getattr(self.env, "obs_cache", None)
-        return src if isinstance(src, dict) else {}
+    def obs(self) -> dict:
+        snapshot = self.bundle.get("obs")
+        values = getattr(snapshot, "values", None)
+        return dict(values) if values is not None else {}
 
     @property
     def num_envs(self) -> int:
@@ -265,8 +269,8 @@ class WatchContext:
 
     def keys(self) -> list[str]:
         """Available trace-face keys (candidate-discovery listing)."""
-        out = [f"obs/{k}" for k in self.obs_cache]
-        out += [f"extra/{k}" for k in self.extra]
+        out = [f"obs/{k}" for k in self.obs]
+        out += [f"record/{k}" for k in self.record]
         out += [f"action/{key}" for key, _ in self._action_values()]
         if "raw" in self.bundle:
             out.append("action/raw")
@@ -288,11 +292,11 @@ class WatchContext:
     def key(self, name: str):
         """Resolve one trace-face key -> the underlying array value."""
         if name.startswith("obs/"):
-            src = self.obs_cache
+            src = self.obs
             k = name[4:]
-        elif name.startswith("extra/"):
-            src = self.extra
-            k = name[6:]
+        elif name.startswith("record/"):
+            src = self.record
+            k = name[7:]
         elif name == "action/raw":
             return self.bundle.get("raw")
         elif name.startswith("action/"):
@@ -304,7 +308,7 @@ class WatchContext:
         else:
             raise WatchError(
                 f"key {name!r} must use the trace face prefix "
-                f"obs/ | extra/ | action/ (available: {self.keys()})",
+                f"obs/ | record/ | action/ (available: {self.keys()})",
                 self.keys(),
             )
         if k not in src:
@@ -418,10 +422,10 @@ class WatchContext:
     def pose(self, entity: str, env: int = 0):
         """World position (3,) float of 'base'|'pelvis'|'robot'|<prop>."""
         name = {
-            "base": "extra/base_pos_w",
-            "pelvis": "extra/base_pos_w",
-            "robot": "extra/base_pos_w",
-        }.get(entity, f"extra/object/{entity}/pos")
+            "base": "record/base_pos_w",
+            "pelvis": "record/base_pos_w",
+            "robot": "record/base_pos_w",
+        }.get(entity, f"record/object/{entity}/pos")
         import numpy as np
 
         return np.asarray(self._arr(name)[int(env)], dtype=float)
@@ -435,8 +439,8 @@ class WatchContext:
         return float(np.linalg.norm(pa - pb))
 
     def contact(self, group: str, env: int | None = None) -> bool:
-        """Contact-group truth (extra/contact/<group>; any env or one)."""
-        a = self._arr(f"extra/contact/{group}")
+        """Contact-group truth (record/contact/<group>; any env or one)."""
+        a = self._arr(f"record/contact/{group}")
         if env is None:
             return bool(a.any())
         return bool(a[int(env)])
@@ -451,7 +455,7 @@ class WatchContext:
     def eval_namespace(self) -> dict:
         """The documented expr binding (watchers_contract §4).
 
-        Console-eval names (np torch obs_cache extra bundle adapter env)
+        Console-eval names (np torch obs record bundle adapter env)
         plus watcher conveniences (t/step/sim_time/episode/env_id and
         key/action/contact/pose/dist).  Full builtins -- same
         pass-through ruling as the inspector.
@@ -465,8 +469,8 @@ class WatchContext:
         ns = {
             "np": np,
             "torch": torch,
-            "obs_cache": self.obs_cache,
-            "extra": self.extra,
+            "obs": self.obs,
+            "record": self.record,
             "bundle": self.bundle,
             "adapter": self.adapter,
             "env": self.env,

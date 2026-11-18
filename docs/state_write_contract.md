@@ -83,7 +83,7 @@ Ordering (all backends):
    `mjw.forward` and a mirror re-sync.  IsaacLab: `scene.write_data_to_sim()`
    then `sim.forward()`.
 2. Re-pose camera rigs through the existing reset hook (`on_reset(env_ids)`).
-3. Refresh `obs_cache`.
+3. Refresh the typed observation registry (`env.obs`).
 
 `settle` does not change the episode clock, episode id, or action targets.
 Without a settle, the raw engine state is written but derived quantities and

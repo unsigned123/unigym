@@ -30,6 +30,7 @@ def _cfg(scene_preset: object) -> dict:
             },
         ],
         "policies": [{"adapter": "manual", "groups": [["arm", "arm"]]}],
+        "observations": {"robot": ["arm"]},
     }
 
 

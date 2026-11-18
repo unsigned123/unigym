@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from typing import Any, NamedTuple, Protocol, TypedDict, Unpack
+from typing import Any, Protocol
 
 import torch
 
 from .._typing import JsonValue
+from ..env.obs import ObsSnapshot
 from ..runtime.actions import NamedAction
 
 
@@ -28,125 +28,7 @@ class AdapterEnv(Protocol):
 
     num_envs: int
     device: str | torch.device
-    obs_cache: dict[str, torch.Tensor]
-
-
-class _RawObsChanges(TypedDict, total=False):
-    """Keyword payload accepted by :meth:`RawObsRequest._replace`."""
-
-    key: str
-    dim: int
-    source: str
-    joint_names: tuple[str, ...] | None
-    articulation: str | None
-
-
-#: robot-state keys that are scoped to ONE articulation.  Kept in sync with
-#: :data:`unigym.env.obs_catalog.PER_ARTICULATION_KEYS`; the import is local
-#: to keep this module torch-only at import time.
-_ROBOT_STATE_KEYS = frozenset(
-    {
-        "gravity_b",
-        "joint_pos_rel",
-        "joint_vel",
-        "applied_torque",
-        "prev_action",
-        "command",
-        "base_yaw",
-        "base_pos_w",
-        "base_quat_w",
-        "base_ang_vel_b",
-        "base_lin_vel_b",
-    }
-)
-#: joint-vector keys whose request MUST carry an explicit ``joint_names``.
-_JOINT_VECTOR_KEYS = frozenset({"joint_pos_rel", "joint_vel", "applied_torque"})
-
-
-@dataclass(frozen=True)
-class RawObsRequest:
-    """Declare one raw quantity the adapter needs in ``obs_cache``.
-
-    Attributes:
-        key: cache key, e.g. "joint_pos_rel" / "joint_vel" /
-            "base_pos_w" / "command" / "prev_action".  The env backend only
-            fills requested keys.
-        dim: last-dim size of the requested tensor (for validation).
-        source: where it comes from -- "robot" | "contact_sensor" | "computed"
-            | "adapter" | "sampler" | "prop" | "camera".
-        joint_names: the joint name of every element, REQUIRED for the
-            joint-vector keys ("joint_pos_rel" / "joint_vel" /
-            "applied_torque").  The catalog publishes the FULL articulation
-            joint set and any NON-EMPTY duplicate-free SUBSET of those names
-            is legal, in ANY order — the request order IS the served order.
-            ``None`` for every other key.
-        articulation: the articulation name for a bare per-articulation key.
-            REQUIRED for every robot-state key (there is no env-side
-            controller inference).  Global keys (``cam/``,
-            ``contact/``, ``object/``, ``site/``, props) keep ``None``.  A
-            pre-namespaced key (``articulation/<name>/...``) needs none.
-    """
-
-    key: str
-    dim: int
-    source: str
-    joint_names: tuple[str, ...] | None = None
-    articulation: str | None = None
-
-    def __post_init__(self):
-        key = str(self.key)
-        if key in _ROBOT_STATE_KEYS:
-            if not self.articulation:
-                raise ValueError(
-                    f"RawObsRequest({key!r}) is articulation-scoped but "
-                    f"declares no articulation; name it explicitly "
-                    f"(e.g. articulation='g1')"
-                )
-        if key in _JOINT_VECTOR_KEYS:
-            names = tuple(self.joint_names or ())
-            if not names:
-                raise ValueError(
-                    f"RawObsRequest({key!r}) addresses joints but carries "
-                    f"no joint_names; joint-vector requests must be "
-                    f"explicit"
-                )
-            if len(set(names)) != len(names):
-                dupes = sorted({n for n in names if names.count(n) > 1})
-                raise ValueError(f"RawObsRequest({key!r}) has duplicate joint names " f"{dupes}")
-
-    def _replace(self, **changes: Unpack[_RawObsChanges]) -> RawObsRequest:
-        """NamedTuple-compatible update helper (canonicalization)."""
-        return replace(self, **changes)
-
-
-class ImageObsRequest(NamedTuple):
-    """Declare one image-like quantity the adapter needs in ``obs_cache``.
-
-    Division of labor vs :class:`RawObsRequest`: RawObsRequest covers vector
-    quantities validated by LAST-DIM size (``dim`` check); ImageObsRequest
-    covers camera frames validated by FULL SHAPE + dtype (``shape`` check,
-    batch axis excluded).  Image keys are served by the
-    ``unigym.cameras`` CameraManager (built from the yaml ``cameras:``
-    section); keys follow the ``cam/<name>/<rgb|depth>`` key space, plus the
-    ``depth_image`` / ``depth_image_raw`` aliases served by an explicitly
-    declared camera named ``depth`` (there is no implicit shim camera).
-
-    Attributes:
-        key: cache key, e.g. "cam/ego/rgb" or "cam/ego/depth".
-        shape: per-env frame shape WITHOUT the batch axis, e.g. (3, 224, 224)
-            for RGB or (1, 60, 106) for metric depth (channel axis included).
-        dtype: expected torch dtype. Raw-value caching: uint8
-            for RGB, float32 metric depth in meters; normalization stays with
-            the adapter.
-        source: documentation string, typically "camera".
-        camera: camera (rig) name serving this key (e.g. "ego").
-    """
-
-    key: str
-    shape: tuple[int, ...]
-    dtype: torch.dtype
-    source: str
-    camera: str
+    obs: object
 
 
 class Adapter(ABC):
@@ -208,10 +90,6 @@ class Adapter(ABC):
         """Restore a :meth:`snapshot_internal` payload (rewind face)."""
         raise NotImplementedError(f"{type(self).__name__} does not implement restore_internal")
 
-    @abstractmethod
-    def get_obs_requests(self) -> list[RawObsRequest]:
-        """Declare raw quantities; the env backend fills obs_cache accordingly."""
-
     @property
     @abstractmethod
     def obs_dim(self) -> int:
@@ -223,22 +101,19 @@ class Adapter(ABC):
         """Adapter control period in seconds (e.g. 0.02 for 50 Hz)."""
 
     @abstractmethod
-    def compute_obs(
-        self, obs_cache: dict[str, torch.Tensor], cmd: torch.Tensor, env: AdapterEnv
-    ) -> torch.Tensor:
-        """Assemble the single-frame adapter observation from raw quantities.
+    def compute_obs(self, obs: ObsSnapshot, env: AdapterEnv) -> torch.Tensor:
+        """Assemble the single-frame adapter observation from typed views.
 
         Includes scales and concatenation order.  May also update internal
         history buffers (called exactly once per control step, after
-        env.step).  ``obs_cache`` keys are the explicit request keys (robot
-        state under ``articulation/<name>/...``).
+        env.step).  Read robot/contact/object/camera/site/command values
+        from *obs* (``obs.robot("g1").joint_pos``, ``obs.command.value``).
         """
 
     def compute_obs_collect(
         self,
         obs_frame: torch.Tensor,
-        obs_cache: dict[str, torch.Tensor],
-        cmd: torch.Tensor,
+        obs: ObsSnapshot,
         env: AdapterEnv,
     ) -> torch.Tensor:
         """Dataset-facing observation frame (recorded as ``rec["obs"]``).
@@ -246,8 +121,8 @@ class Adapter(ABC):
         Default: return *obs_frame* unchanged — record exactly the frame the
         adapter consumed (bitwise-identical to the reference behavior).
 
-        Override to assemble a different dataset frame (e.g. raw camera
-        frames from *obs_cache* alongside proprioception) while keeping
+        Override to assemble a different dataset frame (e.g. camera frames
+        from *obs* alongside proprioception) while keeping
         *compute_obs* as the compact adapter input.  Overriding adapters
         should declare their recording semantics; ``collect.py`` flags the
         override in ``meta["obs_collect_overridden"]``.
@@ -330,7 +205,7 @@ class Adapter(ABC):
 
         Mounted by collect_cli AHEAD of the standard recording/scoring
         chain (FanOutSink, construction order) so keys an adapter writes
-        into ``bundle["extra"]`` during its own on_step reach the
+        into ``bundle["record"]`` during its own on_step reach the
         standard sinks in the same step.  The engine stays
         adapter-agnostic: it never names adapters, it only asks.
         """

@@ -244,11 +244,11 @@ class _RunMeta(TypedDict, total=False):
     label: str
     adapter_params: dict[str, JsonValue]
     adapter_overrides: list[str]
-    obs_catalog: dict[str, JsonValue] | None
+    observations: dict[str, JsonValue] | None
 
 
-DATA_SCHEMA_VERSION = 5
-"""The run data schema version (v5: neutral body/contact facts)."""
+DATA_SCHEMA_VERSION = 6
+"""The run data schema version (v6: typed observation schema)."""
 
 
 def _config_int(value: JsonValue) -> int:
@@ -312,12 +312,6 @@ def _load_watch_specs(path: str) -> list[dict[str, JsonValue]]:
     if not isinstance(raw, list):
         return []
     return [item for item in raw if is_json_object(item)]
-
-
-def _catalog_keys(env: EnvBackend) -> list[str] | None:
-    """The env's observation catalog keys (None when it publishes none)."""
-    catalog: object = getattr(env, "obs_catalog", None)
-    return [str(key) for key in catalog] if _is_str_iterable(catalog) else None
 
 
 def _lighting_json(values: Mapping[str, float]) -> dict[str, JsonValue]:
@@ -1136,10 +1130,11 @@ def _build_sensing(
     adapter: Adapter,
     policy_dt: float,
     prop_manager: PropManager | None,
+    observations,
 ) -> _SensingBundle:
     """Step 2: camera/contact managers + lighting/director/events/recorder."""
     backend_label = info.name
-    # feat/camera-obs: request-driven camera manager, built BEFORE the env
+    # camera manager built from the declared cameras + observations.camera
     # (sensors must join the scene cfg prior to cloning; also feeds the
     # backend capability gate).  Requires --enable_cameras (kit camera
     # pipeline); depth alias obs keys are served only by an explicitly
@@ -1154,7 +1149,7 @@ def _build_sensing(
     cameras_cfg = _camera_base_mount(cfg.get("cameras"), profiles, asset_formats)
     camera_manager = build_camera_manager(
         cameras_cfg,
-        adapter.get_obs_requests(),
+        observations.camera,
         enable_cameras=spec.enable_cameras,
         refs=[rec_ref] if rec_ref else None,
         backend=backend_label,
@@ -1167,7 +1162,7 @@ def _build_sensing(
             f"(keys: {sorted(str(k) for k in camera_manager.camera_keys())})",
             flush=True,
         )
-    # feat/contact-manager: request-driven contact manager, built BEFORE the
+    # contact manager built from the declared contact groups, BEFORE the
     # env (its ContactSensorCfgs must join the scene cfg prior to cloning on
     # isaaclab; docs/contracts/contacts_contract.md).  No ``contacts:`` section ->
     # None -> zero code paths in the env (baseline protocol).
@@ -1182,7 +1177,6 @@ def _build_sensing(
         cfg.get("contacts"),
         backend=backend_label,
         device=device,
-        adapter_requests={r.key for r in adapter.get_obs_requests()},
         contact_groups=contact_groups,
         prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
         articulated_props=(
@@ -1211,6 +1205,13 @@ def _build_sensing(
             "[collect] usd prop default lights: dome 600 + distant " "(override via env.lighting)",
             flush=True,
         )
+    observations.validate(
+        articulations=[art.name for art in spec.articulations],
+        contacts=[spec.name for spec in (contact_manager.specs if contact_manager else ())],
+        objects=(prop_manager.names if prop_manager is not None else ()),
+        cameras=(camera_manager.names if camera_manager is not None else ()),
+        sites=None,
+    )
     if contact_manager is not None:
         print(
             f"[collect] contacts enabled: "
@@ -1299,6 +1300,7 @@ def _build_env_and_sampler(
     robot_realizations: Mapping[str, object] | None = None,
     asset_plan: AssetPlan | None = None,
     actuation_plans: Mapping[str, tuple[ResolvedActuationGroup, ...]] | None = None,
+    observations=None,
 ) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
     # the run output dir resolves BEFORE the backend build: the recorded
@@ -1352,6 +1354,7 @@ def _build_env_and_sampler(
         camera_manager=camera_manager,
         contact_manager=contact_manager,
         director_cfg=director_cfg,
+        observations=observations,
         device=device,
         asset_plan=asset_plan,
         # backend-specific params (yaml env.params; mujoco: spawn_height /
@@ -1628,7 +1631,7 @@ def _build_bridge_and_wiring(
         config=os.path.abspath(spec.config_path),
         out_dir=out_dir,
         state_dir=_config_str(spec.bridges["serve_state_dir"]),
-        obs_catalog=_catalog_keys(env),
+        observation_keys=env.obs.schema.record_keys(),
         paused=_config_bool(spec.bridges["serve_pause"]),
         log_path=_config_str(spec.bridges["run_log"]),
         # typed queries: effective config snapshot (startup
@@ -1846,6 +1849,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         adapter,
         policy_dt,
         prop_manager,
+        spec.observations,
     )
     built = _build_env_and_sampler(
         spec,
@@ -1871,6 +1875,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         robot_realizations=robot_realizations,
         asset_plan=asset_plan,
         actuation_plans=actuation_plans,
+        observations=spec.observations,
     )
     env = built["env"]
     env.adapter_groups = _build_adapter_groups(spec)
@@ -1995,12 +2000,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     if spec.adapter_params:
         meta["adapter_params"] = spec.adapter_params
         meta["adapter_overrides"] = list(spec.adapter_overrides)
-    # the run's observation catalog snapshot (additive meta key;
-    # envs without a catalog -- fakes -- simply omit the key)
-    catalog: object = getattr(env, "obs_catalog", None)
-    to_meta: object = getattr(catalog, "to_meta", None)
+    # the run's observation schema snapshot (meta["observations"])
+    registry: object = getattr(env, "obs", None)
+    schema: object = getattr(registry, "schema", None)
+    to_meta: object = getattr(schema, "to_meta", None)
     if isinstance(to_meta, Callable):
-        meta["obs_catalog"] = to_meta()
+        meta["observations"] = to_meta()
     from unigym.io.writer import ShardWriter
 
     writer = ShardWriter(

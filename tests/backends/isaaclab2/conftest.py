@@ -82,6 +82,7 @@ def _build_env(
     from unigym.actuators import ActuationGroup
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
+    from unigym.env.obs import ObservationConfig
     from unigym.robots.base import RobotProfile
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
@@ -153,6 +154,7 @@ def _build_env(
         sim_dt=0.005,
         device="cuda:0",
         articulations=(articulation,),
+        observations=ObservationConfig(robot=(ARTICULATION,)),
         controls=controls,
         profiles={ARTICULATION: profile},
         robot_realizations={ARTICULATION: articulation_cfg},

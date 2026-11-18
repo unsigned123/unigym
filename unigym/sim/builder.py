@@ -114,6 +114,12 @@ class SimulationBuilder:
             ``termination_mode: external``; the task then owns truncation.
         artifacts: whether to write run artifacts.
         device: the backend device string.
+        observations: an explicit ``observations:`` config mapping override.
+            ``None`` makes the builder GENERATE an explicit config section
+            from its own articulation/camera declarations (see the
+            :attr:`observations` property).  This is config generation, never
+            a hidden runtime default: the emitted run config carries the
+            section verbatim.
     """
 
     def __init__(
@@ -131,6 +137,7 @@ class SimulationBuilder:
         episode_length_s: float = 20.0,
         artifacts: bool = False,
         device: str = "cpu",
+        observations: Mapping[str, JsonValue] | None = None,
     ) -> None:
         if not isinstance(backend, str) or not backend.strip():
             raise SimulationConfigError(
@@ -202,6 +209,7 @@ class SimulationBuilder:
         )
         self._artifacts = artifacts
         self._device = device
+        self._observations = None if observations is None else copy.deepcopy(dict(observations))
         self._world: World | None = None
         self._articulations: list[ArticulationHandle] = []
         self._cameras: list[CameraHandle] = []
@@ -212,6 +220,26 @@ class SimulationBuilder:
         self._config_mode = False
         self._run: Run | None = None
         self._spec: RunSpec | None = None
+
+    @property
+    def observations(self) -> dict[str, JsonValue]:
+        """The explicit observation selection emitted into the run config.
+
+        Caller-supplied ``observations=`` wins verbatim.  Otherwise the
+        builder generates one from its own declarations: every articulation
+        is a robot source and every declared camera is a camera source.  The
+        generated mapping is plain config data (inspectable before build and
+        written into ``cfg["observations"]``); no runtime layer synthesizes
+        it.
+        """
+        if self._observations is not None:
+            return copy.deepcopy(self._observations)
+        return {
+            "robot": [handle.name for handle in self._articulations],
+            "camera": [handle.name for handle in self._cameras],
+            "command": False,
+            "prev_action": False,
+        }
 
     @classmethod
     def from_config(
@@ -477,6 +505,7 @@ class SimulationBuilder:
         cameras = self._camera_entries()
         if cameras:
             cfg["cameras"] = _json_objects(cameras)
+        cfg["observations"] = self.observations
         return cfg
 
     def _articulation_entries(self) -> list[dict[str, JsonValue]]:
@@ -631,7 +660,6 @@ class SimulationBuilder:
         world = cast("World", self._world)
         from unigym.run.api import Run
         from unigym.runner.external import ExternalRunner
-        from unigym.runner.state import read_extra
 
         run = Run(
             cfg,
@@ -649,7 +677,7 @@ class SimulationBuilder:
                     f"SimulationBuilder.runner('external') returned "
                     f"{type(runner).__name__}, expected ExternalRunner"
                 )
-            state = read_extra(instance.env)
+            state = instance.env.record()
             sim = Simulation(
                 backend=self._backend,
                 num_envs=self._num_envs,
@@ -662,7 +690,7 @@ class SimulationBuilder:
                 run=run,
                 owner=self._owner,
                 state=state,
-                obs_cache=dict(instance.env.obs_cache),
+                obs=instance.env.obs.snapshot(),
                 t=0,
             )
         except BaseException:
@@ -684,7 +712,6 @@ class SimulationBuilder:
         self._check_reset_policy(spec)
         self._refuse_cameras_at_multienv(spec.cameras)
         from unigym.runner.external import ExternalRunner
-        from unigym.runner.state import read_extra
         from unigym.world import World
 
         try:
@@ -715,8 +742,8 @@ class SimulationBuilder:
                 env=instance.env,
                 run=run,
                 owner=self._owner,
-                state=read_extra(instance.env),
-                obs_cache=dict(instance.env.obs_cache),
+                state=instance.env.record(),
+                obs=instance.env.obs.snapshot(),
                 t=0,
             )
         except BaseException:

@@ -111,7 +111,7 @@ class TimelineSink:
         log = self.event_log
         if log is None or log.path is None:
             return
-        extra = bundle.get("extra") or {}
+        extra = bundle.get("record") or {}
         term = bundle.get("terminated")
         if term is not None:
             import torch

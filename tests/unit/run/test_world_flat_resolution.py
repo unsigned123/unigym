@@ -55,6 +55,7 @@ def _spec(backend: str) -> Run:
         spawn={"pos": (0.0, 0.0, 0.4)},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
+        observations={"robot": ["tiny"]},
         backend=backend,
         inspect=True,
     )

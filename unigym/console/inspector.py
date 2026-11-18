@@ -7,7 +7,7 @@ diagnostics (assignments, imports, multi-line snippets, ``print``),
 which cost far more than it protected.  Threat model: campus intranet +
 token-gated write face + runs that live minutes -- there is nothing to
 defend against, so eval/exec run with FULL builtins against the injected
-run names (``np torch obs_cache extra bundle adapter env``); a trailing
+run names (``np torch obs record bundle adapter env``); a trailing
 expression's value is returned.  The inspector can therefore mutate run
 state (assignments, method calls) -- that is a documented capability now,
 not an accident; exceptions still never escape (ConsoleError -> ack).
@@ -42,7 +42,7 @@ INLINE_NUMEL = 64  # numel <= 64 -> full inline values; else npz dump
 PREVIEW_N = 8  # the always-present first-8 preview
 MAX_STR = 200  # inline string / repr truncation
 
-EVAL_NAMESPACE = ("np", "torch", "obs_cache", "extra", "bundle", "adapter", "env")
+EVAL_NAMESPACE = ("np", "torch", "obs", "record", "bundle", "adapter", "env")
 """Names injected into every eval (docs/contracts/console_contract.md §4) --
 convenience injections on top of full builtins, NOT a restriction; the
 tests lock this tuple; add names only together with a contract update."""
@@ -71,7 +71,7 @@ class Inspector:
     assignments, imports and arbitrary attribute access all execute
     against the live run objects; the last expression's value is
     returned.  ``env``/``adapter`` may be None (``obs`` queries /
-    ``obs_cache`` in eval degrade to an explicit ConsoleError / empty
+    ``obs`` in eval degrade to an explicit ConsoleError / empty
     mapping).
 
     Args:
@@ -101,7 +101,7 @@ class Inspector:
             return self.eval_expr(params.get("expr"))
         if target == "summary":
             return self.summary()
-        if target in ("obs", "extra"):
+        if target in ("obs", "record"):
             key = params.get("key")
             if not isinstance(key, str):
                 raise ConsoleError(f"inspect: {target} key must be a string, got {key!r}")
@@ -114,11 +114,11 @@ class Inspector:
         raise ConsoleError(f"inspect: unknown target {target!r}")
 
     def summary(self) -> dict:
-        """phase/step/episodes + obs/extra key inventory (read-only)."""
+        """phase/step/episodes + obs/record key inventory (read-only)."""
         out = {
             "num_envs": int(getattr(self.env, "num_envs", 0) or 0),
             "obs_keys": sorted(self._source("obs")),
-            "extra_keys": sorted(self._source("extra")),
+            "record_keys": sorted(self._source("record")),
         }
         if self._status_fn is not None:
             try:
@@ -135,10 +135,11 @@ class Inspector:
 
     def _source(self, which: str) -> dict:
         if which == "obs":
-            src = getattr(self.env, "obs_cache", None)
-            return src if isinstance(src, dict) else {}
+            snapshot = getattr(getattr(self.env, "obs", None), "snapshot", None)
+            values = getattr(snapshot(), "values", None) if callable(snapshot) else None
+            return dict(values) if values is not None else {}
         bundle = self._bundle() or {}
-        src = bundle.get("extra")
+        src = bundle.get("record")
         return src if isinstance(src, dict) else {}
 
     # ------------------------------------------------------------------ #
@@ -216,8 +217,8 @@ class Inspector:
         return {
             "np": np,
             "torch": torch,
-            "obs_cache": self._source("obs"),
-            "extra": self._source("extra"),
+            "obs": self._source("obs"),
+            "record": self._source("record"),
             "bundle": bundle,
             "adapter": self.adapter,
             "env": self.env,
@@ -248,14 +249,14 @@ class Inspector:
     # npz dump
     # ------------------------------------------------------------------ #
     def save_npz(self, rid: int, params: dict) -> dict:
-        """Dump obs/extra arrays to one npz (original key names)."""
+        """Dump obs/record arrays to one npz (original key names)."""
         source = params.get("source", "all")
         keys = params.get("keys")
         sources: dict[str, dict] = {}
         if source in ("obs", "all"):
             sources["obs"] = self._source("obs")
-        if source in ("extra", "all"):
-            sources["extra"] = self._source("extra")
+        if source in ("record", "all"):
+            sources["record"] = self._source("record")
         arrays: dict[str, np.ndarray] = {}
         skipped: list[str] = []
         for src in sources.values():
