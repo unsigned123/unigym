@@ -44,6 +44,7 @@ from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.core import quat
 
 from unigym.env.episode import parse_episode_length, sample_durations
+from unigym.env.native import NativeHandle
 from .init_pose import build_init_pose_cfg, sample_init_pose
 from .terrains.native import NativeTerrainPreset
 from unigym.env.obs import ObservationConfig, ObservationRegistry
@@ -1382,6 +1383,30 @@ class IsaaclabEnv(ManagerBasedEnv):
         """Batch-synchronous episode reset (the shorthand)."""
         self._raise_if_closed()
         return self.reset_envs(torch.arange(self.num_envs, device=self.device))
+
+    # ------------------------------------------------------------------ #
+    # native escape hatch (external packs only; unstable)
+    # ------------------------------------------------------------------ #
+    def native(self, backend: str) -> NativeHandle:
+        """Return identity references to this backend's native objects.
+
+        External-pack escape hatch only (``docs/native_handle.md``): the
+        handle is unstable and never copies, settles, or writes state.
+        Partitioned multi-articulation runs expose ``robot=None`` and carry
+        their assets in ``scene``/``robots``.
+        """
+        if backend != "isaaclab2":
+            raise ValueError(
+                f"isaaclab2 backend native() expects backend='isaaclab2', got {backend!r}"
+            )
+        return NativeHandle(
+            "isaaclab2",
+            {
+                "sim": self.sim,
+                "scene": self.scene,
+                "robot": getattr(self, "robot", None),
+            },
+        )
 
     # ------------------------------------------------------------------ #
     # teardown

@@ -66,6 +66,7 @@ if TYPE_CHECKING:
 
     from unigym.adapters.base import Adapter
     from unigym.env.backends.base import EnvBackend
+    from unigym.env.native import NativeHandle
     from unigym.model.live import LiveModel
     from unigym.runtime.actions import NamedAction
     from unigym.runtime.controllers import (
@@ -1380,6 +1381,33 @@ class Run:
             RuntimeError: The run was closed or has several articulations.
         """
         return self.live_for()
+
+    def native(self, backend: str) -> NativeHandle:
+        """Return the live backend's unstable native escape hatch.
+
+        External packs only: the handle is not a neutral API and carries no
+        compatibility promise.  The requested backend must match the live
+        backend and must declare ``Trait.NATIVE_HANDLE``.
+
+        Args:
+            backend: The canonical backend name of this run.
+
+        Returns:
+            A :class:`~unigym.env.native.NativeHandle` of identity
+            references.
+
+        Raises:
+            RuntimeError: The run is closed.
+            ValueError: *backend* does not match the live backend.
+            NotImplementedError: The live backend does not declare
+                ``NATIVE_HANDLE``.
+        """
+        if self._closed:
+            raise RuntimeError(
+                "Run is closed: native handles are unavailable; the live "
+                "engine objects were released"
+            )
+        return self.build().native(backend)
 
     @property
     def articulations(self) -> list[dict[str, JsonValue]]:
