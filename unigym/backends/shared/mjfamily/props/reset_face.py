@@ -3,9 +3,9 @@
 The scene-preset consumption helpers for the mujoco backend.  An
 initializer never touches engine handles directly: sampling reads the
 model and every mutation goes through a :class:`ResetPrimitives`
-primitive built here (``write_freejoint`` is the existing prop
-freejoint path verbatim -- ``prop_backend.free_addresses`` -> posed
-qpos + zeroed qvel; the settle loop is the actuator-aware zero-action
+primitive built here (``write_freejoint`` is the prop freejoint path --
+``prop_backend.free_addresses`` -> world pose + optional world velocity,
+default zeroed qvel; the settle loop is the actuator-aware zero-action
 face the reset chain already used).  ``joint_group``/``set_targets``
 are the robot-side seams for future initializer types (interface stubs
 until the robot-body reset migrates, §5 route).
@@ -26,10 +26,59 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
 
+from unigym.core import quat as quat_math
 from unigym.initializers import InitializerBase, ResetPrimitives
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.robots.gr1_reset import Gr1ResetSpec
+
+_ZERO_TOL = 1e-12
+
+
+def _freejoint_vector(value, *, name: str, field: str, size: int) -> np.ndarray:
+    """Validate one finite ``(size,)`` freejoint input (prop-name bearing)."""
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"ResetPrimitives.write_freejoint({name!r}): {field} must be numeric, "
+            f"got {type(value).__name__}"
+        ) from exc
+    if array.shape != (size,):
+        raise ValueError(
+            f"ResetPrimitives.write_freejoint({name!r}): {field} must have shape "
+            f"({size},), got {array.shape}"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(f"ResetPrimitives.write_freejoint({name!r}): {field} must be finite")
+    return array
+
+
+def _freejoint_yaw(value, *, name: str) -> None:
+    """Validate a yaw input without changing its arithmetic (bit-exactness)."""
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"ResetPrimitives.write_freejoint({name!r}): yaw must be numeric, "
+            f"got {type(value).__name__}"
+        ) from exc
+    if array.shape != ():
+        raise ValueError(
+            f"ResetPrimitives.write_freejoint({name!r}): yaw must be a scalar, "
+            f"got shape {array.shape}"
+        )
+    if not np.isfinite(array):
+        raise ValueError(f"ResetPrimitives.write_freejoint({name!r}): yaw must be finite")
+
+
+def _freejoint_unit_quat(value, *, name: str) -> np.ndarray:
+    """Validate + normalize a world-frame ``(w, x, y, z)`` quaternion."""
+    quat = _freejoint_vector(value, name=name, field="quat_wxyz", size=4)
+    norm = float(np.linalg.norm(quat))
+    if norm <= _ZERO_TOL:
+        raise ValueError(f"ResetPrimitives.write_freejoint({name!r}): quat_wxyz has zero norm")
+    return quat / norm
 
 
 def _probe_region_placement(env, rule, position, yaw, clearance):
@@ -128,12 +177,57 @@ def build_reset_primitives(env) -> ResetPrimitives:
     """The :class:`ResetPrimitives` face for one constructed backend env."""
     m = env.mj_model
 
-    def write_freejoint(name: str, pos, yaw: float) -> None:
+    def write_freejoint(
+        name: str,
+        pos,
+        yaw: Optional[float] = None,
+        *,
+        quat_wxyz=None,
+        lin_vel_w=None,
+        ang_vel_w=None,
+    ) -> None:
+        """Write a prop freejoint's world pose (+ optional world velocity).
+
+        Exactly one orientation source:
+
+        * ``yaw`` -- pure +Z rotation (the placement sampler's call shape,
+          unchanged and bit-exact);
+        * ``quat_wxyz`` -- full world-frame ``(w, x, y, z)``, normalized
+          here; zero-norm / non-finite / wrong-shape inputs fail fast.
+
+        ``lin_vel_w`` is the world-frame linear velocity at the body origin;
+        ``ang_vel_w`` is the world-frame angular velocity, rotated by
+        ``R.T`` into the freejoint's body-frame qvel slot (MuJoCo's
+        convention).  Each velocity is optional; absent writes zero.
+        """
+        if (yaw is None) == (quat_wxyz is None):
+            raise ValueError(
+                f"ResetPrimitives.write_freejoint({name!r}): supply exactly one "
+                f"of yaw / quat_wxyz (got yaw={yaw is not None}, "
+                f"quat_wxyz={quat_wxyz is not None})"
+            )
+        position = _freejoint_vector(pos, name=name, field="pos", size=3)
+        if yaw is not None:
+            _freejoint_yaw(yaw, name=name)
+            orientation = np.array([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)], dtype=float)
+        else:
+            orientation = _freejoint_unit_quat(quat_wxyz, name=name)
+        lin = (
+            np.zeros(3, dtype=float)
+            if lin_vel_w is None
+            else _freejoint_vector(lin_vel_w, name=name, field="lin_vel_w", size=3)
+        )
+        if ang_vel_w is None:
+            ang_body = np.zeros(3, dtype=float)
+        else:
+            ang_world = _freejoint_vector(ang_vel_w, name=name, field="ang_vel_w", size=3)
+            ang_body = quat_math.to_rotmat(orientation).T @ ang_world
         _bid, qadr, vadr = env.prop_backend.free_addresses(name)
         d = env._active_data
-        d.qpos[qadr : qadr + 3] = pos
-        d.qpos[qadr + 3 : qadr + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
-        d.qvel[vadr : vadr + 6] = 0.0
+        d.qpos[qadr : qadr + 3] = position
+        d.qpos[qadr + 3 : qadr + 7] = orientation
+        d.qvel[vadr : vadr + 3] = lin
+        d.qvel[vadr + 3 : vadr + 6] = ang_body
 
     def joint_group(name: str):
         raise NotImplementedError(

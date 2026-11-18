@@ -276,6 +276,7 @@ markers = [
     "domain_assets: asset reference and manifest domain tests",
     "domain_backends: framework-level backend registry tests",
     "domain_sim: simulation facade declaration tests",
+    "domain_initializers: reset initializer and primitive tests",
     "backend_agnostic: tests that do not target one specific backend",
     "backend_mujoco: MuJoCo backend tests",
     "backend_mjwarp: MuJoCo Warp backend tests",
