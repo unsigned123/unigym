@@ -141,6 +141,22 @@ def test_set_root_state_next_step_keeps_the_written_root(tiny_env):
     )
 
 
+def test_reset_writes_a_full_spawn_quaternion_to_mirror_and_device(tiny_env_factory):
+    """A non-yaw spawn quat reaches root qpos wxyz on the mirror and the device."""
+    env = tiny_env_factory(spawn={"pos": [0.2, -0.1, 0.9], "quat_wxyz": [1.0, 0.0, 1.0, 0.0]})
+    qadr, _ = _root(env)
+    expected = [2**-0.5, 0.0, 2**-0.5, 0.0]
+
+    env.reset_envs(torch.tensor([0], dtype=torch.int64))
+
+    data = env.mj_datas[0]
+    assert data.qpos[qadr : qadr + 3].tolist() == pytest.approx([0.2, -0.1, 0.9])
+    assert data.qpos[qadr + 3 : qadr + 7].tolist() == pytest.approx(expected)
+    device = _device_qpos(env, 0)
+    assert device[qadr : qadr + 3].tolist() == pytest.approx([0.2, -0.1, 0.9], abs=1e-6)
+    assert device[qadr + 3 : qadr + 7].tolist() == pytest.approx(expected, abs=1e-6)
+
+
 def test_set_root_state_clears_warmstart_and_settle_keeps_it_cleared(tiny_env):
     """A write drops the pre-write warm start on mirror + device; settle keeps zero."""
     env = tiny_env

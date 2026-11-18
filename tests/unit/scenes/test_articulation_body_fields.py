@@ -99,6 +99,18 @@ def test_spawn_requires_pos_when_present_and_defaults_yaw_to_zero():
     assert with_yaw.spawn == {"pos": [0.0, 0.0, 1.0], "yaw": 0.5}
 
 
+def test_spawn_accepts_a_full_quaternion_and_omits_yaw():
+    """A non-yaw quat is normalized and replaces the yaw form in the output."""
+    spec = ArticulationSpec(
+        name="g1",
+        spawn={"pos": [0.0, 0.0, 1.0], "quat_wxyz": [1.0, 0.0, 0.0, 1.0]},
+    )
+
+    assert spec.spawn["pos"] == [0.0, 0.0, 1.0]
+    assert "yaw" not in spec.spawn
+    assert spec.spawn["quat_wxyz"] == pytest.approx([2**-0.5, 0.0, 0.0, 2**-0.5])
+
+
 @pytest.mark.parametrize(
     ("spawn", "match"),
     [
@@ -107,12 +119,33 @@ def test_spawn_requires_pos_when_present_and_defaults_yaw_to_zero():
         ({"pos": [0.0, 0.0, float("inf")]}, "finite"),
         ({"pos": [0.0, 0.0, 1.0], "roll": 0.1}, r"unknown keys \['roll'\]"),
         ({"pos": [0.0, 0.0, 1.0], "yaw": float("nan")}, "finite"),
+        (
+            {"pos": [0.0, 0.0, 1.0], "yaw": 0.2, "quat_wxyz": [1.0, 0.0, 0.0, 0.0]},
+            "both `yaw` and `quat_wxyz`",
+        ),
+        ({"pos": [0.0, 0.0, 1.0], "quat_wxyz": [0.0, 0.0, 0.0, 0.0]}, "non-zero norm"),
+        ({"pos": [0.0, 0.0, 1.0], "quat_wxyz": [1.0, 0.0, 0.0]}, "4-vector"),
+        ({"pos": [0.0, 0.0, 1.0], "quat_wxyz": [1.0, 0.0, float("nan"), 0.0]}, "finite"),
     ],
 )
 def test_malformed_spawn_fails_fast(spawn, match):
-    """Spawn rejects missing pos, non-finite values and unknown keys."""
+    """Spawn rejects missing pos, bad orientation, non-finite values and unknown keys."""
     with pytest.raises(ArticulationError, match=match):
         ArticulationSpec(name="g1", spawn=spawn)
+
+
+@pytest.mark.parametrize(
+    "quat",
+    [
+        [0.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [1.0, 0.0, float("nan"), 0.0],
+    ],
+)
+def test_spawn_orientation_errors_name_the_articulation(quat):
+    """Every spawn orientation failure identifies the offending articulation."""
+    with pytest.raises(ArticulationError, match="articulation 'g1'"):
+        ArticulationSpec(name="g1", spawn={"pos": [0.0, 0.0, 1.0], "quat_wxyz": quat})
 
 
 def test_normalize_articulations_accepts_the_neutral_body_contact_keys():

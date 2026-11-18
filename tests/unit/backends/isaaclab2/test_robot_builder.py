@@ -253,6 +253,18 @@ def test_spawn_present_sets_init_pos_and_yaw_quaternion():
     )
 
 
+def test_spawn_full_quaternion_sets_the_init_rot():
+    """spec.spawn.quat_wxyz is normalized once and becomes the cfg init rot."""
+    spec = _spec(
+        spawn={"pos": [1.0, 2.0, 3.0], "quat_wxyz": [1.0, 0.0, 1.0, 0.0]},
+    )
+
+    state = _build(spec=spec).kwargs["init_state"]
+
+    assert state.kwargs["pos"] == (1.0, 2.0, 3.0)
+    assert state.kwargs["rot"] == pytest.approx((2**-0.5, 0.0, 2**-0.5, 0.0))
+
+
 def test_spawn_present_without_yaw_defaults_zero():
     """A spawn position without yaw keeps the identity orientation."""
     state = _build(spec=_spec(spawn={"pos": [1.0, 2.0, 3.0]})).kwargs["init_state"]

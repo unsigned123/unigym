@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from unigym._typing import JsonValue
 from unigym.env.naming import ENV_REGEX_NS
 from unigym.robots.base import RobotProfile
-from unigym.scenes.articulation import ArticulationSpec
+from unigym.scenes.articulation import ArticulationSpec, resolve_spawn_quat
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.assets.plan import AssetPlan
@@ -263,24 +263,18 @@ def _finite_pos(value: object, spec: ArticulationSpec, field: str) -> tuple[floa
 def _spawn_pose(
     spec: ArticulationSpec,
     default_pos: tuple[float, float, float] | None,
-) -> tuple[tuple[float, float, float], float]:
-    """The root position and yaw from ``spec.spawn`` or the explicit default."""
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
+    """The root position and full wxyz orientation from ``spec.spawn``."""
     spawn = dict(spec.spawn or {})
     if spawn:
         pos = _finite_pos(spawn["pos"], spec, "spawn.pos")
-        return pos, _finite_number(spawn.get("yaw", 0.0), spec, "spawn.yaw")
+        return pos, resolve_spawn_quat(spawn)
     if default_pos is None:
         raise ValueError(
             f"articulation {spec.name!r}: spec declares no spawn and the builder "
             f"received no default_pos"
         )
-    return _finite_pos(default_pos, spec, "default_pos"), 0.0
-
-
-def _yaw_quaternion(yaw: float) -> tuple[float, float, float, float]:
-    """The (w, x, y, z) quaternion for one world-z yaw (radians)."""
-    half = yaw / 2.0
-    return (math.cos(half), 0.0, 0.0, math.sin(half))
+    return _finite_pos(default_pos, spec, "default_pos"), resolve_spawn_quat(None)
 
 
 def build_articulation_cfg(
@@ -333,7 +327,7 @@ def build_articulation_cfg(
     cfg_classes = _resolve_classes(classes)
     ref = _selected_asset_ref(profile, spec, asset_format, asset_plan)
     spawn = _spawn_cfg(cfg_classes, spec, asset_format, ref, spawn_options)
-    pos, yaw = _spawn_pose(spec, default_pos)
+    pos, quat_w = _spawn_pose(spec, default_pos)
 
     prim_path = params.get("prim_path", f"{ENV_REGEX_NS}/Robot")
     if not isinstance(prim_path, str):
@@ -351,7 +345,7 @@ def build_articulation_cfg(
         spawn=spawn,
         init_state=cfg_classes.init_state(
             pos=pos,
-            rot=_yaw_quaternion(yaw),
+            rot=quat_w,
             joint_pos=dict(profile.default_joint_pos),
             joint_vel={".*": 0.0},
         ),

@@ -18,6 +18,7 @@ import torch
 
 from unigym.runtime.action_routing import JointActionIndex, RoutedColumn
 from unigym.runtime.actions import NamedAction
+from unigym.scenes.articulation import resolve_spawn_quat
 
 
 def _label(env) -> str:
@@ -94,14 +95,13 @@ def reset_articulations(env, d) -> None:
         spawn = art.spawn or {}
         if spawn:
             pos = list(spawn["pos"])
-            yaw = float(spawn.get("yaw", 0.0))
         else:
             pos = [float(env._spawn_xy[0]), float(env._spawn_xy[1]), float(env._spawn_height)]
-            yaw = float(env._spawn_yaw)
+        quat_w = resolve_spawn_quat(spawn, default_yaw=float(env._spawn_yaw))
         if art.free_qpos_adr is not None:
             a = art.free_qpos_adr
             d.qpos[a : a + 3] = [float(v) for v in pos]
-            d.qpos[a + 3 : a + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
+            d.qpos[a + 3 : a + 7] = quat_w
             d.qpos[art.jadr_art] = art.q0_mj
         else:
             # fixed base: write q0 only at actuated joints (device hinges /

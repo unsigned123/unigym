@@ -13,6 +13,7 @@ import torch
 
 from unigym.core import quat
 from unigym.env.obs_catalog import ObsCatalog, build_obs_catalog
+from unigym.scenes.articulation import resolve_spawn_quat
 
 
 def refresh_obs_sources(env) -> None:
@@ -63,12 +64,12 @@ def read_articulation_state(env, art, e: int = 0) -> dict:
         spawn = art.spawn or {}
         if spawn:
             pos = list(spawn["pos"])
-            yaw = float(spawn.get("yaw", 0.0))
         else:
             pos = [float(env._spawn_xy[0]), float(env._spawn_xy[1]), float(env._spawn_height)]
-            yaw = float(env._spawn_yaw)
         pos_w = np.asarray(pos[:3], dtype=np.float64)
-        quat_w = np.asarray([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)], dtype=np.float64)
+        quat_w = np.asarray(
+            resolve_spawn_quat(spawn, default_yaw=float(env._spawn_yaw)), dtype=np.float64
+        )
         lin_vel_w = np.zeros(3)
         ang_vel_b = np.zeros(3)
         ang_vel_w = np.zeros(3)

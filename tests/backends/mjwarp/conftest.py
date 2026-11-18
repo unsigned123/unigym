@@ -24,6 +24,7 @@ def build_tiny_env(
     mjcf: Path,
     *,
     num_envs: int = 1,
+    spawn: dict | None = None,
     episode_length_s: float | None = 100.0,
     drive: str = "position_pd",
     target: str = "position",
@@ -70,7 +71,7 @@ def build_tiny_env(
     )
     articulation = ArticulationSpec(
         name=ARTICULATION,
-        spawn={"pos": [0.0, 0.0, 0.8]},
+        spawn={"pos": [0.0, 0.0, 0.8]} if spawn is None else spawn,
         actuation=(actuation,),
     )
     group = OrderedActionGroup(
@@ -121,6 +122,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
     def make(
         num_envs: int = 1,
         *,
+        spawn: dict | None = None,
         episode_length_s: float | None = 100.0,
         drive: str = "position_pd",
         target: str = "position",
@@ -138,6 +140,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
             num_envs=num_envs,
+            spawn=spawn,
             episode_length_s=episode_length_s,
             drive=drive,
             target=target,
