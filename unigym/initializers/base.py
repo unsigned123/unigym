@@ -75,13 +75,26 @@ class ResetPrimitives:
     optional (absent writes zero).  The placement sampler still passes
     ``yaw`` today; a pack needing arbitrary orientation constructs the
     quaternion and calls the write directly.
+    ``set_root_state`` is the robot free-root write:
+    ``(name, pos_w(3,), quat_wxyz(4,), lin_vel_w=None, ang_vel_w=None)``
+    -- world pose/quaternion (wxyz, normalized downstream) and optional
+    world velocities at the root body origin (absent writes zero).
+    ``name`` addresses a free-root articulation or a free rigid prop;
+    a fixed/anchored root fails with the backend's state-write error.
+    ``set_joint_state`` is the robot joint write:
+    ``(articulation, joint_names, position, velocity=None)`` -- absolute
+    1-DOF positions for an explicit, duplicate-free name sequence;
+    ``velocity=None`` leaves the selected joints' velocity unchanged.
+    Both write ONLY the current reset env and never settle implicitly
+    (the reset chain's settle/forward tail stays authoritative); calling
+    them outside ``initializer.apply()`` is an error.
     ``settle_fn(substeps)`` runs the backend's zero-action settle loop;
     ``forward()`` refreshes derived quantities; ``prop_extents(name)``
     yields the ``(half_xy, height)`` z-stack inputs and ``prop_names``
     is the declared prop-name set (the neutrality check's reference).
-    ``joint_group``/``set_targets`` are the robot-side write seams for
-    future initializer types -- interface-complete stubs until the
-    robot-body reset migrates (planned).
+    The former ``joint_group`` / ``set_targets`` stubs were removed: they
+    had no core caller, and an external pack that declared them must
+    switch to ``set_root_state`` / ``set_joint_state``.
     """
 
     model: Any
@@ -91,10 +104,14 @@ class ResetPrimitives:
     write_freejoint: Callable[..., None]
     """``(prop_name, pos(3,), yaw=None, *, quat_wxyz=None, lin_vel_w=None,
     ang_vel_w=None)`` -- world pose (+ optional world velocity) write."""
-    joint_group: Callable[[str], Any]
-    """Named joint group -> indices (robot-side seam; stub)."""
-    set_targets: Callable[[Any, Any], None]
-    """Joint-group target write (robot-side seam; stub)."""
+    set_root_state: Callable[..., None]
+    """``(name, pos_w(3,), quat_wxyz(4,), lin_vel_w=None, ang_vel_w=None)``
+    -- free-root world pose/quaternion (+ optional world velocity) write
+    for the CURRENT reset env (free-root articulation or free rigid prop)."""
+    set_joint_state: Callable[..., None]
+    """``(articulation, joint_names, position, velocity=None)`` -- absolute
+    1-DOF joint write for the CURRENT reset env (``velocity=None`` leaves
+    velocity unchanged)."""
     forward: Callable[[], None]
     """``mj_forward`` equivalent (derived-quantity refresh)."""
     prop_extents: Callable[[str], tuple] = None  # type: ignore[assignment]

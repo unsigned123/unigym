@@ -355,6 +355,9 @@ class MjwarpEnv(WarpBatchMixin):
     _data: mujoco.MjData
     _datas: list[mujoco.MjData]
     _active_data: mujoco.MjData
+    # The reset env the initializer writes through ResetPrimitives; set
+    # around ``initializer.apply()`` and restored in a ``finally``.
+    _active_reset_env_id: int | None
     _capacity: Capacity
     _closed: bool
     _closing: bool
@@ -614,6 +617,7 @@ class MjwarpEnv(WarpBatchMixin):
         self._datas = [mujoco.MjData(self._model) for _ in range(n)]
         self._data = self._datas[0]  # legacy alias: tests/scene/director read it
         self._active_data = self._datas[0]
+        self._active_reset_env_id = None
         self._wdata = self._new_warp_data(self._datas[0], n)
         m = self._model
         self._decimation = int(decimation)
@@ -1360,7 +1364,9 @@ class MjwarpEnv(WarpBatchMixin):
         refreshed).
         """
         prev = self._active_data
+        prev_env_id = self._active_reset_env_id
         self._active_data = self._datas[e]
+        self._active_reset_env_id = int(e)
         try:
             if self._initializer is None:
                 raise RuntimeError(
@@ -1391,6 +1397,7 @@ class MjwarpEnv(WarpBatchMixin):
                 )
         finally:
             self._active_data = prev
+            self._active_reset_env_id = prev_env_id
 
     def _setup_actuator_seam(self, plans) -> None:
         """Wire the ctrl laws for the decimation loop.
