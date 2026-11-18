@@ -12,7 +12,6 @@ an adapter.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 
 import torch
@@ -32,6 +31,7 @@ from unigym.runtime.controllers import (
     ControlRuntime,
     control_key,
 )
+from unigym.scenes.articulation import resolve_spawn_quat
 
 __all__ = [
     "bind_articulations",
@@ -129,9 +129,8 @@ def configure_scene(cfg, controls, articulations, profiles, robot_realizations) 
             # realizer/cfg init state, never an invented index offset.
             pos = base_pos
         rot = tuple(getattr(init, "rot", (1.0, 0.0, 0.0, 0.0)))
-        if spawn.get("yaw") is not None:
-            yaw = float(spawn["yaw"])
-            rot = (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0))
+        if "yaw" in spawn or "quat_wxyz" in spawn:
+            rot = resolve_spawn_quat(spawn)
         new_cfg = asset_cfg.replace(
             prim_path=prim_path,
             init_state=_initial_state(init, pos, rot),
@@ -443,10 +442,9 @@ def reset_articulations(env, env_ids) -> None:
         spawn = dict(art.spawn or {})
         if spawn.get("pos") is not None:
             dr[:, :3] = torch.tensor(spawn["pos"], dtype=dr.dtype, device=dr.device)
-        if spawn.get("yaw") is not None:
-            yaw = float(spawn["yaw"])
+        if "yaw" in spawn or "quat_wxyz" in spawn:
             dr[:, 3:7] = torch.tensor(
-                [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)],
+                resolve_spawn_quat(spawn),
                 dtype=dr.dtype,
                 device=dr.device,
             )

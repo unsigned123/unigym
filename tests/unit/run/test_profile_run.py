@@ -358,3 +358,27 @@ def test_config_mode_composes_the_selected_profile_asset(
         assert view["joints"] == list(JOINTS)
     finally:
         run.close()
+
+
+def test_run_spawn_full_quaternion_reaches_the_articulation_entry(tmp_path: Path) -> None:
+    """Run(spawn=...) emits the quat form and the spec normalizes it once."""
+    profile = _profile(assets=AssetRef(mjcf=str(TINY_ARM)))
+    run = Run(
+        world=World.base(mjcf=_floor_world(tmp_path)),
+        robot=profile,
+        spawn={"pos": (0.1, 0.2, 0.9), "quat_wxyz": (1.0, 0.0, 0.0, 1.0)},
+        action_spec=ACTION_SPEC,
+        policies=POLICIES,
+        steps=1,
+        inspect=True,
+    )
+    try:
+        assert run.cfg["articulations"][0]["spawn"] == {
+            "pos": [0.1, 0.2, 0.9],
+            "quat_wxyz": [1.0, 0.0, 0.0, 1.0],
+        }
+        spawn = run.spec.articulations[0].spawn
+        assert "yaw" not in spawn
+        assert spawn["quat_wxyz"] == pytest.approx([2**-0.5, 0.0, 0.0, 2**-0.5])
+    finally:
+        run.close()

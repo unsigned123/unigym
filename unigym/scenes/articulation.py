@@ -53,7 +53,9 @@ __all__ = [
     "normalize_articulation",
     "normalize_articulations",
     "normalize_contact_sensor_inventory",
+    "resolve_spawn_quat",
     "validate_contact_sensor_inventory",
+    "yaw_quat_wxyz",
 ]
 
 ARTICULATION_PREFIX = "articulation"
@@ -494,8 +496,57 @@ class JointSpec:
         )
 
 
-_SPAWN_KEYS = ("pos", "yaw")
+_SPAWN_KEYS = ("pos", "yaw", "quat_wxyz")
 """The closed run-level robot spawn vocabulary."""
+
+_QUAT_WXYZ_SIZE = 4
+
+
+def yaw_quat_wxyz(yaw: float) -> tuple[float, float, float, float]:
+    """The world-frame ``(w, x, y, z)`` root quaternion of one yaw (radians)."""
+    half = yaw / 2.0
+    return (math.cos(half), 0.0, 0.0, math.sin(half))
+
+
+def resolve_spawn_quat(
+    spawn: Mapping[str, JsonValue] | None,
+    *,
+    default_yaw: float = 0.0,
+) -> tuple[float, float, float, float]:
+    """Resolve one normalized spawn mapping to its world-frame wxyz orientation.
+
+    ``quat_wxyz`` is normalized at the schema boundary and returned verbatim;
+    a ``yaw`` (or an absent orientation) becomes the ``(w, 0, 0, z)``
+    quaternion.  ``default_yaw`` applies only when ``spawn`` is empty (the
+    backend's neutral default).  This is the single orientation resolver for
+    every backend: no consumer re-normalizes or re-derives it.
+    """
+    mapping = spawn or {}
+    quat = mapping.get("quat_wxyz")
+    if quat is not None:
+        if not is_object_sequence(quat) or len(quat) != _QUAT_WXYZ_SIZE:
+            raise ArticulationError(
+                f"spawn.quat_wxyz must be a 4-vector (w, x, y, z), got {quat!r}"
+            )
+        return (
+            _finite(quat[0], "spawn.quat_wxyz[0]"),
+            _finite(quat[1], "spawn.quat_wxyz[1]"),
+            _finite(quat[2], "spawn.quat_wxyz[2]"),
+            _finite(quat[3], "spawn.quat_wxyz[3]"),
+        )
+    yaw = _finite(mapping.get("yaw", default_yaw), "spawn.yaw")
+    return yaw_quat_wxyz(yaw)
+
+
+def _spawn_quat(value: object, what: str) -> tuple[float, float, float, float]:
+    """Validate and normalize one finite, non-zero root quaternion."""
+    if not is_object_sequence(value) or len(value) != _QUAT_WXYZ_SIZE:
+        raise ArticulationError(f"{what} must be a 4-vector (w, x, y, z), got {value!r}")
+    quat = tuple(_finite(entry, f"{what}[{index}]") for index, entry in enumerate(value))
+    norm = math.sqrt(sum(component * component for component in quat))
+    if norm == 0.0:
+        raise ArticulationError(f"{what} must have non-zero norm, got {value!r}")
+    return (quat[0] / norm, quat[1] / norm, quat[2] / norm, quat[3] / norm)
 
 
 def _spawn_value(value: object, name: str) -> dict[str, JsonValue]:
@@ -522,6 +573,14 @@ def _spawn_value(value: object, name: str) -> dict[str, JsonValue]:
         _finite(entry, f"articulation {name!r} spawn.pos[{index}]")
         for index, entry in enumerate(raw_pos)
     )
+    if "yaw" in spawn and "quat_wxyz" in spawn:
+        raise ArticulationError(
+            f"articulation {name!r} spawn declares both `yaw` and `quat_wxyz`; "
+            f"supply exactly one orientation"
+        )
+    if "quat_wxyz" in spawn:
+        quat = _spawn_quat(spawn["quat_wxyz"], f"articulation {name!r} spawn.quat_wxyz")
+        return {"pos": list(pos), "quat_wxyz": list(quat)}
     yaw = _finite(spawn.get("yaw", 0.0), f"articulation {name!r} spawn.yaw")
     return {"pos": list(pos), "yaw": yaw}
 

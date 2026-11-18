@@ -290,8 +290,9 @@ def _articulation_entry(
     only: its assets/actuation/topology ride on the profile itself.  A
     declaration dict passes ``actuation`` through verbatim; the bare string
     form carries no actuation, so a live build fails under the hard cut.
-    ``spawn`` is the run-owned root spawn mapping (``pos``/``yaw``); it never
-    lives on a :class:`~unigym.world.World`.
+    ``spawn`` is the run-owned root spawn mapping (``pos`` required, plus
+    exactly one of ``yaw`` / ``quat_wxyz``); it never lives on a
+    :class:`~unigym.world.World`.
     """
     entry: dict[str, JsonValue]
     profile = _robot_profile(robot)
@@ -311,11 +312,17 @@ def _articulation_entry(
         )
     if spawn is not None:
         if not isinstance(spawn, Mapping):
-            raise TypeError(f"spawn= expects a mapping {{pos, yaw?}}, got {type(spawn).__name__}")
+            raise TypeError(
+                f"spawn= expects a mapping {{pos, yaw? | quat_wxyz?}}, "
+                f"got {type(spawn).__name__}"
+            )
         declared = copy.deepcopy(dict(spawn))
         raw_pos = declared.get("pos")
         if isinstance(raw_pos, (list, tuple)):
             declared["pos"] = [float(value) for value in raw_pos]
+        raw_quat = declared.get("quat_wxyz")
+        if isinstance(raw_quat, (list, tuple)):
+            declared["quat_wxyz"] = [float(value) for value in raw_quat]
         entry["spawn"] = declared
     return entry
 
@@ -658,7 +665,8 @@ class Run:
             actuation and topology; the legacy string/dict forms remain for
             config compatibility.
         spawn: Optional run-owned root spawn mapping (``{"pos": (x, y, z),
-            "yaw": radians?}``) written on the robot articulation entry.  The
+            "yaw": radians?}`` or ``{"pos": (x, y, z), "quat_wxyz":
+            (w, x, y, z)}``) written on the robot articulation entry.  The
             world never owns a robot or its spawn.
         action_spec: Explicit action layout for the profile path (an
             ``OrderedActionSpec`` or its group mappings).  Required with
