@@ -26,10 +26,13 @@ This module is intentionally importable without torch/isaaclab.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from .termination import EpisodeTermination, Termination
 
 if TYPE_CHECKING:
     from unigym.packs.runtime import PackRuntime
@@ -194,6 +197,19 @@ class EpisodeData:
         ended_by_termination: True if the termination group fired on this
             env at the final step (engine bundle ``terminated[env_id]``).
             Purely observational -- see the ``success`` discussion above.
+        policy_dt: policy period (s) of the run.
+        sim_dt: simulation period (s) of the run.
+        step_index: canonical int64 tick axis ``1..T`` (frame 0 is tick 1).
+        time_s: authoritative per-frame time ``step_index * policy_dt``.
+        reset_index: tick of the reset sample (canonical ``0``).
+        reset_sample: selected pre-policy-step observation arrays captured by
+            the reset chain (never recorder frame 0).
+        reset_valid: initializer legality of the reset, or None when the
+            initializer does not judge it.
+        reset_reason: initializer-provided reason for an invalid reset.
+        terminal_index: canonical tick of the primary termination.
+        termination: the structured primary/all termination bundle.
+        terminations: the full tuple of terminating reasons for the tick.
     """
 
     data: dict[str, np.ndarray]
@@ -207,6 +223,72 @@ class EpisodeData:
     (Round B B1): the buffer keeps ALL forked data (no truncation) and the
     episode is excluded from physics-legal claims — the ``directed``
     family (benchmark_contract §4)."""
+    policy_dt: float = 0.0
+    sim_dt: float = 0.0
+    step_index: np.ndarray | None = None
+    time_s: np.ndarray | None = None
+    reset_index: int = 0
+    reset_sample: Mapping[str, np.ndarray] | None = None
+    reset_valid: bool | None = None
+    reset_reason: str | None = None
+    terminal_index: int | None = None
+    termination: EpisodeTermination | None = None
+    terminations: tuple[Termination, ...] = ()
+
+    def __post_init__(self) -> None:
+        length = int(self.length)
+        if length < 0:
+            raise ValueError(f"episode length must be >= 0, got {self.length!r}")
+        if self.reset_index != 0:
+            raise ValueError(f"reset_index is the canonical reset tick 0, got {self.reset_index!r}")
+        if self.reset_valid is not None and not isinstance(self.reset_valid, bool):
+            raise TypeError(f"reset_valid must be bool or None, got {self.reset_valid!r}")
+        if self.reset_reason is not None and not isinstance(self.reset_reason, str):
+            raise TypeError(f"reset_reason must be str or None, got {self.reset_reason!r}")
+        index = self.step_index
+        times = self.time_s
+        if index is None and times is None and self.policy_dt > 0.0:
+            index = np.arange(1, length + 1, dtype=np.int64)
+            times = index.astype(np.float64) * float(self.policy_dt)
+        if index is not None:
+            index = np.asarray(index, dtype=np.int64).reshape(-1)
+            if index.shape != (length,):
+                raise ValueError(f"step_index shape {index.shape} != episode length ({length},)")
+            if length and int(index[0]) != 1:
+                raise ValueError(f"step_index must start at canonical tick 1, got {int(index[0])}")
+        if times is not None:
+            times = np.asarray(times, dtype=np.float64).reshape(-1)
+            if times.shape != (length,):
+                raise ValueError(f"time_s shape {times.shape} != episode length ({length},)")
+            if index is not None and self.policy_dt > 0.0:
+                expected = index.astype(np.float64) * float(self.policy_dt)
+                if not np.allclose(times, expected, rtol=1e-9, atol=1e-12):
+                    raise ValueError("time_s is not the canonical step_index * policy_dt mapping")
+        object.__setattr__(self, "step_index", index)
+        object.__setattr__(self, "time_s", times)
+        terms = tuple(self.terminations)
+        if self.termination is not None:
+            if not isinstance(self.termination, EpisodeTermination):
+                raise TypeError("termination must be an EpisodeTermination or None")
+            if not terms:
+                terms = self.termination.all
+            if self.terminal_index is None:
+                object.__setattr__(self, "terminal_index", self.termination.primary.step_index)
+        if not all(isinstance(t, Termination) for t in terms):
+            raise TypeError("terminations must contain only Termination objects")
+        object.__setattr__(self, "terminations", terms)
+        if self.terminal_index is not None:
+            if not isinstance(self.terminal_index, int) or self.terminal_index < 0:
+                raise ValueError(
+                    f"terminal_index must be an int >= 0 or None (0 = reset "
+                    f"tick), got {self.terminal_index!r}"
+                )
+            if length and self.terminal_index > length:
+                raise ValueError(
+                    f"terminal_index {self.terminal_index} is outside the "
+                    f"episode-local axis 0..{length} (global run ticks are "
+                    "not episode ticks)"
+                )
 
 
 @dataclass(frozen=True)
@@ -217,13 +299,17 @@ class EpisodeResult:
         metrics: flat dict of scalar metrics, snake_case names; units are
             documented in the task's docstring (never in the key).
         success: task-judged success for this episode, or None when the
-            task does not define a success criterion.
+            task does not define a success criterion.  ``success`` is NOT
+            inferred from the engine termination outcome.
+        termination: optional structured termination returned by the task;
+            the sink validates and records it alongside the core facts.
         debug: optional non-aggregated extras (excluded from the report's
             metric statistics; tasks may leave it None).
     """
 
     metrics: dict[str, float]
     success: bool | None
+    termination: Termination | None = None
     debug: dict | None = None
 
 

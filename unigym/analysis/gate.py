@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 RESULTS_JSON = "results.json"
 METRICS_NPZ = "metrics.npz"
 
+#: Accepted engine result schemas (v2 = benchmark episode contract v2; v1
+#: stays readable, its episode docs carry the same env/verdict/gate rows).
+RESULTS_SCHEMAS = ("results.v1", "results.v2")
+
 # leaf-label vocabulary (formula comparators, benchmark_contract §Formula)
 _LABEL_OP = {"gte": ">=", "lte": "<=", "gt": ">", "lt": "<", "eq": "=="}
 
@@ -83,9 +87,11 @@ def load_results(run_dir: str | Path) -> dict | None:
             f"{p}: unreadable ({e})",
             hint="results.json is engine-written; a partial " "file means the run died mid-write",
         ) from e
-    if not isinstance(doc, dict) or doc.get("schema") != "results.v1":
+    schema = doc.get("schema") if isinstance(doc, dict) else None
+    if schema not in RESULTS_SCHEMAS:
+        expected = " | ".join(RESULTS_SCHEMAS)
         raise GateError(
-            f"{p}: schema {doc.get('schema')!r} != results.v1"
+            f"{p}: schema {schema!r} not in ({expected})"
             if isinstance(doc, dict)
             else f"{p}: not a mapping"
         )

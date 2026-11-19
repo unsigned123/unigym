@@ -41,7 +41,9 @@ called as ``factory(params, profile, primitives)`` and returns an
 
 from __future__ import annotations
 
+import math
 from abc import ABC
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar, Dict, Optional
 
@@ -49,12 +51,14 @@ import numpy as np
 
 __all__ = [
     "InitializerBase",
+    "ResetOutcome",
     "ResetPrimitives",
     "INITIALIZER_REGISTRY",
     "register",
     "build_initializer",
     "normalize_initializer_spec",
     "validate_initializer_shape",
+    "wrap_initializer_result",
 ]
 
 
@@ -132,6 +136,79 @@ class ResetPrimitives:
     """Probe a candidate without mutating live simulation state."""
 
 
+@dataclass(frozen=True)
+class ResetOutcome:
+    """Structured result of one ``initializer.apply()`` reset.
+
+    Attributes:
+        valid: whether the sampled reset is legal (``None`` when the
+            initializer does not judge legality).
+        reason: human-readable reason for an invalid reset.
+        metrics: flat finite-float reset diagnostics.
+        sample: selected pre-policy-step observation arrays captured by the
+            reset chain (``None`` when the initializer does not expose one).
+        placements: sampled prop placement records (the legacy return face).
+    """
+
+    valid: bool | None = None
+    reason: str | None = None
+    metrics: Mapping[str, float] = field(default_factory=dict)
+    sample: Mapping[str, np.ndarray] | None = None
+    placements: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.valid is not None and not isinstance(self.valid, bool):
+            raise TypeError(f"ResetOutcome.valid must be bool or None, got {self.valid!r}")
+        if self.reason is not None and not isinstance(self.reason, str):
+            raise TypeError(f"ResetOutcome.reason must be str or None, got {self.reason!r}")
+        if not isinstance(self.placements, Mapping):
+            raise TypeError(
+                f"ResetOutcome.placements must be a mapping, got "
+                f"{type(self.placements).__name__}"
+            )
+        metrics: dict[str, float] = {}
+        for key, value in dict(self.metrics).items():
+            if not isinstance(key, str) or not key:
+                raise ValueError(
+                    f"ResetOutcome metric names must be non-empty strings, got {key!r}"
+                )
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError(f"ResetOutcome metric {key!r} is not finite ({number!r})")
+            metrics[key] = number
+        object.__setattr__(self, "metrics", metrics)
+        object.__setattr__(self, "placements", dict(self.placements))
+        if self.sample is not None:
+            if not isinstance(self.sample, Mapping):
+                raise TypeError(
+                    f"ResetOutcome.sample must be a mapping or None, got "
+                    f"{type(self.sample).__name__}"
+                )
+            sample: dict[str, np.ndarray] = {}
+            for key, value in dict(self.sample).items():
+                if not isinstance(key, str) or not key:
+                    raise ValueError("ResetOutcome sample keys must be non-empty strings")
+                sample[key] = np.asarray(value)
+            object.__setattr__(self, "sample", sample)
+
+
+def wrap_initializer_result(result: object) -> ResetOutcome:
+    """Normalize a legacy placements dict (or a ResetOutcome) to ResetOutcome.
+
+    Backward compatibility: an initializer that still returns its
+    ``{prop_name: record}`` mapping is wrapped with ``valid=None`` /
+    ``reason=None`` / ``sample=None``; the placements are preserved verbatim.
+    """
+    if isinstance(result, ResetOutcome):
+        return result
+    if isinstance(result, Mapping):
+        return ResetOutcome(valid=None, reason=None, sample=None, placements=dict(result))
+    raise TypeError(
+        "initializer.apply() must return a ResetOutcome or a placements "
+        f"mapping; got {type(result).__name__}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # InitializerBase
 # --------------------------------------------------------------------------- #
@@ -201,17 +278,31 @@ class InitializerBase(ABC):
         """Bind-time model resolution (the policy's ``bind`` step)."""
         self._bound = self._resolve_policy().bind(self.primitives)
 
-    def apply(self) -> Dict[str, dict]:
+    def apply(self) -> Dict[str, dict] | ResetOutcome:
         """One episode's reset: sample -> write -> return the sample.
 
-        The returned ``{prop_name: record}`` mapping feeds the engine's
-        name-neutrality check (every name must be a declared prop).
+        Returning a ``{prop_name: record}`` mapping keeps the historical
+        contract (the core wrapper turns it into a :class:`ResetOutcome`).
+        New initializers may return a ``ResetOutcome`` directly to record
+        legality/reason/metrics/sample as well.
+
+        The returned placements feed the engine's name-neutrality check
+        (every name must be a declared prop).
         """
         if self._bound is None:
             raise RuntimeError(f"{self.name}.resolve() must run before apply()")
         policy = self._resolve_policy()
         placements = policy.place(self._bound, self.rng)
         return policy.commit(self.primitives, placements)
+
+    def apply_outcome(self) -> ResetOutcome:
+        """The structured reset result consumed by the core reset chain.
+
+        Wraps a legacy placements dict as ``valid=None`` / ``reason=None`` /
+        ``sample=None``; a ``ResetOutcome`` return passes through unchanged.
+        Never infers legality from recorded frame 0.
+        """
+        return wrap_initializer_result(self.apply())
 
     @property
     def places_props(self) -> bool:

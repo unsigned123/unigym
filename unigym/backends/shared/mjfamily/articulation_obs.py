@@ -35,6 +35,13 @@ def refresh_obs_sources(env) -> None:
         for key, value in contacts.items():
             if key in schema:
                 registry.set_contact(key[len("contact/") :], value)
+        # benchmark v2: force/active-body facts are record columns, not
+        # schema observations (the one raw read already produced them).
+        env._last_contact_facts = {
+            key: value
+            for key, value in contacts.items()
+            if key.endswith("/force") or key.endswith("/active_bodies")
+        }
         for name in registry.config.contact:
             if env.contact_manager.has_detail(name):
                 registry.set_contact_detail_provider(

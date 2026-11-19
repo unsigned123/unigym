@@ -13,17 +13,21 @@ contract graphs (same pattern as unigym/scripts/__init__.py).
 from unigym.initializers.base import (
     INITIALIZER_REGISTRY,
     InitializerBase,
+    ResetOutcome,
     ResetPrimitives,
     build_initializer,
     normalize_initializer_spec,
     register,
+    wrap_initializer_result,
 )
 
 __all__ = [
     "INITIALIZER_REGISTRY",
     "InitializerBase",
+    "ResetOutcome",
     "ResetPrimitives",
     "build_initializer",
     "normalize_initializer_spec",
     "register",
+    "wrap_initializer_result",
 ]

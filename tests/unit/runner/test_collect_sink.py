@@ -39,8 +39,8 @@ def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, e
     return sink, records
 
 
-def _bundle(targets, t, projection=None):
-    return {
+def _bundle(targets, t, projection=None, *, step_index=None, time_s=None, reset_state=None):
+    bundle = {
         "t": t,
         "raw": None,
         "targets": targets,
@@ -52,6 +52,47 @@ def _bundle(targets, t, projection=None):
         },
         "cmd": None,
     }
+    if step_index is not None:
+        bundle["step_index"] = step_index
+    if time_s is not None:
+        bundle["time_s"] = time_s
+    if reset_state is not None:
+        bundle["reset_state"] = reset_state
+    return bundle
+
+
+def test_non_filter_path_publishes_episode_local_timeline_and_reset_columns():
+    """CollectSink writes tick 1/time dt (not the global t) + reset facts."""
+    sink, records = _sink()
+    bundle = _bundle(
+        (),
+        500,  # global run tick must not leak into the episode axis
+        step_index=torch.tensor([1], dtype=torch.int64),
+        time_s=torch.tensor([0.02], dtype=torch.float32),
+        reset_state={0: {"reset_index": 0, "reset_valid": False, "reset_reason": "blocked"}},
+    )
+    sink.on_step(500, bundle)
+
+    rec = records[0]
+    assert rec["step_index"].tolist() == [1]
+    assert rec["time_s"].tolist() == pytest.approx([0.02])
+    assert rec["reset_index"].tolist() == [0]
+    assert rec["reset_valid"].tolist() == [0]  # invalid
+    assert rec["reset_reason"] == ["blocked"]
+
+
+def test_non_filter_path_marks_unknown_reset_validity():
+    sink, records = _sink()
+    bundle = _bundle(
+        (),
+        0,
+        step_index=torch.tensor([2], dtype=torch.int64),
+        time_s=torch.tensor([0.04], dtype=torch.float32),
+        reset_state={0: {"reset_index": 0, "reset_valid": None, "reset_reason": None}},
+    )
+    sink.on_step(0, bundle)
+    assert records[0]["reset_valid"].tolist() == [-1]
+    assert records[0]["reset_reason"] == [""]
 
 
 def _body(joint_names, values=None):

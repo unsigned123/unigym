@@ -14,14 +14,38 @@ from .base import (
     build_tasks,
     register,
 )
+from .episode import (
+    EpisodeLimits,
+    RobotIdentity,
+    RunIdentity,
+    timeline_step_index,
+    timeline_time_s,
+)
+from .termination import (
+    EpisodeOutcome,
+    EpisodeTermination,
+    Termination,
+    TerminationExtension,
+    TerminationSource,
+)
 
 __all__ = [
     "TASK_REGISTRY",
     "EpisodeData",
+    "EpisodeLimits",
+    "EpisodeOutcome",
     "EpisodeResult",
+    "EpisodeTermination",
+    "RobotIdentity",
+    "RunIdentity",
     "Task",
+    "Termination",
+    "TerminationExtension",
+    "TerminationSource",
     "build_tasks",
     "register",
+    "timeline_step_index",
+    "timeline_time_s",
 ]
 
 # import side-effect: populate TASK_REGISTRY with the first-party tasks
