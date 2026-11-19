@@ -99,7 +99,7 @@ def contact_candidate_error(
     arg: str,
     patterns: Sequence[str],
     inventory: list[dict],
-    backend: str,
+    family: str,
     reason: str = "matched no bodies",
 ) -> ContactCandidateError:
     """Build the enriched failure (message embeds the full inventory).
@@ -113,7 +113,7 @@ def contact_candidate_error(
     _mark_likely(inventory, tokens)
     lines = [
         f"contact group {group!r}: {arg} {list(patterns)} {reason} "
-        f"-- refusing to guess ({backend} asset).",
+        f"-- refusing to guess ({family} family asset).",
         "discovered:",
     ]
     for entry in inventory:
@@ -205,7 +205,7 @@ def resolve_bucket_names(
     robot_bodies: list[str],
     spec,
     inventory_fn: Optional[InventoryFn] = None,
-    backend: str = "isaaclab",
+    family: str = "isaaclab",
 ) -> list[str]:
     """General-group bucket resolution with the candidate-discovery refusal.
 
@@ -213,6 +213,10 @@ def resolve_bucket_names(
     list (order preserved).  An empty match raises
     :class:`ContactCandidateError` carrying the discovered inventory --
     never a bare "matched nothing".
+
+    ``family`` is a *label* used in the refusal message (e.g.
+    ``"isaaclab"`` -> "isaaclab family asset"), not an env-backend
+    selection: the caller already runs on a canonical backend.
     """
     compiled = [re.compile(p) for p in expected]
     names = [n for n in robot_bodies if any(c.fullmatch(n) for c in compiled)]
@@ -224,7 +228,7 @@ def resolve_bucket_names(
         "sensor_bodies",
         list(expected),
         inventory,
-        backend,
+        family,
         reason="matched no robot body",
     )
 
@@ -235,9 +239,13 @@ def resolve_entry_name(
     spec,
     index: int,
     inventory_fn: Optional[InventoryFn] = None,
-    backend: str = "isaaclab",
+    family: str = "isaaclab",
 ) -> str:
-    """Pairwise-entry resolution (exactly one body) with the same refusal."""
+    """Pairwise-entry resolution (exactly one body) with the same refusal.
+
+    ``family`` is a label for the refusal message, not an
+    env-backend selection (see :func:`resolve_bucket_names`).
+    """
     _, name = split_entry_scope(entry)
     compiled = re.compile(name)
     names = [n for n in robot_bodies if compiled.fullmatch(n)]
@@ -250,7 +258,7 @@ def resolve_entry_name(
         else f"entry {index} ({name!r}) matched no robot body"
     )
     raise contact_candidate_error(
-        spec.name, "sensor_bodies", [name], inventory, backend, reason=reason
+        spec.name, "sensor_bodies", [name], inventory, family, reason=reason
     )
 
 

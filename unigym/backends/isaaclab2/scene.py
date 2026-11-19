@@ -108,7 +108,7 @@ def sim_joint_limits(data, joint_names) -> dict[str, tuple[float, float]] | None
 class IsaacLabSceneOps:
     """Curated scene face over the isaaclab IsaaclabEnv (N=1)."""
 
-    backend = "isaaclab"
+    backend = "isaaclab2"
 
     def __init__(self, env, robot_name: str, camera_names=None):
         self.env = env

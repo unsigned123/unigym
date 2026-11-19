@@ -354,13 +354,15 @@ def add_probe_subparser(sub) -> None:
         "instead (release: `unigym resume "
         "latest`).",
     )
+    from unigym.backends.registry import CANONICAL_BACKENDS
+
     p.add_argument("config", help="run yaml (mujoco recommended for probes)")
     p.add_argument(
         "-b",
         "--backend",
-        choices=["isaaclab", "mujoco"],
+        choices=CANONICAL_BACKENDS,
         default=None,
-        help="override yaml env.backend",
+        help="override yaml env.backend (default: read from yaml)",
     )
     p.add_argument(
         "--steps", type=int, default=None, help="passthrough --steps (collect.steps override)"

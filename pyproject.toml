@@ -179,7 +179,12 @@ ignore_imports = [
 name = "isaaclab backends stay out of the MuJoCo family"
 type = "forbidden"
 allow_indirect_imports = true
-source_modules = ["unigym.backends.isaaclab2", "unigym.backends.isaaclab3"]
+source_modules = [
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_newton",
+    "unigym.backends.shared.isaaclab3_common",
+]
 forbidden_modules = [
     "unigym.backends.mujoco",
     "unigym.backends.mujoco.**",
@@ -197,8 +202,12 @@ source_modules = ["unigym.backends.mujoco", "unigym.backends.mjwarp"]
 forbidden_modules = [
     "unigym.backends.isaaclab2",
     "unigym.backends.isaaclab2.**",
-    "unigym.backends.isaaclab3",
-    "unigym.backends.isaaclab3.**",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_physx.**",
+    "unigym.backends.isaaclab3_newton",
+    "unigym.backends.isaaclab3_newton.**",
+    "unigym.backends.shared.isaaclab3_common",
+    "unigym.backends.shared.isaaclab3_common.**",
 ]
 
 [[tool.importlinter.contracts]]
@@ -216,11 +225,67 @@ source_modules = [
     "unigym.scenes",
     "unigym.adapters",
     "unigym.backends.isaaclab2",
-    "unigym.backends.isaaclab3",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_newton",
 ]
 forbidden_modules = [
     "unigym.backends.shared.mjfamily",
     "unigym.backends.shared.mjfamily.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "shared.isaaclab3_common is private to the IsaacLab 3 backends"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "unigym.core",
+    "unigym.model",
+    "unigym.run",
+    "unigym.props",
+    "unigym.cameras",
+    "unigym.contacts",
+    "unigym.director",
+    "unigym.scenes",
+    "unigym.adapters",
+    "unigym.backends.mujoco",
+    "unigym.backends.mjwarp",
+    "unigym.backends.isaaclab2",
+    "unigym.backends.shared.mjfamily",
+]
+forbidden_modules = [
+    "unigym.backends.shared.isaaclab3_common",
+    "unigym.backends.shared.isaaclab3_common.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "shared.isaaclab3_common stays a library, not a backend"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.backends.shared.isaaclab3_common"]
+forbidden_modules = [
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab2.**",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_physx.**",
+    "unigym.backends.isaaclab3_newton",
+    "unigym.backends.isaaclab3_newton.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "IsaacLab 2 and the IsaacLab 3 identities stay independent"
+type = "independence"
+modules = [
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_newton",
+]
+
+[[tool.importlinter.contracts]]
+name = "engine-family shared libraries stay independent"
+type = "independence"
+modules = [
+    "unigym.backends.shared.mjfamily",
+    "unigym.backends.shared.isaaclab3_common",
 ]
 
 [tool.setuptools]

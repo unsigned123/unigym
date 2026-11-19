@@ -33,7 +33,7 @@ from unigym.actuators.ir import (
     validate_actuation_group,
     validate_drive_law_matrix,
 )
-from unigym.backends.registry import BackendInfo, backend_info
+from unigym.backends.registry import BackendInfo, backend_info, select_backend
 from unigym.benchmarks import build_tasks
 from unigym.env.backends import build_env_backend
 from unigym.filters import build_filter_chain
@@ -84,6 +84,13 @@ if TYPE_CHECKING:
     from unigym.watchers.timeline import EventLog, TimelineSink
 
     from .instance import RunEnv
+
+
+#: Backends whose explicit selection is verified against the live stack
+#: before any env construction (missing stack/wrong major/newton extra ->
+#: ``BackendSelectionError``).  The mujoco family keeps its historical build
+#: path: a d0-style run must stay buildable without an engine probe.
+_ISAACLAB_FAMILY_BACKENDS = frozenset({"isaaclab2", "isaaclab3_physx", "isaaclab3_newton"})
 
 
 @runtime_checkable
@@ -1490,10 +1497,10 @@ def _build_sinks(
     # episodes directed): status_fn wires in after the bridge exists
     director: Director | None = None
     if spec.direct:
-        from unigym.backends.registry import backend_info, build_name
+        from unigym.backends.registry import backend_info
         from unigym.director import Director
 
-        info = backend_info(build_name(spec.backend))
+        info = backend_info(spec.backend)
         director = Director(
             env=env,
             contact_manager=contact_manager,
@@ -1773,6 +1780,15 @@ def build_instance(spec: RunSpec) -> RunInstance:
     backend_label = spec.backend
     _reject_removed_actuator_sources(cfg)
     info = backend_info(backend_label)
+    # Explicit selection is verified at the build boundary for the isaaclab
+    # family: a missing stack / wrong major / missing newton extra raises
+    # ``BackendSelectionError`` here instead of surfacing later as a
+    # ``TypeError`` on ``env_kwargs is None``.  The returned canonical name is
+    # re-resolved so downstream faces use the verified identity.
+    if info.name in _ISAACLAB_FAMILY_BACKENDS:
+        canonical = select_backend(info.name)
+        info = backend_info(canonical)
+        backend_label = canonical
     mode = spec.mode
     pack_runtime = spec.pack_runtime
     if mode in ("benchmark", "both") and pack_runtime is None:

@@ -14,8 +14,10 @@ Those are separate artifacts; the public docs are being rewritten.
 - `unigym/**` framework code (simulation core, run API, backends, props,
   cameras, contacts, runners, trace, web UI package data).
 - One adapter: `unigym.adapters.manual.ManualAdapter` for user-driven loops.
-- Three backends: `mujoco`, `mjwarp` (optional extra), `isaaclab2`.
-  `isaaclab3` is an early-access skeleton and is incomplete.
+- Five canonical backends: `mujoco`, `mjwarp` (optional extra), `isaaclab2`,
+  `isaaclab3_physx`, `isaaclab3_newton`. The two `isaaclab3_*` identities are
+  P1 scaffolding: the canonical names and lanes exist, but neither implements
+  a capability yet.
 - Scene data uses the `scene_presets` pack face (provider code is declared on
   the `providers` face with `kind: scene`); run configs reference it with the
   `scene_preset:` key. The removed `scenes` face and `scene:` key have no
@@ -48,10 +50,32 @@ surface.
 
 | Backend | State | Notes |
 |---|---|---|
-| `mujoco` | Supported | CPU host lane; the default and most complete backend. |
+| `mujoco` | Supported | CPU host lane; the most complete backend. |
 | `mjwarp` | Optional | Install the `warp` extra; treated as an optional/nightly lane. |
-| `isaaclab2` | Supported in container | Requires an Isaac Lab environment; not a host-only install. |
-| `isaaclab3` | Early access | Skeleton only; interfaces may still change. |
+| `isaaclab2` | Supported in container | Requires an Isaac Lab 2 environment; not a host-only install. |
+| `isaaclab3_physx` | P1 scaffolding | Canonical backend identity and lane only; no capability is implemented yet. |
+| `isaaclab3_newton` | P1 scaffolding | Canonical backend identity and lane only; no capability is implemented yet. |
+
+The backend surface is canonical-only. `backend` is **required**, and its value
+must be exactly one of the five names above. `backend: isaaclab` and
+`backend: isaaclab3` are **not aliases** and are rejected with a teaching
+error.
+
+Migration:
+
+- **Configs**: configs that omitted `backend` or used `isaaclab` /
+  `isaaclab3` must choose `isaaclab2`, `isaaclab3_physx` or
+  `isaaclab3_newton` explicitly; there is no version-based family
+  auto-selection or silent fallback.
+- **Python API**: `BACKEND_ALIASES` is removed. `build_name(None)`,
+  `Run(backend=None)` and `build_env_backend(None)` no longer have an implicit
+  default; pass a canonical name explicitly. `isaaclab` and `isaaclab3` are
+  rejected like any unknown spelling, not resolved as aliases.
+- **Executor `backends:` bindings**: binding keys are canonical too. Rename a
+  legacy `backends: {isaaclab: ...}` key to the concrete backend(s) it serves
+  (`isaaclab2`, `isaaclab3_physx` and/or `isaaclab3_newton`). The executor
+  **name** `"isaaclab"` is unchanged (it is the docker image face), so
+  `backends: {isaaclab2: isaaclab}` remains valid.
 
 ## Install
 

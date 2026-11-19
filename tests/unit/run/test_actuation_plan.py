@@ -146,7 +146,7 @@ def test_plan_accepts_direct_drive_laws_on_mujoco_family(target, law):
     assert [row.group.law for row in plans["arm"]] == [law]
 
 
-@pytest.mark.parametrize("backend", ["isaaclab2", "isaaclab3"])
+@pytest.mark.parametrize("backend", ["isaaclab2", "isaaclab3_physx", "isaaclab3_newton"])
 @pytest.mark.parametrize(
     "law",
     ["computed_torque_pd", "direct_torque", "direct_velocity"],

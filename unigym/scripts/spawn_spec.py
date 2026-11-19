@@ -44,6 +44,7 @@ from pathlib import Path
 import yaml
 
 from unigym import runtime_dirs
+from unigym.backends.registry import CANONICAL_BACKENDS, build_name
 from unigym.executors import (  # noqa: F401 (docker synthesis home)
     Executor,
     collect_cli_in_container,
@@ -85,7 +86,7 @@ _DEFAULTS = {
 }
 
 _SUMMARY_MARKER = "[collect] summary:"
-BACKENDS = ("isaaclab", "mujoco")
+BACKENDS = CANONICAL_BACKENDS
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -124,11 +125,25 @@ def runs_root(cfg: dict | None = None) -> Path:
 
 
 def resolve_backend(cfg_path: Path, override: str | None) -> str:
-    if override:
-        return override
+    """The canonical env backend (explicit override wins over env.backend).
+
+    Canonical-only: ``isaaclab`` / ``isaaclab3``, missing/blank and unknown
+    spellings raise ``ValueError`` listing the five names (no aliases, no
+    silent default).
+    """
+    if override is not None:
+        return build_name(override)
     with open(cfg_path) as f:
         y = yaml.safe_load(f) or {}
-    return (y.get("env") or {}).get("backend", "isaaclab")
+    backend = (y.get("env") or {}).get("backend")
+    if backend is None or not str(backend).strip():
+        raise ValueError(
+            f"config {cfg_path}: 'env.backend' is missing/empty; set it to "
+            f"one of: {', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were "
+            f"removed)"
+        )
+    return build_name(backend)
 
 
 def out_dir_for(cfg: dict, cfg_path: Path, passthrough: list[str]) -> Path:
@@ -217,7 +232,7 @@ def worker_args(serve_camera: str | None, state_dir: str, log_path: Path | None)
 # --------------------------------------------------------------------------- #
 @dataclass
 class SpawnSpec:
-    backend: str  # isaaclab | mujoco
+    backend: str  # canonical: mujoco | mjwarp | isaaclab2 | isaaclab3_*
     argv: list[str]  # full host-view command (nohup included)
     config: Path
     out_dir: Path
@@ -307,7 +322,11 @@ def build_spawn(
     passthrough = list(passthrough or [])
     backend = resolve_backend(config_path, backend)
     if backend not in BACKENDS:
-        raise ValueError(f"unknown backend: {backend}")
+        raise ValueError(
+            f"unknown backend {backend!r}; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were removed)"
+        )
 
     # bg runs get their log up front so the SHM worker can carry the path
     # into registry v2 (the daemon view survives daemon restarts).
@@ -398,6 +417,12 @@ def cmd_probe(a, extra: list[str]) -> int:
     module = f"unigym.scripts.probe_{a.name}"
     from unigym.backends.registry import backend_info
 
+    if getattr(a, "backend", None) is None:
+        raise SystemExit(
+            "[unigym probe-mod] error: -b/--backend is required; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were removed)"
+        )
     info = backend_info(a.backend)
     if info.probe_in_host:
         cmd = [cfg["venv_python"], "-m", module] + extra

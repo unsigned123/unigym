@@ -234,28 +234,38 @@ def _build_actuators(spec: PropSpec, c: dict) -> dict:
     return _spawn_module()._build_actuators(spec, c)
 
 
-def _prop_backend(backend: str | None = None) -> PropBackendCap:
+def _prop_backend(backend: str | None) -> PropBackendCap:
     """Resolve a backend's prop face through the registry.
 
-    ``backend=None`` resolves the historical isaaclab build face (the
-    direct-construction default); the registry factory keeps every engine
-    import inside the backend module.
+    ``backend`` is a required canonical env backend (no family alias and no
+    ``None`` default); the registry factory keeps every engine import inside
+    the backend module.
     """
-    from ..backends.registry import backend_info, build_name
+    from ..backends.registry import CANONICAL_BACKENDS, backend_info, build_name
 
-    info = backend_info(build_name(backend))
+    if backend is None or not str(backend).strip():
+        raise ValueError(
+            f"props: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
+        )
+    canonical = build_name(backend)
+    info = backend_info(canonical)
     factory = info.prop_backend
     if factory is None:
         raise ValueError(
-            f"backend {build_name(backend)!r} has no prop backend face "
-            f"(hint: use mujoco/mjwarp/isaaclab)"
+            f"backend {canonical!r} has no prop backend face "
+            f"(available: {', '.join(CANONICAL_BACKENDS)})"
         )
     return cast("PropBackendCap", factory())
 
 
 def _compat_class(name: str) -> type:
-    """Resolve a legacy public handler class name."""
-    return _prop_backend(None).compat(name)
+    """Resolve a legacy public handler class name.
+
+    The legacy class-name vocabulary is the IsaacLab 2.x handler table, so
+    this compatibility surface pins the canonical ``isaaclab2`` backend
+    explicitly -- it is not an env-backend default or family alias.
+    """
+    return _prop_backend("isaaclab2").compat(name)
 
 
 def _resolve_urdf_path(path: str, base_dir: str | None) -> str:

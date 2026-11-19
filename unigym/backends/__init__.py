@@ -3,8 +3,9 @@
 Layout (docs/designs/backend-traits.md §R.2):
 
 * ``unigym/backends/registry.py`` — the Trait enum, ``BackendInfo``,
-  the per-backend trait tables and the import-probe backend selection
-  (``mujoco`` / ``isaaclab2`` / ``isaaclab3`` — three equal backends).
+  the per-backend trait tables and canonical-only backend selection
+  (``mujoco`` / ``mjwarp`` / ``isaaclab2`` / ``isaaclab3_physx`` /
+  ``isaaclab3_newton`` — equal backends, no aliases).
 * ``unigym/backends/<backend>/`` — that backend's implementation of the
   per-capability Protocols (which live on the capability side, e.g.
   ``unigym/env/backends/base.py``, ``unigym/cameras/base.py``).
@@ -19,29 +20,37 @@ nowhere else in ``unigym/`` (see ``tests/test_arch.py``).
 from __future__ import annotations
 
 from .registry import (
-    BACKEND_ALIASES,
     CANONICAL_BACKENDS,
     BackendInfo,
     BackendSelectionError,
+    StackProbe,
     Trait,
     backend_info,
+    build_name,
     isaaclab_version,
     known_backends,
     mujoco_version,
     mujoco_warp_version,
+    newton_version,
     select_backend,
+    selection_error,
+    warp_version,
 )
 
 __all__ = [
-    "BACKEND_ALIASES",
     "CANONICAL_BACKENDS",
     "BackendInfo",
     "BackendSelectionError",
+    "StackProbe",
     "Trait",
     "backend_info",
+    "build_name",
     "isaaclab_version",
     "known_backends",
     "mujoco_version",
     "mujoco_warp_version",
+    "newton_version",
     "select_backend",
+    "selection_error",
+    "warp_version",
 ]

@@ -1,9 +1,10 @@
 """PropManager: interactive prop scene + state manager (neutral face).
 
 ``build_prop_manager(config, num_envs, env_spacing, device, base_dir,
-backend=None)`` returns a :class:`PropManager` for a yaml ``props:``
+backend)`` returns a :class:`PropManager` for a yaml ``props:``
 section, or ``None`` when the section is absent / disabled / declares no
-types -- so callers can treat the result uniformly.
+types -- so callers can treat the result uniformly.  ``backend`` is the
+explicit canonical env backend (no alias and no default).
 
 The handler implementations are backend-owned: the concrete
 IsaacLab handlers live in ``unigym.backends.isaaclab2.props.handlers`` and
@@ -67,10 +68,16 @@ def __getattr__(name: str):
 
 
 def _dispatch_handler(spec: PropSpec) -> type[PropHandler]:
-    """Pick the handler class for a PropSpec through the backend registry."""
+    """Pick the handler class for a PropSpec through the backend registry.
+
+    The public class-name vocabulary is the IsaacLab 2.x handler table, so
+    this legacy compatibility surface pins the canonical ``isaaclab2``
+    backend explicitly (not an env-backend default or family alias).  It is
+    used for declaration validation only.
+    """
     from .base import _prop_backend
 
-    return _prop_backend(None).handler_for(spec)
+    return _prop_backend("isaaclab2").handler_for(spec)
 
 
 def build_prop_manager(
@@ -86,9 +93,9 @@ def build_prop_manager(
 
     Returns ``None`` when the section is missing, ``enabled`` is false, or
     it declares no types -- so callers can treat the result uniformly.
-    ``backend`` selects the handler registry (default: the isaaclab face,
-    preserving the historical direct-construction behaviour).  ``asset_plan``
-    is the composition boundary that resolves template-emitted asset files.
+    ``backend`` is the explicit canonical env backend (no alias and no
+    default).  ``asset_plan`` is the composition boundary that resolves
+    template-emitted asset files.
     """
     if not config:
         return None
@@ -96,6 +103,12 @@ def build_prop_manager(
         return None
     if not config.get("types"):
         return None
+    if backend is None or not str(backend).strip():
+        from unigym.backends.registry import CANONICAL_BACKENDS
+
+        raise ValueError(
+            f"props: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
+        )
     return PropManager(
         config,
         num_envs=num_envs,

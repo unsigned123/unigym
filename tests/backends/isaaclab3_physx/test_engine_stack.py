@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from unigym.backends import registry
 
 
@@ -11,6 +13,19 @@ def test_registry_probes_isaaclab_3() -> None:
     version = registry.isaaclab_version()
     assert version is not None
     assert version[0] >= 3
+
+
+def test_registry_selects_the_physx_identity() -> None:
+    assert registry.select_backend("isaaclab3_physx") == "isaaclab3_physx"
+    assert registry.build_name("isaaclab3_physx") == "isaaclab3_physx"
+    assert "isaaclab3" not in registry.CANONICAL_BACKENDS
+    assert "isaaclab" not in registry.CANONICAL_BACKENDS
+
+    for alias in ("isaaclab3", "isaaclab"):
+        with pytest.raises(ValueError, match=r"aliases were removed"):
+            registry.build_name(alias)
+        with pytest.raises(registry.BackendSelectionError):
+            registry.select_backend(alias)
 
 
 def test_physx_physics_cfg_constructs() -> None:

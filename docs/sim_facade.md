@@ -106,8 +106,11 @@ SimulationBuilder(
 )
 ```
 
-- `backend` must be a registered backend name. The lookup never builds a
-  backend.
+- `backend` is required and must be one of the five canonical names:
+  `mujoco`, `mjwarp`, `isaaclab2`, `isaaclab3_physx`, `isaaclab3_newton`.
+  `isaaclab` and `isaaclab3` are not aliases and are rejected. The lookup never
+  builds a backend; the two `isaaclab3_*` P1 stubs are outside the facade spike
+  claim.
 - Exactly one of `physics_dt` / `substeps` is required and
   `dt == physics_dt * substeps` must hold with exact float arithmetic
   (`abs_tol=1e-12`). There is no silent re-quantization.
@@ -401,7 +404,7 @@ In scope for `SIM_API_VERSION = 4`:
   `isaaclab2` at `N ∈ {1, 2}` (full dog lane unverified): explicit `(N, dim)`
   actions, the per-env named form, `reset(env_ids=...)`, and due/terminated
   reporting with `step` never resetting a row.
-- `mujoco` and `isaaclab2` backend acceptance; `mjwarp` and `isaaclab3` are
+- `mujoco` and `isaaclab2` backend acceptance; `mjwarp` and the `isaaclab3_*` stubs are
   not part of the spike claim (`mjwarp` supports `N > 1`; it is out of this
   spike's lane/fixture scope, not out of capability).
 - Explicit `from_config` semantic loading.

@@ -67,34 +67,43 @@ def _quat_mul_batch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return cast(torch.Tensor, quat.mul(a, b))
 
 
-def build_neutral_rig(spec: CameraSpec, render_groups=None):
-    """Engine-neutral compatibility name for the IsaacLab rig builder.
+def build_neutral_rig(spec: CameraSpec, backend: str, render_groups=None):
+    """Engine-neutral compatibility name for the rig builders.
 
-    Kept neutral: the rig classes moved into
-    ``backends/isaaclab2/cameras`` and this name resolves that backend
-    factory through the registry, exactly like :func:`build_rig`.
+    Kept neutral in the sense that it names no engine: the rig classes live
+    in the backend packages and this name resolves *backend*'s factory
+    through the registry, exactly like :func:`build_rig`.  The backend is
+    explicit (canonical; no alias and no default).
     """
-    return build_rig(spec, backend="isaaclab", render_groups=render_groups)
+    return build_rig(spec, backend=backend, render_groups=render_groups)
 
 
-def build_rig(spec: CameraSpec, backend: str = "isaaclab", render_groups=None) -> CameraRig:
+def build_rig(spec: CameraSpec, backend: str, render_groups=None) -> CameraRig:
     """Factory: rig instance from the spec's ``rig.type``.
 
-    ``backend`` selects the sensor stack through the registry's lazy
-    ``camera_backend`` face: ``isaaclab`` (default; the backend
-    CameraCfg/TiledCameraCfg rigs), ``mujoco`` (M2b: MjSpec-injected
-    ``<camera>`` + ``mujoco.Renderer``) or ``mjwarp`` (C3: N=1 delegates
-    to that same mirror renderer, N>1 uses the native warp batch renderer).
+    ``backend`` (required canonical env backend) selects the sensor stack
+    through the registry's lazy ``camera_backend`` face: ``mujoco`` (M2b:
+    MjSpec-injected ``<camera>`` + ``mujoco.Renderer``), ``mjwarp`` (C3:
+    N=1 delegates to that same mirror renderer, N>1 uses the native warp
+    batch renderer) or the IsaacLab identities (``isaaclab2`` /
+    ``isaaclab3_physx`` / ``isaaclab3_newton``; the backend CameraCfg /
+    TiledCameraCfg rigs).  There is no family alias and no default.
     ``render_groups``: optional per-config geom-class override for the
     capture flags face (camera_contract §14; mujoco-only in v1).
     """
-    from ..backends.registry import backend_info, build_name
+    from ..backends.registry import CANONICAL_BACKENDS, backend_info, build_name
 
-    factory = backend_info(build_name(backend)).camera_backend
+    if backend is None or not str(backend).strip():
+        raise ValueError(
+            f"camera rig: env backend is required; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)}"
+        )
+    canonical = build_name(backend)
+    factory = backend_info(canonical).camera_backend
     if factory is None:
         raise ValueError(
-            f"camera {spec.name!r}: backend {backend!r} has no camera "
-            f"rig factory (hint: use mujoco/mjwarp/isaaclab)"
+            f"camera {spec.name!r}: backend {canonical!r} has no camera "
+            f"rig factory (available: {', '.join(CANONICAL_BACKENDS)})"
         )
     rig_factory = cast(Callable[..., object], factory())
     return cast(CameraRig, rig_factory(spec, render_groups=render_groups))

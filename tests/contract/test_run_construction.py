@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from unigym.backends.registry import BackendSelectionError, isaaclab_version
 from unigym.errors import ConfigError
 from unigym.robots import register_robot, restore_robot_registry, snapshot_robot_registry
 from unigym.run.api import Run
@@ -33,9 +34,30 @@ def test_minimal_construction_without_robot_fails():
         Run.minimal(world=_world())
 
 
+def test_minimal_construction_requires_an_explicit_backend():
+    """There is no implicit backend default; the hint lists the canonical names."""
+    with pytest.raises(ConfigError, match=r"backend is required") as excinfo:
+        Run(world=_world(), robot="fixture_arm")
+
+    message = str(excinfo.value)
+    for canonical in (
+        "mujoco",
+        "mjwarp",
+        "isaaclab2",
+        "isaaclab3_physx",
+        "isaaclab3_newton",
+    ):
+        assert canonical in message
+
+
 def test_minimal_construction_accepts_explicit_robot():
     """An explicit registered robot name remains valid."""
-    run = Run(world=_world(), robot="fixture_arm", observations={"robot": ["fixture_arm"]})
+    run = Run(
+        world=_world(),
+        robot="fixture_arm",
+        backend="mujoco",
+        observations={"robot": ["fixture_arm"]},
+    )
 
     assert run.cfg["articulations"][0]["name"] == "fixture_arm"
 
@@ -81,6 +103,7 @@ def test_robot_declaration_dict_passes_actuation_through():
     run = Run(
         world=_world(),
         robot={"name": "fixture_arm", "actuation": actuation},
+        backend="mujoco",
         observations={"robot": ["fixture_arm"]},
     )
 
@@ -89,7 +112,12 @@ def test_robot_declaration_dict_passes_actuation_through():
 
 def test_bare_robot_string_live_build_fails_the_actuation_hard_cut():
     """Run(robot=...) stays representable but carries no actuation to build."""
-    run = Run(world=_world(), robot="fixture_arm", observations={"robot": ["fixture_arm"]})
+    run = Run(
+        world=_world(),
+        robot="fixture_arm",
+        backend="mujoco",
+        observations={"robot": ["fixture_arm"]},
+    )
 
     with pytest.raises(ValueError, match="no `actuation`"):
         run.build()
@@ -130,6 +158,18 @@ def test_live_build_rejects_removed_gain_env_params(key):
     """The removed env actuator/gain channels fail before construction."""
     with pytest.raises(ValueError, match="removed actuator/gain keys"):
         Run(_live_cfg(**{key: {}})).build()
+
+
+def test_live_build_isaaclab3_without_stack_raises_selection_error():
+    """A missing IsaacLab stack is a selection error, not an internal TypeError."""
+    if isaaclab_version() is not None:
+        pytest.skip("requires the d0 base environment without an IsaacLab stack")
+
+    cfg = _live_cfg()
+    cfg["env"]["backend"] = "isaaclab3_physx"
+
+    with pytest.raises(BackendSelectionError, match="isaaclab stack"):
+        Run(cfg).build()
 
 
 def test_spec_rejects_the_removed_camera_depth_key():

@@ -30,7 +30,7 @@ examples. Its declaration is deliberately empty (`fragment() == {}`): the
 | --- | --- |
 | `mujoco`, `mjwarp` | `world_base: {mjcf: unigym/assets/worlds/flat_ground.xml}` |
 | `isaaclab2` | `terrain: {name: flat, params: {}}` |
-| any backend with neither a `world_base` consumer nor a native flat terrain (e.g. the `isaaclab3` stub) | fails fast with `ConfigError`; the world would otherwise silently contribute no ground |
+| any backend with neither a `world_base` consumer nor a native flat terrain (e.g. the `isaaclab3_*` stubs) | fails fast with `ConfigError`; the world would otherwise silently contribute no ground |
 
 An explicit world declaration wins: when the caller also sets `world_base`
 or `scene_preset` (or `terrain` for a terrain backend), the flat declaration
@@ -70,5 +70,6 @@ Go2 (and every other single-robot flat-world profile) keeps the asset's
   non-empty world asset, so it still rejects `World.flat()` with
   `NoWorldError`. Use `Run(world=World.flat(), ...)` for flat RL tasks until
   the facade gains a world-less declaration form.
-- The `isaaclab3` backend is a stub with an empty trait set and no ground
-  consumer; `World.flat()` on it is a loud `ConfigError` by design.
+- The `isaaclab3_physx` / `isaaclab3_newton` backends are P1 stubs (canonical
+  names with an empty registered trait set) and have no ground consumer;
+  `World.flat()` on either is a loud `ConfigError` by design.

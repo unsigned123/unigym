@@ -47,7 +47,7 @@ def build_isaaclab_rig(spec: CameraSpec, render_groups=None):
     """IsaacLab rig factory: rig instance from the spec's ``rig.type``.
 
     Resolved through :attr:`BackendInfo.camera_backend` for
-    ``isaaclab2``/``isaaclab3``; ``render_groups`` is accepted for the
+    ``isaaclab2``/``isaaclab3_*``; ``render_groups`` is accepted for the
     registry face signature (mujoco-only in v1).
     """
     del render_groups

@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 
+def test_registry_selects_the_newton_identity() -> None:
+    from unigym.backends import registry
+
+    assert registry.select_backend("isaaclab3_newton") == "isaaclab3_newton"
+    assert registry.newton_version() is not None
+
+
 def test_newton_physics_cfg_constructs() -> None:
     from isaaclab.sim.simulation_cfg import SimulationCfg
     from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg

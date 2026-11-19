@@ -120,13 +120,16 @@ def build_scene_ops(
     validated here before any backend import.  The implementations live in the
     backend packages -- lazy function-body imports keep this module engine-free.
     """
-    from ..backends.registry import BackendSelectionError, backend_info
+    from ..backends.registry import BackendSelectionError, CANONICAL_BACKENDS, backend_info
 
     name = require_robot_name(robot_name)
     try:
         info = backend_info(backend)
     except BackendSelectionError as e:
-        raise ValueError(f"scene face: unknown backend {backend!r} " "(mujoco | isaaclab)") from e
+        raise ValueError(
+            f"scene face: unknown backend {backend!r}; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)}"
+        ) from e
     if info.scene_ops is None:
         raise ValueError(f"scene face: backend {backend!r} declares no " "scene_ops face")
     # The registry entry is a no-arg factory returning the backend's SceneOps

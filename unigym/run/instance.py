@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from unigym.backends.registry import Trait, backend_info, build_name
+from unigym.backends.registry import CANONICAL_BACKENDS, Trait, backend_info
 
 from .spec import RunSpec
 
@@ -218,26 +218,32 @@ class RunInstance:
         """Return the live backend's unstable native escape hatch.
 
         Args:
-            backend: A backend spelling (canonical or the legacy
-                ``isaaclab`` alias); it is canonicalized and must match this
-                run's live backend.
+            backend: A canonical backend name; it must match this run's live
+                backend.  The removed ``isaaclab`` / ``isaaclab3`` aliases are
+                rejected (no silent resolution).
 
         Returns:
             A :class:`~unigym.env.native.NativeHandle` of identity
             references (external packs only; unstable).
 
         Raises:
-            ValueError: *backend* does not match the live backend.
+            ValueError: *backend* is not canonical, or does not match the live
+                backend.
             NotImplementedError: The live backend does not declare the
                 ``NATIVE_HANDLE`` trait (or exposes no native method).
         """
-        live = build_name(self.spec.backend)
-        requested = build_name(backend)
+        live = self.spec.backend
+        if not isinstance(backend, str) or backend not in CANONICAL_BACKENDS:
+            raise ValueError(
+                f"native(backend={backend!r}) is not a canonical backend | "
+                f"hint: pass exactly one of: {', '.join(CANONICAL_BACKENDS)} "
+                "(the 'isaaclab' / 'isaaclab3' aliases were removed)"
+            )
+        requested = backend
         if requested != live:
             raise ValueError(
                 f"native(backend={backend!r}) does not match this run's live "
-                f"backend {self.spec.backend!r} (canonical: requested "
-                f"{requested!r}, live {live!r})"
+                f"backend {live!r} (canonical requested {requested!r})"
             )
         if Trait.NATIVE_HANDLE not in backend_info(live).traits:
             raise NotImplementedError(
@@ -265,7 +271,7 @@ class RunInstance:
         """
         if self._closed:
             raise RuntimeError("RunInstance is closed: model edits need a live backend")
-        live = build_name(self.spec.backend)
+        live = self.spec.backend
         if Trait.MODEL_EDIT not in backend_info(live).traits:
             raise NotImplementedError(
                 f"backend {live!r} does not declare the MODEL_EDIT trait "

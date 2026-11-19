@@ -1,8 +1,8 @@
 # Design brief: IsaacLab 3 backends (PhysX + Newton)
 
-Status: G2 approved (Q1-Q6 confirmed). Target stack: IsaacLab 3.0.0rc1 /
-Isaac Sim 6.1.0.0 / Kit 110.3.0 / Newton 1.6.1 / MuJoCo-Warp 3.12 / Warp 1.17 /
-Python 3.12.
+Status: G2 approved (Q1-Q6 confirmed; Q1 revised 2026-11-19 to remove all
+aliases). Target stack: IsaacLab 3.0.0rc1 / Isaac Sim 6.1.0.0 / Kit 110.3.0 /
+Newton 1.6.1 / MuJoCo-Warp 3.12 / Warp 1.17 / Python 3.12.
 
 ## Goal
 
@@ -16,13 +16,17 @@ contacts, props, director, terrain, events). Engine-neutral and IsaacLab-3.x
 implementation lives **once** in
 `unigym/backends/shared/isaaclab3_common/`; each backend package owns only its
 `EngineProfile` values and genuinely engine-only adapters. The repo-internal
-`wxyz` quaternion invariant is preserved at the data boundary. `isaaclab3`
-remains a supported spelling (alias to `isaaclab3_physx`); `isaaclab`
-auto-routing keeps PhysX as the default.
+`wxyz` quaternion invariant is preserved at the data boundary.
 
-The user-visible outcome: a config can select `backend: isaaclab3_physx` or
-`backend: isaaclab3_newton` and get honest capability gating, no silent
-fallback, and one implementation to maintain.
+The backend surface is **canonical-only**: `mujoco`, `mjwarp`, `isaaclab2`,
+`isaaclab3_physx`, `isaaclab3_newton`.  There are no `isaaclab` or `isaaclab3`
+aliases and no version-based family auto-selection; `backend` is required and
+an omitted/ambiguous value is a teaching error.  Selection verifies the
+explicitly chosen stack and never silently falls back.
+
+The user-visible outcome: a config selects exactly one backend
+(`backend: isaaclab3_physx` or `backend: isaaclab3_newton`) and gets honest
+capability gating, no silent fallback, and one implementation to maintain.
 
 ## Non-goals
 
@@ -90,9 +94,10 @@ unigym/backends/isaaclab3_newton/                         - Newton backend ident
   launcher.py                                             - kit launcher (same launch path in this slice)
   registry_faces.py                                       - engine-owned factories + Newton-only adapters
 
-unigym/backends/isaaclab3/                                - REMOVE in P1 (Q1 approved: symmetric names);
-                                                             P0 keeps it as the probe target
-unigym/backends/registry.py                               - trait tables, factories, aliases, probes
+unigym/backends/isaaclab3/                                - REMOVED in P1a; replaced by the two
+                                                             canonical backend packages
+unigym/backends/registry.py                               - trait tables, factories, canonical-only
+                                                             names, StackProbe/selection_error
 unigym/backends/__init__.py                               - dependency-direction docs
 pyproject.toml                                            - import-linter contracts
 ci/compat.toml                                            - environments + lanes (nightly in P4)
@@ -143,11 +148,21 @@ docs/testing.md                                           - lane/env/marker tabl
     `CONTACTS_OVERRIDE` stay absent until proven.
 - **`CANONICAL_BACKENDS`** (changed): `mujoco`, `mjwarp`, `isaaclab2`,
   `isaaclab3_physx`, `isaaclab3_newton`.
-- **Aliases** (changed): `isaaclab3` -> `isaaclab3_physx`; `isaaclab` auto
-  -> PhysX for the 3.x major, unchanged for 2.x.
+- **Aliases** (removed): no `isaaclab` / `isaaclab3` alias and no version-based
+  family auto-selection.  `backend` is required; `None`, `""`, `isaaclab` and
+  `isaaclab3` are rejected with a hint listing the five canonical names.
+- **Selection decision** (new): a pure `StackProbe` value object plus
+  `selection_error(canonical, probe)` decide stack presence/version errors.
+  `select_backend(canonical)` is the only probe-backed entry; unit tests feed
+  fake probes to the pure decision function (no monkeypatching).
 - **Probes** (changed): `isaaclab3_newton` requires `isaaclab >= 3` **and**
   importable `newton` / `mujoco-warp` / `warp`. `isaaclab3_physx` requires
-  only `isaaclab >= 3`. Failures raise `BackendSelectionError{error, hint}`.
+  only `isaaclab >= 3`. `isaaclab2` requires `isaaclab < 3`. Failures raise
+  `BackendSelectionError{error, hint}`.
+- **Build boundary**: `build_instance` verifies the explicitly chosen
+  backend's stack before constructing any env; the P1 stubs expose an
+  `env_kwargs` factory that raises a teaching `NotImplementedError`, never an
+  internal `TypeError`.
 - **`BackendInfo`** (unchanged fields in this slice): both entries fill
   `options_schema` (Newton: solver/substeps; PhysX: empty), `scopes` only where
   `max_envs` genuinely narrows, `camera_enable_required` (True for PhysX;
@@ -159,7 +174,7 @@ docs/testing.md                                           - lane/env/marker tabl
 
 ```text
 yaml/run spec
-  -> registry.select_backend(name)            # alias/version/newton probe
+  -> registry.select_backend(canonical)       # explicit stack/newton probe
   -> registry.BACKEND_INFO[canonical].traits  # fail-fast capability gate
   -> backend package factories (env_kwargs, terrain, events, cameras, contacts,
      props, director, robot realizer, kit launcher)
@@ -188,7 +203,8 @@ Invariants:
    `isaaclab3_newton`, or mujoco-family packages.
 3. `isaaclab3_physx` and `isaaclab3_newton` never import each other.
 4. No module-level `isaaclab` / `pxr` / `omni` import outside the lazy
-   boundaries; importing either backend package loads no engine.
+   boundaries; importing either backend package or the shared package loads no
+   engine.
 5. Declared trait == implemented protocol; a missing trait fails before
    construction with `{error, hint}`.
 6. All simulator writes go through `*_index`; all data reads are explicit
@@ -214,34 +230,54 @@ Invalid input / failure behaviour:
 
 ## Compatibility and migration
 
-- **Public API**: `known_backends()` / `CANONICAL_BACKENDS` gain a name and
-  lose the `isaaclab3` canonical spelling; `isaaclab3` remains a config alias.
-  `BackendInfo.name` values change accordingly. No other public type changes.
-- **Config/schema**: `backend: isaaclab3` keeps working (alias). `isaaclab3`
-  and `isaaclab3_physx` share the `backend_options` namespace; Newton uses
-  `backend_options.isaaclab3_newton`. Unknown cross-namespace keys still fail.
+- **Public API**: `known_backends()` / `CANONICAL_BACKENDS` are the five
+  canonical names. `BACKEND_ALIASES` / `_BUILD_ALIASES` are removed;
+  `build_name` only validates a canonical spelling and performs no probing.
+  There is no implicit default: `build_name(None)`, `Run(backend=None)` and
+  `build_env_backend(None)` raise a teaching error instead of falling back to
+  `"isaaclab"`. Helper APIs that previously defaulted to `"isaaclab"`
+  (`build_rig`, props, contacts) likewise require a canonical name.
+- **Config/schema**: `backend` is required. `backend: isaaclab` and
+  `backend: isaaclab3` are rejected with a hint listing the five canonical
+  names; they are not aliases. `backend_options` namespaces are canonical-only
+  (`isaaclab3_physx`, `isaaclab3_newton`); unknown cross-namespace keys still
+  fail.
+- **Executor bindings**: the executor `backends:` mapping is keyed by canonical
+  env backend, not by family. A legacy `backends: {isaaclab: <executor>}` key
+  is rejected with a teaching error and must be rewritten as one key per
+  concrete backend (`isaaclab2`, `isaaclab3_physx`, `isaaclab3_newton`). The
+  executor **name** `"isaaclab"` is unchanged: it is the docker image face, so
+  `backends: {isaaclab2: isaaclab}` is still the correct binding. The
+  `isaaclab` Python module root and the IsaacLab family docs keep their names;
+  only backend selection and binding keys became canonical.
+- **Migration**: every config that omitted `backend` or used
+  `isaaclab`/`isaaclab3` must name `isaaclab2`, `isaaclab3_physx` or
+  `isaaclab3_newton` explicitly, and every executor binding key must be
+  renamed accordingly. This is intentional fail-fast, not a silent default.
 - **Dependency/version lane**: new strict conda lanes pinned to the dog stack
   (isaaclab 3.0.0rc1, isaacsim 6.1.0.0, newton 1.6.1, mujoco-warp 3.12,
   warp-lang 1.17, python 3.12). `OMNI_KIT_ACCEPT_EULA=YES` is supplied only to
   these lanes.
-- **Migration**: one docs pass (`docs/testing.md`, backend README, contracts
+- **Docs pass**: one docs pass (`docs/testing.md`, backend READMEs, contracts
   that name `isaaclab3` as a stub). Tests that assert the empty il3 trait set
   or the old canonical name are updated in the same change.
-- **Rollback**: purely additive. Removing the two backend packages, their
-  lanes and registry entries restores the previous state; `isaaclab3` stays a
-  valid alias in both directions, so user configs are never stranded.
+- **Rollback**: remove the two backend packages, their lanes and registry
+  entries to restore the previous state. Configs must already name a canonical
+  backend; there is no alias fallback to preserve.
 
 ## Tests
 
 Lowest layers first:
 
-- `tests/unit/backends/test_isaaclab3_traits.py` — both trait tables, trait
-  rules, `TraitScope` validity.
-- `tests/unit/backends/test_isaaclab3_registry.py` — aliases, probes,
-  `known_backends`, `build_name`, backend-option namespaces.
-- `tests/unit/backends/test_isaaclab3_profile.py` — profile values and the
-  shared code's reliance on the contract (no engine branch).
-- `tests/contract/test_registry_probe_isaaclab3.py` — selection/error messages.
+- `tests/unit/backends/test_isaaclab3_registry.py` — both trait tables, trait
+  rules, `TraitScope` validity, canonical names, alias rejection,
+  `known_backends`, `build_name`, backend-option namespaces, and the **pure**
+  `selection_error(canonical, StackProbe)` decision table.  No monkeypatching
+  of version probes.
+- `tests/unit/backends/test_isaaclab3_engine_profile.py` — the frozen
+  EngineProfile contract (no engine branch).
+- `tests/contract/test_registry_probe_isaaclab3.py` — `select_backend` error
+  types/messages for a missing/wrong stack and for rejected aliases.
 - `tests/meta/test_isaaclab3_import_isolation.py` — importing either backend or
   the shared package loads no `isaaclab`/`pxr`/`omni`/`newton`/`warp`.
 
@@ -257,12 +293,12 @@ Backend lanes (real sim):
 
 Lane registry:
 
-- `ci/compat.toml`: `[environments.isaaclab3_physx]`,
-  `[environments.isaaclab3_newton]`, `[lanes.isaaclab3_physx]`,
-  `[lanes.isaaclab3_newton]`, both `strict = true`,
-  `pytest_args = ["--strict-test-packs"]` and join `[nightly]` in P4; P0
-  declares the lanes as stack probes without test packs and keeps them out of
-  the nightly list.
+- `ci/compat.toml`: `[environments.isaaclab3_physx]` and
+  `[environments.isaaclab3_newton]` (both `strict = true` for their pinned
+  manifests) plus `[lanes.isaaclab3_physx]` and `[lanes.isaaclab3_newton]`.
+  In P1 the lanes are stack probes: they declare no `pytest_args` and are out
+  of `[nightly]`. P4 adds `pytest_args = ["--strict-test-packs"]` once the
+  backends consume test packs and joins `[nightly]`.
 - `tests/meta/test_lane_registry.py` picks them up from `ci/compat.toml`; the
   two test directories are siblings, so no selector overlap.
 - `docs/testing.md`: add the lanes, env vars and the EULA note.
@@ -324,9 +360,11 @@ Alternatives considered:
 
 Resolved decisions (Q1-Q6 confirmed):
 
-- **Q1 confirmed**: symmetric canonical names `isaaclab3_physx` and
-  `isaaclab3_newton`; `isaaclab3` becomes an alias to `isaaclab3_physx`.
-  The P0 lanes use the final names; the registry rename lands in P1.
+- **Q1 confirmed (revised)**: canonical names only — `mujoco`, `mjwarp`,
+  `isaaclab2`, `isaaclab3_physx`, `isaaclab3_newton`.  No `isaaclab` /
+  `isaaclab3` aliases and no family auto-selection; `backend` is required.
+  Selection uses the pure `StackProbe` / `selection_error` decision function;
+  tests feed fake probes instead of monkeypatching version functions.
 - **Q2 confirmed**: `shared/isaaclab3_common` is scoped to the IsaacLab 3.x
   family. A version-agnostic subset for `isaaclab2` is a separate refactor.
 - **Q3 confirmed**: Newton runs inside the Kit lane in this slice; kitless is a
@@ -345,8 +383,8 @@ P0 delivers the probes and the lane scaffolding only:
 
 - two lane identities (`isaaclab3_physx`, `isaaclab3_newton`) with pinned
   manifests, markers, stack probes and docs;
-- no `unigym/` product-code change, so the registry keeps the current
-  `isaaclab3` canonical name until P1;
+- no `unigym/` product-code change in P0; P1a makes the canonical-only
+  selection change and removes the old `isaaclab3` skeleton package;
 - no `--strict-test-packs` (no test packs are consumed yet) and no `[nightly]`
   entry / GitHub job (no self-hosted runner and environment yet).
 
@@ -357,8 +395,9 @@ declared.
 
 ## P0 probe checklist (completed on the reference lane)
 
-1. Registry probe on dog: `isaaclab_version() == (3, 0)`;
-   `select_backend("isaaclab3")` passes.
+1. Registry probe on dog: `isaaclab_version() == (3, 0)` and
+   `select_backend("isaaclab3_physx")` resolves explicitly (the old
+   `select_backend("isaaclab3")` alias is intentionally removed in P1a).
 2. Explicit import surfaces used by the backend all resolve without
    `fromlist=["*"]`.
 3. `AppLauncher.add_app_launcher_args` adds no `--headless`/`--enable_cameras`;

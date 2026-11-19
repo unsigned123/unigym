@@ -225,7 +225,7 @@ def resolve_all_articulation(spec: ContactGroupSpec, contact_assets: Mapping[str
 class IsaacLabContactBackend:
     """Backend object for all groups of one run (isaaclab)."""
 
-    backend_key = "isaaclab"
+    backend_key = "isaaclab2"
 
     @classmethod
     def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]:
@@ -489,7 +489,7 @@ class IsaacLabContactBackend:
                     "filter_bodies",
                     [pattern],
                     inventory_fn(),
-                    "isaaclab",
+                    "isaaclab",  # family label (asset family), not the env backend name
                     reason=reason,
                 )
             resolved.append(names[0])

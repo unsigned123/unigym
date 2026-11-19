@@ -83,7 +83,8 @@ _UNSERVED_DRIVES = frozenset({"effort", "current"})
 #: mapping, so its set stays position-PD only.
 BACKEND_LAW_CAPABILITIES: dict[str, frozenset[str]] = {
     "isaaclab2": frozenset({"standard_pd"}),
-    "isaaclab3": frozenset({"standard_pd"}),
+    "isaaclab3_physx": frozenset({"standard_pd"}),
+    "isaaclab3_newton": frozenset({"standard_pd"}),
     "mujoco": frozenset(
         {"standard_pd", "computed_torque_pd", "native_servo", "direct_torque", "direct_velocity"}
     ),

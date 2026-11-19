@@ -83,10 +83,10 @@ def test_world_flat_resolves_to_a_native_flat_terrain_preset() -> None:
 
 
 def test_world_flat_fails_loudly_on_a_backend_without_any_ground() -> None:
-    """The isaaclab3 stub consumes neither world_base nor terrain: no silence."""
-    run = _spec("isaaclab3")
+    """The IsaacLab 3 PhysX stub consumes neither world_base nor terrain: no silence."""
+    run = _spec("isaaclab3_physx")
     try:
-        with pytest.raises(ConfigError, match="isaaclab3.*no flat-ground resolution"):
+        with pytest.raises(ConfigError, match="isaaclab3_physx.*no flat-ground resolution"):
             run.spec
     finally:
         run.close()

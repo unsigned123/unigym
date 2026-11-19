@@ -36,7 +36,26 @@ from unigym.scripts import spawn_spec as ss
 
 _PROBE_TIMEOUT = 60.0  # isaaclab lazy import must not wake Kit
 _WHITELIST = frozenset({"unigym", "mujoco", "isaaclab", "torch", "warp", "mujoco_warp"})
-_BACKEND_MODULES = {"mujoco": "mujoco", "mjwarp": "mujoco_warp", "isaaclab": "isaaclab"}
+#: canonical env backend -> the Python module its executor must import.
+#: The three IsaacLab backends share the ``isaaclab`` module root.
+_BACKEND_MODULES = {
+    "mujoco": "mujoco",
+    "mjwarp": "mujoco_warp",
+    "isaaclab2": "isaaclab",
+    "isaaclab3_physx": "isaaclab",
+    "isaaclab3_newton": "isaaclab",
+}
+#: Legacy ``backends:`` binding keys from a pre-canonical unigym.local.yaml
+#: still name the family ("isaaclab").  Keep diagnosing them via the shared
+#: module root -- an explicit fallback, never an env backend choice.
+_FAMILY_BINDING_MODULES = {"isaaclab": "isaaclab"}
+
+
+def _backend_module(backend: str) -> str | None:
+    """Canonical backend (or legacy family binding key) -> import module."""
+    return _BACKEND_MODULES.get(backend) or _FAMILY_BINDING_MODULES.get(backend)
+
+
 #: extra -> its runtime import names (find_spec only -- doctor imports
 #: nothing).  webui repeats daemon on purpose: it is a meta-extra that
 #: pulls the same runtime (``unigym[webui]`` == portal + daemon).
@@ -171,7 +190,7 @@ def executor_diags(cfg: dict, run_probe=run_probe) -> list[ex.Diag]:
             )
         )
     for backend in sorted(binding):
-        mod = _BACKEND_MODULES.get(backend)
+        mod = _backend_module(backend)
         if not mod:
             continue
         e = table[binding[backend]]
@@ -419,13 +438,13 @@ def render_suggestion(cfg: dict, findings: dict) -> str:
     host(("unigym", "mujoco"), "mujoco", "imports unigym+mujoco")
     host(("unigym", "mujoco", "mujoco_warp"), "mjwarp", "imports unigym+mujoco_warp")
     if qualified(("unigym", "isaaclab")):
-        host(("unigym", "isaaclab"), "isaaclab", "imports unigym+isaaclab")
+        host(("unigym", "isaaclab"), "isaaclab2", "imports unigym+isaaclab")
     elif images:
         lines.append(f"  docker_il: {{kind: docker, image: {images[0]}}}")
         n_probed = sum(1 for p in findings["pythons"] if p["has"].get("unigym"))
         backends.append(
             (
-                "isaaclab",
+                "isaaclab2",
                 "docker_il",
                 f"docker image (probed {n_probed} unigym env(s), " "none imports isaaclab)",
             )

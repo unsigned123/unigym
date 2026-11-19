@@ -324,7 +324,9 @@ def _str_list(value, arg: str, name: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 # declarative reference resolution : {contact_group: ...} / {prop: ...}
 # --------------------------------------------------------------------------- #
-BACKENDS = ("mujoco", "isaaclab")
+#: Canonical env backends that expose a contact face (no ``isaaclab`` /
+#: ``isaaclab3`` aliases: those family spellings are not selectable).
+BACKENDS = ("mujoco", "mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton")
 
 
 def _body_spec_list(value, where: str) -> list[str]:

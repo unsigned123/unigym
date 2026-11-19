@@ -30,6 +30,7 @@ from unigym._typing import (
 )
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
 from unigym.backends.registry import (
+    CANONICAL_BACKENDS,
     backend_info,
     known_backends,
     validate_backend_options,
@@ -483,6 +484,37 @@ def _require_config(value: object, what: str) -> dict[str, JsonValue]:
     return value
 
 
+def require_backend_name(value: object, source: str, *, key: str = "env.backend") -> str:
+    """Return *value* as a canonical backend name or raise ``ConfigError``.
+
+    There is no default: a missing/empty/non-string value and any
+    non-canonical spelling (including the removed ``isaaclab`` / ``isaaclab3``
+    aliases) fail here with the five canonical names in the hint.
+    """
+    from unigym.errors import ConfigError
+
+    canonical = ", ".join(CANONICAL_BACKENDS)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"{source}: {key} is required (got {value!r}); there is no "
+            f"implicit backend default | hint: set {key} to exactly one of: "
+            f"{canonical} (the 'isaaclab' / 'isaaclab3' aliases were removed)"
+        )
+    name = value.strip()
+    if name not in CANONICAL_BACKENDS:
+        raise ConfigError(
+            f"{source}: {key}={value!r} is not a canonical backend | hint: "
+            f"choose exactly one of: {canonical} (the 'isaaclab' / "
+            "'isaaclab3' aliases were removed)"
+        )
+    return name
+
+
+def require_backend(env: Mapping[str, JsonValue], source: str) -> str:
+    """Return the explicitly declared canonical ``env.backend`` name."""
+    return require_backend_name(env.get("backend"), source)
+
+
 def _require_str(value: object, what: str) -> str:
     """Narrow a config scalar to a string."""
     from unigym.errors import ConfigError
@@ -659,7 +691,7 @@ def build_spec(
     except ValueError as exc:
         raise ConfigError(f"{args.config}: {exc}") from exc
     early_env = _require_config(cfg.get("env"), "env")
-    backend_label = str(early_env.get("backend", "isaaclab"))
+    backend_label = require_backend(early_env, args.config)
     info = backend_info(backend_label)
     binding = BackendBinding(
         name=info.name,

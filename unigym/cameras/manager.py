@@ -42,7 +42,11 @@ from contextlib import contextmanager
 import numpy as np
 import torch
 
-from unigym.backends.registry import BackendSelectionError, backend_info
+from unigym.backends.registry import (
+    BackendSelectionError,
+    CANONICAL_BACKENDS,
+    backend_info,
+)
 
 from .base import (
     apply_rate_keys,
@@ -724,7 +728,7 @@ def build_camera_manager(
     obs_cameras=(),
     enable_cameras: bool = False,
     refs=None,
-    backend: str = "isaaclab",
+    backend: str | None = None,
     render_groups=None,
     policy_hz: float | None = None,
     num_envs: int | None = None,
@@ -744,9 +748,12 @@ def build_camera_manager(
         refs: recorder ``camera_ref`` names — cameras referenced only for
             video are instantiated too (zero extra sensors: the same
             rig serves obs and video).
-        backend: ``"isaaclab"`` (default; kit sensors), ``"mujoco"``
-            (MjSpec-injected cameras + in-process renderers) or
-            ``"mjwarp"`` (C3; N=1 mirror renderer, N>1 native warp batch).
+        backend: the explicit canonical env backend (no alias and no
+            default): ``"mujoco"`` (MjSpec-injected cameras + in-process
+            renderers), ``"mjwarp"`` (C3; N=1 mirror renderer, N>1 native
+            warp batch) or one of the IsaacLab identities
+            (``"isaaclab2"`` / ``"isaaclab3_physx"`` / ``"isaaclab3_newton"``;
+            kit sensors).
         render_groups: optional per-config geom-class declaration for the
             capture flags face (``env.params.render_groups``; §14).  Only
             consumed by mujoco rigs (v1).
@@ -762,10 +769,17 @@ def build_camera_manager(
     without an explicit ``depth`` camera, or a depth-camera geometry
     mismatch.
     """
+    if backend is None or not str(backend).strip():
+        raise ValueError(
+            f"cameras: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
+        )
     try:
         info = backend_info(backend)
     except BackendSelectionError as e:
-        raise ValueError(f"unknown camera backend {backend!r} " "(isaaclab|mujoco|mjwarp)") from e
+        raise ValueError(
+            f"unknown camera backend {backend!r}; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)}"
+        ) from e
     obs_names = set(obs_cameras or ())
     declared = fold_declared_intervals(cameras_cfg, policy_hz)
     dup = sorted({n for n in (s.name for s in declared) if [x.name for x in declared].count(n) > 1})

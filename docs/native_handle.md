@@ -34,7 +34,9 @@ run.native("isaaclab2") -> NativeHandle
 The direct form is `env.native(backend)`.  The requested backend name must
 match the live backend exactly; a mismatch is a `ValueError`.  The run facade
 also gates on `Trait.NATIVE_HANDLE`, raising `NotImplementedError` with the
-backend name and trait when the backend declares it absent (`isaaclab3`).
+backend name and trait when the backend declares it absent. The
+`isaaclab3_physx` / `isaaclab3_newton` P1 stubs declare no `NATIVE_HANDLE`
+trait, so requesting a handle from either raises that error.
 
 `NativeHandle` is a frozen dataclass with:
 

@@ -93,9 +93,9 @@ def test_run_instance_delegates_to_the_live_env() -> None:
 
 
 def test_run_instance_rejects_a_backend_without_the_trait() -> None:
-    """IsaacLab3 declares no MODEL_EDIT; the facade names the trait."""
-    instance = _instance("isaaclab3", _EditEnv())
-    with pytest.raises(NotImplementedError, match=r"isaaclab3.*MODEL_EDIT"):
+    """The IsaacLab 3 PhysX stub declares no MODEL_EDIT; the facade names the trait."""
+    instance = _instance("isaaclab3_physx", _EditEnv())
+    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*MODEL_EDIT"):
         instance.model_edit()
 
 

@@ -1643,6 +1643,13 @@ def debug_preflight(
     import os
     import yaml as _yaml
 
+    from unigym.backends.registry import (
+        CANONICAL_BACKENDS,
+        BackendSelectionError,
+        backend_info,
+        select_backend,
+    )
+
     warnings: list[str] = []
     if backend is None:
         if config_path is None:
@@ -1650,13 +1657,29 @@ def debug_preflight(
                 "backend unknown: pass -b/--backend or a config_path to " "read env.backend from"
             )
         peek = _yaml.safe_load(Path(config_path).read_text()) or {}
-        backend = (peek.get("env") or {}).get("backend", "isaaclab")
-    from unigym.backends.registry import BackendSelectionError, backend_info
+        backend = (peek.get("env") or {}).get("backend")
+        if backend is None or not str(backend).strip():
+            raise DebugPreflightError(
+                f"config {config_path}: 'env.backend' is missing/empty; "
+                f"set it to one of: {', '.join(CANONICAL_BACKENDS)} "
+                f"(canonical names only; 'isaaclab'/'isaaclab3' aliases "
+                f"were removed)"
+            )
+
+    try:
+        select_backend(backend)
+    except BackendSelectionError as e:
+        raise DebugPreflightError(f"{e.error}; hint: {e.hint}") from e
 
     try:
         backend_faces = backend_info(backend)
     except BackendSelectionError as e:
-        raise DebugPreflightError(f"unknown backend {backend!r} (isaaclab|mujoco)") from e
+        raise DebugPreflightError(
+            f"unknown backend {backend!r}; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were "
+            f"removed)"
+        ) from e
     cameras = cfg.get("cameras") or []
     if (
         cameras

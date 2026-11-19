@@ -1,8 +1,10 @@
 # isaaclab3_newton backend lane
 
-P0 scaffolding for the IsaacLab 3 Newton backend identity. The lane currently
-owns environment and stack probes only; the backend implementation and the
-capability/parity tests land in P3 (see `docs/designs/isaaclab3-backend.md`).
+P1 scaffolding for the `isaaclab3_newton` backend identity. This is a canonical
+backend name; `isaaclab3` and `isaaclab` are not aliases for it. The backend
+implements no capability yet, so the lane currently owns environment and stack
+probes only; the backend implementation and the capability/parity tests land
+in P3 (see `docs/designs/isaaclab3-backend.md`).
 
 The lane sets `OMNI_KIT_ACCEPT_EULA=YES` in `conftest.py` because the rc1
 launcher requires non-interactive EULA acceptance. Newton runs inside the Kit

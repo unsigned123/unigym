@@ -9,8 +9,12 @@ an engine (the factories perform those imports on first use).
 Usage (collect.py):
 
     from unigym.env.backends import build_env_backend
-    env = build_env_backend(cfg["env"].get("backend", "isaaclab"),
+    env = build_env_backend(cfg["env"]["backend"],  # required canonical name
                             robot_profile=profile, adapter=adapter, ...)
+
+There is no default backend: the caller must pass one of the canonical
+registry names (``mujoco`` / ``mjwarp`` / ``isaaclab2`` /
+``isaaclab3_physx`` / ``isaaclab3_newton``).
 """
 
 from __future__ import annotations
@@ -49,11 +53,14 @@ def __dir__() -> list[str]:
     return sorted(list(globals().keys()) + ["BACKEND_REGISTRY"])
 
 
-def build_env_backend(name: str | None = None, **kwargs):
-    """Build a collection backend by registry name and enforce its contract.
+def build_env_backend(name: str, **kwargs):
+    """Build a collection backend by canonical registry name.
+
+    *name* is required (no default).  The registry's :func:`build_name`
+    validates the canonical spelling only; it performs no probing.
 
     Order of operations (before any sim state exists):
-      1. registry lookup (unknown name -> ``ValueError``);
+      1. canonical-name validation (unknown/non-canonical -> ``ValueError``);
       2. capability gate: a yaml/adapter request for a capability the backend
          lacks -> ``NotImplementedError``;
       3. construct the backend env class with the caller's kwargs;

@@ -21,8 +21,10 @@ _SCRIPT = """
 import json
 import sys
 
-import unigym.backends.isaaclab3
+import unigym.backends.isaaclab3_newton
+import unigym.backends.isaaclab3_physx
 import unigym.backends.registry
+import unigym.backends.shared.isaaclab3_common
 
 print("P0_IMPORT_JSON:" + json.dumps(sorted({name.split(".", 1)[0] for name in sys.modules})))
 """
@@ -39,6 +41,7 @@ _ENGINE_TOP_LEVEL = {
     "warp",
     "pxr",
     "omni",
+    "isaacsim",
     "torch",
 }
 
@@ -65,3 +68,26 @@ def test_importing_the_backend_package_loads_no_engine() -> None:
     loaded = set(json.loads(markers[-1]))
     leaked = loaded & _ENGINE_TOP_LEVEL
     assert not leaked, f"importing the backend package loaded {sorted(leaked)}"
+
+
+def test_canonical_backends_include_both_identities() -> None:
+    """The registry names both identities and rejects the removed aliases."""
+    from unigym.backends.registry import CANONICAL_BACKENDS, build_name, known_backends
+
+    names = known_backends()
+    assert list(CANONICAL_BACKENDS) == [
+        "mujoco",
+        "mjwarp",
+        "isaaclab2",
+        "isaaclab3_physx",
+        "isaaclab3_newton",
+    ]
+    assert names == list(CANONICAL_BACKENDS)
+    assert "isaaclab3_physx" in names
+    assert "isaaclab3_newton" in names
+    assert "isaaclab" not in names
+    assert "isaaclab3" not in names
+
+    for alias in ("isaaclab", "isaaclab3"):
+        with pytest.raises(ValueError, match=r"aliases were removed"):
+            build_name(alias)

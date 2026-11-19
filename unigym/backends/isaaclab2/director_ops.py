@@ -19,7 +19,7 @@ from unigym.director.ops import HAND_ALIAS_CANDIDATES, _OpsBase, strip_prop_pref
 class IsaacLabDirectorOps(_OpsBase):
     """write_root_pose mechanics + RigidObject asset table + cuboid gripper."""
 
-    backend = "isaaclab"
+    backend = "isaaclab2"
 
     def __init__(self, env):
         self.env = env

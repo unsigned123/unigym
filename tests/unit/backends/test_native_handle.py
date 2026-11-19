@@ -12,7 +12,8 @@ import pytest
 from unigym._typing import JsonValue
 from unigym.backends.registry import (
     ISAACLAB2_TRAITS,
-    ISAACLAB3_TRAITS,
+    ISAACLAB3_NEWTON_TRAITS,
+    ISAACLAB3_PHYSX_TRAITS,
     MJWARP_TRAITS,
     MUJOCO_TRAITS,
     Trait,
@@ -68,11 +69,12 @@ def test_native_handle_private_attributes_stay_attributes() -> None:
 
 
 def test_native_handle_is_a_declared_trait_on_the_three_backends() -> None:
-    """MuJoCo/Mjwarp/IsaacLab2 declare the trait; IsaacLab3 does not."""
+    """MuJoCo/Mjwarp/IsaacLab2 declare the trait; the IsaacLab 3 stubs do not."""
     assert Trait.NATIVE_HANDLE in MUJOCO_TRAITS
     assert Trait.NATIVE_HANDLE in MJWARP_TRAITS
     assert Trait.NATIVE_HANDLE in ISAACLAB2_TRAITS
-    assert Trait.NATIVE_HANDLE not in ISAACLAB3_TRAITS
+    assert Trait.NATIVE_HANDLE not in ISAACLAB3_PHYSX_TRAITS
+    assert Trait.NATIVE_HANDLE not in ISAACLAB3_NEWTON_TRAITS
 
     assert Trait.NATIVE_HANDLE in BackendCapabilities(native_handle=True).traits()
     assert Trait.NATIVE_HANDLE not in BackendCapabilities().traits()
@@ -146,31 +148,31 @@ def test_run_native_rejects_a_backend_mismatch() -> None:
         instance.native("mjwarp")
 
 
-def test_run_native_canonicalizes_the_isaaclab_alias() -> None:
-    """Legacy ``isaaclab`` and canonical ``isaaclab2`` are the same backend."""
-    env = _NativeEnv(_handle())
-    instance = _instance("isaaclab", env)
+def test_run_native_rejects_the_removed_isaaclab_aliases() -> None:
+    """Selection is canonical-only: the removed aliases never resolve."""
+    instance = _instance("isaaclab2", _NativeEnv(_handle()))
 
-    assert instance.native("isaaclab2") is env.handle
-    assert env.calls == ["isaaclab2"]
+    for alias in ("isaaclab", "isaaclab3"):
+        with pytest.raises(ValueError, match=r"not a canonical backend"):
+            instance.native(alias)
 
-    alias_env = _NativeEnv(_handle())
-    alias_instance = _instance("isaaclab2", alias_env)
+    canonical_env = _NativeEnv(_handle())
+    canonical_instance = _instance("isaaclab2", canonical_env)
 
-    assert alias_instance.native("isaaclab") is alias_env.handle
-    assert alias_env.calls == ["isaaclab2"]
+    assert canonical_instance.native("isaaclab2") is canonical_env.handle
+    assert canonical_env.calls == ["isaaclab2"]
 
 
-def test_run_native_isaaclab3_fails_with_the_trait_name(monkeypatch) -> None:
-    """IsaacLab3 declares no NATIVE_HANDLE; both facades teach the trait."""
+def test_run_native_isaaclab3_physx_fails_with_the_trait_name(monkeypatch) -> None:
+    """The IsaacLab 3 PhysX stub declares no NATIVE_HANDLE; both facades teach the trait."""
     run = Run(_cfg())
-    instance = _instance("isaaclab3", _NativeEnv(_handle()))
+    instance = _instance("isaaclab3_physx", _NativeEnv(_handle()))
     monkeypatch.setattr(run, "build", lambda inspect=False: instance)
 
-    with pytest.raises(NotImplementedError, match=r"isaaclab3.*NATIVE_HANDLE"):
-        instance.native("isaaclab3")
-    with pytest.raises(NotImplementedError, match=r"isaaclab3.*NATIVE_HANDLE"):
-        run.native("isaaclab3")
+    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*NATIVE_HANDLE"):
+        instance.native("isaaclab3_physx")
+    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*NATIVE_HANDLE"):
+        run.native("isaaclab3_physx")
 
 
 _CORE_ROOT = Path(__file__).resolve().parents[2] / "unigym"

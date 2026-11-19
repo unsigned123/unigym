@@ -65,7 +65,9 @@ def test_backend_robot_realizer_is_the_only_backend_seam():
     assert backend_info("mujoco").robot_realizer is None
     assert backend_info("mjwarp").robot_realizer is None
     assert backend_info("isaaclab2").robot_realizer is not None
-    assert backend_info("isaaclab3").robot_realizer is not None
+    # P1 stubs: no engine robot object yet, so no realizer.
+    assert backend_info("isaaclab3_physx").robot_realizer is None
+    assert backend_info("isaaclab3_newton").robot_realizer is None
 
 
 def test_legacy_recipe_names_are_removed():
@@ -86,7 +88,8 @@ def test_legacy_recipe_names_are_removed():
         ("mujoco", ("mjcf",)),
         ("mjwarp", ("mjcf",)),
         ("isaaclab2", ("usd", "urdf")),
-        ("isaaclab3", ("usd", "urdf")),
+        ("isaaclab3_physx", ("usd", "urdf")),
+        ("isaaclab3_newton", ("usd", "urdf")),
     ],
 )
 def test_every_backend_declares_its_asset_formats(backend: str, asset_formats: tuple[str, ...]):

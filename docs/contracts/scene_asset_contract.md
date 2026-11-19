@@ -100,8 +100,9 @@ backend_info("mjwarp").asset_formats   # ("mjcf",)
 backend_info("isaaclab2").asset_formats  # ("usd", "urdf")
 ```
 
-`isaaclab3` declares the same asset formats but has no registered asset-scene
-engine; file-backed scene composition is an `isaaclab2` capability.
+`isaaclab3_physx` / `isaaclab3_newton` are P1 stubs: they declare the same
+`("usd", "urdf")` asset formats but have no registered asset-scene engine, so
+file-backed scene composition is an `isaaclab2` capability.
 
 Explicit refusals:
 

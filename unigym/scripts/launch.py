@@ -98,6 +98,17 @@ from unigym._optional import MissingExtraError
 _REPO = Path(__file__).resolve().parents[2]
 _UNIGYM_YAML = _REPO / "unigym.yaml"
 
+#: canonical env backends -- the launcher stays import-light (no
+#: unigym.core/registry load at --help time), so the five names are
+#: spelled here; registry.CANONICAL_BACKENDS is the runtime truth.
+_CANONICAL_BACKENDS = (
+    "mujoco",
+    "mjwarp",
+    "isaaclab2",
+    "isaaclab3_physx",
+    "isaaclab3_newton",
+)
+
 _SELF = __name__
 
 #: name -> (module, register function, one-line description).  The
@@ -254,7 +265,7 @@ def _register_run(sub) -> None:
     r.add_argument(
         "-b",
         "--backend",
-        choices=["isaaclab", "mujoco"],
+        choices=_CANONICAL_BACKENDS,
         default=None,
         help="override yaml env.backend (default: read from yaml)",
     )
@@ -339,7 +350,13 @@ def _register_run(sub) -> None:
         "now the e2e one-command probe)",
     )
     pm.add_argument("name")
-    pm.add_argument("-b", "--backend", choices=["isaaclab", "mujoco"], default="isaaclab")
+    pm.add_argument(
+        "-b",
+        "--backend",
+        choices=_CANONICAL_BACKENDS,
+        required=True,
+        help="env backend (canonical only; required -- no default)",
+    )
     pm.set_defaults(fn=lambda a, pt: ss.cmd_probe(a, pt))
 
     b = sub.add_parser("bash", help="interactive container with unigym mounts")
@@ -849,7 +866,7 @@ def _register_status(sub) -> None:
     dbg.add_argument(
         "-b",
         "--backend",
-        choices=["isaaclab", "mujoco"],
+        choices=_CANONICAL_BACKENDS,
         default=None,
         help="override yaml env.backend (default: read from yaml)",
     )

@@ -6,10 +6,13 @@ optional feature a yaml/adapter/director-op can request maps to a trait, and
 a backend missing that trait fails fast at build time (``{error, hint}``) —
 never a silent degradation.
 
-Backends are *equal citizens*: ``mujoco`` / ``isaaclab2``
-/ ``isaaclab3``.  ``isaaclab2`` (IsaacLab 2.3 series) and ``isaaclab3``
-(3.0+ series) are two different backends, selected by import probing at
-construction time; a config ``backend:`` key overrides the probe.
+Backends are *equal citizens*: ``mujoco`` / ``mjwarp`` / ``isaaclab2`` /
+``isaaclab3_physx`` / ``isaaclab3_newton``.  The two IsaacLab 3 identities share
+one implementation package but differ in engine, runtime stack and capability
+set.  Selection is canonical-only: there are no ``isaaclab`` / ``isaaclab3``
+aliases and no version-based family auto-selection.  ``backend`` is required;
+the explicitly chosen stack is verified against a live probe and never falls
+back silently.
 
 This module is **stdlib-only at import time**: engine presence is probed
 lazily (importlib.metadata first — no side effects — then a guarded
@@ -30,12 +33,12 @@ from unigym.assets.asset_ref import ASSET_FORMATS
 
 __all__ = [
     "CANONICAL_BACKENDS",
-    "BACKEND_ALIASES",
     "MJWARP_BACKEND",
     "BackendInfo",
     "BackendSelectionError",
     "ModelEditField",
     "ModelEditProvider",
+    "StackProbe",
     "build_name",
     "TRAIT_RULES",
     "Trait",
@@ -46,9 +49,12 @@ __all__ = [
     "known_backends",
     "mujoco_version",
     "mujoco_warp_version",
+    "newton_version",
     "select_backend",
+    "selection_error",
     "validate_backend_options",
     "validate_trait_rules",
+    "warp_version",
 ]
 
 
@@ -191,7 +197,7 @@ class TraitScope:
 class BackendInfo:
     """Identity + capability set of one registered backend."""
 
-    name: str  # canonical: "mujoco" | "isaaclab2" | "isaaclab3"
+    name: str  # canonical: "mujoco" | "mjwarp" | "isaaclab2" | "isaaclab3_*"
     version: tuple[int, int]  # engine version (probe; (0, 0) when absent)
     traits: frozenset[Trait]  # capability set (registration declares it)
     options_schema: Mapping[str, object] = field(default_factory=dict)
@@ -446,8 +452,9 @@ def _validate_options_block(
 _OPTION_NAMESPACES = {
     "mujoco": ("mujoco",),
     "mjwarp": ("mjwarp",),
-    "isaaclab2": ("isaaclab2", "isaaclab"),
-    "isaaclab3": ("isaaclab3", "isaaclab"),
+    "isaaclab2": ("isaaclab2",),
+    "isaaclab3_physx": ("isaaclab3_physx",),
+    "isaaclab3_newton": ("isaaclab3_newton",),
 }
 
 
@@ -457,7 +464,7 @@ def validate_backend_options(
     """Validate ``env.backend_options`` and return only *backend*'s options.
 
     Args:
-        backend: The requested backend spelling (canonical or alias).
+        backend: The requested canonical backend name.
         options: The raw ``env.backend_options`` mapping.
 
     Returns:
@@ -466,13 +473,14 @@ def validate_backend_options(
     Raises:
         ValueError: A malformed block, an unknown backend namespace, an
             unknown option key or an option the backend does not declare.
+        BackendSelectionError: *backend* is not a canonical name.
     """
     if options is None:
         options = {}
     if not isinstance(options, Mapping):
         raise ValueError(f"env.backend_options must be a mapping, got " f"{type(options).__name__}")
-    canonical = _resolve_name(backend)
-    accepted = _OPTION_NAMESPACES.get(canonical, (canonical,))
+    canonical = _canonical_or_error(backend)
+    accepted = _OPTION_NAMESPACES[canonical]
     foreign = sorted(set(options) - set(accepted))
     if foreign:
         raise ValueError(
@@ -561,7 +569,7 @@ def validate_trait_rules(backends=None) -> None:
 
     Called at import (so a bad declaration table fails before any run) and
     re-run independently by ``tests/meta/traits/test_trait_rules.py``.
-    Empty trait sets (the isaaclab3 skeleton) are skipped: they declare no
+    Empty trait sets (the IsaacLab 3 P1 skeletons) are skipped: they declare no
     layout because they implement nothing yet.
     """
     infos = _STATIC_INFO if backends is None else backends
@@ -729,10 +737,12 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
     }
 )
 
-# EA skeleton: registered so selection/probing can name it, implements
-# nothing yet (backends/isaaclab3/README.md declares the gap; build -> stub
-# NotImplementedError).  Traits fill in as capabilities land.
-ISAACLAB3_TRAITS = frozenset()
+# IsaacLab 3 P1 skeletons: registered so selection/probing can name the two
+# backend identities; they implement nothing yet (construction fails fast).
+# Traits fill in as capabilities land.  PhysX and Newton are separate
+# identities because their runtime stacks and capability sets differ.
+ISAACLAB3_PHYSX_TRAITS = frozenset()
+ISAACLAB3_NEWTON_TRAITS = frozenset()
 
 # mujoco's model-global writes are one-MjModel only (no per-env
 # face); they stay declared traits but are unavailable at N>1.  mjwarp
@@ -787,11 +797,18 @@ def _isaaclab2_env() -> type:
     return IsaaclabEnv
 
 
-def _isaaclab3_env() -> type:
-    """Load the IsaacLab 3.x env class lazily (EA skeleton)."""
-    from unigym.backends.isaaclab3 import Isaaclab3Env
+def _isaaclab3_physx_env() -> type:
+    """Load the IsaacLab 3.x PhysX env class lazily (P1 skeleton)."""
+    from unigym.backends.isaaclab3_physx import Isaaclab3PhysxEnv
 
-    return Isaaclab3Env
+    return Isaaclab3PhysxEnv
+
+
+def _isaaclab3_newton_env() -> type:
+    """Load the IsaacLab 3.x Newton env class lazily (P1 skeleton)."""
+    from unigym.backends.isaaclab3_newton import Isaaclab3NewtonEnv
+
+    return Isaaclab3NewtonEnv
 
 
 def _mujoco_live() -> type:
@@ -1011,6 +1028,25 @@ def _isaaclab2_robot_realizer() -> object:
     return build_robot_realization
 
 
+def _isaaclab3_stub_env_kwargs(backend: str) -> object:
+    """Return the P1 skeleton ``env_kwargs`` builder (raises on construction)."""
+
+    def env_kwargs(*_args: Any, **_kwargs: Any) -> object:
+        raise NotImplementedError(
+            f"backend {backend!r}: P1 skeleton — shared backend not implemented yet"
+        )
+
+    return env_kwargs
+
+
+def _isaaclab3_physx_env_kwargs() -> object:
+    return _isaaclab3_stub_env_kwargs("isaaclab3_physx")
+
+
+def _isaaclab3_newton_env_kwargs() -> object:
+    return _isaaclab3_stub_env_kwargs("isaaclab3_newton")
+
+
 _STATIC_INFO: dict[str, BackendInfo] = {
     "mujoco": BackendInfo(
         "mujoco",
@@ -1101,24 +1137,21 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         camera_enable_required=True,
         scene_provider_consumer=True,
     ),
-    "isaaclab3": BackendInfo(
-        "isaaclab3",
+    "isaaclab3_physx": BackendInfo(
+        "isaaclab3_physx",
         (3, 0),
-        ISAACLAB3_TRAITS,
+        ISAACLAB3_PHYSX_TRAITS,
         asset_formats=("usd", "urdf"),
-        env_class=_isaaclab3_env,
-        camera_backend=_isaaclab2_rig_factory,
-        director_ops=_isaaclab2_director_ops,
-        contact_backend=_isaaclab2_contact_backend,
-        gripper_backend=_isaaclab2_gripper_backend,
-        env_kwargs=_isaaclab2_env_kwargs,
-        build_terrain=_isaaclab2_build_terrain,
-        build_events=_isaaclab2_build_events,
-        scene_ops=_isaaclab2_scene_ops,
-        kit_launcher=_isaaclab2_kit_launcher,
-        robot_realizer=_isaaclab2_robot_realizer,
-        default_lighting={"dome_intensity": 600.0},
-        camera_enable_required=True,
+        env_class=_isaaclab3_physx_env,
+        env_kwargs=_isaaclab3_physx_env_kwargs,
+    ),
+    "isaaclab3_newton": BackendInfo(
+        "isaaclab3_newton",
+        (3, 0),
+        ISAACLAB3_NEWTON_TRAITS,
+        asset_formats=("usd", "urdf"),
+        env_class=_isaaclab3_newton_env,
+        env_kwargs=_isaaclab3_newton_env_kwargs,
     ),
 }
 
@@ -1130,14 +1163,6 @@ MJWARP_BACKEND: str = "mjwarp"
 
 # import-time self-check: a bad trait table must never reach a run
 validate_trait_rules()
-
-# config-facing aliases -> canonical family.  "isaaclab" is the historical
-# default name; it resolves to isaaclab2/isaaclab3 by version probe.
-BACKEND_ALIASES: dict[str, str] = {"isaaclab": "isaaclab:auto"}
-
-# build-name aliases: the single truth for the env factory table.
-# "isaaclab" is the historical build spelling of the 2.3-series module.
-_BUILD_ALIASES: dict[str, str] = {"isaaclab": "isaaclab2"}
 
 
 # --------------------------------------------------------------------------- #
@@ -1195,117 +1220,232 @@ def mujoco_warp_version() -> tuple[int, int] | None:
     return _dist_version("mujoco-warp") or _import_version("mujoco_warp")
 
 
+def newton_version() -> tuple[int, int] | None:
+    """Return the ``newton`` (major, minor) version probe."""
+    return _dist_version("newton") or _import_version("newton")
+
+
+def warp_version() -> tuple[int, int] | None:
+    """Return the ``warp-lang`` (major, minor) version probe.
+
+    The distribution name is ``warp-lang``; the import/module name is ``warp``.
+    """
+    return _dist_version("warp-lang") or _import_version("warp")
+
+
 def known_backends() -> list[str]:
     """Canonical backend names (registry order, no probing)."""
     return list(CANONICAL_BACKENDS)
 
 
-def build_name(name: str | None = None) -> str:
-    """Resolve a build spelling to a canonical backend name (no probing).
-
-    The historical ``"isaaclab"`` build name pins ``isaaclab2`` (the 2.3
-    module family); canonical names pass through unchanged.
-    """
-    raw = "isaaclab" if name is None else str(name).strip().lower()
-    raw = _BUILD_ALIASES.get(raw, raw)
-    if raw in _STATIC_INFO:
-        return raw
-    raise ValueError(f"unknown env backend {raw!r}; " f"available: {', '.join(CANONICAL_BACKENDS)}")
-
-
-def backend_info(name: str) -> BackendInfo:
-    """Registry info for *name* (canonical, alias or ``isaaclab``).
-
-    The returned ``version`` is the live probe for the requested family —
-    ``(0, 0)`` when the stack is absent (callers gate on it via
-    :func:`select_backend`, which is the fail-fast entry point).
-    """
-    canonical = _resolve_name(name)
-    info = _STATIC_INFO[canonical]
-    if canonical == "mujoco":
-        ver = mujoco_version()
-    elif canonical == "mjwarp":
-        ver = mujoco_warp_version()
-    else:
-        ver = isaaclab_version()
-        if canonical == "isaaclab3" and ver is not None and ver[0] < 3:
-            ver = None  # declared il3, stack is 2.x
-        if canonical == "isaaclab2" and ver is not None and ver[0] >= 3:
-            ver = None  # declared il2, stack is 3.x
-    if ver is not None:
-        info = replace(info, version=ver)
-    return info
-
-
-def _resolve_name(name: str | None) -> str:
-    """Normalize a requested backend name to a canonical one.
-
-    ``None`` / ``"isaaclab"`` -> the isaaclab family by version probe
-    (2.x -> isaaclab2, 3.x+ -> isaaclab3, absent -> isaaclab2 so the
-    fail-fast message names the *default* stack).
-    """
-    if name is None:
-        name = "isaaclab"
-    name = str(name).strip().lower()
-    if name in ("isaaclab", "isaaclab:auto"):
-        ver = isaaclab_version()
-        if ver is not None and ver[0] >= 3:
-            return "isaaclab3"
-        return "isaaclab2"
-    if name in _STATIC_INFO:
-        return name
-    raise BackendSelectionError(
-        f"unknown env backend {name!r}",
+def _canonical_hint() -> str:
+    """The teaching hint shared by every rejection path."""
+    return (
         f"available backends: {', '.join(CANONICAL_BACKENDS)} "
-        f"(alias 'isaaclab' auto-selects isaaclab2/isaaclab3 by version)",
+        f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were removed)"
     )
 
 
-def select_backend(name: str | None = None) -> str:
-    """Resolve a config ``backend:`` value to a canonical, usable backend.
+def _canonical_or_error(name: str | None) -> str:
+    """Return *name* if it is canonical, else raise ``BackendSelectionError``.
 
-    Import-probe auto-selection for ``None``/``"isaaclab"``; explicit
-    ``isaaclab2``/``isaaclab3``/``mujoco`` pins are verified against the
-    probe (stack absent or version mismatch -> :class:`BackendSelectionError`
-    with an actionable hint — never a silent fallback).
+    No aliases and no version probing: ``None``/``""``/``isaaclab``/
+    ``isaaclab3`` are rejected just like any unknown spelling.
     """
-    canonical = _resolve_name(name)
+    raw = "" if name is None else str(name).strip().lower()
+    if raw in _STATIC_INFO:
+        return raw
+    raise BackendSelectionError(f"unknown env backend {name!r}", _canonical_hint())
+
+
+def build_name(name: str) -> str:
+    """Validate a canonical build spelling (no probing, no aliases).
+
+    Only :data:`CANONICAL_BACKENDS` is accepted.  ``None``, ``""``,
+    ``"isaaclab"``, ``"isaaclab3"`` and unknown spellings raise a teaching
+    :class:`ValueError` listing the five canonical names.
+    """
+    raw = "" if name is None else str(name).strip().lower()
+    if raw in _STATIC_INFO:
+        return raw
+    raise ValueError(
+        f"unknown env backend {name!r}; available backends: "
+        f"{', '.join(CANONICAL_BACKENDS)} "
+        f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were removed)"
+    )
+
+
+def _stack_version(canonical: str) -> tuple[int, int] | None:
+    """Probed version of *canonical*'s stack, or None if absent/mismatched."""
     if canonical == "mujoco":
-        ver = mujoco_version()
-        if ver is None:
-            raise BackendSelectionError(
+        return mujoco_version()
+    if canonical == "mjwarp":
+        mjwarp = mujoco_warp_version()
+        if mjwarp is None or warp_version() is None:
+            return None
+        return mjwarp
+    ver = isaaclab_version()
+    if canonical == "isaaclab2":
+        return None if ver is None or ver[0] >= 3 else ver
+    if canonical == "isaaclab3_physx":
+        return None if ver is None or ver[0] < 3 else ver
+    # isaaclab3_newton: needs IsaacLab 3.x and the whole Newton stack.
+    if ver is None or ver[0] < 3:
+        return None
+    if newton_version() is None or mujoco_warp_version() is None or warp_version() is None:
+        return None
+    return ver
+
+
+def backend_info(name: str) -> BackendInfo:
+    """Registry info for the canonical backend *name*.
+
+    The returned ``version`` is the live probe for that backend's stack;
+    ``(0, 0)`` when the stack is absent or its major version does not match
+    the backend identity (callers gate on it via :func:`select_backend`, the
+    fail-fast entry point).
+
+    Raises:
+        BackendSelectionError: *name* is not a canonical name (no aliases,
+            no ``None``).
+    """
+    canonical = _canonical_or_error(name)
+    info = _STATIC_INFO[canonical]
+    ver = _stack_version(canonical)
+    return replace(info, version=(0, 0) if ver is None else ver)
+
+
+@dataclass(frozen=True)
+class StackProbe:
+    """A snapshot of the engine stacks a backend selection may require.
+
+    The pure decision function :func:`selection_error` consumes this value
+    object, so unit tests feed fake probes instead of monkeypatching the live
+    version probes.  Each field is ``(major, minor)`` or ``None`` (absent).
+    """
+
+    isaaclab: tuple[int, int] | None = None
+    newton: tuple[int, int] | None = None
+    mujoco: tuple[int, int] | None = None
+    mujoco_warp: tuple[int, int] | None = None
+    warp: tuple[int, int] | None = None
+
+
+def selection_error(canonical: str, probe: StackProbe) -> BackendSelectionError | None:
+    """Decide whether *canonical* is usable against *probe* (pure).
+
+    Never calls a version probe: the caller owns the :class:`StackProbe`.
+    Returns the :class:`BackendSelectionError` for an unusable selection, or
+    ``None`` when the explicitly chosen stack is satisfied.
+    """
+    if canonical not in _STATIC_INFO:
+        return BackendSelectionError(
+            f"unknown env backend {canonical!r}",
+            _canonical_hint(),
+        )
+
+    if canonical == "mujoco":
+        if probe.mujoco is None:
+            return BackendSelectionError(
                 "backend 'mujoco' requested but the mujoco stack is not "
                 "importable in this environment",
                 "run on the host .venv_sim (pip install mujoco) or pick a " "different env.backend",
             )
-        return canonical
+        return None
+
     if canonical == "mjwarp":
-        ver = mujoco_warp_version()
-        if ver is None:
-            raise BackendSelectionError(
-                "backend 'mjwarp' requested but the mujoco-warp stack is not "
-                "importable in this environment",
+        missing = [
+            dist
+            for dist, ver in (("mujoco-warp", probe.mujoco_warp), ("warp-lang", probe.warp))
+            if ver is None
+        ]
+        if missing:
+            return BackendSelectionError(
+                "backend 'mjwarp' requested but the "
+                + " + ".join(missing)
+                + " stack is not importable in this environment",
                 "install the warp extra (pip install 'unigym[warp]'; "
                 "mujoco>=3.13 + mujoco-warp + warp-lang) or pick a "
                 "different env.backend",
             )
-        return canonical
-    ver = isaaclab_version()
+        return None
+
+    ver = probe.isaaclab
+    if canonical == "isaaclab2":
+        if ver is None:
+            return BackendSelectionError(
+                "backend 'isaaclab2' requested but the isaaclab stack is not "
+                "importable in this environment",
+                "isaaclab runs need the isaac-lab container (AppLauncher must "
+                "start first); check env.backend in the config",
+            )
+        if ver[0] >= 3:
+            return BackendSelectionError(
+                f"backend 'isaaclab2' requested but installed isaaclab is {ver[0]}.{ver[1]}",
+                "set env.backend: isaaclab3_physx or isaaclab3_newton "
+                "(or install the isaaclab 2.3 stack)",
+            )
+        return None
+
+    # The two IsaacLab 3 identities both require IsaacLab 3.x.
     if ver is None:
-        raise BackendSelectionError(
-            f"backend '{canonical}' requested but the isaaclab stack is not "
+        return BackendSelectionError(
+            f"backend {canonical!r} requested but the isaaclab stack is not "
             f"importable in this environment",
             "isaaclab runs need the isaac-lab container (AppLauncher must "
             "start first); check env.backend in the config",
         )
-    if canonical == "isaaclab2" and ver[0] >= 3:
-        raise BackendSelectionError(
-            f"backend 'isaaclab2' requested but installed isaaclab is " f"{ver[0]}.{ver[1]}",
-            "set env.backend: isaaclab3 (or install the isaaclab 2.3 stack)",
-        )
-    if canonical == "isaaclab3" and ver[0] < 3:
-        raise BackendSelectionError(
-            f"backend 'isaaclab3' requested but installed isaaclab is " f"{ver[0]}.{ver[1]}",
+    if ver[0] < 3:
+        return BackendSelectionError(
+            f"backend {canonical!r} requested but installed isaaclab is {ver[0]}.{ver[1]}",
             "set env.backend: isaaclab2 (or install isaaclab 3.x)",
         )
+    if canonical == "isaaclab3_physx":
+        return None
+
+    # isaaclab3_newton: IsaacLab 3.x plus newton / mujoco-warp / warp-lang.
+    missing = [
+        dist
+        for dist, dist_ver in (
+            ("newton", probe.newton),
+            ("mujoco-warp", probe.mujoco_warp),
+            ("warp-lang", probe.warp),
+        )
+        if dist_ver is None
+    ]
+    if missing:
+        return BackendSelectionError(
+            "backend 'isaaclab3_newton' requested but the "
+            + " + ".join(missing)
+            + " stack is not importable in this environment",
+            "install newton + mujoco-warp + warp-lang (the IsaacLab 3 Newton "
+            "extra) or set env.backend: isaaclab3_physx",
+        )
+    return None
+
+
+def _live_probe() -> StackProbe:
+    """Snapshot the live stacks for :func:`select_backend` (probes once)."""
+    return StackProbe(
+        isaaclab=isaaclab_version(),
+        newton=newton_version(),
+        mujoco=mujoco_version(),
+        mujoco_warp=mujoco_warp_version(),
+        warp=warp_version(),
+    )
+
+
+def select_backend(name: str) -> str:
+    """Verify the explicitly chosen canonical backend against the live stack.
+
+    Canonical-only: no aliases and no automatic family selection.  ``None``,
+    ``""``, ``"isaaclab"``, ``"isaaclab3"`` and unknown names are rejected.
+    The chosen backend's stack is verified with :func:`selection_error`; a
+    missing or mismatched stack raises :class:`BackendSelectionError` with an
+    actionable hint — never a silent fallback.
+    """
+    canonical = _canonical_or_error(name)
+    error = selection_error(canonical, _live_probe())
+    if error is not None:
+        raise error
     return canonical

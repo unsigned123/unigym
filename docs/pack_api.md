@@ -509,6 +509,11 @@ declared format:
 | `static_rigid` | one root body, no joints | static USD; static URDF refused |
 | `dynamic_rigid` | one root body + one root freejoint | dynamic USD; jointless URDF best effort |
 
+`isaaclab3_physx` and `isaaclab3_newton` are P1 stubs: they declare the same
+`("usd", "urdf")` formats but have no asset-scene engine, so the IsaacLab
+`.usd` / `.urdf` columns above describe `isaaclab2` behaviour only (an
+asset-scene stub is not implemented).
+
 Resolve one scene's assets through the same boundary helpers:
 
 ```python
@@ -652,7 +657,7 @@ passes actuation explicitly; it is never silently filled from a pack.
 is robot metadata, not backend logic: the backend's selected asset format picks
 the native name. Each backend declares an ordered, non-empty
 `BackendInfo.asset_formats` preference tuple: `("mjcf",)` for
-mujoco/mjwarp and `("usd", "urdf")` for isaaclab2/isaaclab3. For each
+mujoco/mjwarp and `("usd", "urdf")` for isaaclab2/isaaclab3_*. For each
 articulation the run layer selects the first preferred format present on the
 effective `AssetRef` (`spec.model` when set, otherwise `profile.assets`). There
 is no fallback or conversion: an effective asset with no compatible format
@@ -688,7 +693,7 @@ articulations:
   named `all`.
 - Omitting `contacts` while the run declares a run-level `contacts:` section
   defaults to `all` with a build warning that states the per-body sensor cost
-  (on isaaclab one `ContactSensorCfg` per rigid body per env clone).
+  (on an IsaacLab backend one `ContactSensorCfg` per rigid body per env clone).
 - `none` suppresses the implicit default; explicitly declared inventory groups
   and explicit run-level `sensor_bodies` lists still work.
 - Adapter contact-observation requests never synthesize contact groups; they
@@ -764,7 +769,7 @@ realizer(profile, *, spec, params, asset_plan) -> backend realization
 `spec` is the run-level `ArticulationSpec`; its `spawn` mapping is the only
 robot-root spawn authority.
 
-- isaaclab2/isaaclab3 build the `ArticulationCfg` from the neutral profile in
+- isaaclab2/isaaclab3_* build the `ArticulationCfg` from the neutral profile in
   `unigym/backends/isaaclab2/robots/`;
 - mujoco/mjwarp consume the neutral profile directly and build no engine robot
   object;
@@ -1080,7 +1085,9 @@ backend_params:                   # selected by the run backend
 
 The core never hard-codes `backend_params.mujoco`: the selected run backend's
 block is merged into `env.params`, and each backend validates its own keys.
-Content-only presets (no provider) may declare static `objects.types` but not a
+`<backend>` is a canonical backend name; `isaaclab` and `isaaclab3` are not
+aliases and are rejected. Content-only presets (no provider) may declare static
+`objects.types` but not a
 content-fill spec; a fill needs a composed scene. `backend_params.<backend>.initializer`
 must use the runtime shape (`type:` or `module:`, with an optional `params:`
 mapping), and `base` currently accepts only `joint: fixed`.

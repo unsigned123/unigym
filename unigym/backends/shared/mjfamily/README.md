@@ -18,7 +18,7 @@ of one backend importing the other.
 2. It must **never import any `backends/<name>/env.py`**. Family code is a
    library, not an env orchestration; env state is passed in as an argument.
 3. Only `unigym/backends/mujoco/**` and `unigym/backends/mjwarp/**` may
-   import this package. Neutral layers and the `isaaclab2` / `isaaclab3`
+   import this package. Neutral layers and the `isaaclab2` / `isaaclab3_*`
    backends must not.
 4. The two backend packages remain independent: `mujoco` must not import
    `mjwarp` (and vice versa). Cross-backend edges are ratcheted in

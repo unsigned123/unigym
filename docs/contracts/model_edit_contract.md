@@ -31,11 +31,15 @@ hatch; common model fields belong here.
 - No automatic mass -> inertia coupling.
 - No undo/history: model edits are not rewound.
 - IsaacLab2 has no published geom IR, so geom fields are a capability error.
-- IsaacLab3 declares no `MODEL_EDIT` trait.
+- The IsaacLab 3 P1 stubs (`isaaclab3_physx` / `isaaclab3_newton`) declare no
+  `MODEL_EDIT` trait, so every field below is a capability error.
 
 ## 1. Field matrix
 
-| Field | mujoco | mjwarp | isaaclab2 | isaaclab3 |
+The `isaaclab3_*` column covers both IsaacLab 3 P1 stubs
+(`isaaclab3_physx` / `isaaclab3_newton`).
+
+| Field | mujoco | mjwarp | isaaclab2 | isaaclab3_* |
 |---|---|---|---|---|
 | body.mass | yes | yes | yes | no |
 | body.com | yes | yes | yes | no |

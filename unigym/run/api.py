@@ -59,7 +59,7 @@ from unigym._typing import (
 from unigym.backends.registry import Trait, backend_info
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from unigym.camera import CameraSet
-from unigym.run.spec import RunSpec, build_spec
+from unigym.run.spec import RunSpec, build_spec, require_backend, require_backend_name
 
 if TYPE_CHECKING:
     import torch
@@ -689,7 +689,10 @@ class Run:
             for a config that declares articulations without a registry
             lookup (the facade declaration path).  Non-serialized: the
             profiles bypass only the factory lookup.
-        backend: Environment backend (default ``"mujoco"``).
+        backend: Environment backend; one of the five canonical names
+            (``mujoco`` / ``mjwarp`` / ``isaaclab2`` / ``isaaclab3_physx`` /
+            ``isaaclab3_newton``).  Required: there is no implicit default and
+            the ``isaaclab`` / ``isaaclab3`` aliases were removed.
         backend_options: Backend-private options mapping
             (``env.backend_options``), e.g.
             ``{"mujoco": {"compose": {"auto_prefix": True}}}``.
@@ -891,7 +894,7 @@ class Run:
         """
         articulation_entry = _articulation_entry(robot, spawn)
         adapter_section = _adapter_section(adapter)
-        backend_label = backend or "mujoco"
+        backend_label = require_backend_name(backend, "<memory>", key="backend")
         profile = _robot_profile(robot)
         if profile is not None:
             minimal_action_spec, minimal_policies = _explicit_action_authoring(
@@ -1102,7 +1105,7 @@ class Run:
         if self._backend is not None:
             cfg = copy.deepcopy(cfg)
             _section(cfg, "env")["backend"] = self._backend
-        backend = str(_existing_section(cfg, "env").get("backend", "isaaclab"))
+        backend = require_backend(_existing_section(cfg, "env"), self._config_path)
         info = backend_info(backend)
         if (
             self._world is not None
@@ -1123,7 +1126,7 @@ class Run:
             else:
                 # A backend with neither a world_base consumer nor a flat
                 # terrain would silently simulate nothing; fail at the spec
-                # boundary instead (e.g. the isaaclab3 stub).
+                # boundary instead (e.g. the isaaclab3_* stubs).
                 from unigym.errors import ConfigError
 
                 raise ConfigError(
@@ -1263,7 +1266,7 @@ class Run:
     def __repr__(self) -> str:
         """``<Run name=... backend=... num_envs=... built=...>``."""
         env = _existing_section(self._raw_cfg, "env")
-        backend = self._backend or env.get("backend") or "isaaclab"
+        backend = self._backend or env.get("backend") or "<unset>"
         num_envs = self._num_envs if self._num_envs is not None else env.get("num_envs", "?")
         return (
             f"<Run name={self._display_name()!r} backend={backend!r} "
@@ -1275,7 +1278,7 @@ class Run:
         env = _existing_section(self._raw_cfg, "env")
         rows: dict[str, JsonValue] = {
             "name": self._display_name(),
-            "backend": self._backend or env.get("backend", "isaaclab"),
+            "backend": self._backend or env.get("backend") or "<unset>",
             "num_envs": (
                 self._num_envs if self._num_envs is not None else env.get("num_envs", "?")
             ),

@@ -290,7 +290,11 @@ def _qvel_size(info: Joint) -> int:
 
 
 def _backend_label(ir: ModelIR, env: object) -> str:
-    """Return the backend name used in errors (IR first, env fallback)."""
+    """Return the backend name used in errors (IR first, env fallback).
+
+    The label must be a canonical env backend name; the fallback is only a
+    last-resort diagnostic spelling (never an engine alias or default).
+    """
     return ir.backend or type(env).__name__
 
 
@@ -302,23 +306,33 @@ def _resolve_live_binder(
     """Resolve the backend's ``live_provider`` face (registry, lazy).
 
     The neutral layer names no engine: the binder class is imported only
-    when a ``BackendInfo.live_provider`` factory is actually invoked.
+    when a ``BackendInfo.live_provider`` factory is actually invoked.  The
+    label must be an explicit canonical env backend -- there is no alias and
+    no default.
     """
-    provider: Callable[[], type] | None = None
-    try:
-        from unigym.backends.registry import backend_info, build_name
+    from unigym.backends.registry import CANONICAL_BACKENDS, backend_info, build_name
 
-        provider = backend_info(build_name(label)).live_provider
-    except (ValueError, RuntimeError):
-        provider = None
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError(
+            f"live proxies: env backend is required; choose one of: "
+            f"{', '.join(CANONICAL_BACKENDS)}"
+        )
+    try:
+        canonical = build_name(label)
+    except ValueError as exc:
+        raise ValueError(
+            f"live proxies: backend label {label!r} is not canonical; "
+            f"choose one of: {', '.join(CANONICAL_BACKENDS)}"
+        ) from exc
+    provider: Callable[[], type] | None = backend_info(canonical).live_provider
     if provider is None:
         raise NotImplementedError(
-            f"live proxies: backend {label!r} has no live model binding "
+            f"live proxies: backend {canonical!r} has no live model binding "
             f"(hint: live proxies: mujoco/mjwarp today)"
         )
     binder = provider()(ir, env)
     if not isinstance(binder, _LiveBinder):
-        raise NotImplementedError(f"live proxies: backend {label!r} returned an invalid binder")
+        raise NotImplementedError(f"live proxies: backend {canonical!r} returned an invalid binder")
     return binder
 
 

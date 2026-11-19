@@ -139,9 +139,9 @@ def _compiled_model(instance):
     Raises:
         SystemExit: The backend exposes no compiled model handle.
     """
-    from unigym.backends.registry import backend_info, build_name
+    from unigym.backends.registry import backend_info
 
-    info = backend_info(build_name(instance.spec.backend))
+    info = backend_info(instance.spec.backend)
     if info.model_handle is None:
         raise SystemExit(
             f"[describe] error: --compiled is unavailable for backend "

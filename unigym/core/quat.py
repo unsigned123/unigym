@@ -376,6 +376,8 @@ def camera_isaac_to_mujoco(q_isaac_wxyz) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 def _isaaclab_is_xyzw() -> bool:
     """True when the probed isaaclab major version is >= 3 (xyzw data/cfg)."""
+    # Data-convention probe only (wxyz vs xyzw at the IsaacLab boundary);
+    # this is NOT an env-backend selection and never picks a backend.
     from ..backends.registry import isaaclab_version
 
     ver = isaaclab_version()

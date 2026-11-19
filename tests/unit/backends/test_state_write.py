@@ -10,7 +10,8 @@ import torch
 from unigym._typing import JsonValue
 from unigym.backends.registry import (
     ISAACLAB2_TRAITS,
-    ISAACLAB3_TRAITS,
+    ISAACLAB3_NEWTON_TRAITS,
+    ISAACLAB3_PHYSX_TRAITS,
     MJWARP_TRAITS,
     MUJOCO_TRAITS,
     Trait,
@@ -81,11 +82,12 @@ def test_normalize_state_quat_normalizes_and_rejects_zero_norm() -> None:
 
 
 def test_state_write_is_an_optional_trait() -> None:
-    """MuJoCo/IsaacLab2/Mjwarp declare STATE_WRITE; IsaacLab3 does not."""
+    """MuJoCo/IsaacLab2/Mjwarp declare STATE_WRITE; the IsaacLab 3 stubs do not."""
     assert Trait.STATE_WRITE in MUJOCO_TRAITS
     assert Trait.STATE_WRITE in ISAACLAB2_TRAITS
     assert Trait.STATE_WRITE in MJWARP_TRAITS
-    assert Trait.STATE_WRITE not in ISAACLAB3_TRAITS
+    assert Trait.STATE_WRITE not in ISAACLAB3_PHYSX_TRAITS
+    assert Trait.STATE_WRITE not in ISAACLAB3_NEWTON_TRAITS
 
     assert Trait.STATE_WRITE in BackendCapabilities(state_write=True).traits()
     assert Trait.STATE_WRITE not in BackendCapabilities().traits()
@@ -165,12 +167,12 @@ def test_run_delegates_state_writes_and_never_settles_implicitly(monkeypatch) ->
 def test_run_state_write_raises_for_an_unsupported_backend(monkeypatch) -> None:
     """A backend without the STATE_WRITE trait gets a clear error."""
     cfg = _cfg()
-    cfg["env"] = {"backend": "isaaclab3", "num_envs": 1}
+    cfg["env"] = {"backend": "isaaclab3_physx", "num_envs": 1}
     cfg.pop("world_base")
     run = Run(cfg)
     monkeypatch.setattr(run, "build", lambda inspect=False: SimpleNamespace(env=object()))
 
-    with pytest.raises(NotImplementedError, match=r"isaaclab3.*STATE_WRITE"):
+    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*STATE_WRITE"):
         run.settle(None)
 
 

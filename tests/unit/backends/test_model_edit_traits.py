@@ -12,7 +12,8 @@ import pytest
 from unigym.backends import registry
 from unigym.backends.registry import (
     ISAACLAB2_TRAITS,
-    ISAACLAB3_TRAITS,
+    ISAACLAB3_NEWTON_TRAITS,
+    ISAACLAB3_PHYSX_TRAITS,
     MJWARP_TRAITS,
     MUJOCO_TRAITS,
     ModelEditField,
@@ -27,11 +28,12 @@ DOC = ROOT / "docs" / "contracts" / "model_edit_contract.md"
 
 
 def test_model_edit_is_declared_on_the_three_real_backends() -> None:
-    """MuJoCo/mjwarp/IsaacLab2 declare MODEL_EDIT; IsaacLab3 does not."""
+    """MuJoCo/mjwarp/IsaacLab2 declare MODEL_EDIT; the IsaacLab 3 stubs do not."""
     assert Trait.MODEL_EDIT in MUJOCO_TRAITS
     assert Trait.MODEL_EDIT in MJWARP_TRAITS
     assert Trait.MODEL_EDIT in ISAACLAB2_TRAITS
-    assert Trait.MODEL_EDIT not in ISAACLAB3_TRAITS
+    assert Trait.MODEL_EDIT not in ISAACLAB3_PHYSX_TRAITS
+    assert Trait.MODEL_EDIT not in ISAACLAB3_NEWTON_TRAITS
 
     assert Trait.MODEL_EDIT in BackendCapabilities(model_edit=True).traits()
     assert Trait.MODEL_EDIT not in BackendCapabilities().traits()
@@ -50,10 +52,11 @@ def test_provider_fields_equal_the_registry_field_set(backend) -> None:
 
 
 def test_isaaclab3_has_no_model_edit_registration() -> None:
-    """The EA skeleton declares neither the trait nor provider/fields."""
-    info = backend_info("isaaclab3")
-    assert info.model_edit_provider is None
-    assert info.model_edit_fields == frozenset()
+    """The P1 skeletons declare neither the trait nor provider/fields."""
+    for name in ("isaaclab3_physx", "isaaclab3_newton"):
+        info = backend_info(name)
+        assert info.model_edit_provider is None
+        assert info.model_edit_fields == frozenset()
 
 
 def test_model_edit_field_sets_match_the_documented_matrix() -> None:
@@ -68,10 +71,11 @@ def test_model_edit_field_sets_match_the_documented_matrix() -> None:
             "mujoco": cells[1],
             "mjwarp": cells[2],
             "isaaclab2": cells[3],
-            "isaaclab3": cells[4],
+            "isaaclab3_physx": cells[4],
+            "isaaclab3_newton": cells[4],
         }
     assert set(matrix) == {field.value for field in ModelEditField}
-    for backend in ("mujoco", "mjwarp", "isaaclab2", "isaaclab3"):
+    for backend in ("mujoco", "mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton"):
         fields = backend_info(backend).model_edit_fields
         for field in ModelEditField:
             documented = matrix[field.value][backend]

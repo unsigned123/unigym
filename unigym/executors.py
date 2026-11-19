@@ -32,6 +32,8 @@ from typing import NoReturn
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from unigym.backends.registry import CANONICAL_BACKENDS
+
 
 # --------------------------------------------------------------------------- #
 # docker synthesis -- moved verbatim from spawn_spec (byte-locked by L1)
@@ -318,6 +320,29 @@ def builtin_executors(cfg: dict) -> dict[str, Executor]:
     }
 
 
+#: canonical env backend -> builtin executor name.  Executor names stay
+#: legacy ("isaaclab" is the docker image face); binding keys are canonical.
+_BUILTIN_BINDING: dict[str, str] = {
+    "mujoco": "mujoco",
+    "mjwarp": "mujoco",
+    "isaaclab2": "isaaclab",
+    "isaaclab3_physx": "isaaclab",
+    "isaaclab3_newton": "isaaclab",
+}
+
+
+def _check_backend_key(backend) -> str:
+    """Canonical-only `backends:` key check (aliases/unknown teaching error)."""
+    key = "" if backend is None else str(backend).strip().lower()
+    if key not in CANONICAL_BACKENDS:
+        _fail(
+            f"backends.{backend}",
+            "env backend keys are canonical; 'isaaclab'/'isaaclab3' "
+            f"aliases removed -- use one of: {', '.join(CANONICAL_BACKENDS)}",
+        )
+    return key
+
+
 def _parse_executor(name: str, raw, cfg: dict) -> Executor:
     f = f"executors.{name}"
     if not isinstance(raw, dict) or not raw.get("kind"):
@@ -369,7 +394,7 @@ def resolve_executors(cfg: dict) -> tuple[dict[str, Executor], dict[str, str]]:
     declared = cfg.get("executors")
     binding_raw = cfg.get("backends")
     if not declared and not binding_raw:
-        return builtin_executors(cfg), {"mujoco": "mujoco", "isaaclab": "isaaclab"}
+        return builtin_executors(cfg), dict(_BUILTIN_BINDING)
     if declared and not binding_raw:
         _fail(
             "backends",
@@ -382,13 +407,14 @@ def resolve_executors(cfg: dict) -> tuple[dict[str, Executor], dict[str, str]]:
     )
     binding: dict[str, str] = {}
     for backend, tgt in (binding_raw or {}).items():
+        key = _check_backend_key(backend)
         name = tgt.get("executor") if isinstance(tgt, dict) else tgt
         if not isinstance(name, str) or name not in table:
             _fail(
                 f"backends.{backend}",
                 f"unknown executor {name!r} (declared: " f"{', '.join(sorted(table)) or 'none'})",
             )
-        binding[backend] = name
+        binding[key] = name
     return table, binding
 
 

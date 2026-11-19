@@ -72,6 +72,7 @@ def test_run_profile_path_builds_with_profile_assets_and_actuation(tmp_path: Pat
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        backend="mujoco",
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
@@ -101,6 +102,7 @@ def test_run_profile_path_requires_explicit_action_and_policies(tmp_path: Path) 
         Run(
             world=World.base(mjcf=_floor_world(tmp_path)),
             robot=_profile(assets=None),
+            backend="mujoco",
             steps=1,
         )
 
@@ -114,6 +116,7 @@ def test_profile_release_assets_resolve_only_at_build(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        backend="mujoco",
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
@@ -146,6 +149,7 @@ def test_mujoco_build_does_not_resolve_an_unselected_release_format(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        backend="mujoco",
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
@@ -220,6 +224,7 @@ def test_injected_profile_wins_over_a_pack_profile_with_the_same_id(
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        backend="mujoco",
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
@@ -372,6 +377,7 @@ def test_run_spawn_full_quaternion_reaches_the_articulation_entry(tmp_path: Path
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=profile,
+        backend="mujoco",
         observations={"robot": ["tiny"]},
         spawn={"pos": (0.1, 0.2, 0.9), "quat_wxyz": (1.0, 0.0, 0.0, 1.0)},
         action_spec=ACTION_SPEC,

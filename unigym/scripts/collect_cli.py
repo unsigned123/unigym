@@ -41,7 +41,7 @@ Reset policy (yaml ``runner:`` section, optional):
                                          # accepts a callable injection seam
 
 Backend dispatch: the yaml ``env.backend`` key selects the collection backend
-(default ``"isaaclab"``); the backend is built through
+(required, canonical only); the backend is built through
 ``unigym.env.backends.build_env_backend(...)`` (now called from
 ``unigym.run.build.build_instance`` -- the one construction point) and only
 talks to the engine
@@ -58,7 +58,7 @@ from pathlib import Path
 
 import yaml
 
-from unigym.backends.registry import backend_info
+from unigym.backends.registry import CANONICAL_BACKENDS, backend_info
 
 parser = argparse.ArgumentParser(description="General robot locomotion data collection")
 parser.add_argument("--config", type=str, required=True, help="path to run yaml")
@@ -310,11 +310,11 @@ def _peek_backend(config_path: str) -> str:
 
     Fail-fast contract (backend_contract §1; audit 2026-10 P0-2): an
     unreadable config or a yaml syntax error dies HERE with an actionable
-    {error, hint} message -- never a silent fall-back to the default
+    {error, hint} message -- never a silent fall-back to a default
     backend (a typo'd path on a mujoco config would otherwise ride the
     whole isaaclab/kit launch chain before dying in ``main()``).  A config
-    that parses but omits ``env.backend`` keeps the documented schema
-    default ``"isaaclab"``.
+    that parses but omits (or blanks) ``env.backend`` ALSO dies HERE:
+    ``backend`` is required and canonical-only.
     """
     try:
         with open(config_path) as f:
@@ -332,7 +332,7 @@ def _peek_backend(config_path: str) -> str:
             f"[collect] error: config {config_path} must be a yaml mapping "
             f"(got {type(peek).__name__}) "
             f"| hint: see backend_contract §1 (env.backend selects the "
-            f"backend; default isaaclab)"
+            f"backend; it is required and canonical-only)"
         )
     env = peek.get("env") or {}
     if not isinstance(env, dict):
@@ -340,9 +340,27 @@ def _peek_backend(config_path: str) -> str:
             f"[collect] error: config {config_path}: 'env' must be a "
             f"mapping (got {type(env).__name__}) "
             f"| hint: see backend_contract §1 (env.backend selects the "
-            f"backend; default isaaclab)"
+            f"backend; it is required and canonical-only)"
         )
-    return str(env.get("backend", "isaaclab"))
+    backend = env.get("backend")
+    if backend is None or not str(backend).strip():
+        raise SystemExit(
+            f"[collect] error: config {config_path}: 'env.backend' is "
+            f"missing/empty | hint: set env.backend to one of: "
+            f"{', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases "
+            f"were removed)"
+        )
+    canonical = str(backend).strip().lower()
+    if canonical not in CANONICAL_BACKENDS:
+        raise SystemExit(
+            f"[collect] error: config {config_path}: 'env.backend' = "
+            f"{backend!r} is not a canonical env backend | hint: set "
+            f"env.backend to one of: {', '.join(CANONICAL_BACKENDS)} "
+            f"(canonical names only; 'isaaclab'/'isaaclab3' aliases "
+            f"were removed)"
+        )
+    return canonical
 
 
 backend_label = _peek_backend(parser.parse_known_args()[0].config)
