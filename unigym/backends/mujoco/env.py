@@ -456,6 +456,8 @@ class MujocoEnv:
         self._fill_record = None
         self._closed = False
         self._closing = False
+        self._stepping = False
+        self._model_revision = 0
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
         # (same injection point as the camera rigs)
@@ -849,6 +851,37 @@ class MujocoEnv:
         """
         return self._datas
 
+    def model_edit(self):
+        """Open one global model-edit transaction between steps.
+
+        Returns:
+            A :class:`~unigym.model.edit.ModelEditor` bound to this env.
+
+        Raises:
+            RuntimeError: The environment is closed or currently stepping.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("mujoco backend: environment is closed")
+        if self._stepping:
+            raise RuntimeError("mujoco backend: model edits are only allowed between steps")
+        from unigym.backends.mujoco.model_edit import MujocoModelEditProvider
+        from unigym.model.edit import ModelEditor
+
+        provider = MujocoModelEditProvider()
+
+        def commit(bodies, geoms):
+            return provider.apply(self, bodies, geoms)
+
+        return ModelEditor(
+            backend="mujoco",
+            fields=provider.fields,
+            model_set=self.model_set,
+            revision=self._model_revision,
+            commit=commit,
+            is_open=lambda: not (self._closed or self._closing or self._stepping),
+            current_revision=lambda: self._model_revision,
+        )
+
     @property
     def policy_joint_pos_limits(self):
         """Soft joint limits (policy order) from the model, or ``None``."""
@@ -1238,6 +1271,21 @@ class MujocoEnv:
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
     ) -> EnvStep:
+        """Advance one policy tick behind the model-edit step guard."""
+        if self._stepping:  # pragma: no cover - one owner per step
+            raise RuntimeError("mujoco backend: step() is not re-entrant")
+        self._stepping = True
+        try:
+            return self._step_impl(actions, raw_action, cmd)
+        finally:
+            self._stepping = False
+
+    def _step_impl(
+        self,
+        actions: Sequence[NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
+    ) -> EnvStep:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
         ``actions`` is a ``Sequence[NamedAction]`` (the adapter's
@@ -1418,6 +1466,7 @@ class MujocoEnv:
                     "spec_bits": spec,
                     "bits": [n for b, n in sorted(bits.items()) if spec & b],
                     "mj_time": float(d.time),
+                    "model_revision": int(self._model_revision),
                 },
                 # backend bookkeeping OUTSIDE mjSTATE: the episode clock
                 # and the sampled episode duration are sim truth and roll
@@ -1444,6 +1493,7 @@ class MujocoEnv:
                 "spec_bits": spec,
                 "bits": [n for b, n in sorted(bits.items()) if spec & b],
                 "mj_time": float(self._datas[0].time),
+                "model_revision": int(self._model_revision),
             },
             "extra": {
                 "obs_t": int(self._t),
@@ -1466,6 +1516,16 @@ class MujocoEnv:
         payload's ``extra`` (sim truth) -- ``episode_id`` never rewinds.
         """
         m = self._model
+        meta = state.get("meta") or {}
+        saved_revision = meta.get("model_revision")
+        if saved_revision is not None and int(saved_revision) != self._model_revision:
+            from unigym.model.errors import ModelEditError
+
+            raise ModelEditError(
+                f"mujoco backend: snapshot was captured at model revision "
+                f"{saved_revision}, current revision is {self._model_revision}; "
+                f"model edits are not rewindable (capture a new checkpoint)"
+            )
         spec = int(mujoco.mjtState.mjSTATE_INTEGRATION)
         if self.num_envs == 1:
             d = self._data
