@@ -57,6 +57,7 @@ def _build_env(
     contact_manager=None,
     terrain_cfg=None,
     prop_manager=None,
+    director_cfg=None,
 ):
     """Construct the IsaacLab 3 PhysX backend over the Cartpole asset."""
     import isaaclab.sim as sim_utils
@@ -144,6 +145,7 @@ def _build_env(
         robot_realizations={ARTICULATION: articulation_cfg},
         contact_manager=contact_manager,
         prop_manager=prop_manager,
+        director_cfg=director_cfg,
     )
 
 

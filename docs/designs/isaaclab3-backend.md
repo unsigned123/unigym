@@ -102,9 +102,13 @@ byte-identical, adds no new `Trait` value and no new public field.
   lane test.  The trait/bit land after the shared capability model can express
   partial prop support (or after all three tiers get lane tests).  Newton
   follows in P3.
-- **P2-C director**: teleport / setvel / attach / gripper lane coverage.
+- **P2-C director**: teleport / setvel / follow (kin attach) / gripper lane coverage.
   Declares `DIRECTOR_TELEPORT`, `DIRECTOR_SETVEL`, `DIRECTOR_ATTACH_SLAVE`,
-  `DIRECTOR_GRIPPER` (no capability bit).
+  `DIRECTOR_GRIPPER` (no capability bit).  PhysX status: `test_director.py`
+  drives the neutral `Director` through `handle()` and proves the rigid-prop
+  teleport/setvel writes, the kinematic follow lock across `on_step` and
+  release, the pin hold across `on_step` and release, and the gripper
+  where/move/where round-trip.  Newton follows in P3.
 - **P2-D cameras + recorder**: explicit profile `renderer_cfg`, RGB and depth
   rigs, recorder video.  Declares `CAMERAS_RGB`, `CAMERAS_DEPTH_RIG`,
   `CAMERAS_PER_ENV`, `CAMERAS_PER_ENV_STATE`, `RECORDER_VIDEO`; sets

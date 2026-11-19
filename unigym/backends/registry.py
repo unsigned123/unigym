@@ -739,10 +739,12 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
 
 # IsaacLab 3 identities: PhysX and Newton share one implementation package
 # but own separate runtime stacks and capability sets.  C2-1 lights up the
-# verified shared core conservatively; camera/prop/director traits stay
-# undeclared until their backend tests land (P2).  The rigid-prop path is
-# lane-tested, but the shared props bit projects all three PROPS_* traits, so
-# its declaration is deferred until the capability model can express it.
+# verified shared core conservatively; camera/prop traits stay undeclared
+# until their backend tests land (P2).  The rigid-prop path is lane-tested,
+# but the shared props bit projects all three PROPS_* traits, so its
+# declaration is deferred until the capability model can express it.  The
+# PhysX director writes are lane-proven, so its kinematic director traits are
+# declared; weld stays absent until an engine-hosted weld test exists.
 _IL3_CORE = _CORE | frozenset(
     {
         Trait.MULTI_ENV,  # native num_envs=N scene cloning
@@ -760,6 +762,10 @@ ISAACLAB3_PHYSX_TRAITS = _IL3_CORE | frozenset(
     {
         Trait.EVENTS_DR,  # PhysX profile owns the CoM DR write
         Trait.CONTACTS_GROUPS,  # contacts: all world-frame groups
+        Trait.DIRECTOR_TELEPORT,  # root-pose writes on a rigid prop
+        Trait.DIRECTOR_SETVEL,  # root-velocity writes on a rigid prop
+        Trait.DIRECTOR_ATTACH_SLAVE,  # per-tick kinematic follow
+        Trait.DIRECTOR_GRIPPER,  # kinematic gripper pose face
     }
 )
 
@@ -768,8 +774,8 @@ ISAACLAB3_NEWTON_TRAITS = _IL3_CORE
 # mujoco's model-global writes are one-MjModel only (no per-env
 # face); they stay declared traits but are unavailable at N>1.  mjwarp
 # declares the same N=1 scope (director writes the CPU mirror + pushes the
-# device; one MjModel / one mocap namespace).  isaaclab supports these at
-# N>1 (no scope).
+# device; one MjModel / one mocap namespace).  isaaclab2 supports these at
+# N>1 (no scope); the isaaclab3 neutral Director writes env 0 only.
 _MODEL_GLOBAL = "model-global writes (one MjModel): no per-env face"
 _MJWARP_MODEL_GLOBAL = "model-global writes (one MjModel); mirror-only " "at N>1"
 MUJOCO_SCOPES: dict[Trait, TraitScope] = {
