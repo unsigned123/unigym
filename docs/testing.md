@@ -376,11 +376,13 @@ The two `isaaclab3_*` lanes are the two IsaacLab 3 backend identities
 (`docs/designs/isaaclab3-backend.md`). The canonical names are exactly
 `isaaclab3_physx` and `isaaclab3_newton`; `isaaclab3` is not a lane, a config
 alias or a test directory. P2 declares capabilities one lane test at a time:
-`isaaclab3_physx` owns the real Cartpole contact test and therefore declares
-`--strict-test-packs`; `isaaclab3_newton` still owns environment and stack
-probes only. The remaining capability tests and the self-hosted GitHub jobs
-land with the backend implementation. The lanes stay out of `[nightly]` until
-those jobs exist.
+`isaaclab3_physx` owns the real Cartpole contact test and the rigid-box /
+free-root state-write tests, and therefore declares `--strict-test-packs`; the
+props trait/bit itself is deferred until the shared capability model can
+express partial prop support. `isaaclab3_newton` still owns environment and
+stack probes only. The remaining capability tests and the self-hosted GitHub
+jobs land with the backend implementation. The lanes stay out of `[nightly]`
+until those jobs exist.
 
 Selector ownership rules:
 

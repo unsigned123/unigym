@@ -740,7 +740,9 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
 # IsaacLab 3 identities: PhysX and Newton share one implementation package
 # but own separate runtime stacks and capability sets.  C2-1 lights up the
 # verified shared core conservatively; camera/prop/director traits stay
-# undeclared until their backend tests land (P2/C3).
+# undeclared until their backend tests land (P2).  The rigid-prop path is
+# lane-tested, but the shared props bit projects all three PROPS_* traits, so
+# its declaration is deferred until the capability model can express it.
 _IL3_CORE = _CORE | frozenset(
     {
         Trait.MULTI_ENV,  # native num_envs=N scene cloning

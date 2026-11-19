@@ -92,9 +92,16 @@ byte-identical, adds no new `Trait` value and no new public field.
   `BackendCapabilities.contacts=True`.  Newton follows in P3 only when the same
   test passes there.
 - **P2-B props + free-root state**: rigid prop spawn/read, and a free-root
-  asset for `set_root_state` / partial reset / `settle`.  Declares
-  `PROPS_RIGID` (+ `PROPS_ARTICULATION_USD` only when proven); sets
-  `BackendCapabilities.props=True`.
+  asset for `set_root_state` / partial reset / `settle`.  PhysX status:
+  `test_props.py` and the box `set_root_state` / partial `reset_envs` path in
+  `test_state_write.py` verify the behavior, but **the props capability is
+  deferred**.  `BackendCapabilities.props=True` projects
+  `PROPS_RIGID + PROPS_ARTICULATION_URDF + PROPS_ARTICULATION_USD` together, so
+  declaring only the rigid tier would fail the capability/trait subset
+  invariant, while declaring the articulation tiers would claim them without a
+  lane test.  The trait/bit land after the shared capability model can express
+  partial prop support (or after all three tiers get lane tests).  Newton
+  follows in P3.
 - **P2-C director**: teleport / setvel / attach / gripper lane coverage.
   Declares `DIRECTOR_TELEPORT`, `DIRECTOR_SETVEL`, `DIRECTOR_ATTACH_SLAVE`,
   `DIRECTOR_GRIPPER` (no capability bit).

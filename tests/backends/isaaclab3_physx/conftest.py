@@ -50,7 +50,14 @@ def _cartpole_articulation_cfg(usd: Path):
     )
 
 
-def _build_env(usd: Path, *, num_envs: int = 1, contact_manager=None, terrain_cfg=None):
+def _build_env(
+    usd: Path,
+    *,
+    num_envs: int = 1,
+    contact_manager=None,
+    terrain_cfg=None,
+    prop_manager=None,
+):
     """Construct the IsaacLab 3 PhysX backend over the Cartpole asset."""
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
@@ -136,6 +143,7 @@ def _build_env(usd: Path, *, num_envs: int = 1, contact_manager=None, terrain_cf
         profiles={ARTICULATION: profile},
         robot_realizations={ARTICULATION: articulation_cfg},
         contact_manager=contact_manager,
+        prop_manager=prop_manager,
     )
 
 
@@ -167,3 +175,38 @@ def env_factory(cartpole_usd: Path, simulation_app: object) -> Iterator[Callable
 def cartpole_env(env_factory: Callable[..., object]):
     """One constructed IsaacLab 3 PhysX Cartpole env, closed at teardown."""
     return env_factory(1)
+
+
+@pytest.fixture
+def crate_prop_manager() -> Callable[..., object]:
+    """Build a fresh ``box`` prop manager for the PhysX prop lane."""
+    from unigym.props import build_prop_manager
+
+    def make(num_envs: int = 2):
+        return build_prop_manager(
+            {
+                "types": [
+                    {
+                        "name": "crate",
+                        "type": "box",
+                        "size": [0.1, 0.1, 0.1],
+                        "aabb": {
+                            "center": [0.0, 0.0, 0.05],
+                            "half_extents": [0.05, 0.05, 0.05],
+                        },
+                        "placement": {
+                            "mode": "fixed",
+                            "x_range": [0.5, 0.5],
+                            "y_range": [0.0, 0.0],
+                            "z_range": [0.3, 0.3],
+                        },
+                    }
+                ]
+            },
+            num_envs=num_envs,
+            env_spacing=4.0,
+            device="cuda:0",
+            backend="isaaclab3_physx",
+        )
+
+    return make
