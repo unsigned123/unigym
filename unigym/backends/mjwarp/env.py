@@ -172,6 +172,7 @@ BACKEND_CAPABILITIES = BackendCapabilities(
     multi_env=True,
     state_write=True,
     native_handle=True,
+    model_edit=True,
 )
 
 
@@ -435,6 +436,8 @@ class MjwarpEnv(WarpBatchMixin):
         self._fill_record = None
         self._closed = False
         self._closing = False
+        self._stepping = False
+        self._model_revision = 0
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
         # (same injection point as the camera rigs)
@@ -832,6 +835,39 @@ class MjwarpEnv(WarpBatchMixin):
         backend-internal; external packs must use ``env.native("mjwarp")``.
         """
         return self._datas
+
+    def model_edit(self):
+        """Open one global model-edit transaction between steps.
+
+        The CPU ``MjModel`` is edited + ``mj_setConst``-recomputed, the
+        published IR is refreshed, and the shared device model fields are
+        pushed at their leading index only.  ``_wdata`` state and warm-start
+        are never touched.
+
+        Raises:
+            RuntimeError: The environment is closed or currently stepping.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("mjwarp backend: environment is closed")
+        if self._stepping:
+            raise RuntimeError("mjwarp backend: model edits are only allowed between steps")
+        from unigym.backends.mjwarp.model_edit import MjwarpModelEditProvider
+        from unigym.model.edit import ModelEditor
+
+        provider = MjwarpModelEditProvider()
+
+        def commit(bodies, geoms):
+            return provider.apply(self, bodies, geoms)
+
+        return ModelEditor(
+            backend="mjwarp",
+            fields=provider.fields,
+            model_set=self.model_set,
+            revision=self._model_revision,
+            commit=commit,
+            is_open=lambda: not (self._closed or self._closing or self._stepping),
+            current_revision=lambda: self._model_revision,
+        )
 
     def sync_writes(self, e: int = 0) -> None:
         """Push CPU-mirror + model-level director writes to the warp device.
@@ -1288,6 +1324,21 @@ class MjwarpEnv(WarpBatchMixin):
         raw_action: torch.Tensor | None = None,
         cmd: torch.Tensor | None = None,
     ) -> EnvStep:
+        """Advance one policy tick behind the model-edit step guard."""
+        if self._stepping:  # pragma: no cover - one owner per step
+            raise RuntimeError("mjwarp backend: step() is not re-entrant")
+        self._stepping = True
+        try:
+            return self._step_impl(actions, raw_action, cmd)
+        finally:
+            self._stepping = False
+
+    def _step_impl(
+        self,
+        actions: Sequence[NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
+    ) -> EnvStep:
         """Advance one policy tick: decimation x mj_step, PD every sim step.
 
         ``actions`` is a ``Sequence[NamedAction]`` (the adapter's
@@ -1493,6 +1544,7 @@ class MjwarpEnv(WarpBatchMixin):
                     "spec_bits": spec,
                     "bits": [n for b, n in sorted(bits.items()) if spec & b],
                     "mj_time": float(d.time),
+                    "model_revision": int(self._model_revision),
                 },
                 # backend bookkeeping OUTSIDE mjSTATE: the episode clock
                 # and the sampled episode duration are sim truth and roll
@@ -1520,6 +1572,7 @@ class MjwarpEnv(WarpBatchMixin):
                 "spec_bits": spec,
                 "bits": [n for b, n in sorted(bits.items()) if spec & b],
                 "mj_time": float(self._datas[0].time),
+                "model_revision": int(self._model_revision),
             },
             "extra": {
                 "obs_t": int(self._t),
@@ -1538,6 +1591,16 @@ class MjwarpEnv(WarpBatchMixin):
         the payload's ``extra`` (sim truth) -- ``episode_id`` never rewinds.
         """
         m = self._model
+        meta = state.get("meta") or {}
+        saved_revision = meta.get("model_revision")
+        if saved_revision is not None and int(saved_revision) != self._model_revision:
+            from unigym.model.errors import ModelEditError
+
+            raise ModelEditError(
+                f"mjwarp backend: snapshot was captured at model revision "
+                f"{saved_revision}, current revision is {self._model_revision}; "
+                f"model edits are not rewindable (capture a new checkpoint)"
+            )
         spec = int(mujoco.mjtState.mjSTATE_INTEGRATION)
         if self.num_envs == 1:
             d = self._data

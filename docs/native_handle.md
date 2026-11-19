@@ -7,6 +7,10 @@ explicit escape hatch, **not** a neutral API and **not** a compatibility
 promise.  If an operation is not on the neutral `Run`/`EnvBackend` surface,
 core does not support it merely because a handle can reach the native object.
 
+Common model-parameter edits are **not** a reason to use this handle: they
+live behind `Trait.MODEL_EDIT` as `run.model_edit()` (see
+`contracts/model_edit_contract.md`).
+
 ## 0. Who may use it
 
 Only external packs with a declared native dependency.  Core libraries, tasks,

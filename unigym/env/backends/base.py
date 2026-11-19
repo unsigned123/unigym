@@ -144,6 +144,8 @@ class BackendCapabilities:
     # docs/state_write_contract.md)
     native_handle: bool = False  # env.native(backend) -> NativeHandle
     # (external packs only; docs/native_handle.md)
+    model_edit: bool = False  # run.model_edit() global parameter transaction
+    # (docs/contracts/model_edit_contract.md)
 
     @classmethod
     def full(cls) -> BackendCapabilities:
@@ -164,6 +166,7 @@ class BackendCapabilities:
             multi_env=True,
             state_write=True,
             native_handle=True,
+            model_edit=True,
         )
 
     def traits(self) -> frozenset[Trait]:
@@ -192,6 +195,7 @@ class BackendCapabilities:
             "snapshot": (Trait.SNAPSHOT,),
             "state_write": (Trait.STATE_WRITE,),
             "native_handle": (Trait.NATIVE_HANDLE,),
+            "model_edit": (Trait.MODEL_EDIT,),
         }
         out: set[Trait] = set()
         for feat, enabled in {
@@ -206,6 +210,7 @@ class BackendCapabilities:
             "snapshot": self.snapshot,
             "state_write": self.state_write,
             "native_handle": self.native_handle,
+            "model_edit": self.model_edit,
         }.items():
             if enabled:
                 out.update(groups[feat])

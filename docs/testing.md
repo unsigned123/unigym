@@ -209,7 +209,16 @@ unigym/runtime/controllers.py    -> tests/unit/runtime/test_controllers.py
 unigym/terminations/articulation.py
                                   -> tests/unit/terminations/test_articulation.py
 unigym/backends/mujoco/env.py    -> tests/backends/mujoco/test_env.py
+unigym/model/edit.py             -> tests/unit/model/test_edit.py
+unigym/backends/registry.py      -> tests/unit/backends/test_model_edit_traits.py
+unigym/run/api.py (model-edit)   -> tests/unit/run/test_model_edit.py
 ```
+
+Model-edit backend lanes stay in their existing backend directories:
+`tests/backends/mujoco/test_model_edit.py`,
+`tests/backends/mjwarp/test_model_edit.py` and
+`tests/backends/isaaclab2/test_model_edit.py`.  The IsaacLab2 lane runs on the
+IsaacLab container; report it BLOCKED when that stack is unavailable.
 
 Mirror the product domain tree to a useful depth. Do not create a test file for
 a module that has no independently testable behavior.

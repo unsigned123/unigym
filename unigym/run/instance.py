@@ -252,6 +252,33 @@ class RunInstance:
             )
         return self.env.native(live)
 
+    def model_edit(self):
+        """Open one global model-edit transaction on the live backend.
+
+        Returns:
+            A :class:`~unigym.model.edit.ModelEditor` bound to this run.
+
+        Raises:
+            RuntimeError: The run is closed.
+            NotImplementedError: The live backend does not declare
+                ``MODEL_EDIT`` (or its env exposes no ``model_edit`` method).
+        """
+        if self._closed:
+            raise RuntimeError("RunInstance is closed: model edits need a live backend")
+        live = build_name(self.spec.backend)
+        if Trait.MODEL_EDIT not in backend_info(live).traits:
+            raise NotImplementedError(
+                f"backend {live!r} does not declare the MODEL_EDIT trait "
+                f"(run.model_edit is optional and this backend declares it absent)"
+            )
+        method = getattr(self.env, "model_edit", None)
+        if not callable(method):
+            raise NotImplementedError(
+                f"backend {live!r} declares MODEL_EDIT but its env exposes "
+                f"no model_edit() method"
+            )
+        return method()
+
     def close(self) -> None:
         """Idempotent teardown: bridge -> recorder (if it owns one) -> env."""
         if self._closed:

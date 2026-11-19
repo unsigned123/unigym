@@ -9,7 +9,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .diff import ModelDiff
+from .edit import (
+    BodyEdit,
+    BodyEditHandle,
+    GeomEdit,
+    GeomEditHandle,
+    ModelEditResult,
+    ModelEditor,
+)
 from .errors import (
+    ModelEditCapabilityError,
+    ModelEditError,
     ModelIRError,
     ModelSetError,
     StaleModelError,
@@ -80,10 +90,14 @@ def __getattr__(name: str) -> object:
 __all__ = [
     "Actuator",
     "Body",
+    "BodyEdit",
+    "BodyEditHandle",
     "Camera",
     "EqSlot",
     "Geom",
     "GeomContact",
+    "GeomEdit",
+    "GeomEditHandle",
     "GeomGroup",
     "Joint",
     "LiveBody",
@@ -93,6 +107,10 @@ __all__ = [
     "Material",
     "MjExt",
     "ModelDiff",
+    "ModelEditCapabilityError",
+    "ModelEditError",
+    "ModelEditResult",
+    "ModelEditor",
     "ModelExt",
     "ModelIR",
     "ModelIRError",

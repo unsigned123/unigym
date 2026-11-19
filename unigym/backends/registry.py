@@ -34,6 +34,8 @@ __all__ = [
     "MJWARP_BACKEND",
     "BackendInfo",
     "BackendSelectionError",
+    "ModelEditField",
+    "ModelEditProvider",
     "build_name",
     "TRAIT_RULES",
     "Trait",
@@ -111,8 +113,59 @@ class Trait(Enum):
     MODEL_MOCAP = "MODEL_MOCAP"  # mocap body carriers
     MODEL_EQ_SLOTS = "MODEL_EQ_SLOTS"  # equality slots
     MODEL_USD_PRIMS = "MODEL_USD_PRIMS"  # USD prim hierarchy
+    # --- model edits (global; no per-env face) ---
+    MODEL_EDIT = "MODEL_EDIT"  # run.model_edit() transaction
     # --- native escape hatch (external packs only; unstable) ---
     NATIVE_HANDLE = "NATIVE_HANDLE"  # env.native(backend) -> NativeHandle
+
+
+class ModelEditField(Enum):
+    """One addressable model parameter inside a ``MODEL_EDIT`` transaction.
+
+    The enum is the single source of truth for the field capability matrix;
+    backends declare the subset they can write through
+    :attr:`BackendInfo.model_edit_fields`.
+    """
+
+    BODY_MASS = "body.mass"
+    BODY_COM = "body.com"
+    BODY_INERTIA = "body.inertia"
+    BODY_INERTIA_QUAT = "body.inertia_quat"
+    GEOM_FRICTION = "geom.friction"
+    GEOM_RESTITUTION = "geom.restitution"
+
+
+BODY_MODEL_EDIT_FIELDS = frozenset(
+    {
+        ModelEditField.BODY_MASS,
+        ModelEditField.BODY_COM,
+        ModelEditField.BODY_INERTIA,
+        ModelEditField.BODY_INERTIA_QUAT,
+    }
+)
+GEOM_MODEL_EDIT_FIELDS = frozenset(
+    {
+        ModelEditField.GEOM_FRICTION,
+        ModelEditField.GEOM_RESTITUTION,
+    }
+)
+MUJOCO_MODEL_EDIT_FIELDS = BODY_MODEL_EDIT_FIELDS | GEOM_MODEL_EDIT_FIELDS
+ISAACLAB2_MODEL_EDIT_FIELDS = BODY_MODEL_EDIT_FIELDS
+
+
+@dataclass(frozen=True)
+class ModelEditProvider:
+    """A backend's model-edit writer declaration (engine import stays lazy).
+
+    Attributes:
+        fields: The exact field set this provider can write.  It must equal
+            the owning backend's :attr:`BackendInfo.model_edit_fields`.
+        loader: Zero-argument factory returning the provider class/object;
+            called only when a model-edit transaction opens.
+    """
+
+    fields: frozenset[ModelEditField]
+    loader: Callable[[], object] = field(repr=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -172,6 +225,10 @@ class BackendInfo:
     """
     # Optional construction faces (default None; each backend fills them in).
     model_provider: Callable[[], Callable[[], Any]] | None = None
+    model_edit_provider: ModelEditProvider | None = None
+    """Optional model-edit writer declaration (``Trait.MODEL_EDIT``)."""
+    model_edit_fields: frozenset[ModelEditField] = frozenset()
+    """The model fields the backend's writer can edit (must equal provider)."""
     model_handle: Callable[[], Callable[[object], object | None]] | None = None
     """Optional factory for the backend's compiled-model handle resolver.
 
@@ -277,6 +334,13 @@ class BackendInfo:
                 f"backend {self.name!r} backend_param_keys must be snake_case: {sorted(keys)}"
             )
         object.__setattr__(self, "backend_param_keys", keys)
+        edit_fields = frozenset(self.model_edit_fields)
+        if not edit_fields <= set(ModelEditField):
+            raise ValueError(
+                f"backend {self.name!r} declares unknown model-edit fields "
+                f"{sorted(field.value for field in edit_fields - set(ModelEditField))}"
+            )
+        object.__setattr__(self, "model_edit_fields", edit_fields)
 
     def has(self, *traits: Trait) -> bool:
         """Every listed trait present?"""
@@ -461,6 +525,37 @@ TRAIT_RULES: dict[Trait, TraitRule] = {
 _LAYOUT_TRAITS = (Trait.ENV_LAYOUT_TILED, Trait.ENV_LAYOUT_COINCIDENT)
 
 
+def _validate_model_edit_declaration(
+    name: str,
+    info: BackendInfo,
+    traits: set[Trait],
+) -> None:
+    """Enforce provider/field/trait consistency for ``MODEL_EDIT``."""
+    provider = info.model_edit_provider
+    fields = set(info.model_edit_fields)
+    if Trait.MODEL_EDIT in traits:
+        if provider is None:
+            raise RuntimeError(
+                f"backend {name!r}: MODEL_EDIT is declared but " f"model_edit_provider is None"
+            )
+        if not fields:
+            raise RuntimeError(
+                f"backend {name!r}: MODEL_EDIT is declared but " f"model_edit_fields is empty"
+            )
+        if set(provider.fields) != fields:
+            raise RuntimeError(
+                f"backend {name!r}: model_edit_provider fields "
+                f"{sorted(field.value for field in provider.fields)} != "
+                f"model_edit_fields {sorted(field.value for field in fields)}"
+            )
+        return
+    if provider is not None or fields:
+        raise RuntimeError(
+            f"backend {name!r}: model-edit provider/fields declared without "
+            f"the MODEL_EDIT trait"
+        )
+
+
 def validate_trait_rules(backends=None) -> None:
     """Validate every registered backend's trait set against ``TRAIT_RULES``.
 
@@ -484,6 +579,7 @@ def validate_trait_rules(backends=None) -> None:
                     f"backend {name!r}: trait {trait.name} scope max_envs "
                     f"must be >= 1, got {scope.max_envs}"
                 )
+        _validate_model_edit_declaration(name, info, traits)
         if not traits:
             continue
         layouts = [t for t in _LAYOUT_TRAITS if t in traits]
@@ -552,6 +648,7 @@ MUJOCO_TRAITS = _CORE | frozenset(
         Trait.MODEL_MASS_INERTIA,
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
+        Trait.MODEL_EDIT,  # global body/geom parameter transaction
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -589,6 +686,7 @@ MJWARP_TRAITS = _CORE | frozenset(
         Trait.MODEL_MASS_INERTIA,
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
+        Trait.MODEL_EDIT,  # global body/geom parameter transaction
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -626,6 +724,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
         Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
         # The USD prim hierarchy is the isaaclab model face
         Trait.MODEL_USD_PRIMS,
+        Trait.MODEL_EDIT,  # body mass/COM/inertia across every env row
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -721,6 +820,27 @@ def _isaaclab2_model_provider() -> Callable[[], Any]:
     from unigym.backends.isaaclab2.model import IsaacLabModelProvider
 
     return IsaacLabModelProvider
+
+
+def _mujoco_model_edit_provider() -> object:
+    """Load the MuJoCo model-edit writer lazily."""
+    from unigym.backends.mujoco.model_edit import MujocoModelEditProvider
+
+    return MujocoModelEditProvider
+
+
+def _mjwarp_model_edit_provider() -> object:
+    """Load the mjwarp model-edit writer lazily."""
+    from unigym.backends.mjwarp.model_edit import MjwarpModelEditProvider
+
+    return MjwarpModelEditProvider
+
+
+def _isaaclab2_model_edit_provider() -> object:
+    """Load the IsaacLab2 model-edit writer lazily."""
+    from unigym.backends.isaaclab2.model_edit import IsaacLab2ModelEditProvider
+
+    return IsaacLab2ModelEditProvider
 
 
 def _mujoco_model_handle() -> Callable[[object], object | None]:
@@ -903,6 +1023,10 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         env_class=_mujoco_env,
         live_provider=_mujoco_live,
         model_provider=_mujoco_model_provider,
+        model_edit_provider=ModelEditProvider(
+            MUJOCO_MODEL_EDIT_FIELDS, _mujoco_model_edit_provider
+        ),
+        model_edit_fields=MUJOCO_MODEL_EDIT_FIELDS,
         model_handle=_mujoco_model_handle,
         prop_backend=_mujoco_prop_backend,
         camera_backend=_mujoco_rig_factory,
@@ -930,6 +1054,10 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         env_class=_mjwarp_env,
         live_provider=_mujoco_live,
         model_provider=_mjwarp_model_provider,
+        model_edit_provider=ModelEditProvider(
+            MUJOCO_MODEL_EDIT_FIELDS, _mjwarp_model_edit_provider
+        ),
+        model_edit_fields=MUJOCO_MODEL_EDIT_FIELDS,
         model_handle=_mjwarp_model_handle,
         prop_backend=_mujoco_prop_backend,
         camera_backend=_mjwarp_rig_factory,
@@ -954,6 +1082,10 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         scene_engine=_isaaclab2_scene_engine,
         env_class=_isaaclab2_env,
         model_provider=_isaaclab2_model_provider,
+        model_edit_provider=ModelEditProvider(
+            ISAACLAB2_MODEL_EDIT_FIELDS, _isaaclab2_model_edit_provider
+        ),
+        model_edit_fields=ISAACLAB2_MODEL_EDIT_FIELDS,
         prop_backend=_isaaclab2_prop_backend,
         camera_backend=_isaaclab2_rig_factory,
         director_ops=_isaaclab2_director_ops,

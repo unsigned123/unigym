@@ -38,8 +38,9 @@ def build_tiny_env(
     asset_plan=None,
     adapter=None,
     observations=None,
+    device: str = "cpu",
 ):
-    """Construct the real warp backend from the fixture MJCF (CPU, no managers)."""
+    """Construct the real warp backend from the fixture MJCF (no managers)."""
     for module_name in ("mujoco_warp", "warp"):
         require_optional_module(module_name, reason=_WARP_REASON)
 
@@ -105,7 +106,7 @@ def build_tiny_env(
         sim_dt=0.005,
         world_base={"mjcf": str(mjcf)},
         backend_params=params or {},
-        device="cpu",
+        device=device,
         articulations=(articulation,),
         controls=controls,
         profiles={ARTICULATION: profile},
@@ -144,6 +145,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         asset_plan=None,
         adapter=None,
         observations=None,
+        device: str = "cpu",
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -162,6 +164,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             asset_plan=asset_plan,
             adapter=adapter,
             observations=observations,
+            device=device,
         )
         created.append(env)
         return env
