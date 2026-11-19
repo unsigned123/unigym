@@ -105,43 +105,47 @@ def randomize_rigid_body_com_abs(env, env_ids, com_range: dict, asset_cfg):
     exposes no ``default_com``), then anchor every sample to it, so each
     episode gets an independent, bounded CoM displacement.
 
-    PhysX-only as written: ``root_physx_view`` is the PhysX physics-view
-    handle.  The Newton backend has no PhysX view -- its CoM write goes
-    through the ``set_coms_index`` face, which is a P2 item.  A Newton
-    asset therefore raises a clear ``NotImplementedError`` here instead of an
-    ``AttributeError``; the import stays engine-free either way.
+    Engine-neutral: the read/write go through the env's ``EngineProfile``
+    (``get_body_com`` / ``set_body_com``), never a PhysX-only physics view.
+    The profile hides the payload split — PhysX writes a 7-dim
+    ``pos + identity xyzw quat`` tensor, Newton writes a 3-dim position —
+    both via ``asset.set_coms_index``.  An env without an ``EngineProfile``
+    raises a clear ``NotImplementedError`` instead of an ``AttributeError``;
+    the import stays engine-free either way.
     """
     import torch
 
-    asset = env.scene[asset_cfg.name]
-    view = getattr(asset, "root_physx_view", None)
-    if view is None:
-        # Newton path: no root_physx_view; CoM writes use set_coms_index
-        # (P2, driven by EngineProfile.set_body_com).
+    profile = getattr(env, "engine_profile", None)
+    if profile is None or not (
+        callable(getattr(profile, "get_body_com", None))
+        and callable(getattr(profile, "set_body_com", None))
+    ):
         raise NotImplementedError(
-            "randomize_rigid_body_com_abs: this asset exposes no "
-            "root_physx_view (Newton backend); Newton CoM randomization via "
-            "set_coms_index is a P2 item"
+            "randomize_rigid_body_com_abs: the env exposes no EngineProfile "
+            "with get_body_com/set_body_com; CoM randomization requires an "
+            "EngineProfile (PhysX 7-dim identity quat / Newton 3-dim)"
         )
+
+    asset = env.scene[asset_cfg.name]
+    coms = torch.as_tensor(profile.get_body_com(asset), dtype=torch.float32)
     if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device="cpu")
+        env_ids = torch.arange(env.scene.num_envs, device=coms.device)
     else:
-        env_ids = env_ids.cpu()
+        env_ids = torch.as_tensor(env_ids, device=coms.device)
     if asset_cfg.body_ids == slice(None):
-        body_ids = torch.arange(asset.num_bodies, dtype=torch.int, device="cpu")
+        body_ids = torch.arange(asset.num_bodies, dtype=torch.int, device=coms.device)
     else:
-        body_ids = torch.tensor(asset_cfg.body_ids, dtype=torch.int, device="cpu")
+        body_ids = torch.as_tensor(asset_cfg.body_ids, dtype=torch.int, device=coms.device)
 
     range_list = [com_range.get(key, (0.0, 0.0)) for key in ("x", "y", "z")]
-    lo = torch.tensor([r[0] for r in range_list], device="cpu")
-    hi = torch.tensor([r[1] for r in range_list], device="cpu")
-    rand = lo + (hi - lo) * torch.rand(len(env_ids), 1, 3, device="cpu")
+    lo = torch.tensor([r[0] for r in range_list], device=coms.device)
+    hi = torch.tensor([r[1] for r in range_list], device=coms.device)
+    rand = lo + (hi - lo) * torch.rand(len(env_ids), 1, 3, device=coms.device)
 
     # Capture the pristine CoM on the first call (ArticulationData exposes
     # default_mass but no default_com, so we cache it on the asset itself).
     # The first call happens during env init, before any CoM randomization.
     default_com = getattr(asset, "_dc_default_com", None)
-    coms = view.get_coms().clone()
     if default_com is None:
         default_com = coms.clone()
         asset._dc_default_com = default_com
@@ -149,7 +153,7 @@ def randomize_rigid_body_com_abs(env, env_ids, com_range: dict, asset_cfg):
     coms[env_ids[:, None], body_ids, :3] = (
         default_com[env_ids[:, None], body_ids, :3].clone() + rand
     )
-    view.set_coms(coms, env_ids)
+    profile.set_body_com(asset, coms[env_ids], env_ids)
 
 
 def build_events_cfg(events_list: list, backend: str | None = None) -> dict:

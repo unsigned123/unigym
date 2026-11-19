@@ -142,30 +142,77 @@ def test_build_event_terms_redirects_the_deprecated_com_func():
 
 class _AssetCfg:
     name = "prop"
+    body_ids = slice(None)
 
 
 class _Asset:
-    """Newton-shaped asset: no ``root_physx_view`` handle."""
+    """Engine-agnostic asset: numbers come from the fake profile."""
+
+    num_bodies = 2
 
 
 class _Scene:
-    def __init__(self, items: dict):
+    def __init__(self, items: dict, num_envs: int):
         self._items = dict(items)
+        self.num_envs = num_envs
 
     def __getitem__(self, name: str):
         return self._items[name]
 
 
 class _Env:
-    def __init__(self, items: dict):
-        self.scene = _Scene(items)
+    def __init__(self, items: dict, *, num_envs: int = 3, engine_profile=None):
+        self.scene = _Scene(items, num_envs)
+        if engine_profile is not None:
+            self.engine_profile = engine_profile
 
 
-def test_randomize_com_abs_reports_the_newton_gap_clearly():
-    """A missing ``root_physx_view`` raises the documented Newton NotImplementedError."""
+class _RecordingProfile:
+    """Fake EngineProfile that records the CoM read/write calls."""
+
+    def __init__(self, coms):
+        self._coms = coms
+        self.get_calls = []
+        self.set_calls = []
+
+    def get_body_com(self, asset):
+        self.get_calls.append(asset)
+        return self._coms
+
+    def set_body_com(self, asset, coms, env_ids):
+        self.set_calls.append((asset, coms, env_ids))
+
+
+def test_randomize_com_abs_requires_an_engine_profile():
+    """An env without an EngineProfile raises a teaching NotImplementedError."""
     env = _Env({"prop": _Asset()})
 
-    with pytest.raises(NotImplementedError, match="root_physx_view") as err:
+    with pytest.raises(NotImplementedError, match="EngineProfile") as err:
         randomize_rigid_body_com_abs(env, None, {"x": [0.0, 0.0]}, _AssetCfg())
 
-    assert "set_coms_index" in str(err.value)
+    assert "get_body_com" in str(err.value)
+    assert "set_body_com" in str(err.value)
+
+
+def test_randomize_com_abs_reads_and_writes_through_the_profile():
+    """CoM read/write go through the profile, no ``root_physx_view`` needed."""
+    import torch
+
+    coms = torch.ones(3, 2, 3)
+    profile = _RecordingProfile(coms)
+    asset = _Asset()
+    env = _Env({"prop": asset}, num_envs=3, engine_profile=profile)
+    env_ids = torch.tensor([0, 2])
+
+    randomize_rigid_body_com_abs(env, env_ids, {"x": [0.1, 0.1]}, _AssetCfg())
+
+    assert profile.get_calls == [asset]
+    assert len(profile.set_calls) == 1
+    set_asset, written, written_env_ids = profile.set_calls[0]
+    assert set_asset is asset
+    assert written.shape == (2, 2, 3)
+    assert torch.equal(written_env_ids, env_ids)
+    # default CoM (ones) + x offset on the selected envs only
+    assert torch.allclose(written[0, :, 0], torch.full((2,), 1.1))
+    assert torch.allclose(written[1, :, 0], torch.full((2,), 1.1))
+    assert torch.allclose(written[..., 1:], torch.ones(2, 2, 2))

@@ -26,8 +26,11 @@ class EngineProfile:
         depth_background: The engine's "no hit" depth sentinel.
         default_joint_ordering: ``ArticulationCfg.joint_ordering`` default;
             ``None`` keeps the upstream default.
+        get_body_com: Read the ``(N, B, 3)`` body CoM positions from the
+            asset (``asset.data.body_com_pos_b``) as a float32 tensor.
         set_body_com: Write body CoM positions for the DR event; the call
-            signature and payload differ between PhysX and Newton.
+            signature and payload differ between PhysX and Newton (PhysX takes
+            a 7-dim ``pos + xyzw quat`` payload, Newton a 3-dim position).
     """
 
     name: str
@@ -35,4 +38,5 @@ class EngineProfile:
     renderer_cfg: Callable[[], object] | None
     depth_background: float
     default_joint_ordering: str | None
+    get_body_com: Callable[[object], object]
     set_body_com: Callable[[object, object, object], None]

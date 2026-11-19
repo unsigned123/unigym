@@ -155,10 +155,18 @@ docs/testing.md                                           - lane/env/marker tabl
       renderer_cfg: Callable[[], object] | None        # CameraCfg.renderer_cfg
       depth_background: float                           # inf (RTX) | 0.0 (NewtonWarp)
       default_joint_ordering: str | None               # "physx" | "mjwarp" | None
-      set_body_com: Callable[[object, object, object], None]  # (asset, com, env_ids)
+      get_body_com: Callable[[object], object]         # asset -> (N, B, 3) float32
+      set_body_com: Callable[[object, object, object], None]  # (asset, coms, env_ids)
   ```
   Owner: `shared/isaaclab3_common` owns the contract; each backend's
   `profile.py` owns the concrete values.
+
+  C3 note: CoM randomization (`dr_events.randomize_rigid_body_com_abs`) is
+  engine-neutral and goes exclusively through `get_body_com`/`set_body_com`
+  (both backed by `asset.data.body_com_pos_b` and `asset.set_coms_index`).
+  PhysX writes a 7-dim `pos + identity xyzw quat` payload; Newton writes a
+  3-dim position. There is no `root_physx_view` branch; shared code never
+  inspects the backend identity.
 - **`Isaaclab3EnvBase`** (new, `shared/.../env.py`): `ManagerBasedEnv` subclass
   carrying the existing `isaaclab2/env.py` lifecycle/step/reset logic with
   3.x data and write semantics. Takes an `EngineProfile` by construction.

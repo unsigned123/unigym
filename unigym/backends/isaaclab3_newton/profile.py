@@ -26,9 +26,28 @@ def _renderer_cfg():
     return NewtonWarpRendererCfg()
 
 
-def _set_body_com(asset: object, com: object, env_ids: object) -> None:
-    """Write body CoM positions for the DR event (a P2 item)."""
-    raise NotImplementedError("IsaacLab 3 Newton set_body_com is a P2 item (set_coms_index)")
+def _get_body_com(asset: object):
+    """Read body CoM positions as a float32 ``(N, B, 3)`` tensor."""
+    import torch
+
+    data = getattr(asset, "data", None)
+    if data is None:
+        raise TypeError("body-CoM asset exposes no .data surface")
+    value = getattr(data, "body_com_pos_b", None)
+    if value is None:
+        raise TypeError("body-CoM data exposes no body_com_pos_b surface")
+    payload = getattr(value, "torch", value)
+    return torch.as_tensor(payload, dtype=torch.float32)
+
+
+def _set_body_com(asset: object, coms: object, env_ids: object) -> None:
+    """Write body CoM positions via ``set_coms_index`` (positions only)."""
+    import torch
+
+    setter = getattr(asset, "set_coms_index", None)
+    if not callable(setter):
+        raise TypeError("body-CoM asset exposes no set_coms_index method")
+    setter(coms=torch.as_tensor(coms, dtype=torch.float32), env_ids=env_ids)
 
 
 NEWTON_PROFILE = EngineProfile(
@@ -37,5 +56,6 @@ NEWTON_PROFILE = EngineProfile(
     renderer_cfg=_renderer_cfg,
     depth_background=0.0,
     default_joint_ordering="mjwarp",
+    get_body_com=_get_body_com,
     set_body_com=_set_body_com,
 )
