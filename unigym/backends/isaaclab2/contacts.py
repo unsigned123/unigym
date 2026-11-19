@@ -5,43 +5,27 @@ isaaclab (imports live inside the functions that need it, mirroring
 ``cameras/isaaclab_backend.py``); the module itself is import-safe without
 the kit.
 
-Semantics (authoritative local source: Isaac Lab 2.3.2
-``sensors/contact_sensor/contact_sensor.py``):
+Scheme A semantics:
 
-* Every group owns ONE articulation (``ContactGroupSpec.articulation``).
-  The owning articulation's prim leaf is ``Robot`` for the first declared
-  articulation and ``Robot_<name>`` otherwise; the run layer's articulation
-  order is the only source of that slot (no global union, no cross-robot
-  body matching).
-* ``general`` groups -> one ContactSensorCfg per scope bucket with
-  ``prim_path = {ENV_REGEX_NS}/<leaf>/(<union of sensor_bodies>)``; the raw
-  array is ``data.net_forces_w`` (N, B, 3), world frame natively.  A
-  sensor_bodies entry containing ``/`` is an explicit Robot-relative prim
-  sub-path (nested scopes, e.g. the localized G1 finger links under
-  ``left_hand/``): such entries are bucketed per scope, each bucket gets
-  its own cfg (fields ``contact_<name>``, then ``contact_<name>__s1``...)
-  and the raw slices concatenate along B in bucket order.
-* ``pairwise`` groups -> one ContactSensorCfg PER sensor_bodies ENTRY with
-  ``filter_prim_paths_expr`` built from ``filter_bodies``.  Rationale: the
-  PhysX filtered reporting is one-to-many ONLY (one sensor body against
-  many filter bodies) — a single cfg with multiple matched sensor bodies is
-  not valid (Isaac Lab ContactSensor docstring); per-entry sensors keep
-  each (sensor, filter) matrix well-defined.  Each entry must resolve to
-  exactly one body (fail-fast at bind).  The raw array is the F-axis
-  concatenation of the per-entry ``data.force_matrix_w`` (N, 1, F, 3) ->
-  (N, B, F, 3), world frame natively.  Scoped entries (``/``) build
-  ``{ENV}/<leaf>/{scope}/{name}`` paths; body resolution uses the last
-  segment.
-* Bare filter bodies are resolved in the owning articulation's body list
-  and must resolve exactly one body; explicit prim paths / env-prefixed
-  expressions (props, world) pass through unchanged.
-* B ordering: owning robot asset body order filtered by the entry regexes
-  (``pairwise``: entry order, one body each).  F ordering:
-  ``filter_bodies`` entry order (PhysX preserves pattern order).
-* ``frame: body`` is a v1 NotImplementedError for this backend (plan §6
-  allowed list); ``frame: world`` is direct.
-* Sensor buffers are recycled in-place by the sensor update — read_raw
-  ALWAYS clones (cameras package lesson, annotator-buffer aliasing).
+* A group's bodies come from explicit ``ContactBodyRef`` records only.  Robot
+  refs are anchored at the owning articulation's prim leaf (``Robot`` for the
+  first declared articulation, ``Robot_<name>`` otherwise).  Object/fixture
+  refs address the declared prop's root prim ``{ENV}/Prop_<name>``.
+* ``general`` groups -> one ContactSensorCfg per sensor ref; the raw array is
+  ``data.net_forces_w`` (N, B, 3), world frame natively.  The B axis is the
+  concatenation of per-ref slices in declaration order.
+* ``pairwise`` groups -> one ContactSensorCfg PER sensor ref with
+  ``filter_prim_paths_expr`` flattened from the filter refs in declaration
+  order (exact literals are emitted without regex grouping).  Each sensor ref
+  must resolve exactly one body (PhysX filtered reporting is one-to-many
+  only); an empty/multi-body sensor ref fails at bind.  read_raw asserts the
+  sensor's F axis equals the resolved filter count -- no silent F drift.
+* Static ground/support filters are NOT representable by the rigid-prop
+  ContactSensor surface: a support/environment ref is refused at build with a
+  clear limitation (use the MuJoCo family for static support contacts).
+* ``frame: body`` remains a v1 NotImplementedError for this backend.
+* Sensor buffers are recycled in-place by the sensor update — read_raw ALWAYS
+  clones (cameras package lesson, annotator-buffer aliasing).
 """
 
 from __future__ import annotations
@@ -50,260 +34,190 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Optional
 
-from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec, is_all_bodies
-from unigym.contacts.discovery import (
-    contact_candidate_error,
-    resolve_bucket_names,
-    resolve_entry_name,
-    usd_robot_inventory,
-)
+from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec
+from unigym.contacts.inventory import ContactBodyAddress, ContactInventory, resolve_refs
+from unigym.contacts.refs import ContactBodyRef, is_wildcard
 
 from .naming import articulation_prim_leaf, articulation_scene_field
 
-
-def _is_explicit_prim_path(entry: str) -> bool:
-    return entry.startswith("/") or entry.startswith(ENV_PREFIX_SENTINEL)
+_REGEX_META = re.compile(r"[.^$*+?{}\[\]\\|()]")
 
 
-def split_scope(entry: str) -> tuple[Optional[str], str]:
-    """Split a sensor_bodies entry into ``(scope, body_name)``.
-
-    A ``/`` inside the entry marks an explicit Robot-relative prim
-    sub-path (nested scopes): the localized G1 USD keeps the finger and
-    palm links under ``left_hand/`` / ``left_wrist_yaw_link/`` subtrees,
-    and the ContactSensor prim-path matching is SEGMENT-wise (each path
-    token is matched independently, Isaac Lab ``find_matching_prims``),
-    so a flat ``Robot/<name>`` expression cannot reach them.  The body
-    name used for resolution is the LAST segment.  Plain entries are
-    ``(None, entry)``.
-    """
-    if "/" in entry:
-        scope, name = entry.rsplit("/", 1)
-        return scope, name
-    return None, entry
+class _StaticContactUnsupported(NotImplementedError):
+    """A support/environment ref cannot be represented on IsaaccLab2."""
 
 
-def entry_prim_path(entry: str, robot_leaf: str = "Robot") -> str:
-    """Robot-anchored ``prim_path`` for ONE sensor entry (per-entry cfgs)."""
-    scope, name = split_scope(entry)
-    if scope is not None:
-        return f"{{ENV_REGEX_NS}}/{robot_leaf}/{scope}/{name}"
-    return f"{{ENV_REGEX_NS}}/{robot_leaf}/({name})"
+def _is_explicit_prim_path(value: str) -> bool:
+    return value.startswith("/") or value.startswith(ENV_PREFIX_SENTINEL)
 
 
-def _general_buckets(entries: list[str]) -> list[list[str]]:
-    """General-mode body names bucketed by scope (first-appearance order)."""
-    order: list[Optional[str]] = []
-    buckets: dict[Optional[str], list[str]] = {}
-    for e in entries:
-        scope, name = split_scope(e)
-        if scope not in buckets:
-            buckets[scope] = []
-            order.append(scope)
-        buckets[scope].append(name)
-    return [buckets[s] for s in order]
-
-
-def general_prim_paths(entries: list[str], robot_leaf: str = "Robot") -> list[str]:
-    """Union prim-path exprs for a general group, one per scope bucket."""
-    order: list[Optional[str]] = []
-    buckets: dict[Optional[str], list[str]] = {}
-    for e in entries:
-        scope, name = split_scope(e)
-        if scope not in buckets:
-            buckets[scope] = []
-            order.append(scope)
-        buckets[scope].append(name)
-    out = []
-    for scope in order:
-        union = f"({'|'.join(buckets[scope])})"
-        out.append(
-            f"{{ENV_REGEX_NS}}/{robot_leaf}/{scope}/{union}"
-            if scope
-            else f"{{ENV_REGEX_NS}}/{robot_leaf}/{union}"
-        )
-    return out
-
-
-def general_field_names(name: str, entries: list[str]) -> list[str]:
-    """Scene-cfg field names for a general group (``__sN`` beyond the 1st)."""
-    n = len(_general_buckets(entries))
-    return [name if i == 0 else f"{name}__s{i}" for i in range(n)]
-
-
-def sensor_prim_path(
-    spec: ContactGroupSpec,
-    entries: Optional[list[str]] = None,
-    robot_leaf: str = "Robot",
-) -> str:
-    """Robot-anchored ``prim_path`` for a scope-less (union) group.
-
-    Supports flat body sets: ``({e1}|{e2}|...)``.
-    Scoped entries (containing ``/``) are not representable here -- use
-    :func:`entry_prim_path` / :func:`general_prim_paths`.
-    """
-    alts = entries if entries is not None else list(spec.sensor_bodies)
-    if any("/" in e for e in alts):
-        raise ValueError(
-            f"scoped sensor entry {alts} cannot build a flat union path; "
-            f"use entry_prim_path/general_prim_paths"
-        )
-    return f"{{ENV_REGEX_NS}}/{robot_leaf}/({'|'.join(alts)})"
-
-
-def filter_prim_exprs(spec: ContactGroupSpec, robot_leaf: str = "Robot") -> list[str]:
-    """``filter_prim_paths_expr`` for a pairwise group.
-
-    Bare entries are robot-body regexes in the group's articulation scope;
-    entries starting with ``/`` or ``{ENV_REGEX_NS}`` pass through verbatim
-    (props ``{ENV_REGEX_NS}/Prop_*``).
-    """
-    return [
-        e if _is_explicit_prim_path(e) else f"{{ENV_REGEX_NS}}/{robot_leaf}/{e}"
-        for e in spec.filter_bodies or ()
-    ]
-
-
-def resolve_articulation_leaf(
-    spec: ContactGroupSpec, articulation_names: Optional[Sequence[str]]
-) -> str:
-    """Prim leaf of *spec*'s owning articulation (``Robot`` when implicit)."""
-    if spec.articulation is None:
-        return "Robot"
-    if articulation_names is None:
-        raise ValueError(
-            f"contact group {spec.name!r}: articulation "
-            f"{spec.articulation!r} is declared but the articulation order "
-            f"is unknown; construct the manager through "
-            f"build_contact_manager(articulation_names=...)"
-        )
-    try:
-        index = tuple(articulation_names).index(spec.articulation)
-    except ValueError:
-        raise ValueError(
-            f"contact group {spec.name!r}: articulation "
-            f"{spec.articulation!r} is not declared by the run "
-            f"(declared: {list(articulation_names)})"
-        ) from None
-    return articulation_prim_leaf(spec.articulation, index)
-
-
-def resolve_all_articulation(spec: ContactGroupSpec, contact_assets: Mapping[str, str]) -> str:
-    """Articulation whose pre-clone USD inventory expands ``contacts: all``.
-
-    An explicit owner wins.  An omitted owner is legal only when exactly one
-    all-mode asset exists (the single-articulation case); otherwise the
-    group is ambiguous and the error names the legal reference form instead
-    of silently unioning inventories.
-    """
-    assets = sorted(contact_assets)
-    if not assets:
-        raise ValueError(
-            f"contact group {spec.name!r}: contacts: all requires an "
-            f"articulation's resolved USD asset path; the run resolved no "
-            f"all-mode asset (explicit contact groups remain the URDF path)"
-        )
-    if spec.articulation is not None:
-        if spec.articulation not in contact_assets:
-            raise ValueError(
-                f"contact group {spec.name!r}: contacts: all references "
-                f"articulation {spec.articulation!r}, but the run resolved "
-                f"no USD asset for it (all-mode assets: {assets}); declare "
-                f"explicit contact groups for a non-USD asset"
-            )
-        return spec.articulation
-    if len(assets) == 1:
-        return assets[0]
-    raise ValueError(
-        f"contact group {spec.name!r}: contacts: all is ambiguous across "
-        f"articulations {assets}; reference the owner with "
-        f"sensor_bodies: {{contact_group: {{articulation: <name>, group: "
-        f"all}}}} (or declare articulation: <name>)"
-    )
+def _union(names: Sequence[str]) -> str:
+    uniq = list(dict.fromkeys(names))
+    if len(uniq) == 1:
+        return uniq[0]
+    return "(" + "|".join(uniq) + ")"
 
 
 class IsaacLabContactBackend:
-    """Backend object for all groups of one run (isaaclab)."""
+    """Backend object for all groups of one run (isaaclab2)."""
 
     backend_key = "isaaclab2"
 
-    @classmethod
-    def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]:
-        """Native contact-filter address for a declared prop."""
-        if articulated:
-            return [f"{{ENV_REGEX_NS}}/Prop_{name}/.*"]
-        return [f"{{ENV_REGEX_NS}}/Prop_{name}"]
-
-    def __init__(self, specs: list[ContactGroupSpec], contact_assets=None, articulation_names=None):
+    def __init__(
+        self,
+        specs: list[ContactGroupSpec],
+        *,
+        articulation_names=None,
+        articulation_body_sets=None,
+        prop_names=None,
+        articulated_props=None,
+        contact_assets=None,
+    ):
         self.specs = list(specs)
         self._contact_assets = dict(contact_assets or {})
         self._articulation_names = (
             None if articulation_names is None else tuple(str(n) for n in articulation_names)
         )
-        self._sensors: dict[str, dict] = {}  # name -> pieces
-        self._perm: dict[str, list[list[int]]] = {}  # name -> per-piece perm
-        self._all_bodies: dict[str, tuple[str, list]] = {}  # name -> (owner, bodies)
-        self._all_inventories: dict[str, list] = {}  # articulation -> inventory
+        self._articulation_body_sets: Mapping[str, Mapping[str, Sequence[str]]] = dict(
+            articulation_body_sets or {}
+        )
+        self._prop_names = [str(name) for name in (prop_names or ())]
+        self._articulated_props = {str(name) for name in (articulated_props or ())}
+        self._sensors: dict[str, dict] = {}
+        self._perm: dict[str, list[list[int]]] = {}
+        self._filters: dict[str, list[ContactBodyAddress]] = {}
+        self._fields: dict[str, list[str]] = {}
+        self.inventory: Optional[ContactInventory] = None
         self._bound = False
 
     # ---------------------------------------------------------------- #
     # articulation scope
     # ---------------------------------------------------------------- #
-    def _leaf(self, spec: ContactGroupSpec) -> str:
-        """Prim leaf of this group's owning articulation."""
-        return resolve_articulation_leaf(spec, self._articulation_names)
-
-    def _articulation_index(self, spec: ContactGroupSpec) -> int:
+    def _articulation_index(self, articulation: str) -> int:
         if self._articulation_names is None:
             raise ValueError(
-                f"contact group {spec.name!r}: articulation "
-                f"{spec.articulation!r} is declared but the articulation "
-                f"order is unknown; construct the manager through "
+                f"contact ref names articulation {articulation!r} but the "
+                f"articulation order is unknown; construct the manager through "
                 f"build_contact_manager(articulation_names=...)"
             )
         try:
-            return self._articulation_names.index(spec.articulation)
+            return self._articulation_names.index(articulation)
         except ValueError:
             raise ValueError(
-                f"contact group {spec.name!r}: articulation "
-                f"{spec.articulation!r} is not declared by the run "
-                f"(declared: {list(self._articulation_names)})"
+                f"contact ref names articulation {articulation!r}, which is "
+                f"not declared by the run (declared: {list(self._articulation_names)})"
             ) from None
 
-    def _robot_asset(self, env, spec: ContactGroupSpec):
-        """Scene asset of the group's articulation (``env.robot`` when implicit)."""
-        if spec.articulation is None:
-            return env.robot
-        field = articulation_scene_field(spec.articulation, self._articulation_index(spec))
-        return env.scene[field]
+    def _leaf(self, ref: ContactBodyRef) -> str:
+        if ref.articulation is None:
+            return "Robot"
+        return articulation_prim_leaf(ref.articulation, self._articulation_index(ref.articulation))
+
+    def _articulation_names_used(self) -> list[str]:
+        out: list[str] = []
+        for spec in self.specs:
+            for name in spec.articulation_names():
+                if name not in out:
+                    out.append(name)
+        if not out and self._articulation_names:
+            out.append(self._articulation_names[0])
+        return out
+
+    # ---------------------------------------------------------------- #
+    # pre-clone prim paths from declared refs
+    # ---------------------------------------------------------------- #
+    def _robot_path(self, ref: ContactBodyRef) -> str:
+        leaf = self._leaf(ref)
+        if ref.body_set is not None:
+            scope = self._body_set_scope(ref)
+            sets = self._articulation_body_sets.get(scope)
+            bodies = None if sets is None else sets.get(ref.body_set)
+            if bodies is None:
+                raise ValueError(
+                    f"contact ref {ref.label()!r}: body_set {ref.body_set!r} is "
+                    f"not declared for articulation {scope!r}; declare it in the "
+                    f"profile body_sets or the articulation contacts inventory"
+                )
+            union = _union([str(body) for body in bodies])
+            return f"{ENV_PREFIX_SENTINEL}/{leaf}/{union}"
+        body = ref.body
+        assert body is not None
+        if is_wildcard(body, ref.match):
+            return f"{ENV_PREFIX_SENTINEL}/{leaf}/(.*)"
+        if "/" in body:
+            scope, name = body.rsplit("/", 1)
+            return f"{ENV_PREFIX_SENTINEL}/{leaf}/{scope}/{name}"
+        if ref.match == "exact" or not _REGEX_META.search(body):
+            return f"{ENV_PREFIX_SENTINEL}/{leaf}/{body}"
+        return f"{ENV_PREFIX_SENTINEL}/{leaf}/({body})"
+
+    def _body_set_scope(self, ref: ContactBodyRef) -> str:
+        """Articulation scope owning a ``body_set`` ref.
+
+        An explicit ref articulation wins.  A single-articulation run makes an
+        omitted owner unambiguous (the historical implicit ``Robot`` scope);
+        otherwise an omitted owner is legal only when exactly one declared
+        body-set scope exists.
+        """
+        if ref.articulation is not None:
+            return ref.articulation
+        if self._articulation_names is not None and len(self._articulation_names) == 1:
+            return self._articulation_names[0]
+        scopes = [
+            scope for scope, sets in self._articulation_body_sets.items() if ref.body_set in sets
+        ]
+        if len(scopes) == 1:
+            return scopes[0]
+        raise ValueError(
+            f"contact ref {ref.label()!r}: body_set {ref.body_set!r} must name "
+            f"articulation when the run declares {list(self._articulation_names or ())} "
+            f"or several body-set scopes; declared scopes: "
+            f"{sorted(self._articulation_body_sets)}"
+        )
+
+    def _validate_declared_prop_refs(self, spec: ContactGroupSpec) -> None:
+        """Object/fixture refs must name declared props (no synthesized rows)."""
+        declared = set(self._prop_names)
+        for ref in (*spec.sensor_refs, *spec.filter_refs):
+            if ref.owner in ("object", "fixture") and ref.name not in declared:
+                raise ValueError(
+                    f"contact group {spec.name!r}: ref {ref.label()!r} names an "
+                    f"undeclared {ref.owner} prop {ref.name!r}; declared props "
+                    f"are {sorted(declared)}"
+                )
+
+    def _prop_path(self, ref: ContactBodyRef) -> str:
+        if ref.owner in ("support", "environment"):
+            raise _StaticContactUnsupported(
+                f"contact ref {ref.label()!r}: static support/environment "
+                f"contacts are not representable on isaaclab2 (the rigid-prop "
+                f"ContactSensor surface cannot report static ground/terrain "
+                f"pairs); run the group on the mujoco family or drop the ref"
+            )
+        body = ref.body
+        if body is not None and body != ref.name:
+            raise _StaticContactUnsupported(
+                f"contact ref {ref.label()!r}: non-root articulated prop link "
+                f"sensors are not supported on isaaclab2 in this lane; address "
+                f"the prop root (omit body or body: {ref.name}) on the "
+                f"isaaclab lane, or run the group on the mujoco family"
+            )
+        return f"{ENV_PREFIX_SENTINEL}/Prop_{ref.name}"
+
+    def _ref_path(self, ref: ContactBodyRef) -> str:
+        if ref.owner in ("support", "environment"):
+            # Static scopes must fail at BUILD, before ref.path (an
+            # environment path) can bypass the static contact limitation.
+            return self._prop_path(ref)
+        if ref.path is not None:
+            return ref.path
+        if ref.owner == "robot":
+            return self._robot_path(ref)
+        return self._prop_path(ref)
 
     # ---------------------------------------------------------------- #
     # scene contribution (before cloning)
     # ---------------------------------------------------------------- #
-    def _all_inventory(self, articulation: str) -> list:
-        """The pre-clone rigid-body inventory for one articulation.
-
-        Materialized from that articulation's registered USD asset through
-        :mod:`unigym.backends.isaaclab2.usd` -- the source of truth before
-        cloning (post-spawn body names cannot create sensors).  Fixed-joint
-        merged links are excluded by the inventory owner.  Never a union
-        across articulations.
-        """
-        if articulation in self._all_inventories:
-            return self._all_inventories[articulation]
-        from .usd import robot_rigid_bodies
-
-        asset_path = self._contact_assets[articulation]
-        try:
-            inventory = robot_rigid_bodies(asset_path)
-        except (OSError, ValueError) as exc:
-            raise ValueError(
-                f"contacts: all: cannot inventory articulation "
-                f"{articulation!r} asset {asset_path!r}: {exc}"
-            ) from exc
-        self._all_inventories[articulation] = inventory
-        return inventory
-
     @staticmethod
     def _add_field(fields: dict, field: str, value, group: str) -> None:
         """Add one scene sensor field; derived-name collisions fail fast."""
@@ -318,75 +232,36 @@ class IsaacLabContactBackend:
     def setup_scene(self) -> dict:
         """``{scene_field: ContactSensorCfg}`` for every group.
 
-        Fields: ``contact_<name>`` (general, single scope bucket) and
-        ``contact_<name>__sN`` (general, further scope buckets),
-        ``contact_<name>_b<i>`` (ONE sensor per body for ``all``) and
-        ``contact_<name>_<j>`` (pairwise entry j).  The prim path is anchored
-        at the owning articulation's leaf.  ``history_length=1`` matches the
-        manager's v1 history support; ``track_air_time`` stays off (we serve
-        forces, not timings).
+        One cfg per sensor ref (``contact_<name>_s<i>``); pairwise cfgs carry
+        the flattened filter prim paths in F order.
         """
         from isaaclab.sensors import ContactSensorCfg
 
         fields_cfg: dict = {}
         for spec in self.specs:
-            leaf = self._leaf(spec)
-            if is_all_bodies(spec.sensor_bodies):
-                articulation = resolve_all_articulation(spec, self._contact_assets)
-                bodies = self._all_inventory(articulation)
-                self._all_bodies[spec.name] = (articulation, bodies)
-                for i, body in enumerate(bodies):
-                    self._add_field(
-                        fields_cfg,
-                        f"contact_{spec.name}_b{i}",
-                        ContactSensorCfg(
-                            prim_path=f"{{ENV_REGEX_NS}}/{leaf}/{body.path}",
-                            history_length=1,
-                        ),
-                        spec.name,
-                    )
-                continue
-            if spec.mode == "general":
-                paths = general_prim_paths(list(spec.sensor_bodies), robot_leaf=leaf)
-                fields = general_field_names(spec.name, list(spec.sensor_bodies))
-                for field, path in zip(fields, paths):
-                    self._add_field(
-                        fields_cfg,
-                        f"contact_{field}",
-                        ContactSensorCfg(prim_path=path, history_length=1),
-                        spec.name,
-                    )
-            else:
-                exprs = filter_prim_exprs(spec, robot_leaf=leaf)
-                for j, entry in enumerate(spec.sensor_bodies):
-                    self._add_field(
-                        fields_cfg,
-                        f"contact_{spec.name}_{j}",
-                        ContactSensorCfg(
-                            prim_path=entry_prim_path(entry, robot_leaf=leaf),
-                            filter_prim_paths_expr=exprs,
-                            history_length=1,
-                        ),
-                        spec.name,
-                    )
+            self._validate_declared_prop_refs(spec)
+            names: list[str] = []
+            filter_exprs = [self._ref_path(ref) for ref in spec.filter_refs]
+            for i, ref in enumerate(spec.sensor_refs):
+                field = f"contact_{spec.name}_s{i}"
+                kwargs = {"prim_path": self._ref_path(ref), "history_length": 1}
+                if spec.mode == "pairwise":
+                    kwargs["filter_prim_paths_expr"] = filter_exprs
+                self._add_field(
+                    fields_cfg,
+                    field,
+                    ContactSensorCfg(**kwargs),
+                    spec.name,
+                )
+                names.append(field)
+            self._fields[spec.name] = names
         return fields_cfg
 
     # ---------------------------------------------------------------- #
     # bind (after construction)
     # ---------------------------------------------------------------- #
     def bind_env(self, env) -> None:
-        """Resolve bodies + grab sensor handles; fail-fast on mismatches.
-
-        Body names resolve against the group's OWNING articulation
-        (``env.robot`` when the group has no explicit owner, the articulation
-        scene field otherwise).  Unresolvable sensor declarations refuse with
-        a ``ContactCandidateError`` carrying that robot's discovered prim
-        inventory (``usd_robot_inventory``: rigid-body prims + collision
-        coverage, nested scopes included) -- foreign assets with unfamiliar
-        naming become self-describing at the failure site.  Bare filter
-        bodies resolve in the same articulation and must match exactly one
-        body; duplicate resolved sensor/filter bodies fail fast.
-        """
+        """Resolve refs against the live scene and cache sensor handles."""
         if spec_body_frame_unsupported(self.specs):
             name = next(s.name for s in self.specs if s.frame == "body")
             raise NotImplementedError(
@@ -394,129 +269,126 @@ class IsaacLabContactBackend:
                 f"is not implemented in v1 (plan §6 allowed list); use "
                 f"frame: world"
             )
+        self.inventory = self._runtime_inventory(env)
         for spec in self.specs:
-            robot = self._robot_asset(env, spec)
-            robot_bodies = [str(n) for n in robot.data.body_names]
-
-            def inventory(robot=robot):
-                return usd_robot_inventory(robot)
-
-            if is_all_bodies(spec.sensor_bodies):
-                _, bodies = self._all_bodies[spec.name]
-                pieces, perms = [], []
-                for i, body in enumerate(bodies):
-                    sensor = env.scene[f"contact_{spec.name}_b{i}"]
-                    names = [str(n) for n in sensor.body_names]
-                    expected = str(body.path).rsplit("/", 1)[-1]
-                    if expected in names:
-                        perm = [names.index(expected)]
-                    elif len(names) == 1:
-                        perm = [0]
-                    else:
-                        raise ValueError(
-                            f"contact group {spec.name!r}: all-body sensor "
-                            f"{body.path!r} resolves to bodies {names} "
-                            f"(articulation {spec.articulation or '<single>'!r})"
-                        )
-                    pieces.append(sensor)
-                    perms.append(perm)
-                self._sensors[spec.name] = {"mode": "general", "sensors": pieces}
-                self._perm[spec.name] = perms
-                continue
-            if spec.mode == "general":
-                fields = general_field_names(spec.name, list(spec.sensor_bodies))
-                buckets = _general_buckets(list(spec.sensor_bodies))
-                pieces, perms = [], []
-                resolved: list[str] = []
-                for field, expected in zip(fields, buckets):
-                    sensor = env.scene[f"contact_{field}"]
-                    names = resolve_bucket_names(
-                        expected, robot_bodies, spec, inventory_fn=inventory
+            sensor_rows = resolve_refs(
+                self.inventory, spec.sensor_refs, axis="sensor_refs", group=spec.name
+            )
+            filter_rows = resolve_refs(
+                self.inventory, spec.filter_refs, axis="filter_refs", group=spec.name
+            )
+            for ref in spec.filter_refs:
+                resolved = self.inventory.resolve(ref)
+                if len(resolved) != 1:
+                    raise ValueError(
+                        f"contact group {spec.name!r}: filter ref {ref.label()!r} "
+                        f"resolved {len(resolved)} bodies; the IsaaccLab2 filter "
+                        f"axis is one column per explicit ref, so each filter "
+                        f"ref must address exactly one body"
                     )
-                    perm = [sensor.body_names.index(n) for n in names]
-                    if sorted(perm) != list(range(len(names))):
+            self._filters[spec.name] = filter_rows
+            fields = self._fields.get(spec.name) or [
+                f"contact_{spec.name}_s{i}" for i in range(len(sensor_rows))
+            ]
+            pieces, perms = [], []
+            cursor = 0
+            for index, field in enumerate(fields):
+                sensor = env.scene[field]
+                ref_rows = self.inventory.resolve(spec.sensor_refs[index])
+                cursor += len(ref_rows)
+                names = [str(n) for n in sensor.body_names]
+                idx: list[int] = []
+                for row in ref_rows:
+                    native = row.native if row.native in names else row.body
+                    if native not in names:
                         raise ValueError(
-                            f"contact group {spec.name!r}: body resolution "
-                            f"mismatch sensor={sensor.body_names} vs "
-                            f"expected={names}"
+                            f"contact group {spec.name!r}: sensor ref "
+                            f"{spec.sensor_refs[index].label()!r} resolved "
+                            f"{row.key!r} but the spawned sensor reports "
+                            f"bodies {names}"
                         )
-                    pieces.append(sensor)
-                    perms.append(perm)
-                    resolved.extend(names)
-                self._reject_duplicates(spec, "sensor_bodies", resolved)
-                self._sensors[spec.name] = {"mode": "general", "sensors": pieces}
-                self._perm[spec.name] = perms
-            else:
-                self._resolve_bare_filters(spec, robot_bodies, inventory)
-                pieces, perms = [], []
-                resolved = []
-                for j, entry in enumerate(spec.sensor_bodies):
-                    sensor = env.scene[f"contact_{spec.name}_{j}"]
-                    name = resolve_entry_name(entry, robot_bodies, spec, j, inventory_fn=inventory)
-                    idx = sensor.body_names.index(name)
-                    pieces.append(sensor)
-                    perms.append([idx])
-                    resolved.append(name)
-                self._reject_duplicates(spec, "sensor_bodies", resolved)
-                self._sensors[spec.name] = {"mode": "pairwise", "sensors": pieces}
-                self._perm[spec.name] = perms
+                    idx.append(names.index(native))
+                if spec.mode == "pairwise" and len(idx) != 1:
+                    raise ValueError(
+                        f"contact group {spec.name!r}: pairwise sensor ref "
+                        f"{spec.sensor_refs[index].label()!r} resolved "
+                        f"{len(idx)} bodies; PhysX filtered reporting is "
+                        f"one-to-many only (use one body per sensor ref)"
+                    )
+                pieces.append(sensor)
+                perms.append(idx)
+            self._sensors[spec.name] = {"mode": spec.mode, "sensors": pieces}
+            self._perm[spec.name] = perms
         self._bound = True
 
-    def _resolve_bare_filters(
-        self, spec: ContactGroupSpec, robot_bodies: list[str], inventory_fn
-    ) -> None:
-        """Resolve bare filter bodies in the owning articulation (fail fast).
-
-        A bare filter expression must match exactly one body so the filter
-        axis ``F`` stays equal to ``len(filter_bodies)`` (the shape contract).
-        Explicit prim paths / env-prefixed prop expressions pass through.
-        """
-        resolved: list[str] = []
-        for j, entry in enumerate(spec.filter_bodies or ()):
-            if _is_explicit_prim_path(entry):
-                continue
-            _, pattern = split_scope(entry)
-            compiled = re.compile(pattern)
-            names = [n for n in robot_bodies if compiled.fullmatch(n)]
-            if len(names) != 1:
-                reason = (
-                    f"filter entry {j} matched {len(names)} robot bodies "
-                    f"(a bare filter body must resolve exactly one body in "
-                    f"articulation {spec.articulation or '<single>'!r})"
+    def _runtime_inventory(self, env) -> ContactInventory:
+        rows: list[ContactBodyAddress] = []
+        names = self._articulation_names_used()
+        for index, articulation in enumerate(names):
+            if self._articulation_names and articulation in self._articulation_names:
+                index = self._articulation_index(articulation)
+                field = articulation_scene_field(articulation, index)
+            else:
+                field = "robot" if index == 0 else f"robot_{articulation}"
+            robot = env.scene[field]
+            for name in robot.data.body_names:
+                native = str(name)
+                rows.append(
+                    ContactBodyAddress(
+                        owner="robot",
+                        scope=articulation,
+                        body=native,
+                        native=native,
+                        prim_path=None,
+                        collision=True,
+                        contact_capable=True,
+                        key=f"robot/{articulation}/{native}",
+                    )
                 )
-                raise contact_candidate_error(
-                    spec.name,
-                    "filter_bodies",
-                    [pattern],
-                    inventory_fn(),
-                    "isaaclab",  # family label (asset family), not the env backend name
-                    reason=reason,
+        prop_names = self._all_prop_names()
+        for name in prop_names:
+            owner = "fixture" if name in self._articulated_props else "object"
+            scene_field = f"prop_{name}"
+            try:
+                asset = env.scene[scene_field]
+            except (KeyError, TypeError):
+                asset = None
+            body_names = []
+            if asset is not None:
+                data = getattr(asset, "data", None)
+                body_names = [str(n) for n in (getattr(data, "body_names", None) or ())]
+            if not body_names:
+                body_names = [name]
+            for i, native in enumerate(body_names):
+                rows.append(
+                    ContactBodyAddress(
+                        owner=owner,
+                        scope=name,
+                        body=native,
+                        native=native,
+                        prim_path=f"{ENV_PREFIX_SENTINEL}/Prop_{name}",
+                        collision=True,
+                        contact_capable=True,
+                        key=f"{owner}/{name}/{native}",
+                        root=i == 0,
+                    )
                 )
-            resolved.append(names[0])
-        self._reject_duplicates(spec, "filter_bodies", resolved)
+        triples: list[tuple[str, str, tuple[str, ...]]] = []
+        for articulation, sets in self._articulation_body_sets.items():
+            for set_name, bodies in sets.items():
+                triples.append((articulation, set_name, tuple(str(b) for b in bodies)))
+        return ContactInventory(self.backend_key, tuple(rows), tuple(triples))
 
-    @staticmethod
-    def _reject_duplicates(spec: ContactGroupSpec, arg: str, names: list[str]) -> None:
-        duplicates = sorted({name for name in names if names.count(name) > 1})
-        if duplicates:
-            raise ValueError(
-                f"contact group {spec.name!r}: {arg} resolve to duplicate "
-                f"bodies {duplicates}; each resolved body must be distinct"
-            )
+    def _all_prop_names(self) -> list[str]:
+        """Declared prop names only (inventories never synthesize ref rows)."""
+        return list(self._prop_names)
 
     def group_axes(self, spec: ContactGroupSpec) -> tuple[int, int]:
-        """Resolved ``(B, F)`` sensor/filter counts (post bind_env).
-
-        Feeds the obs catalog's per-key shape resolution.  general: B =
-        summed bucket bodies (the concatenated ``net_forces_w`` slices), F =
-        0; pairwise: exactly one body per ``sensor_bodies`` entry (the
-        one-to-many limitation), F = ``len(filter_bodies)`` (each entry
-        contributes one filter prim expr).
-        """
+        """Resolved ``(B, F)`` sensor/filter counts (post bind_env)."""
         perms = self._perm.get(spec.name, [])
         if spec.mode == "general":
             return sum(len(p) for p in perms), 0
-        return len(perms), len(spec.filter_bodies or ())
+        return len(perms), len(self._filters.get(spec.name, ()))
 
     # ---------------------------------------------------------------- #
     # raw reading
@@ -531,29 +403,32 @@ class IsaacLabContactBackend:
         entry = self._sensors[spec.name]
         perm = self._perm[spec.name]
         if entry["mode"] == "general":
-            # one (N, B_bucket, 3) slice per scope bucket, concatenated
-            # along B (single flat bucket == the classic single sensor)
             pieces = [s.data.net_forces_w[:, p, :] for s, p in zip(entry["sensors"], perm)]
             if len(pieces) == 1:
                 return pieces[0].clone()
             return torch.cat(pieces, dim=1).clone()
-        # force_matrix_w: (N, 1, F, 3) world per entry (contact_sensor.py:386)
-        pieces = [s.data.force_matrix_w[:, p, :, :] for s, p in zip(entry["sensors"], perm)]
+        expected_f = len(self._filters.get(spec.name, ()))
+        pieces = []
+        for sensor, p in zip(entry["sensors"], perm):
+            matrix = sensor.data.force_matrix_w[:, p, :, :]
+            if int(matrix.shape[2]) != expected_f:
+                raise AssertionError(
+                    f"contact group {spec.name!r}: sensor F axis "
+                    f"{int(matrix.shape[2])} != resolved filter refs "
+                    f"{expected_f}; filter_prim_paths_expr and the declared "
+                    f"filter_refs drifted"
+                )
+            pieces.append(matrix)
         return torch.cat(pieces, dim=1).clone()
 
     def close(self) -> None:
         """Release the cached sensor handles (ContactBackend lifecycle)."""
         self._sensors.clear()
         self._perm.clear()
-        self._all_bodies.clear()
-        self._all_inventories.clear()
+        self._filters.clear()
+        self._fields.clear()
+        self.inventory = None
         self._bound = False
-
-
-def _fullmatch(names: list[str], patterns: list[str]) -> list[str]:
-    """Names (input order preserved) fullmatching ANY pattern."""
-    compiled = [re.compile(p) for p in patterns]
-    return [n for n in names if any(c.fullmatch(n) for c in compiled)]
 
 
 def spec_body_frame_unsupported(specs: list[ContactGroupSpec]) -> bool:

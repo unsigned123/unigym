@@ -210,8 +210,11 @@ class IsaacLabSceneOps:
         resolved = self._resolved_sensor_names(cm)
         for spec in cm.specs:
             sensors = resolved.get(spec.name)
-            members = list(sensors) if sensors else list(spec.sensor_bodies)
-            members += list(spec.filter_bodies or [])
+            members = (
+                list(sensors)
+                if sensors
+                else [ref.label() for ref in (*spec.sensor_refs, *spec.filter_refs)]
+            )
             out[spec.name] = {"members": members}
         return out
 

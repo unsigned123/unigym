@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import inspect
-import subprocess
+from dataclasses import fields
 from pathlib import Path
 
-import pytest
 
 from unigym.benchmarks.base import EpisodeData, EpisodeResult
 from unigym.benchmarks.episode import EpisodeLimits
@@ -14,8 +13,6 @@ from unigym.benchmarks.termination import EpisodeOutcome, Termination
 from unigym.contacts.base import ContactGroupSpec
 from unigym.initializers.base import ResetOutcome, wrap_initializer_result
 from unigym.runner.sinks import benchmark as benchmark_sink
-
-REPO = Path(__file__).resolve().parents[2]
 
 
 def test_report_and_results_have_stable_schemas():
@@ -60,35 +57,29 @@ def test_episode_limits_and_reset_outcome_are_exported():
 def test_contact_spec_exposes_owner_and_aggregation():
     spec = ContactGroupSpec(
         name="support",
-        sensor_bodies=["floor"],
+        sensor_refs=[{"owner": "environment", "body": "world"}],
         frame="world",
-        owner="environment",
         aggregation="sum_magnitudes",
     )
     assert spec.metadata()["owner"] == "environment"
+    assert spec.metadata()["sensor_refs"] == [{"owner": "environment", "body": "world"}]
+    assert spec.metadata()["mode"] == "general"
     assert spec.force_key() == "contact/support/force"
     assert spec.active_bodies_key() == "contact/support/active_bodies"
 
 
-def test_no_isaaclab3_files_touched():
-    if not (REPO / ".git").exists():
-        pytest.skip("not a git worktree")
-    out = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(REPO),
-            "status",
-            "--porcelain",
-            "--",
-            "unigym/backends/isaaclab3",
-            "unigym/backends/shared/isaaclab3_common",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert out.stdout.strip() == ""
+def test_isaaclab3_common_contacts_use_the_typed_ref_schema():
+    """The shared IsaacLab 3 contact face no longer consumes legacy body lists."""
+    from unigym.backends.shared.isaaclab3_common import contacts
+
+    names = {field.name for field in fields(ContactGroupSpec)}
+    assert {"sensor_refs", "filter_refs"} <= names
+    assert "sensor_bodies" not in names
+    assert "filter_bodies" not in names
+    source = Path(contacts.__file__).read_text(encoding="utf-8")
+    assert "spec.sensor_bodies" not in source
+    assert "spec.filter_bodies" not in source
+    assert "ContactInventory" in source
 
 
 def test_termination_extension_payload_is_json_safe():

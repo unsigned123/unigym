@@ -4,7 +4,8 @@ This module is **numpy/torch-only** (no isaaclab, no mujoco) so the spec
 parsing, the validation and the format/component/aggregate unified layer are
 unit-testable offline; both backend modules import lazily (mirroring the
 ``cameras/`` package convention: isaaclab imports live exclusively in
-``backends/isaaclab2/contacts.py``, mujoco access in ``backends/mujoco/contacts.py``).
+``backends/isaaclab2/contacts.py``, mujoco access in
+``backends/mujoco/contacts.py``).
 
 Key space (plan UniGym-contacts contact-manager plan)
 =======================================================================
@@ -12,7 +13,7 @@ Every contact *group* named ``<name>`` serves exactly one record key::
 
     contact/<name>   -> shape table below (torch (N, ...) on env.device)
 
-Shapes (plan §2; B = resolved sensor bodies, F = resolved filter bodies,
+Shapes (B = resolved sensor bodies, F = resolved filter bodies,
 N = num_envs; aggregate may remove the F axis on pairwise groups):
 
 ============  ==============  ==============
@@ -25,14 +26,17 @@ contact       (N, B) bool     (N, B, F) bool
 
 Rules baked in here:
 
+* a group names its sensor and filter bodies with explicit typed
+  :class:`~unigym.contacts.refs.ContactBodyRef` records only (Scheme A,
+  breaking): no string body lists, no ``auto`` owner, no
+  ``{prop: ...}`` / ``{contact_group: ...}`` references and no implicit
+  global regex union;
+* ``mode`` is derived: non-empty ``filter_refs`` -> pairwise, otherwise
+  general.  ``owner`` is derived metadata from the refs, never a resolver;
 * ``frame`` is **required with no default** (world|body) — no silent
   world-frame semantics;
 * ``component`` defaults to ``mag``; ``x|y|z`` are SIGNED projections
   (``raw`` ignores ``component``);
-* a group may name its owning articulation (``articulation``); the
-  ``{contact_group: {articulation, group}}`` reference records the owner
-  automatically.  A run with more than one articulation requires it, so a
-  body regex can never silently match another articulation;
 * per-group isolation over sharing (one sensor cfg per group / pairwise
   entry), same isolation philosophy as cameras/;
 * baseline protocol: a config without a ``contacts:`` section produces
@@ -48,41 +52,16 @@ from typing import ClassVar, Mapping, Optional, Protocol, Sequence, cast
 import numpy as np
 import torch
 
+from .refs import ContactBodyRef
+
 FORMATS = ("raw", "norm", "contact")
 COMPONENTS = ("mag", "x", "y", "z")
 FRAMES = ("world", "body")
 MODES = ("general", "pairwise")
-OWNERS = ("robot", "object", "environment", "fixture")
 AGGREGATIONS = ("net", "sum_magnitudes")
 # aggregate vocabulary by format (plan §2: contact -> any|all; value -> sum|mean|max)
 AGGREGATE_CONTACT = ("any", "all", "none")
 AGGREGATE_VALUE = ("sum", "mean", "max", "none")
-
-ALL_BODIES = "<all>"
-"""Typed sentinel for the ``contacts: all`` inventory mode.
-
-The run layer maps an ``all`` inventory to one synthetic group named
-``all`` whose sensor bodies are this sentinel.  MuJoCo/mjwarp expand it at
-bind over the referenced articulation's model bodies; isaaclab expands it
-through the pre-clone USD inventory.  It is never a body-name regex.
-"""
-
-
-def is_all_bodies(entries) -> bool:
-    """True when *entries* is the single ``ALL_BODIES`` sentinel."""
-    return isinstance(entries, (list, tuple)) and tuple(entries) == (ALL_BODIES,)
-
-
-def expand_all_bodies(entries, resolver) -> list[str]:
-    """Expand the ``ALL_BODIES`` sentinel through a backend resolver.
-
-    A non-sentinel list passes through unchanged; the sentinel form must be
-    exactly one entry (validated by :class:`ContactGroupSpec`).
-    """
-    if not is_all_bodies(entries):
-        return [str(entry) for entry in entries]
-    return [str(name) for name in resolver()]
-
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 ENV_PREFIX_SENTINEL = "{ENV_REGEX_NS}"
@@ -99,6 +78,33 @@ def contact_key(name: str) -> str:
 # --------------------------------------------------------------------------- #
 # group spec (yaml-declarable, backend-agnostic)
 # --------------------------------------------------------------------------- #
+_REMOVED_KEYS = {
+    "sensor_bodies": (
+        "key 'sensor_bodies' was removed by the breaking contact schema; "
+        "declare sensor_refs: [{owner: robot|object|support|fixture|environment, ...}] "
+        "(explicit typed refs -- no string body lists, no auto owner, no global regex union)"
+    ),
+    "filter_bodies": (
+        "key 'filter_bodies' was removed by the breaking contact schema; "
+        "declare filter_refs: [{owner: ..., ...}] (an empty/omitted list keeps "
+        "the group general; a non-empty list makes it pairwise)"
+    ),
+    "articulation": (
+        "a group-level 'articulation' is no longer a resolver; put "
+        "articulation: <name> inside each robot ref "
+        "({owner: robot, articulation: <name>, body|body_set: ...})"
+    ),
+    "mode": (
+        "'mode' is derived: a non-empty filter_refs list makes the group "
+        "pairwise, otherwise it is general"
+    ),
+    "owner": (
+        "'owner' is derived metadata from sensor_refs/filter_refs; remove the key "
+        "and declare the owner on each ref"
+    ),
+}
+
+
 @dataclass
 class ContactGroupSpec:
     """One declared contact group (yaml ``contacts:`` list entry).
@@ -107,25 +113,14 @@ class ContactGroupSpec:
         name: group name (unique across the run; part of the
             ``contact/<name>`` key; restricted to ``[A-Za-z0-9_-]+`` because
             it also becomes an isaaclab scene-cfg field suffix).
-        sensor_bodies: body-name regex list matched (fullmatch) against the
-            owning articulation's body names; the resolved set defines axis B
-            (backend asset order).
+        sensor_refs: explicit :class:`ContactBodyRef` sequence defining the B
+            axis in declaration order (backend-native order within each ref).
         frame: ``world`` or ``body`` — REQUIRED, no default.
             ``body`` forces the per-sensor-body frame (isaaclab: v1
             NotImplementedError; mujoco: rotates by the sensor body
             orientation).
-        articulation: owning articulation name.  REQUIRED for every group in
-            a run with more than one articulation; ``None`` means the single
-            declared articulation.  The ``{contact_group: {articulation,
-            group}}`` reference sets it automatically.
-        filter_bodies: pairwise filter body-name regex list; a bare entry is
-            resolved in the owning articulation's scope, an entry starting
-            with ``/`` or ``{ENV_REGEX_NS}`` is used as an explicit prim path
-            (props ``Prop_*``).  Presence of a non-empty list makes the group
-            pairwise.
-        mode: ``general`` (no filter — net force on the sensor bodies) or
-            ``pairwise`` (per-filter force matrix).  Default derived from
-            ``filter_bodies``; an explicit value must be consistent.
+        filter_refs: explicit filter refs; non-empty -> pairwise.  F follows
+            declaration order, backend-native body order within each ref.
         format: ``raw`` (force vectors), ``norm`` (component magnitude /
             signed projection) or ``contact`` (boolean vs ``threshold``).
         component: ``mag`` (default) or ``x|y|z`` (signed projection);
@@ -136,9 +131,6 @@ class ContactGroupSpec:
             F axis, so aggregate must stay ``none``.
         history: only 1 supported in v1 (>1 raises NotImplementedError,
             plan §6 allowed list).
-        owner: declarative provenance of the group's subject -- ``robot``
-            (default, the owning articulation), ``object``, ``environment``
-            or ``fixture``.  Provenance only, never a filter.
         aggregation: force-fact aggregation for ``contact/<name>/force``.
             ``net`` (default) uses the group's net sensor force vector
             magnitude; ``sum_magnitudes`` sums per-contact force magnitudes
@@ -146,17 +138,14 @@ class ContactGroupSpec:
     """
 
     name: str
-    sensor_bodies: Sequence[str]
+    sensor_refs: Sequence[ContactBodyRef]
     frame: str  # REQUIRED, no default
-    filter_bodies: Optional[Sequence[str]] = None
-    mode: Optional[str] = None
+    filter_refs: Sequence[ContactBodyRef] = ()
     format: str = "raw"
     component: str = "mag"
     threshold: Optional[float] = None
     aggregate: str = "none"
     history: int = 1
-    articulation: Optional[str] = None
-    owner: str = "robot"
     aggregation: str = "net"
 
     def __post_init__(self):
@@ -172,39 +161,8 @@ class ContactGroupSpec:
                 f"trimmed, free of '/' and match [A-Za-z0-9_-]+ (it is part "
                 f"of the contact/<name> key and a scene field suffix)"
             )
-        if self.articulation is not None and (
-            not isinstance(self.articulation, str)
-            or not self.articulation
-            or self.articulation.strip() != self.articulation
-        ):
-            raise ValueError(
-                f"contact {self.name!r}: articulation must be a non-empty, "
-                f"trimmed string or None, got {self.articulation!r}"
-            )
-        self.sensor_bodies = _str_list(self.sensor_bodies, "sensor_bodies", self.name)
-        if ALL_BODIES in self.sensor_bodies and tuple(self.sensor_bodies) != (ALL_BODIES,):
-            raise ValueError(
-                f"contact {self.name!r}: the all-bodies sentinel {ALL_BODIES!r} "
-                f"must be the only sensor body entry"
-            )
-        if self.filter_bodies is not None:
-            self.filter_bodies = _str_list(self.filter_bodies, "filter_bodies", self.name)
-            if ALL_BODIES in self.filter_bodies:
-                raise ValueError(
-                    f"contact {self.name!r}: the all-bodies sentinel {ALL_BODIES!r} "
-                    f"is not a valid filter body"
-                )
-        if self.mode is None:
-            self.mode = "pairwise" if self.filter_bodies else "general"
-        if self.mode not in MODES:
-            raise ValueError(
-                f"contact {self.name!r}: mode must be one of " f"{MODES}, got {self.mode!r}"
-            )
-        if (self.mode == "pairwise") != (self.filter_bodies is not None):
-            raise ValueError(
-                f"contact {self.name!r}: mode/filter_bodies inconsistent "
-                f"(mode={self.mode!r}, filter_bodies={self.filter_bodies})"
-            )
+        self.sensor_refs = _ref_list(self.sensor_refs, "sensor_refs", self.name, required=True)
+        self.filter_refs = _ref_list(self.filter_refs, "filter_refs", self.name, required=False)
         if self.format not in FORMATS:
             raise ValueError(
                 f"contact {self.name!r}: format must be one of " f"{FORMATS}, got {self.format!r}"
@@ -250,56 +208,91 @@ class ContactGroupSpec:
                 f"contact {self.name!r}: history > 1 is not implemented in "
                 f"v1 (plan §6 allowed list); got history={self.history}"
             )
-        if self.owner not in OWNERS:
-            raise ValueError(
-                f"contact {self.name!r}: owner must be one of {OWNERS}, " f"got {self.owner!r}"
-            )
         if self.aggregation not in AGGREGATIONS:
             raise ValueError(
                 f"contact {self.name!r}: aggregation must be one of "
                 f"{AGGREGATIONS}, got {self.aggregation!r}"
             )
 
+    # ---- derived metadata ------------------------------------------------ #
+    @property
+    def mode(self) -> str:
+        """Derived mode: non-empty filter_refs -> pairwise."""
+        return "pairwise" if self.filter_refs else "general"
+
+    @property
+    def owner(self) -> str:
+        """Derived group owner: one sensor owner, else ``mixed``."""
+        owners = self.owners()
+        return owners[0] if len(owners) == 1 else "mixed"
+
+    def owners(self) -> list[str]:
+        """Distinct sensor owners in declaration order."""
+        seen: list[str] = []
+        for ref in self.sensor_refs:
+            if ref.owner not in seen:
+                seen.append(ref.owner)
+        return seen
+
+    def articulation_names(self) -> list[str]:
+        """Explicit robot articulations referenced by any ref (declaration order)."""
+        out: list[str] = []
+        for ref in (*self.sensor_refs, *self.filter_refs):
+            if ref.owner == "robot" and ref.articulation and ref.articulation not in out:
+                out.append(ref.articulation)
+        return out
+
+    def prop_names(self, owners: Sequence[str] = ("object", "fixture", "support")) -> list[str]:
+        """Declared prop/support scopes referenced by any ref."""
+        allowed = set(owners)
+        out: list[str] = []
+        for ref in (*self.sensor_refs, *self.filter_refs):
+            if ref.owner in allowed and ref.name and ref.name not in out:
+                out.append(ref.name)
+        return out
+
     # ---- parsing -------------------------------------------------------- #
     @classmethod
     def from_yaml(cls, entry: dict) -> ContactGroupSpec:
-        """Build a spec from one yaml ``contacts:`` list entry.
+        """Build a spec from one yaml ``contacts:`` list entry (Scheme A only).
 
-        Unknown keys raise (fail-fast against typos); ``name``,
-        ``sensor_bodies`` and ``frame`` are required (frame has NO default).
+        Unknown keys raise (fail-fast against typos).  Removed legacy keys
+        raise a teaching error naming the explicit ref replacement.
+        ``name``, ``sensor_refs`` and ``frame`` are required.
         """
         if not isinstance(entry, dict):
             raise ValueError(
                 f"contact group entry must be a mapping, got " f"{type(entry).__name__}"
             )
+        removed = sorted(set(entry) & set(_REMOVED_KEYS))
+        if removed:
+            details = "; ".join(f"{key}: {_REMOVED_KEYS[key]}" for key in removed)
+            name = entry.get("name", "?")
+            raise ValueError(f"contact spec {name!r} uses removed keys: {details}")
         allowed = {f.name for f in fields(cls)}
         unknown = set(entry) - allowed
         if unknown:
             raise ValueError(
                 f"contact spec unknown keys {sorted(unknown)}; " f"allowed: {sorted(allowed)}"
             )
-        missing = [k for k in ("name", "sensor_bodies", "frame") if entry.get(k) is None]
+        missing = [k for k in ("name", "sensor_refs", "frame") if entry.get(k) is None]
         if missing:
             raise ValueError(
-                f"contact spec missing required keys {missing} " f"(frame is mandatory)"
+                f"contact spec missing required keys {missing} "
+                f"(sensor_refs and frame are mandatory; declare explicit "
+                f"{{owner: ...}} refs)"
             )
-        for arg in ("sensor_bodies", "filter_bodies"):
-            if isinstance(entry.get(arg), dict):
+        for arg in ("sensor_refs", "filter_refs"):
+            value = entry.get(arg)
+            if isinstance(value, Mapping):
                 raise ValueError(
-                    f"contact {entry['name']!r}: {arg} is still in the "
-                    f"reference form {entry[arg]!r} -- resolve reference "
-                    f"forms ({{contact_group: ...}} / {{prop: ...}}) via "
-                    f"build_contact_manager/resolve_contact_entries first"
+                    f"contact {entry['name']!r}: {arg} is a mapping "
+                    f"{value!r}; the legacy reference forms "
+                    f"({{contact_group: ...}} / {{prop: ...}}) are removed -- "
+                    f"declare a list of explicit {{owner: ...}} refs"
                 )
         kwargs = dict(entry)
-        kwargs["sensor_bodies"] = list(kwargs["sensor_bodies"])
-        if kwargs.get("filter_bodies") is not None:
-            kwargs["filter_bodies"] = list(kwargs["filter_bodies"])
         return cls(**kwargs)
-
-    # ---- resolution helpers --------------------------------------------- #
-    def resolved_mode(self) -> str:
-        return "pairwise" if self.filter_bodies else "general"
 
     # ---- shape table (plan §2, single source of truth) ------------------- #
     def raw_shape(self, num_envs: int, B: int, F: int = 0) -> tuple:
@@ -339,72 +332,59 @@ class ContactGroupSpec:
         """Static per-group metadata for ``meta["contacts"]`` (JSON-safe)."""
         return {
             "owner": self.owner,
+            "owners": self.owners(),
             "aggregation": self.aggregation,
             "frame": self.frame,
+            "mode": self.mode,
             "unit": "N",
-            "sensor_bodies": list(self.sensor_bodies),
-            "filter_bodies": (None if self.filter_bodies is None else list(self.filter_bodies)),
-            "articulation": self.articulation,
+            "sensor_refs": [ref.to_dict() for ref in self.sensor_refs],
+            "filter_refs": [ref.to_dict() for ref in self.filter_refs],
         }
 
 
-def _str_list(value, arg: str, name: str) -> list[str]:
-    if (
-        not isinstance(value, (list, tuple))
-        or len(value) == 0
-        or not all(isinstance(v, str) and v for v in value)
-    ):
+def _ref_list(value, arg: str, name: str, *, required: bool) -> list[ContactBodyRef]:
+    if value is None:
+        if required:
+            raise ValueError(f"contact {name!r}: {arg} is required")
+        return []
+    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, (list, tuple)):
         raise ValueError(
-            f"contact {name!r}: {arg} must be a non-empty "
-            f"list of non-empty strings, got {value!r}"
+            f"contact {name!r}: {arg} must be a list of explicit "
+            f"{{owner: ...}} refs, got {value!r}"
         )
-    return list(value)
+    refs = [ContactBodyRef.from_mapping(entry) for entry in value]
+    if required and not refs:
+        raise ValueError(f"contact {name!r}: {arg} must not be empty")
+    return refs
 
 
 # --------------------------------------------------------------------------- #
-# declarative reference resolution : {contact_group: ...} / {prop: ...}
+# backend construction registry face
 # --------------------------------------------------------------------------- #
 #: Canonical env backends that expose a contact face (no ``isaaclab`` /
 #: ``isaaclab3`` aliases: those family spellings are not selectable).
 BACKENDS = ("mujoco", "mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton")
 
 
-def _body_spec_list(value, where: str) -> list[str]:
-    """Validate a resolved sensor/filter list (non-empty, non-empty strs)."""
-    if (
-        not isinstance(value, (list, tuple))
-        or len(value) == 0
-        or not all(isinstance(v, str) and v for v in value)
-    ):
-        raise ValueError(
-            f"{where} must be a non-empty list of non-empty " f"strings, got {value!r}"
-        )
-    return [str(v) for v in value]
-
-
 class _ContactBackendFace(Protocol):
-    """The backend-native reference-resolution face (registry boundary)."""
+    """The backend contact face (registry boundary)."""
 
     backend_key: ClassVar[str]
 
     def __init__(
         self,
         specs,
-        contact_assets: Mapping[str, str] | None = None,
+        *,
         articulation_names: Sequence[str] | None = None,
+        articulation_body_sets: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+        prop_names: Sequence[str] | None = None,
+        articulated_props: Sequence[str] | None = None,
+        contact_assets: Mapping[str, str] | None = None,
     ) -> None: ...
-
-    @classmethod
-    def prop_filter_paths(cls, name: str, articulated: bool) -> list[str]: ...
 
 
 def _contact_face(backend: str) -> type[_ContactBackendFace]:
-    """Resolve the backend contact face lazily through the registry.
-
-    The face class owns BOTH the raw-reading backend object and the
-    backend-native name/path resolution (prop body addresses), so the neutral
-    package carries no backend-name branch.
-    """
+    """Resolve the backend contact face lazily through the registry."""
     from ..backends.registry import BackendSelectionError, backend_info
 
     try:
@@ -426,198 +406,22 @@ def _contact_face(backend: str) -> type[_ContactBackendFace]:
 def build_contact_backend(
     backend: str,
     specs,
-    contact_assets: Mapping[str, str] | None = None,
+    *,
     articulation_names: Sequence[str] | None = None,
+    articulation_body_sets: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+    prop_names: Sequence[str] | None = None,
+    articulated_props: Sequence[str] | None = None,
+    contact_assets: Mapping[str, str] | None = None,
 ) -> _ContactBackendFace:
-    """Construct the backend contact object for *specs* (registry face).
-
-    ``articulation_names`` is the run's articulation declaration order; the
-    backend uses it to assign the scene prim leaf (``Robot`` first, then
-    ``Robot_<name>``) and to reject a scoped group whose articulation is not
-    declared.
-    """
+    """Construct the backend contact object for *specs* (registry face)."""
     return _contact_face(backend)(
         specs,
-        contact_assets=contact_assets,
         articulation_names=articulation_names,
+        articulation_body_sets=articulation_body_sets,
+        prop_names=prop_names,
+        articulated_props=articulated_props,
+        contact_assets=contact_assets,
     )
-
-
-def _available_contact_refs(contact_groups) -> list[str]:
-    """Every resolvable ``articulation.group`` reference (sorted)."""
-    refs = [
-        f"{articulation}.{group}"
-        for articulation, groups in (contact_groups or {}).items()
-        for group in groups
-    ]
-    return sorted(refs)
-
-
-def resolve_contact_group(contact_groups, value) -> list[str]:
-    """Resolve ``{contact_group: {articulation, group}}`` to native regexes.
-
-    The table is the run layer's per-articulation native-body inventory
-    (``{articulation: {group: (native bodies)}}``); this neutral module only
-    consumes it and never imports ``BodyBinding`` or ``AssetRef``.
-    """
-    if not isinstance(value, dict) or set(value) != {"contact_group"}:
-        raise ValueError(
-            "contact sensor_bodies reference form must be "
-            "{contact_group: {articulation: <name>, group: <name>}}, got "
-            f"keys {sorted(value) if isinstance(value, dict) else value!r}"
-        )
-    ref = value["contact_group"]
-    if not isinstance(ref, dict) or set(ref) != {"articulation", "group"}:
-        raise ValueError(
-            "contact_group reference must declare exactly "
-            "{articulation: <name>, group: <name>}, got "
-            f"{sorted(ref) if isinstance(ref, dict) else ref!r}"
-        )
-    articulation = ref["articulation"]
-    group = ref["group"]
-    available = _available_contact_refs(contact_groups)
-    if not isinstance(articulation, str) or not articulation:
-        raise ValueError(
-            f"contact_group articulation must be a non-empty string; "
-            f"available references: {available}"
-        )
-    groups = (contact_groups or {}).get(articulation)
-    if groups is None:
-        raise ValueError(
-            f"contact_group articulation {articulation!r} is unknown; "
-            f"available references: {available}"
-        )
-    if not isinstance(group, str) or not group:
-        raise ValueError(
-            f"contact_group group must be a non-empty string; " f"available references: {available}"
-        )
-    if group not in groups:
-        raise ValueError(
-            f"contact_group reference {articulation}.{group} is unknown; "
-            f"available references: {available}"
-        )
-    return _body_spec_list(groups[group], f"contact_group {articulation}.{group} bodies")
-
-
-def resolve_prop_filter(name, backend: str, prop_names, articulated_props=frozenset()) -> list[str]:
-    """Resolve a ``{prop: <name>}`` filter reference to the prop body.
-
-    The address is the backend-native prop body name: MJ body
-    ``Prop_<name>`` (mujoco) vs the cloned prim path
-    ``{ENV_REGEX_NS}/Prop_<name>`` (isaaclab).  Articulation props
-     own a whole SUBTREE (``Prop_<name>_<link>``), so their
-     filter is the subtree pattern.  Unknown names fail fast listing the
-     declared props (the declaration is the single source of truth --
-     zero hardcoded addresses).
-    """
-    face = _contact_face(backend)
-    names = list(prop_names or [])
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"prop reference must be a non-empty string, " f"got {name!r}")
-    if name not in names:
-        raise ValueError(
-            f"prop filter reference {name!r}: no such declared prop "
-            f"(available: {sorted(names)}); the contacts section may only "
-            f"reference props declared in the same run config"
-        )
-    return face.prop_filter_paths(name, name in articulated_props)
-
-
-def _resolve_ref(
-    value,
-    backend: str,
-    arg: str,
-    group: str,
-    contact_groups,
-    prop_names,
-    articulated_props=frozenset(),
-) -> list[str]:
-    """One sensor_bodies/filter_bodies field: reference form OR list."""
-    if isinstance(value, dict):
-        keys = set(value)
-        if arg == "sensor_bodies":
-            if keys != {"contact_group"}:
-                raise ValueError(
-                    f"contact {group!r}: {arg} reference form is "
-                    f"{{contact_group: {{articulation, group}}}}, got keys {sorted(keys)}"
-                )
-            return resolve_contact_group(contact_groups, value)
-        if keys != {"prop"}:
-            raise ValueError(
-                f"contact {group!r}: {arg} reference form is "
-                f"{{prop: <name>}}, got keys {sorted(keys)}"
-            )
-        return resolve_prop_filter(value["prop"], backend, prop_names, articulated_props)
-    return _body_spec_list(value, f"contact {group!r}: {arg}")
-
-
-def resolve_contact_entry(
-    entry: dict, backend: str, contact_groups=None, prop_names=None, articulated_props=frozenset()
-) -> dict:
-    """Resolve ONE yaml ``contacts:`` entry's reference forms to lists.
-
-    ``sensor_bodies`` is either an explicit list of body specs or the
-    reference form ``{contact_group: {articulation, group}}``;
-    ``filter_bodies`` either an explicit list or ``{prop: <name>}``.
-    Everything else passes through untouched for
-    :class:`ContactGroupSpec` validation.  Returns a NEW dict (the input is
-    never mutated).
-    """
-    if not isinstance(entry, dict):
-        raise ValueError(f"contact group entry must be a mapping, got " f"{type(entry).__name__}")
-    out = dict(entry)
-    sensor_value = out.get("sensor_bodies")
-    if isinstance(sensor_value, dict) and set(sensor_value) == {"contact_group"}:
-        ref = sensor_value["contact_group"]
-        owner = ref.get("articulation") if isinstance(ref, dict) else None
-        if isinstance(owner, str) and owner:
-            declared = out.get("articulation")
-            if declared is not None and declared != owner:
-                raise ValueError(
-                    f"contact {out.get('name', '?')!r}: articulation "
-                    f"{declared!r} conflicts with the contact_group reference "
-                    f"owner {owner!r}; declare one owner"
-                )
-            out["articulation"] = owner
-    if "sensor_bodies" in out:
-        out["sensor_bodies"] = _resolve_ref(
-            out["sensor_bodies"],
-            backend,
-            "sensor_bodies",
-            str(out.get("name", "?")),
-            contact_groups,
-            prop_names,
-            articulated_props,
-        )
-    if out.get("filter_bodies") is not None:
-        out["filter_bodies"] = _resolve_ref(
-            out["filter_bodies"],
-            backend,
-            "filter_bodies",
-            str(out.get("name", "?")),
-            contact_groups,
-            prop_names,
-            articulated_props,
-        )
-    return out
-
-
-def resolve_contact_entries(
-    entries, backend: str, contact_groups=None, prop_names=None, articulated_props=frozenset()
-) -> list[dict]:
-    """Resolve every entry of a ``contacts:`` list (see
-    :func:`resolve_contact_entry`); the list itself must be a list."""
-    if entries is None:
-        return []
-    if not isinstance(entries, (list, tuple)):
-        raise ValueError(
-            f"yaml 'contacts' section must be a list of group "
-            f"entries, got {type(entries).__name__}"
-        )
-    return [
-        resolve_contact_entry(e, backend, contact_groups, prop_names, articulated_props)
-        for e in entries
-    ]
 
 
 # --------------------------------------------------------------------------- #

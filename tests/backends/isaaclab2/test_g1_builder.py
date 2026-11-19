@@ -241,7 +241,7 @@ def test_g1_realization_has_no_old_module_or_template():
     assert not hasattr(robots, "G1_29DOF_CFG")
 
 
-def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
+def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
     """contacts: all uses the pre-clone USD inventory and reads per-body rows."""
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
@@ -250,7 +250,6 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.env.obs import ObservationConfig
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
-    from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
@@ -267,9 +266,15 @@ def test_g1_contact_all_materializes_one_sensor_per_body(g1_usd):
     assert "right_hand/right_hand_palm_link" not in paths
 
     manager = build_contact_manager(
-        [{"name": "all", "sensor_bodies": [ALL_BODIES], "frame": "world"}],
+        [
+            {
+                "name": "all",
+                "sensor_refs": [{"owner": "robot", "articulation": "g1", "body": "*"}],
+                "frame": "world",
+            }
+        ],
         backend="isaaclab2",
-        contact_assets={"g1": str(g1_usd)},
+        articulation_names=("g1",),
     )
     assert manager is not None
 

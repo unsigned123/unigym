@@ -163,7 +163,9 @@ _BASE_XML = """<?xml version="1.0"?>
 """
 
 
-def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None, names=("left", "right")):
+def _two_articulation_env(
+    tmp_path, tiny_mjcf, *, group_name=None, names=("left", "right"), contact_manager=None
+):
     from unigym.actuators import ActuationGroup
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.adapters.manual import ManualAdapter
@@ -272,6 +274,7 @@ def _two_articulation_env(tmp_path, tiny_mjcf, *, group_name=None, names=("left"
         controls=controls,
         profiles=profiles,
         actuation_plans=plans,
+        contact_manager=contact_manager,
         observations=ObservationConfig(robot=tuple(names)),
     )
     return env

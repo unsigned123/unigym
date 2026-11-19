@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, TypedDict, runtime_checka
 
 import numpy as np
 
-from unigym._typing import JsonValue, is_json_object, is_object_sequence
+from unigym._typing import JsonValue, is_json_object
 from unigym.assets.asset_ref import select_asset_format
 from unigym.robots.assets import select_robot_asset
 from unigym.actuators.ir import (
@@ -172,7 +172,7 @@ class _RobotBundle(TypedDict):
     adapter: Adapter
     generates_command: bool
     policy_dt: float
-    contact_groups: dict[str, dict[str, tuple[str, ...]]]
+    articulation_body_sets: dict[str, dict[str, tuple[str, ...]]]
     contact_assets: dict[str, str]
 
 
@@ -785,106 +785,74 @@ def _selected_asset_path(
     return str(value) if os.path.isabs(str(value)) else None
 
 
-def _effective_contacts(
-    name: str, build: _ProfileBuild, run_contacts: bool
-) -> ContactSensorInventory | None:
-    """The articulation's effective contact inventory.
+def _effective_contacts(build: _ProfileBuild) -> ContactSensorInventory | None:
+    """The articulation's explicitly declared contact inventory (or None)."""
+    return build["spec"].contacts
 
-    An explicit declaration wins (``none`` is the opt-out); omitted contacts
-    become ``all`` only when the run declares a contacts section, with the
-    build warning that states the per-body sensor cost.
+
+def _fixture_prop_names(prop_manager: PropManager | None) -> set[str]:
+    """Contact-owner fixture classification for the declared props.
+
+    Anchored articulated props (``articulation`` / ``usd_articulation``) are
+    fixtures; every free/rigid kind -- including ``free_articulation`` -- is an
+    object.  A fixture ref for a free prop therefore fails inventory resolution
+    with candidates instead of silently flipping ownership.
     """
-    inventory = build["spec"].contacts
-    if inventory is not None:
-        return inventory
-    if not run_contacts:
-        return None
-    from unigym.scenes.articulation import ContactSensorInventory
-
-    print(
-        f"[collect] WARNING articulation {name!r} omits `contacts` while the "
-        f"run declares a contacts section: defaulting to contacts: all "
-        f"(every rigid-body link under the robot asset; on isaaclab this "
-        f"materializes one ContactSensorCfg per rigid body per env clone)",
-        flush=True,
-    )
-    return ContactSensorInventory(mode="all")
+    if prop_manager is None:
+        return set()
+    return {s.name for s in prop_manager.specs if s.type in ("articulation", "usd_articulation")}
 
 
-def _contact_group_table(
+def _contact_declarations(
     builds: dict[str, _ProfileBuild],
     *,
-    run_contacts: bool = False,
     asset_plan: AssetPlan | None = None,
 ) -> tuple[dict[str, dict[str, tuple[str, ...]]], dict[str, str]]:
-    """Per-articulation native contact-group inventory for the resolver.
+    """Per-articulation native body-set declarations for robot refs.
 
-    ``declared`` inventories map their canonical bodies through the selected
-    per-articulation format; ``all`` contributes one synthetic group named
-    ``all`` whose sensor bodies are the typed ``ALL_BODIES`` sentinel; ``none``
-    contributes no group.  The second return value is the per-articulation
-    resolved selected asset path used by the backend ``all`` expansion.
+    Robot ``body_set`` refs resolve against the profile's ``body_sets`` plus
+    the articulation's declared ``contacts`` groups (canonical body ids mapped
+    through the selected per-articulation backend format).  The second return
+    value keeps the resolved selected-asset paths available to backend
+    inventories that walk a USD asset.
+
     Only this layer touches ``BodyBinding``.
     """
-    from unigym.contacts.base import ALL_BODIES
-
-    table: dict[str, dict[str, tuple[str, ...]]] = {}
+    body_sets: dict[str, dict[str, tuple[str, ...]]] = {}
     contact_assets: dict[str, str] = {}
     for name, build in builds.items():
         profile = build["profile"]
-        inventory = _effective_contacts(name, build, run_contacts)
-        if inventory is None or inventory.mode == "none":
-            continue
-        groups: dict[str, tuple[str, ...]] = {}
-        if inventory.mode == "all":
-            groups["all"] = (ALL_BODIES,)
-            asset_path = _selected_asset_path(profile, build["asset_format"], asset_plan)
-            if asset_path is not None:
-                contact_assets[name] = asset_path
-        else:
+        asset_format = build["asset_format"]
+        sets: dict[str, tuple[str, ...]] = {}
+        for set_name, members in profile.body_sets.items():
+            sets[set_name] = tuple(
+                profile.body_bindings[body].names[asset_format]
+                for body in members
+                if body in profile.body_bindings
+                and asset_format in profile.body_bindings[body].names
+            )
+        inventory = _effective_contacts(build)
+        if inventory is not None and inventory.mode == "declared":
             for group in inventory.groups:
                 bodies = (
                     group.bodies
                     if group.body_set is None
                     else profile.body_sets.get(group.body_set, ())
                 )
-                groups[group.name] = tuple(
-                    profile.body_bindings[body].names[build["asset_format"]]
-                    for body in (bodies or ())
+                sets.setdefault(
+                    group.name,
+                    tuple(
+                        profile.body_bindings[body].names[asset_format]
+                        for body in (bodies or ())
+                        if asset_format in profile.body_bindings[body].names
+                    ),
                 )
-        table[name] = groups
-    return table, contact_assets
-
-
-def _reject_inventory_mode_refs(
-    contacts_cfg: object, articulations: Sequence[ArticulationSpec]
-) -> None:
-    """Fail fast when a run-level contact group references ``contacts: none``.
-
-    ``all`` contributes the synthetic ``all`` group and resolves normally;
-    ``none`` deliberately has no group, so a reference to it is a teaching
-    error instead of a generic unknown-group failure.
-    """
-    if not is_object_sequence(contacts_cfg):
-        return
-    modes = {art.name: art.contacts.mode for art in articulations if art.contacts is not None}
-    for entry in contacts_cfg:
-        if not is_json_object(entry):
-            continue
-        sensor_bodies = entry.get("sensor_bodies")
-        if not is_json_object(sensor_bodies):
-            continue
-        ref = sensor_bodies.get("contact_group")
-        if not is_json_object(ref):
-            continue
-        articulation = ref.get("articulation")
-        group = ref.get("group")
-        if isinstance(articulation, str) and modes.get(articulation) == "none":
-            raise ValueError(
-                f"contact_group reference {articulation}.{group} targets an "
-                f"articulation whose contacts mode is 'none'; declare an "
-                f"explicit group or remove the contacts opt-out"
-            )
+        if sets:
+            body_sets[name] = sets
+        asset_path = _selected_asset_path(profile, asset_format, asset_plan)
+        if asset_path is not None:
+            contact_assets[name] = asset_path
+    return body_sets, contact_assets
 
 
 def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBuild]:
@@ -1064,9 +1032,8 @@ def _build_robot_and_props(
     # hierarchical adapters generate their own command each step ->
     # no command sampler; the self-generated command is recorded instead.
     generates_command = bool(adapter.generates_command)
-    contact_groups, contact_assets = _contact_group_table(
+    articulation_body_sets, contact_assets = _contact_declarations(
         builds,
-        run_contacts=bool(cfg.get("contacts")),
         asset_plan=asset_plan,
     )
     return {
@@ -1079,7 +1046,7 @@ def _build_robot_and_props(
         "adapter": adapter,
         "generates_command": generates_command,
         "policy_dt": _effective_policy_dt(spec, adapter),
-        "contact_groups": contact_groups,
+        "articulation_body_sets": articulation_body_sets,
         "contact_assets": contact_assets,
     }
 
@@ -1137,7 +1104,7 @@ def _build_sensing(
     num_envs: int,
     profiles: Mapping[str, RobotProfile],
     asset_formats: Mapping[str, str],
-    contact_groups: Mapping[str, Mapping[str, tuple[str, ...]]],
+    articulation_body_sets: Mapping[str, Mapping[str, tuple[str, ...]]],
     contact_assets: Mapping[str, str],
     adapter: Adapter,
     policy_dt: float,
@@ -1178,27 +1145,23 @@ def _build_sensing(
     # env (its ContactSensorCfgs must join the scene cfg prior to cloning on
     # isaaclab; docs/contracts/contacts_contract.md).  No ``contacts:`` section ->
     # None -> zero code paths in the env (baseline protocol).
-    # contact groups are FULLY declarative -- sensor_bodies may reference an
-    # articulation inventory group
-    # (``{contact_group: {articulation, group}}``) and filter_bodies a prop
-    # (``{prop: <name>}``); resolution happens inside build_contact_manager
-    # against the run layer's native contact-group table + the declared prop
-    # names.
-    _reject_inventory_mode_refs(cfg.get("contacts"), spec.articulations)
+    # Every group body is an explicit typed {owner: ...} ref; the run layer
+    # supplies the articulation order/body-set table and the declared prop
+    # names, and the backend resolves refs against its native inventory.
     contact_manager = build_contact_manager(
         cfg.get("contacts"),
         backend=backend_label,
         device=device,
-        contact_groups=contact_groups,
-        prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
-        articulated_props=(
-            {s.name for s in prop_manager.specs if s.type == "articulation"}
-            if prop_manager is not None
-            else None
-        ),
-        contact_assets=dict(contact_assets),
         articulation_names=tuple(art.name for art in spec.articulations),
+        articulation_body_sets=articulation_body_sets,
+        prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
+        articulated_props=(_fixture_prop_names(prop_manager) if prop_manager is not None else None),
+        contact_assets=dict(contact_assets),
     )
+    if contact_manager is not None and prop_manager is not None:
+        # object props used as contact sensors must activate the physics
+        # contact reporter before the scene spawn (IsaacLab2 spawner form).
+        prop_manager.require_contact_sensors(contact_manager.referenced_prop_names())
     # default lights: a textured usd prop on isaaclab without scene
     # fill light renders as a black silhouette -- when the config declares
     # NO env.lighting and a usd prop is present, enable dome + distant by
@@ -1953,7 +1916,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         num_envs,
         profiles,
         robot["asset_formats"],
-        robot["contact_groups"],
+        robot["articulation_body_sets"],
         robot["contact_assets"],
         adapter,
         policy_dt,

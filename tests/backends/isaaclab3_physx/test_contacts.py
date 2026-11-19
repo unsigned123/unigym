@@ -40,11 +40,10 @@ def _raised_ground():
 
 
 def test_contact_all_world_group_reads_world_forces(cartpole_usd, env_factory):
-    """A ``contacts: all`` world group reports a world-frame normal force."""
+    """A robot ``body: "*"`` world group reports a world-frame normal force."""
     from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
     from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
     from unigym.backends.shared.isaaclab3_common.usd import robot_rigid_bodies
-    from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
     from unigym.runtime.actions import NamedAction
 
@@ -54,9 +53,15 @@ def test_contact_all_world_group_reads_world_forces(cartpole_usd, env_factory):
     }
 
     manager = build_contact_manager(
-        [{"name": "all", "sensor_bodies": [ALL_BODIES], "frame": "world"}],
+        [
+            {
+                "name": "all",
+                "sensor_refs": [{"owner": "robot", "articulation": ARTICULATION, "body": "*"}],
+                "frame": "world",
+            }
+        ],
         backend="isaaclab3_physx",
-        contact_assets={ARTICULATION: str(cartpole_usd)},
+        articulation_names=(ARTICULATION,),
     )
     assert manager.backend.backend_key == "isaaclab3_physx"
 
@@ -64,10 +69,10 @@ def test_contact_all_world_group_reads_world_forces(cartpole_usd, env_factory):
     body_paths = [body.path for body in robot_rigid_bodies(str(cartpole_usd))]
     assert manager.backend.group_axes(manager.specs[0]) == (len(body_paths), 0)
 
-    contact_index = body_paths.index(CONTACT_BODY)
-    sensor = env.scene[f"contact_all_b{contact_index}"]
-    assert list(sensor.body_names) == [CONTACT_BODY]
-    assert sensor.cfg.prim_path.endswith(f"/{CONTACT_BODY}")
+    sensor = env.scene["contact_all_s0"]
+    assert set(sensor.body_names) == {path.rsplit("/", 1)[-1] for path in body_paths}
+    assert sensor.cfg.prim_path.endswith("/(.*)")
+    contact_index = list(sensor.body_names).index(CONTACT_BODY)
 
     assert env.reset_all().tolist() == [0]
     after_reset = manager.read()["contact/all"]

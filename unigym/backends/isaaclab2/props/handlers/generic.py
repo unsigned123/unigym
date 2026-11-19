@@ -104,6 +104,7 @@ class GenericProp(PropHandler):
                 ),
                 collision_group=0,
                 debug_vis=False,
+                activate_contact_sensors=bool(getattr(self.spec, "_contact_sensor", False)),
             )
             return self.spec.name, cfg
         spawn = _build_urdf_spawn(self.spec, c)
@@ -118,6 +119,7 @@ class GenericProp(PropHandler):
             ),
             collision_group=0,
             debug_vis=False,
+            activate_contact_sensors=bool(getattr(self.spec, "_contact_sensor", False)),
         )
         return self.spec.name, cfg
 

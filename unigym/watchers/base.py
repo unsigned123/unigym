@@ -76,7 +76,7 @@ class WatchError(ValueError):
 
     Raised by add/update/test before anything persists; the message
     lists the available trace-face keys when a key reference failed --
-    same UX as contacts/discovery.py.
+    same UX as contacts/inventory.py.
     """
 
     def __init__(self, message: str, discovered: list[str] | None = None):

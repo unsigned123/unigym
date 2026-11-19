@@ -13,7 +13,11 @@ from unigym.contacts.manager import ContactManager
 
 
 def _spec(**kw):
-    base = dict(name="feet", sensor_bodies=["foot"], frame="world")
+    base = dict(
+        name="feet",
+        sensor_refs=[{"owner": "robot", "articulation": "g1", "body": "foot"}],
+        frame="world",
+    )
     base.update(kw)
     return ContactGroupSpec(**base)
 
@@ -40,12 +44,13 @@ class _RecordingBackend:
         return None
 
 
-def test_owner_and_aggregation_are_validated():
-    spec = _spec(owner="object", aggregation="sum_magnitudes")
+def test_owner_is_derived_and_aggregation_is_validated():
+    spec = _spec(
+        sensor_refs=[{"owner": "object", "name": "crate"}],
+        aggregation="sum_magnitudes",
+    )
     assert spec.owner == "object"
     assert spec.metadata()["aggregation"] == "sum_magnitudes"
-    with pytest.raises(ValueError):
-        _spec(owner="world")
     with pytest.raises(ValueError):
         _spec(aggregation="max")
 
@@ -72,7 +77,15 @@ def test_active_bodies_respects_contact_threshold():
 def test_manager_one_raw_read_serves_force_and_active_bodies():
     raw = np.array([[[3.0, 4.0, 0.0], [1.0, 0.0, 0.0]]], dtype=np.float32)
     backend = _RecordingBackend(raw)
-    manager = ContactManager([_spec(owner="fixture", aggregation="sum_magnitudes")], backend)
+    manager = ContactManager(
+        [
+            _spec(
+                sensor_refs=[{"owner": "fixture", "name": "microwave"}],
+                aggregation="sum_magnitudes",
+            )
+        ],
+        backend,
+    )
     out = manager.read()
     assert backend.reads == 1
     assert set(out) == {"contact/feet", "contact/feet/force", "contact/feet/active_bodies"}
@@ -83,7 +96,10 @@ def test_manager_one_raw_read_serves_force_and_active_bodies():
 
 def test_pairwise_force_facts_reduce_filters():
     raw = np.array([[[[3.0, 4.0, 0.0]], [[0.0, 0.0, 0.0]]]], dtype=np.float32)
-    spec = _spec(filter_bodies=["ball"], aggregation="sum_magnitudes")
+    spec = _spec(
+        filter_refs=[{"owner": "robot", "body": "ball"}],
+        aggregation="sum_magnitudes",
+    )
     force, active = contact_force_facts(raw, spec)
     assert force.tolist() == pytest.approx([5.0])
     assert active.tolist() == [1]
@@ -96,10 +112,30 @@ def test_sum_magnitudes_applies_configured_filter_aggregate():
     )  # one sensor body, two filter contacts with magnitudes 3 and 4
 
     def force(aggregate):
-        spec = _spec(filter_bodies=["ball"], aggregation="sum_magnitudes", aggregate=aggregate)
+        spec = _spec(
+            filter_refs=[{"owner": "robot", "body": "ball"}],
+            aggregation="sum_magnitudes",
+            aggregate=aggregate,
+        )
         return contact_force_facts(raw, spec)[0].tolist()
 
     assert force("sum") == pytest.approx([7.0])
     assert force("max") == pytest.approx([4.0])
     assert force("mean") == pytest.approx([3.5])
     assert force("none") == pytest.approx([7.0])
+
+
+def test_metadata_carries_explicit_object_and_support_refs():
+    spec = _spec(
+        name="crate_table",
+        sensor_refs=[{"owner": "object", "name": "crate"}],
+        filter_refs=[{"owner": "support", "name": "table"}],
+        format="contact",
+        threshold=0.5,
+        aggregate="any",
+    )
+    metadata = spec.metadata()
+    assert metadata["owner"] == "object"
+    assert metadata["mode"] == "pairwise"
+    assert metadata["sensor_refs"] == [{"owner": "object", "name": "crate"}]
+    assert metadata["filter_refs"] == [{"owner": "support", "name": "table"}]

@@ -36,18 +36,17 @@ Object state (slimmed): every prop records
     held_<name>[__<group>] generation was RETIRED -- hand
     contact criteria are DECLARED contact groups now (see below).
 Declarative contacts (docs/contracts/contacts_contract.md):
-    yaml `contacts:` groups may address articulation inventory groups
-    (sensor_bodies: {contact_group: {articulation: g1, group: grasp.left}})
-    and props (filter_bodies: {prop: cracker}) by name -- zero hardcoded
-    bodies.
+    yaml `contacts:` groups address explicit typed refs only
+    (sensor_refs / filter_refs: {owner: robot|object|support|fixture|
+    environment, ...}) -- zero hardcoded bodies and no legacy string lists.
 usd props : type: usd -> isaaclab UsdFileCfg direct load
     (materials in file; usd_prep_prop.py sim-ready prep); mujoco
     declares its representation per prop (mjcf_file / box_texture /
     box -- fail-fast when missing).
-Hand contact fix : isaaclab contact sensor_bodies entries may
-    carry "scope/body_name" nested paths -- segment-wise ContactSensor
-    matching never reached the nested finger prims through flat names
-    (probe: probe_hand_contacts -- retired in git history, v063 cleanup).
+Hand contact fix : robot refs may carry "scope/body_name" nested paths --
+    segment-wise ContactSensor matching never reached the nested finger prims
+    through flat names (probe: probe_hand_contacts -- retired in git history,
+    v063 cleanup).
 Server world (REMOVED): `unigym submit` / `unigym server` and the
 runs/ pending/running/done protocol are gone (zero users; batch =
 `unigym run a.yaml b.yaml ...`).  Run verdicts now live in the run's

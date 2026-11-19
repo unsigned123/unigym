@@ -230,49 +230,19 @@ class IsaacLabSceneOps:
         cm = getattr(self.env, "contact_manager", None)
         if cm is None:
             return {}
+        backend = getattr(cm, "backend", None)
+        inventory = getattr(backend, "inventory", None)
         out: dict = {}
-        resolved = self._resolved_sensor_names(cm)
         for spec in cm.specs:
-            sensors = resolved.get(spec.name)
-            members = list(sensors) if sensors else list(spec.sensor_bodies)
-            members += list(spec.filter_bodies or [])
+            if inventory is not None:
+                members = [row.native for ref in spec.sensor_refs for row in inventory.resolve(ref)]
+                members += [
+                    row.native for ref in spec.filter_refs for row in inventory.resolve(ref)
+                ]
+            else:
+                members = [ref.label() for ref in (*spec.sensor_refs, *spec.filter_refs)]
             out[spec.name] = {"members": members}
         return out
-
-    def _resolved_sensor_names(self, cm) -> dict[str, list[str]]:
-        """Resolved sensor body names per group (post bind_env).
-
-        Read from the contact backend's own tables; unbound -> {}
-        (callers fall back to the declared entries).
-        """
-        backend = getattr(cm, "backend", None)
-        sensors = getattr(backend, "_sensors", None) or {}
-        perms = getattr(backend, "_perm", None) or {}
-        robot = getattr(self.env, "robot", None)
-        if not (sensors and perms and robot is not None):
-            return {}
-        body_names = [str(n) for n in robot.data.body_names]
-        out: dict[str, list[str]] = {}
-        for name, pieces in sensors.items():
-            names: list[str] = []
-            for piece, perm in zip(pieces["sensors"], perms.get(name, [])):
-                for idx in perm:
-                    try:
-                        names.append(piece.body_names[idx])
-                    except (IndexError, TypeError):
-                        pass
-            # sensor body names are robot-qualified frames; keep the
-            # robot-relative tail (the curated face names robot bodies
-            # the way the declarations do)
-            out[name] = [self._robot_relative(n, body_names) for n in names]
-        return out
-
-    @staticmethod
-    def _robot_relative(name: str, body_names: list[str]) -> str:
-        for b in body_names:
-            if str(name).endswith(b):
-                return b
-        return str(name)
 
     # ------------------------------------------------------------------ #
     # live state (fresh per query; data reads only)

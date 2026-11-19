@@ -170,7 +170,7 @@ def inject_spec_camera(spec: CameraSpec, mjspec, default_body: str | None = None
             body = mjspec.body(body_name)
             if body is None:
                 # same fail-fast-with-candidates pattern as the contacts
-                # package (contacts/discovery.py): name-addressed mounts
+                # package (contacts/inventory.py): name-addressed mounts
                 # list the addressable bodies at the failure site
                 bodies = [b.name for b in mjspec.bodies if b.name]
                 raise ValueError(
