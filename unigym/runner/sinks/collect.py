@@ -288,6 +288,33 @@ class CollectSink:
             rec[_record_key(k)] = v
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
+        # canonical EPISODE-LOCAL timeline columns (benchmark v2): the first
+        # post-step frame of each episode is tick 1 at time policy_dt -- never
+        # the global run step, duration_s, or arange*dt starting at 0.
+        step_index = bundle.get("step_index")
+        time_s = bundle.get("time_s")
+        if step_index is not None:
+            rec["step_index"] = step_index
+        if time_s is not None:
+            rec["time_s"] = time_s
+        reset_state = bundle.get("reset_state") or {}
+        if reset_state:
+            rec["reset_index"] = torch.full(
+                (self.num_envs,), 0, dtype=torch.int64, device=self.device
+            )
+            rec["reset_valid"] = torch.tensor(
+                [
+                    -1
+                    if reset_state[i]["reset_valid"] is None
+                    else int(reset_state[i]["reset_valid"])
+                    for i in range(self.num_envs)
+                ],
+                dtype=torch.int8,
+                device=self.device,
+            )
+            rec["reset_reason"] = [
+                str(reset_state[i]["reset_reason"] or "") for i in range(self.num_envs)
+            ]
         # one column per effective group (authored groups + backend-declared
         # prop groups).  Values come from the runner's authoring projection
         # when present, otherwise from the tolerant spec projection of this

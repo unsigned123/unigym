@@ -35,6 +35,11 @@ from unigym.actuators.ir import (
 )
 from unigym.backends.registry import BackendInfo, backend_info, select_backend
 from unigym.benchmarks import build_tasks
+from unigym.benchmarks.episode import (
+    EpisodeLimits,
+    RobotIdentity,
+    RunIdentity,
+)
 from unigym.env.backends import build_env_backend
 from unigym.filters import build_filter_chain
 from unigym.logger import DataCollectLogger
@@ -1443,7 +1448,7 @@ def _apply_benchmark_budget(
             "policy_dt": policy_dt,
             "articulations": {rt.articulation: list(rt.joint_names) for rt in runtimes},
             "has_command": bool(sampler is not None or generates_command),
-            "backend": backend_label,  # results.v1 face
+            "backend": backend_label,  # results face
         }
         if len(runtimes) == 1:
             task_meta["joint_names"] = list(runtimes[0].joint_names)
@@ -1460,6 +1465,83 @@ def _apply_benchmark_budget(
             flush=True,
         )
     return total_steps, bench_cfg, task_meta
+
+
+def _initializer_reset_seed(cfg: dict[str, JsonValue]) -> int | None:
+    """Declared initializer seed (scene-preset or legacy reset block)."""
+    env_section = _config_dict(cfg.get("env")) or {}
+    params = _config_dict(env_section.get("params")) or {}
+    init = params.get("initializer")
+    if isinstance(init, dict):
+        init_params = _config_dict(init.get("params")) or {}
+        seed = init_params.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            return None
+        return int(seed)
+    legacy = params.get("reset")
+    if isinstance(legacy, dict):
+        seed = legacy.get("seed")
+        if isinstance(seed, int) and not isinstance(seed, bool):
+            return int(seed)
+    return None
+
+
+def _world_id(world_base: JsonValue) -> str | None:
+    """Stable world identifier from the resolved world base declaration."""
+    if isinstance(world_base, str) and world_base:
+        return world_base
+    if isinstance(world_base, dict):
+        for key in ("name", "id", "type", "path", "mjcf", "urdf", "usd"):
+            value = world_base.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _run_identity(
+    spec: RunSpec,
+    cfg: dict[str, JsonValue],
+    env: RunEnv,
+    num_envs: int,
+    seed: int,
+    policy_dt: float,
+) -> RunIdentity:
+    """Complete RunIdentity for benchmark reports (benchmark v2)."""
+    env_cfg = _config_dict(cfg.get("env")) or {}
+    sim_dt = _config_float(env_cfg.get("sim_dt", 0.005))
+    articulations = []
+    for name, runtime in (getattr(env, "articulations", None) or {}).items():
+        profile = getattr(runtime, "profile", None)
+        profile_name = getattr(profile, "name", None) or str(name)
+        articulations.append(RobotIdentity(name=str(name), profile=str(profile_name)))
+    schema = getattr(getattr(env, "obs", None), "schema", None)
+    return RunIdentity(
+        backend=str(spec.backend),
+        device=str(env.device),
+        num_envs=int(num_envs),
+        seed=int(seed),
+        policy_dt=float(policy_dt),
+        sim_dt=float(sim_dt),
+        reset_seed=_initializer_reset_seed(cfg),
+        world_id=_world_id(spec.world_base),
+        articulations=tuple(articulations),
+        observation_schema_version=int(getattr(schema, "version", 1) or 1),
+        model_revision=int(getattr(env, "model_revision", 0) or 0),
+    )
+
+
+def _episode_limits(bench_cfg: dict[str, JsonValue], policy_dt: float) -> EpisodeLimits | None:
+    """Resolve the benchmark task deadline (integer authority)."""
+    has_s = "timeout_s" in bench_cfg
+    has_steps = "timeout_steps" in bench_cfg
+    if not has_s and not has_steps:
+        return None
+    limits = EpisodeLimits(
+        timeout_s=(float(bench_cfg["timeout_s"]) if has_s else None),
+        timeout_steps=(int(bench_cfg["timeout_steps"]) if has_steps else None),
+    )
+    limits.validate_against(policy_dt)  # fail-fast on conflicting declarations
+    return limits
 
 
 def _build_sinks(
@@ -1562,15 +1644,26 @@ def _build_sinks(
             dict(task_meta),
             pack_runtime,
         )
+        run_identity = _run_identity(spec, cfg, env, num_envs, seed, policy_dt)
+        # the runner bundle carries the same identity (benchmark v2)
+        env.run_identity = run_identity
+        limits = _episode_limits(bench_cfg, policy_dt)
+        env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
+        report_meta = dict(task_meta)
+        report_meta["sim_dt"] = run_identity.sim_dt
+        if contact_manager is not None:
+            report_meta["contacts"] = contact_manager.metadata()
         bench_sink = BenchmarkSink(
             tasks=bench_tasks,
-            meta=dict(task_meta),
+            meta=report_meta,
             min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
             max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
             report_path=os.path.join(out_dir, "benchmark_report.json"),
             director=director,
             # benchmark.retain_metric_frames -> metrics.npz
             retain_frames=bool(bench_cfg.get("retain_metric_frames", False)),
+            limits=limits,
+            run_identity=run_identity,
         )
         if bench_tasks:  # no tasks -> nothing to wait for
             stop_when = bench_sink.episodes_done
@@ -1973,6 +2066,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "num_envs": num_envs,
         "steps": total_steps,
         "policy_dt": policy_dt,
+        "sim_dt": _config_float(env_cfg.get("sim_dt", 0.005)),
         "episode_length_s": episode_length_s,
         "episode_length_range": None if dur_lo is None else [dur_lo, dur_hi],
         # v5 data schema: neutral per-articulation body/contact facts
@@ -1993,6 +2087,13 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "language_interval_steps": built["lang_interval"],
         "filters": cfg.get("filters"),
         "filter_active": filter_active,
+        # contact force-fact provenance (benchmark v2): static owner/frame/
+        # unit/bodies metadata lives in meta, never in per-step records.
+        **(
+            {"contacts": sensing["contact_manager"].metadata()}
+            if sensing["contact_manager"] is not None
+            else {}
+        ),
         "terminations": cfg.get("terminations"),
         "init_pose": cfg.get("init_pose"),
         "camera_enabled": sensing["recorder"].enabled,

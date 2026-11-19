@@ -1025,9 +1025,17 @@ class IsaaclabEnv(ManagerBasedEnv):
                 if key in schema:
                     self.obs.set_camera(key, value)
         if self.contact_manager is not None:
-            for key, value in self.contact_manager.read().items():
+            contacts = self.contact_manager.read()
+            for key, value in contacts.items():
                 if key in schema:
                     self.obs.set_contact(key[len("contact/") :], value)
+            # benchmark v2: force/active-body facts ride the record mapping
+            # (the one raw read above already produced them).
+            self._last_contact_facts = {
+                key: value
+                for key, value in contacts.items()
+                if key.endswith("/force") or key.endswith("/active_bodies")
+            }
             for name in self.observations.contact:
                 if self.contact_manager.has_detail(name):
                     self.obs.set_contact_detail_provider(
@@ -1083,6 +1091,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         record: dict[str, object] = dict(self.obs.record())
         record["time_in_episode"] = self._time_in_episode.clone()
         record["episode_id"] = self._episode_id.clone()
+        record.update(getattr(self, "_last_contact_facts", None) or {})
         return record
 
     # ------------------------------------------------------------------ #
@@ -1330,6 +1339,15 @@ class IsaaclabEnv(ManagerBasedEnv):
     # ------------------------------------------------------------------ #
     # episode reset (per-env subset; also covers the batch case)
     # ------------------------------------------------------------------ #
+    @property
+    def last_reset_outcomes(self) -> dict[int, object]:
+        """No structured reset outcomes: isaaclab2 has no initializer face.
+
+        The public runner-facing contract is still present (empty mapping) so
+        benchmark facts stay uniform across backends.
+        """
+        return {}
+
     def reset_envs(self, env_ids) -> torch.Tensor:
         """Reset the given env subset through the full parent-class reset chain.
 

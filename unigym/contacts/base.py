@@ -52,6 +52,8 @@ FORMATS = ("raw", "norm", "contact")
 COMPONENTS = ("mag", "x", "y", "z")
 FRAMES = ("world", "body")
 MODES = ("general", "pairwise")
+OWNERS = ("robot", "object", "environment", "fixture")
+AGGREGATIONS = ("net", "sum_magnitudes")
 # aggregate vocabulary by format (plan §2: contact -> any|all; value -> sum|mean|max)
 AGGREGATE_CONTACT = ("any", "all", "none")
 AGGREGATE_VALUE = ("sum", "mean", "max", "none")
@@ -134,6 +136,13 @@ class ContactGroupSpec:
             F axis, so aggregate must stay ``none``.
         history: only 1 supported in v1 (>1 raises NotImplementedError,
             plan §6 allowed list).
+        owner: declarative provenance of the group's subject -- ``robot``
+            (default, the owning articulation), ``object``, ``environment``
+            or ``fixture``.  Provenance only, never a filter.
+        aggregation: force-fact aggregation for ``contact/<name>/force``.
+            ``net`` (default) uses the group's net sensor force vector
+            magnitude; ``sum_magnitudes`` sums per-contact force magnitudes
+            BEFORE the configured aggregate.
     """
 
     name: str
@@ -147,6 +156,8 @@ class ContactGroupSpec:
     aggregate: str = "none"
     history: int = 1
     articulation: Optional[str] = None
+    owner: str = "robot"
+    aggregation: str = "net"
 
     def __post_init__(self):
         if (
@@ -239,6 +250,15 @@ class ContactGroupSpec:
                 f"contact {self.name!r}: history > 1 is not implemented in "
                 f"v1 (plan §6 allowed list); got history={self.history}"
             )
+        if self.owner not in OWNERS:
+            raise ValueError(
+                f"contact {self.name!r}: owner must be one of {OWNERS}, " f"got {self.owner!r}"
+            )
+        if self.aggregation not in AGGREGATIONS:
+            raise ValueError(
+                f"contact {self.name!r}: aggregation must be one of "
+                f"{AGGREGATIONS}, got {self.aggregation!r}"
+            )
 
     # ---- parsing -------------------------------------------------------- #
     @classmethod
@@ -306,6 +326,26 @@ class ContactGroupSpec:
     def keys(self) -> list[str]:
         """Record/obs keys served by this spec (canonical single key)."""
         return [contact_key(self.name)]
+
+    def force_key(self) -> str:
+        """Scalar force-fact key (``contact/<name>/force``)."""
+        return f"{contact_key(self.name)}/force"
+
+    def active_bodies_key(self) -> str:
+        """Active-body-count fact key (``contact/<name>/active_bodies``)."""
+        return f"{contact_key(self.name)}/active_bodies"
+
+    def metadata(self) -> dict:
+        """Static per-group metadata for ``meta["contacts"]`` (JSON-safe)."""
+        return {
+            "owner": self.owner,
+            "aggregation": self.aggregation,
+            "frame": self.frame,
+            "unit": "N",
+            "sensor_bodies": list(self.sensor_bodies),
+            "filter_bodies": (None if self.filter_bodies is None else list(self.filter_bodies)),
+            "articulation": self.articulation,
+        }
 
 
 def _str_list(value, arg: str, name: str) -> list[str]:
@@ -657,6 +697,60 @@ def apply_format(raw, spec: ContactGroupSpec):
     elif agg == "all":
         mask = _all_last(mask, axis=-1)
     return mask
+
+
+def contact_force_facts(raw, spec: ContactGroupSpec):
+    """Derive ``(force, active_bodies)`` from ONE raw backend read.
+
+    ``force`` is ``(N,)`` in newtons: the magnitude of the group's net force
+    vector (``aggregation: net``) or the sum of per-contact force magnitudes
+    (``aggregation: sum_magnitudes``).  ``active_bodies`` is ``(N,)`` int:
+    how many sensor bodies carry a contact/force above the group threshold
+    (``threshold`` for ``format: contact`` groups, otherwise > 0 N).
+
+    The raw array is never mutated; numpy and torch inputs are both
+    supported so the two backends can never drift.
+    """
+    magnitudes = _norm_last(raw)  # (N, B) or (N, B, F)
+    threshold = float(spec.threshold) if spec.format == "contact" else 0.0
+    pairwise = magnitudes.ndim > 2
+    if spec.aggregation == "net":
+        # sum the force VECTORS over the sensor axis (and the filter axis for
+        # pairwise groups), then take the magnitude of the net vector.
+        net_vector = _sum_axes(raw, (-3, -2) if pairwise else (-2,))
+        force = _norm_last(net_vector)
+    else:
+        # sum_magnitudes: first reduce the per-contact magnitudes over the
+        # FILTER axis with the group's configured aggregate, then sum over
+        # the sensor bodies.  ``none`` means "keep every filter contact" and
+        # therefore sums the filter axis for the scalar fact.
+        reduced = magnitudes
+        if pairwise:
+            if spec.aggregate == "max":
+                reduced = _amax_last(magnitudes)
+            elif spec.aggregate == "mean":
+                reduced = _mean_last(magnitudes)
+            else:
+                reduced = _sum_last(magnitudes)
+        force = _sum_last(reduced)
+    above = magnitudes > threshold
+    if pairwise:
+        above = _any_last(above)  # (N, B): this body has any active contact
+    active = _sum_axes(_as_int(above), (-1,))
+    return force, active
+
+
+def _sum_axes(x, axes: tuple[int, ...]):
+    axes = tuple(int(a) for a in axes)
+    if _is_torch(x):
+        for axis in sorted(axes, reverse=True):
+            x = x.sum(dim=axis)
+        return x
+    return x.sum(axis=axes)
+
+
+def _as_int(x):
+    return x.to(torch.int64) if _is_torch(x) else x.astype(np.int64)
 
 
 def _norm_last(raw):

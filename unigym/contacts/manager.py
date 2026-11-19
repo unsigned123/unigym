@@ -34,7 +34,7 @@ from typing import Callable, Optional, Protocol, cast, runtime_checkable
 import numpy as np
 import torch
 
-from .base import ContactGroupSpec, apply_format, contact_key
+from .base import ContactGroupSpec, apply_format, contact_force_facts, contact_key
 
 
 @runtime_checkable
@@ -80,8 +80,19 @@ class ContactManager:
 
     # ---- keys ------------------------------------------------------------ #
     def keys(self) -> list[str]:
-        """All record keys served (``contact/<name>`` per group)."""
+        """All sensor-record keys served (``contact/<name>`` per group)."""
         return [contact_key(s.name) for s in self.specs]
+
+    def fact_keys(self) -> list[str]:
+        """Force/active-body fact keys served (benchmark v2)."""
+        return [key for s in self.specs for key in (s.force_key(), s.active_bodies_key())]
+
+    def metadata(self) -> dict[str, dict]:
+        """Static per-group provenance metadata for ``meta["contacts"]``.
+
+        Owner/frame/unit/bodies are declarations, not per-step records.
+        """
+        return {s.name: s.metadata() for s in self.specs}
 
     def group_shape(self, name: str) -> tuple | None:
         """Per-env record shape of one group (batch axis stripped).
@@ -145,8 +156,10 @@ class ContactManager:
         """
         out = {}
         for spec in self.specs:
+            # ONE raw read yields the sensor value AND both force facts.
             raw = self.backend.read_raw(spec)
             value = apply_format(raw, spec)
+            force, active = contact_force_facts(raw, spec)
             state = self._overrides.get(spec.name)
             if state is not None:
                 # forced value in the SAME dtype/shape as the physical
@@ -157,6 +170,10 @@ class ContactManager:
                     arr = np.asarray(value)
                     value = np.ones_like(arr) if state == "on" else np.zeros_like(arr)
             out[contact_key(spec.name)] = self._to_record_tensor(value)
+            # Physical fact keys are never director-overridden (only the
+            # sensor/record face is); they always describe the physics read.
+            out[spec.force_key()] = self._to_record_tensor(force)
+            out[spec.active_bodies_key()] = self._to_record_tensor(active)
         return out
 
     # ---- v057 detail face (decision package / slip criterion) ------------- #

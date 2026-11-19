@@ -14,6 +14,10 @@ Process documents:
   `AssetInstance` fields, backend matrix, resolution, digest and refusals.
 - [Model-edit contract](contracts/model_edit_contract.md) - global
   `run.model_edit()` body/geom transaction, field matrix and backend limits.
+- [Benchmark contract v2](contracts/benchmark_contract.md) - canonical
+  episode timeline, deadline authority, termination facts and report schema.
+- [Runner contract](contracts/runner_contract.md) - the sink callback bundle
+  (timeline/reset/termination facts).
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
 

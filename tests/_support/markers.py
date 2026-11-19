@@ -40,6 +40,7 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "backends": "domain_backends",
     "sim": "domain_sim",
     "initializers": "domain_initializers",
+    "benchmarks": "domain_benchmarks",
 }
 
 BACKEND_MARKERS: dict[str, str] = {

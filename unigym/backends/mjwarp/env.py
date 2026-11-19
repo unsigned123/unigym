@@ -698,6 +698,9 @@ class MjwarpEnv(WarpBatchMixin):
         # right after apply() (shared stream -- determinism red line).
         # See unigym/backends/shared/mjfamily/props/reset_face.py.
         self._initializer = wire_reset_face(self, params, robot_profile)
+        # structured per-env reset outcomes (benchmark v2): the last
+        # ``initializer.apply_outcome()`` legality/sample record per env.
+        self._last_reset_outcomes: dict[int, object] = {}
 
         # ---- compatibility alias for the first articulation ----
         if self._articulation_order:
@@ -1129,6 +1132,9 @@ class MjwarpEnv(WarpBatchMixin):
         record: dict[str, object] = dict(self.obs.record())
         record["time_in_episode"] = self._time_in_episode.clone()
         record["episode_id"] = self._episode_id.clone()
+        # benchmark v2 contact force/active-body facts (read once per step
+        # by the manager; published here as record columns).
+        record.update(getattr(self, "_last_contact_facts", None) or {})
         return record
 
     # ------------------------------------------------------------------ #
@@ -1282,7 +1288,8 @@ class MjwarpEnv(WarpBatchMixin):
                 raise RuntimeError(
                     "mjwarp backend: _apply_reset_protocol called without a " "declared initializer"
                 )
-            placements = self._initializer.apply()
+            outcome = self._initializer.apply_outcome()
+            placements = outcome.placements
             declared = (
                 {s.name for s in self.prop_manager.specs}
                 if self.prop_manager is not None
@@ -1295,9 +1302,19 @@ class MjwarpEnv(WarpBatchMixin):
                     f"names {unknown} | declared props: {sorted(declared)}"
                 )
             self._initializer.apply_robot_stages()
+            self._last_reset_outcomes[int(e)] = outcome
         finally:
             self._active_data = prev
             self._active_reset_env_id = prev_env_id
+
+    @property
+    def last_reset_outcomes(self) -> dict[int, object]:
+        """Latest structured ``ResetOutcome`` per env (benchmark v2).
+
+        Public read face for the runner; an env that was never reset through
+        an initializer has no entry.
+        """
+        return self._last_reset_outcomes
 
     def _setup_actuator_seam(self, plans) -> None:
         """Wire the ctrl laws for the decimation loop.

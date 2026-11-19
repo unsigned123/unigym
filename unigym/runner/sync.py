@@ -25,8 +25,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
+import numpy as np
 import torch
 
+from unigym.benchmarks.termination import (
+    EpisodeOutcome,
+    EpisodeTermination,
+    Termination,
+    TerminationSource,
+)
 from unigym.runner.base import StepResult
 from unigym.runtime.actions import (
     LEGAL_ACTION_KINDS,
@@ -198,6 +205,27 @@ def _instance_control_dt(instance) -> float | None:
     if not policies or not name:
         return None if fallback is None else float(fallback)
     return resolve_control_dt(policies, str(name), fallback)
+
+
+_RESET_SAMPLE_PREFIXES = ("articulation/", "object/", "contact/", "site/", "joints/")
+
+
+def _reset_sample_arrays(snapshot) -> dict[str, np.ndarray]:
+    """Selected pre-policy-step arrays from an obs snapshot.
+
+    Cameras and free-form frames are deliberately excluded (memory): the
+    reset sample keeps state-like keys only, never full frames.
+    """
+    values = getattr(snapshot, "values", None) or {}
+    out: dict[str, np.ndarray] = {}
+    for key, value in values.items():
+        if not key.startswith(_RESET_SAMPLE_PREFIXES):
+            continue
+        if torch.is_tensor(value):
+            out[key] = value.detach().cpu().numpy()
+        else:
+            out[key] = np.asarray(value)
+    return out
 
 
 def _joint_limits_by_articulation(env):
@@ -373,6 +401,18 @@ class SyncRunner:
         self._term_joint_limits = None
         if any(getattr(t, "requires_joint_limits", False) for t in term_group.terminations):
             self._term_joint_limits = _joint_limits_by_articulation(env)
+        # benchmark v2 episode facts: per-env reset sample/legality and the
+        # run identity (stamped on the env by the run build).
+        # test doubles may carry no env surface at all; benchmark facts then
+        # stay empty while the historical runner behavior is untouched.
+        self._num_envs = int(getattr(env, "num_envs", 0) or 0)
+        # per-env EPISODE-LOCAL policy step counter: frame 0 is tick 1 and the
+        # tick resets to 0 on that env's reset (never the global run step).
+        self._episode_step = [0] * self._num_envs
+        self._reset_samples: list[dict[str, np.ndarray] | None] = [None] * self._num_envs
+        self._reset_valid: list[bool | None] = [None] * self._num_envs
+        self._reset_reason: list[str | None] = [None] * self._num_envs
+        self.run_identity = getattr(env, "run_identity", None)
 
     def _notify_rewind(self, info: dict) -> None:
         """Fan ``on_rewind`` out to every sink that declares it."""
@@ -454,6 +494,80 @@ class SyncRunner:
             self.env.obs.set_command(self._cmd)
         self._obs_frame = None
         self._started = True
+        # canonical reset tick 0: the initial spawn state is the reset sample
+        # of every env's still-open episode (never recorder frame 0).
+        self._record_reset_facts(all_ids.tolist())
+
+    # ------------------------------------------------------------------ #
+    # benchmark v2 episode facts (reset / termination / timeline)
+    # ------------------------------------------------------------------ #
+    def _record_reset_facts(self, env_ids) -> None:
+        """Capture the post-reset/pre-policy-step sample + legality per env."""
+        if self._num_envs <= 0:
+            return
+        snapshot = self.env.obs.snapshot()
+        arrays = _reset_sample_arrays(snapshot)
+        outcomes = getattr(self.env, "last_reset_outcomes", None) or {}
+        for raw in env_ids:
+            ei = int(raw)
+            sample = {key: value[ei] for key, value in arrays.items() if ei < len(value)}
+            outcome = outcomes.get(ei)
+            initializer_sample = getattr(outcome, "sample", None) if outcome is not None else None
+            if not sample and initializer_sample is not None:
+                sample = {str(k): np.asarray(v) for k, v in initializer_sample.items()}
+            self._reset_samples[ei] = sample or None
+            self._reset_valid[ei] = None if outcome is None else outcome.valid
+            self._reset_reason[ei] = None if outcome is None else outcome.reason
+
+    def _reset_fact(self, ei: int) -> dict:
+        # reset_index is the canonical reset tick of the sample (episode
+        # relative: always 0, before the first post-step frame tick 1).
+        return {
+            "reset_index": 0,
+            "reset_sample": self._reset_samples[ei],
+            "reset_valid": self._reset_valid[ei],
+            "reset_reason": self._reset_reason[ei],
+        }
+
+    def _termination_facts(self, state, clock_due) -> dict[int, EpisodeTermination]:
+        """Per-env core terminations for this tick (term group + deadline).
+
+        Every stamped ``step_index``/``time_s`` is EPISODE-LOCAL (frame 0 is
+        tick 1), so it lines up with ``EpisodeData.step_index``.
+        """
+        by_env: dict[int, list[Termination]] = {}
+
+        def stamp(ei: int) -> dict:
+            index = int(self._episode_step[ei])
+            time_s = None if self.control_dt is None else float(index) * float(self.control_dt)
+            return {"step_index": index, "time_s": time_s}
+
+        detail = self.term_group.check_detail(state) if len(self.term_group) else {}
+        for name, mask in detail.items():
+            code = f"env.{name}"
+            for ei in torch.nonzero(mask).squeeze(-1).tolist():
+                by_env.setdefault(int(ei), []).append(
+                    Termination(
+                        outcome=EpisodeOutcome.FAILURE,
+                        code=code,
+                        source=TerminationSource.ENVIRONMENT,
+                        **stamp(int(ei)),
+                    )
+                )
+        # core engine horizon: the backend's own episode clock fired.
+        due = getattr(clock_due, "tolist", lambda: [])()
+        for ei in due:
+            by_env.setdefault(int(ei), []).append(
+                Termination(
+                    outcome=EpisodeOutcome.DEADLINE,
+                    code="runtime.episode_horizon",
+                    source=TerminationSource.RUNTIME,
+                    **stamp(int(ei)),
+                )
+            )
+        return {
+            ei: EpisodeTermination.from_terminations(terms) for ei, terms in by_env.items() if terms
+        }
 
     @property
     def ticks_done(self) -> int:
@@ -513,6 +627,10 @@ class SyncRunner:
         )
         # 4) physics (interval DR events applied internally)
         step = env.step(targets, raw_action=raw, cmd=cmd)
+        # episode-local clock: every env advances one policy tick in its OWN
+        # episode; a reset below returns that env to tick 0.
+        for i in range(self._num_envs):
+            self._episode_step[i] += 1
         # 5) command resample (self-commanding adapter: cmd stays None)
         if sampler is not None:
             if policy_dt is None:
@@ -554,6 +672,16 @@ class SyncRunner:
         if len(self.term_group) > 1:
             for k, m in self.term_group.check_detail(term_state).items():
                 term_metrics[f"term_{k}"] = float(m.float().mean())
+        # benchmark v2: structured per-env terminations for this tick
+        # (term-group reasons + the core engine horizon).  Core-neutral
+        # outcome/source vocabulary; no Task/Gym language here.
+        terminations = self._termination_facts(term_state, step.reset_env_ids)
+        step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
+        time_s = (
+            None
+            if self.control_dt is None
+            else step_index.to(torch.float32) * float(self.control_dt)
+        )
         bundle = {
             "t": t,
             "raw": raw,
@@ -568,6 +696,18 @@ class SyncRunner:
             "alive": alive,
             "term_state": term_state,
             "term_metrics": term_metrics,
+            "terminations": terminations,
+            "step_index": step_index,
+            "time_s": time_s,
+            "reset_state": {
+                int(ei): {
+                    "reset_index": 0,
+                    "reset_valid": self._reset_valid[ei],
+                    "reset_reason": self._reset_reason[ei],
+                }
+                for ei in range(self._num_envs)
+            },
+            "run_identity": self.run_identity,
             "env": env,
         }
         try:
@@ -603,6 +743,9 @@ class SyncRunner:
         if added is not None and added.numel() > 0:
             due = torch.unique(torch.cat([due.to(torch.int64), added]))
         if due.numel() > 0:
+            # the episode's START facts (reset sample/legality) ride the
+            # episode-end bundle; they were captured at this episode's reset.
+            bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
             # record-before-reset: episode-end data side happens BEFORE
             # the reset chain (sink flushes episodes/videos/counts here)
             self.sink.on_episode_end(due, bundle)
@@ -615,6 +758,10 @@ class SyncRunner:
                     env.obs.set_command(cmd)
                 if getattr(observations, "prev_action", False):
                     env.obs.set_prev_action(None)
+                for raw in due.tolist():
+                    self._episode_step[int(raw)] = 0
+                # capture the NEXT episode's pre-policy-step reset sample
+                self._record_reset_facts(due.tolist())
         self.sink.on_step_end(t, bundle)
         self._obs_frame = obs_frame
         self._cmd = cmd
@@ -675,6 +822,9 @@ class SyncRunner:
                 env.obs.set_command(self._cmd)
             if getattr(observations, "prev_action", False):
                 env.obs.set_prev_action(None)
+            for raw in due.tolist():
+                self._episode_step[int(raw)] = 0
+            self._record_reset_facts(due.tolist())
         return StepResult(
             t=int(self._tick),
             obs=env.obs.snapshot(),
