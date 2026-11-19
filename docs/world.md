@@ -70,6 +70,5 @@ Go2 (and every other single-robot flat-world profile) keeps the asset's
   non-empty world asset, so it still rejects `World.flat()` with
   `NoWorldError`. Use `Run(world=World.flat(), ...)` for flat RL tasks until
   the facade gains a world-less declaration form.
-- The `isaaclab3_physx` / `isaaclab3_newton` backends are P1 stubs (canonical
-  names with an empty registered trait set) and have no ground consumer;
-  `World.flat()` on either is a loud `ConfigError` by design.
+- The IsaacLab 3 identities declare `TERRAIN`; `World.flat()` resolves to the
+  shared flat terrain preset (the PhysX flat/steps presets are lane-tested).

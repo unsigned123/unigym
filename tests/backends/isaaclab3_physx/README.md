@@ -1,6 +1,6 @@
 # isaaclab3_physx backend lane
 
-P2-in-progress lane for the `isaaclab3_physx` backend identity. This is a
+Lane-tested and nightly-enabled `isaaclab3_physx` backend identity. This is a
 canonical backend name; `isaaclab3` and `isaaclab` are not aliases for it. The
 lane owns real Cartpole fixtures plus environment/stack probes. P2 declares
 a capability only after its lane test passes: `CONTACTS_GROUPS` is proven by
@@ -22,8 +22,8 @@ depth stream is gate-rejected until that alias bit lands. `test_props.py` and
 / partial-reset path, but the `props` capability is intentionally NOT declared
 yet: the shared `props` bit projects all three `PROPS_*` traits at once, while
 only the rigid tier is lane-proven. Articulated props remain undeclared until
-their tests land; the earlier CoM DR write declares `EVENTS_DR`, and its lane
-coverage lands in P2-E (see `docs/designs/isaaclab3-backend.md`).
+their tests land; the earlier CoM DR write declares `EVENTS_DR`; its lane coverage is in
+`test_events.py` (see `docs/designs/isaaclab3-backend.md`).
 
 `test_events.py` proves a reset-mode absolute-CoM event applied at construction,
 so the pre-existing `EVENTS_DR` declaration is lane-backed. `test_terrain.py`
@@ -47,3 +47,9 @@ Run it with a provisioned conda environment:
 ```bash
 UNIGYM_ISAACLAB3_PHYSX_ENV=<env> python tools/ci/run_lane.py --lane isaaclab3_physx
 ```
+
+CI/nightly: the self-hosted `isaaclab3_physx` job is default-skipped unless
+`UNIGYM_RUN_ISAACLAB3_PHYSX == 'true'`. It requires the
+`UNIGYM_ISAACLAB3_PHYSX_ENV` conda environment, the shared
+`UNIGYM_TEST_PACKS_WHEELHOUSE`, and an environment that provides
+`imageio_ffmpeg` for the recorder test.

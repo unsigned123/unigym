@@ -33,10 +33,10 @@ env_var = "UNIGYM_ISAACLAB2_ENV"
 manifest = "ci/envs/isaaclab2.toml"
 strict = true
 
-# IsaacLab 3 (P2 in progress): two backend identities share one implementation
+# IsaacLab 3: two backend identities share one implementation
 # (docs/designs/isaaclab3-backend.md).  The PhysX lane consumes the Cartpole
-# test pack and declares --strict-test-packs; the Newton lane still owns
-# environment and stack probes only.
+# test pack, declares --strict-test-packs and joins nightly.  The Newton lane
+# still owns environment and stack probes only until its P3 capability work.
 [environments.isaaclab3_physx]
 provision = "conda"
 env_var = "UNIGYM_ISAACLAB3_PHYSX_ENV"
@@ -132,7 +132,7 @@ selectors = ["tests/backends/isaaclab3_newton"]
 
 # Lanes the nightly workflow runs.  C1 is the empirically verified oldest
 # MuJoCo/NumPy pair (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4); it is nightly
-# only and is not a PR gate.  The isaaclab3_* lanes stay out of this list until
-# their self-hosted jobs and environments are provisioned.
+# only and is not a PR gate.  The PhysX IsaacLab 3 lane joins nightly with its
+# self-hosted job; Newton stays out until P3 capability coverage.
 [nightly]
-lanes = ["d0-py312", "mujoco-py312", "d0-c1", "mujoco-c1", "mjwarp", "isaaclab2"]
+lanes = ["d0-py312", "mujoco-py312", "d0-c1", "mujoco-c1", "mjwarp", "isaaclab2", "isaaclab3_physx"]

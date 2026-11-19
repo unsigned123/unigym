@@ -141,6 +141,44 @@ P2-A owns only the lane harness, the contact test and the contact trait/cap
 declarations.  A shared-face bug stops the slice as `BLOCKED`; it is fixed at
 the shared owner boundary, not worked around in the test.
 
+## P4 plan
+
+P4 turns the lane-tested PhysX backend into a CI/nightly lane.  Newton stays
+out of P4 until its P3 capability coverage exists; adding a stack-probe-only
+Newton lane to nightly would advertise capability the lane does not test.
+
+- **P4-A lane registry**: add `isaaclab3_physx` to `[nightly]`; leave
+  `isaaclab3_newton` out and keep its `pytest_args` empty until P3.  Add a
+  lane-registry meta test for the PhysX nightly entry.
+- **P4-B workflows**: add default-skipped self-hosted PhysX jobs to
+  `.github/workflows/ci.yml` and `nightly.yml`, gated by
+  `vars.UNIGYM_RUN_ISAACLAB3_PHYSX == 'true'`, runner label
+  `isaaclab3_physx`, and repository variables
+  `UNIGYM_ISAACLAB3_PHYSX_ENV` / `UNIGYM_TEST_PACKS_WHEELHOUSE`.  The job
+  installs the test-pack plugin + Cartpole wheel, checks that the lane
+  environment provides `imageio_ffmpeg`, then runs
+  `tools/ci/run_lane.py --lane isaaclab3_physx`.  The Isaac stack and the
+  recorder encoder stay owned by the external conda environment; the job never
+  installs Isaac or downloads PyPI packages.
+- **P4-C docs/verification**: update the CI/nightly sections in
+  `docs/testing.md`, the PhysX lane README and this brief; verify the lane
+  registry, workflow YAML and `run_lane.py --dry-run`.
+
+Non-goals: provisioning the external runner/environment from the repository;
+changing Isaac dependencies; adding Newton nightly before P3; reworking the
+existing d0 baseline failures.
+
+Failure behaviour: a missing runner variable makes the job a visible skip (not
+a fake pass); missing pack wheels or `imageio[ffmpeg]` fail the strict lane;
+missing Isaac stays an external-environment failure.  Rollback removes the two
+workflow jobs, the nightly entry, the meta assertion and the docs changes.
+
+P4 status: PhysX registry/workflow/docs are in place and locally verified
+(lane registry parse, workflow YAML, `run_lane.py --dry-run`).  The external
+self-hosted runner and conda environment remain operational provisioning; the
+nightly job is default-skipped until those variables exist.  Newton remains
+P3-blocked and is deliberately absent from `[nightly]`.
+
 ## Files
 
 Ownership: `shared/isaaclab3_common` owns the IsaacLab-3.x library; each
@@ -263,9 +301,8 @@ docs/testing.md                                           - lane/env/marker tabl
   only `isaaclab >= 3`. `isaaclab2` requires `isaaclab < 3`. Failures raise
   `BackendSelectionError{error, hint}`.
 - **Build boundary**: `build_instance` verifies the explicitly chosen
-  backend's stack before constructing any env; the P1 stubs expose an
-  `env_kwargs` factory that raises a teaching `NotImplementedError`, never an
-  internal `TypeError`.
+  backend's stack before constructing any env; `env_kwargs` constructs the
+  real env and reports teaching errors, never an internal `TypeError`.
 - **`BackendInfo`** (unchanged fields in this slice): both entries fill
   `options_schema` (Newton: solver/substeps; PhysX: empty), `scopes` only where
   `max_envs` genuinely narrows, `camera_enable_required` (True for PhysX;
