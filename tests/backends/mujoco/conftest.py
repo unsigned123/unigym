@@ -14,6 +14,12 @@ KP = 20.0
 KD = 1.0
 
 
+def tiny_mjcf_source() -> str:
+    """The shared tiny MJCF source (for tests that inject extra bodies)."""
+    source = Path(__file__).parents[2] / "_support" / "data" / "tiny_arm.xml"
+    return source.read_text(encoding="utf-8")
+
+
 def build_tiny_env(
     mjcf: Path,
     *,

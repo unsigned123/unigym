@@ -125,7 +125,6 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.env.obs import ObservationConfig
     from unigym.backends.isaaclab2.usd import robot_rigid_bodies
-    from unigym.contacts.base import ALL_BODIES
     from unigym.contacts.manager import build_contact_manager
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
@@ -141,27 +140,32 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         [
             {
                 "name": "cart_all",
-                "sensor_bodies": {"contact_group": {"articulation": CARTPOLE, "group": "all"}},
+                "sensor_refs": [{"owner": "robot", "articulation": CARTPOLE, "body": "*"}],
                 "frame": "world",
             },
             {
                 "name": "humanoid_all",
-                "sensor_bodies": {"contact_group": {"articulation": G1, "group": "all"}},
+                "sensor_refs": [{"owner": "robot", "articulation": G1, "body": "*"}],
                 "frame": "world",
             },
             {
                 "name": "humanoid_feet",
-                "articulation": G1,
-                "sensor_bodies": ["left_ankle_roll_link", "right_ankle_roll_link"],
+                "sensor_refs": [
+                    {
+                        "owner": "robot",
+                        "articulation": G1,
+                        "body": "left_ankle_roll_link",
+                    },
+                    {
+                        "owner": "robot",
+                        "articulation": G1,
+                        "body": "right_ankle_roll_link",
+                    },
+                ],
                 "frame": "world",
             },
         ],
         backend="isaaclab2",
-        contact_groups={
-            CARTPOLE: {"all": (ALL_BODIES,)},
-            G1: {"all": (ALL_BODIES,)},
-        },
-        contact_assets={CARTPOLE: str(cartpole_usd), G1: str(g1_usd)},
         articulation_names=(CARTPOLE, G1),
     )
     assert manager is not None
@@ -229,14 +233,12 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         g1_names = {body.path.rsplit("/", 1)[-1] for body in g1_inventory}
         assert cart_names.isdisjoint(g1_names)
 
-        for i, body in enumerate(cart_inventory):
-            sensor = env.scene[f"contact_cart_all_b{i}"]
-            assert set(sensor.body_names) == {body.path.rsplit("/", 1)[-1]}
-            assert "/Robot/" in sensor.cfg.prim_path
-        for i, body in enumerate(g1_inventory):
-            sensor = env.scene[f"contact_humanoid_all_b{i}"]
-            assert set(sensor.body_names) == {body.path.rsplit("/", 1)[-1]}
-            assert "/Robot_g1/" in sensor.cfg.prim_path
+        cart_sensor = env.scene["contact_cart_all_s0"]
+        assert set(cart_sensor.body_names) == cart_names
+        assert "/Robot/" in cart_sensor.cfg.prim_path
+        g1_sensor = env.scene["contact_humanoid_all_s0"]
+        assert set(g1_sensor.body_names) == g1_names
+        assert "/Robot_g1/" in g1_sensor.cfg.prim_path
 
         values = manager.read()
         assert tuple(values["contact/cart_all"].shape) == (1, len(cart_inventory), 3)

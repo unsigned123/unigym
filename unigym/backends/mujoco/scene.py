@@ -163,7 +163,7 @@ class MujocoSceneOps:
                 # unbound (or non-mujoco backend object): the resolved
                 # declarations are the honest best face
                 out[spec.name] = {
-                    "members": list(spec.sensor_bodies) + list(spec.filter_bodies or [])
+                    "members": [ref.label() for ref in (*spec.sensor_refs, *spec.filter_refs)]
                 }
         return out
 

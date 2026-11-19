@@ -364,13 +364,15 @@ def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_fa
         [
             {
                 "name": "robot",
-                "articulation": "tiny",
-                "sensor_bodies": ["base", "link", "tip"],
+                "sensor_refs": [
+                    {"owner": "robot", "articulation": "tiny", "body": "base"},
+                    {"owner": "robot", "articulation": "tiny", "body": "link"},
+                    {"owner": "robot", "articulation": "tiny", "body": "tip"},
+                ],
                 "frame": "world",
             }
         ],
         backend="mjwarp",
-        contact_assets={ARTICULATION: str(tiny_mjcf)},
         articulation_names=(ARTICULATION,),
     )
     env = tiny_env_factory(contact_manager=manager)

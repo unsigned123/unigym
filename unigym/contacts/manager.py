@@ -8,15 +8,16 @@ or mujoco) owns ALL simulator interaction and only produces RAW force arrays
 
 Lifecycle (driven by the env backends, mirroring props/cameras):
 
-* ``build_contact_manager(cfg, backend, device)`` — collect_cli entry point;
-  a missing/empty ``contacts:`` section returns ``None`` (zero-change
+* ``build_contact_manager(cfg, backend, device, ...)`` — collect_cli entry
+  point; a missing/empty ``contacts:`` section returns ``None`` (zero-change
   guarantee for every existing config).
 * ``setup_scene() -> {field: ContactSensorCfg}`` — isaaclab only; the env
   backend merges the returned dict into the scene cfg BEFORE cloning
   (same ``setattr`` pattern as props).
-* ``bind_env(env)`` — after construction; resolves body names, grabs sensor
-  handles (isaaclab) or indexes the MJ model (mujoco), and fails fast on
-  resolution errors (no silent empty groups).
+* ``bind_env(env)`` — after construction; resolves body refs against the
+  backend-native inventory, grabs sensor handles (isaaclab) or indexes the MJ
+  model (mujoco), and fails fast on resolution errors (no silent empty
+  groups).
 * ``read() -> {contact/<name>: (N, ...) tensor on env.device}`` — every
   policy step and published once per step by the env backend;
   values are freshly allocated tensors (no aliasing of backend buffers).
@@ -34,7 +35,13 @@ from typing import Callable, Optional, Protocol, cast, runtime_checkable
 import numpy as np
 import torch
 
-from .base import ContactGroupSpec, apply_format, contact_force_facts, contact_key
+from .base import (
+    ContactGroupSpec,
+    apply_format,
+    build_contact_backend,
+    contact_force_facts,
+    contact_key,
+)
 
 
 @runtime_checkable
@@ -93,6 +100,15 @@ class ContactManager:
         Owner/frame/unit/bodies are declarations, not per-step records.
         """
         return {s.name: s.metadata() for s in self.specs}
+
+    def referenced_prop_names(self, owners: Sequence[str] = ("object", "fixture")) -> list[str]:
+        """Declared prop scopes referenced by the groups (for sensor activation)."""
+        out: list[str] = []
+        for spec in self.specs:
+            for name in spec.prop_names(owners):
+                if name not in out:
+                    out.append(name)
+        return out
 
     def group_shape(self, name: str) -> tuple | None:
         """Per-env record shape of one group (batch axis stripped).
@@ -224,17 +240,11 @@ class ContactManager:
         self.backend.close()
 
 
-def _validate_articulation_scope(
+def _validate_refs(
     specs: list[ContactGroupSpec],
     articulation_names: Optional[Sequence[str]],
 ) -> Optional[tuple[str, ...]]:
-    """Validate every group's owner against the run articulations.
-
-    Returns the articulation order forwarded to the backend, or ``None`` when
-    the caller did not supply one (direct manager construction).  An omitted
-    owner means "the only articulation"; it is legal only when the run
-    declares exactly one.
-    """
+    """Validate every robot ref's owner against the run articulations."""
     if articulation_names is None:
         return None
     names = tuple(str(name) for name in articulation_names)
@@ -242,21 +252,23 @@ def _validate_articulation_scope(
     if duplicates:
         raise ValueError(f"duplicate articulation names declared by the run: {duplicates}")
     for spec in specs:
-        if spec.articulation is None:
-            if len(names) > 1:
+        for ref in (*spec.sensor_refs, *spec.filter_refs):
+            if ref.owner != "robot":
+                continue
+            if ref.articulation is None:
+                if len(names) > 1:
+                    raise ValueError(
+                        f"contact {spec.name!r}: the run declares articulations "
+                        f"{list(names)}, so every robot ref must name its owner "
+                        f"with articulation: <name> (ref {ref.label()!r})"
+                    )
+                continue
+            if ref.articulation not in names:
                 raise ValueError(
-                    f"contact {spec.name!r}: the run declares articulations "
-                    f"{list(names)}, so the group must name its owner with "
-                    f"articulation: <name> (or "
-                    f"sensor_bodies: {{contact_group: {{articulation: <name>, "
-                    f"group: <group>}}}})"
+                    f"contact {spec.name!r}: articulation {ref.articulation!r} "
+                    f"(ref {ref.label()!r}) is not declared by the run "
+                    f"(declared: {list(names)})"
                 )
-            continue
-        if spec.articulation not in names:
-            raise ValueError(
-                f"contact {spec.name!r}: articulation {spec.articulation!r} "
-                f"is not declared by the run (declared: {list(names)})"
-            )
     return names
 
 
@@ -264,69 +276,49 @@ def build_contact_manager(
     cfg,
     backend: str,
     device: str = "cpu",
-    contact_groups: Optional[Mapping[str, Mapping[str, tuple[str, ...]]]] = None,
+    articulation_names: Optional[Sequence[str]] = None,
+    articulation_body_sets: Optional[Mapping[str, Mapping[str, Sequence[str]]]] = None,
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
     contact_assets: Optional[Mapping[str, str]] = None,
-    articulation_names: Optional[Sequence[str]] = None,
 ) -> Optional[ContactManager]:
     """collect_cli entry point.
 
     Args:
         cfg: yaml ``contacts:`` section (list of group dicts) or None.
             None/empty -> ``None`` (no manager, zero code paths).  Each
-            entry's ``sensor_bodies``/``filter_bodies`` may use the
-            declarative reference forms
-            ``{contact_group: {articulation, group}}`` and
-            ``{prop: <name>}`` -- resolved FIRST against
-            ``contact_groups`` (the run layer's native-body inventory) and
-            ``prop_names`` (the run's declared props), then validated as
-            plain lists; see contacts.base.resolve_contact_entries.
-        backend: env backend name (``isaaclab`` | ``mujoco``); anything else
-            raises NotImplementedError BEFORE any sim state exists.
+            entry declares ``sensor_refs`` / ``filter_refs`` with explicit
+            typed refs; legacy keys are rejected with teaching errors.
+        backend: env backend name (``mujoco`` | ``mjwarp`` | ``isaaclab2``);
+            anything else raises NotImplementedError BEFORE any sim state
+            exists.
         device: env device the record tensors must live on.
-        contact_groups: per-articulation native-body inventory backing the
-            ``{contact_group: ...}`` references
-            (``{articulation: {group: (native bodies)}}``).
-        prop_names: names of the props declared in the same run config,
-            backing the ``{prop: ...}`` filter references.
-        articulated_props: names of the ARTICULATION props ;
-            their ``{prop: ...}`` filters resolve to the whole subtree
-            (``Prop_<name>_.*``) instead of a single body.
-        contact_assets: per-articulation resolved selected asset path for
-            ``contacts: all``.  Backends use it to scope the all-bodies
-            expansion (isaaclab reads the pre-clone USD inventory);
-            ``None``/absent means no ``all`` inventory was declared.
-        articulation_names: the run's articulation declaration order.  When
-            given, every explicitly owned group must name a declared
-            articulation and every group in a multi-articulation run must
-            name an owner (no global union and no cross-articulation body
-            regex matching).  ``None`` keeps the historical direct-manager
-            construction path.
+        articulation_names: the run's articulation declaration order.  Every
+            robot ref without an articulation is legal only in a
+            single-articulation run.
+        articulation_body_sets: per-articulation named body sets (native body
+            names) backing ``body_set`` refs.
+        prop_names: names of the props declared in the same run config.
+        articulated_props: subset of ``prop_names`` spawned as articulated
+            fixtures (owner ``fixture``).
+        contact_assets: per-articulation resolved selected asset path used by
+            the IsaacLab pre-clone inventory for ``body: "*"``.
     """
     if not cfg:
         return None
-    from .base import build_contact_backend, resolve_contact_entries
-
-    specs = [
-        ContactGroupSpec.from_yaml(e)
-        for e in resolve_contact_entries(
-            cfg,
-            backend,
-            contact_groups=contact_groups,
-            prop_names=prop_names,
-            articulated_props=(frozenset(articulated_props or ())),
-        )
-    ]
+    specs = [ContactGroupSpec.from_yaml(e) for e in cfg]
     names = [s.name for s in specs]
     if len(set(names)) != len(names):
         dupes = sorted({n for n in names if names.count(n) > 1})
         raise ValueError(f"duplicate contact group names in yaml: {dupes}")
-    scope_names = _validate_articulation_scope(specs, articulation_names)
+    scope_names = _validate_refs(specs, articulation_names)
     be = build_contact_backend(
         backend,
         specs,
-        contact_assets=contact_assets,
         articulation_names=scope_names,
+        articulation_body_sets=articulation_body_sets,
+        prop_names=prop_names,
+        articulated_props=articulated_props,
+        contact_assets=contact_assets,
     )
     return ContactManager(specs, be, device=device)

@@ -8,7 +8,6 @@ import pytest
 
 from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.backends.registry import BackendInfo
-from unigym.contacts.base import ALL_BODIES
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runtime.controllers import (
     ArticulationRuntime,
@@ -18,8 +17,9 @@ from unigym.runtime.controllers import (
 from unigym.run.build import (
     DATA_SCHEMA_VERSION,
     _camera_base_mount,
-    _contact_group_table,
+    _contact_declarations,
     _effective_profile,
+    _fixture_prop_names,
     _prepare_articulation_models,
     _required_body_ids,
 )
@@ -195,7 +195,7 @@ def test_unknown_contact_body_set_fails_fast():
         _required_body_ids(profile, inventory)
 
 
-def test_contact_group_table_maps_canonical_bodies_through_the_selected_format():
+def test_contact_declarations_map_canonical_bodies_through_the_selected_format():
     """The run layer (and only it) maps inventory bodies to native names."""
     profile = _profile()
     inventory = ContactSensorInventory(
@@ -209,7 +209,7 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
     effective, asset_format = _effective_profile(spec, profile, _info("usd"))
     builds = {"arm": _build(effective, spec, asset_format)}
 
-    table, assets = _contact_group_table(builds)
+    table, assets = _contact_declarations(builds)
 
     assert table == {
         "arm": {
@@ -220,8 +220,8 @@ def test_contact_group_table_maps_canonical_bodies_through_the_selected_format()
     assert assets == {}
 
 
-def test_all_contributes_one_sentinel_group_and_the_selected_asset():
-    """contacts: all maps to the typed sentinel plus the resolved asset path."""
+def test_all_keeps_the_selected_asset_path_for_backend_inventory():
+    """contacts: all carries no synthetic group; the asset path stays available."""
     profile = RobotProfile(
         name="arm",
         joint_sets={"body": ("j",)},
@@ -236,9 +236,9 @@ def test_all_contributes_one_sentinel_group_and_the_selected_asset():
     spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="all"))
     builds = {"arm": _build(profile, spec, "usd")}
 
-    table, assets = _contact_group_table(builds)
+    body_sets, assets = _contact_declarations(builds)
 
-    assert table == {"arm": {"all": (ALL_BODIES,)}}
+    assert body_sets == {}
     assert assets == {"arm": "/tmp/arm.usd"}
 
 
@@ -258,36 +258,54 @@ def test_all_uses_the_per_articulation_selected_asset_format():
     spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="all"))
     builds = {"arm": _build(profile, spec, "urdf")}
 
-    _, assets = _contact_group_table(builds)
+    _, assets = _contact_declarations(builds)
 
     assert assets == {"arm": "/tmp/arm.urdf"}
 
 
-def test_omitted_contacts_with_a_contacts_section_default_to_all(capsys):
-    """An omitted inventory under a run-level contacts section becomes all."""
-    profile = _profile()
-    spec = ArticulationSpec(name="arm")
+def test_declared_contacts_groups_and_profile_body_sets_map_to_native_names():
+    """Robot refs resolve body_set names from profile/contact declarations."""
+    profile = RobotProfile(
+        name="arm",
+        joint_sets={"body": ("j",)},
+        default_joint_pos={"j": 0.0},
+        assets=None,
+        extra_action_sets={},
+        base_body="base",
+        foot_bodies=(),
+        body_sets={"grasp": ("finger",)},
+        body_bindings={
+            "base": BodyBinding("base", {"mjcf": "base_link"}),
+            "finger": BodyBinding("finger", {"mjcf": "finger_link"}),
+            "palm": BodyBinding("palm", {"mjcf": "palm_link"}),
+        },
+    )
+    spec = ArticulationSpec(
+        name="arm",
+        contacts=ContactSensorInventory(
+            mode="declared",
+            groups=(ContactSensorGroup(name="hand", bodies=("palm",)),),
+        ),
+    )
     builds = {"arm": _build(profile, spec, "mjcf")}
 
-    table, assets = _contact_group_table(builds, run_contacts=True)
+    body_sets, _ = _contact_declarations(builds)
 
-    assert table == {"arm": {"all": (ALL_BODIES,)}}
-    assert assets == {}
-    warning = capsys.readouterr().out
-    assert "omits `contacts`" in warning
-    assert "ContactSensorCfg per rigid body" in warning
+    assert body_sets == {"arm": {"grasp": ("finger_link",), "hand": ("palm_link",)}}
 
 
-def test_none_suppresses_the_implicit_all_default():
-    """contacts: none carries no group even under a run-level section."""
+def test_none_and_omitted_contacts_declare_no_body_sets():
+    """contacts: none / omitted carry no groups; an asset may still be listed."""
     profile = _profile()
-    spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="none"))
-    builds = {"arm": _build(profile, spec, "mjcf")}
+    none_spec = ArticulationSpec(name="arm", contacts=ContactSensorInventory(mode="none"))
+    omitted = ArticulationSpec(name="arm")
 
-    table, assets = _contact_group_table(builds, run_contacts=True)
-
-    assert table == {}
+    body_sets, assets = _contact_declarations({"arm": _build(profile, none_spec, "mjcf")})
+    assert body_sets == {"arm": {"grasp": ("finger_link",)}}
     assert assets == {}
+
+    omitted_sets, _ = _contact_declarations({"arm": _build(profile, omitted, "mjcf")})
+    assert omitted_sets == {"arm": {"grasp": ("finger_link",)}}
 
 
 def test_camera_base_mount_uses_the_per_articulation_selected_format():
@@ -453,3 +471,18 @@ def test_v5_articulation_facts_serialize_body_and_contact_vocabulary():
             "groups": [{"name": "feet", "bodies": ["left_foot"]}],
         },
     }
+
+
+def test_fixture_contact_ownership_is_anchored_articulated_props_only():
+    from types import SimpleNamespace
+
+    props = SimpleNamespace(
+        specs=[
+            SimpleNamespace(name="microwave", type="articulation"),
+            SimpleNamespace(name="door", type="usd_articulation"),
+            SimpleNamespace(name="laptop", type="free_articulation"),
+            SimpleNamespace(name="crate", type="rigid_object"),
+        ]
+    )
+    assert _fixture_prop_names(props) == {"microwave", "door"}
+    assert _fixture_prop_names(None) == set()

@@ -1,280 +1,301 @@
-"""Shared IsaacLab 3 contact prim paths, identity and ``.torch`` reads."""
+"""Shared IsaacLab 3 contact refs: prim paths, activation, F alignment."""
 
 from __future__ import annotations
+
+import sys
+import types
 
 import pytest
 import torch
 
-from unigym.backends.shared.isaaclab3_common.contacts import (
-    IsaacLabContactBackend,
-    entry_prim_path,
-    filter_prim_exprs,
-    general_field_names,
-    general_prim_paths,
-    resolve_all_articulation,
-    resolve_articulation_leaf,
-    sensor_prim_path,
-    split_scope,
-)
-from unigym.backends.shared.isaaclab3_common.naming import (
-    articulation_prim_leaf,
-    articulation_scene_field,
-)
-from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec
-from unigym.contacts.discovery import ContactCandidateError
+from unigym.backends.shared.isaaclab3_common.contacts import IsaacLabContactBackend
+from unigym.contacts.manager import build_contact_manager
+
+
+class _Cfg:
+    def __init__(self, **kwargs):
+        self.kw = kwargs
+
+
+class _InitialStateCfg(_Cfg):
+    pass
+
+
+class _RigidObjectCfg(_Cfg):
+    InitialStateCfg = _InitialStateCfg
+
+
+class _SensorCfg(_Cfg):
+    pass
+
+
+@pytest.fixture
+def fake_isaaclab(monkeypatch):
+    package = types.ModuleType("isaaclab")
+    sensors = types.ModuleType("isaaclab.sensors")
+    sensors.ContactSensorCfg = _SensorCfg
+    package.sensors = sensors
+    monkeypatch.setitem(sys.modules, "isaaclab", package)
+    monkeypatch.setitem(sys.modules, "isaaclab.sensors", sensors)
+    return sensors
+
+
+def _manager(groups, *, props=None, articulated=None, names=("tiny",)):
+    manager = build_contact_manager(
+        groups,
+        backend="isaaclab3_physx",
+        articulation_names=names,
+        prop_names=props,
+        articulated_props=articulated,
+    )
+    assert manager is not None
+    assert manager.backend.backend_key == "isaaclab3_physx"
+    return manager
+
+
+def test_implicit_single_articulation_robot_path(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "feet",
+                "sensor_refs": [{"owner": "robot", "body": "left_foot"}],
+                "frame": "world",
+            }
+        ]
+    )
+    fields = manager.setup_scene()
+    assert fields["contact_feet_s0"].kw["prim_path"] == "{ENV_REGEX_NS}/Robot/left_foot"
+
+
+def test_nested_robot_scope_path(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "finger",
+                "sensor_refs": [
+                    {"owner": "robot", "articulation": "g1", "body": "left_hand/finger_1"}
+                ],
+                "frame": "world",
+            }
+        ],
+        names=("g1",),
+    )
+    assert (
+        manager.setup_scene()["contact_finger_s0"].kw["prim_path"]
+        == "{ENV_REGEX_NS}/Robot/left_hand/finger_1"
+    )
+
+
+def test_robot_refs_use_declaration_order_and_articulation_leaf(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "hands",
+                "sensor_refs": [
+                    {"owner": "robot", "articulation": "left_hand", "body": "left_.*"},
+                    {"owner": "robot", "articulation": "right_hand", "body": "right_.*"},
+                ],
+                "frame": "world",
+            }
+        ],
+        names=("cartpole", "left_hand", "right_hand"),
+    )
+    fields = manager.setup_scene()
+    assert fields["contact_hands_s0"].kw["prim_path"] == "{ENV_REGEX_NS}/Robot_left_hand/(left_.*)"
+    assert (
+        fields["contact_hands_s1"].kw["prim_path"] == "{ENV_REGEX_NS}/Robot_right_hand/(right_.*)"
+    )
+
+
+def test_body_set_expands_to_a_union_path(fake_isaaclab):
+    manager = build_contact_manager(
+        [
+            {
+                "name": "grasp",
+                "sensor_refs": [{"owner": "robot", "articulation": "g1", "body_set": "grasp"}],
+                "frame": "world",
+            }
+        ],
+        backend="isaaclab3_physx",
+        articulation_names=("g1",),
+        articulation_body_sets={"g1": {"grasp": ("index_0", "thumb_2")}},
+    )
+    assert manager is not None
+    assert (
+        manager.setup_scene()["contact_grasp_s0"].kw["prim_path"]
+        == "{ENV_REGEX_NS}/Robot/(index_0|thumb_2)"
+    )
+
+
+def test_unknown_body_set_is_a_teaching_error(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "grasp",
+                "sensor_refs": [{"owner": "robot", "body_set": "ghost"}],
+                "frame": "world",
+            }
+        ],
+        names=("g1",),
+    )
+    with pytest.raises(ValueError, match="body_set 'ghost' is not declared"):
+        manager.setup_scene()
+
+
+def test_object_sensor_and_robot_filter_paths(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "crate_tip",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [{"owner": "robot", "articulation": "tiny", "body": "tip"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    cfg = manager.setup_scene()["contact_crate_tip_s0"]
+    assert cfg.kw["prim_path"] == "{ENV_REGEX_NS}/Prop_crate"
+    assert cfg.kw["filter_prim_paths_expr"] == ["{ENV_REGEX_NS}/Robot/tip"]
+
+
+def test_object_body_defaults_to_the_scope_root(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "crate",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    assert manager.setup_scene()["contact_crate_s0"].kw["prim_path"] == "{ENV_REGEX_NS}/Prop_crate"
+
+
+def test_cross_articulation_filter_paths(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "cross",
+                "sensor_refs": [{"owner": "robot", "articulation": "g1", "body": "tip"}],
+                "filter_refs": [{"owner": "robot", "articulation": "cartpole", "body": "pole"}],
+                "frame": "world",
+            }
+        ],
+        names=("cartpole", "g1"),
+    )
+    cfg = manager.setup_scene()["contact_cross_s0"]
+    assert cfg.kw["prim_path"] == "{ENV_REGEX_NS}/Robot_g1/tip"
+    assert cfg.kw["filter_prim_paths_expr"] == ["{ENV_REGEX_NS}/Robot/pole"]
+
+
+def test_single_articulation_body_set_omits_the_owner(fake_isaaclab):
+    manager = build_contact_manager(
+        [
+            {
+                "name": "grasp",
+                "sensor_refs": [{"owner": "robot", "body_set": "grasp"}],
+                "frame": "world",
+            }
+        ],
+        backend="isaaclab3_physx",
+        articulation_names=("tiny",),
+        articulation_body_sets={"tiny": {"grasp": ("tip", "base")}},
+    )
+    assert manager is not None
+    assert (
+        manager.setup_scene()["contact_grasp_s0"].kw["prim_path"]
+        == "{ENV_REGEX_NS}/Robot/(tip|base)"
+    )
+
+
+def test_unknown_object_ref_fails_at_setup(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "ghost",
+                "sensor_refs": [{"owner": "object", "name": "ghost"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    with pytest.raises(ValueError, match="undeclared object prop 'ghost'") as err:
+        manager.setup_scene()
+    assert "crate" in str(err.value)
+
+
+def test_unknown_object_ref_has_no_synthesized_inventory_row():
+    manager = _manager(
+        [
+            {
+                "name": "ghost",
+                "sensor_refs": [{"owner": "object", "name": "ghost"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    with pytest.raises(ValueError, match="unknown object scope") as err:
+        manager.bind_env(_env())
+    assert "object/crate/crate" in str(err.value)
 
 
 @pytest.mark.parametrize(
-    ("entry", "expected"),
+    "ref",
     [
-        ("torso", (None, "torso")),
-        ("left_hand/finger_1", ("left_hand", "finger_1")),
-        ("left_hand/palm/finger_1", ("left_hand/palm", "finger_1")),
+        {"owner": "support", "name": "table"},
+        {"owner": "environment", "body": "world"},
+        {"owner": "environment", "path": "{ENV_REGEX_NS}/World/ground"},
     ],
 )
-def test_split_scope_separates_nested_prim_scope(entry, expected):
-    """A slash entry yields its Robot-relative scope and last-segment body."""
-    assert split_scope(entry) == expected
+def test_static_support_and_environment_refs_are_refused(fake_isaaclab, ref):
+    manager = _manager(
+        [
+            {
+                "name": "stat",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [ref],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    with pytest.raises(NotImplementedError, match="static support/environment"):
+        manager.setup_scene()
 
 
-@pytest.mark.parametrize(
-    ("entry", "expected"),
-    [
-        ("torso", f"{ENV_PREFIX_SENTINEL}/Robot/(torso)"),
-        ("left_hand/finger_1", f"{ENV_PREFIX_SENTINEL}/Robot/left_hand/finger_1"),
-    ],
-)
-def test_entry_prim_path_anchors_one_sensor_body(entry, expected):
-    """One sensor entry becomes a Robot-anchored prim path at its scope."""
-    assert entry_prim_path(entry) == expected
+def test_non_root_fixture_link_ref_is_refused(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "mw",
+                "sensor_refs": [
+                    {"owner": "fixture", "name": "microwave", "body": "microwave_main"}
+                ],
+                "frame": "world",
+            }
+        ],
+        props=["microwave"],
+        articulated={"microwave"},
+    )
+    with pytest.raises(NotImplementedError, match="non-root articulated prop"):
+        manager.setup_scene()
 
 
-def test_general_prim_paths_buckets_scopes_in_first_appearance_order():
-    """A general group gets one union path per scope, in first-appearance order."""
-    entries = ["left/a", "base", "right/b", "left/c"]
-
-    assert general_prim_paths(entries) == [
-        f"{ENV_PREFIX_SENTINEL}/Robot/left/(a|c)",
-        f"{ENV_PREFIX_SENTINEL}/Robot/(base)",
-        f"{ENV_PREFIX_SENTINEL}/Robot/right/(b)",
-    ]
-
-
-def test_general_field_names_suffixes_each_scope_bucket():
-    """General scope buckets yield the bare name then __s1, __s2, ..."""
-    assert general_field_names("feet", ["left/a", "base", "right/b"]) == [
-        "feet",
-        "feet__s1",
-        "feet__s2",
-    ]
-
-
-def test_sensor_prim_path_builds_flat_union_from_spec():
-    """A scope-less group unions its declared sensor bodies into one regex."""
-    spec = ContactGroupSpec(name="feet", sensor_bodies=["left_foot", "right_foot"], frame="world")
-
-    assert sensor_prim_path(spec) == f"{ENV_PREFIX_SENTINEL}/Robot/(left_foot|right_foot)"
-
-
-def test_sensor_prim_path_rejects_scoped_entry():
-    """A nested-scope entry cannot be represented by a flat union path."""
-    spec = ContactGroupSpec(name="hands", sensor_bodies=["left_hand/finger_1"], frame="world")
-
-    with pytest.raises(ValueError, match="scoped sensor entry"):
-        sensor_prim_path(spec)
-
-
-@pytest.mark.parametrize(
-    ("filter_bodies", "expected"),
-    [
-        (["foot"], [f"{ENV_PREFIX_SENTINEL}/Robot/foot"]),
-        (["/World/Table"], ["/World/Table"]),
-        ([f"{ENV_PREFIX_SENTINEL}/Prop_.*"], [f"{ENV_PREFIX_SENTINEL}/Prop_.*"]),
-        (
-            ["left_foot", "/World/Table", f"{ENV_PREFIX_SENTINEL}/Prop_.*"],
+def test_unknown_articulation_ref_is_rejected(fake_isaaclab):
+    with pytest.raises(ValueError, match="not declared by the run"):
+        _manager(
             [
-                f"{ENV_PREFIX_SENTINEL}/Robot/left_foot",
-                "/World/Table",
-                f"{ENV_PREFIX_SENTINEL}/Prop_.*",
+                {
+                    "name": "feet",
+                    "sensor_refs": [{"owner": "robot", "articulation": "ghost", "body": "foot"}],
+                    "frame": "world",
+                }
             ],
-        ),
-    ],
-    ids=["bare-robot-entry", "explicit-prim-path", "env-prefix-pass-through", "mixed-order"],
-)
-def test_filter_prim_exprs_prefixes_bare_entries_only(filter_bodies, expected):
-    """Only bare filter bodies get the Robot prefix; explicit paths pass through."""
-    spec = ContactGroupSpec(
-        name="feet_props",
-        sensor_bodies=["left_foot"],
-        filter_bodies=filter_bodies,
-        frame="world",
-    )
-
-    assert filter_prim_exprs(spec) == expected
-
-
-def test_scoped_paths_use_the_owned_articulation_leaf():
-    """Every derived prim path is anchored at the owning articulation leaf."""
-    spec = ContactGroupSpec(
-        name="feet_props",
-        articulation="g1",
-        sensor_bodies=["left_ankle_roll_link"],
-        filter_bodies=["left_foot", "/World/Table"],
-        frame="world",
-    )
-
-    assert entry_prim_path("left_ankle_roll_link", robot_leaf="Robot_g1") == (
-        f"{ENV_PREFIX_SENTINEL}/Robot_g1/(left_ankle_roll_link)"
-    )
-    assert general_prim_paths(["left/a", "base"], robot_leaf="Robot_g1") == [
-        f"{ENV_PREFIX_SENTINEL}/Robot_g1/left/(a)",
-        f"{ENV_PREFIX_SENTINEL}/Robot_g1/(base)",
-    ]
-    assert sensor_prim_path(spec, robot_leaf="Robot_g1") == (
-        f"{ENV_PREFIX_SENTINEL}/Robot_g1/(left_ankle_roll_link)"
-    )
-    assert filter_prim_exprs(spec, robot_leaf="Robot_g1") == [
-        f"{ENV_PREFIX_SENTINEL}/Robot_g1/left_foot",
-        "/World/Table",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("name", "index", "field", "leaf"),
-    [
-        ("g1", 0, "robot", "Robot"),
-        ("g1", 1, "robot_g1", "Robot_g1"),
-        ("arm", 2, "robot_arm", "Robot_arm"),
-    ],
-)
-def test_articulation_naming_rule_is_shared(name, index, field, leaf):
-    """The first articulation keeps the historical robot/Robot names."""
-    assert articulation_scene_field(name, index) == field
-    assert articulation_prim_leaf(name, index) == leaf
-
-
-def test_resolve_articulation_leaf_uses_the_declaration_order():
-    """An explicit owner maps to its slot leaf; an implicit owner is Robot."""
-    implicit = ContactGroupSpec(name="feet", sensor_bodies=["foot"], frame="world")
-    explicit = ContactGroupSpec(
-        name="feet", articulation="g1", sensor_bodies=["foot"], frame="world"
-    )
-
-    assert resolve_articulation_leaf(implicit, ("cartpole", "g1")) == "Robot"
-    assert resolve_articulation_leaf(explicit, ("cartpole", "g1")) == "Robot_g1"
-
-
-def test_resolve_articulation_leaf_rejects_an_unknown_owner():
-    """A scoped group whose owner is not in the run order fails with the set."""
-    spec = ContactGroupSpec(
-        name="feet", articulation="ghost", sensor_bodies=["foot"], frame="world"
-    )
-
-    with pytest.raises(ValueError, match="not declared by the run") as err:
-        resolve_articulation_leaf(spec, ("cartpole", "g1"))
-
-    assert "ghost" in str(err.value)
-
-
-def test_all_with_one_asset_keeps_the_implicit_single_articulation_owner():
-    """A single all-mode asset needs no explicit owner (single-robot config)."""
-    spec = ContactGroupSpec(name="all", sensor_bodies=["<all>"], frame="world")
-
-    assert resolve_all_articulation(spec, {"cartpole": "/tmp/cartpole.usd"}) == "cartpole"
-
-
-def test_all_with_multiple_assets_requires_the_explicit_owner():
-    """Several all-mode assets never union into one inventory by default."""
-    spec = ContactGroupSpec(name="all", sensor_bodies=["<all>"], frame="world")
-
-    with pytest.raises(ValueError, match="ambiguous across articulations") as err:
-        resolve_all_articulation(spec, {"cartpole": "/tmp/cartpole.usd", "g1": "/tmp/g1.usd"})
-
-    assert "cartpole" in str(err.value) and "g1" in str(err.value)
-
-
-def test_all_rejects_an_owner_without_a_resolved_asset():
-    """An explicitly owned all group needs that articulation's USD asset."""
-    spec = ContactGroupSpec(name="all", articulation="g1", sensor_bodies=["<all>"], frame="world")
-
-    with pytest.raises(ValueError, match="no USD asset for it") as err:
-        resolve_all_articulation(spec, {"cartpole": "/tmp/cartpole.usd"})
-
-    assert "g1" in str(err.value)
-
-
-ROBOT_BODIES = ["left_foot", "right_foot", "left_hand"]
-
-
-def _inventory():
-    return [{"prim": name, "collision": True} for name in ROBOT_BODIES]
-
-
-def _backend(spec: ContactGroupSpec) -> IsaacLabContactBackend:
-    return IsaacLabContactBackend([spec])
-
-
-def test_bare_filter_matching_several_bodies_fails_with_the_inventory():
-    """A bare filter regex that matches 2 bodies refuses to pick one."""
-    spec = ContactGroupSpec(
-        name="feet_props",
-        sensor_bodies=["left_foot"],
-        filter_bodies=["left_.*"],
-        frame="world",
-    )
-
-    with pytest.raises(ContactCandidateError, match="matched 2 robot bodies") as err:
-        _backend(spec)._resolve_bare_filters(spec, ROBOT_BODIES, _inventory)
-
-    assert err.value.arg == "filter_bodies"
-    assert [entry["prim"] for entry in err.value.discovered] == ROBOT_BODIES
-    assert "declare filter_bodies" in err.value.hint
-
-
-def test_bare_filter_matching_no_body_fails_with_the_inventory():
-    """A bare filter regex matching nothing refuses with the candidates."""
-    spec = ContactGroupSpec(
-        name="feet_props",
-        sensor_bodies=["left_foot"],
-        filter_bodies=["ghost"],
-        frame="world",
-    )
-
-    with pytest.raises(ContactCandidateError, match="matched 0 robot bodies") as err:
-        _backend(spec)._resolve_bare_filters(spec, ROBOT_BODIES, _inventory)
-
-    assert err.value.arg == "filter_bodies"
-
-
-def test_duplicate_resolved_filter_bodies_fail_fast():
-    """Two filter expressions resolved to the same body are rejected."""
-    spec = ContactGroupSpec(
-        name="feet_props",
-        sensor_bodies=["left_foot"],
-        filter_bodies=["left_foot", "left_foot"],
-        frame="world",
-    )
-
-    with pytest.raises(ValueError, match=r"filter_bodies resolve to duplicate bodies"):
-        _backend(spec)._resolve_bare_filters(spec, ROBOT_BODIES, _inventory)
-
-
-@pytest.mark.parametrize("arg", ["sensor_bodies", "filter_bodies"])
-def test_duplicate_resolved_bodies_share_one_rejection(arg):
-    """The bind-time guard rejects duplicates on either resolved axis."""
-    spec = ContactGroupSpec(name="feet", sensor_bodies=["left_foot"], frame="world")
-
-    with pytest.raises(ValueError, match=rf"{arg} resolve to duplicate bodies \['left_foot'\]"):
-        IsaacLabContactBackend._reject_duplicates(spec, arg, ["left_foot", "left_foot"])
-
-
-def test_shared_backend_key_is_empty_and_caller_settable():
-    """The shared face owns no engine identity; the caller may set the canonical one."""
-    default = IsaacLabContactBackend([])
-    canonical = IsaacLabContactBackend([], backend_key="isaaclab3_physx")
-
-    assert default.backend_key == ""
-    assert canonical.backend_key == "isaaclab3_physx"
+            names=("cartpole", "g1"),
+        )
 
 
 class _Proxy:
@@ -285,46 +306,130 @@ class _Proxy:
 
 
 class _Data:
-    """ContactSensor ``data`` view with the normal-only force faces."""
-
-    def __init__(self, forces=None, matrix=None):
+    def __init__(self, bodies, forces=None, matrix=None):
+        self.body_names = list(bodies)
         self.net_normal_forces_w = None if forces is None else _Proxy(forces)
         self.normal_force_matrix_w = None if matrix is None else _Proxy(matrix)
 
 
 class _Sensor:
-    def __init__(self, data: _Data):
-        self.data = data
+    def __init__(self, bodies, forces=None, matrix=None):
+        self.data = _Data(bodies, forces, matrix)
+        self.cfg = types.SimpleNamespace(prim_path="?")
+
+    @property
+    def body_names(self):
+        return self.data.body_names
 
 
-def _attach(backend: IsaacLabContactBackend, spec: ContactGroupSpec, sensors, perm):
+def _env(bodies=("tip", "palm")):
+    robot = types.SimpleNamespace(data=types.SimpleNamespace(body_names=list(bodies)))
+    return types.SimpleNamespace(scene={"robot": robot})
+
+
+def _attach(backend, spec, sensors, perm, filters=()):
     backend._sensors[spec.name] = {"mode": spec.mode, "sensors": sensors}
     backend._perm[spec.name] = perm
+    backend._filters[spec.name] = list(filters)
 
 
-def test_general_read_uses_net_normal_forces_and_permutes_body_axis():
-    """A general read slices ``net_normal_forces_w.torch`` along B and clones."""
-    spec = ContactGroupSpec(name="feet", sensor_bodies=["left_foot", "right_foot"], frame="world")
-    forces = torch.arange(12, dtype=torch.float32).reshape(1, 4, 3)
-    sensor = _Sensor(_Data(forces=forces))
-    backend = _backend(spec)
-    _attach(backend, spec, [sensor], [[0, 2]])
+def test_bind_resolves_object_sensor_and_robot_filter_axis():
+    manager = _manager(
+        [
+            {
+                "name": "crate_tip",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [{"owner": "robot", "body": "tip"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    env = _env()
+    env.scene["contact_crate_tip_s0"] = _Sensor(
+        ["crate"], matrix=torch.tensor([[[[1.0, 0.0, 0.0]]]])
+    )
+    manager.bind_env(env)
 
-    out = backend.read_raw(spec)
-
-    assert out.shape == (1, 2, 3)
-    assert torch.equal(out, forces[:, [0, 2], :])
-    forces.fill_(-1.0)
-    assert torch.equal(out, torch.arange(12, dtype=torch.float32).reshape(1, 4, 3)[:, [0, 2], :])
+    assert manager.backend.group_axes(manager.specs[0]) == (1, 1)
+    out = manager.backend.read_raw(manager.specs[0])
+    assert tuple(out.shape) == (1, 1, 1, 3)
 
 
-def test_general_read_concatenates_scope_buckets_along_body_axis():
-    """Multiple general scope buckets concatenate their B slices in bucket order."""
-    spec = ContactGroupSpec(name="hands", sensor_bodies=["left_hand/a", "torso"], frame="world")
-    left = _Sensor(_Data(forces=torch.tensor([[[1.0, 0.0, 0.0]]])))
-    torso = _Sensor(_Data(forces=torch.tensor([[[2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]])))
-    backend = _backend(spec)
-    _attach(backend, spec, [left, torso], [[0], [0, 1]])
+def test_f_axis_drift_asserts_instead_of_silently_mismatching():
+    manager = _manager(
+        [
+            {
+                "name": "crate_tip",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [{"owner": "robot", "body": "tip"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    env = _env()
+    env.scene["contact_crate_tip_s0"] = _Sensor(["crate"], matrix=torch.zeros(1, 1, 2, 3))
+    manager.bind_env(env)
+
+    with pytest.raises(AssertionError, match="resolved filter refs"):
+        manager.backend.read_raw(manager.specs[0])
+
+
+def test_multi_body_filter_ref_is_refused_at_bind():
+    manager = _manager(
+        [
+            {
+                "name": "crate_hand",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [{"owner": "robot", "body": ".*"}],
+                "frame": "world",
+            }
+        ],
+        props=["crate"],
+    )
+    env = _env()
+    env.scene["contact_crate_hand_s0"] = _Sensor(["crate"])
+
+    with pytest.raises(ValueError, match="exactly one body"):
+        manager.bind_env(env)
+
+
+def test_frame_body_remains_unsupported():
+    manager = _manager(
+        [
+            {
+                "name": "hand",
+                "sensor_refs": [{"owner": "robot", "body": "tip"}],
+                "frame": "body",
+            }
+        ]
+    )
+    with pytest.raises(NotImplementedError, match="frame='body'"):
+        manager.bind_env(_env())
+
+
+def test_general_read_concatenates_refs_and_permutes_body_axis():
+    from unigym.contacts.base import ContactGroupSpec
+
+    spec = ContactGroupSpec(
+        name="hands",
+        sensor_refs=[
+            {"owner": "robot", "body": "left_.*"},
+            {"owner": "robot", "body": "right_tip"},
+        ],
+        frame="world",
+    )
+    backend = IsaacLabContactBackend([spec])
+    left = _Sensor(
+        ["left_a", "left_b"],
+        forces=torch.tensor([[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]]),
+    )
+    right = _Sensor(
+        ["right_x", "right_tip"],
+        forces=torch.tensor([[[8.0, 0.0, 0.0], [3.0, 0.0, 0.0]]]),
+    )
+    _attach(backend, spec, [left, right], [[0, 1], [1]])
 
     out = backend.read_raw(spec)
 
@@ -332,20 +437,54 @@ def test_general_read_concatenates_scope_buckets_along_body_axis():
     assert torch.equal(out[0, :, 0], torch.tensor([1.0, 2.0, 3.0]))
 
 
-def test_pairwise_read_uses_normal_force_matrix_and_concatenates_entries():
-    """A pairwise read slices ``normal_force_matrix_w.torch`` per entry and clones."""
+def test_pairwise_read_concatenates_entries_and_clones():
+    from unigym.contacts.base import ContactGroupSpec
+
     spec = ContactGroupSpec(
         name="feet_props",
-        sensor_bodies=["left_foot", "right_foot"],
-        filter_bodies=["/World/Table"],
+        sensor_refs=[
+            {"owner": "robot", "body": "left_foot"},
+            {"owner": "robot", "body": "right_foot"},
+        ],
+        filter_refs=[{"owner": "robot", "body": "ball"}],
         frame="world",
     )
-    left = _Sensor(_Data(matrix=torch.tensor([[[[1.0, 0.0, 0.0]]]])))
-    right = _Sensor(_Data(matrix=torch.tensor([[[[2.0, 0.0, 0.0]]]])))
-    backend = _backend(spec)
-    _attach(backend, spec, [left, right], [[0], [0]])
+    backend = IsaacLabContactBackend([spec])
+    left = _Sensor(["left_foot"], matrix=torch.tensor([[[[1.0, 0.0, 0.0]]]]))
+    right = _Sensor(["right_foot"], matrix=torch.tensor([[[[2.0, 0.0, 0.0]]]]))
+    _attach(backend, spec, [left, right], [[0], [0]], filters=[object()])
 
     out = backend.read_raw(spec)
 
     assert out.shape == (1, 2, 1, 3)
     assert torch.equal(out[0, :, 0, 0], torch.tensor([1.0, 2.0]))
+    out.fill_(-1.0)
+    assert torch.equal(
+        backend.read_raw(spec)[0, :, 0, 0],
+        torch.tensor([1.0, 2.0]),
+    )
+
+
+def test_shared_backend_key_is_empty_and_caller_settable():
+    default = IsaacLabContactBackend([])
+    canonical = IsaacLabContactBackend([], backend_key="isaaclab3_newton")
+    assert default.backend_key == ""
+    assert canonical.backend_key == "isaaclab3_newton"
+
+
+def test_prop_activation_flag_flows_to_the_rigid_object_cfg():
+    from unigym.backends.shared.isaaclab3_common.props.handlers.generic import GenericProp
+    from unigym.props.base import PropSpec
+
+    spec = PropSpec(name="crate", type="rigid_object", urdf_path="/tmp/crate.urdf")
+    handler = GenericProp(spec, num_envs=1, device="cpu")
+    classes = {
+        "RigidObjectCfg": _RigidObjectCfg,
+        "UrdfFileCfg": _Cfg,
+    }
+    _, cfg = handler.setup_scene(classes=classes)
+    assert cfg.kw["activate_contact_sensors"] is False
+
+    spec._contact_sensor = True
+    _, cfg = handler.setup_scene(classes=classes)
+    assert cfg.kw["activate_contact_sensors"] is True

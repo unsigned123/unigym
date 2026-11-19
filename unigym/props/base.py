@@ -34,8 +34,9 @@ Prop kinds (see articulation.py / ball.py / generic.py):
 
 The manager is domain-neutral : it knows nothing about hands,
 grasps or held semantics.  Any hand-contact criterion is a DECLARED contact
-group (yaml ``contacts:`` with ``{contact_group: ...}`` / ``{prop: ...}``
-references -- contacts/base.py) consumed by the ContactManager; the
+group (yaml ``contacts:`` with explicit ``sensor_refs`` / ``filter_refs``
+``ContactBodyRef`` records -- contacts/refs.py) consumed by the
+ContactManager; the
 ``object/<name>/{pos,quat}`` typed observation keys are the
 only object-key family the manager emits.
 
@@ -804,6 +805,37 @@ class PropManager:
     def names(self) -> tuple[str, ...]:
         """Declared prop names in declaration order."""
         return tuple(handler.spec.name for handler in self._handlers)
+
+    def require_contact_sensors(self, names) -> tuple[str, ...]:
+        """Mark declared props whose bodies a contact group references.
+
+        This is the internal contact-sensor requirement flag consumed by the
+        backend prop spawners (IsaacLab2 passes ``activate_contact_sensors=True``
+        on the referenced rigid-object cfg).  It is not a yaml key: contact
+        groups reference props through ``ContactBodyRef(owner=object|fixture,
+        name=...)``.  Unknown names and static stage decorations refuse (a
+        stage prim has no rigid-body contact reporter).
+        """
+        requested = [str(name) for name in (names or ())]
+        known = set(self.names)
+        unknown = [name for name in requested if name not in known]
+        if unknown:
+            raise ValueError(
+                f"contact sensor requirement names unknown props {unknown}; "
+                f"declared props are {sorted(known)}"
+            )
+        for name in requested:
+            handler = self.handler(name)
+            if handler is None:  # pragma: no cover - guarded by unknown
+                continue
+            if getattr(handler, "static", False):
+                raise ValueError(
+                    f"prop {name!r} is a static stage decoration; it has no "
+                    f"rigid-body contact sensor -- remove the contact ref or "
+                    f"spawn a dynamic prop"
+                )
+            handler.spec._contact_sensor = True
+        return tuple(requested)
 
     def bind_env(self, env) -> None:
         for h in self._handlers:
