@@ -12,6 +12,8 @@ Process documents:
   protocol.
 - [Scene asset contract](contracts/scene_asset_contract.md) - file-backed
   `AssetInstance` fields, backend matrix, resolution, digest and refusals.
+- [Model-edit contract](contracts/model_edit_contract.md) - global
+  `run.model_edit()` body/geom transaction, field matrix and backend limits.
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
 
