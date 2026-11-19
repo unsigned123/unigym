@@ -58,9 +58,11 @@ A/B code is copied and adapted into `shared/isaaclab3_common`:
    slice; its engine-backed call path is completed in B.
 2. **B-class cfg builders** next, with the IsaacLab 3 cfg-class table and the
    `to_isaaclab_cfg` quaternion boundary: asset-scene engine/fields, static
-   shapes, robot builder, prop spawn, terrain presets, build faces.
+   shapes, robot builder/realizer, prop spawn, actuator plan, terrain presets.
+   `build.py` and `model.py` are deferred to P1b-B2 because they depend on the
+   C-class DR/scene faces.
 3. **C/D env core** last: shared env base, articulation runtime, scene/model,
-   cameras, contacts, director, DR events, prop handlers.
+   cameras, contacts, director, DR events, prop handlers, build faces.
 
 Each slice keeps the il2 tree byte-identical and proves the shared package is
 import-safe (no module-level engine import).  Duplication against il2 is
