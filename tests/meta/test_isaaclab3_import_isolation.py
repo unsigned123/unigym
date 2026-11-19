@@ -32,8 +32,10 @@ import unigym.backends.shared.isaaclab3_common.asset_scene.engine
 import unigym.backends.shared.isaaclab3_common.asset_scene.fields
 import unigym.backends.shared.isaaclab3_common.asset_scene.inspect
 import unigym.backends.shared.isaaclab3_common.asset_scene.names
+import unigym.backends.shared.isaaclab3_common.build
 import unigym.backends.shared.isaaclab3_common.cfg_classes
 import unigym.backends.shared.isaaclab3_common.init_pose
+import unigym.backends.shared.isaaclab3_common.model
 import unigym.backends.shared.isaaclab3_common.naming
 import unigym.backends.shared.isaaclab3_common.props.spawn
 import unigym.backends.shared.isaaclab3_common.robots

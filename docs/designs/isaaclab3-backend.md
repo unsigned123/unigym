@@ -59,8 +59,9 @@ A/B code is copied and adapted into `shared/isaaclab3_common`:
 2. **B-class cfg builders** next, with the IsaacLab 3 cfg-class table and the
    `to_isaaclab_cfg` quaternion boundary: asset-scene engine/fields, static
    shapes, robot builder/realizer, prop spawn, actuator plan, terrain presets.
-   `build.py` and `model.py` are deferred to P1b-B2 because they depend on the
-   C-class DR/scene faces.
+   `build.py` and `model.py` are P1b-B2; `build_events` stays a teaching stub
+   until the C-class DR events land, and `model.describe` is PhysX-first (the
+   Newton view gap is a P1b-C item).
 3. **C/D env core** last: shared env base, articulation runtime, scene/model,
    cameras, contacts, director, DR events, prop handlers, build faces.
 
