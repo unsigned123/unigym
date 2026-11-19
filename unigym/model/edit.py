@@ -20,7 +20,7 @@ from unigym.backends.registry import Trait, ModelEditField
 from unigym.model.errors import ModelEditCapabilityError, ModelEditError
 
 if TYPE_CHECKING:
-    from unigym.model.ir import Body, ModelIR
+    from unigym.model.ir import Body, Geom, ModelIR
     from unigym.model.set import ModelSet
 
 __all__ = [
@@ -244,6 +244,20 @@ def _validate_geom_fields(
     return out
 
 
+def _body_identity(articulation: str | None, row: Body) -> tuple[object, ...]:
+    """Resolve a body's duplicate-identity key (compiled id first)."""
+    if row.body_id is not None:
+        return ("body_id", int(row.body_id))
+    return ("body_name", articulation, row.name)
+
+
+def _geom_identity(articulation: str | None, row: Geom) -> tuple[object, ...]:
+    """Resolve a geom's duplicate-identity key (compiled id first)."""
+    if row.geom_id is not None:
+        return ("geom_id", int(row.geom_id))
+    return ("geom_name", articulation, row.body, row.name)
+
+
 def _candidates(names: Iterable[str], limit: int = 12) -> str:
     """Return a bounded, stable candidate list."""
     ordered = sorted(names)
@@ -409,8 +423,8 @@ class ModelEditor:
         self._commit = commit
         self._is_open = is_open
         self._current_revision = current_revision
-        self._bodies: dict[tuple[str | None, str], _PendingBody] = {}
-        self._geoms: dict[tuple[str | None, str], _PendingGeom] = {}
+        self._bodies: dict[object, _PendingBody] = {}
+        self._geoms: dict[object, _PendingGeom] = {}
         self._closed = False
         self._result: ModelEditResult | None = None
 
@@ -468,7 +482,7 @@ class ModelEditor:
                 "model edit: body parameter edits on the world body are "
                 "rejected (body_id=0 carries the static world)"
             )
-        key = (name, row.name)
+        key = _body_identity(name, row)
         pending = self._bodies.get(key)
         if pending is None:
             pending = _PendingBody(name, row.name, row.body_id)
@@ -513,7 +527,7 @@ class ModelEditor:
                 f"model edit: geom {row.name!r} belongs to body "
                 f"{row.body!r}, not the named body {body_row.name!r}"
             )
-        key = (name, row.name)
+        key = _geom_identity(name, row)
         pending = self._geoms.get(key)
         if pending is None:
             pending = _PendingGeom(name, body_row.name, row.name, row.geom_id)

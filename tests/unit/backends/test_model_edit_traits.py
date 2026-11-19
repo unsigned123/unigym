@@ -183,3 +183,92 @@ def test_isaaclab2_describe_publishes_com_and_inertia_quat() -> None:
     expected = np.array([[2.0, 0.5, 0.0], [0.5, 3.0, 0.0], [0.0, 0.0, 4.0]])
     assert np.allclose(reconstructed, expected, atol=1e-9)
     assert tip.iquat == (1.0, 0.0, 0.0, 0.0)
+
+
+class _PhysXViewProbe:
+    """PhysX-view-shaped arrays with a one-shot inertia setter failure."""
+
+    def __init__(self) -> None:
+        import torch
+
+        self.body_names = ["first", "second"]
+        self.masses = torch.full((1, 2), 1.0)
+        self.coms = torch.zeros(1, 2, 7)
+        self.coms[:, :, 6] = 1.0  # xyzw identity quaternion
+        self.inertias = torch.eye(3).reshape(1, 1, 9).repeat(1, 2, 1)
+        self.fail_inertia = True
+        self.writes: list[str] = []
+
+    def get_masses(self):
+        return self.masses
+
+    def get_coms(self):
+        return self.coms
+
+    def get_inertias(self):
+        return self.inertias
+
+    def set_masses(self, data, indices):
+        self.writes.append("masses")
+        self.masses = data.clone()
+
+    def set_coms(self, data, indices):
+        self.writes.append("coms")
+        self.coms = data.clone()
+
+    def set_inertias(self, data, indices):
+        self.writes.append("inertias")
+        if self.fail_inertia:
+            self.fail_inertia = False
+            raise RuntimeError("injected inertia setter failure")
+        self.inertias = data.clone()
+
+
+def test_isaaclab2_mid_loop_failure_restores_every_touched_row() -> None:
+    """A setter failure after an earlier body write restores the whole snapshot."""
+    from unigym.backends.isaaclab2.model_edit import IsaacLab2ModelEditProvider
+    from unigym.model.edit import BodyEdit
+    from unigym.model.errors import ModelEditError
+
+    view = _PhysXViewProbe()
+    asset = SimpleNamespace(body_names=["first", "second"], root_physx_view=view)
+    rebuild_calls: list[str] = []
+    env = SimpleNamespace(
+        robots={"cartpole": asset},
+        _model_revision=0,
+        _rebuild_model_set=lambda: rebuild_calls.append("rebuild"),
+    )
+    masses_before = view.masses.clone()
+    coms_before = view.coms.clone()
+    inertias_before = view.inertias.clone()
+    edits = (
+        BodyEdit("cartpole", "first", None, {ModelEditField.BODY_MASS: 2.0}),
+        BodyEdit(
+            "cartpole",
+            "second",
+            None,
+            {
+                ModelEditField.BODY_INERTIA: (0.2, 0.3, 0.4),
+                ModelEditField.BODY_INERTIA_QUAT: (1.0, 0.0, 0.0, 0.0),
+            },
+        ),
+    )
+
+    with pytest.raises(ModelEditError, match="injected inertia setter failure"):
+        IsaacLab2ModelEditProvider().apply(env, edits, ())
+
+    assert view.masses.tolist() == masses_before.tolist()
+    assert view.coms.tolist() == coms_before.tolist()
+    assert view.inertias.tolist() == inertias_before.tolist()
+    assert rebuild_calls == []
+    assert env._model_revision == 0
+
+
+def test_backend_capability_bits_project_model_edit() -> None:
+    """Each real backend's capability object exposes Trait.MODEL_EDIT."""
+    from unigym.backends.mjwarp.env import BACKEND_CAPABILITIES as MJWARP_CAPABILITIES
+    from unigym.backends.mujoco.env import BACKEND_CAPABILITIES as MUJOCO_CAPABILITIES
+
+    assert Trait.MODEL_EDIT in MUJOCO_CAPABILITIES.traits()
+    assert Trait.MODEL_EDIT in MJWARP_CAPABILITIES.traits()
+    assert Trait.MODEL_EDIT not in BackendCapabilities().traits()

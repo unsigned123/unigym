@@ -163,3 +163,23 @@ def test_step_guard_rejects_a_transaction_inside_step(cartpole_env, monkeypatch)
     monkeypatch.setattr(cartpole_env, "_step_impl", probe)
     action = (NamedAction.zeros(1, ARTICULATION, list(CART_JOINTS), "position"),)
     cartpole_env.step(action)
+
+
+def test_atomicity_prevalidates_before_any_physx_write(cartpole_env) -> None:
+    """A later dependency error leaves an earlier mass edit unwritten."""
+    ir = cartpole_env.model_set.articulations[ARTICULATION]
+    first, second = ir.bodies.names()[:2]
+    view = _view(cartpole_env)
+    masses_before = view.get_masses().clone()
+    model_set_before = cartpole_env.model_set
+    revision_before = cartpole_env._model_revision
+
+    edit = cartpole_env.model_edit()
+    edit.body(ARTICULATION, first).set(mass=99.0)
+    edit.body(ARTICULATION, second).set(inertia_quat=(1.0, 0.0, 0.0, 0.0))
+    with pytest.raises(ModelEditError, match="requires body.inertia"):
+        edit.commit()
+
+    assert bool((view.get_masses() == masses_before).all())
+    assert cartpole_env._model_revision == revision_before
+    assert cartpole_env.model_set is model_set_before

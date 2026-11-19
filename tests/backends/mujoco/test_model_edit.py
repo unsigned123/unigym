@@ -250,3 +250,29 @@ def test_geom_field_matrix_is_declared(tiny_env_factory) -> None:
         ModelEditField.GEOM_FRICTION,
         ModelEditField.GEOM_RESTITUTION,
     }
+
+
+def test_refresh_failure_restores_cpu_and_published_model(tiny_env_factory, monkeypatch) -> None:
+    """A post-write ModelSet refresh failure rolls the CPU model back."""
+    env = tiny_env_factory()
+    link, _ = _link_geom(env)
+    mass_before = float(env.mj_model.body_mass[link.body_id])
+    model_set_before = env.model_set
+    native_ir_before = env._native_model_ir
+    revision_before = env._model_revision
+
+    import unigym.backends.mujoco.model_edit as module
+
+    def fail_refresh(env: object, provider: object) -> None:
+        raise RuntimeError("injected refresh failure")
+
+    monkeypatch.setattr(module, "refresh_published_model", fail_refresh)
+    edit = env.model_edit()
+    edit.body("tiny", "link").set(mass=2.0)
+    with pytest.raises(RuntimeError, match="injected refresh failure"):
+        edit.commit()
+
+    assert env.mj_model.body_mass[link.body_id] == pytest.approx(mass_before)
+    assert env.model_set is model_set_before
+    assert env._native_model_ir is native_ir_before
+    assert env._model_revision == revision_before

@@ -172,6 +172,7 @@ BACKEND_CAPABILITIES = BackendCapabilities(
     multi_env=True,
     state_write=True,
     native_handle=True,
+    model_edit=True,
 )
 
 

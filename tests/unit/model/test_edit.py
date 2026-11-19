@@ -33,16 +33,16 @@ ALL_GEOM_FIELDS = frozenset({ModelEditField.GEOM_FRICTION, ModelEditField.GEOM_R
 ALL_FIELDS = ALL_BODY_FIELDS | ALL_GEOM_FIELDS
 
 
-def _ir(name: str = "arm") -> ModelIR:
+def _ir(name: str = "arm", *, offset: int = 0) -> ModelIR:
     bodies = Table(
         [
-            Body(name="world", path=("world",), qualname="world", body_id=0),
+            Body(name="world", path=("world",), qualname="world", body_id=0 + offset),
             Body(
                 name="link",
                 parent="world",
                 path=("world", "link"),
                 qualname="world/link",
-                body_id=1,
+                body_id=1 + offset,
                 mass=1.0,
                 inertia=(0.1, 0.1, 0.1),
                 ipos=(0.0, 0.0, 0.0),
@@ -53,15 +53,15 @@ def _ir(name: str = "arm") -> ModelIR:
                 parent="link",
                 path=("world", "link", "tip"),
                 qualname="world/link/tip",
-                body_id=2,
+                body_id=2 + offset,
                 mass=0.5,
             ),
         ]
     )
     geoms = Table(
         [
-            Geom(name="link_geom", type="box", body="link", geom_id=0),
-            Geom(name="tip_geom", type="box", body="tip", geom_id=1),
+            Geom(name="link_geom", type="box", body="link", geom_id=0 + offset),
+            Geom(name="tip_geom", type="box", body="tip", geom_id=1 + offset),
         ]
     )
     return ModelIR(
@@ -78,7 +78,7 @@ def _set(*, single: bool = True, merged: bool = True) -> ModelSet:
     if single:
         return ModelSet({"arm": ir}, merged=ir if merged else None)
     return ModelSet(
-        {"left": _ir("left"), "right": _ir("right")},
+        {"left": _ir("left", offset=0), "right": _ir("right", offset=10)},
         merged=ir if merged else None,
     )
 
@@ -355,3 +355,16 @@ def test_result_values_mapping_is_frozen_against_later_mutation() -> None:
     (body,) = recorder.calls[0][0]
     assert isinstance(body.values, Mapping)
     assert dict(body.values)[ModelEditField.BODY_MASS] == 2.0
+
+
+def test_duplicate_detection_uses_resolved_compiled_identity() -> None:
+    """Different scopes reaching the same compiled body/geom share duplicate state."""
+    edit = _editor(model_set=_set(single=False, merged=True))
+    edit.body("left", "link").set(mass=1.0)
+    with pytest.raises(ModelEditError, match="duplicate"):
+        edit.body(None, "link").set(mass=2.0)
+
+    edit = _editor(model_set=_set(single=False, merged=True))
+    edit.geom("left", body="link", geom="link_geom").set(friction=(1.0, 0.0, 0.0))
+    with pytest.raises(ModelEditError, match="duplicate"):
+        edit.geom(None, body="link", geom="link_geom").set(friction=(0.5, 0.0, 0.0))

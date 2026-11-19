@@ -152,3 +152,57 @@ def test_snapshot_revision_guard_refuses_a_stale_restore(tiny_env_factory) -> No
         env.restore(state)
 
     env.restore(env.snapshot())
+
+
+def test_refresh_failure_restores_cpu_and_device_model(tiny_env_factory, monkeypatch) -> None:
+    """A refresh failure after the CPU write restores CPU and device rows."""
+    env = tiny_env_factory(num_envs=2)
+    link, _ = _ids(env)
+    mass_before = float(env.mj_model.body_mass[link.body_id])
+    device_before = env._wm.body_mass.numpy().copy()
+    model_set_before = env.model_set
+    revision_before = env._model_revision
+
+    import unigym.backends.mjwarp.model_edit as module
+
+    def fail_refresh(env: object, provider: object) -> None:
+        raise RuntimeError("injected refresh failure")
+
+    monkeypatch.setattr(module, "refresh_published_model", fail_refresh)
+    edit = env.model_edit()
+    edit.body("tiny", "link").set(mass=2.0)
+    with pytest.raises(RuntimeError, match="injected refresh failure"):
+        edit.commit()
+
+    assert env.mj_model.body_mass[link.body_id] == pytest.approx(mass_before)
+    np.testing.assert_allclose(env._wm.body_mass.numpy(), device_before)
+    assert env.model_set is model_set_before
+    assert env._model_revision == revision_before
+
+
+def test_push_failure_restores_cpu_and_resyncs_device(tiny_env_factory, monkeypatch) -> None:
+    """A failed device push rolls back the CPU edit and re-pushes the old model."""
+    env = tiny_env_factory(num_envs=2)
+    link, _ = _ids(env)
+    mass_before = float(env.mj_model.body_mass[link.body_id])
+    device_before = env._wm.body_mass.numpy().copy()
+    revision_before = env._model_revision
+    original_push = env._push_model_edit_fields
+    calls: list[int] = []
+
+    def flaky_push():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("injected push failure")
+        return original_push()
+
+    monkeypatch.setattr(env, "_push_model_edit_fields", flaky_push)
+    edit = env.model_edit()
+    edit.body("tiny", "link").set(mass=2.0)
+    with pytest.raises(RuntimeError, match="injected push failure"):
+        edit.commit()
+
+    assert len(calls) >= 2
+    assert env.mj_model.body_mass[link.body_id] == pytest.approx(mass_before)
+    np.testing.assert_allclose(env._wm.body_mass.numpy(), device_before)
+    assert env._model_revision == revision_before

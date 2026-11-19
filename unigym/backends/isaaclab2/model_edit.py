@@ -9,7 +9,7 @@ no-op.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from unigym.backends.registry import ISAACLAB2_MODEL_EDIT_FIELDS, ModelEditField
 from unigym.model.edit import BodyEdit, GeomEdit, ModelEditResult
@@ -115,58 +115,137 @@ class IsaacLab2ModelEditProvider:
                 + ", ".join(sorted(field.value for field in self.fields))
             )
         robots = getattr(env, "robots", {})
+        planned = self._plan(robots, body_edits)
+        snapshots = self._snapshot(planned)
         try:
-            for edit in body_edits:
-                self._apply_body(robots, edit)
+            for _, view, index, values in planned:
+                self._apply_one(view, index, values)
+            rebuild = getattr(env, "_rebuild_model_set")
+            rebuild()
+            revision = int(getattr(env, "_model_revision")) + 1
+            setattr(env, "_model_revision", revision)
+            return ModelEditResult(
+                backend="isaaclab2",
+                revision=revision,
+                bodies=body_edits,
+                geoms=(),
+                warnings=(),
+            )
         except Exception as exc:
+            self._restore(snapshots)
             if isinstance(exc, ModelEditError):
                 raise
             raise ModelEditError(f"isaaclab2 model edit failed: {exc}") from exc
-        rebuild = getattr(env, "_rebuild_model_set")
-        rebuild()
-        revision = int(getattr(env, "_model_revision")) + 1
-        setattr(env, "_model_revision", revision)
-        return ModelEditResult(
-            backend="isaaclab2",
-            revision=revision,
-            bodies=body_edits,
-            geoms=(),
-            warnings=(),
-        )
 
-    def _apply_body(self, robots: object, edit: BodyEdit) -> None:
-        """Apply one resolved body edit through the articulation view."""
-        if edit.articulation is None:
-            raise ModelEditError(
-                "isaaclab2 model edit: a merged-scene body edit has no " "articulation binding"
-            )
+    def _plan(
+        self,
+        robots: object,
+        edits: tuple[BodyEdit, ...],
+    ) -> list[tuple[str, object, int, Mapping[ModelEditField, object]]]:
+        """Resolve and validate every target before the first PhysX write."""
         assets = robots if hasattr(robots, "get") else {}
-        asset = assets.get(edit.articulation)
-        if asset is None:
-            raise ModelEditError(
-                f"isaaclab2 model edit: unknown articulation " f"{edit.articulation!r}"
+        planned: list[tuple[str, object, int, Mapping[ModelEditField, object]]] = []
+        for edit in edits:
+            if edit.articulation is None:
+                raise ModelEditError(
+                    "isaaclab2 model edit: a merged-scene body edit has no " "articulation binding"
+                )
+            asset = assets.get(edit.articulation)
+            if asset is None:
+                raise ModelEditError(
+                    f"isaaclab2 model edit: unknown articulation " f"{edit.articulation!r}"
+                )
+            view = _view(asset)
+            if view is None:
+                raise ModelEditCapabilityError(
+                    f"isaaclab2 model edit: articulation "
+                    f"{edit.articulation!r} exposes no root_physx_view"
+                )
+            body_names = _body_names(asset, view)
+            try:
+                index = body_names.index(edit.body)
+            except ValueError:
+                raise ModelEditError(
+                    f"isaaclab2 model edit: body {edit.body!r} is not in "
+                    f"articulation {edit.articulation!r}; candidates: "
+                    f"{', '.join(body_names)}"
+                ) from None
+            unknown = sorted(field.value for field in edit.values if field not in self.fields)
+            if unknown:
+                raise ModelEditCapabilityError(
+                    f"isaaclab2 model edit: backend 'isaaclab2' cannot edit "
+                    f"{unknown}; writable fields: "
+                    f"{', '.join(sorted(field.value for field in self.fields))}"
+                )
+            if (
+                ModelEditField.BODY_INERTIA_QUAT in edit.values
+                and ModelEditField.BODY_INERTIA not in edit.values
+            ):
+                raise ModelEditError(
+                    "isaaclab2 model edit: body.inertia_quat requires "
+                    "body.inertia in the same BodyEditHandle.set() call"
+                )
+            self._require_view_api(view, edit.articulation)
+            planned.append((edit.articulation, view, index, edit.values))
+        return planned
+
+    @staticmethod
+    def _require_view_api(view: object, articulation: str) -> None:
+        """Require the getter/setter pairs the snapshot + restore needs."""
+        for name in ("masses", "coms", "inertias"):
+            getter = getattr(view, f"get_{name}", None)
+            setter = getattr(view, f"set_{name}", None)
+            if getter is None or setter is None:
+                raise ModelEditCapabilityError(
+                    f"isaaclab2 model edit: articulation {articulation!r} "
+                    f"root_physx_view lacks get_{name}/set_{name}"
+                )
+
+    def _snapshot(
+        self,
+        planned: list[tuple[str, object, int, Mapping[ModelEditField, object]]],
+    ) -> dict[str, tuple[object, object, object, object]]:
+        """Snapshot full PhysX arrays for every touched articulation."""
+        snapshots: dict[str, tuple[object, object, object, object]] = {}
+        for articulation, view, _, _ in planned:
+            if articulation in snapshots:
+                continue
+            masses = _as_tensor(getattr(view, "get_masses")())
+            if getattr(masses, "ndim", 0) == 1:
+                masses = masses.unsqueeze(0)
+            coms = _as_tensor(getattr(view, "get_coms")())
+            inertias = _as_tensor(getattr(view, "get_inertias")())
+            snapshots[articulation] = (
+                view,
+                masses.clone(),
+                coms.clone(),
+                inertias.clone(),
             )
-        view = _view(asset)
-        if view is None:
-            raise ModelEditCapabilityError(
-                f"isaaclab2 model edit: articulation {edit.articulation!r} "
-                f"exposes no root_physx_view"
-            )
-        body_names = _body_names(asset, view)
-        try:
-            index = body_names.index(edit.body)
-        except ValueError:
-            raise ModelEditError(
-                f"isaaclab2 model edit: body {edit.body!r} is not in "
-                f"articulation {edit.articulation!r}; candidates: "
-                f"{', '.join(body_names)}"
-            ) from None
-        values = edit.values
-        if ModelEditField.BODY_INERTIA_QUAT in values and ModelEditField.BODY_INERTIA not in values:
-            raise ModelEditError(
-                "isaaclab2 model edit: body.inertia_quat requires "
-                "body.inertia in the same BodyEditHandle.set() call"
-            )
+        return snapshots
+
+    def _restore(self, snapshots: dict[str, tuple[object, object, object, object]]) -> None:
+        """Restore every snapshot row; a restore failure never masks the cause."""
+        for view, masses, coms, inertias in snapshots.values():
+            try:
+                getattr(view, "set_masses")(masses, self._indices(masses))
+            except Exception:  # pragma: no cover - best effort rollback
+                pass
+            try:
+                getattr(view, "set_coms")(coms, self._indices(coms))
+            except Exception:  # pragma: no cover - best effort rollback
+                pass
+            try:
+                getattr(view, "set_inertias")(inertias, self._indices(inertias))
+            except Exception:  # pragma: no cover - best effort rollback
+                pass
+
+    def _apply_one(
+        self,
+        view: object,
+        index: int,
+        values: Mapping[ModelEditField, object],
+    ) -> None:
+        """Write one pre-validated body edit through the articulation view."""
         if ModelEditField.BODY_MASS in values:
             self._write_scalar(view, "masses", index, float(values[ModelEditField.BODY_MASS]))
         if ModelEditField.BODY_COM in values:

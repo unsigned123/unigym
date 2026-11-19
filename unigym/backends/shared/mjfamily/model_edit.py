@@ -12,7 +12,8 @@ solver warm-start.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 
 import mujoco
@@ -22,7 +23,12 @@ from unigym.model.edit import BodyEdit, GeomEdit
 from unigym.model.errors import ModelEditError
 from unigym.backends.registry import ModelEditField
 
-__all__ = ["MujocoModelEditWriter", "refresh_published_model"]
+__all__ = [
+    "MujocoModelEditWriter",
+    "published_state",
+    "refresh_published_model",
+    "restore_published_state",
+]
 
 _BODY_ARRAY_FIELDS: dict[ModelEditField, str] = {
     ModelEditField.BODY_MASS: "body_mass",
@@ -68,6 +74,23 @@ def refresh_published_model(env: object, provider: object) -> None:
     setattr(env, "_native_model_ir", ir)
     rebuild = getattr(env, "_rebuild_model_set")
     rebuild()
+
+
+def published_state(env: object) -> tuple[object, object, object]:
+    """Snapshot the env's published IR/model-set references."""
+    return (
+        getattr(env, "_native_model_ir", None),
+        getattr(env, "model_set", None),
+        getattr(env, "model_irs", None),
+    )
+
+
+def restore_published_state(env: object, state: tuple[object, object, object]) -> None:
+    """Restore the published IR/model-set references after a failed refresh."""
+    native_ir, model_set, model_irs = state
+    setattr(env, "_native_model_ir", native_ir)
+    setattr(env, "model_set", model_set)
+    setattr(env, "model_irs", model_irs)
 
 
 class _Rollback:
@@ -126,66 +149,101 @@ class MujocoModelEditWriter:
                 unsupported, or the model recomputation failed.  Every
                 touched row is restored before the error escapes.
         """
+        with self.transaction(model, data, bodies, geoms) as warnings:
+            return warnings
+
+    @contextmanager
+    def transaction(
+        self,
+        model: object,
+        data: object,
+        bodies: Iterable[BodyEdit],
+        geoms: Iterable[GeomEdit],
+    ) -> Iterator[tuple[str, ...]]:
+        """Apply the edit inside a rollback scope.
+
+        The yielded tuple holds the approximation warnings.  Any exception
+        raised by the caller after the writes (for example a failed
+        ``ModelSet`` refresh or device push) restores every touched CPU row
+        and re-runs ``mj_setConst`` before propagating.
+        """
         body_edits = tuple(bodies)
         geom_edits = tuple(geoms)
-        warnings: list[str] = []
         rollback = _Rollback(model)
-        simple = getattr(model, "body_simple", None)
         try:
-            for edit in body_edits:
-                index = self._body_index(model, edit)
-                for field, value in edit.values.items():
-                    array_name = _BODY_ARRAY_FIELDS.get(field)
-                    if array_name is None:
-                        raise ModelEditError(
-                            f"mujoco model edit: unsupported body field {field.value}"
-                        )
-                    rollback.save(array_name, index)
-                    getattr(model, array_name)[index] = value
-                if simple is not None and any(field in edit.values for field in _SIMPLE_SENSITIVE):
-                    rollback.save("body_simple", index)
-                    simple[index] = 0
-            for edit in geom_edits:
-                index = self._geom_index(model, edit)
-                for field, value in edit.values.items():
-                    array_name = _GEOM_ARRAY_FIELDS.get(field)
-                    if array_name is None:
-                        raise ModelEditError(
-                            f"mujoco model edit: unsupported geom field {field.value}"
-                        )
-                    rollback.save(array_name, index)
-                    if field is ModelEditField.GEOM_RESTITUTION:
-                        solref = getattr(model, "geom_solref")
-                        if float(solref[index][0]) <= 0.0:
-                            raise ModelEditError(
-                                f"mujoco model edit: geom "
-                                f"{edit.geom!r} uses direct-mode solref "
-                                f"(solref[0]={float(solref[index][0])}); "
-                                f"restitution approximation needs a "
-                                f"positive time constant"
-                            )
-                        zeta = _restitution_zeta(float(value))
-                        solref[index][1] = zeta
-                        warnings.append(
-                            f"geom {edit.geom!r}: restitution "
-                            f"{float(value):.6g} is approximate; "
-                            f"solref dampratio={zeta:.6g} "
-                            f"(solref[0] retained)"
-                        )
-                    else:
-                        getattr(model, array_name)[index] = value
+            warnings = self._write(model, data, body_edits, geom_edits, rollback)
             mujoco.mj_setConst(model, data)
         except Exception as exc:
-            rollback.restore()
-            if simple is not None:
-                try:
-                    mujoco.mj_setConst(model, data)
-                except Exception:  # pragma: no cover - rollback best effort
-                    pass
+            self._restore(model, data, rollback)
             if isinstance(exc, ModelEditError):
                 raise
             raise ModelEditError(f"mujoco model edit failed: {exc}") from exc
-        return tuple(warnings)
+        try:
+            yield tuple(warnings)
+        except BaseException:
+            self._restore(model, data, rollback)
+            raise
+
+    @staticmethod
+    def _restore(model: object, data: object, rollback: _Rollback) -> None:
+        """Restore every touched row and recompute derived model fields."""
+        rollback.restore()
+        try:
+            mujoco.mj_setConst(model, data)
+        except Exception:  # pragma: no cover - rollback best effort
+            pass
+
+    def _write(
+        self,
+        model: object,
+        data: object,
+        body_edits: tuple[BodyEdit, ...],
+        geom_edits: tuple[GeomEdit, ...],
+        rollback: _Rollback,
+    ) -> list[str]:
+        """Write the arrays and build the warning list (no setConst call)."""
+        del data
+        warnings: list[str] = []
+        simple = getattr(model, "body_simple", None)
+        for edit in body_edits:
+            index = self._body_index(model, edit)
+            for field, value in edit.values.items():
+                array_name = _BODY_ARRAY_FIELDS.get(field)
+                if array_name is None:
+                    raise ModelEditError(f"mujoco model edit: unsupported body field {field.value}")
+                rollback.save(array_name, index)
+                getattr(model, array_name)[index] = value
+            if simple is not None and any(field in edit.values for field in _SIMPLE_SENSITIVE):
+                rollback.save("body_simple", index)
+                simple[index] = 0
+        for edit in geom_edits:
+            index = self._geom_index(model, edit)
+            for field, value in edit.values.items():
+                array_name = _GEOM_ARRAY_FIELDS.get(field)
+                if array_name is None:
+                    raise ModelEditError(f"mujoco model edit: unsupported geom field {field.value}")
+                rollback.save(array_name, index)
+                if field is ModelEditField.GEOM_RESTITUTION:
+                    solref = getattr(model, "geom_solref")
+                    if float(solref[index][0]) <= 0.0:
+                        raise ModelEditError(
+                            f"mujoco model edit: geom "
+                            f"{edit.geom!r} uses direct-mode solref "
+                            f"(solref[0]={float(solref[index][0])}); "
+                            f"restitution approximation needs a "
+                            f"positive time constant"
+                        )
+                    zeta = _restitution_zeta(float(value))
+                    solref[index][1] = zeta
+                    warnings.append(
+                        f"geom {edit.geom!r}: restitution "
+                        f"{float(value):.6g} is approximate; "
+                        f"solref dampratio={zeta:.6g} "
+                        f"(solref[0] retained)"
+                    )
+                else:
+                    getattr(model, array_name)[index] = value
+        return warnings
 
     @staticmethod
     def _body_index(model: object, edit: BodyEdit) -> int:
