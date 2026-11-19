@@ -159,6 +159,26 @@ class WarpBatchMixin:
     #: count rather than copied verbatim.
     _MODEL_FIELDS = ("body_pos", "body_quat", "eq_data", "eq_obj2id", "eq_type")
 
+    #: Model arrays a committed model edit pushes into the shared device
+    #: model.  These are MuJoCo ``mj_setConst`` outputs plus the edited
+    #: inputs; every world sees the same model, so the leading shared slot
+    #: (index 0) is the only one written.
+    _MODEL_EDIT_FIELDS = (
+        "body_mass",
+        "body_ipos",
+        "body_inertia",
+        "body_iquat",
+        "body_subtreemass",
+        "body_invweight0",
+        "body_simple",
+        "dof_invweight0",
+        "dof_length",
+        "actuator_acc0",
+        "tendon_invweight0",
+        "geom_friction",
+        "geom_solref",
+    )
+
     @staticmethod
     def _model_source_array(dst, src) -> np.ndarray:
         """NumPy staging array for a model-field copy into ``dst``."""
@@ -169,7 +189,12 @@ class WarpBatchMixin:
             return np.ascontiguousarray(arr, dtype=np.int32)
         # vector field (vec3f / quatf / vec12f): pad/truncate the component
         # axis to the device's component count (eq_data 11 -> 12 on 3.13).
-        comps = np.asarray(dst.numpy()).shape[-1]
+        # The component count comes from the warp dtype descriptor; never
+        # materialize the whole array with ``dst.numpy()`` here.  A scalar
+        # field falls back to its own last shape axis (no padding needed).
+        comps = int(wp.types.type_size(dst.dtype))
+        if comps <= 1:
+            comps = dst.shape[-1]
         if arr.ndim >= 2 and arr.shape[-1] != comps:
             pad = comps - arr.shape[-1]
             if pad > 0:
@@ -195,6 +220,27 @@ class WarpBatchMixin:
         """Push director-mutable model fields (body/eq tables) to the device."""
         for name in self._MODEL_FIELDS:
             self._copy_model_field(e, name, wm)
+
+    def _copy_global_model_field(self, name: str, wm=None) -> None:
+        """Copy one global model array into the shared device model slot.
+
+        Model arrays are shared by every world.  A ``(1, n)`` device field is
+        written at leading index 0 only (never ``dst_all[e]``); a 1-D field
+        is copied whole.
+        """
+        target = self._wm if wm is None else wm
+        dst_all = getattr(target, name, None)
+        src = getattr(self._model, name, None)
+        if dst_all is None or src is None or dst_all.size == 0:
+            return
+        dst = dst_all if dst_all.ndim == 1 else dst_all[0]
+        arr = self._model_source_array(dst, src)
+        wp.copy(dst, wp.array(arr, dtype=dst.dtype, device=dst.device))
+
+    def _push_model_edit_fields(self, wm=None) -> None:
+        """Push every edited + ``mj_setConst``-derived model field."""
+        for name in self._MODEL_EDIT_FIELDS:
+            self._copy_global_model_field(name, wm)
 
     def _push_director_writes(self, e: int = 0) -> None:
         """Push the CPU mirror state AND model fields of world ``e``.
