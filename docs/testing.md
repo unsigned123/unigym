@@ -312,7 +312,7 @@ Do not assume every backend exists in the self-contained `.venv`.
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts and kinematic director declared; rigid props/free-root writes lane-tested but the props trait deferred; cameras/Newton parity pending; nightly jobs pending) |
+| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts, kinematic director and camera rigs declared; rigid props/free-root writes lane-tested but the props trait deferred; recorder video declared; depth aliases deferred; Newton parity pending; nightly jobs pending) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is
@@ -377,9 +377,14 @@ The two `isaaclab3_*` lanes are the two IsaacLab 3 backend identities
 `isaaclab3_physx` and `isaaclab3_newton`; `isaaclab3` is not a lane, a config
 alias or a test directory. P2 declares capabilities one lane test at a time:
 `isaaclab3_physx` owns the real Cartpole contact test, the rigid-box /
-free-root state-write tests and the neutral-`Director` write tests, and
-therefore declares `--strict-test-packs`; the props trait/bit itself is
-deferred until the shared capability model can express partial prop support.
+free-root state-write tests, the neutral-`Director` write tests and the
+world/body camera rig tests, and therefore declares `--strict-test-packs`; the
+props trait/bit itself is deferred until the shared capability model can
+express partial prop support. The camera lane proves RGB, metric depth,
+per-env camera state and a non-empty MP4 recorder write. `DEPTH_OBS_ALIASES`
+stays undeclared because the lane has no depth-alias coverage; until that bit
+lands, an observation request selecting a depth stream is gate-rejected on
+PhysX. The lane environment installs `imageio[ffmpeg]` for the recorder test.
 `isaaclab3_newton` still owns environment and stack probes only. The remaining
 capability tests and the self-hosted GitHub jobs land with the backend
 implementation. The lanes stay out of `[nightly]` until those jobs exist.

@@ -739,12 +739,12 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
 
 # IsaacLab 3 identities: PhysX and Newton share one implementation package
 # but own separate runtime stacks and capability sets.  C2-1 lights up the
-# verified shared core conservatively; camera/prop traits stay undeclared
-# until their backend tests land (P2).  The rigid-prop path is lane-tested,
-# but the shared props bit projects all three PROPS_* traits, so its
-# declaration is deferred until the capability model can express it.  The
-# PhysX director writes are lane-proven, so its kinematic director traits are
-# declared; weld stays absent until an engine-hosted weld test exists.
+# verified shared core conservatively; prop traits stay undeclared until
+# their backend tests land (P2).  The rigid-prop path is lane-tested, but the
+# shared props bit projects all three PROPS_* traits, so its declaration is
+# deferred until the capability model can express it.  The PhysX director,
+# camera and recorder paths are lane-proven, so those traits are declared;
+# weld stays absent until an engine-hosted weld test exists.
 _IL3_CORE = _CORE | frozenset(
     {
         Trait.MULTI_ENV,  # native num_envs=N scene cloning
@@ -766,6 +766,12 @@ ISAACLAB3_PHYSX_TRAITS = _IL3_CORE | frozenset(
         Trait.DIRECTOR_SETVEL,  # root-velocity writes on a rigid prop
         Trait.DIRECTOR_ATTACH_SLAVE,  # per-tick kinematic follow
         Trait.DIRECTOR_GRIPPER,  # kinematic gripper pose face
+        Trait.CAMERAS_RGB,  # RTX CameraCfg rigs
+        Trait.CAMERAS_DEPTH_RIG,  # distance_to_camera annotator
+        Trait.CAMERAS_GLOBAL,  # global request-axis world rig
+        Trait.CAMERAS_PER_ENV,  # cloned sensor per env
+        Trait.CAMERAS_PER_ENV_STATE,  # per-(camera, env) pose state
+        Trait.RECORDER_VIDEO,  # camera_ref capture -> MP4
     }
 )
 

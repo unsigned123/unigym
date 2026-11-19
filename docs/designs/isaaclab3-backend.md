@@ -110,10 +110,19 @@ byte-identical, adds no new `Trait` value and no new public field.
   release, the pin hold across `on_step` and release, and the gripper
   where/move/where round-trip.  Newton follows in P3.
 - **P2-D cameras + recorder**: explicit profile `renderer_cfg`, RGB and depth
-  rigs, recorder video.  Declares `CAMERAS_RGB`, `CAMERAS_DEPTH_RIG`,
-  `CAMERAS_PER_ENV`, `CAMERAS_PER_ENV_STATE`, `RECORDER_VIDEO`; sets
-  `BackendCapabilities.cameras/depth_camera/recorder`.  Newton camera support
-  stays undeclared unless the renderer path passes.
+  rigs, recorder video. PhysX status: `test_cameras.py` proves a global world
+  rig (RGB + `distance_to_camera` depth), a per-env body rig (RGB), and a
+  per-instance world rig with a distinct env 1 state row, and writes a captured
+  frame to a non-empty MP4, so `CAMERAS_RGB`, `CAMERAS_DEPTH_RIG`,
+  `CAMERAS_GLOBAL`, `CAMERAS_PER_ENV`, `CAMERAS_PER_ENV_STATE` and
+  `RECORDER_VIDEO` are declared with
+  `BackendCapabilities.cameras=True` / `recorder=True`; the lane environment
+  installs `imageio[ffmpeg]`. The depth RIG is proven while the `depth` alias
+  bit is deferred (`depth_camera=False`, no `DEPTH_OBS_ALIASES` lane coverage);
+  consequently an observation request selecting a depth stream is gate-rejected
+  until that alias bit lands. No `CAMERAS_BATCH_RENDER`, per-env intrinsics or
+  Newton camera trait is declared. Newton camera support stays undeclared
+  unless the renderer path passes.
 - **P2-E events + terrain closeout**: PhysX/Newton DR events lane coverage,
   Newton `EVENTS_DR` decision, and a terrain-preset lane test.  Updates the
   trait tables and docs in the same change.

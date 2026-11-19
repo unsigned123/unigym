@@ -30,7 +30,7 @@ def simulation_app() -> Iterator[object]:
     require_optional_module("isaaclab", reason="the IsaacLab 3 PhysX lane")
     from isaaclab.app import AppLauncher
 
-    launcher = AppLauncher(headless=True)
+    launcher = AppLauncher(headless=True, enable_cameras=True)
     yield launcher.app
     launcher.app.close()
 
@@ -58,6 +58,7 @@ def _build_env(
     terrain_cfg=None,
     prop_manager=None,
     director_cfg=None,
+    camera_manager=None,
 ):
     """Construct the IsaacLab 3 PhysX backend over the Cartpole asset."""
     import isaaclab.sim as sim_utils
@@ -146,6 +147,7 @@ def _build_env(
         contact_manager=contact_manager,
         prop_manager=prop_manager,
         director_cfg=director_cfg,
+        camera_manager=camera_manager,
     )
 
 
