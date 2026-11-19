@@ -578,6 +578,8 @@ class IsaaclabEnv(ManagerBasedEnv):
         # failure there still leaves close()/the guards well-defined
         self._closed = False
         self._closing = False
+        self._stepping = False
+        self._model_revision = 0
         self._asset_scene: ComposedAssetScene | None = None
         self.artifact_paths: dict[str, str] = {}
         self._dur_lo, self._dur_hi = (
@@ -881,6 +883,37 @@ class IsaaclabEnv(ManagerBasedEnv):
         self.model_irs = irs
         self.model_set = ModelSet(irs, merged=merged)
 
+    def model_edit(self):
+        """Open one global body model-edit transaction between steps.
+
+        Geom fields are declared absent (no published geom IR); the provider
+        raises a capability error for them.
+
+        Raises:
+            RuntimeError: The environment is closed or currently stepping.
+        """
+        if self._closed or self._closing:
+            raise RuntimeError("isaaclab2 backend: environment is closed")
+        if self._stepping:
+            raise RuntimeError("isaaclab2 backend: model edits are only allowed between steps")
+        from unigym.backends.isaaclab2.model_edit import IsaacLab2ModelEditProvider
+        from unigym.model.edit import ModelEditor
+
+        provider = IsaacLab2ModelEditProvider()
+
+        def commit(bodies, geoms):
+            return provider.apply(self, bodies, geoms)
+
+        return ModelEditor(
+            backend="isaaclab2",
+            fields=provider.fields,
+            model_set=self.model_set,
+            revision=self._model_revision,
+            commit=commit,
+            is_open=lambda: not (self._closed or self._closing or self._stepping),
+            current_revision=lambda: self._model_revision,
+        )
+
     # ------------------------------------------------------------------ #
     # lighting (Task 1: brighter video)
     # ------------------------------------------------------------------ #
@@ -1056,6 +1089,21 @@ class IsaaclabEnv(ManagerBasedEnv):
     # stepping
     # ------------------------------------------------------------------ #
     def step(
+        self,
+        actions: Sequence[NamedAction],
+        raw_action: torch.Tensor | None = None,
+        cmd: torch.Tensor | None = None,
+    ) -> EnvStep:
+        """Advance one policy step behind the model-edit step guard."""
+        if self._stepping:  # pragma: no cover - one owner per step
+            raise RuntimeError("isaaclab2 backend: step() is not re-entrant")
+        self._stepping = True
+        try:
+            return self._step_impl(actions, raw_action, cmd)
+        finally:
+            self._stepping = False
+
+    def _step_impl(
         self,
         actions: Sequence[NamedAction],
         raw_action: torch.Tensor | None = None,

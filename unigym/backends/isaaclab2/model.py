@@ -235,15 +235,27 @@ def _camera_host(bodies, robot_body):
 # live (post-sim) readers
 # ---------------------------------------------------------------------------
 def _mass_and_inertia(articulation, body_names):
-    """Return per-body ``(masses, inertias)`` from the PhysX view if exposed."""
+    """Return per-body ``(masses, inertias, iquats, coms)`` from the PhysX view.
+
+    PhysX exposes a full inertia tensor; the neutral IR publishes its
+    principal diagonal plus the body-local principal-axis quaternion, so a
+    non-diagonal tensor round-trips without inventing a value.
+    """
     view = getattr(articulation, "root_physx_view", None)
     if view is None:
         view = getattr(articulation, "_root_physx_view", None)
     count = len(body_names)
     masses = _physx_values(view, "get_masses", count)
     raw_inertias = _physx_rows(view, "get_inertias", count)
-    inertias = [_inertia_diag(value) for value in raw_inertias]
-    return masses, inertias
+    inertias = []
+    iquats = []
+    for value in raw_inertias:
+        inertia, iquat = _inertia_principal(value)
+        inertias.append(inertia)
+        iquats.append(iquat)
+    raw_coms = _physx_rows(view, "get_coms", count)
+    coms = [_row_at(raw_coms, index, 3) for index in range(count)]
+    return masses, inertias, iquats, coms
 
 
 def _physx_rows(view, method, count):
@@ -276,18 +288,88 @@ def _finite(value):
     return number if number == number and abs(number) != float("inf") else None
 
 
-def _inertia_diag(value):
-    """Return a diagonal inertia triple from a 3/9/3x3 array, else ``None``."""
+def _inertia_matrix(value):
+    """Return a symmetric 3x3 NumPy matrix from a 3/9/3x3 PhysX value."""
     seq = _as_sequence(value)
     if seq is None:
         return None
+    rows = None
     if len(seq) == 3 and all(isinstance(item, (int, float)) for item in seq):
-        return tuple(_finite(item) for item in seq)
-    if len(seq) == 9:
-        return (_finite(seq[0]), _finite(seq[4]), _finite(seq[8]))
-    if len(seq) == 3 and all(isinstance(item, (list, tuple)) for item in seq):
-        return tuple(_finite(seq[i][i]) for i in range(3))
-    return None
+        rows = [
+            [float(seq[0]), 0.0, 0.0],
+            [0.0, float(seq[1]), 0.0],
+            [0.0, 0.0, float(seq[2])],
+        ]
+    elif len(seq) == 9 and all(isinstance(item, (int, float)) for item in seq):
+        rows = [[float(seq[3 * r + c]) for c in range(3)] for r in range(3)]
+    elif len(seq) == 3 and all(isinstance(item, (list, tuple)) for item in seq):
+        rows = [[float(item) for item in row[:3]] for row in seq]
+    if rows is None:
+        return None
+    try:
+        import numpy as np
+
+        matrix = np.asarray(rows, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    return 0.5 * (matrix + matrix.T)
+
+
+def _matrix_to_quat_wxyz(matrix) -> tuple[float, float, float, float]:
+    """Convert a rotation matrix to a unit wxyz quaternion."""
+    import numpy as np
+
+    trace = float(matrix[0, 0] + matrix[1, 1] + matrix[2, 2])
+    if trace > 0.0:
+        scale = (trace + 1.0) ** 0.5 * 2.0
+        w = 0.25 * scale
+        x = (matrix[2, 1] - matrix[1, 2]) / scale
+        y = (matrix[0, 2] - matrix[2, 0]) / scale
+        z = (matrix[1, 0] - matrix[0, 1]) / scale
+    elif matrix[0, 0] > matrix[1, 1] and matrix[0, 0] > matrix[2, 2]:
+        scale = (1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) ** 0.5 * 2.0
+        w = (matrix[2, 1] - matrix[1, 2]) / scale
+        x = 0.25 * scale
+        y = (matrix[0, 1] + matrix[1, 0]) / scale
+        z = (matrix[0, 2] + matrix[2, 0]) / scale
+    elif matrix[1, 1] > matrix[2, 2]:
+        scale = (1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) ** 0.5 * 2.0
+        w = (matrix[0, 2] - matrix[2, 0]) / scale
+        x = (matrix[0, 1] + matrix[1, 0]) / scale
+        y = 0.25 * scale
+        z = (matrix[1, 2] + matrix[2, 1]) / scale
+    else:
+        scale = (1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) ** 0.5 * 2.0
+        w = (matrix[1, 0] - matrix[0, 1]) / scale
+        x = (matrix[0, 2] + matrix[2, 0]) / scale
+        y = (matrix[1, 2] + matrix[2, 1]) / scale
+        z = 0.25 * scale
+    quat = np.asarray([w, x, y, z], dtype=float)
+    norm = float(np.linalg.norm(quat))
+    if norm <= 1e-12:  # pragma: no cover - a rotation matrix is never zero
+        return (1.0, 0.0, 0.0, 0.0)
+    quat = quat / norm
+    if quat[0] < 0.0:
+        quat = -quat
+    return (float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
+
+
+def _inertia_principal(value):
+    """Return ``(principal diagonal, wxyz quat)`` from a PhysX inertia tensor."""
+    matrix = _inertia_matrix(value)
+    if matrix is None:
+        return None, None
+    import numpy as np
+
+    try:
+        eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+    except np.linalg.LinAlgError:
+        diag = (float(matrix[0, 0]), float(matrix[1, 1]), float(matrix[2, 2]))
+        return diag, (1.0, 0.0, 0.0, 0.0)
+    if float(np.linalg.det(eigenvectors)) < 0.0:
+        eigenvectors[:, 0] = -eigenvectors[:, 0]
+    diagonal = tuple(max(float(value), 0.0) for value in eigenvalues)
+    return diagonal, _matrix_to_quat_wxyz(eigenvectors)
 
 
 def _row_at(values, index, size):
@@ -395,8 +477,8 @@ def _body_path(name, parents):
     return tuple(reversed(chain))
 
 
-def _body_rows(body_names, data, masses, inertias, facts):
-    """Build the compiled body rows (pose, inertia, USD path/parent)."""
+def _body_rows(body_names, data, masses, inertias, iquats, coms, facts):
+    """Build the compiled body rows (pose, COM, inertia, USD path/parent)."""
     positions = _first_env(getattr(data, "body_pos_w", None))
     quats = _first_env(getattr(data, "body_quat_w", None))
     rows = []
@@ -413,6 +495,8 @@ def _body_rows(body_names, data, masses, inertias, facts):
                 quat=_row_at(quats, index, 4) or (1.0, 0.0, 0.0, 0.0),
                 mass=masses[index],
                 inertia=inertias[index],
+                ipos=coms[index],
+                iquat=iquats[index],
             )
         )
     return rows
@@ -563,9 +647,9 @@ class IsaacLabModelProvider:
         root_body = body_names[0] if body_names else "root"
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)
-        masses, inertias = _mass_and_inertia(articulation, body_names)
+        masses, inertias, iquats, coms = _mass_and_inertia(articulation, body_names)
         attrs = {"robot": {"prim_path": root_prim, "root_body": root_body}}
-        bodies = _body_rows(body_names, data, masses, inertias, facts)
+        bodies = _body_rows(body_names, data, masses, inertias, iquats, coms, facts)
         joints = _joint_rows(joint_names, data, root_body, facts, attrs)
         actuators = _live_actuator_rows(articulation, root_body, attrs)
         prim_paths = dict(facts["prim_paths"])
