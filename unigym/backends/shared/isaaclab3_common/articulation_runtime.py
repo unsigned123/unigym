@@ -420,9 +420,8 @@ def reset_articulations(env, env_ids) -> None:
         dj = art.q0_art.unsqueeze(0).expand(n, -1).clone()
         robot.write_root_link_pose_to_sim_index(root_pose=dr[:, :7], env_ids=env_ids)
         robot.write_root_link_velocity_to_sim_index(root_velocity=dr[:, 7:13], env_ids=env_ids)
-        robot.write_joint_state_to_sim_index(
-            position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids
-        )
+        robot.write_joint_position_to_sim_index(position=dj, env_ids=env_ids)
+        robot.write_joint_velocity_to_sim_index(velocity=torch.zeros_like(dj), env_ids=env_ids)
     # No ``root_state_w[env_ids] = dr`` cache write: flush the write path
     # instead so the next read observes the spawn state.
     scene = getattr(env, "scene", None)

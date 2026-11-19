@@ -75,8 +75,11 @@ class _KeywordOnlyAsset:
     def write_root_link_velocity_to_sim_index(self, *, root_velocity, env_ids) -> None:
         self.calls.append(("vel", tuple(env_ids)))
 
-    def write_joint_state_to_sim_index(self, *, position, velocity, joint_ids, env_ids) -> None:
-        self.calls.append(("joint", tuple(env_ids)))
+    def write_joint_position_to_sim_index(self, *, position, joint_ids, env_ids) -> None:
+        self.calls.append(("joint_pos", tuple(env_ids)))
+
+    def write_joint_velocity_to_sim_index(self, *, velocity, joint_ids, env_ids) -> None:
+        self.calls.append(("joint_vel", tuple(env_ids)))
 
 
 class _GripperEnv:

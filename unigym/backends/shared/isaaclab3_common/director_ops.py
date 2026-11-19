@@ -144,7 +144,7 @@ class IsaacLabDirectorOps(_OpsBase):
         from unigym.director import _fail
 
         asset = self.resolve_obj(name)
-        if joints and not hasattr(asset, "write_joint_state_to_sim_index"):
+        if joints and not hasattr(asset, "write_joint_position_to_sim_index"):
             raise _fail(f"prop {name!r} is rigid -- no joints to write")
         pose = torch.zeros(1, 7, device=self.env.device)
         cur_pos = _torch_view(asset.data.root_pos_w)[0]
@@ -186,9 +186,8 @@ class IsaacLabDirectorOps(_OpsBase):
             vel_t = torch.zeros(1, len(ids), device=self.env.device)
             for jname, val in joints.items():
                 pos_t[0, ids.index(jidx[jname])] = float(val)
-            asset.write_joint_state_to_sim_index(
-                position=pos_t, velocity=vel_t, joint_ids=ids, env_ids=[0]
-            )
+            asset.write_joint_position_to_sim_index(position=pos_t, joint_ids=ids, env_ids=[0])
+            asset.write_joint_velocity_to_sim_index(velocity=vel_t, joint_ids=ids, env_ids=[0])
         return {
             "teleported": name,
             "pos": pos,

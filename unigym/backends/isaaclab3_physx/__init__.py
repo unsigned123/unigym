@@ -1,10 +1,10 @@
-"""IsaacLab 3.x PhysX backend identity (P1 skeleton).
+"""IsaacLab 3.x PhysX backend identity.
 
 The two IsaacLab 3 identities share one implementation package
 (``unigym/backends/shared/isaaclab3_common``) but own separate trait tables,
-engine profiles and runtime probes.  This package is the PhysX identity; it
-currently declares no capability, so construction fails fast.  The
-implementation lands in P1.
+engine profiles and runtime probes.  This package is the PhysX identity; the
+env class lives in :mod:`unigym.backends.isaaclab3_physx.env` and is imported
+lazily so importing this package stays engine-free.
 """
 
 from __future__ import annotations
@@ -18,14 +18,4 @@ BACKEND_INFO = BackendInfo(
     asset_formats=("usd", "urdf"),
 )
 
-__all__ = ["BACKEND_INFO", "Isaaclab3PhysxEnv"]
-
-
-class Isaaclab3PhysxEnv:
-    """P1 skeleton: construction fails fast (no capability implemented)."""
-
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "backend 'isaaclab3_physx' is a P1 skeleton — no capability is "
-            "implemented yet; the shared backend lands in P1"
-        )
+__all__ = ["BACKEND_INFO"]

@@ -157,10 +157,13 @@ class PropArticulation(PropHandler):
         inits = torch.tensor(
             [self.joints[n]["init"] for n in self.joints], device=env.device, dtype=world_pos.dtype
         ).expand(n, -1)
-        self._asset.write_joint_state_to_sim_index(
-            position=inits,
+        joint_ids = [self._jidx[n] for n in self.joints]
+        self._asset.write_joint_position_to_sim_index(
+            position=inits, joint_ids=joint_ids, env_ids=env_ids
+        )
+        self._asset.write_joint_velocity_to_sim_index(
             velocity=torch.zeros(n, len(self.joints), device=env.device, dtype=world_pos.dtype),
-            joint_ids=[self._jidx[n] for n in self.joints],
+            joint_ids=joint_ids,
             env_ids=env_ids,
         )
         # latch: re-lock (upstream semantics -- reset always re-locks and the

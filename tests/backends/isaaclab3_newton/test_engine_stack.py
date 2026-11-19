@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+from unigym.backends.isaaclab3_newton.env import Isaaclab3NewtonEnv
+from unigym.backends.isaaclab3_newton.profile import NEWTON_PROFILE
+
+
+def test_env_shell_wiring() -> None:
+    assert Isaaclab3NewtonEnv.backend_name == "isaaclab3_newton"
+    assert Isaaclab3NewtonEnv.engine_profile is NEWTON_PROFILE
+    assert Isaaclab3NewtonEnv.asset_formats == ("usd", "urdf")
+
 
 def test_registry_selects_the_newton_identity() -> None:
     from unigym.backends import registry

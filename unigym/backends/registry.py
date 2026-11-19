@@ -798,15 +798,15 @@ def _isaaclab2_env() -> type:
 
 
 def _isaaclab3_physx_env() -> type:
-    """Load the IsaacLab 3.x PhysX env class lazily (P1 skeleton)."""
-    from unigym.backends.isaaclab3_physx import Isaaclab3PhysxEnv
+    """Load the IsaacLab 3.x PhysX env class lazily."""
+    from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
 
     return Isaaclab3PhysxEnv
 
 
 def _isaaclab3_newton_env() -> type:
-    """Load the IsaacLab 3.x Newton env class lazily (P1 skeleton)."""
-    from unigym.backends.isaaclab3_newton import Isaaclab3NewtonEnv
+    """Load the IsaacLab 3.x Newton env class lazily."""
+    from unigym.backends.isaaclab3_newton.env import Isaaclab3NewtonEnv
 
     return Isaaclab3NewtonEnv
 

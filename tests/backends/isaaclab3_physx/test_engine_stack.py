@@ -7,6 +7,14 @@ import argparse
 import pytest
 
 from unigym.backends import registry
+from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
+from unigym.backends.isaaclab3_physx.profile import PHYSX_PROFILE
+
+
+def test_env_shell_wiring() -> None:
+    assert Isaaclab3PhysxEnv.backend_name == "isaaclab3_physx"
+    assert Isaaclab3PhysxEnv.engine_profile is PHYSX_PROFILE
+    assert Isaaclab3PhysxEnv.asset_formats == ("usd", "urdf")
 
 
 def test_registry_probes_isaaclab_3() -> None:

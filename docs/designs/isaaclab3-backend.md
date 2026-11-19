@@ -63,7 +63,11 @@ A/B code is copied and adapted into `shared/isaaclab3_common`:
    until the C-class DR events land, and `model.describe` is PhysX-first (the
    Newton view gap is a P1b-C item).
 3. **C/D env core** last: shared env base, articulation runtime, scene/model,
-   cameras, contacts, director, DR events, prop handlers, build faces.  These
+   cameras, contacts, director, DR events, prop handlers, build faces.  The
+   shared `env.py` is the engine-coupled base (it inherits `ManagerBasedEnv`);
+   backend `env.py` subclasses it and sets `backend_name` / `engine_profile` /
+   `BACKEND_CAPABILITIES`.  Shared `env.py` is imported only by backend
+   `env.py`, never by a package `__init__`.  These
    modules are engine-coupled by nature: they may use module-level
    torch/isaaclab imports, but they are never imported by the shared or
    backend package `__init__` — backend `env_class` factories import them

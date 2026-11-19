@@ -59,8 +59,12 @@ class _PropAssetLike(Protocol):
         self, *, root_velocity: Tensor, env_ids=None
     ) -> object: ...
 
-    def write_joint_state_to_sim_index(
-        self, *, position: Tensor, velocity: Tensor, joint_ids=None, env_ids=None
+    def write_joint_position_to_sim_index(
+        self, *, position: Tensor, joint_ids=None, env_ids=None
+    ) -> object: ...
+
+    def write_joint_velocity_to_sim_index(
+        self, *, velocity: Tensor, joint_ids=None, env_ids=None
     ) -> object: ...
 
     def write_joint_stiffness_to_sim(
