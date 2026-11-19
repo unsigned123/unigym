@@ -9,12 +9,17 @@ import pytest
 from unigym.backends import registry
 from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
 from unigym.backends.isaaclab3_physx.profile import PHYSX_PROFILE
+from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS
 
 
 def test_env_shell_wiring() -> None:
     assert Isaaclab3PhysxEnv.backend_name == "isaaclab3_physx"
     assert Isaaclab3PhysxEnv.engine_profile is PHYSX_PROFILE
     assert Isaaclab3PhysxEnv.asset_formats == ("usd", "urdf")
+
+
+def test_backend_capabilities_are_a_subset_of_the_registry_traits() -> None:
+    assert Isaaclab3PhysxEnv.BACKEND_CAPABILITIES.traits() <= ISAACLAB3_PHYSX_TRAITS
 
 
 def test_registry_probes_isaaclab_3() -> None:
@@ -53,3 +58,10 @@ def test_launcher_args_drop_headless_and_enable_cameras() -> None:
     args = parser.parse_args([])
     assert not hasattr(args, "headless")
     assert not hasattr(args, "enable_cameras")
+
+
+def test_build_events_is_wired() -> None:
+    """The shared DR builder is reachable from the backend build face."""
+    from unigym.backends.shared.isaaclab3_common.build import build_events
+
+    assert build_events([]) == {}

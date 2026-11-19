@@ -107,7 +107,7 @@ def randomize_rigid_body_com_abs(env, env_ids, com_range: dict, asset_cfg):
 
     PhysX-only as written: ``root_physx_view`` is the PhysX physics-view
     handle.  The Newton backend has no PhysX view -- its CoM write goes
-    through the ``set_coms_index`` face, which is the P1b-C2 item.  A Newton
+    through the ``set_coms_index`` face, which is a P2 item.  A Newton
     asset therefore raises a clear ``NotImplementedError`` here instead of an
     ``AttributeError``; the import stays engine-free either way.
     """
@@ -117,11 +117,11 @@ def randomize_rigid_body_com_abs(env, env_ids, com_range: dict, asset_cfg):
     view = getattr(asset, "root_physx_view", None)
     if view is None:
         # Newton path: no root_physx_view; CoM writes use set_coms_index
-        # (P1b-C2, driven by EngineProfile.set_body_com).
+        # (P2, driven by EngineProfile.set_body_com).
         raise NotImplementedError(
             "randomize_rigid_body_com_abs: this asset exposes no "
             "root_physx_view (Newton backend); Newton CoM randomization via "
-            "set_coms_index is P1b-C2"
+            "set_coms_index is a P2 item"
         )
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device="cpu")
@@ -167,7 +167,7 @@ def build_events_cfg(events_list: list, backend: str | None = None) -> dict:
         events_list: the yaml ``randomization.events`` list.
         backend: optional canonical backend identity, forwarded by the
             backend package for call-site symmetry.  The builder itself is
-            engine-neutral; Newton's CoM adapter is a P1b-C2 item, so the
+            engine-neutral; Newton's CoM adapter is a P2 item, so the
             value is currently informational only.
     """
     import types

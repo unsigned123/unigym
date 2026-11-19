@@ -69,12 +69,12 @@ def test_native_handle_private_attributes_stay_attributes() -> None:
 
 
 def test_native_handle_is_a_declared_trait_on_the_three_backends() -> None:
-    """MuJoCo/Mjwarp/IsaacLab2 declare the trait; the IsaacLab 3 stubs do not."""
+    """Every registered backend declares NATIVE_HANDLE after the C2 trait pass."""
     assert Trait.NATIVE_HANDLE in MUJOCO_TRAITS
     assert Trait.NATIVE_HANDLE in MJWARP_TRAITS
     assert Trait.NATIVE_HANDLE in ISAACLAB2_TRAITS
-    assert Trait.NATIVE_HANDLE not in ISAACLAB3_PHYSX_TRAITS
-    assert Trait.NATIVE_HANDLE not in ISAACLAB3_NEWTON_TRAITS
+    assert Trait.NATIVE_HANDLE in ISAACLAB3_PHYSX_TRAITS
+    assert Trait.NATIVE_HANDLE in ISAACLAB3_NEWTON_TRAITS
 
     assert Trait.NATIVE_HANDLE in BackendCapabilities(native_handle=True).traits()
     assert Trait.NATIVE_HANDLE not in BackendCapabilities().traits()
@@ -163,16 +163,16 @@ def test_run_native_rejects_the_removed_isaaclab_aliases() -> None:
     assert canonical_env.calls == ["isaaclab2"]
 
 
-def test_run_native_isaaclab3_physx_fails_with_the_trait_name(monkeypatch) -> None:
-    """The IsaacLab 3 PhysX stub declares no NATIVE_HANDLE; both facades teach the trait."""
+def test_run_native_delegates_for_isaaclab3_physx(monkeypatch) -> None:
+    """The C2 trait pass lights NATIVE_HANDLE up for isaaclab3_physx."""
     run = Run(_cfg())
-    instance = _instance("isaaclab3_physx", _NativeEnv(_handle()))
+    env = _NativeEnv(_handle())
+    instance = _instance("isaaclab3_physx", env)
     monkeypatch.setattr(run, "build", lambda inspect=False: instance)
 
-    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*NATIVE_HANDLE"):
-        instance.native("isaaclab3_physx")
-    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*NATIVE_HANDLE"):
-        run.native("isaaclab3_physx")
+    assert instance.native("isaaclab3_physx") is env.handle
+    assert run.native("isaaclab3_physx") is env.handle
+    assert env.calls == ["isaaclab3_physx", "isaaclab3_physx"]
 
 
 _CORE_ROOT = Path(__file__).resolve().parents[2] / "unigym"

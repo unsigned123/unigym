@@ -12,7 +12,16 @@ from unigym.env.backends.base import BackendCapabilities
 
 from .profile import NEWTON_PROFILE
 
-__all__ = ["Isaaclab3NewtonEnv"]
+__all__ = ["BACKEND_CAPABILITIES", "Isaaclab3NewtonEnv"]
+
+_CAPABILITIES = BackendCapabilities(
+    multi_env=True,
+    init_pose=True,
+    state_write=True,
+    native_handle=True,
+)
+
+BACKEND_CAPABILITIES = _CAPABILITIES
 
 
 class Isaaclab3NewtonEnv(Isaaclab3EnvBase):
@@ -20,4 +29,4 @@ class Isaaclab3NewtonEnv(Isaaclab3EnvBase):
 
     backend_name = "isaaclab3_newton"
     engine_profile = NEWTON_PROFILE
-    BACKEND_CAPABILITIES = BackendCapabilities()
+    BACKEND_CAPABILITIES = _CAPABILITIES

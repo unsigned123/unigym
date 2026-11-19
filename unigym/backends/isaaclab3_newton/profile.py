@@ -27,8 +27,8 @@ def _renderer_cfg():
 
 
 def _set_body_com(asset: object, com: object, env_ids: object) -> None:
-    """Write body CoM positions for the DR event (lands in C2)."""
-    raise NotImplementedError("IsaacLab 3 Newton set_body_com lands in C2 (set_coms_index)")
+    """Write body CoM positions for the DR event (a P2 item)."""
+    raise NotImplementedError("IsaacLab 3 Newton set_body_com is a P2 item (set_coms_index)")
 
 
 NEWTON_PROFILE = EngineProfile(

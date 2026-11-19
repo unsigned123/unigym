@@ -100,14 +100,12 @@ def build_terrain(cfg: dict, num_envs: int, env_spacing: float, spec_terrain=Non
 def build_events(section):
     """Build the yaml ``randomization.events`` config.
 
-    Teaching stub: the shared DR events land in P1b-C, so this backend does
-    not yet accept a ``randomization.events`` section.  Explicitly refuse
-    instead of silently returning an empty config.
+    Forwards the declared event list to the shared DR builder, which returns
+    the ``{term_name: EventTermCfg}`` mapping the shared env consumes.
     """
-    raise NotImplementedError(
-        "IsaacLab 3 shared DR events land in P1b-C; "
-        "randomization.events is not available on this backend yet"
-    )
+    from .dr_events import build_events_cfg
+
+    return build_events_cfg(section)
 
 
 __all__ = [

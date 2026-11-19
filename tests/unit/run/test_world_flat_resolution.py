@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from unigym.actuators.ir import ActuationGroup
-from unigym.errors import ConfigError
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
@@ -82,11 +79,12 @@ def test_world_flat_resolves_to_a_native_flat_terrain_preset() -> None:
         run.close()
 
 
-def test_world_flat_fails_loudly_on_a_backend_without_any_ground() -> None:
-    """The IsaacLab 3 PhysX stub consumes neither world_base nor terrain: no silence."""
+def test_world_flat_resolves_to_the_isaaclab3_terrain_preset() -> None:
+    """The C2 trait pass gives the IsaacLab 3 identities a flat terrain preset."""
     run = _spec("isaaclab3_physx")
     try:
-        with pytest.raises(ConfigError, match="isaaclab3_physx.*no flat-ground resolution"):
-            run.spec
+        cfg = run.spec.cfg
+        assert "world_base" not in cfg
+        assert cfg["terrain"] == {"name": "flat", "params": {}}
     finally:
         run.close()

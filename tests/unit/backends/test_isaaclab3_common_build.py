@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import pytest
 
 from unigym.backends.shared.isaaclab3_common.build import (
-    build_events,
     build_terrain,
     env_kwargs,
 )
@@ -146,9 +145,3 @@ def test_build_terrain_forwards_yaml_section_to_shared_builder(monkeypatch):
 
     assert result == {"sentinel": True}
     assert calls == {"section": section, "num_envs": 7, "env_spacing": 4.5}
-
-
-def test_build_events_is_a_p1bc_teaching_stub():
-    """DR events are not wired yet and say so (P1b-C)."""
-    with pytest.raises(NotImplementedError, match="P1b-C"):
-        build_events({"randomization": {"events": []}})

@@ -82,12 +82,12 @@ def test_normalize_state_quat_normalizes_and_rejects_zero_norm() -> None:
 
 
 def test_state_write_is_an_optional_trait() -> None:
-    """MuJoCo/IsaacLab2/Mjwarp declare STATE_WRITE; the IsaacLab 3 stubs do not."""
+    """Every registered backend declares STATE_WRITE after the C2 trait pass."""
     assert Trait.STATE_WRITE in MUJOCO_TRAITS
     assert Trait.STATE_WRITE in ISAACLAB2_TRAITS
     assert Trait.STATE_WRITE in MJWARP_TRAITS
-    assert Trait.STATE_WRITE not in ISAACLAB3_PHYSX_TRAITS
-    assert Trait.STATE_WRITE not in ISAACLAB3_NEWTON_TRAITS
+    assert Trait.STATE_WRITE in ISAACLAB3_PHYSX_TRAITS
+    assert Trait.STATE_WRITE in ISAACLAB3_NEWTON_TRAITS
 
     assert Trait.STATE_WRITE in BackendCapabilities(state_write=True).traits()
     assert Trait.STATE_WRITE not in BackendCapabilities().traits()
@@ -164,16 +164,17 @@ def test_run_delegates_state_writes_and_never_settles_implicitly(monkeypatch) ->
     assert env.calls[1][1] == [0, 1]
 
 
-def test_run_state_write_raises_for_an_unsupported_backend(monkeypatch) -> None:
-    """A backend without the STATE_WRITE trait gets a clear error."""
+def test_run_state_write_delegates_for_isaaclab3_physx(monkeypatch) -> None:
+    """The C2 trait pass lights STATE_WRITE up for isaaclab3_physx."""
     cfg = _cfg()
     cfg["env"] = {"backend": "isaaclab3_physx", "num_envs": 1}
     cfg.pop("world_base")
     run = Run(cfg)
-    monkeypatch.setattr(run, "build", lambda inspect=False: SimpleNamespace(env=object()))
+    env = _StateWriteRecorder()
+    monkeypatch.setattr(run, "build", lambda inspect=False: SimpleNamespace(env=env))
 
-    with pytest.raises(NotImplementedError, match=r"isaaclab3_physx.*STATE_WRITE"):
-        run.settle(None)
+    assert run.settle(None).tolist() == [0]
+    assert env.calls[0][0] == "settle"
 
 
 def test_run_state_write_delegates_for_mjwarp(monkeypatch) -> None:

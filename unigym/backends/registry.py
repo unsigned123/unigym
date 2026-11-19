@@ -737,12 +737,30 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
     }
 )
 
-# IsaacLab 3 P1 skeletons: registered so selection/probing can name the two
-# backend identities; they implement nothing yet (construction fails fast).
-# Traits fill in as capabilities land.  PhysX and Newton are separate
-# identities because their runtime stacks and capability sets differ.
-ISAACLAB3_PHYSX_TRAITS = frozenset()
-ISAACLAB3_NEWTON_TRAITS = frozenset()
+# IsaacLab 3 identities: PhysX and Newton share one implementation package
+# but own separate runtime stacks and capability sets.  C2-1 lights up the
+# verified shared core conservatively; camera/contact/prop/director traits
+# stay undeclared until their backend tests land (P2/C3).
+_IL3_CORE = _CORE | frozenset(
+    {
+        Trait.MULTI_ENV,  # native num_envs=N scene cloning
+        Trait.ENV_LAYOUT_TILED,  # env_spacing clone grid
+        Trait.SCENE_COMPOSE,  # neutral Scene -> composed asset scene
+        Trait.TERRAIN,
+        Trait.INIT_POSE,
+        Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
+        Trait.MODEL_USD_PRIMS,  # USD prim hierarchy is the isaaclab model face
+        Trait.NATIVE_HANDLE,  # external-pack-only identity handle
+    }
+)
+
+ISAACLAB3_PHYSX_TRAITS = _IL3_CORE | frozenset(
+    {
+        Trait.EVENTS_DR,  # PhysX profile owns the CoM DR write
+    }
+)
+
+ISAACLAB3_NEWTON_TRAITS = _IL3_CORE
 
 # mujoco's model-global writes are one-MjModel only (no per-env
 # face); they stay declared traits but are unavailable at N>1.  mjwarp
@@ -1028,23 +1046,44 @@ def _isaaclab2_robot_realizer() -> object:
     return build_robot_realization
 
 
-def _isaaclab3_stub_env_kwargs(backend: str) -> object:
-    """Return the P1 skeleton ``env_kwargs`` builder (raises on construction)."""
+def _isaaclab3_faces(backend: str) -> object:
+    """Import one IsaacLab 3 backend's lazy registry-face module.
 
-    def env_kwargs(*_args: Any, **_kwargs: Any) -> object:
-        raise NotImplementedError(
-            f"backend {backend!r}: P1 skeleton — shared backend not implemented yet"
-        )
-
-    return env_kwargs
-
-
-def _isaaclab3_physx_env_kwargs() -> object:
-    return _isaaclab3_stub_env_kwargs("isaaclab3_physx")
+    Called only from inside a face factory, so the engine-owned module (and
+    any engine import it triggers) never loads when this stdlib-only module
+    is imported.
+    """
+    return importlib.import_module(f"unigym.backends.{backend}.registry_faces")
 
 
-def _isaaclab3_newton_env_kwargs() -> object:
-    return _isaaclab3_stub_env_kwargs("isaaclab3_newton")
+def _isaaclab3_face(backend: str, face: str) -> Callable[[], object]:
+    """Return a registry factory that resolves one face from *backend*.
+
+    Args:
+        backend: the canonical IsaacLab 3 identity
+            (``isaaclab3_physx`` / ``isaaclab3_newton``).
+        face: the zero-argument factory name in that backend's
+            ``registry_faces`` module.
+    """
+
+    def factory() -> object:
+        return getattr(_isaaclab3_faces(backend), face)()
+
+    return factory
+
+
+def _isaaclab3_seam(backend: str, name: str) -> Callable[[], object]:
+    """Return a registry factory for an exported builder/launcher object.
+
+    ``env_kwargs`` / ``build_terrain`` / ``build_events`` / ``kit_launcher``
+    are the callables themselves (not zero-argument factories), so the
+    registry factory resolves the module attribute without calling it.
+    """
+
+    def factory() -> object:
+        return getattr(_isaaclab3_faces(backend), name)
+
+    return factory
 
 
 _STATIC_INFO: dict[str, BackendInfo] = {
@@ -1142,16 +1181,46 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         (3, 0),
         ISAACLAB3_PHYSX_TRAITS,
         asset_formats=("usd", "urdf"),
+        scene_engine=_isaaclab3_face("isaaclab3_physx", "scene_engine"),
         env_class=_isaaclab3_physx_env,
-        env_kwargs=_isaaclab3_physx_env_kwargs,
+        model_provider=_isaaclab3_face("isaaclab3_physx", "model_provider"),
+        prop_backend=_isaaclab3_face("isaaclab3_physx", "prop_backend"),
+        camera_backend=_isaaclab3_face("isaaclab3_physx", "camera_backend"),
+        director_ops=_isaaclab3_face("isaaclab3_physx", "director_ops"),
+        contact_backend=_isaaclab3_face("isaaclab3_physx", "contact_backend"),
+        gripper_backend=_isaaclab3_face("isaaclab3_physx", "gripper_backend"),
+        env_kwargs=_isaaclab3_seam("isaaclab3_physx", "env_kwargs"),
+        build_terrain=_isaaclab3_seam("isaaclab3_physx", "build_terrain"),
+        build_events=_isaaclab3_seam("isaaclab3_physx", "build_events"),
+        scene_ops=_isaaclab3_face("isaaclab3_physx", "scene_ops"),
+        kit_launcher=_isaaclab3_seam("isaaclab3_physx", "kit_launcher"),
+        robot_realizer=_isaaclab3_face("isaaclab3_physx", "robot_realizer"),
+        default_lighting={"dome_intensity": 600.0},
+        camera_enable_required=True,
+        scene_provider_consumer=True,
     ),
     "isaaclab3_newton": BackendInfo(
         "isaaclab3_newton",
         (3, 0),
         ISAACLAB3_NEWTON_TRAITS,
         asset_formats=("usd", "urdf"),
+        scene_engine=_isaaclab3_face("isaaclab3_newton", "scene_engine"),
         env_class=_isaaclab3_newton_env,
-        env_kwargs=_isaaclab3_newton_env_kwargs,
+        model_provider=_isaaclab3_face("isaaclab3_newton", "model_provider"),
+        prop_backend=_isaaclab3_face("isaaclab3_newton", "prop_backend"),
+        camera_backend=_isaaclab3_face("isaaclab3_newton", "camera_backend"),
+        director_ops=_isaaclab3_face("isaaclab3_newton", "director_ops"),
+        contact_backend=_isaaclab3_face("isaaclab3_newton", "contact_backend"),
+        gripper_backend=_isaaclab3_face("isaaclab3_newton", "gripper_backend"),
+        env_kwargs=_isaaclab3_seam("isaaclab3_newton", "env_kwargs"),
+        build_terrain=_isaaclab3_seam("isaaclab3_newton", "build_terrain"),
+        build_events=_isaaclab3_seam("isaaclab3_newton", "build_events"),
+        scene_ops=_isaaclab3_face("isaaclab3_newton", "scene_ops"),
+        kit_launcher=_isaaclab3_seam("isaaclab3_newton", "kit_launcher"),
+        robot_realizer=_isaaclab3_face("isaaclab3_newton", "robot_realizer"),
+        default_lighting={"dome_intensity": 600.0},
+        camera_enable_required=False,
+        scene_provider_consumer=True,
     ),
 }
 

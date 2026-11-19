@@ -157,9 +157,9 @@ def test_validate_backend_options_rejects_foreign_alias_option_namespaces(
     "backend",
     ["isaaclab3_physx", "isaaclab3_newton"],
 )
-def test_isaaclab3_stub_env_kwargs_factory_raises(backend: str) -> None:
+def test_isaaclab3_env_kwargs_factory_is_wired(backend: str) -> None:
+    from unigym.backends.shared.isaaclab3_common.build import env_kwargs
+
     info = backend_info(backend)
     assert info.env_kwargs is not None
-    builder = info.env_kwargs()
-    with pytest.raises(NotImplementedError, match=r"P1 skeleton"):
-        builder()
+    assert info.env_kwargs() is env_kwargs
