@@ -1,4 +1,4 @@
-"""Benchmark episode contract v2: schema, neutrality and isolation checks."""
+"""Benchmark episode contract: schema, neutrality and isolation checks."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ from unigym.runner.sinks import benchmark as benchmark_sink
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_report_and_results_are_v2():
-    assert benchmark_sink.REPORT_SCHEMA == "benchmark_report.v2"
-    assert benchmark_sink.RESULTS_SCHEMA == "results.v2"
+def test_report_and_results_have_stable_schemas():
+    assert benchmark_sink.REPORT_SCHEMA == "benchmark_report"
+    assert benchmark_sink.RESULTS_SCHEMA == "results"
 
 
-def test_episode_data_carries_v2_fields():
+def test_episode_data_carries_contract_fields():
     fields = EpisodeData.__dataclass_fields__
     for name in (
         "policy_dt",

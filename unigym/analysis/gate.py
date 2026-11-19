@@ -34,9 +34,9 @@ if TYPE_CHECKING:
 RESULTS_JSON = "results.json"
 METRICS_NPZ = "metrics.npz"
 
-#: Accepted engine result schemas (v2 = benchmark episode contract v2; v1
-#: stays readable, its episode docs carry the same env/verdict/gate rows).
-RESULTS_SCHEMAS = ("results.v1", "results.v2")
+#: Accepted engine result schemas (current benchmark schema; the legacy
+#: results.v1 stays readable and carries the same env/verdict/gate rows).
+RESULTS_SCHEMAS = ("results.v1", "results")
 
 # leaf-label vocabulary (formula comparators, benchmark_contract §Formula)
 _LABEL_OP = {"gte": ">=", "lte": "<=", "gt": ">", "lt": "<", "eq": "=="}

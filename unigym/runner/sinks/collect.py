@@ -288,7 +288,7 @@ class CollectSink:
             rec[_record_key(k)] = v
         rec["obs"] = obs_collect
         rec["action_raw"] = raw
-        # canonical EPISODE-LOCAL timeline columns (benchmark v2): the first
+        # canonical EPISODE-LOCAL timeline columns (benchmark contract): the first
         # post-step frame of each episode is tick 1 at time policy_dt -- never
         # the global run step, duration_s, or arange*dt starting at 0.
         step_index = bundle.get("step_index")

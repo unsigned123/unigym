@@ -1,10 +1,10 @@
-# Benchmark contract v2
+# Benchmark contract
 
 - Status: active
 - Core base: `52b6bad`
-- Schema: `benchmark_report.v2` / `results.v2`
+- Schema: `benchmark_report` / `results`
 
-Benchmark report v2 is a deliberate break.  Core owns one episode contract;
+Benchmark report is a deliberate break.  Core owns one episode contract;
 pack/task code never re-derives timeline, deadlines or termination facts.
 
 ## Timeline
@@ -61,7 +61,7 @@ and includes it in the report.
 
 ```json
 {
-  "schema": "benchmark_report.v2",
+  "schema": "benchmark_report",
   "meta": {"run": {"backend": "...", "device": "...", "num_envs": 8,
                    "seed": 0, "policy_dt": 0.02, "sim_dt": 0.005,
                    "reset_seed": 2, "world_id": "...",
@@ -74,6 +74,6 @@ and includes it in the report.
 }
 ```
 
-`results.json` (`results.v2`) carries the same `run` identity and the
+`results.json` (schema `results`) carries the same `run` identity and the
 per-episode termination/extensions document.  Extension payloads are
 preserved per episode; core never invents or merges schemas.

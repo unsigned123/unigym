@@ -1,4 +1,4 @@
-"""RunIdentity + benchmark report v2 (identity, counts, extensions)."""
+"""RunIdentity + benchmark report (identity, counts, extensions)."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def _step_bundle():
     }
 
 
-def test_report_v2_has_run_identity_counts_and_extensions(tmp_path):
+def test_report_has_run_identity_counts_and_extensions(tmp_path):
     sink = BenchmarkSink(
         tasks=[_DummyTask(params={}, meta={})],
         meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7, "backend": "mujoco"},
@@ -185,7 +185,7 @@ def test_report_v2_has_run_identity_counts_and_extensions(tmp_path):
     sink.on_episode_end(torch.tensor([0]), end)
     report = sink.on_run_end()
 
-    assert report["schema"] == "benchmark_report.v2"
+    assert report["schema"] == "benchmark_report"
     run = report["meta"]["run"]
     assert run["backend"] == "mujoco"
     assert run["reset_seed"] == 2
@@ -202,11 +202,11 @@ def test_report_v2_has_run_identity_counts_and_extensions(tmp_path):
     assert {"task.success", "env.fall", "runtime.task_deadline"} <= codes
 
     on_disk = json.loads((tmp_path / "benchmark_report.json").read_text())
-    assert on_disk["schema"] == "benchmark_report.v2"
+    assert on_disk["schema"] == "benchmark_report"
     assert on_disk["meta"]["run"]["world_id"] == "flat"
 
     results = json.loads((tmp_path / "results.json").read_text())
-    assert results["schema"] == "results.v2"
+    assert results["schema"] == "results"
     assert results["run"]["backend"] == "mujoco"
     assert results["episodes"][0]["termination"]["primary"]["outcome"] == "success"
     assert {"env", "verdict", "gate"} <= set(results["episodes"][0])

@@ -698,7 +698,7 @@ class MjwarpEnv(WarpBatchMixin):
         # right after apply() (shared stream -- determinism red line).
         # See unigym/backends/shared/mjfamily/props/reset_face.py.
         self._initializer = wire_reset_face(self, params, robot_profile)
-        # structured per-env reset outcomes (benchmark v2): the last
+        # structured per-env reset outcomes (benchmark contract): the last
         # ``initializer.apply_outcome()`` legality/sample record per env.
         self._last_reset_outcomes: dict[int, object] = {}
 
@@ -1132,7 +1132,7 @@ class MjwarpEnv(WarpBatchMixin):
         record: dict[str, object] = dict(self.obs.record())
         record["time_in_episode"] = self._time_in_episode.clone()
         record["episode_id"] = self._episode_id.clone()
-        # benchmark v2 contact force/active-body facts (read once per step
+        # benchmark contract contact force/active-body facts (read once per step
         # by the manager; published here as record columns).
         record.update(getattr(self, "_last_contact_facts", None) or {})
         return record
@@ -1309,7 +1309,7 @@ class MjwarpEnv(WarpBatchMixin):
 
     @property
     def last_reset_outcomes(self) -> dict[int, object]:
-        """Latest structured ``ResetOutcome`` per env (benchmark v2).
+        """Latest structured ``ResetOutcome`` per env (benchmark contract).
 
         Public read face for the runner; an env that was never reset through
         an initializer has no entry.

@@ -37,7 +37,7 @@ per-config ``render_groups: {visual: [g...], collision: [g...]}``
 override (env.params, camera-manager build arg) takes precedence when
 declared, for assets that DO follow a group convention.
 
-Render mechanics (flags v2, design §8.1): ``geom_group`` is a pure
+Render mechanics (flags, design §8.1): ``geom_group`` is a pure
 visualization field (physics never reads it), so the rig applies the
 classification ONCE at bind time -- visual-only geoms move PERMANENTLY
 into the dedicated visual group (:data:`VISUAL_GROUP`) and the shared

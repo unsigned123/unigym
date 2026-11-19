@@ -1506,7 +1506,7 @@ def _run_identity(
     seed: int,
     policy_dt: float,
 ) -> RunIdentity:
-    """Complete RunIdentity for benchmark reports (benchmark v2)."""
+    """Complete RunIdentity for benchmark reports (benchmark contract)."""
     env_cfg = _config_dict(cfg.get("env")) or {}
     sim_dt = _config_float(env_cfg.get("sim_dt", 0.005))
     articulations = []
@@ -1645,7 +1645,7 @@ def _build_sinks(
             pack_runtime,
         )
         run_identity = _run_identity(spec, cfg, env, num_envs, seed, policy_dt)
-        # the runner bundle carries the same identity (benchmark v2)
+        # the runner bundle carries the same identity (benchmark contract)
         env.run_identity = run_identity
         limits = _episode_limits(bench_cfg, policy_dt)
         env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
@@ -2087,7 +2087,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "language_interval_steps": built["lang_interval"],
         "filters": cfg.get("filters"),
         "filter_active": filter_active,
-        # contact force-fact provenance (benchmark v2): static owner/frame/
+        # contact force-fact provenance (benchmark contract): static owner/frame/
         # unit/bodies metadata lives in meta, never in per-step records.
         **(
             {"contacts": sensing["contact_manager"].metadata()}

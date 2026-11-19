@@ -292,7 +292,7 @@ class CameraManager:
         state (the ``render`` live key), the frame is re-rendered through
         the RenderSpec capture face with that state, so the recording
         shows what the live stream shows -- the policy obs cache stays
-        untouched (the render is a pure read under the v2 layout).
+        untouched (the render is a pure read under the current layout).
         """
         rspec = None
         rig = None

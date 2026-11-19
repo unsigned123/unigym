@@ -21,7 +21,7 @@ the world -- is the SHM segment:
 * command-slot req-ack (pause/resume/set_props/get_view/shutdown/set_camera/
   step/inspect/save_npz -- the daemon media gateway and the CLI perform
   every operation through this; plus the typed queries metrics/config/report)
-* registry v2 ({run_id, pid, shm, output_dir, log_path, start_ts,
+* run registry ({run_id, pid, shm, output_dir, log_path, start_ts,
   cameras[], ...}; the old-generation port/auth/webui_url/curl_base/
   tunnel_hint keys are retired -- a run has neither port nor token)
 
@@ -269,7 +269,7 @@ L_LEN, L_FMT = 152, 160
 L_STEP, L_TS = 168, 176  # publish-time policy step + monotonic
 L_DATA = 192
 
-# registry schema version (serve-registry v2 keys; see Bridge).
+# registry schema version (serve-registry keys; see Bridge).
 REGISTRY_SCHEMA = 2
 
 #: A control-plane response body: handler-defined, JSON-ish but not
@@ -891,7 +891,7 @@ class Bridge:
             from construction, SHM H_PAUSED=1).  Default False: the
             historical start-RUNNING behavior.
         log_path: the run's own log file (spawn builder knows it); carried
-            in registry v2 so the daemon view survives daemon restarts.
+            in run registry so the daemon view survives daemon restarts.
         config_doc: the EFFECTIVE run config (post CLI overrides).  Captured
             once into the ``config`` typed query (cmd 11) as a JSON-safe
             snapshot; oversize fails fast HERE (startup assert), not at
@@ -950,7 +950,7 @@ class Bridge:
         self.camera = camera or (names[0] if names else None)
         if camera is not None and names and camera not in names:
             raise BridgeError(f"camera {camera!r} not instantiated " f"(cameras: {names})")
-        # the run's obs catalog key list (carried in registry v2)
+        # the run's obs catalog key list (carried in run registry)
         self.observation_keys = sorted(observation_keys) if observation_keys is not None else []
         self.frame_capacity = int(frame_capacity)
         self.poll_interval = float(poll_interval)
@@ -1057,9 +1057,9 @@ class Bridge:
                     f"design §2)"
                 )
 
-        # ---- serve registry v2 (breaking schema change; design §2) ------------
+        # ---- serve registry (breaking schema change; design §2) ------------
         # {run_id, pid, shm, output_dir, log_path, start_ts, cameras[]} is
-        # the v2 core; config/camera/gpu/observation_keys ride along as the
+        # the core; config/camera/gpu/observation_keys ride along as the
         # daemon's display/preflight face.  port/auth/webui_url/curl_base/
         # tunnel_hint are RETIRED (the run has no port and no token).
         self._state_path = None

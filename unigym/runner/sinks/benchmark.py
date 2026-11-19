@@ -75,14 +75,14 @@ def _record_key(key: str) -> str:
     return key
 
 
-REPORT_SCHEMA = "benchmark_report.v2"
-RESULTS_SCHEMA = "results.v2"
+REPORT_SCHEMA = "benchmark_report"
+RESULTS_SCHEMA = "results"
 METRICS_NPZ = "metrics.npz"
 RESULTS_JSON = "results.json"
 
 
 def _verdict(success, ended_by_termination: bool) -> str:
-    """results.v2 verdict (analyze_contract §6): the task is the judge --
+    """Results verdict (analyze_contract §6): the task is the judge --
     success verdicts win over the observational termination flag."""
     if success is True:
         return "success"
@@ -146,7 +146,7 @@ class BenchmarkSink:
         self._metrics_pending: list[dict] = []  # bridge metrics feed
         self._director = director
         self.episode_directed: list[bool] = []  # parallel to episodes
-        # per-episode structured termination docs (report v2)
+        # per-episode structured termination docs (benchmark report)
         self._episode_terminations: list[dict] = []
         self._terminal_primary: list[Termination | None] = []
         # rewind marking (Round B B1): per-env rewind records for the OPEN
@@ -333,7 +333,7 @@ class BenchmarkSink:
                     self.results[task.name].append(result)
                     if primary is None:
                         primary = result
-                    # results.v2 episode doc (engine's own
+                    # results episode doc (engine's own
                     # verdicts -- analyze/probe render, never re-compute)
                     self.episode_docs.append(
                         {
@@ -455,7 +455,7 @@ class BenchmarkSink:
             "tasks": tasks_report,
             "episodes_total": self.n_episodes,
             "steps_total": self.steps_total,
-            # benchmark v2 terminal facts (per-episode extensions preserved
+            # benchmark contract terminal facts (per-episode extensions preserved
             # in ``episode_terminations``; no cross-namespace aggregation)
             "terminal_outcome_counts": outcome_counts(self._terminal_primary),
             "terminal_code_counts": code_counts(self._terminal_primary),
@@ -502,7 +502,7 @@ class BenchmarkSink:
     # results.json / metrics.npz (benchmark_contract §results)
     # ------------------------------------------------------------------ #
     def results_document(self) -> dict:
-        """The results.v2 document (engine verdicts; zero re-derivation)."""
+        """The results document (engine verdicts; zero re-derivation)."""
         episodes = []
         for doc in self.episode_docs:
             episodes.append({k: v for k, v in doc.items() if k != "frames"})

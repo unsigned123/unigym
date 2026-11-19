@@ -216,7 +216,7 @@ def worker_args(serve_camera: str | None, state_dir: str, log_path: Path | None)
 
     The old ``--serve``/``--serve_port``/``--serve_webui``/``--serve_token``
     spawn flags are gone: every run is a pure SHM worker, so only the registry directory,
-    the run's own log path (registry v2 carries it) and the publishing
+    the run's own log path (run registry carries it) and the publishing
     camera remain selectable at spawn time.
     """
     args = ["--serve_state_dir", state_dir]
@@ -329,7 +329,7 @@ def build_spawn(
         )
 
     # bg runs get their log up front so the SHM worker can carry the path
-    # into registry v2 (the daemon view survives daemon restarts).
+    # into run registry (the daemon view survives daemon restarts).
     # v068: log_dir resolves to <runtime_dir>/logs (explicit yaml wins).
     log_path = None
     if bg:

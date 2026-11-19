@@ -1,4 +1,4 @@
-"""Episode timeline / deadline / run identity helpers (benchmark v2).
+"""Episode timeline / deadline / run identity helpers (benchmark contract).
 
 Canonical integer tick axis shared by recorders, benchmark sinks and parity
 probes::

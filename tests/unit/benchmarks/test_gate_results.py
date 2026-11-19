@@ -1,4 +1,4 @@
-"""The analysis gate reads both results.v1 and benchmark-v2 results.v2."""
+"""The analysis gate reads both results.v1 and benchmark results."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _write(tmp_path, schema):
     return path
 
 
-@pytest.mark.parametrize("schema", ["results.v1", "results.v2"])
+@pytest.mark.parametrize("schema", ["results.v1", "results"])
 def test_gate_accepts_current_result_schemas(tmp_path, schema):
     _write(tmp_path, schema)
     doc = load_results(tmp_path)

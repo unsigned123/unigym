@@ -64,7 +64,7 @@ def _api_port() -> int:
 
 
 def _resolve_output_dir(pid: int) -> str | None:
-    """The run's REAL output dir from its serve-registry v2 file (design:
+    """The run's REAL output dir from its serve-registry file (design:
     registry, never a glob).  The spawn handle's value is a yaml-based
     PREDICTION -- a `-s run_name=...` override legally redirects the run.
     Registry files exist from worker mount until the clean-stop unlink,

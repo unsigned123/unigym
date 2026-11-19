@@ -46,7 +46,7 @@ def check_label(label: object) -> str | None:
 class RunSpec:
     """One run request (daemon /api/start body; explicit, json-able).
 
-    (registry v2 / run-slimming, design §2/§5): the serve family
+    (run registry / run-slimming, design §2/§5): the serve family
     of spawn knobs is GONE -- every run is a pure SHM worker (media and
     console terminate in the daemon media gateway).  ``serve_camera``
     only picks the publishing camera.

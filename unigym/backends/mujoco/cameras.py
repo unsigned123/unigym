@@ -207,7 +207,7 @@ class _MjRigBase:
         self._reclassify_groups()
 
     def _reclassify_groups(self) -> None:
-        """Load-time reclassification (flags v2, §8.1).
+        """Load-time reclassification (flags, §8.1).
 
         Visual-only geoms
         move PERMANENTLY into the reserved visual group; the render face

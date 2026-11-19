@@ -8,10 +8,10 @@ else passes through verbatim -- no cosmetic renames):
     obs                  -> obs/policy_frame   (the dataset policy frame)
     action_raw           -> action/raw
     action_target/<group> -> action/target/<group> (v3, EVERY NamedAction group)
-    action_target        -> action/target          (legacy v2 shard migration)
+    action_target        -> action/target          (legacy shard migration)
 
 Robot state keys are namespaced (``articulation/<name>/...`` in v3) and
-pass through verbatim, so importing a legacy v2 run still yields the same
+pass through verbatim, so importing a legacy run still yields the same
 trace segments as before.  Ticks are the GLOBAL step index across shards
 (episode resets included:
 shards are flat).  Truncation via ``max_ticks`` is recorded in
@@ -33,7 +33,7 @@ MAP = "collect_shard.v1"
 _KEY_RENAME = {
     "obs": "obs/policy_frame",
     "action_raw": "action/raw",
-    # historical anchors: v2 shards carry the single primary column
+    # historical anchors: legacy shards carry the single primary column
     "action_target": "action/target",
 }
 _ACTION_PREFIX = "action_target/"

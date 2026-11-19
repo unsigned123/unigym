@@ -84,7 +84,7 @@ class ContactManager:
         return [contact_key(s.name) for s in self.specs]
 
     def fact_keys(self) -> list[str]:
-        """Force/active-body fact keys served (benchmark v2)."""
+        """Force/active-body fact keys served (benchmark contract)."""
         return [key for s in self.specs for key in (s.force_key(), s.active_bodies_key())]
 
     def metadata(self) -> dict[str, dict]:

@@ -1,4 +1,4 @@
-"""Core-neutral episode termination facts (benchmark contract v2).
+"""Core-neutral episode termination facts (benchmark contract).
 
 ``Termination`` is a CORE fact object.  It deliberately knows nothing about
 ``Task`` or Gymnasium's ``terminated`` / ``truncated`` vocabulary -- the RL

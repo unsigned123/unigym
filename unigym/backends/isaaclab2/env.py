@@ -1029,7 +1029,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             for key, value in contacts.items():
                 if key in schema:
                     self.obs.set_contact(key[len("contact/") :], value)
-            # benchmark v2: force/active-body facts ride the record mapping
+            # benchmark contract: force/active-body facts ride the record mapping
             # (the one raw read above already produced them).
             self._last_contact_facts = {
                 key: value

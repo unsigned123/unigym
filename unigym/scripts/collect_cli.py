@@ -194,7 +194,7 @@ parser.add_argument(
     dest="run_log",
     type=str,
     default=None,
-    help="this run's log file (carried into serve registry " "v2 by the spawn builder)",
+    help="this run's log file (carried into the serve registry by the spawn builder)",
 )
 parser.add_argument(
     "--serve_pause",

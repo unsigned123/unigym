@@ -10,7 +10,7 @@ source).
                               spawn/job scheduling (report-only watch);
                               the auth tri-state lives here
     unigym/daemon/api.py      control API (127.0.0.1:8670, curl-friendly)
-    unigym/daemon/portal.py   webui portal v2 (8600: run selector/spawn/
+    unigym/daemon/portal.py   webui portal (8600: run selector/spawn/
                               terminate/live view; single browser source)
     unigym/daemon/media.py    media gateway: shared SHM frame readers +
                               MJPEG + console/info passthrough (liftable)

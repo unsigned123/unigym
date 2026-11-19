@@ -401,7 +401,7 @@ class SyncRunner:
         self._term_joint_limits = None
         if any(getattr(t, "requires_joint_limits", False) for t in term_group.terminations):
             self._term_joint_limits = _joint_limits_by_articulation(env)
-        # benchmark v2 episode facts: per-env reset sample/legality and the
+        # benchmark contract episode facts: per-env reset sample/legality and the
         # run identity (stamped on the env by the run build).
         # test doubles may carry no env surface at all; benchmark facts then
         # stay empty while the historical runner behavior is untouched.
@@ -499,7 +499,7 @@ class SyncRunner:
         self._record_reset_facts(all_ids.tolist())
 
     # ------------------------------------------------------------------ #
-    # benchmark v2 episode facts (reset / termination / timeline)
+    # benchmark contract episode facts (reset / termination / timeline)
     # ------------------------------------------------------------------ #
     def _record_reset_facts(self, env_ids) -> None:
         """Capture the post-reset/pre-policy-step sample + legality per env."""
@@ -672,7 +672,7 @@ class SyncRunner:
         if len(self.term_group) > 1:
             for k, m in self.term_group.check_detail(term_state).items():
                 term_metrics[f"term_{k}"] = float(m.float().mean())
-        # benchmark v2: structured per-env terminations for this tick
+        # benchmark contract: structured per-env terminations for this tick
         # (term-group reasons + the core engine horizon).  Core-neutral
         # outcome/source vocabulary; no Task/Gym language here.
         terminations = self._termination_facts(term_state, step.reset_env_ids)

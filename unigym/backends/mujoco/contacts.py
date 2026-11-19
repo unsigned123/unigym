@@ -441,9 +441,9 @@ class MujocoContactBackend:
                 if spec.frame == "body":
                     f_on_sensor = rotate_to_frame(f_on_sensor, d.xquat[sensor_ids[s_idx]])
                 # tangential relative velocity at the contact point (world)
-                v1 = self._body_point_velocity(mj=m, d=d, body=b1, point=pos, vel_buf=vel)
-                v2 = self._body_point_velocity(mj=m, d=d, body=b2, point=pos, vel_buf=vel)
-                v_rel = v2 - v1
+                body1_vel = self._body_point_velocity(mj=m, d=d, body=b1, point=pos, vel_buf=vel)
+                body2_vel = self._body_point_velocity(mj=m, d=d, body=b2, point=pos, vel_buf=vel)
+                v_rel = body2_vel - body1_vel
                 n = np.asarray(frame[0], dtype=np.float64)
                 v_t_vec = v_rel - float(v_rel @ n) * n
                 rec = {

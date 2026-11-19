@@ -251,7 +251,7 @@ def query_events(svc, run_id: str, tail: int = 50, kind: str | None = None) -> t
 
 
 def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) -> tuple[int, dict]:
-    """The run's own log file tail (registry v2 log_path; plain file read).
+    """The run's own log file tail (run registry log_path; plain file read).
 
     ``tail`` is in CHARACTERS (spawn_spec.log_tail semantics), clamped to
     1..200000 -- the run.html log pane polls this.
@@ -262,7 +262,7 @@ def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) -> tuple[int, dict
         return _err(
             f"no log path registered for run {run_id}",
             404,
-            hint="registry v2 carries log_path; runs spawned by " "older builds may lack it",
+            hint="run registry carries log_path; runs spawned by " "older builds may lack it",
         )
     tail = max(1, min(int(tail or DEFAULT_LOG_TAIL), 200000))
     try:

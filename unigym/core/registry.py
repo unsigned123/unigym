@@ -1,7 +1,7 @@
-"""core.registry -- the run instance view (registry v2).
+"""core.registry -- the run instance view (run registry).
 
 State lives in the instances --
-each run writes its own serve registry v2 (/tmp/unigym-serve-<id>.json,
+each run writes its own serve registry (/tmp/unigym-serve-<id>.json,
 unigym/runtime/bridge.py):
 
     {schema: 2, run_id, pid, shm, output_dir, log_path, start_ts,
@@ -35,7 +35,7 @@ from unigym.runtime import bridge as _bridge
 
 @dataclass
 class RunInfo:
-    """One run instance, merged view (registry v2)."""
+    """One run instance, merged view (run registry)."""
 
     run_id: str
     pid: int

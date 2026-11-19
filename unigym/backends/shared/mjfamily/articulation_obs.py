@@ -35,7 +35,7 @@ def refresh_obs_sources(env) -> None:
         for key, value in contacts.items():
             if key in schema:
                 registry.set_contact(key[len("contact/") :], value)
-        # benchmark v2: force/active-body facts are record columns, not
+        # benchmark contract: force/active-body facts are record columns, not
         # schema observations (the one raw read already produced them).
         env._last_contact_facts = {
             key: value
