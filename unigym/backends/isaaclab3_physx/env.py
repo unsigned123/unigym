@@ -21,6 +21,8 @@ _CAPABILITIES = BackendCapabilities(
     native_handle=True,
     events=True,
     contacts=True,
+    cameras=True,
+    recorder=True,
 )
 
 BACKEND_CAPABILITIES = _CAPABILITIES
