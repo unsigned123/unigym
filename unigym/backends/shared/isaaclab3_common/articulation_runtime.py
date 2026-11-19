@@ -1,0 +1,433 @@
+"""IsaacLab 3.x articulation/control runtime.
+
+Every engine iterates ``env.articulations`` and ``env.controls``.  This
+module owns the IsaacLab-side runtime tables: one scene field per
+articulation (``robot`` / ``robot_<name>``), one action term per control
+group, the per-articulation address/catalog tables, action routing, reset and
+the namespaced observation/termination records.
+
+There is no policy runtime type: a policy is a ``position_pd`` control plus
+an adapter.
+
+The module is engine-coupled (C/D class): it may use module-level ``torch``,
+but the ``isaaclab`` imports stay function-local so importing this module
+never loads the engine stack.  All simulator writes go through the IsaacLab 3
+``*_index`` variants; all data reads take the explicit ``.torch`` payload of a
+``ProxyArray``; the root quaternion is converted at the boundary (repo-internal
+``wxyz`` <-> IsaacLab 3 ``xyzw``).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+
+from unigym.backends.shared.isaaclab3_common.naming import (
+    articulation_prim_leaf,
+    articulation_scene_field,
+)
+from unigym.backends.shared.isaaclab3_common.robots import articulation_cfg
+from unigym.env.naming import ENV_REGEX_NS
+from unigym.runtime.actions import NamedAction
+from unigym.runtime.controllers import (
+    ArticulationRuntime,
+    ControlRuntime,
+    control_key,
+)
+from unigym.scenes.articulation import resolve_spawn_quat
+
+__all__ = [
+    "bind_articulations",
+    "configure_scene",
+    "reset_articulations",
+    "route_actions",
+    "sync_articulation_controls",
+    "validate_options",
+]
+
+_LABEL = "IsaacLab 3 backend"
+
+
+def _torch_view(value) -> torch.Tensor:
+    """Explicit ``.torch`` payload of an IsaacLab 3 ``ProxyArray`` (else *value*).
+
+    IsaacLab 3 data views are ``ProxyArray`` objects whose ``.shape`` is
+    warp-shaped and which must never be fed to ``torch`` implicitly.  Reading
+    ``.torch`` is the only sanctioned boundary.
+    """
+    payload = getattr(value, "torch", None)
+    if payload is None:
+        payload = value
+    assert isinstance(payload, torch.Tensor)
+    return payload
+
+
+def validate_options(
+    adapter,
+    *,
+    events_cfg,
+    recorder,
+    prop_manager,
+    camera_manager,
+    contact_manager,
+    director_cfg,
+    init_pose_cfg,
+) -> None:
+    """Reject the partition options this MVP does not implement.
+
+    Contact groups ARE supported with multiple articulations (each group
+    owns one articulation); the remaining options below stay rejected.
+    """
+    for option, value in (
+        ("prop_manager", prop_manager),
+        ("camera_manager", camera_manager),
+        ("director_cfg", director_cfg),
+        ("events_cfg", events_cfg),
+        ("init_pose", init_pose_cfg),
+    ):
+        if value is not None:
+            raise NotImplementedError(
+                f"{_LABEL}: {option} is not supported with multiple "
+                f"articulations (MVP: one env, external/manual driver)"
+            )
+    del recorder
+
+
+def _initial_state(init, pos, rot):
+    """Clone an articulation ``InitialStateCfg`` with a new root pose."""
+    joint_pos = dict(getattr(init, "joint_pos", None) or {})
+    joint_vel = dict(getattr(init, "joint_vel", None) or {})
+    return type(init)(
+        pos=tuple(float(v) for v in pos),
+        rot=tuple(float(v) for v in rot),
+        joint_pos=joint_pos,
+        joint_vel=joint_vel,
+    )
+
+
+def configure_scene(cfg, controls, articulations, profiles, robot_realizations) -> dict:
+    """Add per-articulation scene fields + one action term per control."""
+    if len(articulations) < 2:
+        raise ValueError(
+            f"{_LABEL}: partitioned scene needs >= 2 articulations, got {len(articulations)}"
+        )
+    controls = tuple(controls or ())
+    fields: dict[str, str] = {}
+    for index, spec in enumerate(articulations):
+        if profiles.get(spec.name) is None:
+            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no profile")
+        asset_cfg = articulation_cfg(robot_realizations, spec.name)
+        field = articulation_scene_field(spec.name, index)
+        leaf = articulation_prim_leaf(spec.name, index)
+        prim_path = f"{ENV_REGEX_NS}/{leaf}"
+        init = asset_cfg.init_state
+        base_pos = tuple(float(v) for v in (getattr(init, "pos", None) or (0.0, 0.0, 0.0)))
+        spawn = dict(getattr(spec, "spawn", {}) or {})
+        spawn_pos = spawn.get("pos")
+        if spawn_pos is not None:
+            pos = tuple(float(v) for v in spawn_pos)
+            if len(pos) != 3:
+                raise ValueError(
+                    f"{_LABEL}: articulation {spec.name!r} spawn.pos "
+                    f"must be a 3-vector, got {spawn_pos!r}"
+                )
+        else:
+            # spawn is the sole robot-root authority: absent -> the
+            # realizer/cfg init state, never an invented index offset.
+            pos = base_pos
+        rot = tuple(getattr(init, "rot", (1.0, 0.0, 0.0, 0.0)))
+        if "yaw" in spawn or "quat_wxyz" in spawn:
+            # repo-internal spawn quat is wxyz; the IsaacLab 3 cfg wants xyzw.
+            from unigym.core.quat import to_isaaclab_cfg
+
+            rot = tuple(float(v) for v in to_isaaclab_cfg(resolve_spawn_quat(spawn)))
+        new_cfg = asset_cfg.replace(
+            prim_path=prim_path,
+            init_state=_initial_state(init, pos, rot),
+        )
+        setattr(cfg.scene, field, new_cfg)
+        fields[spec.name] = field
+
+    for control in controls:
+        if control.prop:
+            continue
+        if control.articulation not in fields:
+            continue
+        group = control.name
+        if not str(group).isidentifier():
+            raise ValueError(
+                f"{_LABEL}: control {group!r} of articulation "
+                f"{control.articulation!r} is not a valid action-term name"
+            )
+        if hasattr(cfg.actions, group):
+            raise ValueError(
+                f"{_LABEL}: action entry {group!r} collides with an existing action term name"
+            )
+        # Lazy: the action cfg class is an isaaclab symbol, never imported at
+        # module import time.
+        from isaaclab.envs.mdp.actions import JointPositionActionCfg
+
+        setattr(
+            cfg.actions,
+            group,
+            JointPositionActionCfg(
+                asset_name=fields[control.articulation],
+                joint_names=list(control.joint_names),
+                scale=1.0,
+                use_default_offset=False,
+                preserve_order=True,
+            ),
+        )
+    return fields
+
+
+def _articulation_runtime(env, spec, profile, asset) -> ArticulationRuntime:
+    asset_names = tuple(asset.joint_names)
+    defaults = dict(getattr(profile, "default_joint_pos", {}) or {})
+    q0_art = torch.tensor(
+        [float(defaults.get(n, 0.0)) for n in asset_names], dtype=torch.float32, device=env.device
+    )
+    base_body_id = getattr(profile, "base_body", None)
+    base_body = ""
+    if base_body_id is not None:
+        base_body = str(profile.body_bindings[base_body_id].names["usd"])
+    art = ArticulationRuntime(
+        name=spec.name,
+        model=getattr(spec, "model", None),
+        root=getattr(spec, "root", "free"),
+        joint_names=asset_names,
+        q0=q0_art.detach().cpu().numpy(),
+        foot_bodies=tuple(getattr(profile, "foot_bodies", None) or ()),
+        spawn=dict(getattr(spec, "spawn", {}) or {}),
+        base_body=base_body,
+        base_body_id=base_body_id,
+        body_sets=dict(getattr(profile, "body_sets", {}) or {}),
+        contacts=getattr(spec, "contacts", None),
+        profile=profile,
+    )
+    setattr(art, "asset", asset)
+    setattr(art, "q0_art", q0_art)
+    return art
+
+
+def _bind_scene_fields(env, specs, fields, partitioned) -> str:
+    env.robots = {}
+    for index, spec in enumerate(specs):
+        field = fields.get(spec.name, "robot" if index == 0 else None)
+        if field is None:
+            raise ValueError(f"{_LABEL}: articulation {spec.name!r} has no scene field")
+        env.robots[spec.name] = env.scene[field]
+    first = specs[0].name
+    env.robot = env.robots[first]
+    return first
+
+
+def _bind_term_resolvers(env) -> None:
+    from unigym.runtime.actions import IsaaclabJointResolver
+
+    env.action_entry_names = list(env.action_manager.active_terms)
+    env._term_resolvers = {}
+    for name in env.action_entry_names:
+        term = env.action_manager.get_term(name)
+        joint_names = getattr(getattr(term, "cfg", None), "joint_names", None)
+        if not joint_names:
+            raise ValueError(
+                f"action term {name!r} has no explicit joint_names; the "
+                f"NamedAction contract requires preserve_order=True terms "
+                f"with explicit name lists"
+            )
+        env._term_resolvers[name] = IsaaclabJointResolver(joint_names)
+
+
+def _bind_control_runtimes(env, specs, profiles, partitioned, first) -> dict:
+    env.articulations = {}
+    for spec in specs:
+        env.articulations[spec.name] = _articulation_runtime(
+            env, spec, profiles[spec.name], env.robots[spec.name]
+        )
+    controls: dict[tuple[str, str], ControlRuntime] = {}
+    planned_controls = env._planned_controls or ()
+    for control in planned_controls:
+        if not control.prop and control.drive not in ("position_pd", "position_servo"):
+            raise NotImplementedError(
+                f"{_LABEL}: articulation {control.articulation!r} control "
+                f"{control.name!r} requests drive {control.drive!r}; the "
+                f"IsaacLab 3 backend has no native direct-drive actuator "
+                f"mapping and implements only position joint targets "
+                f"(position_pd / position_servo) | hint: use a backend that "
+                f"supports direct drive"
+            )
+        art = env.articulations.get(control.articulation)
+        if art is None:
+            raise ValueError(
+                f"{_LABEL}: control {control.name!r} names articulation "
+                f"{control.articulation!r}, which has no runtime"
+            )
+        control.asset_joint_names = tuple(art.joint_names)
+        control.addresses["term"] = control.name
+        index = {n: i for i, n in enumerate(art.joint_names)}
+        control.addresses["perm_il2pol"] = [index[n] for n in control.joint_names if n in index]
+        controls[control_key(control)] = control
+    # every remaining action term (articulated props) becomes a servo control
+    declared_groups = {control.name for control in controls.values()}
+    for term in env.action_entry_names:
+        if term in declared_groups:
+            continue
+        joint_names = tuple(getattr(env.action_manager.get_term(term).cfg, "joint_names", ()))
+        prop = ControlRuntime(
+            name=term,
+            adapter="prop",
+            articulation=first,
+            joint_names=joint_names,
+            q0=tuple(0.0 for _ in joint_names),
+            drive="position_servo",
+            target="position",
+            required=True,
+            prop=True,
+            role="aux",
+        )
+        controls[control_key(prop)] = prop
+    return controls
+
+
+def _bind_control_order(env, controls) -> None:
+    env.controls = controls
+    by_group = {control.name: control for control in controls.values()}
+    if len(by_group) != len(controls):
+        raise ValueError(
+            f"{_LABEL}: control rows are not unique; each action term name "
+            f"must map to exactly one control row "
+            f"(declared: {[(c.articulation, c.name) for c in controls.values()]})"
+        )
+    env._control_order = [by_group[name] for name in env.action_entry_names if name in by_group]
+    for art in env.articulations.values():
+        body = next(
+            (c for c in env._control_order if c.articulation == art.name and c.role == "body"),
+            None,
+        )
+        perm = (
+            body.addresses["perm_il2pol"] if body is not None else list(range(len(art.joint_names)))
+        )
+        art.addresses["perm_il2pol"] = list(perm)
+        art.perm_il2pol = torch.tensor(list(perm), dtype=torch.int64, device=env.device)
+    env._joint_limits_by_articulation = {}
+    for art in env.articulations.values():
+        # IsaacLab 3 names the face ``joint_limits_sim``; keep the 2.3 face as
+        # a fallback so a degraded/sourceless asset stays an honest null.
+        lim = getattr(art.asset.data, "joint_limits_sim", None)
+        if lim is None:
+            lim = getattr(art.asset.data, "joint_pos_limits", None)
+        if lim is None:
+            env._joint_limits_by_articulation[art.name] = None
+            continue
+        lim = torch.as_tensor(_torch_view(lim))
+        perm = art.perm_il2pol
+        env._joint_limits_by_articulation[art.name] = (lim[:, perm, 0], lim[:, perm, 1])
+
+
+def bind_articulations(env) -> None:
+    """Bind every articulation/control runtime after ``super().__init__``."""
+    specs = tuple(env._articulation_specs)
+    profiles = dict(env._profiles)
+    fields = dict(env._articulation_fields or {})
+    partitioned = len(specs) > 1
+    first = _bind_scene_fields(env, specs, fields, partitioned)
+    _bind_term_resolvers(env)
+    controls = _bind_control_runtimes(env, specs, profiles, partitioned, first)
+    _bind_control_order(env, controls)
+
+    first_art = env.articulations[first]
+    env._perm_il2pol = first_art.perm_il2pol
+    env._perm_pol2il = torch.argsort(env._perm_il2pol)
+    env._q0_art = first_art.q0_art
+
+
+def sync_articulation_controls(env, articulation: str) -> None:
+    """Fill the first control's address table for the flat compatibility face."""
+    art = env.articulations[articulation]
+    index = {n: i for i, n in enumerate(art.joint_names)}
+    art.addresses["perm_il2pol"] = [index[n] for n in art.joint_names if n in index]
+
+
+def route_actions(env, actions: Sequence[NamedAction]) -> torch.Tensor:
+    """Resolve every joint-addressed action column onto the flat term input.
+
+    Columns are routed by ``(articulation, joint)`` through the shared
+    :class:`~unigym.runtime.action_routing.JointActionIndex`; each term's
+    buffer is filled in the term's own input order (preserve_order terms:
+    input dim i == cfg.joint_names[i]).  Unknown joints, wrong kinds, duplicate
+    coverage and missing required joints all fail fast with joint-worded
+    errors.  A control-row / action-term name is a backend detail, never an
+    action identity.
+    """
+    if isinstance(actions, (str, bytes)) or not isinstance(actions, Sequence):
+        raise TypeError(
+            f"{_LABEL} step expects a sequence of NamedAction, got {type(actions).__name__}"
+        )
+    order = list(env._control_order)
+    buffers: dict[str, torch.Tensor] = {}
+    for control in order:
+        term_name = control.addresses.get("term", control.name)
+        dim = int(env.action_manager.get_term(term_name).action_dim)
+        buffers[term_name] = torch.zeros(env.num_envs, dim, dtype=torch.float32, device=env.device)
+    index = getattr(env, "_action_joint_index", None)
+    if index is None:
+        from unigym.runtime.action_routing import JointActionIndex
+
+        index = JointActionIndex.from_controls(order, label=_LABEL)
+        env._action_joint_index = index
+    routed = index.route(actions, env.num_envs)
+    for routed_column in routed:
+        slot = routed_column.slot
+        control = slot.owner
+        assert isinstance(control, ControlRuntime)
+        term_name = control.addresses.get("term", control.name)
+        term_index = env._term_resolvers[term_name].index_of(slot.joint)
+        buffers[term_name][:, term_index] = routed_column.entry.values[
+            :, routed_column.source_index
+        ].to(device=env.device, dtype=torch.float32)
+    return torch.cat(
+        [buffers[control.addresses.get("term", control.name)] for control in order], dim=-1
+    )
+
+
+def reset_articulations(env, env_ids) -> None:
+    """Write every articulation's spawn root pose + q0 (declaration order).
+
+    Writes go straight to the sim through the IsaacLab 3 ``*_index`` variants
+    (never through a ``root_state_w`` cache assignment); the flush is
+    ``scene.write_data_to_sim()`` + ``sim.forward()`` so derived state is
+    fresh before the next tick.
+    """
+    for art in env.articulations.values():
+        robot = art.asset
+        n = env_ids.numel()
+        dr = _torch_view(robot.data.default_root_state)[env_ids].clone()
+        spawn = dict(art.spawn or {})
+        if spawn.get("pos") is not None:
+            dr[:, :3] = torch.tensor(spawn["pos"], dtype=dr.dtype, device=dr.device)
+        if "yaw" in spawn or "quat_wxyz" in spawn:
+            # repo-internal spawn quat is wxyz; the IsaacLab 3 root state (and
+            # therefore the write payload) is xyzw.
+            from unigym.core.quat import to_isaaclab_cfg
+
+            dr[:, 3:7] = torch.as_tensor(
+                to_isaaclab_cfg(resolve_spawn_quat(spawn)),
+                dtype=dr.dtype,
+                device=dr.device,
+            )
+        dj = art.q0_art.unsqueeze(0).expand(n, -1).clone()
+        robot.write_root_link_pose_to_sim_index(root_pose=dr[:, :7], env_ids=env_ids)
+        robot.write_root_link_velocity_to_sim_index(root_velocity=dr[:, 7:13], env_ids=env_ids)
+        robot.write_joint_state_to_sim_index(
+            position=dj, velocity=torch.zeros_like(dj), env_ids=env_ids
+        )
+    # No ``root_state_w[env_ids] = dr`` cache write: flush the write path
+    # instead so the next read observes the spawn state.
+    scene = getattr(env, "scene", None)
+    if scene is not None and hasattr(scene, "write_data_to_sim"):
+        scene.write_data_to_sim()
+    sim = getattr(env, "sim", None)
+    if sim is not None and hasattr(sim, "forward"):
+        sim.forward()

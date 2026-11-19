@@ -443,7 +443,7 @@ class PropHandler:
         """
         return getattr(self, "_asset", None)
 
-    def get_world_pose(self, env):
+    def get_world_pose(self, env) -> tuple[torch.Tensor, torch.Tensor] | None:
         """``(pos (N,3), quat (N,4) wxyz)`` world root pose, or None.
 
         Consumed by the typed object observation views;
