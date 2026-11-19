@@ -15,9 +15,9 @@ Those are separate artifacts; the public docs are being rewritten.
   cameras, contacts, runners, trace, web UI package data).
 - One adapter: `unigym.adapters.manual.ManualAdapter` for user-driven loops.
 - Five canonical backends: `mujoco`, `mjwarp` (optional extra), `isaaclab2`,
-  `isaaclab3_physx`, `isaaclab3_newton`. The two `isaaclab3_*` identities are
-  P1 scaffolding: the canonical names and lanes exist, but neither implements
-  a capability yet.
+  `isaaclab3_physx`, `isaaclab3_newton`. The PhysX identity has P2 capability
+  coverage and a nightly lane; the Newton identity is still a stack-probe lane
+  until its P3 capability work.
 - Scene data uses the `scene_presets` pack face (provider code is declared on
   the `providers` face with `kind: scene`); run configs reference it with the
   `scene_preset:` key. The removed `scenes` face and `scene:` key have no
@@ -53,8 +53,8 @@ surface.
 | `mujoco` | Supported | CPU host lane; the most complete backend. |
 | `mjwarp` | Optional | Install the `warp` extra; treated as an optional/nightly lane. |
 | `isaaclab2` | Supported in container | Requires an Isaac Lab 2 environment; not a host-only install. |
-| `isaaclab3_physx` | P1 scaffolding | Canonical backend identity and lane only; no capability is implemented yet. |
-| `isaaclab3_newton` | P1 scaffolding | Canonical backend identity and lane only; no capability is implemented yet. |
+| `isaaclab3_physx` | Lane-tested, nightly | Contacts, director, cameras/recorder, DR events and terrain are lane-tested. |
+| `isaaclab3_newton` | Stack-probe lane | Canonical identity; capability parity waits for P3. |
 
 The backend surface is canonical-only. `backend` is **required**, and its value
 must be exactly one of the five names above. `backend: isaaclab` and

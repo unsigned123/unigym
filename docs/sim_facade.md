@@ -109,8 +109,8 @@ SimulationBuilder(
 - `backend` is required and must be one of the five canonical names:
   `mujoco`, `mjwarp`, `isaaclab2`, `isaaclab3_physx`, `isaaclab3_newton`.
   `isaaclab` and `isaaclab3` are not aliases and are rejected. The lookup never
-  builds a backend; the two `isaaclab3_*` P1 stubs are outside the facade spike
-  claim.
+  builds a backend; the two `isaaclab3_*` identities are normal facade-backed
+  backends.
 - Exactly one of `physics_dt` / `substeps` is required and
   `dt == physics_dt * substeps` must hold with exact float arithmetic
   (`abs_tol=1e-12`). There is no silent re-quantization.

@@ -287,6 +287,18 @@ def test_nightly_lanes_reference_declared_lanes(registry):
     assert not offenders, f"nightly lanes missing or undeclared: {offenders}"
 
 
+def test_nightly_includes_isaaclab3_physx(registry):
+    """The PhysX IsaacLab 3 lane has a nightly self-hosted job."""
+    nightly = _nested_table(registry, "nightly")
+    value = nightly.get("lanes")
+    assert isinstance(value, list), "nightly.lanes must be a list"
+    assert "isaaclab3_physx" in value
+    assert "isaaclab3_newton" not in value
+    newton = _tables(registry, "lanes").get("isaaclab3_newton")
+    assert newton is not None
+    assert "--strict-test-packs" not in newton.get("pytest_args", [])
+
+
 def test_nightly_includes_c1_variant_lanes(registry):
     """The nightly matrix runs both empirically verified C1 variants."""
     nightly = _nested_table(registry, "nightly")

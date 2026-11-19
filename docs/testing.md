@@ -312,14 +312,15 @@ Do not assume every backend exists in the self-contained `.venv`.
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts, kinematic director and camera rigs declared; rigid props/free-root writes lane-tested but the props trait deferred; recorder video, DR events and flat/steps terrain declared; depth aliases deferred; Newton parity pending; nightly jobs pending) |
+| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (PhysX: contacts, director, cameras/recorder, DR events and terrain lane-tested and in nightly; rigid props/free-root writes lane-tested but the props trait deferred; depth aliases deferred. Newton: P3 capability parity pending and not yet in nightly) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is
 the long-term/CI compatibility direction; `ci/compat.toml` is authoritative for
 the lanes currently registered and runnable.
 
-Python 3.12 is a nightly-only dimension. It is not part of the PR gate. C1 is
+Python 3.12 is a nightly-only dimension for the base/MuJoCo version lanes; it is
+not part of the PR gate (pinned backend lanes may use 3.12). C1 is
 an active nightly lane with exact pins (Python 3.11 / MuJoCo 3.1.1 / NumPy
 1.26.4); it is not a PR gate and does not claim support for MuJoCo 3.x in
 general.
@@ -335,6 +336,7 @@ The nightly workflow adds the Python 3.12 version dimension on top of PR CI:
 | C1 | 3.11 | `base-c1` | nightly MuJoCo 3.1.1 / NumPy 1.26.4 pair |
 | W1 | 3.11 | `mjwarp` | MuJoCo Warp lane |
 | I2 | 3.11 | external IsaacLab 2 (`isaaclab2`) | external IsaacLab 2 |
+| I3 | 3.12 | external IsaacLab 3 (`isaaclab3_physx`) | PhysX IsaacLab 3 nightly |
 
 C1 is empirically verified at exactly Python 3.11 / MuJoCo 3.1.1 / NumPy
 1.26.4. It is one verified pair, not a general MuJoCo 3.x support claim. It
@@ -370,7 +372,8 @@ markers remain resource and capability markers.
 The `isaaclab2` and `isaaclab3_physx` lanes also declare
 `pytest_args = ["--strict-test-packs"]`; the runner appends pytest args before
 the selectors. The `[nightly]` table names the lanes the nightly workflow runs
-(`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`).
+(`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`,
+`isaaclab3_physx`).
 
 The two `isaaclab3_*` lanes are the two IsaacLab 3 backend identities
 (`docs/designs/isaaclab3-backend.md`). The canonical names are exactly
@@ -385,9 +388,9 @@ per-env camera state and a non-empty MP4 recorder write. `DEPTH_OBS_ALIASES`
 stays undeclared because the lane has no depth-alias coverage; until that bit
 lands, an observation request selecting a depth stream is gate-rejected on
 PhysX. The lane environment installs `imageio[ffmpeg]` for the recorder test.
-`isaaclab3_newton` still owns environment and stack probes only. The remaining
-capability tests and the self-hosted GitHub jobs land with the backend
-implementation. The lanes stay out of `[nightly]` until those jobs exist.
+`isaaclab3_physx` joins `[nightly]` through its default-skipped self-hosted
+job. `isaaclab3_newton` still owns environment and stack probes only and stays
+out of `[nightly]` until its P3 capability coverage lands.
 
 Selector ownership rules:
 
@@ -515,6 +518,9 @@ GitHub PR CI runs the lane registry, not hand-copied pytest paths:
   `tools/ci/run_lane.py --lane mjwarp` on a hosted Ubuntu runner;
 - the `isaaclab2` job runs `tools/ci/run_lane.py --lane isaaclab2` on a
   self-hosted runner and is skipped unless explicitly enabled;
+- the `isaaclab3_physx` job runs `tools/ci/run_lane.py --lane isaaclab3_physx`
+  on a self-hosted runner, checks the lane environment's `imageio_ffmpeg`,
+  installs the declared test packs, and is skipped unless explicitly enabled;
 - the `package` job builds the wheel, installs it into a clean temporary
   environment, copies `tests/smoke` outside the checkout, and runs it there.
 
@@ -533,9 +539,15 @@ visible on the runner PATH (or `UNIGYM_CONDA_EXE` set by the runner). The job
 installs the plugin, Cartpole and G1 pack wheels from that wheelhouse into the
 conda environment before running the lane; the tests never read the wheelhouse
 path. A missing Cartpole or G1 pack fails the strict lane rather than skipping.
-A skipped `isaaclab2` job is a visible skip, not a green pass: the job uses
-neither `continue-on-error` nor an echo/`exit 0` stub, and it installs no Isaac
-dependency itself — the external conda environment owns them.
+A skipped `isaaclab2` or `isaaclab3_physx` job is a visible skip, not a green
+pass: the job uses neither `continue-on-error` nor an echo/`exit 0` stub, and it
+installs no Isaac dependency itself — the external conda environments own them.
+The PhysX job also checks that its environment provides `imageio_ffmpeg`; the
+recorder test fails rather than silently degrading. Enabling `isaaclab3_physx`
+requires a self-hosted runner with the `isaaclab3_physx` label, the
+`UNIGYM_ISAACLAB3_PHYSX_ENV` repository variable naming the pinned 3.12 conda
+environment, the same `UNIGYM_TEST_PACKS_WHEELHOUSE`, and the repository
+variable `UNIGYM_RUN_ISAACLAB3_PHYSX == 'true'`.
 
 The `package` job proves the installed wheel, not the source tree. It runs
 `tests/smoke` with the test working directory outside the checkout, supplies no
@@ -561,8 +573,9 @@ The scheduled `nightly` workflow runs the lanes named in the registry's
 `[nightly]` table through the same runner: `d0-py312` and `mujoco-py312` on
 Python 3.12, `d0-c1` and `mujoco-c1` on the pinned C1 environment, `mjwarp` on
 CPU Python 3.11, and the default-skipped `isaaclab2` lane on its self-hosted
+runner, plus the default-skipped `isaaclab3_physx` lane on its self-hosted
 runner. Nightly is a discovery lane for the Python 3.12 and C1 dimensions and
-the external backend, not a PR gate; it does not install Isaac dependencies
+the external backends, not a PR gate; it does not install Isaac dependencies
 itself and does not fake a pass for a skipped job.
 
 The `c1` job provisions a clean venv instead of running the project

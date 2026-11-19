@@ -509,10 +509,10 @@ declared format:
 | `static_rigid` | one root body, no joints | static USD; static URDF refused |
 | `dynamic_rigid` | one root body + one root freejoint | dynamic USD; jointless URDF best effort |
 
-`isaaclab3_physx` and `isaaclab3_newton` are P1 stubs: they declare the same
-`("usd", "urdf")` formats but have no asset-scene engine, so the IsaacLab
-`.usd` / `.urdf` columns above describe `isaaclab2` behaviour only (an
-asset-scene stub is not implemented).
+`isaaclab3_physx` and `isaaclab3_newton` declare the same `("usd", "urdf")`
+formats and use the shared IsaacLab 3 asset-scene engine. PhysX has P2
+capability coverage; asset-scene lane coverage remains a follow-up for both
+identities, with Newton parity in P3.
 
 Resolve one scene's assets through the same boundary helpers:
 

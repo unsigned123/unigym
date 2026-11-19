@@ -100,9 +100,9 @@ backend_info("mjwarp").asset_formats   # ("mjcf",)
 backend_info("isaaclab2").asset_formats  # ("usd", "urdf")
 ```
 
-`isaaclab3_physx` / `isaaclab3_newton` are P1 stubs: they declare the same
-`("usd", "urdf")` asset formats but have no registered asset-scene engine, so
-file-backed scene composition is an `isaaclab2` capability.
+`isaaclab3_physx` / `isaaclab3_newton` declare the same `("usd", "urdf")`
+asset formats and use the shared IsaacLab 3 asset-scene engine; asset-scene
+lane coverage remains a follow-up for both, with Newton parity in P3.
 
 Explicit refusals:
 
