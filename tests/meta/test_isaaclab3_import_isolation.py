@@ -25,6 +25,22 @@ import unigym.backends.isaaclab3_newton
 import unigym.backends.isaaclab3_physx
 import unigym.backends.registry
 import unigym.backends.shared.isaaclab3_common
+import unigym.backends.shared.isaaclab3_common.asset_scene
+import unigym.backends.shared.isaaclab3_common.asset_scene.artifacts
+import unigym.backends.shared.isaaclab3_common.asset_scene.inspect
+import unigym.backends.shared.isaaclab3_common.asset_scene.names
+import unigym.backends.shared.isaaclab3_common.cfg_classes
+import unigym.backends.shared.isaaclab3_common.init_pose
+import unigym.backends.shared.isaaclab3_common.naming
+import unigym.backends.shared.isaaclab3_common.terrains
+import unigym.backends.shared.isaaclab3_common.terrains.base
+import unigym.backends.shared.isaaclab3_common.terrains.custom
+import unigym.backends.shared.isaaclab3_common.terrains.custom._compat
+import unigym.backends.shared.isaaclab3_common.terrains.custom.gap
+import unigym.backends.shared.isaaclab3_common.terrains.custom.pit
+import unigym.backends.shared.isaaclab3_common.terrains.custom.slope_rough
+import unigym.backends.shared.isaaclab3_common.terrains.custom.unidirectional
+import unigym.backends.shared.isaaclab3_common.usd
 
 print("P0_IMPORT_JSON:" + json.dumps(sorted({name.split(".", 1)[0] for name in sys.modules})))
 """

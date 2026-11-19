@@ -46,6 +46,26 @@ capability gating, no silent fallback, and one implementation to maintain.
   conda lane.
 - No mujoco/mjwarp changes.
 
+## P1b extraction plan
+
+The il2 backend is a **reference, not a dependency**: the Non-goal above means
+P1b does not modify `isaaclab2` and does not make it import this package.  The
+A/B code is copied and adapted into `shared/isaaclab3_common`:
+
+1. **A-class pure modules** first (no engine API): naming, cfg-class table, USD
+   inventory, asset-scene names/inspect, terrain base + custom generators,
+   neutral pose sampling.  `asset_scene/artifacts` is import-safe in this
+   slice; its engine-backed call path is completed in B.
+2. **B-class cfg builders** next, with the IsaacLab 3 cfg-class table and the
+   `to_isaaclab_cfg` quaternion boundary: asset-scene engine/fields, static
+   shapes, robot builder, prop spawn, terrain presets, build faces.
+3. **C/D env core** last: shared env base, articulation runtime, scene/model,
+   cameras, contacts, director, DR events, prop handlers.
+
+Each slice keeps the il2 tree byte-identical and proves the shared package is
+import-safe (no module-level engine import).  Duplication against il2 is
+accepted for this release; a later convergence is a separate refactor.
+
 ## Files
 
 Ownership: `shared/isaaclab3_common` owns the IsaacLab-3.x library; each
