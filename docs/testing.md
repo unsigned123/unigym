@@ -312,7 +312,7 @@ Do not assume every backend exists in the self-contained `.venv`.
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P1 scaffolding; no capability implementation yet; nightly jobs pending) |
+| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts declared; props/director/cameras/Newton parity pending; nightly jobs pending) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is
@@ -367,19 +367,20 @@ markers remain resource and capability markers.
 | `isaaclab3_physx` | `isaaclab3_physx` | conda (`UNIGYM_ISAACLAB3_PHYSX_ENV`) | `tests/backends/isaaclab3_physx` |
 | `isaaclab3_newton` | `isaaclab3_newton` | conda (`UNIGYM_ISAACLAB3_NEWTON_ENV`) | `tests/backends/isaaclab3_newton` |
 
-The `isaaclab2` lane also declares
+The `isaaclab2` and `isaaclab3_physx` lanes also declare
 `pytest_args = ["--strict-test-packs"]`; the runner appends pytest args before
 the selectors. The `[nightly]` table names the lanes the nightly workflow runs
 (`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`).
 
-The two `isaaclab3_*` lanes are the P1 scaffolding for the two IsaacLab 3
-backend identities (`docs/designs/isaaclab3-backend.md`). The canonical names
-are exactly `isaaclab3_physx` and `isaaclab3_newton`; `isaaclab3` is not a lane,
-a config alias or a test directory. Neither backend implements a capability
-yet, so the lanes own environment and stack probes only and do not declare
-`--strict-test-packs`; the capability tests and the self-hosted GitHub jobs land
-with the backend implementation. The lanes stay out of `[nightly]` until those
-jobs exist.
+The two `isaaclab3_*` lanes are the two IsaacLab 3 backend identities
+(`docs/designs/isaaclab3-backend.md`). The canonical names are exactly
+`isaaclab3_physx` and `isaaclab3_newton`; `isaaclab3` is not a lane, a config
+alias or a test directory. P2 declares capabilities one lane test at a time:
+`isaaclab3_physx` owns the real Cartpole contact test and therefore declares
+`--strict-test-packs`; `isaaclab3_newton` still owns environment and stack
+probes only. The remaining capability tests and the self-hosted GitHub jobs
+land with the backend implementation. The lanes stay out of `[nightly]` until
+those jobs exist.
 
 Selector ownership rules:
 

@@ -7,18 +7,25 @@ import argparse
 import pytest
 
 from unigym.backends import registry
-from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
 from unigym.backends.isaaclab3_physx.profile import PHYSX_PROFILE
 from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS
 
 
-def test_env_shell_wiring() -> None:
+@pytest.mark.sim
+def test_env_shell_wiring(simulation_app: object) -> None:
+    from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
+
     assert Isaaclab3PhysxEnv.backend_name == "isaaclab3_physx"
     assert Isaaclab3PhysxEnv.engine_profile is PHYSX_PROFILE
     assert Isaaclab3PhysxEnv.asset_formats == ("usd", "urdf")
 
 
-def test_backend_capabilities_are_a_subset_of_the_registry_traits() -> None:
+@pytest.mark.sim
+def test_backend_capabilities_are_a_subset_of_the_registry_traits(
+    simulation_app: object,
+) -> None:
+    from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
+
     assert Isaaclab3PhysxEnv.BACKEND_CAPABILITIES.traits() <= ISAACLAB3_PHYSX_TRAITS
 
 

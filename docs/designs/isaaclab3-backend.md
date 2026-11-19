@@ -78,6 +78,39 @@ Each slice keeps the il2 tree byte-identical and proves the shared package is
 import-safe (no module-level engine import).  Duplication against il2 is
 accepted for this release; a later convergence is a separate refactor.
 
+## P2 slice plan
+
+P2 turns the copied shared faces into **declared** capabilities, one backend
+test at a time.  A trait is added only after the owning lane test passes on the
+real stack; there is no batch declaration.  Every slice keeps `isaaclab2`
+byte-identical, adds no new `Trait` value and no new public field.
+
+- **P2-A lane harness + contacts**: real Cartpole fixtures on the PhysX lane
+  (construct / reset / step / close), a `contacts: all` world-frame group, a
+  real contact-producing step with a nonzero world-frame normal force, and
+  post-reset zero buffers.  Declares `CONTACTS_GROUPS`; sets
+  `BackendCapabilities.contacts=True`.  Newton follows in P3 only when the same
+  test passes there.
+- **P2-B props + free-root state**: rigid prop spawn/read, and a free-root
+  asset for `set_root_state` / partial reset / `settle`.  Declares
+  `PROPS_RIGID` (+ `PROPS_ARTICULATION_USD` only when proven); sets
+  `BackendCapabilities.props=True`.
+- **P2-C director**: teleport / setvel / attach / gripper lane coverage.
+  Declares `DIRECTOR_TELEPORT`, `DIRECTOR_SETVEL`, `DIRECTOR_ATTACH_SLAVE`,
+  `DIRECTOR_GRIPPER` (no capability bit).
+- **P2-D cameras + recorder**: explicit profile `renderer_cfg`, RGB and depth
+  rigs, recorder video.  Declares `CAMERAS_RGB`, `CAMERAS_DEPTH_RIG`,
+  `CAMERAS_PER_ENV`, `CAMERAS_PER_ENV_STATE`, `RECORDER_VIDEO`; sets
+  `BackendCapabilities.cameras/depth_camera/recorder`.  Newton camera support
+  stays undeclared unless the renderer path passes.
+- **P2-E events + terrain closeout**: PhysX/Newton DR events lane coverage,
+  Newton `EVENTS_DR` decision, and a terrain-preset lane test.  Updates the
+  trait tables and docs in the same change.
+
+P2-A owns only the lane harness, the contact test and the contact trait/cap
+declarations.  A shared-face bug stops the slice as `BLOCKED`; it is fixed at
+the shared owner boundary, not worked around in the test.
+
 ## Files
 
 Ownership: `shared/isaaclab3_common` owns the IsaacLab-3.x library; each

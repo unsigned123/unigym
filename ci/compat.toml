@@ -33,10 +33,10 @@ env_var = "UNIGYM_ISAACLAB2_ENV"
 manifest = "ci/envs/isaaclab2.toml"
 strict = true
 
-# IsaacLab 3 scaffolding (P1): two backend identities share one implementation
-# (docs/designs/isaaclab3-backend.md).  These lanes currently own environment
-# and stack probes only; they do not declare --strict-test-packs until the
-# backend implementation consumes the test packs.
+# IsaacLab 3 (P2 in progress): two backend identities share one implementation
+# (docs/designs/isaaclab3-backend.md).  The PhysX lane consumes the Cartpole
+# test pack and declares --strict-test-packs; the Newton lane still owns
+# environment and stack probes only.
 [environments.isaaclab3_physx]
 provision = "conda"
 env_var = "UNIGYM_ISAACLAB3_PHYSX_ENV"
@@ -124,6 +124,7 @@ pytest_args = ["--strict-test-packs"]
 [lanes.isaaclab3_physx]
 environment = "isaaclab3_physx"
 selectors = ["tests/backends/isaaclab3_physx"]
+pytest_args = ["--strict-test-packs"]
 
 [lanes.isaaclab3_newton]
 environment = "isaaclab3_newton"

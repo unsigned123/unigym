@@ -248,6 +248,13 @@ def test_isaaclab2_lane_requires_strict_test_packs(registry):
     assert "--strict-test-packs" in lane.get("pytest_args", [])
 
 
+def test_isaaclab3_physx_lane_requires_strict_test_packs(registry):
+    """The PhysX lane fails when its declared Cartpole pack is absent."""
+    lane = _tables(registry, "lanes").get("isaaclab3_physx")
+    assert lane is not None, "registry must declare the isaaclab3_physx lane"
+    assert "--strict-test-packs" in lane.get("pytest_args", [])
+
+
 def test_variant_lanes_reference_a_primary_lane_with_identical_selectors(registry):
     """A variant lane reuses one primary lane's ownership, not a second copy."""
     lanes = _tables(registry, "lanes")

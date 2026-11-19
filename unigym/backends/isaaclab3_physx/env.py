@@ -20,6 +20,7 @@ _CAPABILITIES = BackendCapabilities(
     state_write=True,
     native_handle=True,
     events=True,
+    contacts=True,
 )
 
 BACKEND_CAPABILITIES = _CAPABILITIES

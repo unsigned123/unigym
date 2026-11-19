@@ -739,8 +739,8 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
 
 # IsaacLab 3 identities: PhysX and Newton share one implementation package
 # but own separate runtime stacks and capability sets.  C2-1 lights up the
-# verified shared core conservatively; camera/contact/prop/director traits
-# stay undeclared until their backend tests land (P2/C3).
+# verified shared core conservatively; camera/prop/director traits stay
+# undeclared until their backend tests land (P2/C3).
 _IL3_CORE = _CORE | frozenset(
     {
         Trait.MULTI_ENV,  # native num_envs=N scene cloning
@@ -757,6 +757,7 @@ _IL3_CORE = _CORE | frozenset(
 ISAACLAB3_PHYSX_TRAITS = _IL3_CORE | frozenset(
     {
         Trait.EVENTS_DR,  # PhysX profile owns the CoM DR write
+        Trait.CONTACTS_GROUPS,  # contacts: all world-frame groups
     }
 )
 
