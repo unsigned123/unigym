@@ -269,8 +269,6 @@ class GeneratorTerrain(TerrainPreset):
                 static_friction=friction,
                 dynamic_friction=friction,
                 restitution=0.0,
-                friction_combine_mode="multiply",
-                restitution_combine_mode="multiply",
             ),
             visual_material=c["PreviewSurfaceCfg"](
                 diffuse_color=tuple(p.get("color", (0.5, 0.45, 0.4)))

@@ -312,7 +312,7 @@ Do not assume every backend exists in the self-contained `.venv`.
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts, kinematic director and camera rigs declared; rigid props/free-root writes lane-tested but the props trait deferred; recorder video declared; depth aliases deferred; Newton parity pending; nightly jobs pending) |
+| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P2 in progress: PhysX contacts, kinematic director and camera rigs declared; rigid props/free-root writes lane-tested but the props trait deferred; recorder video, DR events and flat/steps terrain declared; depth aliases deferred; Newton parity pending; nightly jobs pending) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is

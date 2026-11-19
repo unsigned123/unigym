@@ -25,8 +25,14 @@ only the rigid tier is lane-proven. Articulated props remain undeclared until
 their tests land; the earlier CoM DR write declares `EVENTS_DR`, and its lane
 coverage lands in P2-E (see `docs/designs/isaaclab3-backend.md`).
 
-The lane declares `--strict-test-packs` because the contact, prop, director
-and camera tests consume the `isaaclab_cartpole` test pack.
+`test_events.py` proves a reset-mode absolute-CoM event applied at construction,
+so the pre-existing `EVENTS_DR` declaration is lane-backed. `test_terrain.py`
+proves both the flat `ground` preset and the steps mesh `terrain` preset
+construct and step. Newton keeps `EVENTS_DR` undeclared until its P3 lane
+coverage.
+
+The lane declares `--strict-test-packs` because the contact, prop, director,
+camera, event and terrain tests consume the `isaaclab_cartpole` test pack.
 
 The lane launches Kit with `enable_cameras=True` in `conftest.py` because the
 camera tests construct real RTX sensors. This is a session-wide offscreen

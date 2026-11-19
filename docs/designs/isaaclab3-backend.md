@@ -123,9 +123,19 @@ byte-identical, adds no new `Trait` value and no new public field.
   until that alias bit lands. No `CAMERAS_BATCH_RENDER`, per-env intrinsics or
   Newton camera trait is declared. Newton camera support stays undeclared
   unless the renderer path passes.
-- **P2-E events + terrain closeout**: PhysX/Newton DR events lane coverage,
-  Newton `EVENTS_DR` decision, and a terrain-preset lane test.  Updates the
-  trait tables and docs in the same change.
+- **P2-E events + terrain closeout**: PhysX DR events lane coverage, the
+  Newton `EVENTS_DR` decision, and terrain-preset lane tests.  PhysX status:
+  `test_events.py` proves a reset-mode `randomize_rigid_body_com_abs` event
+  applies at construction (two fixed-range envs differ by exactly twice the
+  offset); `test_terrain.py` proves the flat `ground` and steps mesh `terrain`
+  presets construct and step.  The steps/generator/native presets now pass only
+  the engine-neutral material fields to IsaacLab 3's
+  `RigidBodyMaterialBaseCfg`; the PhysX-only combine-mode kwargs were the
+  shared-face bug found by this slice.  Consequence: IsaacLab 3 uses the
+  solver's default combine mode (average) where isaaclab2 authored `multiply`;
+  restoring multiply parity needs a PhysX-owned material factory and is a
+  follow-up, not a neutral-preset responsibility.  Newton keeps `EVENTS_DR`
+  undeclared until its P3 lane coverage.
 
 P2-A owns only the lane harness, the contact test and the contact trait/cap
 declarations.  A shared-face bug stops the slice as `BLOCKED`; it is fixed at
