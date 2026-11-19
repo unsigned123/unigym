@@ -33,6 +33,22 @@ env_var = "UNIGYM_ISAACLAB2_ENV"
 manifest = "ci/envs/isaaclab2.toml"
 strict = true
 
+# IsaacLab 3 scaffolding (P0): two backend identities share one implementation
+# (docs/designs/isaaclab3-backend.md).  These lanes currently own environment
+# and stack probes only; they do not declare --strict-test-packs until the
+# backend implementation consumes the test packs.
+[environments.isaaclab3_physx]
+provision = "conda"
+env_var = "UNIGYM_ISAACLAB3_PHYSX_ENV"
+manifest = "ci/envs/isaaclab3_physx.toml"
+strict = true
+
+[environments.isaaclab3_newton]
+provision = "conda"
+env_var = "UNIGYM_ISAACLAB3_NEWTON_ENV"
+manifest = "ci/envs/isaaclab3_newton.toml"
+strict = true
+
 [lanes.d0]
 environment = "base"
 selectors = [
@@ -105,8 +121,17 @@ environment = "isaaclab2"
 selectors = ["tests/backends/isaaclab2"]
 pytest_args = ["--strict-test-packs"]
 
+[lanes.isaaclab3_physx]
+environment = "isaaclab3_physx"
+selectors = ["tests/backends/isaaclab3_physx"]
+
+[lanes.isaaclab3_newton]
+environment = "isaaclab3_newton"
+selectors = ["tests/backends/isaaclab3_newton"]
+
 # Lanes the nightly workflow runs.  C1 is the empirically verified oldest
 # MuJoCo/NumPy pair (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4); it is nightly
-# only and is not a PR gate.
+# only and is not a PR gate.  The isaaclab3_* lanes stay out of this list until
+# their self-hosted jobs and environments are provisioned.
 [nightly]
 lanes = ["d0-py312", "mujoco-py312", "d0-c1", "mujoco-c1", "mjwarp", "isaaclab2"]

@@ -47,6 +47,8 @@ BACKEND_MARKERS: dict[str, str] = {
     "mjwarp": "backend_mjwarp",
     "isaaclab2": "backend_isaaclab2",
     "isaaclab3": "backend_isaaclab3",
+    "isaaclab3_physx": "backend_isaaclab3_physx",
+    "isaaclab3_newton": "backend_isaaclab3_newton",
 }
 
 RESOURCE_MARKERS: frozenset[str] = frozenset(

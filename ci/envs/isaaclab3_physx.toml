@@ -1,0 +1,12 @@
+# Clean IsaacLab 3 PhysX lane versions.  Measured from the installed
+# distributions on the reference lane (docs/designs/isaaclab3-backend.md).
+# No machine paths.  The 3.0.0rc1 line is pinned until a 3.0 GA lane exists.
+# The extension distributions report version 0.0.0; that is their published
+# value, not a fallback.
+python = "3.12"
+isaacsim = "6.1.0.0"
+isaaclab = "3.0.0rc1"
+isaaclab_physx = "0.0.0"
+isaaclab_tasks = "0.0.0"
+isaaclab_assets = "0.0.0"
+torch = "2.11.0+cu130"

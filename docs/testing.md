@@ -194,7 +194,8 @@ tests/
 │   ├── mujoco/
 │   ├── mjwarp/
 │   ├── isaaclab2/
-│   └── isaaclab3/
+│   ├── isaaclab3_physx/
+│   └── isaaclab3_newton/
 ├── contract/
 ├── conformance/
 ├── integration/
@@ -262,7 +263,9 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `backend_mujoco` | `tests/backends/mujoco/**` or conformance fixture |
 | `backend_mjwarp` | `tests/backends/mjwarp/**` or conformance fixture |
 | `backend_isaaclab2` | `tests/backends/isaaclab2/**` or conformance fixture |
-| `backend_isaaclab3` | `tests/backends/isaaclab3/**` or conformance fixture |
+| `backend_isaaclab3` | legacy IsaacLab 3 family spelling; no current test directory |
+| `backend_isaaclab3_physx` | `tests/backends/isaaclab3_physx/**` |
+| `backend_isaaclab3_newton` | `tests/backends/isaaclab3_newton/**` |
 | `fast` | smoke/unit/contract/meta without resource markers |
 | `slow` | integration automatically; manual on heavy unit/backend tests |
 
@@ -309,7 +312,7 @@ Do not assume every backend exists in the self-contained `.venv`.
 | C3 | Python 3.12 + latest MuJoCo | nightly version dimension |
 | W1 | MuJoCo Warp pinned pair | warp lane |
 | I2 | external IsaacLab 2 environment | IsaacLab 2 CI |
-| I3 | external IsaacLab 3 environment | IsaacLab 3 CI (not registered) |
+| I3 | external IsaacLab 3 environment | `isaaclab3_physx` / `isaaclab3_newton` lanes (P0 scaffolding; nightly jobs pending) |
 
 The supported set is the union of these validated lanes. It is not a promise
 that every Python × MuJoCo × NumPy × backend combination works. This table is
@@ -361,11 +364,19 @@ markers remain resource and capability markers.
 | `mujoco-c1` | `base-c1` | uv (`--no-sync`), Python 3.11, C1 pins, `variant_of = "mujoco"` | `tests/backends/mujoco` |
 | `mjwarp` | `mjwarp` | uv (`dev`, `warp`) | `tests/backends/mjwarp` |
 | `isaaclab2` | `isaaclab2` | conda (`UNIGYM_ISAACLAB2_ENV`) | `tests/backends/isaaclab2` |
+| `isaaclab3_physx` | `isaaclab3_physx` | conda (`UNIGYM_ISAACLAB3_PHYSX_ENV`) | `tests/backends/isaaclab3_physx` |
+| `isaaclab3_newton` | `isaaclab3_newton` | conda (`UNIGYM_ISAACLAB3_NEWTON_ENV`) | `tests/backends/isaaclab3_newton` |
 
 The `isaaclab2` lane also declares
 `pytest_args = ["--strict-test-packs"]`; the runner appends pytest args before
 the selectors. The `[nightly]` table names the lanes the nightly workflow runs
 (`d0-py312`, `mujoco-py312`, `d0-c1`, `mujoco-c1`, `mjwarp`, `isaaclab2`).
+
+The two `isaaclab3_*` lanes are the P0 scaffolding for the two IsaacLab 3
+backend identities (`docs/designs/isaaclab3-backend.md`). They own environment
+and stack probes only, so they do not declare `--strict-test-packs` yet; the
+capability tests and the self-hosted GitHub jobs land with the backend
+implementation. The lanes stay out of `[nightly]` until those jobs exist.
 
 Selector ownership rules:
 
@@ -423,7 +434,8 @@ UNIGYM_TEST_PYTHON           explicit interpreter override
 UNIGYM_MUJOCO_ENV            conda env for the MuJoCo lane
 UNIGYM_MJWARP_ENV            conda env for the warp lane
 UNIGYM_ISAACLAB2_ENV         conda env for IsaacLab 2
-UNIGYM_ISAACLAB3_ENV         conda env for IsaacLab 3
+UNIGYM_ISAACLAB3_PHYSX_ENV   conda env for the IsaacLab 3 PhysX lane
+UNIGYM_ISAACLAB3_NEWTON_ENV  conda env for the IsaacLab 3 Newton lane
 UNIGYM_CONDA_EXE             optional conda executable override
 UNIGYM_TEST_ENV_STRICT       "1" = missing environment fails
 ```
@@ -443,7 +455,8 @@ machine-specific interpreter path.
 - Required CI lane missing: fail, never skip.
 - `CUDA_VISIBLE_DEVICES` is empty by default; GPU tests require explicit
   assignment.
-- `OMNI_KIT_ACCEPT_EULA=YES` is supplied only to the IsaacLab 3 lane.
+- The `isaaclab3_*` lane `conftest.py` sets `OMNI_KIT_ACCEPT_EULA=YES` for the
+  rc1 launcher; the lane runner does not inject it.
 
 Example backend command:
 
