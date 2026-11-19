@@ -12,6 +12,8 @@ from __future__ import annotations
 from unigym.errors import UniGymError
 
 __all__ = [
+    "ModelEditCapabilityError",
+    "ModelEditError",
     "ModelIRError",
     "ModelSetError",
     "StaleModelError",
@@ -33,3 +35,11 @@ class UnknownExtensionError(ModelIRError):
 
 class StaleModelError(UniGymError, RuntimeError):
     """A dynamic proxy was read after its native world was closed."""
+
+
+class ModelEditError(UniGymError, ValueError):
+    """A model-edit transaction rejected a name, field or value."""
+
+
+class ModelEditCapabilityError(UniGymError, NotImplementedError):
+    """A backend cannot write a requested model field or target kind."""

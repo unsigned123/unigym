@@ -163,6 +163,7 @@ source_modules = [
 forbidden_modules = ["unigym.backends.**"]
 ignore_imports = [
     "unigym.model.ir -> unigym.backends.registry",
+    "unigym.model.edit -> unigym.backends.registry",
     "unigym.model.live -> unigym.backends.registry",
     "unigym.cameras.capabilities -> unigym.backends.registry",
     "unigym.cameras.manager -> unigym.backends.registry",

@@ -1409,6 +1409,27 @@ class Run:
             )
         return self.build().native(backend)
 
+    def model_edit(self):
+        """Open one global model-edit transaction (``Trait.MODEL_EDIT``).
+
+        ``run.model`` remains the read-only ``ModelSet``; the editor is the
+        write face.  Edits apply to every env (no ``env_ids``) and require
+        the live backend.
+
+        Returns:
+            A :class:`~unigym.model.edit.ModelEditor`.
+
+        Raises:
+            RuntimeError: The run is closed.
+            NotImplementedError: The live backend does not declare
+                ``MODEL_EDIT``.
+        """
+        if self._closed:
+            raise RuntimeError(
+                "Run is closed: model edits are unavailable; static .model " "reads remain valid"
+            )
+        return self.build().model_edit()
+
     @property
     def articulations(self) -> list[dict[str, JsonValue]]:
         """The neutral per-articulation views derived from the live runtime.
