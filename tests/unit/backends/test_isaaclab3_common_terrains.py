@@ -139,7 +139,11 @@ def test_step_terrain_builds_generator_importer_with_base_material():
     assert importer.kwargs["env_spacing"] == 7.0
     assert importer.kwargs["debug_vis"] is False
     assert isinstance(importer.kwargs["visual_material"], _PreviewSurfaceCfg)
-    assert _material(importer).kwargs["static_friction"] == 0.9
+    assert _material(importer).kwargs == {
+        "static_friction": 0.9,
+        "dynamic_friction": 0.9,
+        "restitution": 0.0,
+    }
 
     generator = importer.kwargs["terrain_generator"]
     assert isinstance(generator, _TerrainGeneratorCfg)
@@ -182,7 +186,11 @@ def test_generator_terrain_resolves_builtin_sub_terrain_types():
     importer = preset.build(2, 5.0, classes=_CLASSES)["terrain"]
 
     assert isinstance(importer, _TerrainImporterCfg)
-    assert _material(importer).kwargs["static_friction"] == 0.6
+    assert _material(importer).kwargs == {
+        "static_friction": 0.6,
+        "dynamic_friction": 0.6,
+        "restitution": 0.0,
+    }
     generator = importer.kwargs["terrain_generator"]
     assert isinstance(generator, _TerrainGeneratorCfg)
     assert generator.kwargs["num_rows"] == 2
@@ -252,7 +260,11 @@ def test_native_terrain_preset_samples_the_neutral_height_field():
     assert set(fields) == {"terrain"}
     importer = fields["terrain"]
     assert isinstance(importer, _TerrainImporterCfg)
-    assert _material(importer).kwargs["static_friction"] == 0.7
+    assert _material(importer).kwargs == {
+        "static_friction": 0.7,
+        "dynamic_friction": 0.7,
+        "restitution": 0.0,
+    }
     generator = importer.kwargs["terrain_generator"]
     assert isinstance(generator, _TerrainGeneratorCfg)
     assert generator.kwargs["size"] == (4.0, 4.0)

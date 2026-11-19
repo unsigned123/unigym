@@ -234,8 +234,6 @@ class NativeTerrainPreset(TerrainPreset):
                 static_friction=self.friction,
                 dynamic_friction=self.friction,
                 restitution=0.0,
-                friction_combine_mode="multiply",
-                restitution_combine_mode="multiply",
             ),
             visual_material=c["PreviewSurfaceCfg"](diffuse_color=self.color),
             debug_vis=False,
