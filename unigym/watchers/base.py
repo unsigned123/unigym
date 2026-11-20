@@ -29,8 +29,12 @@ from __future__ import annotations
 import enum
 import math
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    import torch
 
 __all__ = [
     "Level",
@@ -95,6 +99,10 @@ class WatchResult:
     data:     json-safe dict (the evidence: values, env indexes...).
     actions:  non-empty -> overrides the spec's static ``on`` for THIS
               fire (declarative default + dynamic override).
+    signals:  user-defined per-env tensors published to the run's
+              ``SignalBus`` on every evaluated tick (level semantics).
+              Core transports names/dtypes/trailing shapes unchanged; a
+              leading axis of ``num_envs`` is the only rule.
     """
 
     fired: bool
@@ -102,6 +110,7 @@ class WatchResult:
     message: str = ""
     data: dict = field(default_factory=dict)
     actions: tuple = ()
+    signals: Mapping[str, torch.Tensor] = field(default_factory=dict)
 
     @classmethod
     def info(cls, message: str, data: dict | None = None) -> WatchResult:
@@ -129,6 +138,15 @@ class WatchResult:
             "message": self.message,
             "data": self.data,
             "actions": list(self.actions),
+            # event logs carry names/shapes only -- never raw tensors
+            "signals": (
+                {
+                    str(name): [int(size) for size in getattr(value, "shape", ())]
+                    for name, value in self.signals.items()
+                }
+                if isinstance(self.signals, Mapping)
+                else {}
+            ),
         }
 
 

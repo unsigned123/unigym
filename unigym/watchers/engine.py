@@ -7,6 +7,7 @@ tick).  Every tick:
     for each enabled watch (budgeted):
         guard (tier-1, optional) -> skip when false
         result = predicate(ctx)          # template | expr | callable
+        publish result.signals           # level values, even fired=False
         fire = trigger(result.fired)     # edge/level/once/cooldown (§8.5)
         if fire: execute actions         # pause/capture/dump/mark/notify
 
@@ -22,10 +23,13 @@ view -- the thin-shell principle); events stream to events.jsonl (timeline).
 
 from __future__ import annotations
 
+import copy
 import json
 import time
+from collections import deque
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import templates as _tpl
 from .base import (
@@ -43,9 +47,29 @@ from .base import (
 )
 from .spec import TIER2_CAP, WatchSpec, check_callable_path, compile_expr, exec_block, load_callable
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    import torch
+
+    from unigym.signals import SignalBus
+
 __all__ = ["WatcherEngine", "WatchState"]
 
 STRIKES_TO_DISABLE = 3
+
+_WATCH_STATE_FIELDS = (
+    "prev",
+    "hold",
+    "cooldown_until",
+    "strikes",
+    "fired",
+    "disabled",
+    "disabled_reason",
+    "last_tick",
+    "setup_done",
+    "last_degrade_tick",
+)
+_WATCH_BOOL_FIELDS = frozenset({"prev", "disabled", "setup_done"})
+_WATCH_INT_FIELDS = frozenset({"hold", "cooldown_until", "strikes", "fired", "last_degrade_tick"})
 
 
 # --------------------------------------------------------------------------- #
@@ -96,10 +120,22 @@ class WatcherEngine:
         bridge: owning Bridge (pause/capture/dump/direct actions); may
             be None in offline tests.
         specs: born-armed declarations (yaml entry point, §8.6).
+        signals: optional run ``SignalBus``; evaluated results publish
+            their signal mapping there (None -> no-op).
     """
 
+    name = "watchers"
+
     def __init__(
-        self, run_id: str, out_dir, env=None, adapter=None, event_log=None, bridge=None, specs=None
+        self,
+        run_id: str,
+        out_dir,
+        env=None,
+        adapter=None,
+        event_log=None,
+        bridge=None,
+        specs=None,
+        signals: SignalBus | None = None,
     ):
         self.run_id = run_id
         self.out_dir = Path(out_dir) if out_dir else None
@@ -107,6 +143,7 @@ class WatcherEngine:
         self.adapter = adapter
         self.event_log = event_log
         self.bridge = bridge
+        self.signals = signals
         self._specs: dict[str, WatchSpec] = {}
         self._states: dict[str, WatchState] = {}
         self._expr_code: dict[str, tuple] = {}  # name -> (code, is_exec)
@@ -368,6 +405,9 @@ class WatcherEngine:
                 continue
             try:
                 result = self._evaluate(spec, st, dry=False)
+                # level semantics: the values publish on every evaluated
+                # tick, independent of the trigger/actions decision
+                self._publish_signals(result.signals)
             except Exception as e:  # noqa: BLE001
                 self._fail_safe(name, spec, e, t)
                 continue
@@ -419,6 +459,48 @@ class WatcherEngine:
                 f"{type(res).__name__}, expected WatchResult"
             )
         return res
+
+    def _publish_signals(self, signals: Mapping[str, torch.Tensor]) -> None:
+        """Publish one evaluated result's user signals (level semantics).
+
+        The whole mapping is preflighted before the first store so one bad
+        value cannot leave a partially published tick on the bus.  The bus
+        remains the transport authority; this preflight mirrors its
+        published contract only to make a failure atomic.
+        """
+        bus = self.signals
+        if bus is None:
+            return
+        if not isinstance(signals, Mapping):
+            raise ValueError(
+                "WatchResult.signals must be a mapping of names to tensors, "
+                f"got {type(signals).__name__}"
+            )
+        if not signals:
+            return
+        import torch
+
+        checked: list[tuple[str, torch.Tensor]] = []
+        for name, value in signals.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"signal name must be a non-empty str, got {name!r}")
+            if not isinstance(value, torch.Tensor):
+                raise ValueError(
+                    f"signal {name!r} value must be a torch.Tensor, got " f"{type(value).__name__}"
+                )
+            if value.ndim < 1 or int(value.shape[0]) != bus.num_envs:
+                raise ValueError(
+                    f"signal {name!r} value must have leading dimension "
+                    f"num_envs={bus.num_envs}, got shape {tuple(value.shape)}"
+                )
+            if value.device != bus.device:
+                raise ValueError(
+                    f"signal {name!r} value device {value.device} does not "
+                    f"match bus device {bus.device}"
+                )
+            checked.append((name, value))
+        for name, value in checked:
+            bus.publish(name, value)
 
     def _eval_guard(self, spec: WatchSpec, st: WatchState) -> bool:
         try:
@@ -607,6 +689,248 @@ class WatcherEngine:
             return {"result": res}
         except Exception as e:  # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
+
+    # ------------------------------------------------------------------ #
+    # rewind provider (name = "watchers")
+    # ------------------------------------------------------------------ #
+    def rewind_state(self) -> dict[str, object]:
+        """Capture specs, trigger state and template window buffers.
+
+        Callable watcher instances are not captured: a signal-producing
+        callable must be stateless in this slice, so re-creating it from
+        the spec is the whole state.  ``setup()`` is framework lifecycle,
+        not opaque internal state: restore re-creates the instance and
+        forces it to run setup again against the live context.
+        Stateful callable producers are explicitly unsupported by the
+        watcher contract.
+        """
+        return {
+            "specs": [copy.deepcopy(self._specs[name].to_dict()) for name in sorted(self._specs)],
+            "states": {
+                name: {field: getattr(self._states[name], field) for field in _WATCH_STATE_FIELDS}
+                for name in sorted(self._states)
+            },
+            "window_cache": {
+                copy.deepcopy(key): {"win": int(entry["win"]), "buf": list(entry["buf"])}
+                for key, entry in self.window_cache.items()
+            },
+        }
+
+    def validate_rewind_state(self, state: dict[str, object]) -> None:
+        """Pre-flight a watcher payload without changing live state.
+
+        The same judgment :meth:`apply_rewind_state` enforces, run
+        read-only so a refused rewind is a zero-change rejection.
+        """
+        self._checked_state(state)
+
+    def apply_rewind_state(self, state: dict[str, object]) -> None:
+        """Restore the specs, trigger state and template windows.
+
+        Hot-add/clear after a checkpoint is reverted: specs are part of the
+        payload, so the restored engine arms exactly the checkpoint's set.
+        Re-created callable instances re-run their framework ``setup()``
+        lifecycle before the next check.
+        """
+        specs, states, windows = self._checked_state(state)
+        new_specs: dict[str, WatchSpec] = {}
+        new_states: dict[str, WatchState] = {}
+        expr_code: dict[str, tuple] = {}
+        guard_code: dict[str, tuple] = {}
+        for spec in specs:
+            if spec.kind == "expr":
+                expr_code[spec.name] = compile_expr(spec.expr)
+            elif spec.kind == "callable":
+                spec.callable_path = check_callable_path(spec.callable_path)
+            if spec.guard:
+                guard_code[spec.name] = compile_expr(spec.guard)
+            restored = WatchState()
+            for field, value in states[spec.name].items():
+                setattr(restored, field, value)
+            if spec.kind == "callable":
+                restored.instance = self._instantiate(spec)
+                # setup() is the framework lifecycle, not opaque callable
+                # state: the fresh instance must run it against the live
+                # context before its first post-rewind check.
+                restored.setup_done = False
+            new_specs[spec.name] = spec
+            new_states[spec.name] = restored
+        self._specs.clear()
+        self._specs.update(new_specs)
+        self._states.clear()
+        self._states.update(new_states)
+        self._expr_code.clear()
+        self._expr_code.update(expr_code)
+        self._guard_code.clear()
+        self._guard_code.update(guard_code)
+        self.window_cache.clear()
+        self.window_cache.update(windows)
+        _tpl._CURRENT_ENGINE = self
+        self._persist()
+
+    def _checked_state(
+        self, state: object
+    ) -> tuple[
+        list[WatchSpec],
+        dict[str, dict[str, object]],
+        dict[tuple[str, int], dict[str, object]],
+    ]:
+        """Validate a watcher payload and return its narrowed components.
+
+        Shared by :meth:`validate_rewind_state` (read-only pre-flight) and
+        :meth:`apply_rewind_state` (second line), so both phases embody the
+        same refusal judgment.
+        """
+        from unigym.runtime.rewind import RewindGateError
+
+        if not isinstance(state, Mapping):
+            raise RewindGateError(
+                f"watchers rewind state must be a mapping, got {type(state).__name__}"
+            )
+        raw_specs = state.get("specs")
+        raw_states = state.get("states")
+        raw_windows = state.get("window_cache")
+        if not isinstance(raw_specs, list):
+            raise RewindGateError("watchers rewind state: 'specs' must be a list")
+        specs: list[WatchSpec] = []
+        for raw in raw_specs:
+            if not isinstance(raw, Mapping):
+                raise RewindGateError(
+                    "watchers rewind state: each spec must be a mapping, "
+                    f"got {type(raw).__name__}"
+                )
+            try:
+                spec = WatchSpec.from_dict(dict(raw))
+                self._check_spec_definition(spec)
+            except WatchError as e:
+                raise RewindGateError(f"watchers rewind state: invalid spec: {e}") from e
+            specs.append(spec)
+        names = [spec.name for spec in specs]
+        if len(names) != len(set(names)):
+            raise RewindGateError(f"watchers rewind state: duplicate spec names {names}")
+        if not isinstance(raw_states, Mapping):
+            raise RewindGateError("watchers rewind state: 'states' must be a mapping")
+        state_names = set(raw_states)
+        if state_names != set(names):
+            missing = sorted(set(names) - state_names)
+            extra = sorted(str(name) for name in state_names - set(names))
+            raise RewindGateError(
+                "watchers rewind state: 'states' keys must match specs "
+                f"(missing: {missing}; unknown: {extra})"
+            )
+        states: dict[str, dict[str, object]] = {}
+        for name in names:
+            raw_state = raw_states[name]
+            if not isinstance(raw_state, Mapping):
+                raise RewindGateError(
+                    f"watchers rewind state: state for {name!r} must be a mapping"
+                )
+            self._check_state_fields(name, raw_state)
+            states[name] = {field: raw_state[field] for field in _WATCH_STATE_FIELDS}
+        if not isinstance(raw_windows, Mapping):
+            raise RewindGateError("watchers rewind state: 'window_cache' must be a mapping")
+        windows: dict[tuple[str, int], dict[str, object]] = {}
+        for raw_key, raw_entry in raw_windows.items():
+            if not isinstance(raw_key, tuple) or len(raw_key) != 2:
+                raise RewindGateError(
+                    f"watchers rewind state: window key must be (key, win), got {raw_key!r}"
+                )
+            key_name, key_win = raw_key
+            if (
+                not isinstance(key_name, str)
+                or isinstance(key_win, bool)
+                or not isinstance(key_win, int)
+                or key_win < 1
+            ):
+                raise RewindGateError(
+                    f"watchers rewind state: window key must be (str, int >= 1), got {raw_key!r}"
+                )
+            if not isinstance(raw_entry, Mapping) or set(raw_entry) != {"win", "buf"}:
+                raise RewindGateError(
+                    f"watchers rewind state: window entry for {raw_key!r} must hold win/buf"
+                )
+            win = raw_entry["win"]
+            raw_buf = raw_entry["buf"]
+            if isinstance(win, bool) or not isinstance(win, int) or win < 1:
+                raise RewindGateError(
+                    f"watchers rewind state: window {raw_key!r} size must be an int >= 1"
+                )
+            if isinstance(raw_buf, (str, bytes)) or not isinstance(raw_buf, Sequence):
+                raise RewindGateError(
+                    f"watchers rewind state: window {raw_key!r} buffer must be a sequence"
+                )
+            values: list[float | None] = []
+            for item in raw_buf:
+                if item is None:
+                    values.append(None)
+                elif isinstance(item, bool) or not isinstance(item, (int, float)):
+                    raise RewindGateError(
+                        f"watchers rewind state: window {raw_key!r} buffer values "
+                        "must be numbers or None"
+                    )
+                else:
+                    values.append(float(item))
+            if len(values) > win:
+                raise RewindGateError(
+                    f"watchers rewind state: window {raw_key!r} buffer holds "
+                    f"{len(values)} values for maxlen {win}"
+                )
+            windows[(key_name, int(key_win))] = {
+                "win": int(win),
+                "buf": deque(values, maxlen=int(win)),
+            }
+        return specs, states, windows
+
+    @staticmethod
+    def _check_spec_definition(spec: WatchSpec) -> None:
+        """Compile an input spec's predicate/guard (same checks as add)."""
+        if spec.kind == "template":
+            errors = _tpl.validate_template_params(spec.template_name, spec.params, [])
+            if errors:
+                raise WatchError(
+                    f"watch '{spec.name}': template '{spec.template}' invalid: " + "; ".join(errors)
+                )
+        elif spec.kind == "expr":
+            compile_expr(spec.expr)
+        else:
+            check_callable_path(spec.callable_path)
+        if spec.guard:
+            compile_expr(spec.guard)
+
+    @staticmethod
+    def _check_state_fields(name: str, state: Mapping) -> None:
+        """Reject a state payload whose fields/types drifted."""
+        from unigym.runtime.rewind import RewindGateError
+
+        if set(state) != set(_WATCH_STATE_FIELDS):
+            missing = sorted(set(_WATCH_STATE_FIELDS) - set(state))
+            extra = sorted(str(key) for key in set(state) - set(_WATCH_STATE_FIELDS))
+            raise RewindGateError(
+                f"watchers rewind state: state for {name!r} has wrong fields "
+                f"(missing: {missing}; unknown: {extra})"
+            )
+        for field in _WATCH_STATE_FIELDS:
+            value = state[field]
+            if field in _WATCH_BOOL_FIELDS:
+                if not isinstance(value, bool):
+                    raise RewindGateError(
+                        f"watchers rewind state: state for {name!r}.{field} must be bool"
+                    )
+            elif field == "disabled_reason":
+                if not isinstance(value, str):
+                    raise RewindGateError(
+                        f"watchers rewind state: state for {name!r}.{field} must be str"
+                    )
+            elif field == "last_tick":
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+                    raise RewindGateError(
+                        f"watchers rewind state: state for {name!r}.{field} must be int|None"
+                    )
+            elif field in _WATCH_INT_FIELDS:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise RewindGateError(
+                        f"watchers rewind state: state for {name!r}.{field} must be int"
+                    )
 
     # ------------------------------------------------------------------ #
     # status / persistence (file is truth)
