@@ -55,6 +55,27 @@ enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
 outcome.  Tasks may return `EpisodeResult.termination`; the sink validates
 and includes it in the report.
 
+## Result views
+
+`unigym.core.episode_result.EpisodeResultView` is the read-only handoff used by
+the command-sampler hook (command_sampler_contract.md):
+
+```python
+@dataclass(frozen=True)
+class EpisodeResultView:
+    task: str
+    success: bool | None
+    metrics: Mapping[str, float]
+```
+
+`BenchmarkSink` builds the views after each task returns successfully and
+publishes them on the episode-end bundle as
+`bundle["episode_results"] = {env_id: (view, ...)}`: one tuple per due env in
+task declaration order.  A task that raises is omitted exactly as it is omitted
+from the report.  The view copies its metrics into a read-only mapping and
+carries no `EpisodeData`, numpy array or task object, so `Task.score(ep)` stays
+pure and the command layer never depends on the benchmark layer.
+
 ## Reports
 
 `benchmark_report.json`:

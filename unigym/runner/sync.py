@@ -7,6 +7,7 @@ unified termination check, then hands a *bundle* to the consumer-side sink:
     sink.on_step(t, bundle)                       # record (pre-reset data side)
     [due mask = clock | reset policy]             #
     sink.on_episode_end(due, bundle)              # BEFORE env.reset_envs
+    sampler.on_episode_end(due, episode_results)  # AFTER sinks, BEFORE reset
     if auto_reset:                                # Gym Env sets this False
         env.reset_envs(due); adapter.on_reset(due)  # reset chain (fixed order)
         sampler.reset(due)                          #
@@ -24,6 +25,7 @@ inline computation cannot perturb bit-exact rollouts.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from types import MappingProxyType
 
 import numpy as np
 import torch
@@ -749,6 +751,16 @@ class SyncRunner:
             # record-before-reset: episode-end data side happens BEFORE
             # the reset chain (sink flushes episodes/videos/counts here)
             self.sink.on_episode_end(due, bundle)
+            # sampler feedback rides the same boundary: AFTER the sinks (they
+            # populate bundle["episode_results"]) and BEFORE sampler.reset, so
+            # prior-episode results can shape the next command.  Runs even when
+            # auto_reset=False (only the reset chain below is skipped).  The
+            # mapping is wrapped read-only: the sampler observes, never edits.
+            if sampler is not None:
+                on_episode_end = getattr(sampler, "on_episode_end", None)
+                if callable(on_episode_end):
+                    results = bundle.get("episode_results") or {}
+                    on_episode_end(due, MappingProxyType(dict(results)))
             if self.auto_reset:
                 env.reset_envs(due)
                 adapter.on_reset(due)

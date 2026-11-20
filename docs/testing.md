@@ -245,6 +245,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `layer_integration` | `tests/integration/**` |
 | `layer_meta` | `tests/meta/**` |
 | `domain_core` | `tests/unit/core/**` |
+| `domain_commands` | `tests/unit/commands/**` |
 | `domain_model` | `tests/unit/model/**` |
 | `domain_scene` | `tests/unit/scenes/**` |
 | `domain_runtime` | `tests/unit/runtime/**` |

@@ -53,6 +53,7 @@ from unigym.benchmarks.termination import (
     outcome_counts,
     source_counts,
 )
+from unigym.core.episode_result import EpisodeResultView
 
 from ..episodes import assemble_episode, slice_step_for_env
 
@@ -260,11 +261,16 @@ class BenchmarkSink:
         reset_facts = bundle.get("reset_facts") or {}
         policy_dt = float(self.meta.get("policy_dt") or 0.0)
         sim_dt = float(self.meta.get("sim_dt") or 0.0)
+        # per-env read-only result views for the sampler hook: successful
+        # tasks only, in task declaration order (a raising task is omitted
+        # exactly as it is omitted from the report)
+        episode_results: dict[int, tuple[EpisodeResultView, ...]] = {}
         for ei in env_ids.tolist():
             steps = self.ep_bufs[ei]
             self.ep_bufs[ei] = []
             rewinds, self._ep_rewinds[ei] = self._ep_rewinds[ei], []
             self.n_episodes += 1
+            episode_results[int(ei)] = ()
             if not steps:
                 continue
             length = len(steps)
@@ -310,6 +316,7 @@ class BenchmarkSink:
             # order the engine hands to every sink, bridge included)
             primary = None
             task_terms: list[Termination] = []
+            views: list[EpisodeResultView] = []
             docs_start = len(self.episode_docs)
             for task in self.tasks:
                 try:
@@ -331,6 +338,13 @@ class BenchmarkSink:
                             )
                         task_terms.append(result.termination)
                     self.results[task.name].append(result)
+                    views.append(
+                        EpisodeResultView(
+                            task=task.name,
+                            success=result.success,
+                            metrics=result.metrics,
+                        )
+                    )
                     if primary is None:
                         primary = result
                     # results episode doc (engine's own
@@ -355,6 +369,7 @@ class BenchmarkSink:
                     )
             # task-declared terminations participate in core precedence;
             # extensions stay JSON-only in the per-episode document.
+            episode_results[int(ei)] = tuple(views)
             all_terms = list(core_terms) + task_terms
             final_termination = (
                 EpisodeTermination.from_terminations(all_terms) if all_terms else None
@@ -412,6 +427,9 @@ class BenchmarkSink:
                     "rewound": ep.rewound,
                 }
             )
+        # hand the per-env views to the engine, which forwards them to the
+        # command sampler right after this callback (same boundary bundle)
+        bundle["episode_results"] = episode_results
 
     # ------------------------------------------------------------------ #
     # light progress (post-reset, mirrors CollectSink's logging rhythm)

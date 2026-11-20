@@ -14,6 +14,9 @@ time_s        canonical time ((t+1) * policy_dt)
 run_identity  RunIdentity (benchmark runs)
 reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
               present on on_episode_end for the ending episode
+episode_results {env_id: (EpisodeResultView, ...)}
+              present on on_episode_end when a BenchmarkSink scored the
+              episode; per-env, task declaration order, read-only
 ```
 
 Lifecycle:
@@ -23,9 +26,17 @@ Lifecycle:
 2. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `reset_facts`
    describe the episode's START (captured at its reset, tick 0); the
    termination facts are the final tick's.
-3. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
-4. The runner captures the NEXT episode's pre-policy-step sample from
+3. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
+   the sinks (they publish the views) and BEFORE `sampler.reset`.  Runs even
+   when `auto_reset` is false.
+4. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
+5. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
+
+`build_instance` calls `sampler.bind_env(env)` once at the live-instance
+construction seam, before any runner exists.  `SyncRunner` never binds, so
+multiple runners over one cached `RunInstance` cannot rebind.  The
+command-sampler lifecycle is documented in `command_sampler_contract.md`.
 
 Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
 `terminated/truncated` vocabulary.  The task layer maps core outcomes later.

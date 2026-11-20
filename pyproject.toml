@@ -328,6 +328,7 @@ markers = [
     "layer_integration: CLI, daemon, subprocess and heavy-path tests",
     "layer_meta: test-system and repository-rule tests",
     "domain_core: core domain tests",
+    "domain_commands: command sampler domain tests",
     "domain_model: model domain tests",
     "domain_scene: scene domain tests",
     "domain_runtime: runtime domain tests",

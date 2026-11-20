@@ -14,6 +14,10 @@ back to it.  Everything the next ``adapter.act`` consumes is covered:
   ``on_rewind(restored_tick)`` resync hook (in-flight skill drop -> hold,
   EventCompiler seq rollback, TimeAccount/TimeControl resync, ledger
   rewind marker);
+* sampler -- a ``rewind_capable`` command sampler's ``rewind_state()`` joins
+  the payload and is applied after the adapter, before the providers; an
+  inert sampler packages nothing and a non-capable one is refused by the
+  gate;
 * providers -- :class:`RewindStateProvider` facilities: each provider's
   ``rewind_state()`` joins the SAME
   checkpoint payload (one freeze point, one package) and is applied
@@ -87,12 +91,13 @@ RewindEngine: TypeAlias = Any
 
 
 class RewindPayload(TypedDict):
-    """One checkpoint's packaged run state (engine + adapter + providers)."""
+    """One checkpoint's packaged run state (engine + adapter + sampler + providers)."""
 
     tick: int
     env: SnapshotValue
     observations: dict[str, SnapshotValue]
     adapter: SnapshotValue
+    sampler: SnapshotValue
     providers: dict[str, SnapshotValue]
     episode_id: int | None
     obs_frame: SnapshotValue
@@ -258,26 +263,46 @@ class RewindController:
                 "forked timeline have no defined composition)",
                 hint="drop --replay or start a fresh run for the rewind " "face",
             )
-        if getattr(self.engine, "sampler", None) is not None:
-            # the gate's true invariant: no unsnapshotted sampler STATE
-            # (a random resampler's RNG/timers live outside the
-            # snapshot).  A sampler that declares itself rewind_inert
-            # (explicit class attribute, the rewindable discipline) is
-            # stateless by construction -- the checkpoint ring
-            # needs it: agent_g1 session configs carry an IGNORED fixed
-            # command sampler (the adapter never reads it) and would
-            # otherwise lose every checkpoint.
-            sampler: object | None = self.engine.sampler
-            if not getattr(sampler, "rewind_inert", False):
+        sampler = getattr(self.engine, "sampler", None)
+        if sampler is not None:
+            # the gate's true invariant: no unsnapshotted sampler STATE (a
+            # random resampler's RNG/timers live outside the snapshot).  A
+            # sampler that declares itself rewind_inert (explicit class
+            # attribute, the rewindable discipline) is stateless by
+            # construction -- the checkpoint ring needs it: agent_g1 session
+            # configs carry an IGNORED fixed command sampler (the adapter
+            # never reads it) and would otherwise lose every checkpoint.  A
+            # rewind_capable sampler packages its own state into every
+            # checkpoint payload instead.
+            inert = bool(getattr(sampler, "rewind_inert", False))
+            capable = bool(getattr(sampler, "rewind_capable", False))
+            if not inert and not capable:
                 raise RewindGateError(
-                    "sampler-based runs are not rewindable in v1 "
-                    "(command resampler state lives outside the "
-                    "snapshot)",
-                    hint="self-commanding adapters (agent_g1, sonic_g1) "
-                    "run without a sampler (or with an explicitly "
-                    "rewind_inert one, e.g. fixed); rewind needs "
-                    "one of those",
+                    f"sampler {type(sampler).__name__} is not rewindable "
+                    f"(rewind_inert={inert}, rewind_capable={capable})",
+                    hint="rewind requires a sampler that is rewind_inert "
+                    "(no external state, e.g. fixed) or rewind_capable "
+                    "(implements rewind_state/apply_rewind_state); random "
+                    "resamplers (uniform, lhs) are not rewindable",
                 )
+
+    # ---------------------------------------------------------------- #
+    # sampler state (rewind_capable samplers only)
+    # ---------------------------------------------------------------- #
+    def _sampler(self) -> SnapshotValue | None:
+        """The engine's command sampler (duck-typed runner seam)."""
+        return getattr(self.engine, "sampler", None)
+
+    def _sampler_capable(self) -> bool:
+        sampler = self._sampler()
+        return bool(sampler is not None and getattr(sampler, "rewind_capable", False))
+
+    def _sampler_state(self) -> SnapshotValue:
+        """The capable sampler's freeze-point state (None when inert/absent)."""
+        sampler = self._sampler()
+        if sampler is None or not getattr(sampler, "rewind_capable", False):
+            return None
+        return _snap_val(sampler.rewind_state())
 
     # ---------------------------------------------------------------- #
     # command handlers (engine thread; errors land in the ack)
@@ -307,6 +332,10 @@ class RewindController:
                 if callable(getattr(self.adapter, "snapshot_internal", None))
                 else None
             ),
+            # sampler state: the capable sampler's own command/phase/timer
+            # state (None for rewind_inert samplers -- there is nothing to
+            # package).  Same freeze point as the engine/adapter package.
+            "sampler": self._sampler_state(),
             # provider states: the SAME freeze point packages the
             # engine + adapter + every facility's necessary state (the
             # consistency guarantee is constructional -- one package)
@@ -453,6 +482,7 @@ class RewindController:
                 if callable(getattr(self.adapter, "snapshot_internal", None))
                 else None
             ),
+            "sampler": self._sampler_state(),
             "providers": {p.name: p.rewind_state() for p in self.providers},
         }
         applied: list[str] = []
@@ -463,6 +493,12 @@ class RewindController:
                 getattr(self.adapter, "restore_internal", None)
             ):
                 self.adapter.restore_internal(payload["adapter"])
+            # sampler state: after env/observations/adapter, before the
+            # providers (the sampler owns only its own command state)
+            if payload.get("sampler") is not None:
+                sampler = self._sampler()
+                if sampler is not None:
+                    sampler.apply_rewind_state(payload["sampler"])
             # restore order: engine -> adapter -> providers (design
             # §1.2); any provider failure raises through -- the except
             # below rolls EVERYTHING back (engine + adapter + providers).
@@ -499,6 +535,28 @@ class RewindController:
                 ) as rb:
                     print(
                         f"[rewind] safety-net adapter rollback failed "
+                        f"({type(rb).__name__}: {rb}) -- continuing; "
+                        f"the original error below is authoritative",
+                        flush=True,
+                    )
+            # sampler rollback: mirrors the apply order (adapter -> sampler
+            # -> providers); a rollback failure is logged, never masking the
+            # original exception
+            sampler = self._sampler()
+            sampler_state = safety.get("sampler")
+            if sampler is not None and sampler_state is not None:
+                try:
+                    sampler.apply_rewind_state(sampler_state)
+                except (
+                    ValueError,
+                    RuntimeError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    AttributeError,
+                ) as rb:
+                    print(
+                        f"[rewind] safety-net sampler rollback failed "
                         f"({type(rb).__name__}: {rb}) -- continuing; "
                         f"the original error below is authoritative",
                         flush=True,
@@ -585,6 +643,14 @@ class RewindController:
         :class:`RewindGateError` with the world untouched.
         """
         bundle = self.bridge._bundle or {}
+        if self._sampler_capable() and payload.get("sampler") is None:
+            raise RewindGateError(
+                f"sampler {type(self._sampler()).__name__} is rewind_capable "
+                f"but snapshot {sid} has no sampler state",
+                hint="the snapshot predates the sampler state capture (or "
+                "was taken by a non-capable sampler); rewind refuses rather "
+                "than partially restore the run",
+            )
         snap_ep = payload.get("episode_id")
         live_ep = _episode_stamp(bundle)
         if snap_ep is not None and live_ep is not None and int(snap_ep) != int(live_ep):
