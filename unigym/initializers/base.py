@@ -52,7 +52,12 @@ import numpy as np
 from unigym.provenance import OriginTable, ProviderOrigin, RegistrySnapshot
 
 __all__ = [
+    "CollisionPairSpec",
     "InitializerBase",
+    "ProbeCapabilityError",
+    "ProbePose",
+    "ProbeRequest",
+    "ProbeResult",
     "ResetOutcome",
     "ResetPrimitives",
     "INITIALIZER_REGISTRY",
@@ -66,6 +71,223 @@ __all__ = [
     "validate_initializer_shape",
     "wrap_initializer_result",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# neutral probe request/result types (engine-free)
+# --------------------------------------------------------------------------- #
+def _probe_vector(value, *, field: str, size: int) -> tuple[float, ...]:
+    """Validate one finite ``(size,)`` probe vector and canonicalize it."""
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a numeric vector") from exc
+    if array.shape != (size,):
+        raise ValueError(f"{field} must have shape ({size},), got {array.shape}")
+    if not np.isfinite(array).all():
+        raise ValueError(f"{field} must be finite")
+    return tuple(float(component) for component in array)
+
+
+def _probe_name(value, *, field: str) -> str:
+    """Validate and canonicalize one non-empty owner/body/geom name."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string, got {value!r}")
+    return value.strip()
+
+
+class ProbeCapabilityError(RuntimeError):
+    """The backend cannot probe the requested free-root pose.
+
+    Raised by ``ResetPrimitives.probe`` for an unsupported capability (an
+    articulated internal body pose, a fixed/anchored root, a candidate
+    without collision geoms), an unknown declared owner/geom/support
+    reference, or an unavailable backend query.  It is the neutral,
+    pack-catchable capability failure; malformed shapes/types remain value
+    errors.
+    """
+
+
+@dataclass(frozen=True)
+class ProbePose:
+    """One candidate free-root pose in world frame.
+
+    ``owner`` is the declared prop or articulation name; ``body`` is
+    ``None`` for a free root.  V1 probes free roots only: a non-``None``
+    body is rejected by the backend with a capability error.
+    ``pos_w`` is world XYZ in metres and ``quat_wxyz`` is a world-frame
+    ``(w, x, y, z)`` quaternion (normalized by the backend).
+    """
+
+    owner: str
+    body: str | None
+    pos_w: tuple[float, float, float]
+    quat_wxyz: tuple[float, float, float, float]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "owner", _probe_name(self.owner, field="ProbePose.owner"))
+        if self.body is not None:
+            object.__setattr__(self, "body", _probe_name(self.body, field="ProbePose.body"))
+        object.__setattr__(
+            self, "pos_w", _probe_vector(self.pos_w, field="ProbePose.pos_w", size=3)
+        )
+        quat = _probe_vector(self.quat_wxyz, field="ProbePose.quat_wxyz", size=4)
+        if float(np.linalg.norm(quat)) <= 1e-12:
+            raise ValueError("ProbePose.quat_wxyz must be a non-zero quaternion")
+        object.__setattr__(self, "quat_wxyz", quat)
+
+
+@dataclass(frozen=True)
+class CollisionPairSpec:
+    """One explicitly checked candidate geom / other geom pair.
+
+    ``allow_support_contact`` permits a near-zero contact (within
+    ``penetration_tolerance_m``) to satisfy the requested clearance; it
+    never excuses actual overlap.  This is the region-placement support
+    exception expressed neutrally.
+    """
+
+    candidate_geom: str
+    other_geom: str
+    allow_support_contact: bool = False
+    penetration_tolerance_m: float = 1e-7
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "candidate_geom",
+            _probe_name(self.candidate_geom, field="CollisionPairSpec.candidate_geom"),
+        )
+        object.__setattr__(
+            self, "other_geom", _probe_name(self.other_geom, field="CollisionPairSpec.other_geom")
+        )
+        if not isinstance(self.allow_support_contact, bool):
+            raise TypeError(
+                "CollisionPairSpec.allow_support_contact must be bool, got "
+                f"{type(self.allow_support_contact).__name__}"
+            )
+        try:
+            tolerance = float(self.penetration_tolerance_m)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "CollisionPairSpec.penetration_tolerance_m must be a finite " "non-negative number"
+            ) from exc
+        if not math.isfinite(tolerance) or tolerance < 0:
+            raise ValueError(
+                "CollisionPairSpec.penetration_tolerance_m must be a finite " "non-negative number"
+            )
+        object.__setattr__(self, "penetration_tolerance_m", tolerance)
+
+
+@dataclass(frozen=True)
+class ProbeRequest:
+    """One backend-scratch collision/clearance probe request.
+
+    ``overrides`` is a non-empty sequence of candidate free-root poses.
+    ``pairs=None`` asks the backend to treat every override owner's full
+    body subtree (root plus descendants) as candidates, skip same-owner
+    internal pairs, cross-pair different overridden owners, and pair each
+    candidate against the collision geoms outside all overridden subtrees.
+    A declared ``support_body`` is never removed from that world set: its
+    geoms stay in the query, and only pairs against that exact body allow
+    a near-zero contact.  Explicit ``pairs`` are evaluated exactly as
+    given; the request-level ``support_body`` does not alter them.
+    ``min_clearance_m`` is surface clearance in metres; it is not an
+    owner-origin distance.
+    """
+
+    overrides: tuple[ProbePose, ...]
+    pairs: tuple[CollisionPairSpec, ...] | None = None
+    min_clearance_m: float = 0.0
+    support_body: str | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            overrides = tuple(self.overrides)
+        except TypeError as exc:
+            raise TypeError("ProbeRequest.overrides must be a sequence of ProbePose") from exc
+        if not overrides:
+            raise ValueError("ProbeRequest.overrides must be a non-empty sequence of ProbePose")
+        seen: set[tuple[str, str | None]] = set()
+        for index, pose in enumerate(overrides):
+            if not isinstance(pose, ProbePose):
+                raise TypeError(
+                    f"ProbeRequest.overrides[{index}] must be a ProbePose, got "
+                    f"{type(pose).__name__}"
+                )
+            key = (pose.owner, pose.body)
+            if key in seen:
+                raise ValueError(f"ProbeRequest.overrides[{index}] duplicates owner/body {key!r}")
+            seen.add(key)
+        object.__setattr__(self, "overrides", overrides)
+
+        if self.pairs is not None:
+            try:
+                pairs = tuple(self.pairs)
+            except TypeError as exc:
+                raise TypeError(
+                    "ProbeRequest.pairs must be None or a sequence of CollisionPairSpec"
+                ) from exc
+            for index, pair in enumerate(pairs):
+                if not isinstance(pair, CollisionPairSpec):
+                    raise TypeError(
+                        f"ProbeRequest.pairs[{index}] must be a CollisionPairSpec, got "
+                        f"{type(pair).__name__}"
+                    )
+            object.__setattr__(self, "pairs", pairs)
+
+        try:
+            clearance = float(self.min_clearance_m)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "ProbeRequest.min_clearance_m must be a finite non-negative number"
+            ) from exc
+        if not math.isfinite(clearance) or clearance < 0:
+            raise ValueError("ProbeRequest.min_clearance_m must be a finite non-negative number")
+        object.__setattr__(self, "min_clearance_m", clearance)
+
+        if self.support_body is not None:
+            object.__setattr__(
+                self,
+                "support_body",
+                _probe_name(self.support_body, field="ProbeRequest.support_body"),
+            )
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """Probe verdict and measured signed distances, in metres.
+
+    ``reason`` is a stable query outcome (``penetration`` /
+    ``insufficient_clearance``) or ``None`` when accepted.  Distances are
+    signed and may be capped by the backend's query horizon (MuJoCo caps at
+    ``max(1.0, min_clearance_m + penetration_tolerance_m)``).  Capability
+    failures raise instead of returning a result.
+    """
+
+    accepted: bool
+    reason: str | None
+    distances_m: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.accepted, bool):
+            raise TypeError(f"ProbeResult.accepted must be bool, got {self.accepted!r}")
+        reason: str | None = None
+        if self.reason is not None:
+            if not isinstance(self.reason, str):
+                raise TypeError(f"ProbeResult.reason must be str or None, got {self.reason!r}")
+            reason = self.reason.strip()
+            if not reason:
+                raise ValueError("ProbeResult.reason must be non-empty when set")
+        if self.accepted and reason is not None:
+            raise ValueError("ProbeResult.reason must be None when accepted")
+        if not self.accepted and reason is None:
+            raise ValueError("ProbeResult.reason must be set when rejected")
+        object.__setattr__(self, "reason", reason)
+        distances = tuple(float(distance) for distance in self.distances_m)
+        if not all(math.isfinite(distance) for distance in distances):
+            raise ValueError("ProbeResult.distances_m must be finite")
+        object.__setattr__(self, "distances_m", distances)
 
 
 # --------------------------------------------------------------------------- #
@@ -99,9 +321,11 @@ class ResetPrimitives:
     (the reset chain's settle/forward tail stays authoritative); calling
     them outside ``initializer.apply()`` is an error.
     ``settle_fn(substeps)`` runs the backend's zero-action settle loop;
-    ``forward()`` refreshes derived quantities; ``prop_extents(name)``
-    yields the ``(half_xy, height)`` z-stack inputs and ``prop_names``
-    is the declared prop-name set (the neutrality check's reference).
+    ``forward()`` refreshes derived quantities; ``probe(request)`` evaluates
+    a :class:`ProbeRequest` on a private scratch data copy (never the live
+    reset data); ``prop_extents(name)`` yields the ``(half_xy, height)``
+    z-stack inputs and ``prop_names`` is the declared prop-name set (the
+    neutrality check's reference).
     The former ``joint_group`` / ``set_targets`` stubs were removed: they
     had no core caller, and an external pack that declared them must
     switch to ``set_root_state`` / ``set_joint_state``.
@@ -124,6 +348,14 @@ class ResetPrimitives:
     velocity unchanged)."""
     forward: Callable[[], None]
     """``mj_forward`` equivalent (derived-quantity refresh)."""
+    probe: Callable[[ProbeRequest], ProbeResult]
+    """Evaluate candidate free-root poses on a private scratch data copy.
+
+    Runs ``mj_copyData`` -> apply the request overrides -> ``mj_forward``
+    -> ``mj_geomDistance`` and returns a :class:`ProbeResult`.  Live reset
+    data, qpos/qvel and the model are never mutated.  V1 supports
+    freejoint/free roots only; capability failures raise
+    :class:`ProbeCapabilityError`."""
     prop_extents: Callable[[str], tuple] = None  # type: ignore[assignment]
     """``(prop_name) -> (half_xy, height)`` (z-stack sampler inputs)."""
     prop_names: frozenset = field(default_factory=frozenset)

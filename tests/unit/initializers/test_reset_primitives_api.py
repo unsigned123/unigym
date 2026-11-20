@@ -16,7 +16,7 @@ def test_removed_stub_fields_are_gone() -> None:
 
     assert "joint_group" not in names
     assert "set_targets" not in names
-    assert {"set_root_state", "set_joint_state"} <= names
+    assert {"set_root_state", "set_joint_state", "probe"} <= names
 
 
 def test_no_core_caller_of_the_removed_primitives() -> None:

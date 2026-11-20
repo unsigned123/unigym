@@ -1123,6 +1123,64 @@ declares a catalog `scene_preset`, an unregistered inline provider, mode
 `benchmark`/`both`, or a `pack:`/asset reference string; there is no
 module-level default runtime or cache.
 
+#### Initializer reset probes
+
+An initializer may ask the backend to evaluate candidate free-root poses
+without touching the live reset state.  The neutral request types are exported
+from `unigym.initializers`:
+
+```python
+from unigym.initializers import (
+    CollisionPairSpec,
+    ProbeCapabilityError,
+    ProbePose,
+    ProbeRequest,
+    ProbeResult,
+)
+
+result = primitives.probe(
+    ProbeRequest(
+        overrides=(
+            ProbePose(
+                owner="robot_a",
+                body=None,
+                pos_w=(1.0, 0.0, 0.8),
+                quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+            ),
+        ),
+        pairs=None,
+        min_clearance_m=0.02,
+        support_body="table",
+    )
+)
+```
+
+The backend copies the live reset `MjData` with `mj_copyData`, applies every
+override to the private scratch copy, runs `mj_forward` and evaluates
+`mj_geomDistance`.  Live data, qpos/qvel and the model are never mutated.
+With `pairs=None`, every overridden owner contributes its **full body
+subtree** (root plus descendants) as candidate geoms; same-owner internal
+pairs are excluded, different overridden owners are cross-paired so
+overlapping overrides are rejected, and every candidate is paired against
+the collision geoms outside all overridden subtrees.  The world set is never
+silently reduced by `support_body`: its geoms stay in the query, and only
+pairs against that exact support body are allowed a near-zero contact.  On
+the explicit `pairs` path the request-level `support_body` does not alter the
+declared pairs; use `CollisionPairSpec.allow_support_contact` per pair
+instead.  `min_clearance_m` is surface clearance in metres, not an
+owner-origin distance.  Distances are signed and capped by MuJoCo's query
+horizon: `max(1.0, min_clearance_m + penetration_tolerance_m)`.
+
+V1 supports freejoint/free-root overrides only (`ProbePose.body=None`): a
+robot free root, a free rigid prop, or a free articulation prop.  An anchored
+articulation prop, a fixed robot root, an articulated internal body pose, a
+model without collision geoms, or an unknown owner/geom/support reference
+raises the neutral, pack-catchable `ProbeCapabilityError` exported by
+`unigym.initializers`; packs never need the backend-private probe module.
+Malformed shapes or types remain value errors.  The legacy
+`probe_candidate(rule, position, yaw, clearance)` region entry remains and
+delegates to `probe`.
+
 ### Run resources
 
 A run config reference has exactly two accepted forms:

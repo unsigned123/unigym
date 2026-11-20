@@ -12,7 +12,12 @@ contract graphs (same pattern as unigym/scripts/__init__.py).
 
 from unigym.initializers.base import (
     INITIALIZER_REGISTRY,
+    CollisionPairSpec,
     InitializerBase,
+    ProbeCapabilityError,
+    ProbePose,
+    ProbeRequest,
+    ProbeResult,
     ResetOutcome,
     ResetPrimitives,
     build_initializer,
@@ -23,7 +28,12 @@ from unigym.initializers.base import (
 
 __all__ = [
     "INITIALIZER_REGISTRY",
+    "CollisionPairSpec",
     "InitializerBase",
+    "ProbeCapabilityError",
+    "ProbePose",
+    "ProbeRequest",
+    "ProbeResult",
     "ResetOutcome",
     "ResetPrimitives",
     "build_initializer",

@@ -18,9 +18,12 @@ in :meth:`InitializerBase.apply_robot_stages`, called once after
 ``apply`` inside the backend reset chain, so the execution order and the
 RNG consumption order stay bitwise (determinism red line).
 
-``_probe_region_placement`` is the region-bound candidate-probe face
+``_region_probe_request`` is the region-bound candidate-probe face
 (the backend's collision-query seam the placement sampler reaches
-through ``ResetPrimitives.probe_candidate``).
+through ``ResetPrimitives.probe_candidate``).  ``ResetPrimitives.probe``
+is the generic request face: it resolves declared free roots, copies the
+live reset ``MjData`` into a private scratch object and evaluates explicit
+or automatic collision pairs without mutating live data or the model.
 
 Scope: only the mujoco and mjwarp reset chains build this face.  The
 isaaclab2 backend does not construct ``ResetPrimitives`` and is not
@@ -36,7 +39,14 @@ from typing import Optional
 import numpy as np
 
 from unigym.core import quat as quat_math
-from unigym.initializers import InitializerBase, ResetPrimitives
+from unigym.initializers import (
+    InitializerBase,
+    ProbeCapabilityError,
+    ProbePose,
+    ProbeRequest,
+    ProbeResult,
+    ResetPrimitives,
+)
 
 _ZERO_TOL = 1e-12
 
@@ -125,18 +135,15 @@ def _state_write_row(env, array: np.ndarray):
     return tensor.reshape(1, -1).to(env.device)
 
 
-def _probe_region_placement(env, rule, position, yaw, clearance):
-    """Probe a synthetic freejoint pose through a private MuJoCo data copy."""
-    from ..scene.placement_query import CollisionPair, probe_freejoint_candidate
-    import mujoco
+def _region_probe_request(env, rule, position, yaw, clearance) -> ProbeRequest:
+    """Build the region placement request from the legacy call shape."""
+    from unigym.initializers import CollisionPairSpec
     from unigym.initializers.placement import PlacementCapabilityError
+    import mujoco
 
     _bid, _qadr, _vadr = env.prop_backend.free_addresses(rule.object_name)
     region = env._placement_regions[rule.region_key]
     support_body = mujoco.mj_name2id(env._model, mujoco.mjtObj.mjOBJ_BODY, region.owner)
-    joint_name = mujoco.mj_id2name(
-        env._model, mujoco.mjtObj.mjOBJ_JOINT, int(env._model.body_jntadr[_bid])
-    )
     candidate = [
         mujoco.mj_id2name(env._model, mujoco.mjtObj.mjOBJ_GEOM, geom)
         for geom in range(
@@ -151,7 +158,7 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
     # are compiled contype=0/conaffinity=0 and are never collision
     # evidence
     blocking_geoms = [
-        CollisionPair(
+        CollisionPairSpec(
             geom,
             mujoco.mj_id2name(env._model, mujoco.mjtObj.mjOBJ_GEOM, other),
             allow_support_contact=(
@@ -165,18 +172,19 @@ def _probe_region_placement(env, rule, position, yaw, clearance):
             and (int(env._model.geom_contype[other]) or int(env._model.geom_conaffinity[other]))
         )
     ]
-    try:
-        return probe_freejoint_candidate(
-            env._model,
-            env._active_data,
-            joint_name,
-            position,
-            (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)),
-            blocking_geoms,
-            min_clearance_m=clearance,
-        )
-    except (AttributeError, ValueError) as exc:
-        raise PlacementCapabilityError(str(exc)) from exc
+    return ProbeRequest(
+        overrides=(
+            ProbePose(
+                owner=rule.object_name,
+                body=None,
+                pos_w=position,
+                quat_wxyz=(np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)),
+            ),
+        ),
+        pairs=tuple(blocking_geoms),
+        min_clearance_m=clearance,
+        support_body=region.owner,
+    )
 
 
 def resolve_base_height(params: dict, profile) -> float:
@@ -395,8 +403,81 @@ def build_reset_primitives(env) -> ResetPrimitives:
             height = max(height, float(size[2]) * 2)
         return ((-half_x, -half_y, 0.0), (half_x, half_y, height))
 
+    def probe(request: ProbeRequest) -> ProbeResult:
+        """Evaluate candidate free-root poses on a private scratch ``MjData``.
+
+        The live reset data is copied with ``mj_copyData``; the requested
+        overrides are written only to the scratch copy before one
+        ``mj_forward`` and the collision/clearance queries.  Live qpos/qvel,
+        the live data and the model are never mutated.  V1 supports
+        freejoint/free roots only: a non-``None`` ``ProbePose.body`` or a
+        fixed root raises a capability error.
+        """
+        from ..scene.placement_query import probe_free_poses
+
+        if not isinstance(request, ProbeRequest):
+            raise TypeError(
+                "ResetPrimitives.probe: request must be a ProbeRequest, got "
+                f"{type(request).__name__}"
+            )
+
+        def root_address(pose: ProbePose, index: int) -> tuple[int, int]:
+            if pose.body is not None:
+                raise ProbeCapabilityError(
+                    f"ResetPrimitives.probe: request.overrides[{index}].body "
+                    f"{pose.body!r} is not supported; v1 probes free roots only "
+                    "(body=None)"
+                )
+            arts = getattr(env, "articulations", None) or {}
+            art = arts.get(pose.owner)
+            if art is not None:
+                if art.free_qpos_adr is None or art.free_dof_adr is None:
+                    raise ProbeCapabilityError(
+                        f"ResetPrimitives.probe: request.overrides[{index}].owner "
+                        f"{pose.owner!r} has a fixed root; v1 probes free roots only"
+                    )
+                base_bid = art.addresses.get("base_body_id")
+                if base_bid is None or int(base_bid) < 0:
+                    raise ProbeCapabilityError(
+                        f"ResetPrimitives.probe: request.overrides[{index}].owner "
+                        f"{pose.owner!r} has no compiled base body"
+                    )
+                return int(base_bid), int(art.free_qpos_adr)
+            prop_backend = getattr(env, "prop_backend", None)
+            if prop_backend is not None and pose.owner in prop_backend.free_prop_names():
+                body_id, qadr, _vadr = prop_backend.free_addresses(pose.owner)
+                return int(body_id), int(qadr)
+            prop_art = (
+                None if prop_backend is None else prop_backend.articulations().get(pose.owner)
+            )
+            if prop_art is not None:
+                free_qadr = getattr(prop_art, "free_qadr", None)
+                if free_qadr is None or int(free_qadr) < 0 or int(prop_art.root_bid) < 0:
+                    raise ProbeCapabilityError(
+                        f"ResetPrimitives.probe: request.overrides[{index}].owner "
+                        f"{pose.owner!r} is an anchored articulation prop with a fixed "
+                        "root; v1 probes free roots only"
+                    )
+                return int(prop_art.root_bid), int(free_qadr)
+            free_props = sorted(prop_backend.free_prop_names()) if prop_backend is not None else []
+            prop_arts = sorted(prop_backend.articulations()) if prop_backend is not None else []
+            raise ProbeCapabilityError(
+                f"ResetPrimitives.probe: request.overrides[{index}].owner "
+                f"{pose.owner!r} is not a declared articulation or free prop "
+                f"| articulations: {sorted(arts)}, free rigid props: {free_props}, "
+                f"articulation props: {prop_arts}"
+            )
+
+        roots = tuple(root_address(pose, index) for index, pose in enumerate(request.overrides))
+        return probe_free_poses(m, env._active_data, request, roots)
+
     def probe_candidate(rule, position, yaw, clearance):
-        return _probe_region_placement(env, rule, position, yaw, clearance)
+        from unigym.initializers.placement import PlacementCapabilityError
+
+        try:
+            return probe(_region_probe_request(env, rule, position, yaw, clearance))
+        except (AttributeError, ValueError, ProbeCapabilityError) as exc:
+            raise PlacementCapabilityError(str(exc)) from exc
 
     def resolve_articulation(profile_name: str) -> str:
         """Resolve a robot profile name to the run's articulation name.
@@ -436,6 +517,7 @@ def build_reset_primitives(env) -> ResetPrimitives:
         set_root_state=set_root_state,
         set_joint_state=set_joint_state,
         forward=forward,
+        probe=probe,
         prop_extents=env._prop_extents,
         prop_names=frozenset(s.name for s in env.prop_manager.specs)
         if env.prop_manager is not None
