@@ -142,6 +142,9 @@ def register_prop_template(
     Returns:
         A decorator that stores the provider and returns it unchanged.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.PROP_TEMPLATE, name=name)
     if (
         not isinstance(name, str)
         or not name

@@ -18,6 +18,16 @@ _TESTS_ROOT = Path(__file__).resolve().parent
 _DATA_ROOT = _TESTS_ROOT / "_support" / "data"
 
 
+@pytest.fixture(autouse=True)
+def _reset_registration_gate():
+    """Every test starts in bootstrap phase (registration tests enter phases)."""
+    from unigym.registration import reset_registration
+
+    reset_registration()
+    yield
+    reset_registration()
+
+
 @pytest.fixture
 def tiny_mjcf(tmp_path: Path) -> Path:
     """Copy the shared primitives-only MJCF into an isolated tmp directory."""

@@ -36,6 +36,9 @@ from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
+    from unigym.actuator_law import ActuatorLawSnapshot
+    from unigym.benchmarks.task_providers import TaskProviderRegistrySnapshot
+    from unigym.initializers.base import InitializerRegistrySnapshot
     from unigym.props.templates import PropTemplateRegistrySnapshot
     from unigym.robots import RobotProfile
     from unigym.scenes.pipeline import SceneContentFillerRegistrySnapshot
@@ -93,6 +96,7 @@ class ActivationHandle:
     adapters: tuple[str, ...] = ()
     robots: tuple[str, ...] = ()
     scene_providers: tuple[str, ...] = ()
+    actuator_laws: tuple[str, ...] = ()
 
 
 def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) -> Path:
@@ -497,6 +501,48 @@ def _attribute_pack_code_prop_templates(
         if prop_template_origin(info.name).kind != "unknown":
             continue
         attribute_prop_template(info.name, origin)
+
+
+def _attribute_pack_code_initializers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: InitializerRegistrySnapshot,
+) -> None:
+    """Label initializers the pack registered itself during activation."""
+    from unigym.initializers.base import (
+        INITIALIZER_REGISTRY,
+        attribute_initializer,
+        initializer_origin,
+    )
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in sorted(INITIALIZER_REGISTRY):
+        if name in before.entries:
+            continue
+        if initializer_origin(name).kind != "unknown":
+            continue
+        attribute_initializer(name, origin)
+
+
+def _attribute_pack_code_task_providers(
+    manifest: PackManifestV1,
+    runtime: PackRuntime,
+    before: TaskProviderRegistrySnapshot,
+) -> None:
+    """Label task providers the pack registered itself during activation."""
+    from unigym.benchmarks.task_providers import (
+        PROVIDERS,
+        attribute_task_provider,
+        task_provider_origin,
+    )
+
+    origin = _pack_code_origin(manifest, runtime)
+    for name in sorted(PROVIDERS):
+        if name in before.entries:
+            continue
+        if task_provider_origin(name).kind != "unknown":
+            continue
+        attribute_task_provider(name, origin)
 
 
 def _attribute_pack_code_terminations(
@@ -926,6 +972,9 @@ class PackRuntime:
         if cached is not None:
             return cached
 
+        from unigym.registration import RegistrationPhase, at_least_phase
+
+        at_least_phase(RegistrationPhase.ACTIVATE)
         manifest = self.catalog.get(pack)
         entrypoint = manifest.entrypoint
         adapter_items = tuple(
@@ -937,6 +986,9 @@ class PackRuntime:
         scene_items = tuple(
             item for item in manifest.provides.get("providers", ()) if item.kind == "scene"
         )
+        law_items = tuple(
+            item for item in manifest.provides.get("providers", ()) if item.kind == "actuator_law"
+        )
         # Importing any pack module can register through ``unigym.pack_api``,
         # not only modules pulled in by their own provider kind: a scene item
         # import may register an adapter or robot.  Snapshot every registry
@@ -946,10 +998,11 @@ class PackRuntime:
         # (an entrypoint, or an adapter / robot / scene provider entrypoint).
         # A resource-only robot pack imports nothing and stays engine-free.
         activation_surface = entrypoint is not None or bool(
-            adapter_items or robot_items or scene_items
+            adapter_items or robot_items or scene_items or law_items
         )
         imports_pack_code = entrypoint is not None or any(
-            item.entrypoint is not None for item in (*adapter_items, *robot_items, *scene_items)
+            item.entrypoint is not None
+            for item in (*adapter_items, *robot_items, *scene_items, *law_items)
         )
         adapters_before: RegistrySnapshot[type[Adapter]] | None = None
         robots_before: RegistrySnapshot[Callable[..., RobotProfile]] | None = None
@@ -957,6 +1010,9 @@ class PackRuntime:
         content_before: SceneContentFillerRegistrySnapshot | None = None
         templates_before: PropTemplateRegistrySnapshot | None = None
         terminations_before: TerminationRegistrySnapshot | None = None
+        laws_before: ActuatorLawSnapshot | None = None
+        initializers_before: InitializerRegistrySnapshot | None = None
+        task_providers_before: TaskProviderRegistrySnapshot | None = None
         if activation_surface:
             if imports_pack_code:
                 from unigym.adapters import snapshot_adapter_registry
@@ -968,11 +1024,18 @@ class PackRuntime:
             from unigym.scenes.providers import snapshot_scene_providers
             from unigym.terminations import snapshot_termination_registry
 
+            from unigym.actuator_law import snapshot_actuator_laws
+            from unigym.benchmarks.task_providers import snapshot_task_providers
+            from unigym.initializers.base import snapshot_initializers
+
             robots_before = snapshot_robot_registry()
             scene_before = snapshot_scene_providers()
             content_before = snapshot_scene_content_fillers()
             templates_before = snapshot_prop_templates()
             terminations_before = snapshot_termination_registry()
+            laws_before = snapshot_actuator_laws()
+            initializers_before = snapshot_initializers()
+            task_providers_before = snapshot_task_providers()
 
         def rollback_adapters() -> None:
             """Restore the adapter classes and origins a failed activation changed."""
@@ -1022,6 +1085,30 @@ class PackRuntime:
 
             restore_termination_registry(terminations_before)
 
+        def rollback_actuator_laws() -> None:
+            """Restore actuator law descriptors a failed activation changed."""
+            if laws_before is None:
+                return
+            from unigym.actuator_law import restore_actuator_laws
+
+            restore_actuator_laws(laws_before)
+
+        def rollback_initializers() -> None:
+            """Restore initializer registrations/origins a failed activation changed."""
+            if initializers_before is None:
+                return
+            from unigym.initializers.base import restore_initializers
+
+            restore_initializers(initializers_before)
+
+        def rollback_task_providers() -> None:
+            """Restore task-provider registrations/origins a failed activation changed."""
+            if task_providers_before is None:
+                return
+            from unigym.benchmarks.task_providers import restore_task_providers
+
+            restore_task_providers(task_providers_before)
+
         try:
             if entrypoint is not None:
                 context = PackContext(pack=pack, root=manifest.root, runtime=self)
@@ -1038,6 +1125,12 @@ class PackRuntime:
                     set(registered_scene_providers()) - set(scene_before.providers)
                 )
 
+            if law_items:
+                from unigym.packs.actuators import activate_actuator_law_providers
+
+                actuator_laws = activate_actuator_law_providers(manifest, self)
+            else:
+                actuator_laws = ()
             adapters = _activate_adapter_providers(manifest, self)
             robots = _activate_robot_providers(manifest, self)
             scene_providers = _activate_scene_provider_providers(
@@ -1055,6 +1148,10 @@ class PackRuntime:
                 _attribute_pack_code_prop_templates(manifest, self, templates_before)
             if terminations_before is not None:
                 _attribute_pack_code_terminations(manifest, self, terminations_before)
+            if initializers_before is not None:
+                _attribute_pack_code_initializers(manifest, self, initializers_before)
+            if task_providers_before is not None:
+                _attribute_pack_code_task_providers(manifest, self, task_providers_before)
         except PackError:
             rollback_adapters()
             rollback_robots()
@@ -1062,6 +1159,9 @@ class PackRuntime:
             rollback_content_fillers()
             rollback_prop_templates()
             rollback_terminations()
+            rollback_actuator_laws()
+            rollback_initializers()
+            rollback_task_providers()
             raise
         except Exception as err:
             rollback_adapters()
@@ -1070,6 +1170,9 @@ class PackRuntime:
             rollback_content_fillers()
             rollback_prop_templates()
             rollback_terminations()
+            rollback_actuator_laws()
+            rollback_initializers()
+            rollback_task_providers()
             if entrypoint is None:
                 raise PackError(f"pack {pack!r} provider activation failed: {err}") from err
             raise PackError(
@@ -1082,6 +1185,7 @@ class PackRuntime:
             adapters=adapters,
             robots=robots,
             scene_providers=scene_providers,
+            actuator_laws=actuator_laws,
         )
         self._handles[pack] = handle
         return handle

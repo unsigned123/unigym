@@ -448,6 +448,37 @@ def _declared_adapter_name(cfg: dict[str, JsonValue]) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _declared_actuation_laws(cfg: dict[str, JsonValue]) -> tuple[str, ...]:
+    """Every actuation law name a raw config's articulations declare."""
+    arts = cfg.get("articulations")
+    if not isinstance(arts, (list, tuple)):
+        return ()
+    laws: list[str] = []
+    for art in arts:
+        if not isinstance(art, Mapping):
+            continue
+        groups = art.get("actuation")
+        if not isinstance(groups, (list, tuple)):
+            continue
+        for group in groups:
+            if not isinstance(group, Mapping):
+                continue
+            law = group.get("law")
+            if isinstance(law, str) and law:
+                laws.append(law)
+    return tuple(laws)
+
+
+def _needs_actuator_law_runtime(cfg: dict[str, JsonValue]) -> bool:
+    """True when a declared law is not a registered/core descriptor."""
+    laws = _declared_actuation_laws(cfg)
+    if not laws:
+        return False
+    from unigym.actuator_law import ACTUATOR_LAW_REGISTRY
+
+    return any(law not in ACTUATOR_LAW_REGISTRY for law in laws)
+
+
 def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) -> bool:
     """True when a run config needs an explicit runtime at its boundary.
 
@@ -472,6 +503,8 @@ def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) ->
         block = cfg.get(section)
         if isinstance(block, dict) and _declares_prop_template(block.get("types")):
             return True
+    if _needs_actuator_law_runtime(cfg):
+        return True
     return _contains_asset_ref(cfg)
 
 
@@ -680,7 +713,9 @@ def build_spec(
     declared on the runtime ``benchmarks`` face.
     """
     from unigym.errors import ConfigError
+    from unigym.registration import RegistrationPhase, at_least_phase
 
+    at_least_phase(RegistrationPhase.SPEC)
     raw_cfg = copy.deepcopy(cfg)
     reject_legacy_scene_keys(raw_cfg, source=args.config)
     # The content key surface ('objects:') normalizes onto the internal name

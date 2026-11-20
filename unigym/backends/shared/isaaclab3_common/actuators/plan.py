@@ -63,16 +63,18 @@ def _standard_pd_kwargs(resolved: ResolvedActuationGroup) -> dict[str, object]:
             f"actuation group {group.name!r} law 'standard_pd' declares "
             f"unknown gains {unknown}; allowed gains are ['kd', 'kp']"
         )
-    missing = [key for key in ("kp", "kd") if key not in group.gains]
+    missing = [key for key in ("kp", "kd") if key not in group.gains and key not in group.params]
     if missing:
         raise ValueError(
             f"actuation group {group.name!r} law 'standard_pd' is missing "
-            f"gains {missing}; declare both kp and kd explicitly"
+            f"gains {missing}; declare them explicitly in `gains` or `params`"
         )
+    kp = group.gains["kp"] if "kp" in group.gains else group.params["kp"]
+    kd = group.gains["kd"] if "kd" in group.gains else group.params["kd"]
     kwargs: dict[str, object] = {
         "joint_names_expr": list(resolved.joint_names),
-        "stiffness": group.gains["kp"],
-        "damping": group.gains["kd"],
+        "stiffness": kp,
+        "damping": kd,
     }
     if group.effort_limit is not None:
         kwargs["joint_effort_limit"] = group.effort_limit
@@ -81,10 +83,50 @@ def _standard_pd_kwargs(resolved: ResolvedActuationGroup) -> dict[str, object]:
     return kwargs
 
 
+def _pack_law_cfg(
+    resolved: ResolvedActuationGroup,
+    *,
+    backend: str,
+    cfg_cls: Callable[..., object],
+):
+    """Build one pack-declared law cfg through its late-bound factory."""
+    from unigym.actuators import (
+        ActuatorBuildContext,
+        actuator_law,
+        get_actuator_implementation,
+        has_actuator_implementation,
+    )
+
+    group = resolved.group
+    if not has_actuator_implementation(group.law, backend):
+        raise ValueError(
+            f"actuation group {group.name!r} law {group.law!r} has no native "
+            f"Isaac Lab actuator mapping; the Isaac Lab backends implement "
+            f"standard_pd only"
+        )
+    descriptor = actuator_law(group.law)
+    context = ActuatorBuildContext(
+        law=descriptor,
+        backend=backend,
+        group=resolved,
+        joint_names=tuple(resolved.joint_names),
+        params={**dict(group.params), **dict(group.gains)},
+        extra={
+            "effort_limit": group.effort_limit,
+            "velocity_limit": group.velocity_limit,
+        },
+    )
+    result = get_actuator_implementation(group.law, backend).factory(context)
+    if isinstance(result, Mapping):
+        return cfg_cls(**dict(result))
+    return result
+
+
 def build_actuator_plan(
     groups: Sequence[ResolvedActuationGroup],
     *,
     classes: Mapping[str, object] | None = None,
+    backend: str = "isaaclab3_physx",
 ) -> dict[str, object]:
     """Translate resolved actuation groups into Isaac Lab actuator configs.
 
@@ -93,6 +135,8 @@ def build_actuator_plan(
             order.
         classes: optional ``{"ImplicitActuatorCfg": <class>}`` injection table
             for unit tests.  ``None`` lazily imports the Isaac Lab class.
+        backend: the canonical backend identity used to select a pack-driven
+            actuator implementation.
 
     Returns:
         ``{group name: ImplicitActuatorCfg}``.
@@ -103,5 +147,8 @@ def build_actuator_plan(
         group = resolved.group
         if group.name in plan:
             raise ValueError(f"duplicate actuation group name {group.name!r} in the plan")
-        plan[group.name] = cfg_cls(**_standard_pd_kwargs(resolved))
+        if group.law == "standard_pd":
+            plan[group.name] = cfg_cls(**_standard_pd_kwargs(resolved))
+        else:
+            plan[group.name] = _pack_law_cfg(resolved, backend=backend, cfg_cls=cfg_cls)
     return plan

@@ -24,11 +24,13 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Protocol, cast
 
 from unigym._typing import JsonValue
+from unigym.actuator_law import ACTUATOR_LAW_REGISTRY, ActuatorLawDescriptor
 
-from .base import ACTUATOR_REGISTRY
+from . import descriptors as _descriptors  # noqa: F401  (registers core laws)
 
 __all__ = [
     "BACKEND_LAW_CAPABILITIES",
@@ -63,46 +65,69 @@ _GROUP_KEYS = (
     "velocity_limit",
     "command",
     "parts",
+    "params",
 )
 
-_LAW_GAIN_KEYS: dict[str, frozenset[str]] = {
-    "standard_pd": frozenset({"kp", "kd"}),
-    "computed_torque_pd": frozenset({"kp", "kd"}),
-    "native_servo": frozenset(),
-    "direct_torque": frozenset(),
-    "direct_velocity": frozenset(),
-}
-
-_POSITION_PD_LAWS = frozenset({"standard_pd", "computed_torque_pd"})
-_DIRECT_LAWS = frozenset({"direct_torque", "direct_velocity"})
 _UNSERVED_DRIVES = frozenset({"effort", "current"})
 
-#: Backend -> the actuation laws that backend implements natively.  A law
-#: outside this set fails with a teaching error; no backend approximates a
-#: different physics model.  IsaacLab has no native direct-drive actuator
-#: mapping, so its set stays position-PD only.
-BACKEND_LAW_CAPABILITIES: dict[str, frozenset[str]] = {
-    "isaaclab2": frozenset({"standard_pd"}),
-    "isaaclab3_physx": frozenset({"standard_pd"}),
-    "isaaclab3_newton": frozenset({"standard_pd"}),
-    "mujoco": frozenset(
-        {"standard_pd", "computed_torque_pd", "native_servo", "direct_torque", "direct_velocity"}
-    ),
-    "mjwarp": frozenset(
-        {"standard_pd", "computed_torque_pd", "native_servo", "direct_torque", "direct_velocity"}
-    ),
-}
 
-#: Drive -> (required laws, teaching label).  Every legal drive has exactly
-#: one row; ``effort``/``current`` are absent because no registered backend
-#: has a native direct-drive law for them.
-_DRIVE_REQUIREMENTS: dict[str, tuple[frozenset[str], str]] = {
-    "position_pd": (_POSITION_PD_LAWS, "standard_pd or computed_torque_pd"),
-    "position_servo": (frozenset({"native_servo"}), "native_servo"),
-    "torque": (frozenset({"direct_torque"}), "direct_torque"),
-    "velocity": (frozenset({"direct_velocity"}), "direct_velocity"),
-}
-_KNOWN_DRIVES = frozenset(_DRIVE_REQUIREMENTS) | _UNSERVED_DRIVES
+def _canonical_backends() -> frozenset[str]:
+    """The backend vocabulary used to derive the compatibility capability view."""
+    try:
+        from unigym.backends.registry import CANONICAL_BACKENDS
+    except Exception:  # pragma: no cover - registry is core and stdlib-only
+        return frozenset({"isaaclab2", "isaaclab3_physx", "isaaclab3_newton", "mujoco", "mjwarp"})
+    return frozenset(CANONICAL_BACKENDS)
+
+
+def _derive_backend_capabilities() -> dict[str, frozenset[str]]:
+    """Derive ``backend -> laws`` from the law descriptors."""
+    capabilities: dict[str, frozenset[str]] = {}
+    for backend in _canonical_backends():
+        capabilities[backend] = frozenset(
+            name
+            for name, descriptor in ACTUATOR_LAW_REGISTRY.items()
+            if descriptor.backends is None or backend in descriptor.backends
+        )
+    return capabilities
+
+
+def _derive_drive_requirements() -> dict[str, tuple[str, ...]]:
+    """Derive ``drive -> laws`` from the law descriptors (registration order)."""
+    requirements: dict[str, set[str]] = {}
+    for name, descriptor in ACTUATOR_LAW_REGISTRY.items():
+        for drive in descriptor.drives:
+            requirements.setdefault(drive, set()).add(name)
+    index = {name: position for position, name in enumerate(ACTUATOR_LAW_REGISTRY)}
+    return {
+        drive: tuple(sorted(laws, key=index.__getitem__)) for drive, laws in requirements.items()
+    }
+
+
+#: Backend -> the actuation laws that backend implements natively.  Derived
+#: from the law descriptors; kept as the compatibility view IR consumers use.
+BACKEND_LAW_CAPABILITIES: dict[str, frozenset[str]] = _derive_backend_capabilities()
+
+
+def _backend_supported(backend: str) -> frozenset[str] | None:
+    """The live law set for *backend* (pack laws included)."""
+    if backend not in BACKEND_LAW_CAPABILITIES:
+        return None
+    return frozenset(
+        name
+        for name, descriptor in ACTUATOR_LAW_REGISTRY.items()
+        if descriptor.backends is None or backend in descriptor.backends
+    )
+
+
+def _descriptor(law: str) -> ActuatorLawDescriptor:
+    try:
+        return ACTUATOR_LAW_REGISTRY[law]
+    except KeyError:
+        raise ActuationError(
+            f"actuation law {law!r} is not registered; registered laws are "
+            f"{sorted(ACTUATOR_LAW_REGISTRY)}"
+        ) from None
 
 
 class _DriveControl(Protocol):
@@ -163,6 +188,30 @@ def _gain_map(value: object, what: str) -> dict[str, GainValue]:
     return {str(key): _gain_value(item, f"{what}[{key!r}]") for key, item in value.items()}
 
 
+def _freeze_param_value(value: object, what: str) -> JsonValue:
+    """Freeze one JSON-like law parameter value (no arbitrary objects)."""
+    if isinstance(value, Mapping):
+        _string_keys(value, what)
+        return MappingProxyType(
+            {str(key): _freeze_param_value(item, f"{what}.{key}") for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_param_value(item, what) for item in value)
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise ActuationError(
+        f"{what} must be JSON data (scalar, list or string-keyed mapping), "
+        f"got {type(value).__name__}"
+    )
+
+
+def _param_map(value: object, what: str) -> dict[str, JsonValue]:
+    if not isinstance(value, Mapping):
+        raise ActuationError(f"{what} must be a mapping, got {value!r}")
+    _string_keys(value, what)
+    return {str(key): _freeze_param_value(item, f"{what}[{key!r}]") for key, item in value.items()}
+
+
 def _limit(value: object, what: str) -> float | dict[str, float] | None:
     if value is None:
         return None
@@ -216,6 +265,7 @@ class ActuationGroup:
     velocity_limit: float | Mapping[str, float] | None = None
     command: Mapping[str, JsonValue] = field(default_factory=_empty_command_map)
     parts: tuple[str, ...] | None = None
+    params: Mapping[str, JsonValue] = field(default_factory=_empty_command_map)
 
     def __post_init__(self) -> None:
         name = self.name
@@ -226,10 +276,10 @@ class ActuationGroup:
             raise ActuationError(
                 f"actuation group {name!r} law must be a non-empty string, got {law!r}"
             )
-        if law not in ACTUATOR_REGISTRY:
+        if law not in ACTUATOR_LAW_REGISTRY:
             raise ActuationError(
                 f"actuation group {name!r} law {law!r} is not registered; "
-                f"registered laws are {sorted(ACTUATOR_REGISTRY)}"
+                f"registered laws are {sorted(ACTUATOR_LAW_REGISTRY)}"
             )
         joint_set = self.joint_set
         if joint_set is not None:
@@ -254,6 +304,7 @@ class ActuationGroup:
                 f"actuation group {name!r} command must be a mapping, got " f"{self.command!r}"
             )
         parts = _names(self.parts, f"actuation group {name!r} parts")
+        params = _param_map(self.params, f"actuation group {name!r} params")
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "law", law)
         object.__setattr__(self, "joints", joints)
@@ -263,6 +314,7 @@ class ActuationGroup:
         object.__setattr__(self, "velocity_limit", velocity_limit)
         object.__setattr__(self, "command", dict(self.command))
         object.__setattr__(self, "parts", parts)
+        object.__setattr__(self, "params", MappingProxyType(params))
 
 
 @dataclass(frozen=True)
@@ -511,7 +563,7 @@ def validate_actuation_group(group: ActuationGroup, *, backend: str) -> None:
 
     This is pure IR: it never inspects compiled actuator types.
     """
-    supported = BACKEND_LAW_CAPABILITIES.get(backend)
+    supported = _backend_supported(backend)
     if supported is None:
         raise ActuationError(
             f"backend {backend!r} declares no actuation law support; supported "
@@ -522,48 +574,59 @@ def validate_actuation_group(group: ActuationGroup, *, backend: str) -> None:
             f"actuation group {group.name!r} law {group.law!r} is not supported "
             f"by backend {backend!r}; supported laws are {sorted(supported)}"
         )
-    if group.command:
+    descriptor = _descriptor(group.law)
+    unknown_params = sorted(set(group.params) - set(descriptor.config_keys))
+    if unknown_params:
+        raise ActuationError(
+            f"actuation group {group.name!r} law {group.law!r} declares unknown "
+            f"params {unknown_params}; allowed params are "
+            f"{sorted(descriptor.config_keys)}"
+        )
+    if group.command and not descriptor.allows_command:
         raise ActuationError(
             f"actuation group {group.name!r} law {group.law!r} declares a "
             f"non-empty `command`; no current law accepts command parameters"
         )
-    allowed = _LAW_GAIN_KEYS[group.law]
+    allowed = descriptor.gain_keys
     unknown = sorted(set(group.gains) - allowed)
     if unknown:
         raise ActuationError(
             f"actuation group {group.name!r} law {group.law!r} declares unknown "
             f"gains {unknown}; allowed gains are {sorted(allowed)}"
         )
-    if group.law in ("standard_pd", "computed_torque_pd"):
-        missing = [key for key in ("kp", "kd") if key not in group.gains]
+    if descriptor.required_gains:
+        missing = [
+            key
+            for key in descriptor.required_gains
+            if key not in group.gains and key not in group.params
+        ]
         if missing:
             raise ActuationError(
                 f"actuation group {group.name!r} law {group.law!r} is missing "
-                f"gains {missing}; declare both kp and kd explicitly"
+                f"gains {missing}; declare them explicitly in `gains` or `params`"
             )
-    if group.law == "standard_pd" and group.parts:
-        raise ActuationError(
-            f"actuation group {group.name!r} law 'standard_pd' declares `parts` "
-            f"{list(group.parts)}; parts are only valid for computed_torque_pd"
-        )
-    if group.law == "native_servo":
-        if group.gains:
+    if group.parts and not descriptor.allows_parts:
+        if group.law in ("direct_torque", "direct_velocity"):
             raise ActuationError(
-                f"actuation group {group.name!r} law 'native_servo' declares "
-                f"gains {sorted(group.gains)}; the servo gain lives in the "
-                f"compiled actuator"
+                f"actuation group {group.name!r} law {group.law!r} declares "
+                f"parts {list(group.parts)}; a direct-drive law has no parts"
             )
-        if group.parts:
+        if group.law == "native_servo":
             raise ActuationError(
                 f"actuation group {group.name!r} law 'native_servo' declares "
                 f"parts {list(group.parts)}; native_servo has no parts"
             )
-    if group.law in _DIRECT_LAWS and group.parts:
         raise ActuationError(
-            f"actuation group {group.name!r} law {group.law!r} declares "
-            f"parts {list(group.parts)}; a direct-drive law has no parts"
+            f"actuation group {group.name!r} law {group.law!r} declares `parts` "
+            f"{list(group.parts)}; parts are only valid for computed_torque_pd"
         )
-    if backend in ("mujoco", "mjwarp"):
+    if group.law == "native_servo" and group.gains:
+        raise ActuationError(
+            f"actuation group {group.name!r} law 'native_servo' declares "
+            f"gains {sorted(group.gains)}; the servo gain lives in the "
+            f"compiled actuator"
+        )
+    if backend in descriptor.backend_owned_limits:
         limits = [
             name for name in ("effort_limit", "velocity_limit") if getattr(group, name) is not None
         ]
@@ -588,6 +651,8 @@ def validate_drive_law_matrix(
     direct-drive law on any registered backend and fail with a teaching
     error.
     """
+    drive_laws = _derive_drive_requirements()
+    known_drives = frozenset(drive_laws) | _UNSERVED_DRIVES
     law_by_joint: dict[tuple[str, str], str] = {}
     for resolved in groups:
         for joint in resolved.joint_names:
@@ -598,10 +663,10 @@ def validate_drive_law_matrix(
         drive = str(control.drive)
         name = str(getattr(control, "name", "<unnamed>"))
         articulation = str(control.articulation)
-        if drive not in _KNOWN_DRIVES:
+        if drive not in known_drives:
             raise ActuationError(
                 f"control {name!r} requests unknown drive {drive!r}; legal "
-                f"drives are {sorted(_KNOWN_DRIVES)}"
+                f"drives are {sorted(known_drives)}"
             )
         if drive in _UNSERVED_DRIVES:
             raise ActuationError(
@@ -610,7 +675,8 @@ def validate_drive_law_matrix(
                 f"supported direct drives are torque (direct_torque) and "
                 f"velocity (direct_velocity)"
             )
-        required, label = _DRIVE_REQUIREMENTS[drive]
+        required = drive_laws[drive]
+        label = " or ".join(required)
         for joint in control.joint_names:
             law = law_by_joint.get((articulation, str(joint)))
             if law is None:

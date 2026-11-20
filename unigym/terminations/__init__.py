@@ -86,6 +86,9 @@ def register_termination(
             not callable.
         TypeError: *origin* is not a :class:`ProviderOrigin`.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.TERMINATION, name=name)
     if (
         not isinstance(name, str)
         or not name

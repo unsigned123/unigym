@@ -14,7 +14,13 @@ from dataclasses import dataclass
 from unigym._typing import JsonValue
 
 from . import PackError
-from .schema import FACE_NAMES, PackManifestV1, ProvidedItem, freeze_provider_params
+from .schema import (
+    FACE_NAMES,
+    PackManifestV1,
+    ProvidedItem,
+    _freeze_json,
+    freeze_provider_params,
+)
 
 
 @dataclass(frozen=True)
@@ -32,12 +38,19 @@ class CatalogEntry:
     resource: str | None
     entrypoint: str | None
     kind: str | None
-    params: Mapping[str, Mapping[str, JsonValue]] | None = None
+    params: Mapping[str, JsonValue] | Mapping[str, Mapping[str, JsonValue]] | None = None
 
     def __post_init__(self) -> None:
-        """Deep-freeze the optional provider parameter schema (defense in depth)."""
-        if self.params is not None:
-            object.__setattr__(self, "params", freeze_provider_params(self.params))
+        """Deep-freeze the optional provider parameter declaration."""
+        if self.params is None:
+            return
+        if self.kind == "actuator_implementation":
+            frozen = _freeze_json(self.params)
+            if not isinstance(frozen, Mapping):
+                raise PackError(f"catalog entry {self.pack}:{self.id} params must be a mapping")
+            object.__setattr__(self, "params", frozen)
+            return
+        object.__setattr__(self, "params", freeze_provider_params(self.params))
 
 
 def _entry(pack: str, face: str, item: ProvidedItem) -> CatalogEntry:

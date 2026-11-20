@@ -28,10 +28,17 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from types import MappingProxyType
 
 from unigym.assets.asset_ref import ASSET_FORMATS
+from unigym.registration import (
+    ACTUATOR_IMPLEMENTATION_WINDOWS,
+    BackendRegistrationPolicy,
+    PackFace,
+)
 
 __all__ = [
+    "BACKEND_REGISTRATION_POLICIES",
     "CANONICAL_BACKENDS",
     "MJWARP_BACKEND",
     "BackendInfo",
@@ -316,6 +323,8 @@ class BackendInfo:
     """``unigym probe`` runs in the host venv (vs the container lane)."""
     probe_env: tuple[tuple[str, str], ...] = ()
     """Environment defaults injected into a host-lane probe subprocess."""
+    registration_policy: BackendRegistrationPolicy | None = None
+    """Optional narrowing of the pack registration windows."""
 
     def __post_init__(self) -> None:
         """Validate and freeze the backend asset-format preference list."""
@@ -1101,6 +1110,18 @@ def _isaaclab3_seam(backend: str, name: str) -> Callable[[], object]:
     return factory
 
 
+BACKEND_REGISTRATION_POLICIES: Mapping[str, BackendRegistrationPolicy] = MappingProxyType(
+    {
+        backend: BackendRegistrationPolicy(
+            backend=backend,
+            windows={PackFace.ACTUATOR_IMPLEMENTATION: window},
+        )
+        for backend, window in ACTUATOR_IMPLEMENTATION_WINDOWS.items()
+    }
+)
+"""Canonical backend -> registration policy (only implementations narrow)."""
+
+
 _STATIC_INFO: dict[str, BackendInfo] = {
     "mujoco": BackendInfo(
         "mujoco",
@@ -1237,6 +1258,11 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         camera_enable_required=False,
         scene_provider_consumer=True,
     ),
+}
+
+_STATIC_INFO = {
+    name: replace(info, registration_policy=BACKEND_REGISTRATION_POLICIES.get(name))
+    for name, info in _STATIC_INFO.items()
 }
 
 CANONICAL_BACKENDS: tuple[str, ...] = tuple(_STATIC_INFO)

@@ -1161,6 +1161,22 @@ Golden/regression tests are deliberately deferred.
 - Porting old tests wholesale instead of using them as a behavior checklist.
 - Treating a generated catalog as the source of truth.
 
+## Registration phases
+
+Every test starts in bootstrap phase through the autouse
+`_reset_registration_gate` fixture in `tests/conftest.py`.  Tests that exercise
+a specific phase call `enter_phase(...)`, `at_least_phase(...)` or
+`seal_runtime()` explicitly and must not rely on another test's phase.
+
+Phase tests live in:
+
+- `tests/unit/core/test_registration_phase.py` (primitives);
+- `tests/contract/test_registration_gate.py` (one wrong-phase check per face);
+- `tests/contract/test_actuator_pack_registration.py` (manifest kinds,
+  activation/ materialization, same-pack ownership);
+- `tests/unit/run/test_registration_phases.py` (run lifecycle order);
+- `tests/unit/actuators/test_actuator_descriptors.py` (descriptor/IR surface).
+
 ## 17. Definition of done for a test change
 
 - The change has a test at the lowest layer that proves the behavior.

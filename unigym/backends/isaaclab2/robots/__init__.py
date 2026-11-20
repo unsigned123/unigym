@@ -145,7 +145,7 @@ def build_robot_realization(
         spec=spec,
         params=params,
         asset_format=asset_format,
-        actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved),
+        actuator_plan=lambda _profile, _spec: build_actuator_plan(resolved, backend=backend.name),
         asset_plan=asset_plan,
         default_pos=default_pos,
         spawn_options=_param_mapping(params, "spawn_options"),

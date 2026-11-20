@@ -218,6 +218,9 @@ def register_scene_content_filler(
             factory is not callable, or *origin* is not a
             :class:`ProviderOrigin`.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.SCENE_CONTENT_FILLER, name=name)
     if not isinstance(name, str) or _CONTENT_NAME_RE.fullmatch(name) is None:
         raise SceneBindingError(
             f"content filler name {name!r} must be lowercase snake_case "

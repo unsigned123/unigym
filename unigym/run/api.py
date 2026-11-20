@@ -1092,6 +1092,9 @@ class Run:
 
     def _build_spec(self) -> RunSpec:
         """Run the one existing normalization path (no second parser)."""
+        from unigym.registration import RegistrationPhase, at_least_phase
+
+        at_least_phase(RegistrationPhase.MANIFEST)
         cfg = self._raw_cfg
         # Pre-build CameraSet/BenchmarkSet edits are declarations too:
         # fold them into the config at the single normalization point so an
@@ -1169,6 +1172,10 @@ class Run:
             runtime = discover(entry_points=True)
             runtime.activate_all()
             self._pack_runtime = runtime
+        elif runtime is not None and requires_pack_runtime(cfg):
+            # An explicitly injected runtime is activated here too: a config
+            # that needs a pack must not reach SPEC with an inert runtime.
+            runtime.activate_all()
         spec = build_spec(
             cfg,
             self._args(),

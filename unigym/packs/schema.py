@@ -166,12 +166,21 @@ class ProvidedItem:
     resource: str | None
     entrypoint: str | None
     kind: str | None
-    params: Mapping[str, Mapping[str, JsonValue]] | None = None
+    params: Mapping[str, JsonValue] | Mapping[str, Mapping[str, JsonValue]] | None = None
 
     def __post_init__(self) -> None:
-        """Deep-freeze the optional provider parameter schema."""
-        if self.params is not None:
-            object.__setattr__(self, "params", freeze_provider_params(self.params))
+        """Deep-freeze the optional provider parameter declaration."""
+        if self.params is None:
+            return
+        if self.kind == "actuator_implementation":
+            frozen = _freeze_json(self.params)
+            if not isinstance(frozen, Mapping):
+                raise PackError(
+                    f"provider {self.id!r} actuator implementation params must be a mapping"
+                )
+            object.__setattr__(self, "params", frozen)
+            return
+        object.__setattr__(self, "params", freeze_provider_params(self.params))
 
 
 @dataclass(frozen=True)
@@ -226,6 +235,47 @@ def _check_resource(root: Path, resource: str, where: str) -> None:
         raise PackError(f"{where} resource {resource!r} escapes the manifest root {base}") from None
     if not candidate.exists():
         raise PackError(f"{where} resource {resource!r} does not exist under {base}")
+
+
+def _actuator_implementation_params(
+    raw: object, *, where: str, item_id: str
+) -> Mapping[str, JsonValue]:
+    """Validate the flat ``law/backend/kind`` implementation selector."""
+    if not isinstance(raw, Mapping):
+        raise PackError(
+            f"{where} (id {item_id!r}) actuator implementation requires a mapping "
+            "'params' with law/backend (and optional kind)"
+        )
+    unknown = sorted(str(key) for key in raw if key not in {"law", "backend", "kind"})
+    if unknown:
+        raise PackError(
+            f"{where} (id {item_id!r}) actuator implementation params declare unknown "
+            f"keys {unknown}; known keys: ['backend', 'kind', 'law']"
+        )
+    for key in ("law", "backend"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise PackError(
+                f"{where} (id {item_id!r}) actuator implementation params require a "
+                f"non-empty string {key!r}"
+            )
+    backend = raw["backend"]
+    from unigym.backends.registry import CANONICAL_BACKENDS
+
+    if backend not in CANONICAL_BACKENDS:
+        raise PackError(
+            f"{where} (id {item_id!r}) actuator implementation backend {backend!r} is "
+            f"not canonical; choose exactly one of {list(CANONICAL_BACKENDS)}"
+        )
+    kind = raw.get("kind")
+    if kind is not None and (not isinstance(kind, str) or not kind.strip()):
+        raise PackError(
+            f"{where} (id {item_id!r}) actuator implementation params 'kind' must be "
+            "a non-empty string"
+        )
+    frozen = _freeze_json(raw)
+    assert isinstance(frozen, Mapping)
+    return frozen
 
 
 def _provided_item(
@@ -313,6 +363,25 @@ def _provided_item(
                 f"{where} (id {item_id!r}) is a scene preset item and must be "
                 "resource-backed; declare 'resource: scene_presets/<file>.yaml'"
             )
+    elif face == "providers" and kind == "actuator_law":
+        if raw_params is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is an actuator law item and cannot "
+                "declare 'params:'; declare the law fields in the law resource "
+                "or the entrypoint's descriptor"
+            )
+    elif face == "providers" and kind == "actuator_implementation":
+        if resource is not None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is an actuator implementation item and "
+                "must be entrypoint-backed only; drop 'resource:'"
+            )
+        if entrypoint is None:
+            raise PackError(
+                f"{where} (id {item_id!r}) is an actuator implementation item and "
+                "requires 'entrypoint: module:factory'"
+            )
+        params = _actuator_implementation_params(raw_params, where=where, item_id=item_id)
     elif face == "providers" and kind == "scene":
         if resource is not None:
             raise PackError(

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from unigym.actuator_law import ActuatorLawDescriptor
 from unigym.packs.catalog import CatalogEntry, PackCatalog
 from unigym.packs.packset import (
     AssetResourceRef,
@@ -38,6 +39,13 @@ from unigym.packs.runtime import (
 )
 from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
 from unigym.provenance import ProviderInfo, ProviderOrigin
+from unigym.registration import (
+    BackendRegistrationPolicy,
+    PackFace,
+    PhaseWindow,
+    RegistrationGate,
+    RegistrationPhase,
+)
 from unigym.scenes.providers import (
     SceneProvider,
     SceneProviderContext,
@@ -115,8 +123,21 @@ def register_termination(name: str, cls):
     return register(name, cls)
 
 
+def register_actuator_law(descriptor):
+    """Register a pack-declared actuator law descriptor (public law surface)."""
+    from unigym.actuator_law import register_actuator_law as register
+
+    return register(descriptor)
+
+
 __all__ = [
+    "BackendRegistrationPolicy",
+    "PackFace",
+    "PhaseWindow",
+    "RegistrationGate",
+    "RegistrationPhase",
     "ActivationHandle",
+    "ActuatorLawDescriptor",
     "AssetContext",
     "AssetResourceRef",
     "CatalogEntry",
@@ -140,6 +161,7 @@ __all__ = [
     "installed",
     "load_asset_manifest",
     "load_manifest_v1",
+    "register_actuator_law",
     "register_adapter",
     "register_prop_template",
     "register_robot",
