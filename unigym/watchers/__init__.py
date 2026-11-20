@@ -67,7 +67,7 @@ def load_watch_yaml(path) -> list[dict]:
     return doc
 
 
-def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=None):
+def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=None, signals=None):
     """Mount the WatcherEngine on a live bridge (collect_cli wiring).
 
     * ``bridge._watchers`` -- the per-tick hook target (evaluated in
@@ -76,6 +76,9 @@ def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=N
     * command "watch" (cmd 15) -> ``engine.handle`` (add/list/clear/
       update/test from the CLI through the daemon).
     * ``Bridge.on_episode_end`` -> callable ``on_reset`` hooks (§8.3).
+    * ``signals`` -- the run's ``SignalBus`` (optional; offline tests may
+      omit it).  Every evaluated result publishes its signal mapping there.
+      The returned engine also carries the ``"watchers"`` rewind provider.
     """
     engine = WatcherEngine(
         run_id=bridge.run_id,
@@ -85,6 +88,7 @@ def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=N
         event_log=event_log,
         bridge=bridge,
         specs=specs,
+        signals=signals,
     )
     bridge._watchers = engine
     bridge.register_command("watch", engine.handle)

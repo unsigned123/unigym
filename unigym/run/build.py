@@ -85,6 +85,7 @@ if TYPE_CHECKING:
         ContactSensorInventory,
     )
     from unigym.scenes.terrain import Terrain
+    from unigym.signals import SignalBus
     from unigym.trace.replay import TraceReplay
     from unigym.watchers.timeline import EventLog, TimelineSink
 
@@ -1677,6 +1678,7 @@ def _build_bridge_and_wiring(
     watch_specs: list[dict[str, JsonValue]] | None,
     stop_when: Callable[[], bool] | None,
     num_envs: int,
+    signals: SignalBus,
 ) -> _WiringBundle:
     """Step 6: replay + bridge + runtime attach + rewind providers."""
     from unigym.runner.sinks import FanOutSink
@@ -1732,13 +1734,14 @@ def _build_bridge_and_wiring(
     from unigym import runtime_dirs
     from unigym.watchers import attach as attach_watchers
 
-    attach_watchers(
+    watcher_engine = attach_watchers(
         bridge,
         env=env,
         adapter=adapter,
         out_dir=runtime_dirs.watch_dir(bridge.run_id),
         event_log=event_log,
         specs=watch_specs,
+        signals=signals,
     )
     # director: command handler on cmd 14 + live status feed
     if director is not None:
@@ -1773,6 +1776,9 @@ def _build_bridge_and_wiring(
 
     initializer: object | None = getattr(env, "_initializer", None)
     rewind_providers = build_rewind_providers(sink, initializer=initializer)
+    # watcher specs + trigger state + window cache ride the checkpoint so a
+    # hot-added/cleared watcher set is reverted with the rest of the branch.
+    rewind_providers.append(watcher_engine)
     # freeze face (freeze paradigm): skill halt -> world freeze.
     # Engine-thread park hook for adapters that declare it (agent_g1);
     # a no-op mount for every other adapter.
@@ -2152,6 +2158,11 @@ def build_instance(spec: RunSpec) -> RunInstance:
         pack_runtime,
         effective_groups,
     )
+    # The run's one SignalBus exists BEFORE the bridge/wiring seam: the
+    # watcher engine publishes into it and joins the rewind providers at
+    # attach; constructing it after watcher attach would leave the engine
+    # with no transport.
+    signals = SignalBus(num_envs, device)
     wiring = _build_bridge_and_wiring(
         spec,
         cfg,
@@ -2168,6 +2179,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sinks["watch_specs"],
         sinks["stop_when"],
         num_envs,
+        signals=signals,
     )
 
     seal_runtime()
@@ -2175,7 +2187,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
     # seam, so bind the env and the run's signal view here exactly once per
     # built run -- before any runner exists.  Run.runner("sync") / run.gym()
     # reuse the cached RunInstance and must not rebind.
-    signals = SignalBus(num_envs, device)
     if sampler is not None:
         sampler.bind_env(env)
         sampler.bind_signals(signals)
