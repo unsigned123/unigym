@@ -25,6 +25,7 @@ LAYER_MARKERS: dict[str, str] = {
 
 UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "core": "domain_core",
+    "commands": "domain_commands",
     "model": "domain_model",
     "scenes": "domain_scene",
     "runtime": "domain_runtime",

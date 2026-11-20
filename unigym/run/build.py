@@ -2169,6 +2169,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
 
     seal_runtime()
+    # Command-sampler lifecycle: this is the one live-instance construction
+    # seam, so bind the env here exactly once per built run -- before any
+    # runner exists.  Run.runner("sync") / run.gym() reuse the cached
+    # RunInstance and must not rebind.
+    if sampler is not None:
+        sampler.bind_env(env)
     return RunInstance(
         spec=spec,
         profile=profile,

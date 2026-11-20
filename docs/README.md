@@ -18,6 +18,8 @@ Process documents:
   episode timeline, deadline authority, termination facts and report schema.
 - [Runner contract](contracts/runner_contract.md) - the sink callback bundle
   (timeline/reset/termination facts).
+- [Command sampler contract](contracts/command_sampler_contract.md) - sampler
+  lifecycle hooks, custom factory authoring and rewind participation.
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
 

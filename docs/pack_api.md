@@ -1163,6 +1163,43 @@ resources the run uses. `POST /api/start` calls the same
 shared `resolve_run_config` with the daemon runtime, so it accepts an absolute
 path or an exact `runs` catalog id and rejects relative paths and globs.
 
+### Command sampler authoring
+
+A run config's `command:` section selects exactly one sampler source:
+
+```yaml
+command:
+  name: uniform            # built-in registry (fixed / uniform / lhs)
+  dim: 3
+  ranges: [[-1, 1], [-1, 1], [-1, 1]]
+```
+
+```yaml
+command:
+  module: "acme_commands:make_sampler"   # external factory
+  dim: 4
+  params:
+    seats: 6
+```
+
+- `name` and `module` are mutually exclusive; declaring both or neither is a
+  configuration error naming the field;
+- a built-in `name` section keeps arbitrary parameter pass-through to the
+  registry class;
+- a `module` section accepts only `module` / `dim` / optional `params`, with
+  `dim` a positive int and `params` a mapping;
+- `module` is a `pkg.mod:factory` reference resolved in the run process, not a
+  pack manifest resource;
+- the factory signature is
+  `make_sampler(*, dim: int, device: str, num_envs: int, **params)` and it must
+  return a `unigym.commands.base.CommandSampler`;
+- a bad reference, a non-callable target or a wrong return type fails at build
+  with a teaching error.
+
+The custom sampler receives the live env once through `bind_env` and
+completed-episode benchmark results through `on_episode_end`; both hooks and
+the rewind contract are documented in `contracts/command_sampler_contract.md`.
+
 ### Benchmark resources
 
 A benchmark pack is the existing directory (`pack.yaml`, `tasks/`,
