@@ -1878,6 +1878,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
     seed = spec.seed
     import torch
 
+    from unigym.signals import SignalBus
+
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -2170,16 +2172,22 @@ def build_instance(spec: RunSpec) -> RunInstance:
 
     seal_runtime()
     # Command-sampler lifecycle: this is the one live-instance construction
-    # seam, so bind the env here exactly once per built run -- before any
-    # runner exists.  Run.runner("sync") / run.gym() reuse the cached
-    # RunInstance and must not rebind.
+    # seam, so bind the env and the run's signal view here exactly once per
+    # built run -- before any runner exists.  Run.runner("sync") / run.gym()
+    # reuse the cached RunInstance and must not rebind.
+    signals = SignalBus(num_envs, device)
     if sampler is not None:
         sampler.bind_env(env)
+        sampler.bind_signals(signals)
+    # the bus joins the checkpoint payload once (instance-owned provider);
+    # its values persist until overwritten -- no automatic clear/reset.
+    wiring["rewind_providers"].append(signals)
     return RunInstance(
         spec=spec,
         profile=profile,
         adapter=adapter,
         sampler=sampler,
+        signals=signals,
         term_group=term_group,
         env=env,
         plan=control_plan,
