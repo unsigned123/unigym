@@ -8,9 +8,14 @@ used as a rewind model.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 
 from unigym.commands.base import CommandSampler
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only
+    from unigym.signals import SignalView
 
 
 class RecordingSampler(CommandSampler):
@@ -27,10 +32,14 @@ class RecordingSampler(CommandSampler):
         super().__init__(dim, device, num_envs)
         self.seats = seats
         self.bound_envs: list = []
+        self.signal_views: list[SignalView] = []
         self.episode_calls: list = []
 
     def bind_env(self, env) -> None:
         self.bound_envs.append(env)
+
+    def bind_signals(self, signals: SignalView) -> None:
+        self.signal_views.append(signals)
 
     def on_episode_end(self, env_ids, results) -> None:
         self.episode_calls.append((env_ids.tolist(), results))

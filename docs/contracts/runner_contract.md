@@ -33,10 +33,14 @@ Lifecycle:
 5. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
 
-`build_instance` calls `sampler.bind_env(env)` once at the live-instance
-construction seam, before any runner exists.  `SyncRunner` never binds, so
-multiple runners over one cached `RunInstance` cannot rebind.  The
-command-sampler lifecycle is documented in `command_sampler_contract.md`.
+`build_instance` creates the run's one `SignalBus`, calls
+`sampler.bind_env(env)` and then `sampler.bind_signals(signals)` at the
+live-instance construction seam, before any runner exists.  `SyncRunner` never
+binds, so multiple runners over one cached `RunInstance` cannot rebind.  The
+bus is stored as `RunInstance.signals` and joins `rewind_providers` as the
+`"signals"` provider.  The command-sampler lifecycle is documented in
+`command_sampler_contract.md`; the transport is documented in
+`signal_bus_contract.md`.
 
 Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
 `terminated/truncated` vocabulary.  The task layer maps core outcomes later.

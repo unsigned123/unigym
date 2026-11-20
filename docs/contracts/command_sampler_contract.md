@@ -19,6 +19,7 @@ class CommandSampler(ABC):
     def reset(self, env_ids=None) -> torch.Tensor: ...
     def update(self, step_dt: float, cmd: torch.Tensor) -> torch.Tensor: ...
     def bind_env(self, env: EnvBackend) -> None: ...
+    def bind_signals(self, signals: SignalView) -> None: ...
     def on_episode_end(self, env_ids, results) -> None: ...
     def rewind_state(self) -> dict[str, JsonValue]: ...
     def apply_rewind_state(self, state: dict[str, JsonValue]) -> None: ...
@@ -34,6 +35,13 @@ class CommandSampler(ABC):
   `run.gym()` reusing the cached `RunInstance` cannot rebind.  It is never
   serialized.  The env is a read-only view (`env.obs`, `env.num_envs`,
   `env.device`).
+- `bind_signals(signals)` is called exactly once immediately after
+  `bind_env`, at the same build seam and before any runner exists.  The
+  argument is the run's read-only `SignalView`
+  (`docs/contracts/signal_bus_contract.md`).  The default is a no-op; a
+  sampler that consumes signals stores the view and interprets names and
+  dtypes itself.  Core never maps a signal to a command.  It is never
+  serialized or replayed on restore.
 - `on_episode_end(env_ids, results)` is called at every due episode boundary,
   after `sink.on_episode_end` and before `sampler.reset`, so prior-episode
   results can choose the next episode's command.  It also runs when
@@ -71,6 +79,14 @@ command:
 - a target that is not callable, or a return value that is not a
   `CommandSampler`, fails at build with a teaching error.
 
+## Signals
+
+A sampler may read the run's generic signal channel through the bound
+`SignalView` (`signals.get(name)` / `signals.snapshot()`).  Core owns transport
+only: names, dtypes, shapes and meaning belong to the user.  There is no
+automatic signal-to-command mapping, and a sampler that keeps state derived
+from signals must include that state in its own `rewind_state()`.
+
 ## Rewind
 
 The rewind gate accepts a sampler only when it declares `rewind_inert = True`
@@ -87,6 +103,8 @@ The rewind gate accepts a sampler only when it declares `rewind_inert = True`
   objects or live tensors;
 - `bind_env` is not replayed on restore: a restored sampler must not depend on
   having been rebound.
+- `bind_signals` is not replayed on restore either; signal values themselves
+  ride the `SignalBus` rewind provider.
 
 Benchmark feedback the sampler relies on must be folded into its own state in
 `on_episode_end`; the runner does not snapshot `episode_results` separately.
