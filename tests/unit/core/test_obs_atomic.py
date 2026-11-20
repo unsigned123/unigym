@@ -71,7 +71,11 @@ def _publish_all(registry: ObservationRegistry) -> None:
     registry.set_object("cube", "pos", torch.zeros(n, 3, dtype=f32))
     registry.set_object("cube", "quat", torch.tensor([[1.0, 0.0, 0.0, 0.0]]).expand(n, 4).clone())
     registry.set_object("cube", "joints/lid", torch.zeros(n, 1, dtype=f32))
-    registry.set_site("grip", torch.zeros(n, 3, dtype=f32))
+    registry.set_site(
+        "grip",
+        torch.zeros(n, 3, dtype=f32),
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]).expand(n, 4).clone(),
+    )
     registry.set_camera("cam/ego/rgb", torch.zeros(n, 3, 4, 4, dtype=torch.uint8))
     registry.set_command(torch.ones(n, 2, dtype=f32))
     registry.set_prev_action(torch.full((n, 1), 0.5, dtype=f32))
@@ -112,6 +116,7 @@ def test_schema_meta_and_record_keys_are_canonical() -> None:
     schema = _schema()
     meta = schema.to_meta()
 
+    assert OBS_SCHEMA_VERSION == 2
     assert meta["version"] == OBS_SCHEMA_VERSION
     assert "articulation/arm/joint_pos" in meta["keys"]
     keys = set(schema.record_keys())
@@ -119,6 +124,7 @@ def test_schema_meta_and_record_keys_are_canonical() -> None:
     assert "contact/feet" in keys
     assert "object/cube/pos" in keys
     assert "site/grip/pos" in keys
+    assert "site/grip/quat" in keys
     assert "cam/ego/rgb" not in keys
     assert "command" not in keys
     assert "prev_action" not in keys
@@ -161,6 +167,7 @@ def test_registry_publishes_typed_views_and_record() -> None:
     assert snapshot.camera("ego").depth is None
     assert snapshot.camera("ego").t == 0
     assert torch.equal(snapshot.site("grip").pos_w, torch.zeros(1, 3))
+    assert torch.equal(snapshot.site("grip").quat_w, torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
     assert torch.equal(snapshot.command.value, torch.ones(1, 2))
     assert torch.equal(snapshot.prev_action.value, torch.full((1, 1), 0.5))
 
@@ -172,6 +179,7 @@ def test_registry_publishes_typed_views_and_record() -> None:
     assert "contact/feet" in record
     assert "object/cube/pos" in record
     assert "site/grip/pos" in record
+    assert "site/grip/quat" in record
 
 
 def test_registry_validates_shape_and_dtype() -> None:
@@ -255,3 +263,33 @@ def test_multi_articulation_typed_access_is_independent() -> None:
     snapshot = registry.snapshot()
     assert snapshot.robot("left").joint_pos.tolist() == [[1.0], [1.0]]
     assert snapshot.robot("right").joint_pos.tolist() == [[2.0], [2.0]]
+
+
+def test_site_registry_always_publishes_a_full_pose() -> None:
+    """``set_site`` writes both keys and validates the orientation shape."""
+    registry = _registry()
+    pos = torch.tensor([[1.0, 2.0, 3.0]])
+    quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    registry.set_site("grip", pos, quat_w)
+
+    snapshot = registry.snapshot()
+    assert torch.equal(snapshot.site("grip").pos_w, pos)
+    assert torch.equal(snapshot.site("grip").quat_w, quat_w)
+
+    with pytest.raises(ObsContractError, match="shape"):
+        registry.set_site("grip", pos, torch.zeros(1, 3))
+
+
+def test_site_publication_is_atomic_on_a_bad_quaternion() -> None:
+    """A rejected quat publishes neither key and preserves the previous pair."""
+    registry = _registry()
+    old_pos = torch.tensor([[1.0, 2.0, 3.0]])
+    old_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    registry.set_site("grip", old_pos, old_quat)
+
+    with pytest.raises(ObsContractError, match="shape"):
+        registry.set_site("grip", torch.zeros(1, 3), torch.zeros(1, 3))
+
+    snapshot = registry.snapshot()
+    assert torch.equal(snapshot.site("grip").pos_w, old_pos)
+    assert torch.equal(snapshot.site("grip").quat_w, old_quat)

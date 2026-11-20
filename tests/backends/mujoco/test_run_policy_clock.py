@@ -135,7 +135,7 @@ def test_run_meta_carries_the_observation_schema(tiny_mjcf: Path) -> None:
     run = Run(_clock_cfg(tiny_mjcf, None), inspect=True)
     try:
         meta = run.build(inspect=True).writer.meta
-        assert meta["observations"]["version"] == 1
+        assert meta["observations"]["version"] == 2
         assert "articulation/tiny/joint_pos" in meta["observations"]["keys"]
         assert "obs_catalog" not in meta
     finally:

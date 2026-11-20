@@ -374,7 +374,8 @@ def _scale_site(site: Site, scale: tuple) -> Site:
 
     Scalar sizes (the sphere radius form) take the global mean;
     two-entry vectors take the in-plane mean plus the z factor;
-    three-entry vectors scale per-axis.
+    three-entry vectors scale per-axis.  Site orientation is not part of
+    the official scaling law and is preserved verbatim.
     """
     updates: dict = {}
     if site.pos != (0.0, 0.0, 0.0):
@@ -401,6 +402,7 @@ def _scale_site(site: Site, scale: tuple) -> Site:
         rgba=site.rgba,
         type=site.type,
         size_vector=updates.get("size_vector", site.size_vector),
+        quat=site.quat,
     )
 
 

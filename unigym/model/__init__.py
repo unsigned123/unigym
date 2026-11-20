@@ -43,8 +43,10 @@ from .ir import (
     UnparsedExt,
     UsdExt,
 )
-from .table import Table
 from .set import ModelSet
+from .table import Table
+
+from unigym.sites import SiteEntry, SiteSpec
 
 if TYPE_CHECKING:
     from .live import LiveBody, LiveJoint, LiveModel, LiveTable
@@ -118,6 +120,8 @@ __all__ = [
     "ModelSetError",
     "MujocoModelProvider",
     "Site",
+    "SiteEntry",
+    "SiteSpec",
     "StaleModelError",
     "Table",
     "Texture",

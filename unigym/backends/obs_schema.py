@@ -9,14 +9,21 @@ bound.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Literal
 
 from unigym.env.obs import ObservationConfig, ObservationSchema, build_observation_schema
+from unigym.sites import SiteEntry, SiteSpec
+
+if TYPE_CHECKING:
+    from unigym.props.asset_ir import AssetDefinition
+    from unigym.robots.base import RobotProfile
 
 __all__ = [
     "build_schema",
+    "build_site_inventory",
     "policy_joint_names",
-    "require_sites",
     "selected_camera_frames",
 ]
 
@@ -86,28 +93,55 @@ def _object_table(prop_manager) -> dict[str, tuple[str, ...]]:
     return table
 
 
-def require_sites(backend: str, declared, inventory=None) -> tuple[str, ...]:
-    """Validate ``observations.site`` against a backend site inventory.
+def build_site_inventory(
+    profiles: Mapping[str, RobotProfile],
+    asset_definitions: Mapping[str, AssetDefinition],
+) -> Mapping[str, SiteEntry]:
+    """Build the asset-level site inventory ``{name: SiteEntry}``.
 
-    ``inventory=None`` means the backend has no site readback face: a
-    non-empty selection fails at build; an empty selection is legal.
+    Profile sites are articulation-owned; generated prop payload sites are
+    prop-owned.  Site names are run-wide, so a name declared by two owners is
+    a build error rather than an arbitrary winner.  The returned mapping is
+    read-only.
     """
-    names = tuple(str(name) for name in (declared or ()))
-    if inventory is None:
-        if names:
-            raise NotImplementedError(
-                f"{backend} backend: observations.site is not implemented "
-                f"(no site readback face); selected sites: {list(names)}"
-            )
-        return ()
-    available = set(inventory)
-    unknown = [name for name in names if name not in available]
-    if unknown:
+    if not isinstance(profiles, Mapping):
+        raise ValueError(f"site inventory profiles must be a mapping, got {profiles!r}")
+    if not isinstance(asset_definitions, Mapping):
         raise ValueError(
-            f"{backend} backend: observations.site names unknown sites {unknown}; "
-            f"declared sites: {sorted(available)}"
+            f"site inventory asset_definitions must be a mapping, got {asset_definitions!r}"
         )
-    return names
+    inventory: dict[str, SiteEntry] = {}
+
+    def add(owner: str, kind: Literal["articulation", "prop"], spec: SiteSpec) -> None:
+        entry = SiteEntry(owner=owner, kind=kind, spec=spec)
+        previous = inventory.get(entry.spec.name)
+        if previous is not None:
+            raise ValueError(
+                f"duplicate site name {entry.spec.name!r} declared by "
+                f"{previous.kind} {previous.owner!r} and {entry.kind} {entry.owner!r}"
+            )
+        inventory[entry.spec.name] = entry
+
+    for owner, profile in profiles.items():
+        if not isinstance(owner, str) or not owner:
+            raise ValueError(
+                f"site inventory profile owner must be a non-empty string, got {owner!r}"
+            )
+        for spec in (getattr(profile, "sites", None) or {}).values():
+            add(owner, "articulation", spec)
+
+    for owner, asset in asset_definitions.items():
+        if not isinstance(owner, str) or not owner:
+            raise ValueError(f"site inventory prop owner must be a non-empty string, got {owner!r}")
+        if asset.name != owner:
+            raise ValueError(
+                f"site inventory prop {owner!r} carries asset definition "
+                f"{asset.name!r}; the owner and payload identity must match"
+            )
+        for spec in asset.site_specs().values():
+            add(owner, "prop", spec)
+
+    return MappingProxyType(inventory)
 
 
 def build_schema(

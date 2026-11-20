@@ -116,9 +116,18 @@ class Joint:
             )
 
 
+def _normalized_quat(owner: str, value) -> tuple:
+    """Validate and normalize one wxyz quaternion with an overflow-safe norm."""
+    quat = _require_vec(owner, "quat", value, 4)
+    norm = math.hypot(*quat)
+    if not math.isfinite(norm) or norm == 0.0:
+        raise ValueError(f"{owner}: quat must have a finite non-zero norm, got {value!r}")
+    return tuple(component / norm for component in quat)
+
+
 @dataclass(frozen=True)
 class Site:
-    """One named position marker on a generated body.
+    """One named pose marker on a generated body.
 
     ``size`` is the marker's radius scalar unless ``size_vector`` carries
     an authored multi-component engine size (thin cylinder fixture
@@ -126,7 +135,8 @@ class Site:
     unspecified trailing defaults intact.
     ``type`` is the optional marker projection (a
     :data:`SITE_TYPES` name); ``None`` keeps the engine's sphere
-    default.
+    default.  ``quat`` is the body-local wxyz orientation, normalized at
+    construction.
     """
 
     name: str
@@ -135,12 +145,14 @@ class Site:
     rgba: tuple | None = None
     type: str | None = None
     size_vector: tuple | None = None
+    quat: tuple = (1.0, 0.0, 0.0, 0.0)
 
     def __post_init__(self):
-        """Validate the name + position/size/color vectors."""
+        """Validate the name + position/orientation/size/color vectors."""
         object.__setattr__(self, "name", _require_name("site", self.name))
         owner = f"site {self.name!r}"
         object.__setattr__(self, "pos", _require_vec(owner, "pos", self.pos, 3))
+        object.__setattr__(self, "quat", _normalized_quat(owner, self.quat))
         if self.size is not None:
             size = _require_nonneg(owner, "size", self.size)
             if size <= 0.0:

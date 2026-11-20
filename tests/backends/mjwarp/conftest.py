@@ -38,6 +38,7 @@ def build_tiny_env(
     asset_plan=None,
     adapter=None,
     observations=None,
+    sites=None,
     device: str = "cpu",
 ):
     """Construct the real warp backend from the fixture MJCF (no managers)."""
@@ -64,6 +65,7 @@ def build_tiny_env(
         foot_bodies=(),
         body_sets={},
         body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
+        sites={} if sites is None else sites,
     )
     actuation = ActuationGroup(
         name="body",
@@ -145,6 +147,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         asset_plan=None,
         adapter=None,
         observations=None,
+        sites=None,
         device: str = "cpu",
     ):
         env = build_tiny_env(
@@ -164,6 +167,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             asset_plan=asset_plan,
             adapter=adapter,
             observations=observations,
+            sites=sites,
             device=device,
         )
         created.append(env)

@@ -20,6 +20,7 @@ from ._guards import _require_unique
 
 if TYPE_CHECKING:
     from unigym.model import ModelIR
+    from unigym.sites import SiteSpec
 
 
 def _fvec2(values) -> tuple[float, float]:
@@ -175,6 +176,30 @@ class AssetDefinition:
                     )
         validate_asset_definition(self)
 
+    def site_specs(self) -> dict[str, SiteSpec]:
+        """Return the asset's site poses as neutral ``{name: SiteSpec}``.
+
+        Body names are the payload tree names before the renderer's attach
+        prefix; the MuJoCo inventory keeps them as owner-local facts.
+        """
+        from unigym.sites import SiteSpec
+
+        specs: dict[str, SiteSpec] = {}
+        for body in iter_asset_bodies(self):
+            for site in body.sites:
+                if site.name in specs:
+                    raise ValueError(
+                        f"asset definition {self.name!r} declares duplicate site "
+                        f"name {site.name!r}"
+                    )
+                specs[site.name] = SiteSpec(
+                    name=site.name,
+                    body=body.name,
+                    pos=_fvec3(site.pos),
+                    quat_wxyz=_fvec4(site.quat),
+                )
+        return specs
+
     def to_model_ir(self, name: str | None = None) -> ModelIR:
         """Expand this asset payload into the unified :class:`ModelIR`.
 
@@ -265,6 +290,7 @@ class AssetDefinition:
                         type=site.type or "sphere",
                         body=body.name,
                         pos=_fvec3(site.pos),
+                        quat=_fvec4(site.quat),
                         size=size,
                         path=path + (site.name,),
                         qualname=f"{body.name}/{site.name}",

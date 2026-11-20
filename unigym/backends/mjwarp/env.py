@@ -116,7 +116,6 @@ from unigym.backends.obs_schema import build_schema
 from unigym.backends.mjwarp.model import (
     MjwarpModelProvider,
     body_id,
-    site_id,
 )
 from unigym.backends.shared.mjfamily.articulation_obs import (
     read_articulation_state,
@@ -583,6 +582,21 @@ class MjwarpEnv(WarpBatchMixin):
             if observations is not None
             else ObservationConfig.from_mapping(params.get("observations"))
         )
+        site_profiles = dict(profiles or {})
+        if robot_profile is not None and not any(
+            profile is robot_profile for profile in site_profiles.values()
+        ):
+            site_profiles.setdefault(robot_profile.name, robot_profile)
+        self._site_profiles = site_profiles
+        if self.observations.site:
+            from unigym.backends.obs_schema import build_site_inventory
+
+            self._site_inventory = build_site_inventory(
+                site_profiles,
+                getattr(prop_manager, "asset_definitions", None) or {},
+            )
+        else:
+            self._site_inventory = {}
         self._obs_sites = self._resolve_obs_sites(self.observations.site)
         # ---- warp model + ONE batched device Data (nworld=N) ----
         # put_model snapshots the compiled model; every opt/timestep write
@@ -724,7 +738,7 @@ class MjwarpEnv(WarpBatchMixin):
                 camera_manager=self.camera_manager,
                 contact_manager=self.contact_manager,
                 prop_manager=self.prop_manager,
-                sites=tuple(name for name, _ in self._obs_sites),
+                sites=tuple(handle.name for handle in self._obs_sites),
             ),
             num_envs=self.num_envs,
             device=self.device,
@@ -1253,19 +1267,17 @@ class MjwarpEnv(WarpBatchMixin):
         return half_xy, height
 
     def _resolve_obs_sites(self, declared) -> list:
-        """Resolve ``observations.site`` names against the MJ model."""
-        sites: list = []
-        for sname in tuple(declared or ()):
-            sid = site_id(self._model_ir, sname)
-            if sid < 0:
-                raise ValueError(
-                    f"mjwarp backend: observations.site {sname!r} not "
-                    f"found in the MJ model | hint: site names come "
-                    f"from the scene XML ('<site name=...' entries); "
-                    f"check the scene's declared grip sites"
-                )
-            sites.append((sname, sid))
-        return sites
+        """Resolve ``observations.site`` names against asset sites and MJ sites."""
+        from unigym.backends.shared.mjfamily.articulation_obs import resolve_mj_sites
+
+        return resolve_mj_sites(
+            self._model_ir,
+            self._site_profiles,
+            self._site_inventory,
+            tuple(declared or ()),
+            backend="mjwarp backend",
+            name_map=self._mj_name_map,
+        )
 
     def _apply_reset_protocol(self, e: int = 0) -> None:
         """The declared reset chain: placement apply -> robot stages.
