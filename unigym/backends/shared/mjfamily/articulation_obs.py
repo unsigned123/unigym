@@ -9,11 +9,203 @@ data-shaped attributes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+
 import numpy as np
 import torch
 
 from unigym.core import quat
 from unigym.scenes.articulation import resolve_spawn_quat
+
+from .model.ir_access import body_id, site_id
+
+if TYPE_CHECKING:
+    from unigym.sites import SiteEntry
+    from unigym.robots.base import RobotProfile
+
+    from .name_map import MjNameMap
+
+__all__ = [
+    "MjSiteHandle",
+    "read_articulation_state",
+    "refresh_articulation_obs",
+    "refresh_obs",
+    "refresh_obs_sources",
+    "resolve_mj_sites",
+]
+
+
+@dataclass(frozen=True)
+class MjSiteHandle:
+    """One resolved MuJoCo-family site observation handle.
+
+    ``native`` reads ``site_xpos``/``site_xmat``; ``body`` composes the pose
+    from the live body pose and the asset-local offset.  Exactly one id is
+    present for each kind.
+    """
+
+    name: str
+    kind: Literal["native", "body"]
+    native_id: int | None = None
+    body_id: int | None = None
+    local_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    local_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+
+    def __post_init__(self) -> None:
+        if self.kind == "native" and self.native_id is None:
+            raise ValueError(f"native site handle {self.name!r} requires a native_id")
+        if self.kind == "body" and self.body_id is None:
+            raise ValueError(f"body site handle {self.name!r} requires a body_id")
+        if self.kind not in ("native", "body"):
+            raise ValueError(f"site handle {self.name!r} has unknown kind {self.kind!r}")
+
+
+def _native_site_pose(d, native_id: int) -> tuple[np.ndarray, np.ndarray]:
+    """Read one native MJ site pose as world ``(pos, quat_wxyz)``."""
+    from .cameras.helpers import rotmat_to_quat
+
+    pos = np.asarray(d.site_xpos[native_id], dtype=np.float64)
+    rot = np.asarray(d.site_xmat[native_id], dtype=np.float64).reshape(3, 3)
+    return pos, rotmat_to_quat(rot)
+
+
+def _body_site_pose(
+    d, body_id_value: int, local_pos: Sequence[float], local_quat: Sequence[float]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compose one body-local site pose from the live world body pose."""
+    body_pos = np.asarray(d.xpos[body_id_value], dtype=np.float64)
+    body_quat = np.asarray(d.xquat[body_id_value], dtype=np.float64)
+    offset = np.asarray(local_pos, dtype=np.float64)
+    local = np.asarray(local_quat, dtype=np.float64)
+    pos = body_pos + quat.to_rotmat(body_quat) @ offset
+    quat_w = quat.normalize(quat.mul(body_quat, local))
+    return np.asarray(pos, dtype=np.float64), np.asarray(quat_w, dtype=np.float64)
+
+
+def _site_pose(env, handle: MjSiteHandle, e: int) -> tuple[np.ndarray, np.ndarray]:
+    d = env._datas[e]
+    if handle.kind == "native":
+        assert handle.native_id is not None
+        return _native_site_pose(d, handle.native_id)
+    assert handle.body_id is not None
+    return _body_site_pose(d, handle.body_id, handle.local_pos, handle.local_quat)
+
+
+def _require_native_match(backend: str, entry: SiteEntry, row, expected_body: str) -> None:
+    """Fail when a native site disagrees with its asset-level declaration."""
+    spec = entry.spec
+    mismatches: list[str] = []
+    if row.body != expected_body:
+        mismatches.append(f"body {row.body!r} != {expected_body!r}")
+    if not np.allclose(row.pos, spec.pos, rtol=0.0, atol=1e-6):
+        mismatches.append(f"pos {tuple(row.pos)} != {tuple(spec.pos)}")
+    native_quat = np.asarray(row.quat, dtype=np.float64)
+    norm = float(np.linalg.norm(native_quat))
+    if norm == 0.0:
+        mismatches.append("native quat is zero")
+    else:
+        dot = abs(float(np.dot(native_quat / norm, np.asarray(spec.quat_wxyz))))
+        if dot < 1.0 - 1e-6:
+            mismatches.append(f"quat {tuple(row.quat)} != {tuple(spec.quat_wxyz)}")
+    if mismatches:
+        raise ValueError(
+            f"{backend}: observations.site {spec.name!r} native site disagrees with "
+            f"{entry.kind} {entry.owner!r} declaration: " + "; ".join(mismatches)
+        )
+
+
+def resolve_mj_sites(
+    model_ir,
+    profiles: Mapping[str, RobotProfile],
+    inventory: Mapping[str, SiteEntry],
+    declared: Sequence[str],
+    *,
+    backend: str,
+    name_map: MjNameMap | None = None,
+) -> list[MjSiteHandle]:
+    """Resolve selected ``observations.site`` names for MuJoCo/mjWarp.
+
+    MuJoCo keeps native sites as the fast path.  A robot-profile site without
+    a same-named native site uses its canonical body + local pose; a generated
+    prop site has no body fallback in this slice.  ``name_map`` applies the
+    backend-owned articulation prefix used by composed multi-asset models.
+    """
+    from unigym.robots.base import normalize_canonical_body_id
+
+    native = set(model_ir.sites.names())
+    handles: list[MjSiteHandle] = []
+    for name in declared:
+        entry = inventory.get(name)
+        if entry is not None:
+            spec = entry.spec
+            if entry.kind == "articulation":
+                profile = profiles.get(entry.owner)
+                if profile is None:
+                    raise ValueError(
+                        f"{backend}: observations.site {name!r} is owned by "
+                        f"articulation {entry.owner!r} but no profile was supplied"
+                    )
+                canonical_body = normalize_canonical_body_id(
+                    spec.body, f"observations.site {name!r} body"
+                )
+                binding = profile.body_bindings.get(canonical_body)
+                if binding is None or "mjcf" not in binding.names:
+                    raise ValueError(
+                        f"{backend}: observations.site {name!r} body {spec.body!r} "
+                        f"has no mjcf binding in profile {entry.owner!r}"
+                    )
+                body_name = binding.names["mjcf"]
+                if name_map is not None:
+                    body_name = name_map.backend_body(entry.owner, body_name)
+                body_index = body_id(model_ir, body_name)
+                if body_index < 0:
+                    raise ValueError(
+                        f"{backend}: observations.site {name!r} native body "
+                        f"{body_name!r} is not in the MJ model"
+                    )
+                native_name = name
+                prefix = None if name_map is None else name_map.prefix(entry.owner)
+                if prefix and site_id(model_ir, f"{prefix}{name}") >= 0:
+                    native_name = f"{prefix}{name}"
+                native_id = site_id(model_ir, native_name)
+                if native_id >= 0:
+                    _require_native_match(backend, entry, model_ir.sites[native_name], body_name)
+                    handles.append(MjSiteHandle(name=name, kind="native", native_id=native_id))
+                else:
+                    handles.append(
+                        MjSiteHandle(
+                            name=name,
+                            kind="body",
+                            body_id=body_index,
+                            local_pos=spec.pos,
+                            local_quat=spec.quat_wxyz,
+                        )
+                    )
+                continue
+
+            native_name = f"Prop_{entry.owner}_{spec.name}"
+            native_id = site_id(model_ir, native_name)
+            if native_id < 0:
+                raise ValueError(
+                    f"{backend}: observations.site {name!r} generated prop site "
+                    f"{native_name!r} is not in the MJ model; native sites: "
+                    f"{sorted(native)}; asset sites: {sorted(inventory)}"
+                )
+            expected_body = f"Prop_{entry.owner}_{spec.body}"
+            _require_native_match(backend, entry, model_ir.sites[native_name], expected_body)
+            handles.append(MjSiteHandle(name=name, kind="native", native_id=native_id))
+            continue
+
+        native_id = site_id(model_ir, name)
+        if native_id < 0:
+            raise ValueError(
+                f"{backend}: observations.site {name!r} not found; native sites: "
+                f"{sorted(native)}; asset sites: {sorted(inventory)}"
+            )
+        handles.append(MjSiteHandle(name=name, kind="native", native_id=native_id))
+    return handles
 
 
 def refresh_obs_sources(env) -> None:
@@ -62,15 +254,11 @@ def refresh_obs_sources(env) -> None:
                     registry.set_object(
                         name, f"joints/{joint_name}", torch.as_tensor(value, dtype=torch.float32)
                     )
-    for site_name, site_id in getattr(env, "_obs_sites", ()):
-        if env.num_envs == 1:
-            value = torch.tensor(env._data.site_xpos[site_id], dtype=torch.float32).unsqueeze(0)
-        else:
-            value = torch.stack(
-                [torch.tensor(d.site_xpos[site_id], dtype=torch.float32) for d in env._datas],
-                dim=0,
-            )
-        registry.set_site(site_name, value)
+    for handle in getattr(env, "_obs_sites", ()):
+        poses = [_site_pose(env, handle, e) for e in range(env.num_envs)]
+        pos = torch.stack([torch.as_tensor(p, dtype=torch.float32) for p, _ in poses], dim=0)
+        quat_w = torch.stack([torch.as_tensor(q, dtype=torch.float32) for _, q in poses], dim=0)
+        registry.set_site(handle.name, pos, quat_w)
 
 
 def read_articulation_state(env, art, e: int = 0) -> dict:

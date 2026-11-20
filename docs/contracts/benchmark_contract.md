@@ -66,7 +66,7 @@ and includes it in the report.
                    "seed": 0, "policy_dt": 0.02, "sim_dt": 0.005,
                    "reset_seed": 2, "world_id": "...",
                    "articulations": [{"name": "...", "profile": "..."}],
-                   "observation_schema_version": 1, "model_revision": 0}},
+                   "observation_schema_version": 2, "model_revision": 0}},
   "terminal_outcome_counts": {},
   "terminal_code_counts": {},
   "terminal_source_counts": {},

@@ -51,7 +51,7 @@ __all__ = [
 ]
 
 #: Observation schema version (meta.json ``observations.version``).
-OBS_SCHEMA_VERSION = 1
+OBS_SCHEMA_VERSION = 2
 
 _DTYPE_TO_TORCH = {
     "f32": torch.float32,
@@ -523,7 +523,7 @@ class CameraObs(_View):
 
 
 class SiteObs(_View):
-    """Typed site position for one declared record site."""
+    """Typed site pose for one declared record site."""
 
     @property
     def key(self) -> str:
@@ -532,6 +532,10 @@ class SiteObs(_View):
     @property
     def pos_w(self) -> torch.Tensor:
         return self._value(f"{self.key}/pos")
+
+    @property
+    def quat_w(self) -> torch.Tensor:
+        return self._value(f"{self.key}/quat")
 
 
 class _SlotObs(_View):
@@ -724,6 +728,9 @@ def build_observation_schema(
         entries[f"site/{name}/pos"] = ObservationSpec(
             f"site/{name}/pos", (3,), "f32", unit="m", frame="world", source="site"
         )
+        entries[f"site/{name}/quat"] = ObservationSpec(
+            f"site/{name}/quat", (4,), "f32", frame="world", source="site"
+        )
     if config.command:
         entries["command"] = ObservationSpec("command", None, "f32", source="sampler", record=False)
     if config.prev_action:
@@ -909,8 +916,14 @@ class ObservationRegistry:
     def set_camera(self, key: str, value: torch.Tensor) -> None:
         self.set(key, value)
 
-    def set_site(self, name: str, value: torch.Tensor) -> None:
-        self.set(f"site/{name}/pos", value)
+    def set_site(self, name: str, pos: torch.Tensor, quat: torch.Tensor) -> None:
+        """Publish one site pose atomically after validating both keys."""
+        pos_key = f"site/{name}/pos"
+        quat_key = f"site/{name}/quat"
+        self.schema.validate_tensor(pos_key, pos, self.num_envs)
+        self.schema.validate_tensor(quat_key, quat, self.num_envs)
+        self._values[pos_key] = pos
+        self._values[quat_key] = quat
 
     def set_command(self, value: torch.Tensor | None) -> None:
         if value is not None:

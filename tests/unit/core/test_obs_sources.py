@@ -7,12 +7,15 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from unigym.backends.obs_schema import require_sites
+from unigym.backends.obs_schema import build_site_inventory
 from unigym.backends.shared.mjfamily.articulation_obs import refresh_obs_sources
 from unigym.cameras.base import CameraSpec, rgb_key
 from unigym.cameras.manager import CameraManager
 from unigym.contacts.manager import ContactManager
 from unigym.env.obs import ObservationConfig, ObservationRegistry, build_observation_schema
+from unigym.sites import SiteSpec
+from unigym.props.asset_ir import AssetDefinition, Body, Site
+from unigym.robots.base import BodyBinding, RobotProfile
 
 
 class _Camera:
@@ -145,15 +148,6 @@ def test_camera_manager_obs_rig_split_ignores_video_only_cameras() -> None:
     assert [rig.spec.name for rig in manager._obs_rigs] == ["ego"]
 
 
-def test_site_capability_validation_is_backend_explicit() -> None:
-    assert require_sites("mujoco", (), inventory=("grip",)) == ()
-    assert require_sites("mujoco", ("grip",), inventory=("grip",)) == ("grip",)
-    with pytest.raises(ValueError, match="unknown sites"):
-        require_sites("mujoco", ("missing",), inventory=("grip",))
-    with pytest.raises(NotImplementedError, match="no site readback"):
-        require_sites("isaaclab2", ("grip",), inventory=None)
-
-
 def test_video_only_camera_renders_every_call() -> None:
     """Two video captures render twice and return distinct frames."""
     spec = CameraSpec(name="video", types=("rgb",), state="per_instance", width=2, height=2)
@@ -183,3 +177,50 @@ def test_video_only_camera_renders_every_call() -> None:
     assert first.dtype.name == "uint8"
     assert not (first == second).all()
     assert int(first.max()) == 1 and int(second.max()) == 2
+
+
+def _profile(name: str, site: SiteSpec) -> RobotProfile:
+    return RobotProfile(
+        name=name,
+        joint_sets={"body": ("j",)},
+        default_joint_pos={"j": 0.0},
+        assets=None,
+        extra_action_sets={},
+        base_body="base",
+        foot_bodies=(),
+        body_sets={},
+        body_bindings={"base": BodyBinding("base", {"mjcf": "root", "usd": "base"})},
+        sites={site.name: site},
+    )
+
+
+def test_site_inventory_records_articulation_and_prop_owners() -> None:
+    profile = _profile("arm", SiteSpec("tcp", "base"))
+    asset = AssetDefinition(
+        name="cup",
+        root=Body("cup", sites=(Site("handle", pos=(0.0, 0.0, 0.01)),)),
+    )
+
+    inventory = build_site_inventory({"arm": profile}, {"cup": asset})
+
+    assert inventory["tcp"].kind == "articulation"
+    assert inventory["tcp"].owner == "arm"
+    assert inventory["tcp"].spec == profile.sites["tcp"]
+    assert inventory["handle"].kind == "prop"
+    assert inventory["handle"].owner == "cup"
+    assert inventory["handle"].spec.body == "cup"
+
+
+def test_site_inventory_rejects_duplicate_names_across_owners() -> None:
+    left = _profile("left", SiteSpec("tcp", "base"))
+    right = _profile("right", SiteSpec("tcp", "base"))
+
+    with pytest.raises(ValueError, match="duplicate site name 'tcp'.*'left'.*'right'"):
+        build_site_inventory({"left": left, "right": right}, {})
+
+
+def test_site_inventory_rejects_owner_identity_mismatch() -> None:
+    asset = AssetDefinition(name="cup", root=Body("cup", sites=(Site("handle"),)))
+
+    with pytest.raises(ValueError, match="owner and payload identity"):
+        build_site_inventory({}, {"other": asset})

@@ -368,7 +368,7 @@ def _add_geom(mujoco, mjs_body, geom, contact) -> None:
 
 
 def _add_site(mjs_body, site) -> None:
-    """Add one IR site (pos + optional size / rgba / type).
+    """Add one IR site (pos + quat + optional size / rgba / type).
 
     The size is a scalar in the IR: it is assigned to the FIRST
     component only, post-add, so the trailing components keep the
@@ -380,7 +380,7 @@ def _add_site(mjs_body, site) -> None:
     """
     import mujoco
 
-    obj = mjs_body.add_site(name=site.name, pos=list(site.pos))
+    obj = mjs_body.add_site(name=site.name, pos=list(site.pos), quat=list(site.quat))
     if site.size_vector is not None:
         obj.size = [*site.size_vector, *obj.size[len(site.size_vector) :]]
     elif site.size is not None:

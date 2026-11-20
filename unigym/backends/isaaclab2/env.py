@@ -24,7 +24,7 @@ buffers by name, so ordering is correct by construction.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -53,6 +53,8 @@ from unigym.backends.obs_schema import build_schema
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
+    from isaaclab.assets import Articulation
+
     from unigym.backends.isaaclab2.asset_scene.engine import (
         AssetSceneEngine,
         ComposedAssetScene,
@@ -73,6 +75,37 @@ from unigym.env.backends.base import (
 BACKEND_CAPABILITIES = BackendCapabilities.full()
 
 __all__ = ["IsaaclabEnv", "BACKEND_CAPABILITIES"]
+
+
+@dataclass(frozen=True)
+class _IsaacObsSite:
+    """One IsaacLab site handle: robot asset, body index and local pose."""
+
+    name: str
+    asset: Articulation
+    body_index: int
+    local_pos: tuple[float, float, float]
+    local_quat: tuple[float, float, float, float]
+
+
+def _site_body_index(body_names: Sequence[str], usd_name: str, site_name: str) -> int:
+    """Resolve one profile USD body name against the live articulation order."""
+    names = tuple(str(name) for name in body_names)
+    if usd_name in names:
+        return names.index(usd_name)
+    leaf = usd_name.rstrip("/").rsplit("/", 1)[-1]
+    matches = [
+        index
+        for index, name in enumerate(names)
+        if name == leaf or name.rstrip("/").rsplit("/", 1)[-1] == leaf
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    raise ValueError(
+        f"observations.site {site_name!r}: body binding {usd_name!r} does not "
+        f"resolve to exactly one live body; candidates {matches}; "
+        f"live bodies: {list(names)}"
+    )
 
 
 def _base_z_obs(env):
@@ -794,7 +827,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 camera_manager=self.camera_manager,
                 contact_manager=self.contact_manager,
                 prop_manager=self.prop_manager,
-                sites=tuple(name for name, _ in self._obs_sites),
+                sites=tuple(handle.name for handle in self._obs_sites),
             ),
             num_envs=self.num_envs,
             device=self.device,
@@ -836,7 +869,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                 camera_manager=self.camera_manager,
                 contact_manager=self.contact_manager,
                 prop_manager=None,
-                sites=tuple(name for name, _ in self._obs_sites),
+                sites=tuple(handle.name for handle in self._obs_sites),
             ),
             num_envs=self.num_envs,
             device=self.device,
@@ -1005,16 +1038,74 @@ class IsaaclabEnv(ManagerBasedEnv):
     # obs cache
     # ------------------------------------------------------------------ #
     def _resolve_obs_sites(self, declared) -> list:
-        """isaaclab2 has no site readback face: selected sites fail at build.
+        """Resolve robot-profile sites to ``body + local pose`` handles.
 
-        BLOCKED: a real site inventory/readback needs a backend scene-site
-        trait.  Failing here keeps the schema honest (no advertised key that
-        ``env.obs.site`` cannot serve).
+        IsaacLab has no native site readback face and no generated prop-site
+        payload; only asset-level robot-profile declarations are supported.
+        There is no USD prim/FrameTransformer fallback.
         """
-        from unigym.backends.obs_schema import require_sites
+        if not declared:
+            return []
+        from unigym.backends.obs_schema import build_site_inventory
+        from unigym.robots.base import normalize_canonical_body_id
 
-        require_sites("isaaclab2", declared, inventory=None)
-        return []
+        inventory = build_site_inventory(
+            getattr(self, "_profiles", None) or {},
+            getattr(getattr(self, "prop_manager", None), "asset_definitions", None) or {},
+        )
+        handles: list[_IsaacObsSite] = []
+        for name in tuple(declared or ()):
+            entry = inventory.get(name)
+            if entry is None:
+                raise ValueError(
+                    f"isaaclab2 backend: observations.site {name!r} is not an "
+                    f"asset-level site; IsaacLab sites require a robot-profile "
+                    f"declaration (no USD prim fallback); declared asset sites: "
+                    f"{sorted(inventory)}"
+                )
+            if entry.kind == "prop":
+                raise ValueError(
+                    f"isaaclab2 backend: observations.site {name!r} is a generated "
+                    f"prop site; IsaacLab sites currently require a robot profile "
+                    f"(no USD prim fallback)"
+                )
+            profile = self._profiles.get(entry.owner)
+            if profile is None:
+                raise ValueError(
+                    f"isaaclab2 backend: observations.site {name!r} is owned by "
+                    f"articulation {entry.owner!r} but no profile was supplied"
+                )
+            canonical_body = normalize_canonical_body_id(
+                entry.spec.body, f"observations.site {name!r} body"
+            )
+            binding = profile.body_bindings.get(canonical_body)
+            if binding is None or "usd" not in binding.names:
+                raise ValueError(
+                    f"isaaclab2 backend: observations.site {name!r} body "
+                    f"{entry.spec.body!r} has no usd binding in profile {entry.owner!r}"
+                )
+            assets = getattr(self, "robots", None) or {}
+            asset = assets.get(entry.owner)
+            if asset is None:
+                if len(self._profiles) != 1:
+                    raise ValueError(
+                        f"isaaclab2 backend: observations.site {name!r} cannot "
+                        f"resolve articulation {entry.owner!r} to a live scene asset"
+                    )
+                asset = self.robot
+            data = getattr(asset, "data", None)
+            body_names = getattr(data, "body_names", None) or getattr(asset, "body_names", ())
+            body_index = _site_body_index(body_names, binding.names["usd"], name)
+            handles.append(
+                _IsaacObsSite(
+                    name=name,
+                    asset=asset,
+                    body_index=body_index,
+                    local_pos=entry.spec.pos,
+                    local_quat=entry.spec.quat_wxyz,
+                )
+            )
+        return handles
 
     def _refresh_obs(self, raw_action=None, cmd=None) -> None:
         """Refresh the typed observation registry exactly once per step."""
@@ -1056,6 +1147,7 @@ class IsaaclabEnv(ManagerBasedEnv):
                     if f"object/{name}/joints/{joint_name}" in schema:
                         self.obs.set_object(name, f"joints/{joint_name}", value)
         self._refresh_articulations()
+        self._refresh_sites()
         if self.observations.command:
             self.obs.set_command(cmd)
         if self.observations.prev_action:
@@ -1084,6 +1176,26 @@ class IsaaclabEnv(ManagerBasedEnv):
                 name,
                 "base_yaw",
                 math_utils.euler_xyz_from_quat(d.root_quat_w)[2].unsqueeze(-1),
+            )
+
+    def _refresh_sites(self) -> None:
+        """Compose selected robot-profile site poses from the live body pose."""
+        for handle in self._obs_sites:
+            data = handle.asset.data
+            body_pos = torch.as_tensor(data.body_pos_w)[:, handle.body_index]
+            body_quat = torch.as_tensor(data.body_quat_w)[:, handle.body_index]
+            local_pos = torch.as_tensor(
+                handle.local_pos, dtype=body_pos.dtype, device=body_pos.device
+            )
+            local_quat = torch.as_tensor(
+                handle.local_quat, dtype=body_quat.dtype, device=body_quat.device
+            )
+            pos_w = torch.as_tensor(body_pos + quat.rotate(body_quat, local_pos))
+            quat_w = torch.as_tensor(quat.normalize(quat.mul(body_quat, local_quat)))
+            self.obs.set_site(
+                handle.name,
+                pos_w.to(dtype=torch.float32),
+                quat_w.to(dtype=torch.float32),
             )
 
     def record(self) -> dict[str, object]:

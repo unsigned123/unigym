@@ -114,10 +114,7 @@ from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.native import NativeHandle
 from unigym.env.obs import ObservationConfig, ObservationRegistry
 from unigym.backends.obs_schema import build_schema
-from unigym.backends.shared.mjfamily.model.ir_access import (
-    body_id,
-    site_id,
-)
+from unigym.backends.shared.mjfamily.model.ir_access import body_id
 from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, wire_reset_face
 from unigym.backends.shared.mjfamily.props import multienv
 from unigym.backends.shared.mjfamily.scene.scene_spawn import (
@@ -608,6 +605,21 @@ class MujocoEnv:
             if observations is not None
             else ObservationConfig.from_mapping(params.get("observations"))
         )
+        site_profiles = dict(profiles or {})
+        if robot_profile is not None and not any(
+            profile is robot_profile for profile in site_profiles.values()
+        ):
+            site_profiles.setdefault(robot_profile.name, robot_profile)
+        self._site_profiles = site_profiles
+        if self.observations.site:
+            from unigym.backends.obs_schema import build_site_inventory
+
+            self._site_inventory = build_site_inventory(
+                site_profiles,
+                getattr(prop_manager, "asset_definitions", None) or {},
+            )
+        else:
+            self._site_inventory = {}
         self._obs_sites = self._resolve_obs_sites(self.observations.site)
         self._datas = [mujoco.MjData(self._model) for _ in range(n)]
         self._data = self._datas[0]  # legacy alias: tests/scene/director read it
@@ -740,7 +752,7 @@ class MujocoEnv:
                 camera_manager=self.camera_manager,
                 contact_manager=self.contact_manager,
                 prop_manager=self.prop_manager,
-                sites=tuple(name for name, _ in self._obs_sites),
+                sites=tuple(handle.name for handle in self._obs_sites),
             ),
             num_envs=self.num_envs,
             device=self.device,
@@ -1250,19 +1262,17 @@ class MujocoEnv:
     # multi-articulation tables (backend-internal)
     # ------------------------------------------------------------------ #
     def _resolve_obs_sites(self, declared) -> list:
-        """Resolve ``observations.site`` names against the MJ model."""
-        sites: list = []
-        for sname in tuple(declared or ()):
-            sid = site_id(self._model_ir, sname)
-            if sid < 0:
-                raise ValueError(
-                    f"mujoco backend: observations.site {sname!r} not "
-                    f"found in the MJ model | hint: site names come "
-                    f"from the scene XML ('<site name=...' entries); "
-                    f"check the scene's declared grip sites"
-                )
-            sites.append((sname, sid))
-        return sites
+        """Resolve ``observations.site`` names against asset sites and MJ sites."""
+        from unigym.backends.shared.mjfamily.articulation_obs import resolve_mj_sites
+
+        return resolve_mj_sites(
+            self._model_ir,
+            self._site_profiles,
+            self._site_inventory,
+            tuple(declared or ()),
+            backend="mujoco backend",
+            name_map=self._mj_name_map,
+        )
 
     def _setup_actuator_seam(self, plans) -> None:
         """Wire the ctrl laws for the decimation loop.

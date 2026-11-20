@@ -11,12 +11,15 @@ This module owns the schema gate.  Only top-level unknown keys are rejected;
 ``body_bindings`` values are per-format native names, not top-level fields.
 ``assets`` accepts the same ``{mjcf|urdf|usd: <ref>}`` mapping as
 :class:`~unigym.assets.asset_ref.AssetRef`; a pack reference stays an
-unresolved string until the composition boundary resolves it.
+unresolved string until the composition boundary resolves it.  The optional
+``sites`` table declares asset-level site poses (``{name: {body, pos,
+quat_wxyz}}``); the mapping key is the run-wide site observation name.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -24,6 +27,7 @@ import yaml
 
 from unigym._typing import JsonValue
 from unigym.assets.asset_ref import AssetRef, AssetRefError
+from unigym.sites import SiteSpec
 
 from .base import (
     BodyBinding,
@@ -51,6 +55,7 @@ _OPTIONAL_KEYS = (
     "extra_action_sets",
     "full_joint_order",
     "actuation",
+    "sites",
 )
 _TOP_LEVEL_KEYS = frozenset((*_REQUIRED_KEYS, *_OPTIONAL_KEYS))
 
@@ -164,6 +169,96 @@ def _actuation(path: Path, value: object) -> tuple[ActuationGroup, ...]:
         raise _error(path, "actuation", str(err)) from err
 
 
+def _site_numbers(
+    path: Path, name: str, field: str, value: object, length: int
+) -> tuple[float, ...]:
+    """Validate one site pose vector at the loader boundary."""
+    if not isinstance(value, (list, tuple)):
+        raise _error(
+            path,
+            f"sites.{name}",
+            f"field {field!r} must be {length} finite numbers, got {value!r}",
+        )
+    # The runtime check above establishes a sequence; the cast only replaces
+    # the builtin container's unknown item type at this YAML boundary.
+    entries = cast(Sequence[object], value)
+    if len(entries) != length:
+        raise _error(
+            path,
+            f"sites.{name}",
+            f"field {field!r} must be {length} finite numbers, got {value!r}",
+        )
+    numbers: list[float] = []
+    for entry in entries:
+        if (
+            isinstance(entry, bool)
+            or not isinstance(entry, (int, float))
+            or not math.isfinite(entry)
+        ):
+            raise _error(
+                path,
+                f"sites.{name}",
+                f"field {field!r} must be {length} finite numbers, got {value!r}",
+            )
+        numbers.append(float(entry))
+    return tuple(numbers)
+
+
+def _sites(path: Path, value: object) -> dict[str, SiteSpec]:
+    """Build the optional ``sites`` table (key = SiteSpec name)."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise _error(
+            path,
+            "sites",
+            f"expected a mapping of site name -> pose mapping, got {type(value).__name__}",
+        )
+    sites: dict[str, SiteSpec] = {}
+    # The isinstance check above establishes a mapping at the YAML boundary;
+    # the cast only replaces the raw container's unknown key/value types.
+    raw_sites = cast(Mapping[object, object], value)
+    for name, entry in raw_sites.items():
+        if not isinstance(name, str) or not name:
+            raise _error(path, "sites", f"site names must be non-empty strings, got {name!r}")
+        if not isinstance(entry, Mapping):
+            raise _error(
+                path,
+                f"sites.{name}",
+                f"expected a mapping {{body, pos, quat_wxyz}}, got {type(entry).__name__}",
+            )
+        # Same runtime-validated mapping boundary as above.
+        raw_entry = cast(Mapping[str, object], entry)
+        unknown = sorted(set(raw_entry) - {"body", "pos", "quat_wxyz"})
+        if unknown:
+            raise _error(
+                path,
+                f"sites.{name}",
+                f"unknown key(s) {unknown}; allowed keys are ['body', 'pos', 'quat_wxyz']",
+            )
+        body = raw_entry.get("body")
+        if not isinstance(body, str) or not body:
+            raise _error(
+                path,
+                f"sites.{name}",
+                f"field 'body' must be a non-empty string, got {body!r}",
+            )
+        pos = _site_numbers(path, name, "pos", raw_entry.get("pos", (0.0, 0.0, 0.0)), 3)
+        quat = _site_numbers(
+            path, name, "quat_wxyz", raw_entry.get("quat_wxyz", (1.0, 0.0, 0.0, 0.0)), 4
+        )
+        try:
+            sites[name] = SiteSpec(
+                name=name,
+                body=body,
+                pos=(pos[0], pos[1], pos[2]),
+                quat_wxyz=(quat[0], quat[1], quat[2], quat[3]),
+            )
+        except (TypeError, ValueError) as err:
+            raise _error(path, f"sites.{name}", str(err)) from err
+    return sites
+
+
 def load_robot_profile(path: str | Path) -> RobotProfile:
     """Load one ``unigym.robot/1`` document into a :class:`RobotProfile`.
 
@@ -244,6 +339,7 @@ def load_robot_profile(path: str | Path) -> RobotProfile:
             base_height=document.get("base_height"),
             full_joint_order=document.get("full_joint_order"),
             actuation=_actuation(document_path, document.get("actuation")),
+            sites=_sites(document_path, document.get("sites")),
         )
     except (TypeError, ValueError) as err:
         if isinstance(err, RobotDataError):

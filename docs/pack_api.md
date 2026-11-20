@@ -645,7 +645,15 @@ base_body / foot_bodies / body_sets   (canonical body ids)
 body_bindings                          (canonical id -> per-format native name)
 base_height                            (free-base spawn height, or None)
 actuation                              (ActuationGroup tuple; may be empty)
+sites                                  ({name: SiteSpec}; body-local poses)
 ```
+
+`sites` declares asset-level site observations. Each `SiteSpec` names an
+owner-local body (a canonical id in `body_bindings`), a body-local `pos` in
+metres and a normalized `quat_wxyz`; the mapping key is the run-wide
+observation name selected by `observations.site`. There is no run-level
+`sites:` table and no automatic identity orientation: an invalid orientation
+fails at construction.
 
 `actuation` declares the physical drive groups for the profile's joints. A
 non-empty tuple must name declared joints and cover every non-passive declared
@@ -839,6 +847,11 @@ body_bindings:
   base:
     mjcf: base
     usd: /World/base
+sites:
+  tcp:
+    body: base
+    pos: [0.0, 0.0, 0.1]
+    quat_wxyz: [0.70710678, 0.0, 0.70710678, 0.0]
 assets:
   usd: pack:acme/robots/acme_arm.usd
 asset_backends:
@@ -855,7 +868,9 @@ asset_options:
 - optional: `base_body`, `base_height`, `foot_bodies`, `body_sets`,
   `body_bindings`, `assets`, `asset_backends`, `asset_options`,
   `extra_action_sets`, `full_joint_order`, `actuation` (the same
-  `ActuationGroup` mapping shape a run accepts);
+  `ActuationGroup` mapping shape a run accepts), `sites`
+  (`{name: {body, pos, quat_wxyz}}`; site bodies must be declared in
+  `body_bindings`);
 - only top-level unknown keys fail; `body_bindings.<id>.<format>` is data, not
   a top-level field;
 - `body_bindings` builds `BodyBinding(canonical=<key>, names=<value>)`;

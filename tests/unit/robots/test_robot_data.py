@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from unigym.assets.asset_ref import AssetRef
+from unigym.sites import SiteSpec
 from unigym.robots.base import BodyBinding
 from unigym.robots.data import RobotDataError, load_robot_profile
 
@@ -259,3 +260,43 @@ def test_loader_wraps_orphan_asset_metadata(tmp_path: Path) -> None:
     )
     with pytest.raises(RobotDataError, match="asset_options"):
         load_robot_profile(path)
+
+
+def test_loader_parses_optional_sites(tmp_path: Path) -> None:
+    """A profile document can declare asset-level site poses."""
+    document = _document(
+        sites={
+            "tcp": {
+                "body": "base",
+                "pos": [0.0, 0.0, 0.1],
+                "quat_wxyz": [0.70710678, 0.0, 0.70710678, 0.0],
+            }
+        }
+    )
+
+    profile = load_robot_profile(_write(tmp_path / "robot.yaml", document))
+
+    assert profile.sites == {
+        "tcp": SiteSpec(
+            "tcp",
+            "base",
+            pos=(0.0, 0.0, 0.1),
+            quat_wxyz=(0.70710678, 0.0, 0.70710678, 0.0),
+        )
+    }
+
+
+def test_loader_rejects_a_site_with_no_body_binding(tmp_path: Path) -> None:
+    """A site body must exist in the profile body bindings."""
+    document = _document(sites={"tcp": {"body": "missing"}})
+
+    with pytest.raises(RobotDataError, match="tcp.*missing.*body_bindings"):
+        load_robot_profile(_write(tmp_path / "robot.yaml", document))
+
+
+def test_loader_rejects_unknown_site_fields(tmp_path: Path) -> None:
+    """Site entries reject fields outside body/pos/quat_wxyz."""
+    document = _document(sites={"tcp": {"body": "base", "tilt": [0.0, 0.0, 0.0]}})
+
+    with pytest.raises(RobotDataError, match="sites.tcp.*unknown key"):
+        load_robot_profile(_write(tmp_path / "robot.yaml", document))

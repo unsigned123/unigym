@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from unigym._typing import JsonValue
 from unigym.assets.asset_ref import ASSET_FORMATS, AssetRef, AssetRefError
+from unigym.sites import SiteSpec
 
 __all__ = [
     "BodyBinding",
@@ -278,6 +279,10 @@ class RobotProfile:
             legal (a passive robot, or a run that declares explicit
             actuation); a non-empty tuple must address declared joints and
             cover every non-passive declared joint exactly once.
+        sites: named asset-level site poses (``{name: SiteSpec}``).  Every
+            spec body must be a canonical id declared in
+            :attr:`body_bindings`; the site name is the run-wide observation
+            name.
 
     Read-only properties (derived from the data above):
 
@@ -300,6 +305,7 @@ class RobotProfile:
     base_height: float | None = None
     full_joint_order: tuple[str, ...] | None = None
     actuation: tuple[ActuationGroup, ...] = ()
+    sites: Mapping[str, SiteSpec] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -477,6 +483,33 @@ class RobotProfile:
             required.extend(members)
         validate_body_bindings(bindings, required_ids=required, formats=None)
 
+        if self.sites is not None and not isinstance(self.sites, Mapping):
+            raise ValueError(
+                f"RobotProfile sites must be a mapping, got {type(self.sites).__name__}"
+            )
+        sites: dict[str, SiteSpec] = {}
+        for site_name, site in dict(self.sites or {}).items():
+            if not isinstance(site_name, str) or not site_name:
+                raise ValueError(
+                    f"RobotProfile site name must be a non-empty string, got {site_name!r}"
+                )
+            if not isinstance(site, SiteSpec):
+                raise ValueError(
+                    f"RobotProfile site {site_name!r} must be a SiteSpec, "
+                    f"got {type(site).__name__}"
+                )
+            if site.name != site_name:
+                raise ValueError(
+                    f"RobotProfile site key {site_name!r} does not match "
+                    f"SiteSpec name {site.name!r}"
+                )
+            if site.body not in bindings:
+                raise ValueError(
+                    f"RobotProfile site {site_name!r} references body {site.body!r} "
+                    f"with no body_bindings entry; bound bodies: {sorted(bindings)}"
+                )
+            sites[site_name] = site
+
         object.__setattr__(self, "name", str(self.name))
         object.__setattr__(self, "joint_sets", sets)
         default_pos = dict(self.default_joint_pos or {})
@@ -496,6 +529,7 @@ class RobotProfile:
         object.__setattr__(self, "base_height", base_height)
         object.__setattr__(self, "full_joint_order", full_order)
         object.__setattr__(self, "actuation", actuation)
+        object.__setattr__(self, "sites", sites)
 
     # ------------------------------------------------------------------ #
     # read-only derived properties (no backend fields)
