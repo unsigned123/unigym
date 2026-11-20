@@ -16,15 +16,15 @@ The built-ins:
 * ``direct_velocity``   ctrl = clip(target velocity, ctrlrange) over compiled
   velocity servos.
 
-Authoring face: :class:`unigym.scenes.articulation.ArticulationSpec.actuation`
-declares the neutral groups; the run layer resolves them and each backend
-translates the law config.  The isaaclab backends translate only
-``standard_pd`` natively and reject direct drive; the MuJoCo family serves
-all five.
+The five core laws are declared as pure descriptors
+(:mod:`unigym.actuators.descriptors`); their concrete classes remain in
+:data:`ACTUATOR_REGISTRY` for compatibility.  Backend factories live in the
+internal implementation registry (:mod:`unigym.actuators.implementations`).
 """
 
 from __future__ import annotations
 
+from . import descriptors as _descriptors  # noqa: F401  (registers core laws)
 from .base import (
     ACTUATOR_REGISTRY,
     ActuatorBase,
@@ -50,13 +50,36 @@ from .ir import (
     validate_actuation_groups,
     validate_drive_law_matrix,
 )
+from .implementations import (
+    ACTUATOR_IMPLEMENTATION_REGISTRY,
+    ActuatorBuildContext,
+    ActuatorImplementation,
+    get_actuator_implementation,
+    has_actuator_implementation,
+    register_actuator_implementation,
+    restore_actuator_implementations,
+    snapshot_actuator_implementations,
+)
+from unigym.actuator_law import (
+    ACTUATOR_LAW_REGISTRY,
+    ActuatorLawDescriptor,
+    actuator_law,
+    register_actuator_law,
+    restore_actuator_laws,
+    snapshot_actuator_laws,
+)
 
 __all__ = [
+    "ACTUATOR_IMPLEMENTATION_REGISTRY",
+    "ACTUATOR_LAW_REGISTRY",
     "ACTUATOR_REGISTRY",
     "BACKEND_LAW_CAPABILITIES",
     "ActuationError",
     "ActuationGroup",
     "ActuatorBase",
+    "ActuatorBuildContext",
+    "ActuatorImplementation",
+    "ActuatorLawDescriptor",
     "ComputedTorquePdActuator",
     "DirectTorqueActuator",
     "DirectVelocityActuator",
@@ -64,13 +87,22 @@ __all__ = [
     "NativeServoActuator",
     "ResolvedActuationGroup",
     "StandardPdActuator",
+    "actuator_law",
     "build_actuator",
+    "get_actuator_implementation",
+    "has_actuator_implementation",
     "normalize_actuation_group",
     "normalize_actuation_groups",
     "register",
+    "register_actuator_implementation",
+    "register_actuator_law",
     "resolve_actuation_groups",
     "resolve_gain_vector",
     "resolve_group_joints",
+    "restore_actuator_implementations",
+    "restore_actuator_laws",
+    "snapshot_actuator_implementations",
+    "snapshot_actuator_laws",
     "validate_actuation_group",
     "validate_actuation_groups",
     "validate_drive_law_matrix",

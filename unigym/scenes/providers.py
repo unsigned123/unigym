@@ -169,6 +169,9 @@ def register_scene_provider(
         ValueError: The name, factory or parameter schema violates the
             registration contract.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.SCENE_PROVIDER, name=name)
     if not isinstance(name, str) or _NAME_RE.fullmatch(name) is None:
         raise ValueError(
             f"scene provider name {name!r} must be lowercase snake_case, "
@@ -242,6 +245,9 @@ def register_inline_scene_provider(name: str, factory: SceneProvider) -> ScenePr
     while their origin (``kind="inline"``) is inspectable through
     :func:`scene_provider_origin` and captured by the registry snapshot.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.SCENE_PROVIDER_INLINE, name=name)
     if not isinstance(name, str) or not name:
         raise ValueError(f"inline scene provider name must be a non-empty string, got {name!r}")
     if name in _SCENE_PROVIDERS or name in _INLINE_SCENE_PROVIDERS:

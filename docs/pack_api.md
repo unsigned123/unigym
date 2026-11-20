@@ -1573,6 +1573,36 @@ message names the replacement.
 `@register_scene`; it does not load against this release and is outside the
 core release wheelhouse until its own repository migrates.
 
+## Registration phases and actuator providers
+
+Pack code registers providers while the pack runtime is activating; the
+process-global registration gate refuses a registration outside its face
+window (`docs/contracts/registration_phase_contract.md`).  A pack may add an
+actuator law and its backend implementation on the existing `providers` face:
+
+```yaml
+providers:
+  - id: acme.compliant_pd
+    kind: actuator_law
+    resource: actuators/compliant_pd.law.yaml
+
+  - id: acme.compliant_pd.mujoco
+    kind: actuator_implementation
+    entrypoint: acme_actuators:make_mujoco
+    params: {law: acme.compliant_pd, backend: mujoco, kind: mujoco_ctrl}
+```
+
+Law payloads may use `ActuationGroup.params` (frozen JSON keys validated by
+the descriptor's `config_keys`); the merged payload and the `gains` shorthand
+both reach the backend factory.
+
+`actuator_law` items become pure descriptors at `ACTIVATE`; the
+`actuator_implementation` entrypoint is imported only when the run layer
+materializes the selected backend (`BACKEND_BUILD` for MuJoCo/mjWarp,
+`ASSEMBLE` for IsaacLab).  `unigym.pack_api` exports `register_actuator_law`
+and the registration phase primitives; implementation registration is
+internal to the runtime.
+
 ## Non-goals
 
 The current phases deliberately do not implement:

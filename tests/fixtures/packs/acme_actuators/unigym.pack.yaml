@@ -1,0 +1,17 @@
+schema: unigym.pack/1
+name: acme_actuators
+version: 1.0.0
+api: 1
+trust: code
+provides:
+  providers:
+    - id: acme.compliant_pd
+      kind: actuator_law
+      resource: actuators/compliant_pd.law.yaml
+    - id: acme.compliant_pd.mujoco
+      kind: actuator_implementation
+      entrypoint: acme_actuators:make_mujoco
+      params:
+        law: acme.compliant_pd
+        backend: mujoco
+        kind: mujoco_ctrl

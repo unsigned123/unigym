@@ -214,3 +214,34 @@ def test_public_facades_advertise_no_legacy_scene_names(name: str) -> None:
 def test_world_has_no_legacy_factory(name: str) -> None:
     """``World`` keeps only the preset/provider factories."""
     assert not hasattr(world.World, name)
+
+
+@pytest.mark.subprocess
+def test_registration_module_is_stdlib_only() -> None:
+    """``unigym.registration`` imports no engine and no backend registry."""
+    code = (
+        "import sys\n"
+        "import unigym.registration\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+        "assert 'unigym.backends.registry' not in sys.modules\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_actuator_law_module_is_stdlib_only() -> None:
+    """``unigym.actuator_law`` imports no engine, numpy or actuators package."""
+    code = (
+        "import sys\n"
+        "import unigym.actuator_law\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+        "assert 'unigym.actuators' not in sys.modules\n"
+        "assert 'unigym.backends.registry' not in sys.modules\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

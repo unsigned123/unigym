@@ -71,6 +71,9 @@ def register_adapter(
         ValueError: The name is malformed or already registered.
         TypeError: *cls* is not a class or does not subclass ``Adapter``.
     """
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.ADAPTER, name=name)
     if not isinstance(name, str) or not _ADAPTER_NAME_RE.fullmatch(name):
         raise ValueError(
             f"adapter name {name!r} must be lowercase snake_case, optionally "

@@ -42,15 +42,35 @@ from __future__ import annotations
 
 from typing import Callable
 
+from unigym.provenance import OriginTable, ProviderOrigin, RegistrySnapshot
+
 Provider = Callable[[dict, dict], dict]
 
 PROVIDERS: dict[str, Provider] = {}
 """The closed provider registry: registered name -> pure spec-builder."""
 
+_TASK_PROVIDER_ORIGINS = OriginTable()
+"""Private provenance side table beside :data:`PROVIDERS`."""
+
+TaskProviderRegistrySnapshot = RegistrySnapshot[Provider]
+"""The origin-aware task-provider registry snapshot type."""
+
+__all__ = [
+    "PROVIDERS",
+    "Provider",
+    "TaskProviderRegistrySnapshot",
+    "attribute_task_provider",
+    "build_provider_spec",
+    "register",
+    "restore_task_providers",
+    "snapshot_task_providers",
+    "task_provider_origin",
+]
+
 _PROVIDER_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_")
 
 
-def register(name: str) -> Callable[[Provider], Provider]:
+def register(name: str, *, origin: ProviderOrigin | None = None) -> Callable[[Provider], Provider]:
     """Register a provider under ``name`` (lowercase snake_case).
 
     Duplicate names and path-shaped values fail fast -- a provider row
@@ -59,6 +79,9 @@ def register(name: str) -> Callable[[Provider], Provider]:
     """
 
     def deco(fn: Provider) -> Provider:
+        from unigym.registration import PackFace, require_registration
+
+        require_registration(PackFace.TASK_PROVIDER, name=name)
         if not callable(fn):
             raise ValueError(
                 f"task provider {name!r} must be a callable, got " f"{type(fn).__name__}"
@@ -82,9 +105,39 @@ def register(name: str) -> Callable[[Provider], Provider]:
                 "mirrors and restate the pure-builder contract"
             )
         PROVIDERS[name] = fn
+        if origin is None:
+            _TASK_PROVIDER_ORIGINS.remove(name)
+        else:
+            if not isinstance(origin, ProviderOrigin):
+                raise TypeError(
+                    f"task provider {name!r}: origin must be a ProviderOrigin, got "
+                    f"{type(origin).__name__}"
+                )
+            _TASK_PROVIDER_ORIGINS.set(name, origin)
         return fn
 
     return deco
+
+
+def attribute_task_provider(name: str, origin: ProviderOrigin) -> None:
+    """Label one already-registered task provider with *origin*."""
+    if name in PROVIDERS:
+        _TASK_PROVIDER_ORIGINS.set(name, origin)
+
+
+def task_provider_origin(name: str) -> ProviderOrigin:
+    """Return the origin of one registered task provider (never ``None``)."""
+    return _TASK_PROVIDER_ORIGINS.origin(name)
+
+
+def snapshot_task_providers() -> TaskProviderRegistrySnapshot:
+    """Capture the task-provider registry and origins together."""
+    return RegistrySnapshot.capture(PROVIDERS, _TASK_PROVIDER_ORIGINS)
+
+
+def restore_task_providers(snapshot: TaskProviderRegistrySnapshot) -> None:
+    """Restore a snapshot captured by :func:`snapshot_task_providers`."""
+    snapshot.restore(PROVIDERS, _TASK_PROVIDER_ORIGINS)
 
 
 def build_provider_spec(name: str, slots: dict, tables: dict) -> dict:

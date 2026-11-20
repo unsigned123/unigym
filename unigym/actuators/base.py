@@ -51,6 +51,13 @@ def register(name: str):
     """Class decorator: register the actuator law under *name* (fail on dup)."""
 
     def deco(cls):
+        from unigym.registration import PackFace, require_registration
+
+        # Core classes may be imported at a late phase (a fresh process can
+        # first materialize a backend at BACKEND_BUILD).  Pack classes still
+        # pass the actuator-law gate.
+        if not str(getattr(cls, "__module__", "")).startswith("unigym.actuators"):
+            require_registration(PackFace.ACTUATOR_LAW, name=name)
         if name in ACTUATOR_REGISTRY:
             raise ValueError(
                 f"actuator type {name!r} already registered "

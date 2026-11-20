@@ -1278,6 +1278,11 @@ def _build_env_and_sampler(
     observations=None,
 ) -> _EnvBundle:
     """Step 3: env compile + sampler/language wiring."""
+    from unigym.registration import RegistrationPhase, at_least_phase
+
+    at_least_phase(RegistrationPhase.BACKEND_BUILD)
+    if info.name not in _ISAACLAB_FAMILY_BACKENDS:
+        _materialize_pack_actuators(spec, info.name)
     # the run output dir resolves BEFORE the backend build: the recorded
     # scene artifacts are written during env construction
     # and land under <run output dir>/scene/.  The daemon drops the run.json
@@ -1830,8 +1835,23 @@ def _core_termination_group(spec: RunSpec, cfg: dict[str, JsonValue]) -> Termina
     return build_termination_group(_config_list(cfg.get("terminations")))
 
 
+def _materialize_pack_actuators(spec: RunSpec, backend: str) -> None:
+    """Materialize the pack actuator implementations for *backend*.
+
+    The registration gate enforces the backend's legal phase, so this helper
+    is called at ASSEMBLE for IsaacLab and at BACKEND_BUILD for the MuJoCo
+    family.
+    """
+    from unigym.packs.actuators import materialize_actuator_implementations
+
+    materialize_actuator_implementations(spec.pack_runtime, backend)
+
+
 def build_instance(spec: RunSpec) -> RunInstance:
     """Construct every live resource of one run from ``spec`` (no driving)."""
+    from unigym.registration import RegistrationPhase, at_least_phase, seal_runtime
+
+    at_least_phase(RegistrationPhase.ASSEMBLE)
     cfg = spec.cfg
     backend_label = spec.backend
     _reject_removed_actuator_sources(cfg)
@@ -1845,6 +1865,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         canonical = select_backend(info.name)
         info = backend_info(canonical)
         backend_label = canonical
+        _materialize_pack_actuators(spec, info.name)
     mode = spec.mode
     pack_runtime = spec.pack_runtime
     if mode in ("benchmark", "both") and pack_runtime is None:
@@ -2147,6 +2168,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         num_envs,
     )
 
+    seal_runtime()
     return RunInstance(
         spec=spec,
         profile=profile,

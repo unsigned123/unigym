@@ -17,7 +17,14 @@ from typing import cast
 import numpy as np
 import torch
 
-from unigym.actuators import ActuatorBase, build_actuator
+from unigym.actuators import (
+    ActuatorBase,
+    ActuatorBuildContext,
+    actuator_law,
+    build_actuator,
+    get_actuator_implementation,
+    has_actuator_implementation,
+)
 from unigym.actuators.ir import (
     ResolvedActuationGroup,
     validate_actuation_group,
@@ -418,16 +425,6 @@ def _actuator_law(model, slot: int) -> str:
     return "general"
 
 
-#: Neutral law -> the compiled plant it requires.  A software direct-drive
-#: law over a different compiled actuator class would silently mean a
-#: different physics model, so the seam rejects it before the law binds.
-_REQUIRED_COMPILED_LAW: dict[str, str] = {
-    "native_servo": "position_servo",
-    "direct_torque": "motor",
-    "direct_velocity": "velocity_servo",
-}
-
-
 def _direct_plant_error(model, slot: int, law: str) -> str | None:
     """Why a direct law's ctrl write would not carry its named joint unit.
 
@@ -525,14 +522,20 @@ def _law_config(
     group = resolved.group
     cfg: dict = {"type": group.law, "joint_names": list(compiled_names)}
     neutral_names = resolved.joint_names
-    for key in ("kp", "kd"):
+    descriptor = actuator_law(group.law)
+    for key in descriptor.gain_keys:
         if key in group.gains:
-            cfg[key] = _translate_gain_value(
-                group.gains[key],
-                neutral_names,
-                compiled_names,
-                f"actuation group {group.name!r} gain {key!r}",
-            )
+            value = group.gains[key]
+        elif key in group.params:
+            value = group.params[key]
+        else:
+            continue
+        cfg[key] = _translate_gain_value(
+            value,
+            neutral_names,
+            compiled_names,
+            f"actuation group {group.name!r} gain {key!r}",
+        )
     if group.parts:
         cfg["parts"] = _translate_parts(
             group.parts,
@@ -540,6 +543,9 @@ def _law_config(
             compiled_names,
             f"actuation group {group.name!r}",
         )
+    for key, value in group.params.items():
+        if key not in cfg:
+            cfg[key] = value
     return cfg
 
 
@@ -618,7 +624,35 @@ def build_actuator_seam(
     for resolved, compiled in group_rows:
         group = resolved.group
         cfg = _law_config(resolved, compiled)
-        act = build_actuator(cfg)
+        descriptor = actuator_law(group.law)
+        if (
+            not has_actuator_implementation(group.law, backend)
+            and descriptor.requires_implementation
+        ):
+            raise ValueError(
+                f"{label}: actuation group {group.name!r} law {group.law!r} declares "
+                f"an implementation requirement but none is registered for backend "
+                f"{backend!r} | hint: materialize the pack's kind: "
+                "actuator_implementation provider at BACKEND_BUILD"
+            )
+        if has_actuator_implementation(group.law, backend):
+            context = ActuatorBuildContext(
+                law=descriptor,
+                backend=backend,
+                group=resolved,
+                joint_names=tuple(compiled),
+                params={
+                    key: value for key, value in cfg.items() if key not in ("type", "joint_names")
+                },
+            )
+            act = get_actuator_implementation(group.law, backend).factory(context)
+            if not isinstance(act, ActuatorBase):
+                raise ValueError(
+                    f"{label}: actuator implementation for law {group.law!r} on "
+                    f"backend {backend!r} returned {type(act).__name__}, not ActuatorBase"
+                )
+        else:
+            act = build_actuator(cfg)
         act.bind(env, cfg)
         slots = act.bound_slots.tolist()
         duplicate = sorted(set(slots) & set(claimed))
@@ -638,7 +672,7 @@ def build_actuator_seam(
             )
         for slot in slots:
             claimed[slot] = group.name
-        required_plant = _REQUIRED_COMPILED_LAW.get(group.law)
+        required_plant = actuator_law(group.law).compiled_plant.get(backend)
         if required_plant is not None:
             for joint, slot in zip(act.joint_names, slots):
                 compiled_law = _actuator_law(env._model, int(slot))

@@ -49,12 +49,18 @@ from typing import Any, Callable, ClassVar, Dict, Optional
 
 import numpy as np
 
+from unigym.provenance import OriginTable, ProviderOrigin, RegistrySnapshot
+
 __all__ = [
     "InitializerBase",
     "ResetOutcome",
     "ResetPrimitives",
     "INITIALIZER_REGISTRY",
     "register",
+    "attribute_initializer",
+    "initializer_origin",
+    "snapshot_initializers",
+    "restore_initializers",
     "build_initializer",
     "normalize_initializer_spec",
     "validate_initializer_shape",
@@ -330,10 +336,19 @@ class InitializerBase(ABC):
 INITIALIZER_REGISTRY: Dict[str, type] = {}
 """Initializer type name -> class (yaml ``initializer.type`` keys)."""
 
+_INITIALIZER_ORIGINS = OriginTable()
+"""Private provenance side table beside :data:`INITIALIZER_REGISTRY`."""
 
-def register(cls: type) -> type:
+InitializerRegistrySnapshot = RegistrySnapshot[type]
+"""The origin-aware initializer registry snapshot type."""
+
+
+def register(cls: type, *, origin: ProviderOrigin | None = None) -> type:
     """Registry decorator (key = the class's ``name`` ClassVar)."""
+    from unigym.registration import PackFace, require_registration
+
     name = getattr(cls, "name", None)
+    require_registration(PackFace.INITIALIZER, name=name if isinstance(name, str) else None)
     if not name:
         raise ValueError(
             f"{cls.__name__}: initializer classes must declare a "
@@ -346,7 +361,37 @@ def register(cls: type) -> type:
             f"{INITIALIZER_REGISTRY[name].__name__})"
         )
     INITIALIZER_REGISTRY[name] = cls
+    if origin is None:
+        _INITIALIZER_ORIGINS.remove(name)
+    else:
+        if not isinstance(origin, ProviderOrigin):
+            raise TypeError(
+                f"initializer {name!r}: origin must be a ProviderOrigin, got "
+                f"{type(origin).__name__}"
+            )
+        _INITIALIZER_ORIGINS.set(name, origin)
     return cls
+
+
+def attribute_initializer(name: str, origin: ProviderOrigin) -> None:
+    """Label one already-registered initializer with *origin*."""
+    if name in INITIALIZER_REGISTRY:
+        _INITIALIZER_ORIGINS.set(name, origin)
+
+
+def initializer_origin(name: str) -> ProviderOrigin:
+    """Return the origin of one registered initializer (never ``None``)."""
+    return _INITIALIZER_ORIGINS.origin(name)
+
+
+def snapshot_initializers() -> InitializerRegistrySnapshot:
+    """Capture the initializer registry and origins together."""
+    return RegistrySnapshot.capture(INITIALIZER_REGISTRY, _INITIALIZER_ORIGINS)
+
+
+def restore_initializers(snapshot: InitializerRegistrySnapshot) -> None:
+    """Restore a snapshot captured by :func:`snapshot_initializers`."""
+    snapshot.restore(INITIALIZER_REGISTRY, _INITIALIZER_ORIGINS)
 
 
 def _resolve_factory(spec: str):

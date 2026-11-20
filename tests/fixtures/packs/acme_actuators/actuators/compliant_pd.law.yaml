@@ -1,0 +1,13 @@
+schema: unigym.actuator_law/1
+name: acme.compliant_pd
+config_keys: [kp, kd, damping]
+gains:
+  allowed: [kp, kd]
+  required: [kp, kd]
+parts: forbidden
+drives: [position_pd]
+backends: [mujoco, mjwarp]
+compiled_plant: {}
+backend_owned_limits: [mujoco, mjwarp]
+command: forbidden
+implementation: required

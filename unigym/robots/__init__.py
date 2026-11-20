@@ -134,6 +134,9 @@ def register_robot(
         ValueError: The name or factory violates the registration contract.
     """
     validate_robot_registration(name, factory)
+    from unigym.registration import PackFace, require_registration
+
+    require_registration(PackFace.ROBOT, name=name)
     if origin is not None and not isinstance(origin, ProviderOrigin):
         raise TypeError(
             f"robot {name!r}: origin must be a ProviderOrigin, got {type(origin).__name__}"
