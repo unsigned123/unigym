@@ -346,6 +346,7 @@ markers = [
     "domain_sim: simulation facade declaration tests",
     "domain_initializers: reset initializer and primitive tests",
     "domain_benchmarks: benchmark episode scoring and report contract tests",
+    "domain_query: runtime-query contract and facade tests",
     "backend_agnostic: tests that do not target one specific backend",
     "backend_mujoco: MuJoCo backend tests",
     "backend_mjwarp: MuJoCo Warp backend tests",

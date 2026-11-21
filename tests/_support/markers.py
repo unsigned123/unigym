@@ -43,6 +43,7 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "sim": "domain_sim",
     "initializers": "domain_initializers",
     "benchmarks": "domain_benchmarks",
+    "query": "domain_query",
 }
 
 BACKEND_MARKERS: dict[str, str] = {
