@@ -1,9 +1,9 @@
 """The runtime-query facade and its subface protocols.
 
 ``Query`` is the stable user entry (``run.query``); its subfaces group model
-facts, live state, kinematics, geometry, contacts and actuators.  In P0A the
-contact and actuator subfaces exist but every operation is capability-gated
-and raises ``QueryCapabilityError``.
+facts, live state, kinematics, geometry, contacts and actuators.  The contact
+manifold face is group-based; the contact Jacobian and the actuator subface
+stay capability-gated until their own plans land.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from ..model.ir import Actuator, Body, Geom, Joint, ModelIR, Site
 from .base import (
     AABB,
     ComRef,
+    ContactManifold,
     DistanceResult,
     EntityRef,
     EnvSelection,
@@ -167,16 +168,15 @@ class GeometryQuery(Protocol):
 
 
 class ContactQuery(Protocol):
-    """Contact operations (capability-gated until P1)."""
+    """Group-based contact manifolds; Jacobian is capability-gated."""
 
-    def manifold(
-        self,
-        a: EntityRef | None = None,
-        b: EntityRef | None = None,
-        *,
-        env: EnvSelection = None,
-    ) -> NoReturn:
-        """Return the contact manifold between two entities."""
+    def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
+        """Return one declared contact group's active points.
+
+        ``group`` is required and resolves against the run's ``contacts:``
+        groups; the group owns the body filter.  There is no all-contact
+        world scan and no implicit default group.
+        """
         ...
 
     def jacobian(
@@ -188,7 +188,7 @@ class ContactQuery(Protocol):
         env: EnvSelection = None,
         frame: str = "world",
     ) -> NoReturn:
-        """Return the Jacobian of one contact point."""
+        """Return the Jacobian of one contact point (deferred)."""
         ...
 
 
@@ -318,7 +318,7 @@ class Query(Protocol):
 
     @property
     def contacts(self) -> ContactQuery:
-        """Contact operations (capability-gated until P1)."""
+        """Group-based contact manifold reads."""
         ...
 
     @property

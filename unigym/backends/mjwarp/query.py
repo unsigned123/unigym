@@ -32,7 +32,12 @@ from unigym.query.capabilities import (
 __all__ = ["MJWARP_QUERY_CAPABILITIES", "MjwarpQuery"]
 
 _NATIVE = Feature("native", "CPU mirror of the compiled model / live mirror read")
-_P1_DETAIL = "contact/actuator queries are added in P1"
+_P1A_DETAIL = "contact Jacobian and wrench-to-joint are added with the P1A-2 plan"
+_P1_DETAIL = "actuator queries are added in P1B"
+_CONTACT_MIRROR = (
+    "CPU contact mirror math; group-based active contacts regrouped from warp's "
+    "contact solve, not a warp device read"
+)
 _MIRROR = "CPU mirror copy (mj_copyData + mj_forward); not a warp device clone"
 _CPU_MATH = "CPU MuJoCo math on the mirror copy"
 _ENGINE_THREAD = (
@@ -88,8 +93,9 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
         aabb=Feature("synthetic", _CPU_MATH),
     ),
     contacts=ContactCaps(
-        manifold=Feature("unsupported", _P1_DETAIL),
-        jacobian=Feature("unsupported", _P1_DETAIL),
+        manifold=Feature("synthetic", _CONTACT_MIRROR),
+        jacobian=Feature("unsupported", _P1A_DETAIL),
+        wrench_to_joint=Feature("unsupported", _P1A_DETAIL),
     ),
     actuators=ActuatorCaps(
         facts=Feature("unsupported", _P1_DETAIL),

@@ -64,7 +64,7 @@ _MEMBERS: dict[str, tuple[str, ...]] = {
     ),
     "jacobian": ("body", "site", "com", "point"),
     "geometry": ("distance", "aabb"),
-    "contacts": ("manifold", "jacobian"),
+    "contacts": ("manifold", "jacobian", "wrench_to_joint"),
     "actuators": ("facts", "state"),
 }
 
@@ -144,10 +144,11 @@ class GeometryCaps:
 
 @dataclass(frozen=True)
 class ContactCaps:
-    """Contact operations (P0A declares them unsupported)."""
+    """Group-based contact operations and the deferred Jacobian/wrench pair."""
 
     manifold: Feature
     jacobian: Feature
+    wrench_to_joint: Feature
 
 
 @dataclass(frozen=True)

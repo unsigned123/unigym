@@ -29,7 +29,12 @@ from unigym.query.capabilities import (
 __all__ = ["MUJOCO_QUERY_CAPABILITIES", "MujocoQuery"]
 
 _NATIVE = Feature("native")
-_P1_DETAIL = "contact/actuator queries are added in P1"
+_P1A_DETAIL = "contact Jacobian and wrench-to-joint are added with the P1A-2 plan"
+_P1_DETAIL = "actuator queries are added in P1B"
+_CONTACT_MANIFOLD = (
+    "group-based active contacts from data.contact; force acts on the geom2 body "
+    "in the MuJoCo contact frame, rotated to world"
+)
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
@@ -76,8 +81,9 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
     ),
     geometry=GeometryCaps(distance=_NATIVE, aabb=_NATIVE),
     contacts=ContactCaps(
-        manifold=Feature("unsupported", _P1_DETAIL),
-        jacobian=Feature("unsupported", _P1_DETAIL),
+        manifold=Feature("native", _CONTACT_MANIFOLD),
+        jacobian=Feature("unsupported", _P1A_DETAIL),
+        wrench_to_joint=Feature("unsupported", _P1A_DETAIL),
     ),
     actuators=ActuatorCaps(
         facts=Feature("unsupported", _P1_DETAIL),
