@@ -25,6 +25,15 @@ of one backend importing the other.
    `tests/meta/fixtures/backend_isolation_baseline.json` and can only
    shrink.
 
+## `query.py`
+
+The shared runtime-query math (`model` / `state` / `scratch` / `geometry` /
+Jacobian) and the `MjFamilyEnv` protocol.  `mujoco/query.py` and
+`mjwarp/query.py` are thin subclasses that bind their concrete env and
+capability object.  mjWarp reads the CPU `MjData` mirror and labels
+`scratch.*`, `jacobian.*` and `geometry.*` as `synthetic`; see
+`docs/contracts/query_contract.md`.
+
 ## `model/`
 
 - `spec_walk.py` — pre-compile `MjSpec` walkers (`build_from_spec`).

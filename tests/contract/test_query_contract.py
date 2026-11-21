@@ -24,13 +24,14 @@ def _instance(backend: str) -> RunInstance:
     )
 
 
-def test_only_mujoco_declares_runtime_query_with_a_factory() -> None:
-    """The trait and its lazy factory are declared together, on MuJoCo only."""
-    mujoco = backend_info("mujoco")
-    assert Trait.RUNTIME_QUERY in mujoco.traits
-    assert mujoco.query_backend is not None
+def test_mj_family_declares_runtime_query_with_a_factory() -> None:
+    """The trait and its lazy factory are declared together, on the mj family."""
+    for name in ("mujoco", "mjwarp"):
+        info = backend_info(name)
+        assert Trait.RUNTIME_QUERY in info.traits
+        assert info.query_backend is not None
 
-    for name in ("mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton"):
+    for name in ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"):
         info = backend_info(name)
         assert Trait.RUNTIME_QUERY not in info.traits
         assert info.query_backend is None
@@ -47,10 +48,10 @@ def test_trait_without_factory_fails_registration() -> None:
 def test_factory_without_trait_fails_registration() -> None:
     """A backend cannot carry a query factory without the trait."""
     mujoco = backend_info("mujoco")
-    broken = replace(backend_info("mjwarp"), query_backend=mujoco.query_backend)
+    broken = replace(backend_info("isaaclab2"), query_backend=mujoco.query_backend)
 
     with pytest.raises(RuntimeError, match="query_backend.*RUNTIME_QUERY"):
-        validate_trait_rules({"mjwarp": broken})
+        validate_trait_rules({"isaaclab2": broken})
 
 
 def test_run_query_is_gated_by_the_registry_trait() -> None:

@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A)
+## 0. Scope (P0A + P0B-1)
 
 In scope:
 
@@ -30,13 +30,15 @@ Out of scope in P0A:
 
 - contact manifolds, contact Jacobians, wrench-to-joint (P1);
 - actuator runtime facts (P1);
-- MuJoCo Warp and IsaacLab query implementations (P0B);
+- IsaacLab query implementations (P0B-2);
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
   `probe_candidate` or `ResetPrimitives.probe`.
 
 `env.query` is an optional backend face; `EnvBackend` gains no required
-member.  P0A ships the MuJoCo implementation and the neutral contract.
+member.  P0A ships the MuJoCo implementation and the neutral contract;
+P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
+CPU `MjData` mirror.
 
 ## 1. Entry points
 
@@ -56,8 +58,9 @@ env.query      # optional backend face (MuJoCo implements it)
 - raises `QueryStaleError` after the run is closed;
 - is closed with the run.
 
-MuJoCo's `env.query` caches one `MujocoQuery`; `run.query` and `env.query`
-return the same object.
+MuJoCo's `env.query` caches one `MujocoQuery`; mjWarp's `env.query` caches one
+`MjwarpQuery`.  In both backends `run.query` and `env.query` return the same
+object.
 
 ## 2. Capabilities
 
@@ -83,6 +86,19 @@ MuJoCo P0A declares:
 | `scratch.*` | native (`copy`, `live_untouched`) |
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only) |
 | `geometry.*` | native |
+| `contacts.*` | unsupported (P1) |
+| `actuators.*` | unsupported (P1) |
+
+mjWarp P0B-1 reads the CPU `MjData` mirror, so only the model facts and live
+state are native; scratch and the CPU math are labelled honestly:
+
+| Group | Support |
+|---|---|
+| `model.*` | native (CPU mirror of the compiled model) |
+| `state.*` | native (CPU mirror read) |
+| `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
+| `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial |
+| `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.*` | unsupported (P1) |
 | `actuators.*` | unsupported (P1) |
 
@@ -206,7 +222,27 @@ MuJoCo semantics:
   the returned closest points/normal are not meaningful for the true surface
   pair (MuJoCo returns the horizon with zero `fromto`).
 
-## 6. Failures
+## 6. mjWarp CPU mirror semantics
+
+mjWarp steps the `mujoco_warp` device `Data` and refreshes one CPU `MjData`
+mirror per world.  The shared MuJoCo-family query reads only that mirror:
+
+- model facts come from the compiled `ModelIR` / `model_set`;
+- live state is a read of the mirror (`env.mj_datas[e]`), never a device read;
+- scratch is a private `mj_copyData` of the mirror plus `mj_forward`; it is a
+  CPU copy, not a device clone;
+- geometry (`mj_geomDistance`) and Jacobians run as CPU MuJoCo math on the
+  mirror or scratch copy;
+- the live mirror and the warp device `Data` are never mutated by a query;
+- there is no implicit device-to-mirror sync and no lock.  The caller must
+  query on the engine thread at a step boundary, after the backend has
+  synchronized the mirrors.  A mid-step query may read stale mirror state; the
+  contract does not repair it.
+
+This is why the mjWarp capability object labels `scratch.*`, `jacobian.*` and
+`geometry.*` as `synthetic` while `model.*` and `state.*` stay `native`.
+
+## 7. Failures
 
 | Case | Error |
 |---|---|
@@ -215,6 +251,7 @@ MuJoCo semantics:
 | bad shape/dtype/value | `QueryShapeError` (also a `ValueError`) |
 | read after run/env/query close | `QueryStaleError` |
 | concurrent step/reset | caller contract violation (engine-thread only) |
+| mid-step / unsynchronized mjWarp mirror | caller contract violation; no silent device sync |
 
 Failures are loud.  There is no hidden fallback, default substitute or silent
 degradation, and query results are never published as observations.
