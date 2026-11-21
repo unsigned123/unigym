@@ -1330,8 +1330,10 @@ def _actuator_facts(row: Actuator) -> ActuatorFacts:
     The MuJoCo family's slot namespace is the compiled ``MjModel`` actuator
     id, so every fact here is ``slot_kind="mujoco_actuator"``.  Empty declared
     tuples become ``None`` so a caller cannot mistake "undeclared" for "zero
-    parameters".
+    parameters".  A joint actuator names exactly one driven joint; a non-joint
+    target publishes no joint list.
     """
+    joint_names = (row.target,) if row.trntype in ("joint", "jointinparent") and row.target else ()
     return ActuatorFacts(
         name=row.name,
         target=row.target or None,
@@ -1342,6 +1344,7 @@ def _actuator_facts(row: Actuator) -> ActuatorFacts:
         gear=tuple(row.gear) or None,
         gainprm=tuple(row.gainprm) or None,
         biasprm=tuple(row.biasprm) or None,
+        joint_names=joint_names,
     )
 
 

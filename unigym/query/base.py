@@ -163,6 +163,19 @@ def _name(value: str | None, field: str, *, optional: bool = False) -> str | Non
     return value
 
 
+def _name_tuple(value: Sequence[str], field: str) -> tuple[str, ...]:
+    """Validate a sequence of non-empty names and return it as a tuple."""
+    if isinstance(value, (str, bytes)):
+        raise QueryShapeError(field, "a sequence of names", type(value).__name__)
+    names: list[str] = []
+    for item in value:
+        name = _name(item, field)
+        if not isinstance(name, str):
+            raise ValueError(f"{field} must contain non-empty strings")
+        names.append(name)
+    return tuple(names)
+
+
 def _float_tuple(value: Sequence[float] | None, field: str) -> tuple[float, ...] | None:
     """Validate a non-empty finite float tuple, preserving ``None``."""
     if value is None:
@@ -534,7 +547,10 @@ class ActuatorFacts:
     ``slot_kind`` is ``"mujoco_actuator"``.  ``target`` is the neutral target
     name (``None`` when the target has no neutral name); ``ctrlrange``,
     ``gear``, ``gainprm`` and ``biasprm`` are ``None`` when the compiled row
-    does not declare them.
+    does not declare them.  ``joint_names`` names the neutral joints the
+    actuator drives: one joint for a MuJoCo joint actuator, the declared group
+    members for an IsaacLab actuator group, and empty when the backend publishes
+    no such list.
     """
 
     name: str
@@ -546,6 +562,7 @@ class ActuatorFacts:
     gear: tuple[float, ...] | None = None
     gainprm: tuple[float, ...] | None = None
     biasprm: tuple[float, ...] | None = None
+    joint_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate identities and declared parameter tuples."""
@@ -568,6 +585,7 @@ class ActuatorFacts:
         object.__setattr__(self, "gear", _float_tuple(self.gear, "gear"))
         object.__setattr__(self, "gainprm", _float_tuple(self.gainprm, "gainprm"))
         object.__setattr__(self, "biasprm", _float_tuple(self.biasprm, "biasprm"))
+        object.__setattr__(self, "joint_names", _name_tuple(self.joint_names, "joint_names"))
 
 
 @dataclass(frozen=True)
