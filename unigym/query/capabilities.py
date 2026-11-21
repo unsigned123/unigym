@@ -24,13 +24,19 @@ __all__ = [
     "ModelCaps",
     "QueryCapabilities",
     "ScratchCaps",
+    "ScratchIsolation",
+    "ScratchMode",
     "StateCaps",
     "Support",
 ]
 
 Support = Literal["native", "partial", "synthetic", "unsupported"]
+ScratchMode = Literal["copy", "transaction"]
+ScratchIsolation = Literal["bit_exact", "restored"]
 
 _SUPPORTS = frozenset({"native", "partial", "synthetic", "unsupported"})
+_SCRATCH_MODES = frozenset({"copy", "transaction"})
+_SCRATCH_ISOLATIONS = frozenset({"bit_exact", "restored"})
 _GROUP_ORDER = (
     "model",
     "state",
@@ -122,6 +128,20 @@ class ScratchCaps:
     com_pose: Feature
     geometry: Feature
     jacobian: Feature
+    mode: ScratchMode = "copy"
+    isolation: ScratchIsolation = "bit_exact"
+
+    def __post_init__(self) -> None:
+        """Reject an unknown scratch mode or isolation level at construction."""
+        if self.mode not in _SCRATCH_MODES:
+            raise ValueError(
+                f"ScratchCaps.mode must be one of {sorted(_SCRATCH_MODES)}, got {self.mode!r}"
+            )
+        if self.isolation not in _SCRATCH_ISOLATIONS:
+            raise ValueError(
+                f"ScratchCaps.isolation must be one of {sorted(_SCRATCH_ISOLATIONS)}, "
+                f"got {self.isolation!r}"
+            )
 
 
 @dataclass(frozen=True)

@@ -57,16 +57,16 @@ def test_model_facts_and_live_body_state(cartpole_env) -> None:
     assert tuple(positions.shape) == (cartpole_env.num_envs, len(ir.joints))
 
 
-def test_geom_site_model_facts_and_p1_subfaces_are_unsupported(cartpole_env) -> None:
-    """P0B-2 exposes no geom/site model facts; scratch/geometry stay unsupported."""
+def test_geom_site_model_facts_and_unsupported_subfaces(cartpole_env) -> None:
+    """P0B-2 exposes no geom/site model facts; P1C-2 adds a transaction scratch."""
     query = cartpole_env.query
 
     with pytest.raises(QueryCapabilityError, match="model.geom"):
         query.model.geom("bogus")
     with pytest.raises(QueryCapabilityError, match="model.site"):
         query.model.site("bogus")
-    with pytest.raises(QueryCapabilityError, match="scratch"):
-        query.scratch()
+    assert query.capabilities.supports("scratch.copy") == "synthetic"
+    assert query.capabilities.supports("scratch.geometry") == "unsupported"
     with pytest.raises(QueryReferenceError, match="bogus"):
         query.kinematics.jacobian(EntityRef("body", "bogus"))
 

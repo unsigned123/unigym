@@ -10,19 +10,24 @@ P0B-2 implements the model facts carried by the published ``ModelIR`` and live
 body/root/COM/joint/site reads.  P1B-2 adds static actuator facts from the
 published ``ModelIR`` actuator rows and USD attrs.  P1C-1 adds the IsaacLab 3
 body/body-COM Jacobians (native engine rows) and composes site/world-point
-Jacobians from the body link row; actuator runtime state, scratch, geometry
-and contacts stay unsupported and raise ``QueryCapabilityError``.  IsaacLab 2.x
-has no native Jacobian API, so it keeps the unsupported kinematics subface.
+Jacobians from the body link row.  P1C-2 adds the IsaacLab 3 transaction
+scratch: IsaacLab has no snapshot copy, so a scratch writes the live state-write
+face, forwards, reads, and restores the captured root/joint state on close.
+Actuator runtime state, geometry and contacts stay unsupported and raise
+``QueryCapabilityError``.  IsaacLab 2.x keeps the unsupported scratch and
+kinematics subfaces.
 
 Engine-thread contract: the query reads the live articulation buffers at a
 step boundary and adds no lock.  Every result is a detached CPU torch copy; no
-observation is published and nothing is recorded.
+observation is published and nothing is recorded.  An active transaction
+scratch owns its env exclusively: no concurrent scratch, step or reset.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from types import TracebackType
 from typing import NoReturn, Protocol, runtime_checkable
 
 import torch
@@ -60,7 +65,7 @@ from unigym.query.errors import (
     QueryShapeError,
     QueryStaleError,
 )
-from unigym.query.facade import ScratchWorld
+from unigym.query.facade import GeometryQuery, ScratchWorld
 from unigym.robots.base import RobotProfile, normalize_canonical_body_id
 from unigym.runtime.controllers import ArticulationRuntime
 from unigym.sites import SiteEntry
@@ -99,6 +104,7 @@ _SITE_STATE_DETAIL = (
 )
 _ENGINE_THREAD = "engine thread only; query at a step boundary, no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
+_SCRATCH_GEOMETRY_DETAIL = "geometry and contact reads are not supported in an IsaacLab scratch"
 
 
 @runtime_checkable
@@ -123,6 +129,36 @@ class IsaacLabQueryEnv(Protocol):
     @property
     def robots(self) -> Mapping[str, object]:
         """The live articulation assets keyed by articulation name."""
+        ...
+
+
+@runtime_checkable
+class IsaacLabTransactionEnv(IsaacLabQueryEnv, Protocol):
+    """The IsaacLab 3 live state-write face a transaction scratch drives."""
+
+    def set_root_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Write one free root's world pose and velocity."""
+        ...
+
+    def set_joint_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        *,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Write explicit joint positions and optional velocities."""
         ...
 
 
@@ -225,6 +261,20 @@ def _tensor_view(value: object, field: str) -> torch.Tensor:
     if not isinstance(value, torch.Tensor):
         raise QueryShapeError(field, "a torch.Tensor or ProxyArray", type(value).__name__)
     return value
+
+
+def _scratch_vector(value: torch.Tensor, field: str, length: int) -> torch.Tensor:
+    """Validate a scratch write vector and return a finite float64 CPU copy."""
+    if not isinstance(value, torch.Tensor):
+        raise QueryShapeError(field, f"a torch.Tensor of shape ({length},)", type(value).__name__)
+    if not value.is_floating_point():
+        raise QueryShapeError(field, "a floating tensor", str(value.dtype))
+    if tuple(value.shape) != (length,):
+        raise QueryShapeError(field, f"shape ({length},)", str(tuple(value.shape)))
+    vector = value.detach().to("cpu").to(torch.float64)
+    if not bool(torch.isfinite(vector).all()):
+        raise QueryShapeError(field, "finite values", str(vector.tolist()))
+    return vector
 
 
 def _select_env(selection: EnvSelection, num_envs: int) -> torch.Tensor:
@@ -1000,6 +1050,437 @@ class _UnsupportedGeometry(_Subface):
         raise QueryCapabilityError(self._query.backend, "geometry.aabb", "unsupported", _P1_DETAIL)
 
 
+class _UnsupportedScratchGeometry:
+    """Distance and AABB reads are capability-gated inside a transaction scratch."""
+
+    def __init__(self, world: _TransactionScratch) -> None:
+        """Bind the stub to its owning transaction scratch."""
+        self._world = world
+
+    def distance(
+        self,
+        a: EntityRef,
+        b: EntityRef,
+        *,
+        max_distance_m: float = 1.0,
+        env: EnvSelection = None,
+        scratch: ScratchWorld | None = None,
+    ) -> NoReturn:
+        """Reject geometry distance reads in a transaction scratch."""
+        del a, b, max_distance_m, env, scratch
+        self._world._open()
+        raise QueryCapabilityError(
+            self._world._query.backend,
+            "scratch.geometry",
+            "unsupported",
+            _SCRATCH_GEOMETRY_DETAIL,
+        )
+
+    def aabb(self, entity: EntityRef, *, env: EnvSelection = None) -> NoReturn:
+        """Reject geometry AABB reads in a transaction scratch."""
+        del entity, env
+        self._world._open()
+        raise QueryCapabilityError(
+            self._world._query.backend,
+            "scratch.geometry",
+            "unsupported",
+            _SCRATCH_GEOMETRY_DETAIL,
+        )
+
+
+class _TransactionScratch:
+    """One exclusive per-env transaction over the live IsaacLab state.
+
+    IsaacLab exposes no snapshot/restore, so this is not a copy.  The captured
+    root/joint state is the restore source; writes go through the env's live
+    state-write face and every read observes the live buffers after an explicit
+    :meth:`forward`.  Closing restores the captured state and forwards again,
+    so the live world is ``restored`` rather than bit-exact untouched.  The
+    owner (the query) keeps one active scratch per env; the caller must not
+    step, reset or open another scratch while it is active.
+    """
+
+    def __init__(self, query: IsaacLabQuery, env_id: int) -> None:
+        """Bind the transaction to one env of a live query handle."""
+        env = query._env
+        if not isinstance(env, IsaacLabTransactionEnv):
+            raise QueryCapabilityError(
+                query.backend,
+                "scratch",
+                "unsupported",
+                "the env exposes no IsaacLab live state-write face",
+            )
+        self._query = query
+        self._env: IsaacLabTransactionEnv = env
+        self._env_id = env_id
+        self._closed = False
+        self._roots: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+        self._joints: dict[str, tuple[tuple[str, ...], torch.Tensor, torch.Tensor]] = {}
+        self._geometry = _UnsupportedScratchGeometry(self)
+
+    def __enter__(self) -> _TransactionScratch:
+        """Capture every articulation's live root/joint state for this env."""
+        self._query._require_open()
+        if self._env_id in self._query._active_scratch:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch",
+                "unsupported",
+                f"env {self._env_id} already has an active scratch copy",
+            )
+        self._query._active_scratch.add(self._env_id)
+        try:
+            self._capture()
+        except BaseException:
+            self._query._active_scratch.discard(self._env_id)
+            raise
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Restore the captured state; preserve an in-flight body exception.
+
+        A restore/flush failure never replaces the body exception.  It is
+        attached to the body exception as a note so the transaction failure is
+        still visible in the traceback.
+        """
+        del traceback
+        try:
+            self.close()
+        except BaseException as restore_error:
+            if exc_type is None or exc is None:
+                raise
+            exc.add_note(
+                f"scratch restore failed while propagating "
+                f"{type(exc).__name__}: {type(restore_error).__name__}: {restore_error}"
+            )
+        finally:
+            self._query._active_scratch.discard(self._env_id)
+        return False
+
+    def set_root_state(
+        self,
+        name: str,
+        *,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor | None = None,
+        ang_vel_w: torch.Tensor | None = None,
+    ) -> None:
+        """Override one free-root articulation's pose and optional velocities."""
+        self._open()
+        art = self._query._articulation(name)
+        asset = self._query._asset_for("scratch.set_root_state", name)
+        if not self._root_is_free(art, asset):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch.set_root_state",
+                "unsupported",
+                f"articulation {name!r} has a fixed root; set_root_state needs a free root",
+            )
+        if name not in self._roots:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch.set_root_state",
+                "unsupported",
+                f"articulation {name!r} did not capture a free-root state",
+            )
+        pos = _scratch_vector(pos_w, "pos_w", 3)
+        quat = _scratch_vector(quat_wxyz, "quat_wxyz", 4)
+        norm = float(quat.norm())
+        if norm <= 1e-12:
+            raise QueryShapeError("quat_wxyz", "a non-zero quaternion", str(quat.tolist()))
+        quat = quat / norm
+        data = self._query._live_data("scratch.set_root_state", asset, name)
+        linear = (
+            self._row(data, "root_lin_vel_w", 3)
+            if lin_vel_w is None
+            else _scratch_vector(lin_vel_w, "lin_vel_w", 3)
+        )
+        angular = (
+            self._row(data, "root_ang_vel_w", 3)
+            if ang_vel_w is None
+            else _scratch_vector(ang_vel_w, "ang_vel_w", 3)
+        )
+        self._env.set_root_state(
+            [self._env_id],
+            name=name,
+            pos_w=self._on_device(pos),
+            quat_wxyz=self._on_device(quat),
+            lin_vel_w=self._on_device(linear),
+            ang_vel_w=self._on_device(angular),
+        )
+
+    def set_joint_state(
+        self,
+        articulation: str,
+        joint_names: Sequence[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> None:
+        """Override absolute 1-DOF joint positions and optional velocities."""
+        self._open()
+        art = self._query._articulation(articulation)
+        asset = self._query._asset_for("scratch.set_joint_state", articulation)
+        data = self._query._live_data("scratch.set_joint_state", asset, articulation)
+        if isinstance(joint_names, (str, bytes)):
+            raise QueryShapeError("joint_names", "a sequence of joint names", "a string")
+        names = tuple(str(name) for name in joint_names)
+        if not names:
+            raise QueryShapeError("joint_names", "a non-empty sequence", "[]")
+        if len(set(names)) != len(names):
+            raise QueryShapeError("joint_names", "unique names", str(names))
+        declared = self._query._joint_names(asset, data) or tuple(art.joint_names)
+        missing = sorted(set(names) - set(declared))
+        if missing:
+            raise QueryReferenceError("scratch.set_joint_state", missing[0], declared)
+        ir = self._query._ir(articulation)
+        for name in names:
+            row = ir.joints.get(name)
+            if row is None:
+                raise QueryReferenceError(
+                    "scratch.set_joint_state",
+                    name,
+                    ir.joints.names(),
+                )
+            if row.type not in _ONE_DOF_JOINT_TYPES:
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    "scratch.set_joint_state",
+                    "unsupported",
+                    f"joint {name!r} has type {row.type!r}; only 1-DOF hinge/slide "
+                    f"joints are supported",
+                )
+        positions = _scratch_vector(position, "position", len(names))
+        velocities = None if velocity is None else _scratch_vector(velocity, "velocity", len(names))
+        self._env.set_joint_state(
+            [self._env_id],
+            articulation=articulation,
+            joint_names=names,
+            position=self._on_device(positions),
+            velocity=None if velocities is None else self._on_device(velocities),
+        )
+
+    def forward(self) -> None:
+        """Flush the live writes and forward the simulator view."""
+        self._open()
+        self._flush()
+
+    def body_pose(self, name: str, *, articulation: str | None = None) -> Pose:
+        """Return one body's live pose inside the active transaction."""
+        self._open()
+        return self._query.state.body_pose(name, articulation=articulation, env=self._env_id)
+
+    def site_pose(self, name: str, *, articulation: str | None = None) -> Pose:
+        """Return one robot-profile site's live pose inside the transaction."""
+        self._open()
+        return self._query.state.site_pose(name, articulation=articulation, env=self._env_id)
+
+    def com_pose(self, ref: ComRef, *, frame: str = "world") -> Pose:
+        """Return one COM reference on the live transaction buffers."""
+        self._open()
+        return self._query.state.com_pose(ref, frame=frame, env=self._env_id)
+
+    def geometry(self) -> GeometryQuery:
+        """Reject geometry reads: a transaction scratch has no geometry copy."""
+        self._open()
+        return self._geometry
+
+    def jacobian(
+        self,
+        target: EntityRef | ComRef | PointRef,
+        *,
+        articulation: str | None = None,
+        frame: str = "world",
+        reference: str = "body_origin",
+        rotational: bool = True,
+    ) -> Jacobian:
+        """Return a Jacobian read from the live transaction buffers."""
+        self._open()
+        return self._query.kinematics.jacobian(
+            target,
+            articulation=articulation,
+            env=self._env_id,
+            frame=frame,
+            reference=reference,
+            rotational=rotational,
+        )
+
+    def close(self) -> None:
+        """Restore the captured state, forward, and release the env guard."""
+        if self._closed:
+            return
+        self._closed = True
+        error: BaseException | None = None
+        try:
+            for name, (pos, quat, lin, ang) in self._roots.items():
+                try:
+                    self._restore_root(name, pos, quat, lin, ang)
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            for name, (names, position, velocity) in self._joints.items():
+                if not names:
+                    continue
+                try:
+                    self._restore_joints(name, names, position, velocity)
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+        finally:
+            try:
+                self._flush()
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+            self._query._active_scratch.discard(self._env_id)
+        if error is not None:
+            raise error
+
+    def _capture(self) -> None:
+        """Clone the selected env's root/joint state for every articulation."""
+        for name in tuple(self._env.articulations):
+            asset = self._query._asset_for("scratch", name)
+            data = self._query._live_data("scratch", asset, name)
+            art = self._query._articulation(name)
+            if self._root_is_free(art, asset):
+                self._roots[name] = (
+                    self._row(data, "root_pos_w", 3),
+                    self._row(data, "root_quat_w", 4),
+                    self._row(data, "root_lin_vel_w", 3),
+                    self._row(data, "root_ang_vel_w", 3),
+                )
+            names = self._query._joint_names(asset, data) or tuple(art.joint_names)
+            self._joints[name] = (
+                names,
+                self._row(data, "joint_pos", len(names)),
+                self._row(data, "joint_vel", len(names)),
+            )
+
+    def _root_is_free(self, art: ArticulationRuntime, asset: object) -> bool:
+        """Return whether the live root accepts writes (declaration + asset fact).
+
+        ``ArticulationRuntime.root`` defaults to ``free`` even for a fixed USD
+        base, so the live asset's ``is_fixed_base`` is the binding fact: a
+        fixed asset never enters the restore-root set.
+        """
+        if bool(getattr(asset, "is_fixed_base", False)):
+            return False
+        return str(getattr(art, "root", "free")) == "free"
+
+    def _row(self, data: object, attr: str, width: int) -> torch.Tensor:
+        """Clone one ``(1, width)`` row of a live per-env tensor."""
+        value = getattr(data, attr, None)
+        if value is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch",
+                "unsupported",
+                f"live articulation data has no {attr!r}",
+            )
+        tensor = _tensor_view(value, attr)
+        if tensor.ndim != 2 or int(tensor.shape[-1]) != width:
+            raise QueryShapeError(attr, f"shape (N, {width})", str(tuple(tensor.shape)))
+        return tensor[self._env_id : self._env_id + 1].detach().clone()
+
+    def _on_device(self, value: torch.Tensor) -> torch.Tensor:
+        """Reshape one write vector to ``(1, length)`` on the env device."""
+        return value.reshape(1, -1).to(device=self._device())
+
+    def _device(self) -> torch.device:
+        """Return the env's compute device for the state-write face."""
+        device = getattr(self._env, "device", None)
+        if device is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch",
+                "unsupported",
+                "the IsaacLab env exposes no device for state writes",
+            )
+        return torch.device(device)
+
+    def _flush(self) -> None:
+        """Run the live write flush and simulator forward."""
+        scene = getattr(self._env, "scene", None)
+        sim = getattr(self._env, "sim", None)
+        if scene is None or not hasattr(scene, "write_data_to_sim"):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch.forward",
+                "unsupported",
+                "the IsaacLab env exposes no scene.write_data_to_sim()",
+            )
+        if sim is None or not hasattr(sim, "forward"):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "scratch.forward",
+                "unsupported",
+                "the IsaacLab env exposes no sim.forward()",
+            )
+        scene.write_data_to_sim()
+        sim.forward()
+
+    def _restore_root(
+        self,
+        name: str,
+        pos: torch.Tensor,
+        quat_xyzw: torch.Tensor,
+        lin: torch.Tensor,
+        ang: torch.Tensor,
+    ) -> None:
+        """Write one captured free-root state back through the live face."""
+        self._env.set_root_state(
+            [self._env_id],
+            name=name,
+            pos_w=pos,
+            quat_wxyz=self._query._wxyz(quat_xyzw),
+            lin_vel_w=lin,
+            ang_vel_w=ang,
+        )
+
+    def _restore_joints(
+        self,
+        name: str,
+        joint_names: tuple[str, ...],
+        position: torch.Tensor,
+        velocity: torch.Tensor,
+    ) -> None:
+        """Write the captured 1-DOF hinge/slide joint state back.
+
+        The scratch write face only addresses 1-DOF hinge/slide joints, so a
+        captured joint whose IR row is missing or is another type is skipped:
+        it cannot have been changed through the scratch.
+        """
+        ir = self._query._ir(name)
+        writable: list[str] = []
+        columns: list[int] = []
+        for index, joint_name in enumerate(joint_names):
+            row = ir.joints.get(joint_name)
+            if row is None or row.type not in _ONE_DOF_JOINT_TYPES:
+                continue
+            writable.append(joint_name)
+            columns.append(index)
+        if not writable:
+            return
+        self._env.set_joint_state(
+            [self._env_id],
+            articulation=name,
+            joint_names=tuple(writable),
+            position=position[:, columns],
+            velocity=velocity[:, columns],
+        )
+
+    def _open(self) -> None:
+        """Reject reads and writes after the transaction context closed."""
+        if self._closed:
+            raise QueryStaleError("scratch world is closed")
+        self._query._require_open()
+
+
 class _UnsupportedContacts(_Subface):
     """Contact reads are capability-gated until their own plans land."""
 
@@ -1106,6 +1587,7 @@ class IsaacLabQuery:
         self.capabilities = capabilities
         self._quat_order = quat_order
         self._closed = False
+        self._active_scratch: set[int] = set()
         self.model = _ModelQuery(self)
         self.state = _StateQuery(self)
         self.kinematics = _UnsupportedKinematics(self)
@@ -1119,10 +1601,23 @@ class IsaacLabQuery:
         self.capabilities.require(*ops)
 
     def scratch(self, env: int | None = None) -> AbstractContextManager[ScratchWorld]:
-        """Reject scratch worlds: P0B-2 has no scratch copy."""
+        """Reject scratch worlds: the shared base has no scratch copy."""
         del env
         self._require_open()
         raise QueryCapabilityError(self.backend, "scratch", "unsupported", _P1_DETAIL)
+
+    def _scratch_env_id(self, env: int | None) -> int:
+        """Normalize the scratch env selector to one env id (default env 0)."""
+        self._require_open()
+        if env is None:
+            return 0
+        if isinstance(env, bool) or not isinstance(env, int):
+            raise QueryShapeError("env", "an int env id or None", type(env).__name__)
+        return int(_select_env(env, self._env.num_envs)[0])
+
+    def _open_scratch(self, env_id: int) -> AbstractContextManager[ScratchWorld]:
+        """Construct the transaction scratch used by an IsaacLab 3 subclass."""
+        return _TransactionScratch(self, env_id)
 
     def close(self) -> None:
         """Invalidate this query handle (idempotent)."""

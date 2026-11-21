@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from unigym.query.capabilities import (
@@ -116,6 +118,18 @@ def test_feature_rejects_an_unknown_support_level() -> None:
     """Feature support is a closed vocabulary."""
     with pytest.raises(ValueError, match="Feature.support"):
         Feature("bogus")  # type: ignore[arg-type]
+
+
+def test_scratch_caps_mode_and_isolation_are_a_closed_vocabulary() -> None:
+    """A scratch copy defaults to bit-exact copy and rejects unknown modes."""
+    scratch = _capabilities().scratch
+
+    assert scratch.mode == "copy"
+    assert scratch.isolation == "bit_exact"
+    with pytest.raises(ValueError, match="ScratchCaps.mode"):
+        replace(scratch, mode="bogus")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="ScratchCaps.isolation"):
+        replace(scratch, isolation="bogus")  # type: ignore[arg-type]
 
 
 def test_capability_notes_are_read_only() -> None:
