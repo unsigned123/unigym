@@ -775,6 +775,7 @@ ISAACLAB2_TRAITS = _CORE | frozenset(
         # The USD prim hierarchy is the isaaclab model face
         Trait.MODEL_USD_PRIMS,
         Trait.MODEL_EDIT,  # body mass/COM/inertia across every env row
+        Trait.RUNTIME_QUERY,  # on-demand model + live-pose query face
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -796,6 +797,7 @@ _IL3_CORE = _CORE | frozenset(
         Trait.INIT_POSE,
         Trait.STATE_WRITE,  # per-env set_root_state/set_joint_state/settle
         Trait.MODEL_USD_PRIMS,  # USD prim hierarchy is the isaaclab model face
+        Trait.RUNTIME_QUERY,  # on-demand model + live-pose query face
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -954,6 +956,20 @@ def _mjwarp_query_backend() -> QueryBackend:
     from unigym.backends.mjwarp.query import MjwarpQuery
 
     return MjwarpQuery
+
+
+def _isaaclab2_query_backend() -> QueryBackend:
+    """Load the IsaacLab 2.x runtime-query class lazily."""
+    from unigym.backends.isaaclab2.query import Isaaclab2Query
+
+    return Isaaclab2Query
+
+
+def _isaaclab3_query_backend() -> QueryBackend:
+    """Load the IsaacLab 3.x runtime-query class lazily."""
+    from unigym.backends.shared.isaaclab3_common.query import Isaaclab3Query
+
+    return Isaaclab3Query
 
 
 def _mjwarp_model_handle() -> Callable[[object], object | None]:
@@ -1246,6 +1262,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
             ISAACLAB2_MODEL_EDIT_FIELDS, _isaaclab2_model_edit_provider
         ),
         model_edit_fields=ISAACLAB2_MODEL_EDIT_FIELDS,
+        query_backend=_isaaclab2_query_backend,
         prop_backend=_isaaclab2_prop_backend,
         camera_backend=_isaaclab2_rig_factory,
         director_ops=_isaaclab2_director_ops,
@@ -1269,6 +1286,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         scene_engine=_isaaclab3_face("isaaclab3_physx", "scene_engine"),
         env_class=_isaaclab3_physx_env,
         model_provider=_isaaclab3_face("isaaclab3_physx", "model_provider"),
+        query_backend=_isaaclab3_query_backend,
         prop_backend=_isaaclab3_face("isaaclab3_physx", "prop_backend"),
         camera_backend=_isaaclab3_face("isaaclab3_physx", "camera_backend"),
         director_ops=_isaaclab3_face("isaaclab3_physx", "director_ops"),
@@ -1292,6 +1310,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         scene_engine=_isaaclab3_face("isaaclab3_newton", "scene_engine"),
         env_class=_isaaclab3_newton_env,
         model_provider=_isaaclab3_face("isaaclab3_newton", "model_provider"),
+        query_backend=_isaaclab3_query_backend,
         prop_backend=_isaaclab3_face("isaaclab3_newton", "prop_backend"),
         camera_backend=_isaaclab3_face("isaaclab3_newton", "camera_backend"),
         director_ops=_isaaclab3_face("isaaclab3_newton", "director_ops"),

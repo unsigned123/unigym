@@ -30,7 +30,6 @@ Out of scope in P0A:
 
 - contact manifolds, contact Jacobians, wrench-to-joint (P1);
 - actuator runtime facts (P1);
-- IsaacLab query implementations (P0B-2);
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
   `probe_candidate` or `ResetPrimitives.probe`.
@@ -38,13 +37,16 @@ Out of scope in P0A:
 `env.query` is an optional backend face; `EnvBackend` gains no required
 member.  P0A ships the MuJoCo implementation and the neutral contract;
 P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
-CPU `MjData` mirror.
+CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
+(`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
+scratch, geometry, Jacobians, contacts and actuator runtime stay unsupported
+there until P1.
 
 ## 1. Entry points
 
 ```python
 run.query      # RunInstance.query -> Query (trait-gated, lazily constructed)
-env.query      # optional backend face (MuJoCo implements it)
+env.query      # optional backend face (MuJoCo/mjWarp/IsaacLab implement it)
 ```
 
 `RunInstance.query`:
@@ -59,8 +61,11 @@ env.query      # optional backend face (MuJoCo implements it)
 - is closed with the run.
 
 MuJoCo's `env.query` caches one `MujocoQuery`; mjWarp's `env.query` caches one
-`MjwarpQuery`.  In both backends `run.query` and `env.query` return the same
-object.
+`MjwarpQuery`; IsaacLab 2.x caches one `Isaaclab2Query`; IsaacLab 3.x caches one
+`Isaaclab3Query` that reports its concrete `isaaclab3_physx` or
+`isaaclab3_newton` identity.  In every backend `run.query` and `env.query`
+return the same object, and closing the env closes that handle
+(`QueryStaleError` on later use).
 
 ## 2. Capabilities
 
@@ -99,6 +104,21 @@ state are native; scratch and the CPU math are labelled honestly:
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
+| `contacts.*` | unsupported (P1) |
+| `actuators.*` | unsupported (P1) |
+
+IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
+
+| Group | Support |
+|---|---|
+| `model.ir/body/joint/actuator` | native (published `ModelIR`) |
+| `model.geom/site` | unsupported (the IsaacLab `ModelIR` carries no geom/site facts; none are synthesized) |
+| `state.body_pose/root_pose/joint_position/joint_velocity` | native (live articulation buffers) |
+| `state.site_pose` | partial (robot-profile sites only: body + local offset; no USD prim/FrameTransformer) |
+| `state.com_pose` | partial (body COM position; identity `quat_wxyz` by contract; subtree unsupported) |
+| `scratch.*` | unsupported (P1) |
+| `jacobian.*` | unsupported (P1) |
+| `geometry.*` | unsupported (P1) |
 | `contacts.*` | unsupported (P1) |
 | `actuators.*` | unsupported (P1) |
 
@@ -255,3 +275,41 @@ This is why the mjWarp capability object labels `scratch.*`, `jacobian.*` and
 
 Failures are loud.  There is no hidden fallback, default substitute or silent
 degradation, and query results are never published as observations.
+
+## 8. IsaacLab model + pose subset (P0B-2)
+
+IsaacLab 2.x and the IsaacLab 3.x PhysX/Newton identities share one query
+implementation (`unigym.backends.shared.isaaclab_query`); the backend modules
+only bind the env type, capability identity and live quaternion order.
+
+Semantics:
+
+- model facts come from the published `ModelIR` / `model_set` exactly as
+  `run.model` exposes them; `model.geom` and `model.site` raise
+  `QueryCapabilityError` because the IsaacLab IR carries no geom/site facts and
+  P0B-2 does not synthesize them;
+- live state reads the articulation data buffers
+  (`body_pos_w`/`body_quat_w`, `root_pos_w`/`root_quat_w`, `joint_pos`/`joint_vel`);
+  IsaacLab 3.x sim quaternions are `xyzw` and are converted to repo-internal
+  `wxyz` at the read boundary;
+- `state.root_pose` requires a `root="free"` articulation, matching the
+  MuJoCo-family contract;
+- `state.com_pose` reads the body pose plus the `ModelIR` body `ipos` offset.
+  The `Pose` quaternion is identity because a center of mass is a point (the
+  same documented contract as the MuJoCo-family query); subtree COM and
+  non-world frames raise `QueryCapabilityError`;
+- `state.site_pose` supports only robot-profile sites: the profile's site body
+  binding and local `pos`/`quat_wxyz` are composed with the live body pose.
+  There is no USD prim, `FrameTransformer` or generated prop-site fallback;
+- `joint_position`/`joint_velocity` read the articulation's declared joint
+  names; unknown names raise `QueryReferenceError` with the available list.  A
+  requested joint whose `ModelIR` row is not a hinge/slide 1-DOF joint
+  (ball/fixed/other) raises `QueryCapabilityError`; the live column is never
+  returned;
+- `scratch`, `jacobian`, `geometry`, `contacts` and `actuators` are declared
+  unsupported and raise `QueryCapabilityError`; P1 owns them;
+- results are detached CPU torch copies.  Query never writes `env.obs`, never
+  records and never mutates live simulator state.
+
+The PhysX/Newton capability identity is unit-covered; the Newton real-env lane
+remains unverified until that lane environment is available.
