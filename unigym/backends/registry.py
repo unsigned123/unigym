@@ -736,6 +736,7 @@ MJWARP_TRAITS = _CORE | frozenset(
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
         Trait.MODEL_EDIT,  # global body/geom parameter transaction
+        Trait.RUNTIME_QUERY,  # on-demand query face over the CPU mirror
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -946,6 +947,13 @@ def _mujoco_query_backend() -> QueryBackend:
     from unigym.backends.mujoco.query import MujocoQuery
 
     return MujocoQuery
+
+
+def _mjwarp_query_backend() -> QueryBackend:
+    """Load the mjWarp runtime-query class lazily."""
+    from unigym.backends.mjwarp.query import MjwarpQuery
+
+    return MjwarpQuery
 
 
 def _mjwarp_model_handle() -> Callable[[object], object | None]:
@@ -1210,6 +1218,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         ),
         model_edit_fields=MUJOCO_MODEL_EDIT_FIELDS,
         model_handle=_mjwarp_model_handle,
+        query_backend=_mjwarp_query_backend,
         prop_backend=_mujoco_prop_backend,
         camera_backend=_mjwarp_rig_factory,
         director_ops=_mjwarp_director_ops,
