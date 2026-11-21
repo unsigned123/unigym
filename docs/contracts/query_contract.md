@@ -29,7 +29,9 @@ In scope:
 - contact constraint-row Jacobians and wrench-to-joint for the MuJoCo family
   (P1A-2);
 - MuJoCo-family actuator facts and per-env runtime channels (P1B-1);
-- IsaacLab static actuator facts (P1B-2).
+- IsaacLab static actuator facts (P1B-2);
+- IsaacLab 3 body/body-COM Jacobians and composed site/world-point Jacobians
+  (P1C-1).
 
 Out of scope:
 
@@ -38,6 +40,8 @@ Out of scope:
 - actuator group semantics beyond the published row and its declared joint
   names;
 - IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
+- IsaacLab scratch copies (P1C-2);
+- an IsaacLab subtree COM Jacobian (the engine exposes body COM only);
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
@@ -48,9 +52,10 @@ member.  P0A ships the MuJoCo implementation and the neutral contract;
 P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
 CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
 (`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
-scratch, geometry and Jacobians stay unsupported until later P1 work,
-IsaacLab actuator runtime state until later P1B work and IsaacLab contacts
-until P1C.  P1B-2 adds the IsaacLab static actuation facts subset.
+scratch and geometry stay unsupported until later P1 work, IsaacLab actuator
+runtime state until later P1B work and IsaacLab contacts until P1C.  P1B-2 adds
+the IsaacLab static actuation facts subset; P1C-1 adds the IsaacLab 3 Jacobian
+subset.
 
 ## 1. Entry points
 
@@ -122,7 +127,8 @@ labelled honestly:
 | `actuators.facts` | synthetic (compiled CPU mirror model row) |
 | `actuators.state` | synthetic (CPU mirror runtime channels; not a warp device read) |
 
-IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
+IsaacLab 2.x / 3.x P0B-2 share the model+pose subset; P1C-1 adds the IsaacLab 3
+Jacobian subset:
 
 | Group | Support |
 |---|---|
@@ -131,8 +137,12 @@ IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
 | `state.body_pose/root_pose/joint_position/joint_velocity` | native (live articulation buffers) |
 | `state.site_pose` | partial (robot-profile sites only: body + local offset; no USD prim/FrameTransformer) |
 | `state.com_pose` | partial (body COM position; identity `quat_wxyz` by contract; subtree unsupported) |
-| `scratch.*` | unsupported (P1) |
-| `jacobian.*` | unsupported (P1) |
+| `scratch.*` | unsupported (P1C-2) |
+| `jacobian.*` (IsaacLab 2.x) | unsupported (no native Jacobian API) |
+| `jacobian.body` (IsaacLab 3.x) | native (engine body link Jacobian at the body origin) |
+| `jacobian.com` (IsaacLab 3.x) | partial (native body COM Jacobian; a subtree COM Jacobian is unsupported) |
+| `jacobian.site` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the robot-profile site local offset) |
+| `jacobian.point` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the world-point offset) |
 | `geometry.*` | unsupported (P1) |
 | `contacts.*` | unsupported (P1C) |
 | `actuators.facts` | partial (static `ModelIR` actuator-group facts plus published USD joint names; `slot=None`, no ctrlrange/gear/gains/limits) |
@@ -234,7 +244,31 @@ instead of silently changing the frame.
 A subtree COM has a defined translational Jacobian but no native rotational
 Jacobian.  `ComRef(subtree=True)` with `rotational=True` raises
 `QueryCapabilityError`; pass `rotational=False` to read the translational
-block.  A body COM (`ComRef(subtree=False)`) keeps both blocks.
+block.  A body COM (`ComRef(subtree=False)`) keeps both blocks.  IsaacLab 3
+exposes only a body COM Jacobian, so there `ComRef(subtree=True)` raises for
+both blocks.
+
+IsaacLab 3 reads the native body link / body COM Jacobian rows.  The native
+column axis is the six world-frame base DoFs (floating base only) followed by
+the articulation's joint order, which is exactly the `DofLayout` order, so the
+engine rows are used without reordering.  A fixed base omits the fixed root
+from the public body order: the query resolves the root's public index from the
+live backend root body (falling back to the declared base binding), leaves
+indices before the root unchanged, shifts indices after it down by one, and
+raises `QueryCapabilityError` only when the requested body is the root itself.
+A site or `PointRef` attached to that fixed root body raises the same error,
+because its composed row would start from the missing body link row.
+Site and `PointRef` rows are composed from the body link row plus the offset
+from the body origin (`J_lin + omega x r`); the angular block is
+reference-point invariant.
+
+The base label of a floating articulation is the declared canonical base body
+(`ArticulationRuntime.base_body_id`, from `profile.base_body`), not the
+backend-native USD binding.  An undeclared base body is a free-root mapping
+failure: the query raises `QueryCapabilityError` instead of labelling the six
+base columns with an inferred body.  A default `ComRef` (no `body`) resolves the
+live body through the declared base's USD binding, matching `state.com_pose`,
+and raises `QueryReferenceError` when no base body is declared.
 
 `EntityRef.articulation`, `PointRef.entity.articulation` and
 `ComRef.articulation` select the articulation before the `articulation=`
@@ -465,6 +499,13 @@ Semantics:
   `run.model` exposes them; `model.geom` and `model.site` raise
   `QueryCapabilityError` because the IsaacLab IR carries no geom/site facts and
   P0B-2 does not synthesize them;
+- the live IsaacLab 3 IR is compiled from the env-0 articulation asset root,
+  normalizing `{ENV_REGEX_NS}`, `/World/envs/env_.*`, `/World/envs/env_[^/]+`
+  and concrete `/World/envs/env_<n>` spellings.  If the declared prim is absent
+  from the live stage the provider falls back to
+  `root_physx_view.prim_paths[0]` (the resolved asset root in this IL3 version,
+  not the root link).  An unresolved root prim that yields no joint facts
+  raises `ModelIRError` instead of publishing an `unknown` joint IR;
 - live state reads the articulation data buffers
   (`body_pos_w`/`body_quat_w`, `root_pos_w`/`root_quat_w`, `joint_pos`/`joint_vel`);
   IsaacLab 3.x sim quaternions are `xyzw` and are converted to repo-internal
@@ -485,10 +526,13 @@ Semantics:
   returned;
 - `actuators.facts` reports static actuator-group facts only (`slot=None`,
   `slot_kind="isaaclab_group"`, no ctrlrange/gear/gains/limits, joint names
-  from the published USD attrs).  `actuators.state`, `scratch`, `jacobian`,
-  `geometry` and `contacts` are declared unsupported and raise
-  `QueryCapabilityError`; contact manifolds, the contact Jacobian and the
-  contact wrench stay unsupported until P1C (P1A-2 is MuJoCo/mjWarp only);
+  from the published USD attrs).  `actuators.state`, `scratch`, `geometry` and
+  `contacts` are declared unsupported and raise `QueryCapabilityError`; contact
+  manifolds, the contact Jacobian and the contact wrench stay unsupported until
+  P1C (P1A-2 is MuJoCo/mjWarp only);
+- IsaacLab 3 `kinematics.jacobian` reads the native body link / body COM rows
+  and composes site/world-point rows from the body link row; IsaacLab 2.x has
+  no native Jacobian API and keeps `jacobian.*` unsupported;
 - results are detached CPU torch copies.  Query never writes `env.obs`, never
   records and never mutates live simulator state.
 

@@ -1,4 +1,4 @@
-"""IsaacLab 3.x shared runtime-query implementation (P0B-2 model + pose).
+"""IsaacLab 3.x shared runtime-query implementation (model + pose + Jacobian).
 
 The PhysX and Newton identities share one implementation package but own
 separate runtime stacks and capability labels.  This module parameterizes the
@@ -7,23 +7,27 @@ so a query handle always reports the concrete ``isaaclab3_physx`` or
 ``isaaclab3_newton`` identity.  IsaacLab 3.x live quaternions are ``xyzw`` at
 the simulator boundary and are converted to repo-internal ``wxyz`` on read.
 
-Only model facts from the published ``ModelIR`` and live body/root/COM/joint/
-robot-profile-site reads are implemented.  Static actuator facts are a
-facts-only subset; actuator runtime state, scratch, geometry, Jacobians and
-contacts are declared unsupported and raise ``QueryCapabilityError``.
+Model facts come from the published ``ModelIR``; live body/root/COM/joint/
+robot-profile-site reads are native.  Static actuator facts are a facts-only
+subset.  P1C-1 adds the native body/body-COM Jacobians and composes
+site/world-point rows from the body link Jacobian; actuator runtime state,
+scratch, geometry and contacts stay unsupported and raise
+``QueryCapabilityError``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from unigym.backends.shared.isaaclab_query import (
+    IsaacLabJacobianQuery,
     IsaacLabQuery,
     IsaacLabQueryEnv,
     isaaclab_query_capabilities,
 )
-from unigym.query.capabilities import QueryCapabilities
+from unigym.query.capabilities import Feature, JacobianCaps, QueryCapabilities
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
@@ -35,8 +39,49 @@ __all__ = [
     "isaaclab3_query_capabilities",
 ]
 
-ISAACLAB3_PHYSX_QUERY_CAPABILITIES = isaaclab_query_capabilities("isaaclab3_physx")
-ISAACLAB3_NEWTON_QUERY_CAPABILITIES = isaaclab_query_capabilities("isaaclab3_newton")
+_JACOBIAN_SCOPE = (
+    "model facts + live pose + static actuator facts + native body/body-COM "
+    "Jacobian with synthetic site/world-point rows; no scratch/geometry/contact/"
+    "actuator-state"
+)
+
+
+def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
+    """Return the P1C-1 capability declaration for one IsaacLab 3 identity."""
+    base = isaaclab_query_capabilities(backend)
+    notes = dict(base.notes)
+    notes["scope"] = _JACOBIAN_SCOPE
+    notes["jacobian"] = (
+        "body and body COM are native engine rows; site/world-point rows are "
+        "synthesized from the body link row plus the offset; a subtree COM row is "
+        "not exposed by the engine"
+    )
+    return replace(
+        base,
+        jacobian=JacobianCaps(
+            body=Feature(
+                "native",
+                "native body link Jacobian at the body origin, base DoFs first",
+            ),
+            site=Feature(
+                "synthetic",
+                "body link Jacobian composed with the robot-profile site local offset",
+            ),
+            com=Feature(
+                "partial",
+                "native body COM Jacobian; subtree COM is unsupported",
+            ),
+            point=Feature(
+                "synthetic",
+                "body link Jacobian composed with the world-point offset",
+            ),
+        ),
+        notes=notes,
+    )
+
+
+ISAACLAB3_PHYSX_QUERY_CAPABILITIES = _isaaclab3_capabilities("isaaclab3_physx")
+ISAACLAB3_NEWTON_QUERY_CAPABILITIES = _isaaclab3_capabilities("isaaclab3_newton")
 
 _CAPABILITIES: Mapping[str, QueryCapabilities] = {
     "isaaclab3_physx": ISAACLAB3_PHYSX_QUERY_CAPABILITIES,
@@ -73,3 +118,4 @@ class Isaaclab3Query(IsaacLabQuery):
             capabilities=_CAPABILITIES[backend],
             quat_order="xyzw",
         )
+        self.kinematics = IsaacLabJacobianQuery(self)

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from unigym.backends.shared.isaaclab3_common.query import Isaaclab3Query
-from unigym.query import EntityRef, Query, QueryCapabilityError
+from unigym.query import EntityRef, Query, QueryCapabilityError, QueryReferenceError
 from unigym.query.errors import QueryStaleError
 from unigym.run.instance import RunInstance
 
@@ -58,7 +58,7 @@ def test_model_facts_and_live_body_state(cartpole_env) -> None:
 
 
 def test_geom_site_model_facts_and_p1_subfaces_are_unsupported(cartpole_env) -> None:
-    """P0B-2 exposes no geom/site model facts and no scratch/geometry/Jacobian."""
+    """P0B-2 exposes no geom/site model facts; scratch/geometry stay unsupported."""
     query = cartpole_env.query
 
     with pytest.raises(QueryCapabilityError, match="model.geom"):
@@ -67,7 +67,7 @@ def test_geom_site_model_facts_and_p1_subfaces_are_unsupported(cartpole_env) -> 
         query.model.site("bogus")
     with pytest.raises(QueryCapabilityError, match="scratch"):
         query.scratch()
-    with pytest.raises(QueryCapabilityError, match="jacobian"):
+    with pytest.raises(QueryReferenceError, match="bogus"):
         query.kinematics.jacobian(EntityRef("body", "bogus"))
 
 

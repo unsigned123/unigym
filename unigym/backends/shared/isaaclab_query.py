@@ -8,9 +8,11 @@ it never copies the model lookup, state read or site-composition code.
 
 P0B-2 implements the model facts carried by the published ``ModelIR`` and live
 body/root/COM/joint/site reads.  P1B-2 adds static actuator facts from the
-published ``ModelIR`` actuator rows and USD attrs; actuator runtime state,
-scratch, geometry, Jacobians and contacts are declared unsupported and raise
-``QueryCapabilityError``.
+published ``ModelIR`` actuator rows and USD attrs.  P1C-1 adds the IsaacLab 3
+body/body-COM Jacobians (native engine rows) and composes site/world-point
+Jacobians from the body link row; actuator runtime state, scratch, geometry
+and contacts stay unsupported and raise ``QueryCapabilityError``.  IsaacLab 2.x
+has no native Jacobian API, so it keeps the unsupported kinematics subface.
 
 Engine-thread contract: the query reads the live articulation buffers at a
 step boundary and adds no lock.  Every result is a detached CPU torch copy; no
@@ -34,8 +36,10 @@ from unigym.query.base import (
     ActuatorFacts,
     ComRef,
     ContactPoint,
+    DofLayout,
     EntityRef,
     EnvSelection,
+    Jacobian,
     PointRef,
     Pose,
 )
@@ -67,10 +71,9 @@ __all__ = [
     "isaaclab_query_capabilities",
 ]
 
-_P1_DETAIL = (
-    "P0B-2 implements model facts and live pose only; "
-    "the IsaacLab query does not implement this operation"
-)
+_P1_DETAIL = "the IsaacLab query does not implement this operation"
+_BASE_DOF_SUFFIXES = ("px", "py", "pz", "rx", "ry", "rz")
+_ONE_DOF_JOINT_TYPES = frozenset({"hinge", "slide"})
 _ACTUATOR_FACTS_DETAIL = (
     "static IsaacLab actuator-group facts only; slot_kind='isaaclab_group', "
     "joint_names come from the published USD attrs, and ctrlrange/gear/gains/"
@@ -383,46 +386,11 @@ class _StateQuery(_Subface):
     ) -> Pose:
         """Return one robot-profile site's world pose (body + local offset)."""
         self._open()
-        inventory = self._query._site_inventory()
-        entry = inventory.get(name)
-        if entry is None:
-            raise QueryReferenceError("state.site_pose", name, tuple(sorted(inventory)))
-        if entry.kind != "articulation":
-            raise QueryCapabilityError(
-                self._query.backend,
-                "state.site_pose",
-                "partial",
-                f"site {name!r} is a generated prop site; only robot-profile sites "
-                f"are supported in P0B-2",
-            )
-        if articulation is not None and articulation != entry.owner:
-            raise QueryReferenceError(
-                "state.site_pose",
-                name,
-                tuple(sorted(inventory)),
-                f"site {name!r} is owned by articulation {entry.owner!r}",
-            )
-        profile = self._query._profiles().get(entry.owner)
-        if profile is None:
-            raise QueryReferenceError(
-                "state.site_pose",
-                name,
-                tuple(sorted(inventory)),
-                f"articulation {entry.owner!r} has no profile",
-            )
-        canonical = normalize_canonical_body_id(entry.spec.body, f"query site {name!r} body")
-        binding = profile.body_bindings.get(canonical)
-        if binding is None or "usd" not in binding.names:
-            raise QueryReferenceError(
-                "state.site_pose",
-                name,
-                tuple(sorted(inventory)),
-                f"site body {entry.spec.body!r} has no usd binding in profile " f"{entry.owner!r}",
-            )
-        asset = self._query._asset_for("state.site_pose", entry.owner)
-        data = self._query._live_data("state.site_pose", asset, entry.owner)
-        names = self._query._body_names(asset, data)
-        index = _body_index("state.site_pose", binding.names["usd"], names)
+        owner, index, local_pos, local_quat = self._query._site_target(
+            "state.site_pose", name, articulation
+        )
+        asset = self._query._asset_for("state.site_pose", owner)
+        data = self._query._live_data("state.site_pose", asset, owner)
         ids = _select_env(env, self._query._env.num_envs)
         body_pos = self._query._read_rows(
             "state.site_pose", data, "body_pos_w", ids, index, 3, False
@@ -430,9 +398,8 @@ class _StateQuery(_Subface):
         body_quat = self._query._read_rows(
             "state.site_pose", data, "body_quat_w", ids, index, 4, True
         )
-        local_pos = torch.tensor(entry.spec.pos, dtype=torch.float64).expand(body_pos.shape[0], -1)
-        local_quat = torch.tensor(entry.spec.quat_wxyz, dtype=torch.float64)
-        pos_w = body_pos + quat_math.rotate(body_quat, local_pos)
+        offset = local_pos.expand(body_pos.shape[0], -1)
+        pos_w = body_pos + quat_math.rotate(body_quat, offset)
         quat_w = quat_math.normalize(quat_math.mul(body_quat, local_quat))
         return Pose(ids, pos_w, quat_w)
 
@@ -589,6 +556,403 @@ class _StateQuery(_Subface):
         if tensor.ndim != 2:
             raise QueryShapeError(attr, "shape (N, num_joints)", str(tuple(tensor.shape)))
         return tensor[ids][:, columns].clone()
+
+
+class IsaacLabJacobianQuery(_Subface):
+    """IsaacLab 3 body/COM Jacobians plus composed site/world-point rows."""
+
+    def jacobian(
+        self,
+        target: EntityRef | ComRef | PointRef,
+        *,
+        articulation: str | None = None,
+        env: EnvSelection = None,
+        frame: str = "world",
+        reference: str = "body_origin",
+        rotational: bool = True,
+    ) -> Jacobian:
+        """Return one target's world-frame Jacobian in the articulation layout.
+
+        Body and body-COM rows are read from the engine's native Jacobian.
+        Site and world-point rows are composed from the body link row plus the
+        offset from the body origin; the angular block is reference-point
+        invariant and therefore stays the body link angular row.
+        """
+        self._open()
+        if frame != "world":
+            raise QueryCapabilityError(
+                self._query.backend,
+                "jacobian",
+                "unsupported",
+                f"frame={frame!r}; only 'world' is implemented for IsaacLab",
+            )
+        if reference != "body_origin":
+            raise QueryCapabilityError(
+                self._query.backend,
+                "jacobian",
+                "unsupported",
+                f"reference={reference!r}; the target's own origin is the only "
+                f"reference available for IsaacLab",
+            )
+        ids = _select_env(env, self._query._env.num_envs)
+        if isinstance(target, ComRef):
+            rows, layout = self._com_rows(target, articulation, ids)
+            return self._finish(ids, rows, layout, frame, reference, rotational)
+        if isinstance(target, PointRef):
+            rows, layout = self._point_rows(target, articulation, ids)
+            return self._finish(ids, rows, layout, frame, reference, rotational)
+        if isinstance(target, EntityRef):
+            if target.kind == "body":
+                rows, layout = self._body_rows(target, articulation, ids)
+                return self._finish(ids, rows, layout, frame, reference, rotational)
+            if target.kind == "site":
+                rows, layout = self._site_rows(target, articulation, ids)
+                return self._finish(ids, rows, layout, frame, reference, rotational)
+            raise QueryCapabilityError(
+                self._query.backend,
+                "jacobian.geom",
+                "unsupported",
+                "Jacobian targets are body/site/COM/world-point; a geom has no frame",
+            )
+        raise QueryShapeError("target", "an EntityRef, ComRef or PointRef", type(target).__name__)
+
+    def _body_rows(
+        self,
+        target: EntityRef,
+        articulation: str | None,
+        ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, DofLayout]:
+        """Read the native body link Jacobian row for one body."""
+        op = "jacobian.body"
+        art_name = self._resolve_body_target(op, target.articulation, articulation, target.name)
+        art, asset, names, data = self._live_articulation(op, art_name)
+        index = _index_of(op, target.name, names)
+        return self._native_rows(
+            op, "body_link_jacobian_w", art, asset, art_name, names, data, index, ids
+        )
+
+    def _com_rows(
+        self,
+        target: ComRef,
+        articulation: str | None,
+        ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, DofLayout]:
+        """Read the native body center-of-mass Jacobian row."""
+        op = "jacobian.com"
+        if target.subtree:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "partial",
+                "a subtree COM Jacobian is not exposed by IsaacLab; pass subtree=False",
+            )
+        art_name = self._resolve_entity_articulation(op, target.articulation, articulation)
+        art, asset, names, data = self._live_articulation(op, art_name)
+        body_name = target.body or str(getattr(art, "base_body", "") or "")
+        if not body_name:
+            raise QueryReferenceError(
+                op,
+                art_name,
+                names,
+                "no base body is declared for this articulation",
+            )
+        index = _index_of(op, body_name, names)
+        return self._native_rows(
+            op, "body_com_jacobian_w", art, asset, art_name, names, data, index, ids
+        )
+
+    def _site_rows(
+        self,
+        target: EntityRef,
+        articulation: str | None,
+        ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, DofLayout]:
+        """Compose a robot-profile site row from the body link row + offset."""
+        op = "jacobian.site"
+        if target.articulation is not None and articulation is not None:
+            if target.articulation != articulation:
+                raise QueryReferenceError(
+                    op,
+                    target.articulation,
+                    self._query._model_set().names(),
+                    f"reference articulation {target.articulation!r} conflicts with "
+                    f"articulation={articulation!r}",
+                )
+        selector = target.articulation if target.articulation is not None else articulation
+        owner, index, local_pos, _ = self._query._site_target(op, target.name, selector)
+        art, asset, names, data = self._live_articulation(op, owner)
+        rows, layout = self._native_rows(
+            op, "body_link_jacobian_w", art, asset, owner, names, data, index, ids
+        )
+        body_quat = self._query._read_rows(op, data, "body_quat_w", ids, index, 4, True)
+        offset = local_pos.expand(body_quat.shape[0], -1)
+        return self._shift_translation(rows, quat_math.rotate(body_quat, offset)), layout
+
+    def _point_rows(
+        self,
+        target: PointRef,
+        articulation: str | None,
+        ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, DofLayout]:
+        """Compose a world-point row from the body link row + world offset."""
+        op = "jacobian.point"
+        entity = target.entity
+        art_name = self._resolve_body_target(op, entity.articulation, articulation, entity.name)
+        art, asset, names, data = self._live_articulation(op, art_name)
+        index = _index_of(op, entity.name, names)
+        rows, layout = self._native_rows(
+            op, "body_link_jacobian_w", art, asset, art_name, names, data, index, ids
+        )
+        body_pos = self._query._read_rows(op, data, "body_pos_w", ids, index, 3, False)
+        offset = target.point_w.to(torch.float64) - body_pos
+        return self._shift_translation(rows, offset), layout
+
+    @staticmethod
+    def _shift_translation(rows: torch.Tensor, offset: torch.Tensor) -> torch.Tensor:
+        """Shift a link-origin Jacobian's linear block to a point offset by *offset*."""
+        columns = int(rows.shape[-1])
+        translated = rows[:, 0:3, :] + torch.cross(
+            rows[:, 3:6, :], offset[:, :, None].expand(-1, -1, columns), dim=1
+        )
+        return torch.cat((translated, rows[:, 3:6, :]), dim=1)
+
+    def _native_rows(
+        self,
+        op: str,
+        attr: str,
+        art: ArticulationRuntime,
+        asset: object,
+        art_name: str,
+        names: Sequence[str],
+        data: object,
+        index: int,
+        ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, DofLayout]:
+        """Read one engine Jacobian body row and build its ``DofLayout``.
+
+        The native rows are ``(N, num_jacobi_bodies, 6, nv)`` with the six
+        world-frame base DoFs first (floating base only) and the actuated
+        joints in ``art.joint_names`` order.  A fixed base drops the fixed-root
+        body row from the public body order, so the Jacobian row is the public
+        index with the root omitted: indices before the root are unchanged and
+        indices after it shift down by one.
+        """
+        joint_names = tuple(art.joint_names)
+        ir = self._query._ir(art_name)
+        for name in joint_names:
+            row = ir.joints.get(name)
+            if row is None:
+                raise QueryReferenceError(
+                    op,
+                    name,
+                    ir.joints.names(),
+                    "the articulation joint is missing from the published IR",
+                )
+            if row.type not in _ONE_DOF_JOINT_TYPES:
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    op,
+                    "unsupported",
+                    f"articulation {art_name!r} joint {name!r} has type {row.type!r}; "
+                    f"only hinge/slide joint columns are supported",
+                )
+        value = getattr(data, attr, None)
+        if value is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"live articulation data has no {attr!r}",
+            )
+        tensor = _tensor_view(value, attr).detach().to("cpu").to(torch.float64)
+        if tensor.ndim != 4 or int(tensor.shape[2]) != 6:
+            raise QueryShapeError(attr, "shape (N, B, 6, nv)", str(tuple(tensor.shape)))
+        nv = int(tensor.shape[-1])
+        base_columns = nv - len(joint_names)
+        if base_columns not in (0, 6):
+            raise QueryShapeError(
+                attr,
+                f"{len(joint_names)} joint columns plus 0 or 6 base DoFs",
+                str(nv),
+            )
+        root_index = (
+            self._fixed_root_index(op, art, asset, art_name, names) if base_columns == 0 else None
+        )
+        expected_bodies = len(names) if root_index is None else len(names) - 1
+        if int(tensor.shape[1]) != expected_bodies:
+            raise QueryShapeError(
+                attr,
+                f"shape (N, {expected_bodies}, 6, {nv})",
+                str(tuple(tensor.shape)),
+            )
+        if root_index is not None and index == root_index:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "partial",
+                f"body {names[index]!r} is the fixed root and has no Jacobian row",
+            )
+        jacobi_index = index if root_index is None or index < root_index else index - 1
+        base_dofs: tuple[str, ...] = ()
+        base_names: tuple[str, ...] = ()
+        if base_columns == 6:
+            base_body = self._base_body_name(art, art_name)
+            base_dofs = tuple(f"{base_body}.{suffix}" for suffix in _BASE_DOF_SUFFIXES)
+            base_names = (base_body,)
+        layout = DofLayout(
+            articulation=art_name,
+            base_dofs=base_dofs,
+            base_names=base_names,
+            joint_names=joint_names,
+            nv=nv,
+            order=base_dofs + joint_names,
+        )
+        return tensor[ids][:, jacobi_index], layout
+
+    def _live_articulation(
+        self,
+        op: str,
+        art_name: str,
+    ) -> tuple[ArticulationRuntime, object, tuple[str, ...], object]:
+        """Return the live articulation, asset, body order and data block."""
+        art = self._query._articulation(art_name)
+        asset = self._query._asset_for(op, art_name)
+        data = self._query._live_data(op, asset, art_name)
+        return art, asset, self._query._body_names(asset, data), data
+
+    def _fixed_root_index(
+        self,
+        op: str,
+        art: ArticulationRuntime,
+        asset: object,
+        art_name: str,
+        names: Sequence[str],
+    ) -> int:
+        """Return the fixed root's public body index, or raise a teaching error.
+
+        The engine omits the backend root body (backend body row 0) from the
+        public Jacobian body axis.  Resolve which public row that is from the
+        live backend body name, falling back to the declared USD base binding
+        only when the live backend body order is unavailable.  An unresolved
+        or inconsistent root never silently maps to public row 0.
+        """
+        backend_names = _as_names(getattr(asset, "backend_body_names", None))
+        if backend_names:
+            root_name = backend_names[0]
+            if root_name not in names:
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    op,
+                    "unsupported",
+                    f"articulation {art_name!r} is fixed-base but its backend root "
+                    f"body {root_name!r} is not in the public body order {list(names)}",
+                )
+            return list(names).index(root_name)
+        declared = str(getattr(art, "base_body", "") or "")
+        if declared:
+            if declared not in names:
+                raise QueryReferenceError(
+                    op,
+                    declared,
+                    names,
+                    "the declared base body is not in the live body order",
+                )
+            return list(names).index(declared)
+        raise QueryCapabilityError(
+            self._query.backend,
+            op,
+            "unsupported",
+            f"articulation {art_name!r} is fixed-base but its root body public "
+            f"index is unresolved; neither the live backend body order nor a "
+            f"declared base body identifies it",
+        )
+
+    def _base_body_name(self, art: ArticulationRuntime, art_name: str) -> str:
+        """Return the declared canonical base body for a floating articulation.
+
+        The published base labels name the articulation's declared canonical
+        base body (``profile.base_body`` / ``ArticulationRuntime.base_body_id``),
+        never the backend-native USD binding and never an inferred live row.
+        An undeclared base body is a free-root mapping failure: the query raises
+        instead of labelling the six base columns with an arbitrary body.
+        """
+        canonical = getattr(art, "base_body_id", None)
+        declared = str(canonical) if canonical is not None else ""
+        if declared:
+            return declared
+        raise QueryCapabilityError(
+            self._query.backend,
+            "jacobian",
+            "unsupported",
+            f"articulation {art_name!r} declares a free root but no base body is "
+            f"declared; free root unresolved (set profile.base_body)",
+        )
+
+    def _resolve_body_target(
+        self,
+        op: str,
+        reference: str | None,
+        articulation: str | None,
+        body_name: str,
+    ) -> str:
+        """Resolve one body target's articulation, disambiguating by live body names."""
+        if reference is not None:
+            if articulation is not None and articulation != reference:
+                raise QueryReferenceError(
+                    op,
+                    reference,
+                    self._query._model_set().names(),
+                    f"reference articulation {reference!r} conflicts with "
+                    f"articulation={articulation!r}",
+                )
+            self._query._articulation(reference)
+            return reference
+        return self._query._resolve_body_articulation(op, body_name, articulation)
+
+    def _resolve_entity_articulation(
+        self,
+        op: str,
+        reference: str | None,
+        articulation: str | None,
+    ) -> str:
+        """Resolve one target's articulation before the ``articulation=`` keyword."""
+        names = self._query._model_set().names()
+        if reference is not None:
+            if articulation is not None and articulation != reference:
+                raise QueryReferenceError(
+                    op,
+                    reference,
+                    names,
+                    f"reference articulation {reference!r} conflicts with "
+                    f"articulation={articulation!r}",
+                )
+            self._query._articulation(reference)
+            return reference
+        if articulation is not None:
+            self._query._articulation(articulation)
+            return articulation
+        if len(names) == 1:
+            return names[0]
+        raise QueryReferenceError(
+            op,
+            None,
+            names,
+            "pass articulation=... for a multi-articulation run",
+        )
+
+    def _finish(
+        self,
+        ids: torch.Tensor,
+        rows: torch.Tensor,
+        layout: DofLayout,
+        frame: str,
+        reference: str,
+        rotational: bool,
+    ) -> Jacobian:
+        """Build the public result, zeroing the angular block when not requested."""
+        transl = rows[:, 0:3, :]
+        rot = rows[:, 3:6, :] if rotational else torch.zeros_like(transl)
+        return Jacobian(ids, transl, rot, layout, frame, reference)
 
 
 class _UnsupportedKinematics(_Subface):
@@ -906,6 +1270,62 @@ class IsaacLabQuery:
         """Return the run-wide asset-level site inventory."""
         definitions = getattr(getattr(self._env, "prop_manager", None), "asset_definitions", None)
         return build_site_inventory(self._profiles(), definitions or {})
+
+    def _site_target(
+        self,
+        op: str,
+        name: str,
+        articulation: str | None,
+    ) -> tuple[str, int, torch.Tensor, torch.Tensor]:
+        """Resolve one robot-profile site to its owner, body row and local frame.
+
+        Returns ``(articulation, body_index, local_pos, local_quat)`` where the
+        local frame is expressed in the owning body frame.  Both the site-pose
+        read and the composed site Jacobian use this single resolution.
+        """
+        inventory = self._site_inventory()
+        entry = inventory.get(name)
+        if entry is None:
+            raise QueryReferenceError(op, name, tuple(sorted(inventory)))
+        if entry.kind != "articulation":
+            raise QueryCapabilityError(
+                self.backend,
+                op,
+                "partial",
+                f"site {name!r} is a generated prop site; only robot-profile sites "
+                f"are supported",
+            )
+        if articulation is not None and articulation != entry.owner:
+            raise QueryReferenceError(
+                op,
+                name,
+                tuple(sorted(inventory)),
+                f"site {name!r} is owned by articulation {entry.owner!r}",
+            )
+        profile = self._profiles().get(entry.owner)
+        if profile is None:
+            raise QueryReferenceError(
+                op,
+                name,
+                tuple(sorted(inventory)),
+                f"articulation {entry.owner!r} has no profile",
+            )
+        canonical = normalize_canonical_body_id(entry.spec.body, f"query site {name!r} body")
+        binding = profile.body_bindings.get(canonical)
+        if binding is None or "usd" not in binding.names:
+            raise QueryReferenceError(
+                op,
+                name,
+                tuple(sorted(inventory)),
+                f"site body {entry.spec.body!r} has no usd binding in profile {entry.owner!r}",
+            )
+        asset = self._asset_for(op, entry.owner)
+        data = self._live_data(op, asset, entry.owner)
+        names = self._body_names(asset, data)
+        index = _body_index(op, binding.names["usd"], names)
+        local_pos = torch.tensor(entry.spec.pos, dtype=torch.float64)
+        local_quat = torch.tensor(entry.spec.quat_wxyz, dtype=torch.float64)
+        return entry.owner, index, local_pos, local_quat
 
     def _wxyz(self, quats: torch.Tensor) -> torch.Tensor:
         """Reorder a live quaternion tensor into repo-internal ``wxyz``."""

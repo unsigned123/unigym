@@ -27,8 +27,10 @@ reordered ``xyzw -> wxyz`` at this boundary via :func:`unigym.core.quat.to_wxyz`
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
+from unigym.model.errors import ModelIRError
 from unigym.model.ir import (
     Actuator,
     Body,
@@ -434,30 +436,72 @@ def _body_quat(quats, index):
     return _fixed_vec4(_xyzw_to_wxyz(row), (1.0, 0.0, 0.0, 0.0))
 
 
+_ENV_REGEX_TOKENS = (
+    "{ENV_REGEX_NS}",
+    "/World/envs/env_.*",
+    "/World/envs/env_[^/]+",
+    "/World/envs/env_[0-9]+",
+)
+_ENV_INSTANCE_PATTERN = re.compile(r"^/World/envs/env_[^/]+")
+
+
+def _env_0_path(path: str) -> str:
+    """Normalize an IsaacLab env prim path to its env-0 instance.
+
+    IsaacLab 3 exposes the scene regex in several spellings depending on when
+    the path is read: the raw ``{ENV_REGEX_NS}`` token, the rewritten
+    ``/World/envs/env_.*``, the newer ``/World/envs/env_[^/]+`` and a concrete
+    ``/World/envs/env_<n>``.  All of them name the same per-env asset, so the
+    model IR always describes env 0.
+    """
+    resolved = path
+    for token in _ENV_REGEX_TOKENS:
+        resolved = resolved.replace(token, "/World/envs/env_0")
+    return _ENV_INSTANCE_PATTERN.sub("/World/envs/env_0", resolved)
+
+
+def _view_root_prim(articulation):
+    """Return ``root_physx_view.prim_paths[0]`` (the live asset root), if any."""
+    view = _root_view(articulation)
+    paths = getattr(view, "prim_paths", None)
+    if not paths:
+        return None
+    try:
+        value = paths[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+    path = str(value) if value is not None else ""
+    return path or None
+
+
+def _stage_prim_is_valid(path: str) -> bool | None:
+    """Return whether *path* resolves on the live stage (``None`` = no stage)."""
+    stage = _usd_stage()
+    if stage is None:
+        return None
+    return bool(stage.GetPrimAtPath(path).IsValid())
+
+
 def _resolve_root_prim(articulation):
     """Return the articulation asset's root prim path (env 0).
 
-    IsaacLab's ``root_physx_view.prim_paths[0]`` names the ROOT LINK
-    (``.../Robot/pelvis``), not the articulation asset prim, so the cfg's
-    declared (env-regex) prim path is the authoritative source; the view
-    path is only a fallback when no cfg is present.
+    The cfg's declared (env-regex) prim path is the authoritative source and is
+    normalized to the env-0 instance.  When that declared prim does not exist on
+    the live stage, fall back to ``root_physx_view.prim_paths[0]``; in this
+    IsaacLab 3 version that path is the resolved articulation asset root (for
+    example ``/World/envs/env_0/Robot``), not the root link.  If neither source
+    resolves, the declared value is kept so :meth:`describe` can fail loudly
+    instead of emitting an ``unknown`` joint IR.
     """
     cfg = getattr(articulation, "cfg", None)
-    path = _prim_path(cfg) or _prim_path(articulation)
-    if path:
-        # InteractiveScene rewrites the cfg regex to ``/World/envs/env_.*``;
-        # the raw ``{ENV_REGEX_NS}`` form appears before construction.
-        return path.replace("{ENV_REGEX_NS}", "/World/envs/env_0").replace(
-            "/World/envs/env_.*", "/World/envs/env_0"
-        )
-    view = _root_view(articulation)
-    paths = getattr(view, "prim_paths", None)
-    if paths:
-        try:
-            return str(paths[0])
-        except (IndexError, TypeError):
-            pass
-    return None
+    declared = _prim_path(cfg) or _prim_path(articulation)
+    resolved = _env_0_path(declared) if declared else None
+    if resolved is not None and _stage_prim_is_valid(resolved) is not False:
+        return resolved
+    view_root = _view_root_prim(articulation)
+    if view_root is not None:
+        return view_root
+    return resolved
 
 
 def _usd_stage():
@@ -712,6 +756,13 @@ class IsaacLabModelProvider:
         root_body = body_names[0] if body_names else "root"
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)
+        if joint_names and not facts["joint_type"]:
+            raise ModelIRError(
+                f"articulation {_scene_name(articulation)!r}: the USD root prim "
+                f"{root_prim!r} yielded no joint facts; refusing to emit an "
+                f"'unknown' joint IR (check the env prim resolution and "
+                f"root_physx_view.prim_paths)"
+            )
         masses, inertias, iquats, coms = _mass_and_inertia(articulation, body_names)
         attrs = {"robot": {"prim_path": root_prim, "root_body": root_body}}
         bodies = _body_rows(body_names, data, masses, inertias, iquats, coms, facts)

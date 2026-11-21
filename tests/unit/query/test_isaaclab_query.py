@@ -28,6 +28,7 @@ from unigym.query import (
     ComRef,
     ContactPoint,
     EntityRef,
+    PointRef,
     Query,
     QueryCapabilityError,
     QueryReferenceError,
@@ -128,6 +129,7 @@ def _env(backend: str) -> SimpleNamespace:
     asset = SimpleNamespace(
         data=data,
         body_names=["base", "link"],
+        backend_body_names=["base", "link"],
         joint_names=["j1", "j2"],
     )
     art = SimpleNamespace(
@@ -135,6 +137,7 @@ def _env(backend: str) -> SimpleNamespace:
         root="free",
         joint_names=("j1", "j2"),
         base_body="base",
+        base_body_id=CanonicalBodyId("base"),
         profile=_profile(),
     )
     ir = _ir()
@@ -181,9 +184,84 @@ def _env_with_joint_types(joint_types: dict[str, str]) -> SimpleNamespace:
     return env
 
 
+def _native_jacobians(fixed: bool) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build deterministic native link/COM Jacobians for the fake articulation.
+
+    Each Jacobian body row carries a distinct offset so a body-row mix-up is
+    observable, not just a layout-shape mismatch.
+    """
+    num_envs = 2
+    base_columns = 0 if fixed else 6
+    nv = base_columns + 2
+    jacobi_bodies = 1 if fixed else 2
+    link = torch.zeros((num_envs, jacobi_bodies, 6, nv), dtype=torch.float32)
+    for body in range(jacobi_bodies):
+        for column in range(nv):
+            link[:, body, 0, column] = 1.0 + column + 100.0 * body
+            link[:, body, 1, column] = 2.0 + column + 100.0 * body
+            link[:, body, 2, column] = 3.0 + column + 100.0 * body
+            link[:, body, 5, column] = 1.0 + 0.1 * column
+    com = link.clone()
+    com[:, :, 0, :] += 10.0
+    com[:, :, 1, :] += 20.0
+    com[:, :, 2, :] += 30.0
+    return link, com
+
+
+_BODY_POS = {
+    "base": (0.0, 0.0, 1.0),
+    "base_link": (0.0, 0.0, 1.0),
+    "link": (0.0, 0.0, 2.0),
+}
+
+
+def _jacobian_query(
+    fixed: bool = False,
+    *,
+    order: tuple[str, ...] = ("base", "link"),
+    base_body: str = "base",
+    base_body_id: str | None = "base",
+    backend_body_names: tuple[str, ...] | None = ("base", "link"),
+):
+    """Build an IL3 fake query whose live data carries native Jacobian rows.
+
+    ``base_body`` is the backend-native USD binding and ``base_body_id`` is the
+    canonical id; they differ when the robot profile maps a canonical base body
+    onto a differently named USD body.  ``backend_body_names=None`` models a
+    live asset that does not publish its backend body order.
+    """
+    query, env = _query("isaaclab3_physx")
+    data = env.robots["robot"].data
+    art = env.articulations["robot"]
+    art.base_body = base_body
+    art.base_body_id = CanonicalBodyId(base_body_id) if base_body_id else None
+    env.robots["robot"].backend_body_names = (
+        list(backend_body_names) if backend_body_names is not None else None
+    )
+    if tuple(order) != ("base", "link"):
+        data.body_names = list(order)
+        env.robots["robot"].body_names = list(order)
+        data.body_pos_w = torch.tensor(
+            [
+                [_BODY_POS[name] for name in order],
+                [
+                    (_BODY_POS[name][0] + 10.0, _BODY_POS[name][1], _BODY_POS[name][2])
+                    for name in order
+                ],
+            ],
+            dtype=torch.float32,
+        )
+        data.body_quat_w = torch.zeros((2, len(order), 4), dtype=torch.float32)
+        data.body_quat_w[..., 3] = 1.0
+    link, com = _native_jacobians(fixed)
+    data.body_link_jacobian_w = link
+    data.body_com_jacobian_w = com
+    return query, data, link, com
+
+
 @pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
-def test_capabilities_name_the_backend_and_stay_p0b2_honest(backend: str) -> None:
-    """Only model facts and live pose are supported; P1 groups are unsupported."""
+def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
+    """Model facts/pose are native; IL3 adds Jacobians, IL2 has no Jacobian API."""
     caps = {
         "isaaclab2": ISAACLAB2_QUERY_CAPABILITIES,
         "isaaclab3_physx": ISAACLAB3_PHYSX_QUERY_CAPABILITIES,
@@ -203,7 +281,16 @@ def test_capabilities_name_the_backend_and_stay_p0b2_honest(backend: str) -> Non
     assert caps.supports("state.site_pose") == "partial"
     assert caps.supports("state.com_pose") == "partial"
     assert caps.supports("scratch.copy") == "unsupported"
-    assert caps.supports("jacobian.body") == "unsupported"
+    if backend == "isaaclab2":
+        assert caps.supports("jacobian.body") == "unsupported"
+        assert caps.supports("jacobian.site") == "unsupported"
+        assert caps.supports("jacobian.com") == "unsupported"
+        assert caps.supports("jacobian.point") == "unsupported"
+    else:
+        assert caps.supports("jacobian.body") == "native"
+        assert caps.supports("jacobian.site") == "synthetic"
+        assert caps.supports("jacobian.com") == "partial"
+        assert caps.supports("jacobian.point") == "synthetic"
     assert caps.supports("geometry.distance") == "unsupported"
     assert caps.supports("contacts.manifold") == "unsupported"
     assert caps.supports("actuators.facts") == "partial"
@@ -284,6 +371,253 @@ def test_site_pose_composes_the_robot_profile_body_and_local_offset(backend: str
         torch.tensor([[0.0, 0.5, 1.2], [10.5, 0.0, 1.2]], dtype=torch.float64),
     )
     torch.testing.assert_close(pose.quat_wxyz, _QUAT_WXYZ[:, 0])
+
+
+def test_il3_body_jacobian_reads_the_native_link_row_with_a_base_first_layout() -> None:
+    """A body Jacobian is the native link row with the free base DoFs first."""
+    query, _, link, _ = _jacobian_query(fixed=False)
+
+    jac = query.kinematics.jacobian(EntityRef("body", "link"))
+    expected = link[:, 1].to(torch.float64)
+
+    torch.testing.assert_close(jac.transl, expected[:, 0:3])
+    torch.testing.assert_close(jac.rot, expected[:, 3:6])
+    assert jac.frame == "world"
+    assert jac.reference == "body_origin"
+    assert jac.layout.articulation == "robot"
+    assert jac.layout.base_names == ("base",)
+    assert jac.layout.base_dofs == (
+        "base.px",
+        "base.py",
+        "base.pz",
+        "base.rx",
+        "base.ry",
+        "base.rz",
+    )
+    assert jac.layout.joint_names == ("j1", "j2")
+    assert jac.layout.nv == 8
+    assert jac.layout.order == jac.layout.base_dofs + jac.layout.joint_names
+
+
+def test_il3_fixed_base_jacobian_skips_the_fixed_root_row() -> None:
+    """A fixed base has no free columns and drops the root body Jacobian row."""
+    query, _, link, _ = _jacobian_query(fixed=True)
+
+    jac = query.kinematics.jacobian(EntityRef("body", "link"))
+    torch.testing.assert_close(jac.transl, link[:, 0, 0:3].to(torch.float64))
+    assert jac.layout.base_dofs == ()
+    assert jac.layout.base_names == ()
+    assert jac.layout.joint_names == ("j1", "j2")
+    assert jac.layout.nv == 2
+
+    with pytest.raises(QueryCapabilityError, match="fixed root"):
+        query.kinematics.jacobian(EntityRef("body", "base"))
+
+
+def test_il3_com_jacobian_reads_the_native_com_row_and_rejects_subtree() -> None:
+    """A body COM uses the native COM Jacobian; a subtree COM has no engine row."""
+    query, _, link, com = _jacobian_query(fixed=False)
+
+    jac = query.kinematics.jacobian(ComRef("robot", body="link"))
+    torch.testing.assert_close(jac.transl, com[:, 1, 0:3].to(torch.float64))
+    torch.testing.assert_close(jac.rot, com[:, 1, 3:6].to(torch.float64))
+    assert not torch.equal(jac.transl, link[:, 1, 0:3].to(torch.float64))
+
+    with pytest.raises(QueryCapabilityError, match="subtree"):
+        query.kinematics.jacobian(ComRef("robot", subtree=True))
+    with pytest.raises(QueryCapabilityError, match="subtree"):
+        query.kinematics.jacobian(ComRef("robot", body="link", subtree=True))
+
+
+def test_il3_default_com_uses_the_declared_base_body_not_the_live_row_zero() -> None:
+    """A floating base labels base DoFs and defaults the COM from the declared base."""
+    query, data, _, com = _jacobian_query(fixed=False, order=("link", "base"), base_body="base")
+
+    jac = query.kinematics.jacobian(ComRef("robot"))
+
+    assert data.body_names[0] == "link"
+    assert jac.layout.base_names == ("base",)
+    assert jac.layout.base_dofs == (
+        "base.px",
+        "base.py",
+        "base.pz",
+        "base.rx",
+        "base.ry",
+        "base.rz",
+    )
+    assert jac.layout.nv == 8
+    assert jac.layout.order == jac.layout.base_dofs + jac.layout.joint_names
+    torch.testing.assert_close(jac.transl, com[:, 1, 0:3].to(torch.float64))
+    torch.testing.assert_close(jac.rot, com[:, 1, 3:6].to(torch.float64))
+    assert not torch.equal(jac.transl, com[:, 0, 0:3].to(torch.float64))
+
+
+def test_il3_fixed_base_default_com_is_the_fixed_root_with_no_row() -> None:
+    """A fixed root at public index 1 is the declared base, not the live row 0."""
+    query, data, _, com = _jacobian_query(fixed=True, order=("link", "base"), base_body="base")
+
+    assert data.body_names[0] == "link"
+    with pytest.raises(QueryCapabilityError, match="fixed root"):
+        query.kinematics.jacobian(ComRef("robot"))
+
+    jac = query.kinematics.jacobian(ComRef("robot", body="link"))
+    assert jac.layout.base_dofs == ()
+    assert jac.layout.base_names == ()
+    assert jac.layout.nv == 2
+    torch.testing.assert_close(jac.transl, com[:, 0, 0:3].to(torch.float64))
+
+
+def test_il3_floating_jacobian_requires_a_declared_base_body() -> None:
+    """An undeclared floating base fails instead of labelling an arbitrary body."""
+    query, _, _, _ = _jacobian_query(fixed=False, base_body="", base_body_id=None)
+
+    with pytest.raises(QueryCapabilityError, match="free root unresolved"):
+        query.kinematics.jacobian(EntityRef("body", "link"))
+    with pytest.raises(QueryReferenceError, match="no base body is declared"):
+        query.kinematics.jacobian(ComRef("robot"))
+
+
+def test_il3_base_labels_use_the_canonical_base_id_not_the_usd_binding() -> None:
+    """Layout labels use the canonical base id while the COM row uses the USD body."""
+    query, data, _, com = _jacobian_query(
+        fixed=False,
+        order=("link", "base_link"),
+        base_body="base_link",
+        base_body_id="pelvis",
+    )
+
+    jac = query.kinematics.jacobian(ComRef("robot"))
+
+    assert tuple(data.body_names) == ("link", "base_link")
+    assert jac.layout.base_names == ("pelvis",)
+    assert jac.layout.base_dofs == (
+        "pelvis.px",
+        "pelvis.py",
+        "pelvis.pz",
+        "pelvis.rx",
+        "pelvis.ry",
+        "pelvis.rz",
+    )
+    torch.testing.assert_close(jac.transl, com[:, 1, 0:3].to(torch.float64))
+
+
+def test_il3_fixed_root_falls_back_to_declared_base_when_backend_names_missing() -> None:
+    """A missing backend body order resolves the root from the declared base binding."""
+    query, _, link, _ = _jacobian_query(
+        fixed=True,
+        order=("link", "base"),
+        base_body="base",
+        backend_body_names=None,
+    )
+
+    torch.testing.assert_close(
+        query.kinematics.jacobian(EntityRef("body", "link")).transl,
+        link[:, 0, 0:3].to(torch.float64),
+    )
+    with pytest.raises(QueryCapabilityError, match="fixed root"):
+        query.kinematics.jacobian(EntityRef("body", "base"))
+
+
+def test_il3_fixed_root_without_backend_names_or_declared_base_fails_loud() -> None:
+    """A fixed root with no resolvable public index never silently maps to row 0."""
+    query, _, _, _ = _jacobian_query(
+        fixed=True,
+        order=("link", "base"),
+        base_body="",
+        base_body_id=None,
+        backend_body_names=None,
+    )
+
+    with pytest.raises(QueryCapabilityError, match="unresolved"):
+        query.kinematics.jacobian(EntityRef("body", "link"))
+
+
+def test_il3_fixed_root_backend_name_mismatch_fails_loud() -> None:
+    """A backend root absent from the public body order is an error, not row 0."""
+    query, _, _, _ = _jacobian_query(
+        fixed=True,
+        order=("link", "base"),
+        base_body="base",
+        backend_body_names=("ghost", "link"),
+    )
+
+    with pytest.raises(QueryCapabilityError, match="not in the public body order"):
+        query.kinematics.jacobian(EntityRef("body", "link"))
+
+
+def test_il3_body_rows_follow_the_public_body_order() -> None:
+    """Floating rows use the public body index; fixed rows omit the resolved root."""
+    floating, _, link, _ = _jacobian_query(fixed=False, order=("link", "base"), base_body="base")
+    torch.testing.assert_close(
+        floating.kinematics.jacobian(EntityRef("body", "link")).transl,
+        link[:, 0, 0:3].to(torch.float64),
+    )
+    torch.testing.assert_close(
+        floating.kinematics.jacobian(EntityRef("body", "base")).transl,
+        link[:, 1, 0:3].to(torch.float64),
+    )
+
+    fixed, _, fixed_link, _ = _jacobian_query(fixed=True, order=("link", "base"), base_body="base")
+    torch.testing.assert_close(
+        fixed.kinematics.jacobian(EntityRef("body", "link")).transl,
+        fixed_link[:, 0, 0:3].to(torch.float64),
+    )
+    with pytest.raises(QueryCapabilityError, match="fixed root"):
+        fixed.kinematics.jacobian(EntityRef("body", "base"))
+
+
+def test_il3_site_jacobian_composes_the_body_row_with_the_local_offset() -> None:
+    """A site row shifts the link linear block by ``omega x r`` for its body offset."""
+    query, _, link, _ = _jacobian_query(fixed=False)
+
+    jac = query.kinematics.jacobian(EntityRef("site", "ee"))
+    r = torch.tensor([[0.0, 0.5, 0.2], [0.5, 0.0, 0.2]], dtype=torch.float64)
+    base = link[:, 0].to(torch.float64)
+    expected = base[:, 0:3] + torch.cross(
+        base[:, 3:6], r[:, :, None].expand(-1, -1, base.shape[-1]), dim=1
+    )
+
+    torch.testing.assert_close(jac.transl, expected)
+    torch.testing.assert_close(jac.rot, base[:, 3:6])
+    assert jac.layout.joint_names == ("j1", "j2")
+
+
+def test_il3_point_jacobian_composes_the_body_row_with_the_world_point() -> None:
+    """A world-point row shifts the link linear block by the world offset."""
+    query, data, link, _ = _jacobian_query(fixed=False)
+
+    point = torch.tensor([1.0, 0.0, 2.0], dtype=torch.float64)
+    jac = query.kinematics.jacobian(PointRef(EntityRef("body", "link"), point))
+    offset = point - data.body_pos_w[:, 1].to(torch.float64)
+    base = link[:, 1].to(torch.float64)
+    expected = base[:, 0:3] + torch.cross(
+        base[:, 3:6], offset[:, :, None].expand(-1, -1, base.shape[-1]), dim=1
+    )
+
+    torch.testing.assert_close(jac.transl, expected)
+    torch.testing.assert_close(jac.rot, base[:, 3:6])
+
+
+def test_il3_jacobian_rotational_false_zeroes_the_angular_block() -> None:
+    """``rotational=False`` keeps the translational block and zeroes the angular one."""
+    query, _, link, _ = _jacobian_query(fixed=False)
+
+    jac = query.kinematics.jacobian(EntityRef("body", "link"), rotational=False)
+
+    torch.testing.assert_close(jac.transl, link[:, 1, 0:3].to(torch.float64))
+    assert not bool(torch.count_nonzero(jac.rot))
+
+
+def test_il3_jacobian_rejects_unsupported_frame_reference_and_geom() -> None:
+    """Only world-frame body-origin Jacobians exist; a geom target has no frame."""
+    query, _, _, _ = _jacobian_query(fixed=False)
+
+    with pytest.raises(QueryCapabilityError, match="frame"):
+        query.kinematics.jacobian(EntityRef("body", "link"), frame="local")
+    with pytest.raises(QueryCapabilityError, match="reference"):
+        query.kinematics.jacobian(EntityRef("body", "link"), reference="com")
+    with pytest.raises(QueryCapabilityError, match="jacobian.geom"):
+        query.kinematics.jacobian(EntityRef("geom", "link_geom"))
 
 
 @pytest.mark.parametrize("joint_type", ("ball", "fixed"))
