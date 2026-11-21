@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-1)
+## 0. Scope (P0A + P0B-1 + P1A-2)
 
 In scope:
 
@@ -25,13 +25,14 @@ In scope:
 - per-env scratch copy with root/joint writes and `forward`;
 - geometry distance (`mj_geomDistance`) and AABB;
 - body/site/COM/world-point Jacobians;
-- group-based contact manifolds for the MuJoCo family (P1A-1).
+- group-based contact manifolds for the MuJoCo family (P1A-1);
+- contact constraint-row Jacobians and wrench-to-joint for the MuJoCo family
+  (P1A-2).
 
 Out of scope:
 
-- contact Jacobians and wrench-to-joint (P1A-2);
 - actuator runtime facts (P1B);
-- IsaacLab contact manifolds (P1C);
+- IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
@@ -85,7 +86,7 @@ support for the first unsupported op.
 Capabilities are part of the query contract, not the env capability bits.
 There are no per-operation traits and no query bits in `BackendCapabilities`.
 
-MuJoCo declares (P0A + P1A-1):
+MuJoCo declares (P0A + P1A-2):
 
 | Group | Support |
 |---|---|
@@ -95,10 +96,10 @@ MuJoCo declares (P0A + P1A-1):
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only) |
 | `geometry.*` | native |
 | `contacts.manifold` | native (group-based active contacts) |
-| `contacts.jacobian`, `contacts.wrench_to_joint` | unsupported (P1A-2) |
+| `contacts.jacobian`, `contacts.wrench_to_joint` | native (dense contact constraint rows; effective rows follow `model.opt.cone`) |
 | `actuators.*` | unsupported (P1B) |
 
-mjWarp P0B-1/P1A-1 reads the CPU `MjData` mirror, so only the model facts and
+mjWarp P0B-1/P1A-2 reads the CPU `MjData` mirror, so only the model facts and
 live state are native; scratch, the CPU math and the contact mirror are
 labelled honestly:
 
@@ -110,7 +111,7 @@ labelled honestly:
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
-| `contacts.jacobian`, `contacts.wrench_to_joint` | unsupported (P1A-2) |
+| `contacts.jacobian`, `contacts.wrench_to_joint` | synthetic (dense CPU mirror contact rows; effective rows follow `model.opt.cone`) |
 | `actuators.*` | unsupported (P1B) |
 
 IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
@@ -166,6 +167,14 @@ Responses hold detached CPU torch copies.
 - `ContactManifold(env_ids, group, points)`: the selected env ids and the
   group's points in backend contact order, env-major.  No active contact is an
   empty tuple, not an error.
+- `ContactJacobian(env_id, frame, rows, layout)`: one contact's constraint-row
+  block.  `frame` is `"contact"`; `rows` is `(rows, layout.nv)` and holds the
+  contact's effective constraint Jacobian in the articulation's DOF order.
+  Rows are MuJoCo constraint rows, not a per-row axis list: elliptic contacts
+  with `condim >= 3` have rows 0..2 equal to `frame_w`'s normal/tangent axes,
+  pyramidal rows are friction-pyramid face normals (no pure normal row for
+  `condim=3`), and `condim` 4/6 torsion/rolling rows are outside `frame_w`.
+  The tensor is a detached CPU float64 copy.
 
 `env=None` selects every env for state/geometry reads.  `env` may be an int, a
 sequence of ints or a tensor; output `env_ids` preserves the requested order.
@@ -186,6 +195,8 @@ kinematics.jacobian(target, *, articulation=None, env=None,
 geometry.distance(a, b, *, max_distance_m=1.0, env=None, scratch=None)
 geometry.aabb(entity, *, env=None)
 contacts.manifold(group, *, env=None) -> ContactManifold
+contacts.jacobian(point, articulation) -> ContactJacobian
+contacts.wrench_to_joint(point, articulation) -> torch.Tensor  # (nv,)
 ```
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
@@ -226,7 +237,7 @@ Only 1-DOF hinge/slide joints are exposed by `joint_position`/
 `joint_velocity`; another joint type raises a capability error naming the
 joint.
 
-### Contacts (P1A-1)
+### Contacts (P1A-1 / P1A-2)
 
 `contacts.manifold(group, *, env=None)` is **group-based**.  `group` is
 required and resolves against the run's declared `contacts:` groups; the
@@ -245,9 +256,50 @@ and no implicit default group.
 - Points are in backend contact order, env-major, and every result is a
   detached CPU copy.  Querying never mutates the contact list and never
   publishes an observation.
-- `contacts.jacobian` and `contacts.wrench_to_joint` are declared
-  `unsupported` in P1A-1.  They raise `QueryCapabilityError`; the query never
-  returns a zero Jacobian or a fabricated wrench.
+
+### Contact constraint rows (P1A-2)
+
+`contacts.jacobian(point, articulation)` and
+`contacts.wrench_to_joint(point, articulation)` map one manifold point's
+constraint rows into an articulation's DOF layout.  `point` must come from a
+current manifold of the same env; `articulation` owns the output layout.
+
+- The row block starts at `data.contact.efc_address[point.contact_id]`.  Its
+  effective row count follows the friction cone, **not** `contact.dim`:
+  elliptic uses `dim` rows; pyramidal uses `max(1, 2 * (dim - 1))` paired
+  friction rows.  It is sliced from the dense `data.efc_J` and column-scoped to
+  the articulation's `DofLayout`; the result is `(rows, nv)`, never the full
+  model DOF width.
+- `ContactPoint.frame_w` is a basis for the three contact axes (normal,
+  tangent1, tangent2), **not** a per-constraint-row axis label:
+  - elliptic contacts with `condim >= 3` have rows 0..2 equal to those three
+    frame axes; rows 3+ are torsion/rolling constraints;
+  - pyramidal rows are friction-pyramid face normals.  For `condim=3` they are
+    `(n + t1), (n - t1), (n + t2), (n - t2)`; there is no pure normal row.
+    Write a row as a linear combination of `frame_w` axes rather than treating
+    each row as one axis;
+  - `condim` 4/6 torsion and rolling rows are **not** described by `frame_w`.
+- `wrench_to_joint` is `rows.T @ data.efc_force[rows]` in the same row block
+  and DOF order.  The sign/frame follow the MuJoCo `efc_J`/`efc_force`
+  convention; no zero wrench or zero Jacobian is substituted when the rows are
+  unavailable.
+- Only a dense `efc_J` is mapped.  A sparse constraint Jacobian, or an
+  auto-selected sparse layout (`mjJAC_AUTO` with `nv >= 60`), raises
+  `QueryCapabilityError`; compressed values are never reshaped as dense rows.
+- A `contact_id` outside the current contact list raises
+  `QueryReferenceError`.  A point whose `contact_id` still exists but now names
+  a different geom/body pair is stale and also raises `QueryReferenceError`;
+  refetch the manifold instead of reusing the old point.  A point whose
+  `env_id` is outside the run raises `QueryReferenceError`.  A contact with
+  `efc_address < 0` or a row range outside `nefc` raises `QueryCapabilityError`;
+  the query never guesses a row block.
+- An unknown or ambiguous articulation raises `QueryReferenceError`.  A
+  compiled joint shape the layout cannot represent raises
+  `QueryCapabilityError`, exactly as for `kinematics.jacobian`.
+- Results are detached CPU float64 copies.  The contact list, the constraint
+  solve and live `MjData` are not mutated and no observation is published.
+- `contacts.jacobian` and `contacts.wrench_to_joint` are declared `unsupported`
+  on IsaacLab until P1C.  They raise `QueryCapabilityError`.
 
 ## 5. Scratch
 
@@ -298,6 +350,9 @@ mirror per world.  The shared MuJoCo-family query reads only that mirror:
   MuJoCo math on the mirror or scratch copy;
 - `contacts.manifold` reads the mirror contact list and force solve; it is
   `synthetic`, not a native warp device read;
+- `contacts.jacobian` and `contacts.wrench_to_joint` read the mirror
+  `efc_J`/`efc_force` contact rows with CPU MuJoCo math; they are `synthetic`;
+  the mirror must carry a dense `efc_J` (sparse raises `QueryCapabilityError`);
 - the live mirror and the warp device `Data` are never mutated by a query;
 - there is no implicit device-to-mirror sync and no lock.  The caller must
   query on the engine thread at a step boundary, after the backend has
@@ -305,8 +360,9 @@ mirror per world.  The shared MuJoCo-family query reads only that mirror:
   contract does not repair it.
 
 This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
-`geometry.*` and `contacts.manifold` as `synthetic` while `model.*` and
-`state.*` stay `native`.
+`geometry.*`, `contacts.manifold`, `contacts.jacobian` and
+`contacts.wrench_to_joint` as `synthetic` while `model.*` and `state.*` stay
+`native`.
 
 ## 7. Failures
 
@@ -315,6 +371,11 @@ This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
 | unsupported operation | `QueryCapabilityError` naming backend/op/support |
 | unknown/ambiguous entity or contact group | `QueryReferenceError` with available names |
 | contact query without a declared `contacts:` group | `QueryCapabilityError` (no all-contact fallback) |
+| contact id outside the current contact list | `QueryReferenceError` with the available contact ids |
+| in-range contact id now naming a different geom/body pair | `QueryReferenceError` (stale point; refetch the manifold) |
+| point names an env outside the run | `QueryReferenceError` with the available env ids |
+| contact constraint rows unavailable (`efc_address < 0`, bad row range/`nefc`) | `QueryCapabilityError` (no zero row block or wrench) |
+| sparse `efc_J` (explicit or auto-selected) | `QueryCapabilityError` (dense constraint Jacobians only) |
 | bad shape/dtype/value | `QueryShapeError` (also a `ValueError`) |
 | read after run/env/query close | `QueryStaleError` |
 | concurrent step/reset | caller contract violation (engine-thread only) |
@@ -354,8 +415,8 @@ Semantics:
   (ball/fixed/other) raises `QueryCapabilityError`; the live column is never
   returned;
 - `scratch`, `jacobian`, `geometry` and `actuators` are declared unsupported
-  and raise `QueryCapabilityError`; contact manifolds stay unsupported until
-  P1C and the contact Jacobian/wrench pair until P1A-2;
+  and raise `QueryCapabilityError`; contact manifolds, the contact Jacobian and
+  the contact wrench stay unsupported until P1C (P1A-2 is MuJoCo/mjWarp only);
 - results are detached CPU torch copies.  Query never writes `env.obs`, never
   records and never mutates live simulator state.
 

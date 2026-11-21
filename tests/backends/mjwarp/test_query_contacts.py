@@ -10,7 +10,7 @@ import pytest
 
 from unigym.backends.mjwarp.query import MjwarpQuery
 from unigym.contacts.manager import build_contact_manager
-from unigym.query import EntityRef, QueryCapabilityError, QueryReferenceError, QueryStaleError
+from unigym.query import QueryReferenceError, QueryStaleError
 from unigym.runtime.actions import NamedAction
 
 PROP_CRATE = """    <body name="Prop_crate" pos="0.3 0 0.05">
@@ -157,15 +157,12 @@ def test_manifold_after_query_close_is_stale(tiny_env_factory, tmp_path) -> None
         query.contacts.manifold("crate_floor")
 
 
-def test_contact_jacobian_and_wrench_stay_unsupported(tiny_env_factory, tmp_path) -> None:
-    """The mjWarp mirror declares only the manifold; Jacobian/wrench stay off."""
+def test_contact_jacobian_and_wrench_are_synthetic(tiny_env_factory, tmp_path) -> None:
+    """The mjWarp mirror declares the contact rows/wrench as synthetic CPU math."""
     env = _env(tiny_env_factory, tmp_path, _manager())
     query = MjwarpQuery(env)
 
     assert query.capabilities.supports("contacts.manifold") == "synthetic"
-    assert query.capabilities.supports("contacts.jacobian") == "unsupported"
-    assert query.capabilities.supports("contacts.wrench_to_joint") == "unsupported"
-    with pytest.raises(QueryCapabilityError, match=r"contacts\.jacobian.*unsupported"):
-        query.contacts.jacobian(EntityRef("geom", "crate_geom"))
-    with pytest.raises(QueryCapabilityError, match=r"contacts\.wrench_to_joint.*unsupported"):
-        query.require("contacts.wrench_to_joint")
+    assert query.capabilities.supports("contacts.jacobian") == "synthetic"
+    assert query.capabilities.supports("contacts.wrench_to_joint") == "synthetic"
+    query.require("contacts.jacobian", "contacts.wrench_to_joint")
