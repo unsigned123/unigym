@@ -58,6 +58,30 @@ def test_actuator_facts_allows_an_undeclared_row() -> None:
     assert facts.ctrlrange is None
 
 
+def test_actuator_facts_joint_names_default_to_empty() -> None:
+    """A backend that publishes no driven-joint list reports an empty tuple."""
+    assert _facts().joint_names == ()
+
+
+def test_actuator_facts_keeps_the_declared_joint_names() -> None:
+    """An actuator group keeps its declared joint names in order."""
+    facts = _facts(joint_names=("j1", "j2"))
+
+    assert facts.joint_names == ("j1", "j2")
+
+
+def test_actuator_facts_rejects_a_bare_joint_name_string() -> None:
+    """One name is not a sequence: a string would be split into characters."""
+    with pytest.raises(QueryShapeError, match=r"joint_names.*sequence"):
+        _facts(joint_names="j1")
+
+
+def test_actuator_facts_rejects_an_empty_joint_name() -> None:
+    """A joint name is a non-empty identity, never a placeholder."""
+    with pytest.raises(ValueError, match="joint_names"):
+        _facts(joint_names=("j1", ""))
+
+
 def test_actuator_facts_rejects_an_unknown_slot_kind() -> None:
     """The slot namespace is a closed literal, not a free-form tag."""
     with pytest.raises(ValueError, match="slot_kind"):

@@ -8,9 +8,9 @@ so a query handle always reports the concrete ``isaaclab3_physx`` or
 the simulator boundary and are converted to repo-internal ``wxyz`` on read.
 
 Only model facts from the published ``ModelIR`` and live body/root/COM/joint/
-robot-profile-site reads are implemented.  Scratch, geometry, Jacobians,
-contacts and actuator runtime are declared unsupported and raise
-``QueryCapabilityError``; P1 owns them.
+robot-profile-site reads are implemented.  Static actuator facts are a
+facts-only subset; actuator runtime state, scratch, geometry, Jacobians and
+contacts are declared unsupported and raise ``QueryCapabilityError``.
 """
 
 from __future__ import annotations

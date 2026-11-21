@@ -6,10 +6,11 @@ the query math owns here.  A backend subclass supplies its env type, its
 canonical backend label, its capability object and the live quaternion order;
 it never copies the model lookup, state read or site-composition code.
 
-P0B-2 implements only the model facts carried by the published ``ModelIR`` and
-live body/root/COM/joint/site reads.  Scratch, geometry, Jacobians, contacts
-and actuator runtime are declared unsupported and raise
-``QueryCapabilityError``; they belong to P1.
+P0B-2 implements the model facts carried by the published ``ModelIR`` and live
+body/root/COM/joint/site reads.  P1B-2 adds static actuator facts from the
+published ``ModelIR`` actuator rows and USD attrs; actuator runtime state,
+scratch, geometry, Jacobians and contacts are declared unsupported and raise
+``QueryCapabilityError``.
 
 Engine-thread contract: the query reads the live articulation buffers at a
 step boundary and adds no lock.  Every result is a detached CPU torch copy; no
@@ -29,7 +30,15 @@ from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
 from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
-from unigym.query.base import ComRef, ContactPoint, EntityRef, EnvSelection, PointRef, Pose
+from unigym.query.base import (
+    ActuatorFacts,
+    ComRef,
+    ContactPoint,
+    EntityRef,
+    EnvSelection,
+    PointRef,
+    Pose,
+)
 from unigym.query.capabilities import (
     ActuatorCaps,
     ContactCaps,
@@ -61,6 +70,15 @@ __all__ = [
 _P1_DETAIL = (
     "P0B-2 implements model facts and live pose only; "
     "the IsaacLab query does not implement this operation"
+)
+_ACTUATOR_FACTS_DETAIL = (
+    "static IsaacLab actuator-group facts only; slot_kind='isaaclab_group', "
+    "joint_names come from the published USD attrs, and ctrlrange/gear/gains/"
+    "limits are not fabricated"
+)
+_ACTUATOR_STATE_DETAIL = (
+    "IsaacLab actuator groups do not expose a single scalar ctrl/force/length/"
+    "velocity channel compatible with the MuJoCo-family actuator row"
 )
 _GEOM_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; " "no geom facts are synthesized"
@@ -164,13 +182,16 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
             wrench_to_joint=Feature("unsupported", _P1_DETAIL),
         ),
         actuators=ActuatorCaps(
-            facts=Feature("unsupported", _P1_DETAIL),
-            state=Feature("unsupported", _P1_DETAIL),
+            facts=Feature("partial", _ACTUATOR_FACTS_DETAIL),
+            state=Feature("unsupported", _ACTUATOR_STATE_DETAIL),
         ),
         notes={
             "engine_thread": _ENGINE_THREAD,
             "returns": _COPIES,
-            "scope": "P0B-2 model facts + live pose; no scratch/geometry/Jacobian/contact",
+            "scope": (
+                "P0B-2 model facts + live pose + static actuator facts; "
+                "no scratch/geometry/Jacobian/contact/actuator-state"
+            ),
             "sites": "state.site_pose composes robot-profile sites from body + local offset",
         },
     )
@@ -235,6 +256,49 @@ def _body_index(op: str, usd_name: str, names: Sequence[str]) -> int:
         usd_name,
         names,
         "the profile body binding does not resolve to exactly one live body",
+    )
+
+
+def _actuator_joint_names(ir: ModelIR, name: str) -> tuple[str, ...]:
+    """Return one actuator group's published joint names (or empty)."""
+    usd = ir.usd
+    if usd is None:
+        return ()
+    entry = usd.attrs.get(f"actuator/{name}")
+    if not isinstance(entry, Mapping):
+        return ()
+    raw = entry.get("joint_names")
+    if raw is None:
+        return ()
+    field = f"actuator/{name}.joint_names"
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        raise QueryShapeError(field, "a sequence of names", type(raw).__name__)
+    names: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            raise QueryShapeError(field, "non-empty string names", repr(item))
+        names.append(item)
+    return tuple(names)
+
+
+def _actuator_facts(ir: ModelIR, row: Actuator) -> ActuatorFacts:
+    """Map one IsaacLab actuator-group row to facts-only neutral facts.
+
+    IsaacLab actuator groups have no compiled single-actuator slot and no
+    native scalar control range, gear or gain/bias parameters, so those fields
+    stay ``None`` rather than being fabricated from a group configuration.
+    """
+    return ActuatorFacts(
+        name=row.name,
+        target=row.target or None,
+        kind=row.kind,
+        slot=None,
+        slot_kind="isaaclab_group",
+        ctrlrange=None,
+        gear=None,
+        gainprm=None,
+        biasprm=None,
+        joint_names=_actuator_joint_names(ir, row.name),
     )
 
 
@@ -600,28 +664,24 @@ class _UnsupportedContacts(_Subface):
         )
 
 
-class _UnsupportedActuators(_Subface):
-    """Actuator runtime facts are capability-gated."""
+class _ActuatorQuery(_Subface):
+    """Static IsaacLab actuator-group facts; runtime state stays unsupported."""
 
-    def rows(self, articulation: str | None = None) -> NoReturn:
-        """Reject actuator fact rows.
-
-        ``rows`` is the whole-table form of ``facts``; IsaacLab declares the
-        same ``actuators.facts`` operation unsupported for both.
-        """
-        del articulation
+    def rows(self, articulation: str | None = None) -> tuple[ActuatorFacts, ...]:
+        """Return every selected actuator group's facts in ``ModelIR`` order."""
         self._open()
-        raise QueryCapabilityError(
-            self._query.backend, "actuators.facts", "unsupported", _P1_DETAIL
-        )
+        ir = self._query._ir(articulation)
+        return tuple(_actuator_facts(ir, row) for row in ir.actuators)
 
-    def facts(self, name: str, *, articulation: str | None = None) -> NoReturn:
-        """Reject actuator runtime facts."""
-        del name, articulation
+    def facts(self, name: str, *, articulation: str | None = None) -> ActuatorFacts:
+        """Return one actuator group's static facts by neutral name."""
         self._open()
-        raise QueryCapabilityError(
-            self._query.backend, "actuators.facts", "unsupported", _P1_DETAIL
-        )
+        ir = self._query._ir(articulation)
+        try:
+            row = ir.actuators[name]
+        except KeyError:
+            raise QueryReferenceError("actuators.facts", name, ir.actuators.names()) from None
+        return _actuator_facts(ir, row)
 
     def state(
         self,
@@ -630,11 +690,14 @@ class _UnsupportedActuators(_Subface):
         articulation: str | None = None,
         env: EnvSelection = None,
     ) -> NoReturn:
-        """Reject actuator runtime state."""
+        """Reject actuator runtime state: an IsaacLab group has no scalar row."""
         del name, articulation, env
         self._open()
         raise QueryCapabilityError(
-            self._query.backend, "actuators.state", "unsupported", _P1_DETAIL
+            self._query.backend,
+            "actuators.state",
+            "unsupported",
+            _ACTUATOR_STATE_DETAIL,
         )
 
 
@@ -684,7 +747,7 @@ class IsaacLabQuery:
         self.kinematics = _UnsupportedKinematics(self)
         self.geometry = _UnsupportedGeometry(self)
         self.contacts = _UnsupportedContacts(self)
-        self.actuators = _UnsupportedActuators(self)
+        self.actuators = _ActuatorQuery(self)
 
     def require(self, *ops: str) -> None:
         """Raise when any named query operation is unsupported."""

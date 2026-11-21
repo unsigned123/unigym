@@ -23,7 +23,7 @@ from unigym.backends.shared.isaaclab3_common.query import (
     ISAACLAB3_PHYSX_QUERY_CAPABILITIES,
     Isaaclab3Query,
 )
-from unigym.model import Actuator, Body, Joint, ModelIR, ModelSet, Table
+from unigym.model import Actuator, Body, Joint, ModelIR, ModelSet, Table, UsdExt
 from unigym.query import (
     ComRef,
     ContactPoint,
@@ -69,7 +69,20 @@ def _ir() -> ModelIR:
                 Joint(name="j2", type="hinge", body="link"),
             ]
         ),
-        actuators=Table([Actuator(name="a1", target="j1", trntype="joint", actuator_id=0)]),
+        actuators=Table(
+            [
+                Actuator(name="a1", target="j1", trntype="joint", kind="robot", actuator_id=0),
+                Actuator(name="a2", kind="other"),
+            ]
+        ),
+        ext={
+            "usd": UsdExt(
+                attrs={
+                    "actuator/a1": {"joint_names": ["j1"]},
+                    "actuator/a2": {"class": "IdealPDActuator"},
+                }
+            )
+        },
     )
 
 
@@ -193,6 +206,7 @@ def test_capabilities_name_the_backend_and_stay_p0b2_honest(backend: str) -> Non
     assert caps.supports("jacobian.body") == "unsupported"
     assert caps.supports("geometry.distance") == "unsupported"
     assert caps.supports("contacts.manifold") == "unsupported"
+    assert caps.supports("actuators.facts") == "partial"
     assert caps.supports("actuators.state") == "unsupported"
 
 
@@ -305,7 +319,7 @@ def _contact_point() -> ContactPoint:
 
 
 def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
-    """Scratch, Jacobian, geometry, contacts and actuators are P1."""
+    """Scratch, Jacobian, geometry and contacts are P1; actuator state is too."""
     query, _ = _query("isaaclab2")
     point = _contact_point()
 
@@ -323,12 +337,49 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
         query.contacts.jacobian(point, "robot")
     with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
         query.contacts.wrench_to_joint(point, "robot")
-    with pytest.raises(QueryCapabilityError, match="actuators.facts"):
-        query.actuators.rows()
-    with pytest.raises(QueryCapabilityError, match="actuators.facts"):
-        query.actuators.facts("a1")
     with pytest.raises(QueryCapabilityError, match="actuators.state"):
         query.actuators.state("a1")
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_actuator_facts_come_from_the_ir_and_usd_attrs(backend: str) -> None:
+    """Actuator groups publish facts-only rows with their declared joint names."""
+    query, _ = _query(backend)
+
+    rows = query.actuators.rows()
+
+    assert tuple(facts.name for facts in rows) == ("a1", "a2")
+    facts = query.actuators.facts("a1")
+    assert facts.name == "a1"
+    assert facts.target == "j1"
+    assert facts.kind == "robot"
+    assert facts.slot is None
+    assert facts.slot_kind == "isaaclab_group"
+    assert facts.ctrlrange is None
+    assert facts.gear is None
+    assert facts.gainprm is None
+    assert facts.biasprm is None
+    assert facts.joint_names == ("j1",)
+    assert query.actuators.facts("a1", articulation="robot").joint_names == ("j1",)
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_actuator_facts_without_usd_joint_names_stay_empty(backend: str) -> None:
+    """An actuator group with no published joint list reports an empty tuple."""
+    query, _ = _query(backend)
+
+    facts = query.actuators.facts("a2")
+
+    assert facts.target is None
+    assert facts.joint_names == ()
+
+
+def test_unknown_actuator_names_the_available_rows() -> None:
+    """An unknown group is a reference error naming the published actuators."""
+    query, _ = _query("isaaclab2")
+
+    with pytest.raises(QueryReferenceError, match=r"actuators\.facts.*'bogus'.*a1"):
+        query.actuators.facts("bogus")
 
 
 def test_run_query_reuses_the_isaaclab_handle() -> None:

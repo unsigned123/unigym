@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2)
 
 In scope:
 
@@ -28,13 +28,15 @@ In scope:
 - group-based contact manifolds for the MuJoCo family (P1A-1);
 - contact constraint-row Jacobians and wrench-to-joint for the MuJoCo family
   (P1A-2);
-- MuJoCo-family actuator facts and per-env runtime channels (P1B-1).
+- MuJoCo-family actuator facts and per-env runtime channels (P1B-1);
+- IsaacLab static actuator facts (P1B-2).
 
 Out of scope:
 
-- IsaacLab actuator facts/runtime (P1B-2);
+- IsaacLab actuator runtime state;
 - writing `ctrl`, gains or limits, and PD target conversion;
-- actuator group semantics beyond the compiled row;
+- actuator group semantics beyond the published row and its declared joint
+  names;
 - IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
@@ -47,7 +49,8 @@ P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
 CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
 (`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
 scratch, geometry and Jacobians stay unsupported until later P1 work,
-IsaacLab actuators until P1B-2 and IsaacLab contacts until P1C.
+IsaacLab actuator runtime state until later P1B work and IsaacLab contacts
+until P1C.  P1B-2 adds the IsaacLab static actuation facts subset.
 
 ## 1. Entry points
 
@@ -132,7 +135,8 @@ IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
 | `jacobian.*` | unsupported (P1) |
 | `geometry.*` | unsupported (P1) |
 | `contacts.*` | unsupported (P1C) |
-| `actuators.*` | unsupported (P1B-2) |
+| `actuators.facts` | partial (static `ModelIR` actuator-group facts plus published USD joint names; `slot=None`, no ctrlrange/gear/gains/limits) |
+| `actuators.state` | unsupported (an IsaacLab group has no single scalar ctrl/force/length/velocity row) |
 
 The contact/actuator subfaces exist on every backend; an operation the backend
 does not implement raises a typed capability error instead of returning a
@@ -181,12 +185,17 @@ Responses hold detached CPU torch copies.
   `condim=3`), and `condim` 4/6 torsion/rolling rows are outside `frame_w`.
   The tensor is a detached CPU float64 copy.
 - `ActuatorFacts(name, target, kind, slot, slot_kind, ctrlrange, gear,
-  gainprm, biasprm)`: one compiled actuator row.  `slot` is the backend slot
-  and `slot_kind` names its namespace; the MuJoCo family uses
-  `slot_kind="mujoco_actuator"` and the compiled `MjModel` actuator id.
+  gainprm, biasprm, joint_names)`: one actuator row.  `slot` is the backend
+  slot and `slot_kind` names its namespace; the MuJoCo family uses
+  `slot_kind="mujoco_actuator"` and the compiled `MjModel` actuator id, while
+  IsaacLab uses `slot_kind="isaaclab_group"` and `slot=None`.
   `target` is the neutral target name (`None` when unnamed);
   `ctrlrange`/`gear`/`gainprm`/`biasprm` are `None` when the compiled row
-  does not declare them.
+  does not declare them (and always `None` for an IsaacLab group).
+  `joint_names` lists the neutral joints the actuator drives, in declared
+  order: the target joint for a MuJoCo joint actuator, the published group
+  names for an IsaacLab actuator group, and empty when the backend publishes
+  no such list.
 - `ActuatorRuntime(env_ids, ctrl, force, length, velocity)`: one actuator's
   `(E,)` runtime channels for the selected envs.  A channel is `None` when the
   backend cannot read it; every tensor is a detached CPU copy.
@@ -319,7 +328,7 @@ current manifold of the same env; `articulation` owns the output layout.
 - `contacts.jacobian` and `contacts.wrench_to_joint` are declared `unsupported`
   on IsaacLab until P1C.  They raise `QueryCapabilityError`.
 
-### Actuators (P1B-1)
+### Actuators (P1B-1 + P1B-2)
 
 `actuators.rows(articulation=None)` returns every compiled actuator's facts in
 `ModelIR` order; `actuators.facts(name, ...)` resolves one neutral actuator
@@ -331,6 +340,14 @@ name, and `actuators.state(name, ..., env=None)` reads its live channels.
   undeclared parameter tuple is `None`, never a zero-filled substitute.
   Facts are static: a row that is not compiled still reports its neutral
   identity with `slot=None`; only `state` requires a compiled slot.
+- A MuJoCo joint actuator reports its target joint in `joint_names`; a
+  non-joint target reports an empty tuple.
+- IsaacLab actuator facts come from the published `ModelIR` actuator row and
+  the `ext["usd"].attrs["actuator/<name>"]["joint_names"]` list when present.
+  They are facts-only: `slot=None`, `slot_kind="isaaclab_group"`,
+  `ctrlrange`/`gear`/`gainprm`/`biasprm` are `None`, and an absent joint list
+  is an empty tuple.  No control range, gear or gain is fabricated from the
+  group configuration.
 - Runtime reads `data.ctrl`, `data.actuator_force`, `data.actuator_length` and
   `data.actuator_velocity` at the compiled slot, one value per selected env in
   the requested order.  `env=None` selects every env; an empty selection
@@ -340,6 +357,10 @@ name, and `actuators.state(name, ..., env=None)` reads its live channels.
   naming the available actuators.  `facts` returns `slot=None` for an
   uncompiled row; `state` on a row with no compiled slot raises
   `QueryReferenceError` because there is no live channel to read.
+- IsaacLab declares `actuators.state` unsupported and raises
+  `QueryCapabilityError`: an actuator group has no single scalar
+  `ctrl`/`force`/`length`/`velocity` channel compatible with the MuJoCo-family
+  row.  `actuators.facts` is `partial`.
 - A backend with no actuator face declares `actuators.facts`/`state`
   unsupported and raises `QueryCapabilityError`; it never returns zero rows.
 - Querying an actuator never writes `ctrl`, gains or limits, never converts a
@@ -462,9 +483,12 @@ Semantics:
   requested joint whose `ModelIR` row is not a hinge/slide 1-DOF joint
   (ball/fixed/other) raises `QueryCapabilityError`; the live column is never
   returned;
-- `scratch`, `jacobian`, `geometry` and `actuators` are declared unsupported
-  and raise `QueryCapabilityError`; contact manifolds, the contact Jacobian and
-  the contact wrench stay unsupported until P1C (P1A-2 is MuJoCo/mjWarp only);
+- `actuators.facts` reports static actuator-group facts only (`slot=None`,
+  `slot_kind="isaaclab_group"`, no ctrlrange/gear/gains/limits, joint names
+  from the published USD attrs).  `actuators.state`, `scratch`, `jacobian`,
+  `geometry` and `contacts` are declared unsupported and raise
+  `QueryCapabilityError`; contact manifolds, the contact Jacobian and the
+  contact wrench stay unsupported until P1C (P1A-2 is MuJoCo/mjWarp only);
 - results are detached CPU torch copies.  Query never writes `env.obs`, never
   records and never mutates live simulator state.
 
