@@ -7,11 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from unigym.backends.shared.isaaclab3_common import model as model_module
 from unigym.backends.shared.isaaclab3_common.model import (
     IsaacLabModelProvider,
+    _resolve_root_prim,
     provider_for,
 )
 from unigym.core.quat import to_wxyz
+from unigym.model.errors import ModelIRError
 from unigym.model.ir import ModelIR
 
 
@@ -95,3 +98,57 @@ def test_describe_without_root_physx_view_yields_none_mass():
     assert ir.compiled is True
     assert ir.bodies["base"].mass is None
     assert ir.bodies["base"].inertia is None
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        "{ENV_REGEX_NS}/Robot",
+        "/World/envs/env_.*/Robot",
+        "/World/envs/env_[^/]+/Robot",
+        "/World/envs/env_7/Robot",
+    ],
+)
+def test_resolve_root_prim_normalizes_every_env_regex(monkeypatch, declared):
+    """Every IsaacLab 3 env-regex spelling resolves to the env-0 asset root."""
+    monkeypatch.setattr(model_module, "_usd_stage", lambda: None)
+    articulation = SimpleNamespace(cfg=SimpleNamespace(prim_path=declared))
+
+    assert _resolve_root_prim(articulation) == "/World/envs/env_0/Robot"
+
+
+class _InvalidStage:
+    """A stage whose prims never resolve."""
+
+    def GetPrimAtPath(self, path):
+        del path
+        return SimpleNamespace(IsValid=lambda: False)
+
+
+def test_resolve_root_prim_falls_back_to_the_live_asset_root(monkeypatch):
+    """An invalid declared prim falls back to ``root_physx_view.prim_paths[0]``."""
+    monkeypatch.setattr(model_module, "_usd_stage", lambda: _InvalidStage())
+    view = SimpleNamespace(prim_paths=["/World/envs/env_0/Robot"])
+    articulation = SimpleNamespace(
+        cfg=SimpleNamespace(prim_path="/World/envs/env_[^/]+/Missing"),
+        root_physx_view=view,
+    )
+
+    assert _resolve_root_prim(articulation) == "/World/envs/env_0/Robot"
+
+
+def test_resolve_root_prim_keeps_the_declared_path_without_a_view(monkeypatch):
+    """Without a PhysX view the normalized declared prim is retained."""
+    monkeypatch.setattr(model_module, "_usd_stage", lambda: _InvalidStage())
+    articulation = SimpleNamespace(cfg=SimpleNamespace(prim_path="/World/envs/env_.*/Robot"))
+
+    assert _resolve_root_prim(articulation) == "/World/envs/env_0/Robot"
+
+
+def test_describe_refuses_to_emit_unknown_joint_types(monkeypatch):
+    """An unresolved root prim is a loud failure, never an ``unknown`` joint IR."""
+    monkeypatch.setattr(model_module, "_usd_stage", lambda: None)
+    articulation = _NewtonArticulation(body_names=["base"], joint_names=["j1"], data=_NewtonData())
+
+    with pytest.raises(ModelIRError, match="unknown"):
+        IsaacLabModelProvider("isaaclab3_newton").describe(articulation)
