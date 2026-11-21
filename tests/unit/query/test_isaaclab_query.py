@@ -18,11 +18,13 @@ from unigym.backends.isaaclab2.query import (
     ISAACLAB2_QUERY_CAPABILITIES,
     Isaaclab2Query,
 )
+from unigym.backends.shared.isaaclab3_common.contacts import ManifoldContact
 from unigym.backends.shared.isaaclab3_common.query import (
     ISAACLAB3_NEWTON_QUERY_CAPABILITIES,
     ISAACLAB3_PHYSX_QUERY_CAPABILITIES,
     Isaaclab3Query,
 )
+from unigym.contacts.base import ContactGroupSpec
 from unigym.core.quat import to_xyzw
 from unigym.model import Actuator, Body, Joint, ModelIR, ModelSet, Table, UsdExt
 from unigym.query import (
@@ -360,7 +362,16 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
         assert caps.supports("jacobian.com") == "partial"
         assert caps.supports("jacobian.point") == "synthetic"
     assert caps.supports("geometry.distance") == "unsupported"
-    assert caps.supports("contacts.manifold") == "unsupported"
+    assert (
+        caps.supports("contacts.manifold")
+        == {
+            "isaaclab2": "unsupported",
+            "isaaclab3_physx": "partial",
+            "isaaclab3_newton": "unsupported",
+        }[backend]
+    )
+    assert caps.supports("contacts.jacobian") == "unsupported"
+    assert caps.supports("contacts.wrench_to_joint") == "unsupported"
     assert caps.supports("actuators.facts") == "partial"
     assert caps.supports("actuators.state") == "unsupported"
 
@@ -975,3 +986,129 @@ def test_isaaclab3_query_rejects_an_unknown_backend_identity() -> None:
     env.backend_name = "isaaclab3"
     with pytest.raises(TypeError, match="backend_name"):
         Isaaclab3Query(env)
+
+
+def _manifold_group(*, manifold: bool = True) -> ContactGroupSpec:
+    from unigym.contacts.refs import ContactBodyRef
+
+    return ContactGroupSpec(
+        name="grip",
+        sensor_refs=[ContactBodyRef(owner="robot", body="base")],
+        filter_refs=[ContactBodyRef(owner="robot", body="link")],
+        frame="world",
+        manifold=manifold,
+    )
+
+
+def _manifold_record(env_id: int, contact_id: int) -> ManifoldContact:
+    return ManifoldContact(
+        env_id=env_id,
+        body1="link",
+        body2="base",
+        pos_w=torch.tensor([0.0, 0.0, 1.0 + env_id], dtype=torch.float64),
+        separation_m=-0.001,
+        normal_force_n=3.0,
+        contact_id=contact_id,
+    )
+
+
+class _ManifoldBackend:
+    """A bound contact backend double for the group-resolution tests."""
+
+    def __init__(self, records):
+        self.inventory = object()
+        self.records = tuple(records)
+        self.calls = []
+
+    def read_manifold(self, spec, env_ids, *, dt):
+        selected = {int(value) for value in env_ids.tolist()}
+        self.calls.append((spec.name, tuple(env_ids.tolist()), dt))
+        return tuple(record for record in self.records if record.env_id in selected)
+
+
+def _manifold_env(specs, records):
+    query, env = _query("isaaclab3_physx")
+    backend = _ManifoldBackend(records)
+    env.contact_manager = SimpleNamespace(specs=list(specs), backend=backend)
+    env.sim = SimpleNamespace(get_physics_dt=lambda: 0.005)
+    return query, env, backend
+
+
+def test_physx_manifold_reads_body_named_points_and_reports_its_inputs() -> None:
+    """Only provable fields are mapped; normal/geom/frame/friction stay None."""
+    spec = _manifold_group()
+    query, _, backend = _manifold_env([spec], [_manifold_record(0, 0), _manifold_record(1, 1)])
+
+    manifold = query.contacts.manifold("grip")
+
+    assert tuple(manifold.env_ids.tolist()) == (0, 1)
+    assert manifold.group == "grip"
+    first, second = manifold.points
+    assert (first.body1, first.body2) == ("link", "base")
+    assert (second.body1, second.body2) == ("link", "base")
+    assert (first.geom1, first.geom2) == (None, None)
+    assert first.normal_w is None
+    assert second.normal_w is None
+    assert first.frame_w is None
+    assert first.friction_force_w is None
+    assert first.normal_force_n == pytest.approx(3.0)
+    assert first.separation_m == pytest.approx(-0.001)
+    torch.testing.assert_close(first.pos_w, torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64))
+    torch.testing.assert_close(second.pos_w, torch.tensor([0.0, 0.0, 2.0], dtype=torch.float64))
+    assert backend.calls == [("grip", (0, 1), 0.005)]
+
+
+def test_physx_manifold_env_selection_can_return_an_empty_manifold() -> None:
+    """A selected env with no contacts is an empty tuple, not an error."""
+    spec = _manifold_group()
+    query, _, backend = _manifold_env([spec], [_manifold_record(0, 0)])
+
+    manifold = query.contacts.manifold("grip", env=1)
+
+    assert tuple(manifold.env_ids.tolist()) == (1,)
+    assert manifold.points == ()
+    assert backend.calls == [("grip", (1,), 0.005)]
+
+
+def test_physx_manifold_requires_the_group_opt_in() -> None:
+    """A group without manifold: true is a typed capability error."""
+    query, _, _ = _manifold_env([_manifold_group(manifold=False)], [])
+
+    with pytest.raises(QueryCapabilityError, match="manifold: true"):
+        query.contacts.manifold("grip")
+
+
+def test_physx_manifold_unknown_group_is_a_reference_error() -> None:
+    """An unknown group names the declared groups instead of scanning."""
+    query, _, _ = _manifold_env([_manifold_group()], [])
+
+    with pytest.raises(QueryReferenceError, match="ghost"):
+        query.contacts.manifold("ghost")
+
+
+def test_physx_manifold_without_a_contact_manager_is_a_capability_error() -> None:
+    """A run without contacts: groups has no manifold source."""
+    query, _ = _query("isaaclab3_physx")
+
+    with pytest.raises(QueryCapabilityError, match="no contacts"):
+        query.contacts.manifold("grip")
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_newton"))
+def test_contact_manifold_stays_unsupported_on_il2_and_newton(backend: str) -> None:
+    """IL2 and Newton declare no contact manifold."""
+    query, _ = _query(backend)
+
+    with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
+        query.contacts.manifold("grip")
+
+
+def test_physx_contact_jacobian_and_wrench_stay_typed_unsupported() -> None:
+    """An IL3 PhysX manifold does not turn the other contact ops into AttributeError."""
+    query, _ = _query("isaaclab3_physx")
+    point = _contact_point()
+
+    with pytest.raises(QueryCapabilityError, match="contacts.jacobian"):
+        query.contacts.jacobian(point, "robot")
+    with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
+        query.contacts.wrench_to_joint(point, "robot")

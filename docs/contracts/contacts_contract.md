@@ -39,7 +39,11 @@ contacts:
 
 Group keys: `name`, `sensor_refs`, `frame` (required, no default),
 `filter_refs` (optional), `format`, `component`, `threshold`, `aggregate`,
-`history`, `aggregation`.
+`history`, `aggregation`, `manifold`.
+
+| key | rule |
+|---|---|
+| `manifold` | Optional bool, default `false`. Only a `pairwise` group (non-empty `filter_refs`) may set it `true`; `general` + `true` fails at construction. It opts the group into `q.contacts.manifold(name)`; currently only `isaaclab3_physx` implements the filtered read, while IsaacLab 2.x and Newton raise a typed capability error. The existing force/obs path is unchanged. |
 
 Derived (never declared): `mode` (non-empty `filter_refs` -> `pairwise`,
 otherwise `general`) and `owner` (`object` / `robot` / ... when all sensor
