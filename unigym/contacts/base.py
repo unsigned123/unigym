@@ -135,6 +135,11 @@ class ContactGroupSpec:
             ``net`` (default) uses the group's net sensor force vector
             magnitude; ``sum_magnitudes`` sums per-contact force magnitudes
             BEFORE the configured aggregate.
+        manifold: opt in to a backend runtime-query contact manifold for this
+            group (``q.contacts.manifold(name)``).  Default ``False`` keeps the
+            force/obs behavior unchanged.  ``True`` requires a pairwise group
+            (non-empty ``filter_refs``): a general group has no filtered
+            contact source to report.
     """
 
     name: str
@@ -147,6 +152,7 @@ class ContactGroupSpec:
     aggregate: str = "none"
     history: int = 1
     aggregation: str = "net"
+    manifold: bool = False
 
     def __post_init__(self):
         if (
@@ -212,6 +218,16 @@ class ContactGroupSpec:
             raise ValueError(
                 f"contact {self.name!r}: aggregation must be one of "
                 f"{AGGREGATIONS}, got {self.aggregation!r}"
+            )
+        if not isinstance(self.manifold, bool):
+            raise ValueError(
+                f"contact {self.name!r}: manifold must be a bool, " f"got {self.manifold!r}"
+            )
+        if self.manifold and self.mode != "pairwise":
+            raise ValueError(
+                f"contact {self.name!r}: manifold: true requires a pairwise "
+                f"group (non-empty filter_refs); a general group has no "
+                f"filtered contact source to report"
             )
 
     # ---- derived metadata ------------------------------------------------ #

@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3)
 
 In scope:
 
@@ -34,7 +34,9 @@ In scope:
 - IsaacLab 3 body/body-COM Jacobians and composed site/world-point Jacobians
   (P1C-1);
 - IsaacLab 3 transaction scratch with root/joint writes, `forward` and
-  body/site/COM/Jacobian reads (P1C-2).
+  body/site/COM/Jacobian reads (P1C-2);
+- IsaacLab 3 PhysX filtered pairwise contact manifolds for groups that declare
+  `manifold: true` (P1C-3).
 
 Out of scope:
 
@@ -42,7 +44,8 @@ Out of scope:
 - writing `ctrl`, gains or limits, and PD target conversion;
 - actuator group semantics beyond the published row and its declared joint
   names;
-- IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
+- IsaacLab 2.x and IsaacLab 3 Newton contact manifolds, and every IsaacLab
+  contact Jacobian/wrench-to-joint read;
 - IsaacLab scratch geometry/contact reads;
 - an IsaacLab 2.x scratch (IL2 has no transaction card);
 - an IsaacLab subtree COM Jacobian (the engine exposes body COM only);
@@ -56,10 +59,12 @@ member.  P0A ships the MuJoCo implementation and the neutral contract;
 P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
 CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
 (`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
-scratch geometry and contacts stay unsupported.  IsaacLab actuator runtime state
-stays unsupported, and IsaacLab contacts stay out of scope until P1C.  P1B-2 adds
+scratch geometry stays unsupported and the P0B-2 contact face stays
+unsupported.  IsaacLab actuator runtime state stays unsupported.  P1B-2 adds
 the IsaacLab static actuation facts subset; P1C-1 adds the IsaacLab 3 Jacobian
-subset; P1C-2 adds the IsaacLab 3 transaction scratch.
+subset; P1C-2 adds the IsaacLab 3 transaction scratch; P1C-3 adds the PhysX
+filtered pairwise contact manifold (the IsaacLab 2.x / Newton contact manifold
+stays unsupported).
 
 ## 1. Entry points
 
@@ -132,7 +137,9 @@ labelled honestly:
 | `actuators.state` | synthetic (CPU mirror runtime channels; not a warp device read) |
 
 IsaacLab 2.x / 3.x P0B-2 share the model+pose subset; P1C-1 adds the IsaacLab 3
-Jacobian subset and P1C-2 the IsaacLab 3 transaction scratch:
+Jacobian subset, P1C-2 the IsaacLab 3 transaction scratch and P1C-3 the PhysX
+filtered pairwise contact manifold (the IsaacLab 2.x / Newton manifold stays
+unsupported):
 
 | Group | Support |
 |---|---|
@@ -151,7 +158,9 @@ Jacobian subset and P1C-2 the IsaacLab 3 transaction scratch:
 | `jacobian.site` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the robot-profile site local offset) |
 | `jacobian.point` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the world-point offset) |
 | `geometry.*` | unsupported (P1) |
-| `contacts.*` | unsupported (P1C) |
+| `contacts.manifold` (IsaacLab 3 PhysX) | partial (filtered pairwise manifolds for groups declared `manifold: true`; no contact-normal direction, geom ids, per-point tangent frame or friction) |
+| `contacts.manifold` (IsaacLab 2.x / IsaacLab 3 Newton) | unsupported |
+| `contacts.jacobian`, `contacts.wrench_to_joint` | unsupported (no IsaacLab contact constraint rows) |
 | `actuators.facts` | partial (static `ModelIR` actuator-group facts plus published USD joint names; `slot=None`, no ctrlrange/gear/gains/limits) |
 | `actuators.state` | unsupported (an IsaacLab group has no single scalar ctrl/force/length/velocity row) |
 
@@ -305,7 +314,7 @@ Only 1-DOF hinge/slide joints are exposed by `joint_position`/
 `joint_velocity`; another joint type raises a capability error naming the
 joint.
 
-### Contacts (P1A-1 / P1A-2)
+### Contacts (P1A-1 / P1A-2 / P1C-3)
 
 `contacts.manifold(group, *, env=None)` is **group-based**.  `group` is
 required and resolves against the run's declared `contacts:` groups; the
@@ -324,6 +333,35 @@ and no implicit default group.
 - Points are in backend contact order, env-major, and every result is a
   detached CPU copy.  Querying never mutates the contact list and never
   publishes an observation.
+
+#### IsaacLab 3 PhysX filtered manifold (P1C-3)
+
+A contact group opts in with `manifold: true` in its `contacts:` entry.  The
+flag is additive and defaults to `false`; the existing force/observation path is
+unchanged.  Only a pairwise group (non-empty `filter_refs`) may opt in; a
+general group with `manifold: true` fails at spec construction.
+
+- The PhysX contact sensor is declared with `track_contact_points=True` and an
+  explicit `max_contact_data_count_per_prim`; the sensor still reports the
+  force matrix used by the existing contact backend. The cap is a fixed
+  backend declaration (`4` contact points per sensor body and env), not an
+  implicit engine default.
+- `contacts.manifold(group)` reads the sensor's filtered contact view per env.
+  `body1` is the filtered partner and `body2` is the sensor body; this is the
+  group's declaration order only, not a proven contact-normal direction.
+- `pos_w` and `separation_m` come from the engine.  `separation_m` is the
+  engine's signed contact separation; it is never fabricated when the stack
+  does not expose it.  `normal_force_n` is the non-negative magnitude of the
+  engine's normal force scalar.
+- The engine contact normal direction is **not exposed**: this filtered view
+  does not prove its one-sided/two-sided orientation, so `normal_w` and
+  `frame_w` are `None`.  PhysX contact sensors also expose no geom names and no
+  per-point friction force, so `geom1`/`geom2` and `friction_force_w` are
+  `None`.  `body1`/`body2` are always present.
+- `contact_id` is unique within one manifold read (env-local) and is not a
+  stable cross-step identifier.  A group without the opt-in, an unbound group,
+  and every IL2/Newton manifold read raise typed capability errors.
+- No all-contact scan, step, observation or record write is performed.
 
 ### Contact constraint rows (P1A-2)
 
@@ -367,7 +405,7 @@ current manifold of the same env; `articulation` owns the output layout.
 - Results are detached CPU float64 copies.  The contact list, the constraint
   solve and live `MjData` are not mutated and no observation is published.
 - `contacts.jacobian` and `contacts.wrench_to_joint` are declared `unsupported`
-  on IsaacLab until P1C.  They raise `QueryCapabilityError`.
+  on IsaacLab.  They raise `QueryCapabilityError`.
 
 ### Actuators (P1B-1 + P1B-2)
 
@@ -568,10 +606,11 @@ Semantics:
   returned;
 - `actuators.facts` reports static actuator-group facts only (`slot=None`,
   `slot_kind="isaaclab_group"`, no ctrlrange/gear/gains/limits, joint names
-  from the published USD attrs).  `actuators.state`, `geometry` and `contacts`
-  are declared unsupported and raise `QueryCapabilityError`; contact
-  manifolds, the contact Jacobian and the contact wrench stay unsupported until
-  P1C (P1A-2 is MuJoCo/mjWarp only);
+  from the published USD attrs).  `actuators.state` and `geometry` are declared
+  unsupported and raise `QueryCapabilityError`; IsaacLab 3 PhysX
+  `contacts.manifold` is `partial` for opted-in pairwise groups (P1C-3), while
+  the IsaacLab 2.x / Newton contact manifold and every contact
+  Jacobian/wrench-to-joint read stay unsupported;
 - IsaacLab 3 `scratch` is the transaction documented in §5: root/joint writes
   go through the live state-write face and close restores the captured state.
   IsaacLab 2.x keeps `scratch` unsupported; scratch `geometry()` returns an

@@ -12,8 +12,9 @@ robot-profile-site reads are native.  Static actuator facts are a facts-only
 subset.  P1C-1 adds the native body/body-COM Jacobians and composes
 site/world-point rows from the body link Jacobian.  P1C-2 adds the exclusive
 per-env transaction scratch: root/joint writes go through the live state-write
-face and close restores the captured state.  Actuator runtime state, geometry
-and contacts stay unsupported and raise ``QueryCapabilityError``.
+face and close restores the captured state.  P1C-3 adds the PhysX filtered
+pairwise contact manifold for groups that declare ``manifold: true``; the
+Newton manifold, contact Jacobians and wrench-to-joint stay unsupported.
 """
 
 from __future__ import annotations
@@ -24,12 +25,19 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from unigym.backends.shared.isaaclab_query import (
+    IsaacLabContactQuery,
     IsaacLabJacobianQuery,
     IsaacLabQuery,
     IsaacLabQueryEnv,
     isaaclab_query_capabilities,
 )
-from unigym.query.capabilities import Feature, JacobianCaps, QueryCapabilities, ScratchCaps
+from unigym.query.capabilities import (
+    ContactCaps,
+    Feature,
+    JacobianCaps,
+    QueryCapabilities,
+    ScratchCaps,
+)
 from unigym.query.facade import ScratchWorld
 
 if TYPE_CHECKING:
@@ -44,8 +52,9 @@ __all__ = [
 
 _SCOPE = (
     "model facts + live pose + static actuator facts + native body/body-COM "
-    "Jacobian with synthetic site/world-point rows + transaction scratch; no "
-    "scratch geometry/contact/actuator-state"
+    "Jacobian with synthetic site/world-point rows + transaction scratch + "
+    "PhysX filtered pairwise contact manifold; no scratch geometry/contact/"
+    "actuator-state"
 )
 _SCRATCH_TRANSACTION = (
     "exclusive per-env transaction over the live state; IsaacLab exposes no " "snapshot copy"
@@ -63,10 +72,20 @@ _SCRATCH_JOINT = (
 _SCRATCH_FORWARD = "scene.write_data_to_sim() + sim.forward(); no implicit sync"
 _SCRATCH_READ = "the live articulation buffers inside the active transaction"
 _SCRATCH_GEOMETRY = "geometry and contact reads are not supported in an IsaacLab scratch"
+_PHYSX_CONTACT = (
+    "filtered pairwise PhysX contact manifolds for groups declared manifold: true; "
+    "per-contact world position, separation and non-negative normal-force magnitude; "
+    "the engine normal direction is not exposed (normal_w/frame_w are None), there are "
+    "no geom ids or per-point friction, and no contact Jacobian/wrench"
+)
+_NEWTON_CONTACT = (
+    "the IsaacLab 3 Newton filtered contact manifold is not implemented; "
+    "no contact Jacobian/wrench either"
+)
 
 
 def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
-    """Return the P1C-2 capability declaration for one IsaacLab 3 identity."""
+    """Return the P1C-3 capability declaration for one IsaacLab 3 identity."""
     base = isaaclab_query_capabilities(backend)
     notes = dict(base.notes)
     notes["scope"] = _SCOPE
@@ -79,6 +98,17 @@ def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
         "exclusive per-env transaction; the live root/joint state is captured on "
         "enter, written and forwarded by explicit calls, then restored on close. "
         "There is no snapshot copy and no concurrent step/reset."
+    )
+    notes["contacts"] = (
+        "PhysX filtered pairwise manifolds only, for contact groups that declare "
+        "manifold: true; positions, separation and a non-negative force magnitude "
+        "are exposed, the contact-normal direction is not; the Newton contact "
+        "manifold and all contact Jacobian/wrench reads stay unsupported"
+    )
+    manifold = (
+        Feature("partial", _PHYSX_CONTACT)
+        if backend == "isaaclab3_physx"
+        else Feature("unsupported", _NEWTON_CONTACT)
     )
     return replace(
         base,
@@ -113,6 +143,11 @@ def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
                 "synthetic",
                 "body link Jacobian composed with the world-point offset",
             ),
+        ),
+        contacts=ContactCaps(
+            manifold=manifold,
+            jacobian=base.contacts.jacobian,
+            wrench_to_joint=base.contacts.wrench_to_joint,
         ),
         notes=notes,
     )
@@ -157,6 +192,7 @@ class Isaaclab3Query(IsaacLabQuery):
             quat_order="xyzw",
         )
         self.kinematics = IsaacLabJacobianQuery(self)
+        self.contacts = IsaacLabContactQuery(self)
 
     def scratch(self, env: int | None = None) -> AbstractContextManager[ScratchWorld]:
         """Open one exclusive transaction scratch for *env* (default env 0)."""

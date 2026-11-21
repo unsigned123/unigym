@@ -79,6 +79,7 @@ def _build_urdf_spawn(spec: PropSpec, c: dict):
         fix_base=fix_base,
         collision_from_visuals=True,
         make_instanceable=True,
+        activate_contact_sensors=bool(getattr(spec, "_contact_sensor", False)),
     )
     if spec.type == "articulation":
         JointDriveCfg = c["UrdfConverterCfg"].JointDriveCfg
@@ -107,7 +108,10 @@ def _build_usd_spawn(spec: PropSpec, c: dict):
     UsdFileCfg = c["UsdFileCfg"]
     spawn_cfg = dict(spec.spawn)
     # IsaacLab 3: usd_path (UrdfFileCfg uses asset_path)
-    kwargs: dict[str, Any] = dict(usd_path=spec.usd_path)
+    kwargs: dict[str, Any] = dict(
+        usd_path=spec.usd_path,
+        activate_contact_sensors=bool(getattr(spec, "_contact_sensor", False)),
+    )
     mass = spawn_cfg.get("mass")
     if mass is not None:
         kwargs["mass_props"] = c["MassPropertiesCfg"](mass=float(mass))

@@ -45,6 +45,10 @@ def _classes() -> dict:
         "RigidObjectCfg": _RigidObjectCfg,
         "CylinderCfg": _CylinderCfg,
         "CapsuleCfg": _CapsuleCfg,
+        "CuboidCfg": _Cfg,
+        "SphereCfg": _Cfg,
+        "UrdfFileCfg": _Cfg,
+        "UsdFileCfg": _Cfg,
         "MassPropertiesCfg": _Cfg,
         "RigidBodyPropertiesCfg": _Cfg,
         "CollisionPropertiesCfg": _Cfg,
@@ -112,6 +116,38 @@ def test_primitive_spawn_uses_the_shared_material_cfg_for_friction():
     assert isinstance(material, _Material)
     assert material.kwargs["static_friction"] == 1.0
     assert material.kwargs["dynamic_friction"] == 1.0
+
+
+def _contact_sensor_prop(kind: str) -> PropSpec:
+    if kind == "box":
+        return PropSpec(
+            name="crate",
+            type="box",
+            size=[0.1, 0.1, 0.1],
+            aabb={"center": [0.0, 0.0, 0.05], "half_extents": [0.05, 0.05, 0.05]},
+        )
+    if kind == "sphere":
+        return PropSpec(name="ball", type="sphere", radius=0.05)
+    if kind == "cylinder":
+        return PropSpec(name="peg", type="cylinder", radius=0.03, half_height=0.05)
+    if kind == "rigid_object":
+        return PropSpec(name="crate", type="rigid_object", urdf_path="/tmp/crate.urdf")
+    if kind == "usd":
+        return PropSpec(name="crate", type="usd", usd_path="/tmp/crate.usda")
+    raise AssertionError(f"unknown prop kind {kind!r}")
+
+
+@pytest.mark.parametrize("kind", ("box", "sphere", "cylinder", "rigid_object", "usd"))
+def test_il3_prop_contact_sensor_flag_goes_to_the_spawner_not_the_asset_cfg(kind):
+    """IL3 ``RigidObjectCfg`` has no flag; the spawner cfg owns it."""
+    spec = _contact_sensor_prop(kind)
+    setattr(spec, "_contact_sensor", True)
+    handler = IsaacLabPropBackend().build_handler(spec, num_envs=1, device="cpu")
+
+    _name, cfg = handler.setup_scene(classes=_classes())
+
+    assert "activate_contact_sensors" not in cfg.kwargs
+    assert cfg.kwargs["spawn"].kwargs["activate_contact_sensors"] is True
 
 
 class _AssetData:

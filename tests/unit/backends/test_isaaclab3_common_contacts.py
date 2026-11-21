@@ -8,7 +8,10 @@ import types
 import pytest
 import torch
 
-from unigym.backends.shared.isaaclab3_common.contacts import IsaacLabContactBackend
+from unigym.backends.shared.isaaclab3_common.contacts import (
+    MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM,
+    IsaacLabContactBackend,
+)
 from unigym.contacts.manager import build_contact_manager
 
 
@@ -472,7 +475,7 @@ def test_shared_backend_key_is_empty_and_caller_settable():
     assert canonical.backend_key == "isaaclab3_newton"
 
 
-def test_prop_activation_flag_flows_to_the_rigid_object_cfg():
+def test_prop_activation_flag_flows_to_the_spawner_cfg():
     from unigym.backends.shared.isaaclab3_common.props.handlers.generic import GenericProp
     from unigym.props.base import PropSpec
 
@@ -483,8 +486,213 @@ def test_prop_activation_flag_flows_to_the_rigid_object_cfg():
         "UrdfFileCfg": _Cfg,
     }
     _, cfg = handler.setup_scene(classes=classes)
-    assert cfg.kw["activate_contact_sensors"] is False
+    assert "activate_contact_sensors" not in cfg.kw
+    assert cfg.kw["spawn"].kw["activate_contact_sensors"] is False
 
     spec._contact_sensor = True
     _, cfg = handler.setup_scene(classes=classes)
-    assert cfg.kw["activate_contact_sensors"] is True
+    assert "activate_contact_sensors" not in cfg.kw
+    assert cfg.kw["spawn"].kw["activate_contact_sensors"] is True
+
+
+class _ContactView:
+    """Stand-in for the PhysX ``RigidContactView.get_contact_data`` face."""
+
+    def __init__(self, buffers):
+        self._buffers = buffers
+        self.dt = None
+
+    def get_contact_data(self, *, dt):
+        self.dt = dt
+        return self._buffers
+
+
+class _ManifoldSensor:
+    """A bound sensor exposing the public contact-view read face."""
+
+    def __init__(self, bodies, buffers):
+        self._bodies = list(bodies)
+        self.contact_view = _ContactView(buffers)
+
+    @property
+    def body_names(self):
+        return self._bodies
+
+
+def _filter_row(body):
+    from unigym.contacts.inventory import ContactBodyAddress
+
+    return ContactBodyAddress(
+        owner="robot",
+        scope="robot",
+        body=body,
+        native=body,
+        prim_path=None,
+        collision=True,
+        contact_capable=True,
+        key=f"robot/robot/{body}",
+    )
+
+
+def _manifold_spec():
+    from unigym.contacts.base import ContactGroupSpec
+    from unigym.contacts.refs import ContactBodyRef
+
+    return ContactGroupSpec(
+        name="grip",
+        sensor_refs=[ContactBodyRef(owner="robot", body="tip")],
+        filter_refs=[ContactBodyRef(owner="robot", body="ball")],
+        frame="world",
+        manifold=True,
+    )
+
+
+def test_manifold_group_tracks_contact_points_with_a_declared_capacity(fake_isaaclab):
+    """Opting in sets the engine contact-point tracking and an explicit cap."""
+    manager = _manager(
+        [
+            {
+                "name": "grip",
+                "sensor_refs": [{"owner": "robot", "body": "tip"}],
+                "filter_refs": [{"owner": "robot", "body": "ball"}],
+                "frame": "world",
+                "manifold": True,
+            }
+        ]
+    )
+
+    cfg = manager.setup_scene()["contact_grip_s0"]
+
+    assert cfg.kw["track_contact_points"] is True
+    assert cfg.kw["max_contact_data_count_per_prim"] == MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM
+
+
+def test_force_only_group_does_not_enable_contact_point_tracking(fake_isaaclab):
+    """A group without the flag keeps the force-only sensor configuration."""
+    manager = _manager(
+        [
+            {
+                "name": "grip",
+                "sensor_refs": [{"owner": "robot", "body": "tip"}],
+                "filter_refs": [{"owner": "robot", "body": "ball"}],
+                "frame": "world",
+            }
+        ]
+    )
+
+    cfg = manager.setup_scene()["contact_grip_s0"]
+
+    assert "track_contact_points" not in cfg.kw
+    assert "max_contact_data_count_per_prim" not in cfg.kw
+
+
+def test_manifold_read_maps_filtered_engine_rows_to_body_named_points():
+    """Two contacts in env 0 become two points; env 1 has none.
+
+    The engine force scalar is taken as a magnitude: a negative engine scalar
+    does not leak a fabricated sign into the neutral record.
+    """
+    spec = _manifold_spec()
+    backend = IsaacLabContactBackend([spec])
+    forces = torch.tensor([[-2.0], [4.0], [0.0], [0.0]], dtype=torch.float32)
+    points = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [9.0, 9.0, 9.0], [9.0, 9.0, 9.0]],
+        dtype=torch.float32,
+    )
+    normals = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        dtype=torch.float32,
+    )
+    separations = torch.tensor([[-1e-3], [-2e-3], [0.0], [0.0]], dtype=torch.float32)
+    counts = torch.tensor([[2], [0]], dtype=torch.int32)
+    starts = torch.tensor([[0], [2]], dtype=torch.int32)
+    sensor = _ManifoldSensor(["tip"], (forces, points, normals, separations, counts, starts))
+    _attach(backend, spec, [sensor], [[0]], filters=[_filter_row("ball")])
+
+    out = backend.read_manifold(spec, torch.tensor([0, 1], dtype=torch.int64), dt=0.005)
+
+    assert sensor.contact_view.dt == 0.005
+    assert len(out) == 2
+    first, second = out
+    assert (first.env_id, second.env_id) == (0, 0)
+    assert (first.body1, first.body2) == ("ball", "tip")
+    assert (first.contact_id, second.contact_id) == (0, 1)
+    assert first.normal_force_n == pytest.approx(2.0)
+    assert second.normal_force_n == pytest.approx(4.0)
+    assert first.separation_m == pytest.approx(-1e-3)
+    assert first.pos_w.dtype == torch.float64
+    assert first.pos_w.tolist() == pytest.approx([0.0, 0.0, 1.0])
+
+    points[0, 0] = 123.0
+    assert first.pos_w[0].item() == pytest.approx(0.0)
+
+
+def test_manifold_read_respects_the_selected_env_subset():
+    """A selected env with no contacts yields an empty point tuple."""
+    spec = _manifold_spec()
+    backend = IsaacLabContactBackend([spec])
+    sensor = _ManifoldSensor(
+        ["tip"],
+        (
+            torch.zeros((2, 1)),
+            torch.zeros((2, 3)),
+            torch.zeros((2, 3)),
+            torch.zeros((2, 1)),
+            torch.tensor([[1], [0]], dtype=torch.int32),
+            torch.tensor([[0], [1]], dtype=torch.int32),
+        ),
+    )
+    _attach(backend, spec, [sensor], [[0]], filters=[_filter_row("ball")])
+
+    out = backend.read_manifold(spec, torch.tensor([1], dtype=torch.int64), dt=0.005)
+
+    assert out == ()
+
+
+def test_manifold_read_is_env_major_across_multiple_sensors():
+    """Env is the outer axis: env0 sensor/filter order precedes env1."""
+    from unigym.contacts.base import ContactGroupSpec
+    from unigym.contacts.refs import ContactBodyRef
+
+    spec = ContactGroupSpec(
+        name="both_feet",
+        sensor_refs=[
+            ContactBodyRef(owner="robot", body="left_foot"),
+            ContactBodyRef(owner="robot", body="right_foot"),
+        ],
+        filter_refs=[ContactBodyRef(owner="robot", body="ball")],
+        frame="world",
+        manifold=True,
+    )
+    backend = IsaacLabContactBackend([spec])
+
+    def sensor(body: str, env0_force: float, env1_force: float) -> _ManifoldSensor:
+        return _ManifoldSensor(
+            [body],
+            (
+                torch.tensor([[env0_force], [env1_force]], dtype=torch.float32),
+                torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 2.0]], dtype=torch.float32),
+                torch.zeros((2, 3)),
+                torch.tensor([[-1e-3], [-2e-3]], dtype=torch.float32),
+                torch.tensor([[1], [1]], dtype=torch.int32),
+                torch.tensor([[0], [1]], dtype=torch.int32),
+            ),
+        )
+
+    _attach(
+        backend,
+        spec,
+        [sensor("left_foot", 1.0, 3.0), sensor("right_foot", 2.0, 4.0)],
+        [[0], [0]],
+        filters=[_filter_row("ball")],
+    )
+
+    out = backend.read_manifold(spec, torch.tensor([0, 1], dtype=torch.int64), dt=0.005)
+
+    assert [(point.env_id, point.body2, point.normal_force_n) for point in out] == [
+        (0, "left_foot", pytest.approx(1.0)),
+        (0, "right_foot", pytest.approx(2.0)),
+        (1, "left_foot", pytest.approx(3.0)),
+        (1, "right_foot", pytest.approx(4.0)),
+    ]
+    assert [point.contact_id for point in out] == [0, 1, 0, 1]

@@ -30,15 +30,22 @@ Scheme A semantics (identical body resolution to the IsaacLab2 face):
 
 IsaacLab 3 wraps sensor data in ``ProxyArray``; every force read uses the
 explicit ``.torch`` accessor (never ``torch.as_tensor(proxy_array)``).  The
-sensor's internal buffer limits (e.g. ``max_contact_data_count_per_prim``)
-are left to IsaacLab defaults / backend options and are NOT hardcoded here.
+sensor's internal buffer limits are left to IsaacLab defaults for force-only
+groups; a group that opts into ``manifold: true`` explicitly asks the engine to
+track per-contact points with a declared
+``max_contact_data_count_per_prim`` (see ``MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM``).
 """
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping, Sequence
-from typing import Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import torch
 
 from unigym.backends.shared.isaaclab3_common.naming import (
     articulation_prim_leaf,
@@ -49,6 +56,36 @@ from unigym.contacts.inventory import ContactBodyAddress, ContactInventory, reso
 from unigym.contacts.refs import ContactBodyRef, is_wildcard
 
 _REGEX_META = re.compile(r"[.^$*+?{}\[\]\\|()]")
+
+#: Contact-point slots per sensor body and env reserved in the PhysX contact
+#: view when a group declares ``manifold: true``.  The value is passed to
+#: ``ContactSensorCfg.max_contact_data_count_per_prim`` explicitly instead of
+#: relying on the engine's internal default; raising it costs device memory and
+#: is a future per-group option, not a hidden default.
+MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM = 4
+
+
+@dataclass(frozen=True)
+class ManifoldContact:
+    """One engine contact point from a filtered PhysX contact view.
+
+    ``body1`` is the filtered partner and ``body2`` is the sensor body; the
+    order is the group's declaration order only, not a proven force/normal
+    direction.  ``pos_w`` and ``separation_m`` are the engine's per-contact
+    values.  The engine normal direction is not exposed by this record because
+    the filtered view does not prove its one-sided/two-sided orientation;
+    ``normal_force_n`` is the non-negative magnitude of the engine's normal
+    force scalar.  ``contact_id`` is unique within one env of a manifold read
+    and is not a stable cross-step identifier.
+    """
+
+    env_id: int
+    body1: str
+    body2: str
+    pos_w: torch.Tensor
+    separation_m: float
+    normal_force_n: float
+    contact_id: int
 
 
 def _union(names: Sequence[str]) -> str:
@@ -257,6 +294,11 @@ class IsaacLabContactBackend:
                 kwargs = {"prim_path": self._ref_path(ref), "history_length": 1}
                 if spec.mode == "pairwise":
                     kwargs["filter_prim_paths_expr"] = filter_exprs
+                if spec.manifold:
+                    kwargs["track_contact_points"] = True
+                    kwargs["max_contact_data_count_per_prim"] = (
+                        MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM
+                    )
                 self._add_field(
                     fields_cfg,
                     field,
@@ -435,6 +477,179 @@ class IsaacLabContactBackend:
             pieces.append(matrix)
         return torch.cat(pieces, dim=1).clone()
 
+    def read_manifold(
+        self,
+        spec: ContactGroupSpec,
+        env_ids: torch.Tensor,
+        *,
+        dt: float,
+    ) -> tuple[ManifoldContact, ...]:
+        """Read per-contact rows for one ``manifold: true`` pairwise group.
+
+        The engine data comes from the sensor's public
+        ``contact_view.get_contact_data``: world contact points, the engine's
+        signed contact separation and a normal force scalar.  PhysX filtered
+        reporting is one sensor body to many filter bodies, so ``body1`` is the
+        filtered partner and ``body2`` is the sensor body; that order is the
+        group declaration order, not a proven contact-normal direction.  The
+        engine normal is intentionally not exposed: this view does not prove
+        its one-sided/two-sided orientation, so the record carries no direction
+        and ``normal_force_n`` is the force scalar's magnitude.
+
+        ``env_ids`` is the query's normalized 1-D int64 CPU env selection.
+        Points are emitted env-major: env selection order first, then sensor
+        declaration order, then filter declaration order, then engine contact
+        order.  Every returned tensor is a detached CPU float64 copy; the
+        engine buffers are reused in place, so nothing borrowed escapes this
+        method.
+        """
+        if not spec.manifold:
+            raise ValueError(f"contact group {spec.name!r} is not declared manifold: true")
+        if spec.mode != "pairwise":
+            raise ValueError(
+                f"contact group {spec.name!r} is not pairwise; a filtered "
+                f"contact manifold requires a non-empty filter_refs"
+            )
+        entry = self._sensors.get(spec.name)
+        if entry is None or entry.get("mode") != "pairwise":
+            raise ValueError(
+                f"contact group {spec.name!r} is not bound as a pairwise "
+                f"sensor group; bind_env must run before a manifold read"
+            )
+        filter_names = [str(row.body) for row in self._filters.get(spec.name, ())]
+        selected = [int(value) for value in env_ids.tolist()]
+        readings = []
+        for sensor, perm in zip(entry["sensors"], self._perm[spec.name]):
+            body_names = [str(name) for name in sensor.body_names]
+            sensor_index = int(perm[0])
+            sensor_name = body_names[sensor_index]
+            forces, positions, _normals, separations, counts, starts = self._engine_contact_buffers(
+                sensor, spec.name, dt
+            )
+            env_count = self._env_count(len(body_names), counts, spec.name)
+            if int(counts.shape[1]) != len(filter_names):
+                raise ValueError(
+                    f"contact group {spec.name!r}: engine filter axis "
+                    f"{int(counts.shape[1])} != resolved filter refs "
+                    f"{len(filter_names)}; filter_prim_paths_expr and the "
+                    f"declared filter_refs drifted"
+                )
+            readings.append(
+                (
+                    sensor_index,
+                    sensor_name,
+                    forces,
+                    positions,
+                    separations,
+                    counts,
+                    starts,
+                    env_count,
+                )
+            )
+        points: list[ManifoldContact] = []
+        counters: dict[int, int] = {}
+        for env_id in selected:
+            for (
+                sensor_index,
+                sensor_name,
+                forces,
+                positions,
+                separations,
+                counts,
+                starts,
+                env_count,
+            ) in readings:
+                if env_id >= env_count:
+                    raise ValueError(
+                        f"contact group {spec.name!r}: env id {env_id} is "
+                        f"outside the sensor's {env_count} env slots"
+                    )
+                flat = sensor_index * env_count + env_id
+                for filter_index, filter_name in enumerate(filter_names):
+                    count = int(counts[flat, filter_index])
+                    if count <= 0:
+                        continue
+                    start = int(starts[flat, filter_index])
+                    for offset in range(count):
+                        index = start + offset
+                        contact_id = counters.get(env_id, 0)
+                        counters[env_id] = contact_id + 1
+                        points.append(
+                            ManifoldContact(
+                                env_id=env_id,
+                                body1=filter_name,
+                                body2=sensor_name,
+                                pos_w=_cpu_vector(positions[index], "contact point"),
+                                separation_m=_cpu_scalar(separations[index], "contact separation"),
+                                normal_force_n=abs(_cpu_scalar(forces[index], "contact force")),
+                                contact_id=contact_id,
+                            )
+                        )
+        return tuple(points)
+
+    def _engine_contact_buffers(
+        self,
+        sensor,
+        group: str,
+        dt: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return one sensor's per-contact engine buffers as device tensors."""
+        view = getattr(sensor, "contact_view", None)
+        getter = getattr(view, "get_contact_data", None)
+        if not callable(getter):
+            raise NotImplementedError(
+                f"contact group {group!r}: the IsaacLab 3 contact sensor "
+                f"exposes no contact_view.get_contact_data(); the filtered "
+                f"contact manifold is unavailable on this stack"
+            )
+        raw = getter(dt=dt)
+        if not isinstance(raw, tuple) or len(raw) != 6:
+            raise NotImplementedError(
+                f"contact group {group!r}: get_contact_data returned "
+                f"{type(raw).__name__}, expected the 6-tuple (forces, points, "
+                f"normals, separations, counts, start_indices); this stack "
+                f"cannot supply a contact manifold"
+            )
+        forces, positions, normals, separations, counts, starts = (
+            _engine_tensor(value, group) for value in raw
+        )
+        if counts.shape != starts.shape or counts.ndim != 2:
+            raise ValueError(
+                f"contact group {group!r}: engine counts/start_indices shapes "
+                f"{tuple(counts.shape)} / {tuple(starts.shape)} are not the "
+                f"expected matching (sensor_count, filter_count) pair"
+            )
+        if (
+            not _is_contact_column(forces)
+            or not _is_contact_column(separations)
+            or positions.ndim != 2
+            or normals.ndim != 2
+            or int(positions.shape[1]) != 3
+            or int(normals.shape[1]) != 3
+            or int(positions.shape[0]) != int(forces.shape[0])
+            or int(normals.shape[0]) != int(forces.shape[0])
+            or int(separations.shape[0]) != int(forces.shape[0])
+        ):
+            raise ValueError(
+                f"contact group {group!r}: engine contact buffers have shapes "
+                f"forces={tuple(forces.shape)} points={tuple(positions.shape)} "
+                f"normals={tuple(normals.shape)} "
+                f"separations={tuple(separations.shape)}; expected "
+                f"(max, 1) forces/separations and (max, 3) points/normals"
+            )
+        return forces, positions, normals, separations, counts, starts
+
+    @staticmethod
+    def _env_count(bodies: int, counts: torch.Tensor, group: str) -> int:
+        """Derive the env count from the body-major engine sensor axis."""
+        if bodies <= 0 or int(counts.shape[0]) % bodies != 0:
+            raise ValueError(
+                f"contact group {group!r}: engine sensor axis "
+                f"{int(counts.shape[0])} is not a positive multiple of the "
+                f"{bodies} sensor bodies"
+            )
+        return int(counts.shape[0]) // bodies
+
     def close(self) -> None:
         """Release the cached sensor handles (ContactBackend lifecycle)."""
         self._sensors.clear()
@@ -448,3 +663,48 @@ class IsaacLabContactBackend:
 def spec_body_frame_unsupported(specs: list[ContactGroupSpec]) -> bool:
     """True when any isaaclab spec asks for the v1-unsupported body frame."""
     return any(s.frame == "body" for s in specs)
+
+
+def _is_contact_column(value: torch.Tensor) -> bool:
+    """True for the engine's ``(max,)`` or ``(max, 1)`` scalar-per-contact axes."""
+    return value.ndim == 1 or (value.ndim == 2 and int(value.shape[1]) == 1)
+
+
+def _engine_tensor(value, group: str) -> torch.Tensor:
+    """Return a torch view over one engine contact buffer (no copy yet)."""
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return value
+    try:
+        import warp as wp
+    except ImportError as exc:  # pragma: no cover - the lane always ships warp
+        raise NotImplementedError(
+            f"contact group {group!r}: the engine contact buffers are not torch "
+            f"tensors and warp is unavailable"
+        ) from exc
+    tensor = wp.to_torch(value)
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError(
+            f"contact group {group!r}: warp contact buffer did not convert to "
+            f"a torch.Tensor, got {type(tensor).__name__}"
+        )
+    return tensor
+
+
+def _cpu_vector(value: torch.Tensor, field: str) -> torch.Tensor:
+    """Return a detached float64 CPU copy of one ``(3,)`` contact vector."""
+    import torch
+
+    vector = value.detach().to("cpu").to(torch.float64).reshape(-1)
+    if int(vector.numel()) != 3:
+        raise ValueError(f"{field}: expected 3 components, got {int(vector.numel())}")
+    return vector
+
+
+def _cpu_scalar(value: torch.Tensor, field: str) -> float:
+    """Return one detached finite contact scalar as a plain float."""
+    scalar = float(value.detach().to("cpu").reshape(-1)[0])
+    if not math.isfinite(scalar):
+        raise ValueError(f"{field}: expected a finite value, got {scalar!r}")
+    return scalar

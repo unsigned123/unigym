@@ -13,9 +13,10 @@ body/body-COM Jacobians (native engine rows) and composes site/world-point
 Jacobians from the body link row.  P1C-2 adds the IsaacLab 3 transaction
 scratch: IsaacLab has no snapshot copy, so a scratch writes the live state-write
 face, forwards, reads, and restores the captured root/joint state on close.
-Actuator runtime state, geometry and contacts stay unsupported and raise
-``QueryCapabilityError``.  IsaacLab 2.x keeps the unsupported scratch and
-kinematics subfaces.
+Actuator runtime state, geometry and contacts stay unsupported on this shared
+base and raise ``QueryCapabilityError``.  IsaacLab 2.x keeps the unsupported
+scratch and kinematics subfaces.  The IL3 PhysX subclass replaces the contact
+subface with the filtered pairwise manifold implementation.
 
 Engine-thread contract: the query reads the live articulation buffers at a
 step boundary and adds no lock.  Every result is a detached CPU torch copy; no
@@ -27,19 +28,23 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from math import isfinite
 from types import TracebackType
 from typing import NoReturn, Protocol, runtime_checkable
 
 import torch
 
 from unigym.backends.obs_schema import build_site_inventory
+from unigym.backends.shared.isaaclab3_common.contacts import ManifoldContact
 from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
+from unigym.contacts.base import ContactGroupSpec
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
 from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     ActuatorFacts,
     ComRef,
+    ContactManifold,
     ContactPoint,
     DofLayout,
     EntityRef,
@@ -160,6 +165,31 @@ class IsaacLabTransactionEnv(IsaacLabQueryEnv, Protocol):
     ) -> torch.Tensor:
         """Write explicit joint positions and optional velocities."""
         ...
+
+
+@runtime_checkable
+class IsaacLabManifoldBackend(Protocol):
+    """The contact backend face that serves a filtered contact manifold."""
+
+    inventory: object
+
+    def read_manifold(
+        self,
+        spec: ContactGroupSpec,
+        env_ids: torch.Tensor,
+        *,
+        dt: float,
+    ) -> Sequence[ManifoldContact]:
+        """Read one pairwise group's per-contact engine rows."""
+        ...
+
+
+@runtime_checkable
+class IsaacLabContactManagerFace(Protocol):
+    """The run contact manager a query resolves groups against."""
+
+    specs: Sequence[ContactGroupSpec]
+    backend: object
 
 
 def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
@@ -1482,9 +1512,9 @@ class _TransactionScratch:
 
 
 class _UnsupportedContacts(_Subface):
-    """Contact reads are capability-gated until their own plans land."""
+    """Contact reads are capability-gated on identities without a manifold face."""
 
-    def manifold(self, group: str, *, env: EnvSelection = None) -> NoReturn:
+    def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
         """Reject a group-based contact manifold read on IsaacLab."""
         del group, env
         self._open()
@@ -1507,6 +1537,137 @@ class _UnsupportedContacts(_Subface):
         raise QueryCapabilityError(
             self._query.backend, "contacts.wrench_to_joint", "unsupported", _P1_DETAIL
         )
+
+
+class IsaacLabContactQuery(_UnsupportedContacts):
+    """Filtered pairwise contact manifolds over the live PhysX contact view.
+
+    Only groups declared ``manifold: true`` opt in.  The contact backend owns
+    the filtered sensor buffers and returns neutral per-contact rows; this
+    subface resolves the group, normalizes the env selection and validates the
+    engine's physics step before constructing public ``ContactPoint`` values.
+    A group without the flag is a typed capability error, never an empty
+    manifold.  The inherited Jacobian and wrench-to-joint operations stay
+    typed-unsupported, so the contact subface still satisfies the public
+    ``ContactQuery`` protocol.
+    """
+
+    def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
+        """Return one declared ``manifold: true`` group's active points."""
+        self._open()
+        self._query.capabilities.require("contacts.manifold")
+        spec = self._spec(group)
+        if not spec.manifold:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "partial",
+                f"contact group {group!r} was not declared manifold: true; "
+                f"opt in on the group spec to read its filtered contact points",
+            )
+        backend = self._backend(spec)
+        ids = _select_env(env, self._query._env.num_envs)
+        try:
+            records = backend.read_manifold(spec, ids, dt=self._physics_dt())
+        except NotImplementedError as err:
+            raise QueryCapabilityError(
+                self._query.backend, "contacts.manifold", "unsupported", str(err)
+            ) from err
+        points = tuple(_contact_point(record, group) for record in records)
+        return ContactManifold(ids, group, points)
+
+    def _spec(self, group: str) -> ContactGroupSpec:
+        """Resolve one declared contact group by name."""
+        if not isinstance(group, str) or not group:
+            raise QueryShapeError("group", "a non-empty group name", repr(group))
+        manager = getattr(self._query._env, "contact_manager", None)
+        if manager is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                "the run declares no contacts: groups",
+            )
+        if not isinstance(manager, IsaacLabContactManagerFace):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                "the env contact manager exposes no group specs and backend",
+            )
+        specs = tuple(manager.specs)
+        spec = next((entry for entry in specs if entry.name == group), None)
+        if spec is None:
+            raise QueryReferenceError(
+                "contacts.manifold", group, tuple(entry.name for entry in specs)
+            )
+        return spec
+
+    def _backend(self, spec: ContactGroupSpec) -> IsaacLabManifoldBackend:
+        """Return the bound manifold backend for one declared group."""
+        manager = getattr(self._query._env, "contact_manager", None)
+        backend = getattr(manager, "backend", None)
+        if not isinstance(backend, IsaacLabManifoldBackend):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                f"the run contact backend {type(backend).__name__} exposes no "
+                f"filtered manifold read",
+            )
+        if backend.inventory is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                f"contact group {spec.name!r} is not bound to the env",
+            )
+        return backend
+
+    def _physics_dt(self) -> float:
+        """Return the live physics step used to convert contact impulses."""
+        sim = getattr(self._query._env, "sim", None)
+        getter = getattr(sim, "get_physics_dt", None)
+        if not callable(getter):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                "the env exposes no sim.get_physics_dt() for contact forces",
+            )
+        value = getter()
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise QueryShapeError("physics_dt", "a finite positive step", type(value).__name__)
+        dt = float(value)
+        if not isfinite(dt) or dt <= 0.0:
+            raise QueryShapeError("physics_dt", "a finite positive step", repr(dt))
+        return dt
+
+
+def _contact_point(record: ManifoldContact, group: str) -> ContactPoint:
+    """Map one engine contact row to the public neutral contact point.
+
+    PhysX contact sensors expose no geom names and this filtered view does not
+    prove a contact-normal direction, so ``geom1``/``geom2``, ``normal_w`` and
+    ``frame_w`` stay ``None``.  They also expose no per-point friction force,
+    so ``friction_force_w`` stays ``None``.  ``normal_force_n`` is the
+    non-negative engine force magnitude.
+    """
+    return ContactPoint(
+        env_id=record.env_id,
+        group=group,
+        body1=record.body1,
+        body2=record.body2,
+        geom1=None,
+        geom2=None,
+        pos_w=record.pos_w,
+        normal_w=None,
+        frame_w=None,
+        separation_m=record.separation_m,
+        normal_force_n=record.normal_force_n,
+        friction_force_w=None,
+        contact_id=record.contact_id,
+    )
 
 
 class _ActuatorQuery(_Subface):

@@ -82,6 +82,7 @@ def _build_primitive_spawn(spec: PropSpec, c: dict):
         rigid_props=RigidBodyPropertiesCfg(),
         collision_props=CollisionPropertiesCfg(collision_enabled=True),
         visual_material=PreviewSurfaceCfg(diffuse_color=color),
+        activate_contact_sensors=bool(getattr(spec, "_contact_sensor", False)),
     )
     friction = spec.spawn.get("friction")
     restitution = spec.spawn.get("restitution")
@@ -139,7 +140,6 @@ class PrimitiveProp(PropHandler):
             ),
             collision_group=0,
             debug_vis=False,
-            activate_contact_sensors=bool(getattr(self.spec, "_contact_sensor", False)),
         )
         return self.spec.name, cfg
 
