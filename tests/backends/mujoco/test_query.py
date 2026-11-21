@@ -388,13 +388,12 @@ def test_site_com_and_point_jacobians_match_mujoco(tiny_env_factory, tiny_mjcf, 
     np.testing.assert_allclose(result.rot[0].numpy(), expected_r)
 
 
-def test_contacts_and_actuators_are_capability_gated(tiny_env) -> None:
-    """The P0A subfaces exist but every operation raises a typed error."""
+def test_contacts_without_a_declared_group_are_capability_gated(tiny_env) -> None:
+    """A run with no contacts: groups cannot answer a manifold read."""
     query = _query(tiny_env)
-    geom = EntityRef("geom", "base_geom")
 
-    with pytest.raises(QueryCapabilityError, match=r"contacts.manifold.*unsupported"):
-        query.contacts.manifold(geom)
+    with pytest.raises(QueryCapabilityError, match=r"contacts\.manifold.*no contacts"):
+        query.contacts.manifold("anything")
     with pytest.raises(QueryCapabilityError, match=r"actuators.facts.*unsupported"):
         query.actuators.facts("shoulder_motor")
 

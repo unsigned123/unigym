@@ -23,12 +23,19 @@ from typing import TYPE_CHECKING, NoReturn, Protocol, runtime_checkable
 import numpy as np
 import torch
 
+# mjwarp reuses the MuJoCo contact backend, so the pure contact-frame
+# convention helper keeps one home there rather than being copied here.
+from unigym.backends.mujoco.contacts import contact_frame_to_world
+from unigym.contacts.base import ContactGroupSpec
+from unigym.contacts.inventory import resolve_refs
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
 from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     AABB,
     ComRef,
+    ContactManifold,
+    ContactPoint,
     DistanceResult,
     DofLayout,
     EntityRef,
@@ -49,6 +56,7 @@ from unigym.runtime.controllers import ArticulationRuntime
 
 if TYPE_CHECKING:
     from unigym.backends.shared.mjfamily.props.props import MujocoPropBackend
+    from unigym.contacts.manager import ContactManager
 
 import mujoco  # noqa: E402  (the backend env sets MUJOCO_GL before this import)
 
@@ -92,6 +100,11 @@ class MjFamilyEnv(Protocol):
     @property
     def prop_backend(self) -> MujocoPropBackend | None:
         """The optional prop runtime, or ``None`` when the env has no props."""
+        ...
+
+    @property
+    def contact_manager(self) -> ContactManager | None:
+        """The optional run contact manager, or ``None`` without ``contacts:``."""
         ...
 
 
@@ -326,7 +339,7 @@ class MjFamilyQuery:
         self.state = _StateQuery(self)
         self.kinematics = _KinematicsQuery(self)
         self.geometry = _GeometryQuery(self)
-        self.contacts = _UnsupportedContacts(self)
+        self.contacts = _ContactQuery(self)
         self.actuators = _UnsupportedActuators(self)
 
     def require(self, *ops: str) -> None:
@@ -982,19 +995,73 @@ class _GeometryQuery(_QueryPart):
         return center - world_half, center + world_half
 
 
-class _UnsupportedContacts:
-    def __init__(self, query: MjFamilyQuery) -> None:
-        self._query = query
+class _ContactQuery(_QueryPart):
+    """Group-based contact manifolds over the current CPU contact list.
 
-    def manifold(
-        self,
-        a: EntityRef | None = None,
-        b: EntityRef | None = None,
-        *,
-        env: EnvSelection = None,
-    ) -> NoReturn:
-        del a, b, env
-        self._raise("contacts.manifold")
+    The group's declared sensor/filter body ids own the filter; there is no
+    all-contact world scan.  A contact matches a general group when one side
+    is a sensor body and the other is not; a pairwise group additionally
+    requires the other side to be a declared filter body.  Points preserve the
+    backend contact order, env-major.
+    """
+
+    def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
+        """Return the active contact points of one declared group."""
+        self._open()
+        self._query.capabilities.require("contacts.manifold")
+        spec, sensor_ids, filter_ids = self._group(group)
+        ids, datas = self._frames(env)
+        body_names, geom_names = self._scene_names()
+        model = self._env.mj_model
+        sensor_set = set(sensor_ids)
+        filter_set = set(filter_ids)
+        points: list[ContactPoint] = []
+        frc6 = np.zeros(6, dtype=np.float64)
+        for env_index, data in enumerate(datas):
+            env_id = int(ids[env_index])
+            ncon = int(data.ncon)
+            geoms = np.asarray(data.contact.geom)[:ncon]
+            frames = np.asarray(data.contact.frame)[:ncon].reshape(-1, 9)
+            positions = np.asarray(data.contact.pos)[:ncon]
+            separations = np.asarray(data.contact.dist)[:ncon]
+            for contact_id in range(ncon):
+                geom1 = int(geoms[contact_id, 0])
+                geom2 = int(geoms[contact_id, 1])
+                body1 = int(model.geom_bodyid[geom1])
+                body2 = int(model.geom_bodyid[geom2])
+                if body1 in sensor_set:
+                    other = body2
+                elif body2 in sensor_set:
+                    other = body1
+                else:
+                    continue
+                if spec.mode == "pairwise":
+                    if other not in filter_set:
+                        continue
+                elif other in sensor_set:
+                    continue
+                mujoco.mj_contactForce(model, data, contact_id, frc6)
+                frame = frames[contact_id].reshape(3, 3)
+                tangential = np.zeros(3, dtype=np.float64)
+                tangential[1:3] = frc6[1:3]
+                points.append(
+                    ContactPoint(
+                        env_id=env_id,
+                        group=group,
+                        body1=body_names[body1],
+                        body2=body_names[body2],
+                        geom1=geom_names.get(geom1),
+                        geom2=geom_names.get(geom2),
+                        pos_w=_tensor(positions[contact_id]),
+                        normal_w=_tensor(frame[0]),
+                        frame_w=_tensor(frame),
+                        separation_m=float(separations[contact_id]),
+                        normal_force_n=float(frc6[0]),
+                        friction_force_w=_tensor(contact_frame_to_world(frame, tangential)),
+                        contact_id=contact_id,
+                    )
+                )
+        return ContactManifold(ids, group, tuple(points))
 
     def jacobian(
         self,
@@ -1005,13 +1072,94 @@ class _UnsupportedContacts:
         env: EnvSelection = None,
         frame: str = "world",
     ) -> NoReturn:
+        """Reject contact Jacobian reads (deferred to the contact-Jacobian plan)."""
         del a, b, point, env, frame
-        self._raise("contacts.jacobian")
+        self._open()
+        self._query.capabilities.require("contacts.jacobian")
+        raise AssertionError("contacts.jacobian is declared unsupported but require() returned")
 
-    def _raise(self, op: str) -> NoReturn:
-        self._query._require_open()
-        self._query.capabilities.require(op)
-        raise AssertionError(f"{op} is declared unsupported but require() returned")
+    def _group(self, group: str) -> tuple[ContactGroupSpec, tuple[int, ...], tuple[int, ...]]:
+        if not isinstance(group, str) or not group:
+            raise QueryShapeError("group", "a non-empty group name", repr(group))
+        manager = self._env.contact_manager
+        if manager is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                "the run declares no contacts: groups",
+            )
+        available = [spec.name for spec in manager.specs]
+        spec = next((entry for entry in manager.specs if entry.name == group), None)
+        if spec is None:
+            raise QueryReferenceError("contacts.manifold", group, available)
+        inventory = getattr(manager.backend, "inventory", None)
+        if inventory is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                f"contact group {group!r} is not bound to the env",
+            )
+        sensors = resolve_refs(inventory, spec.sensor_refs, axis="sensor_refs", group=group)
+        filters = resolve_refs(inventory, spec.filter_refs, axis="filter_refs", group=group)
+        if not sensors:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "contacts.manifold",
+                "unsupported",
+                f"contact group {group!r} resolved no sensor bodies",
+            )
+        model = self._env.mj_model
+        body_ids = {
+            str(model.body(body_id).name): body_id
+            for body_id in range(model.nbody)
+            if model.body(body_id).name
+        }
+        sensor_ids = tuple(self._native_body_id(body_ids, row.native) for row in sensors)
+        filter_ids = tuple(self._native_body_id(body_ids, row.native) for row in filters)
+        return spec, sensor_ids, filter_ids
+
+    def _native_body_id(self, body_ids: dict[str, int], native: str) -> int:
+        try:
+            return body_ids[native]
+        except KeyError:
+            raise QueryReferenceError("contacts.manifold", native, body_ids) from None
+
+    def _scene_names(self) -> tuple[dict[int, str], dict[int, str]]:
+        """Return ``(body id -> name, geom id -> name)`` for the whole scene.
+
+        The merged IR is the neutral whole-scene name source.  A run without a
+        lossless merge falls back to the union of its articulation IRs; bodies
+        and geoms outside every articulation (world, props, supports) keep
+        their compiled names, which is the neutral vocabulary for scene-owned
+        geometry.
+        """
+        model_set = self._model_set()
+        if model_set.merged is not None:
+            irs = (model_set.merged,)
+        else:
+            irs = tuple(model_set.articulations.values())
+        body_names: dict[int, str] = {}
+        geom_names: dict[int, str] = {}
+        for ir in irs:
+            for body in ir.bodies:
+                if body.body_id is not None:
+                    body_names.setdefault(int(body.body_id), body.name)
+            for geom in ir.geoms:
+                if geom.geom_id is not None:
+                    geom_names.setdefault(int(geom.geom_id), geom.name)
+        model = self._env.mj_model
+        for body_id in range(model.nbody):
+            if body_id not in body_names:
+                name = str(model.body(body_id).name)
+                body_names[body_id] = name or f"<unnamed:body:{body_id}>"
+        for geom_id in range(model.ngeom):
+            if geom_id not in geom_names:
+                name = str(model.geom(geom_id).name)
+                if name:
+                    geom_names[geom_id] = name
+        return body_names, geom_names
 
 
 class _UnsupportedActuators:

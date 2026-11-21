@@ -60,6 +60,7 @@ def _capabilities() -> QueryCapabilities:
         contacts=ContactCaps(
             manifold=Feature("unsupported", "arrives in P1"),
             jacobian=Feature("unsupported", "arrives in P1"),
+            wrench_to_joint=Feature("unsupported", "arrives in P1"),
         ),
         actuators=ActuatorCaps(
             facts=Feature("unsupported", "arrives in P1"),

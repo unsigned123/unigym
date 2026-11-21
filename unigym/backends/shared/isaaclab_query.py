@@ -58,7 +58,10 @@ __all__ = [
     "isaaclab_query_capabilities",
 ]
 
-_P1_DETAIL = "P0B-2 implements model facts and live pose only; P1 owns this operation"
+_P1_DETAIL = (
+    "P0B-2 implements model facts and live pose only; "
+    "the IsaacLab query does not implement this operation"
+)
 _GEOM_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; " "no geom facts are synthesized"
 )
@@ -158,6 +161,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
         contacts=ContactCaps(
             manifold=Feature("unsupported", _P1_DETAIL),
             jacobian=Feature("unsupported", _P1_DETAIL),
+            wrench_to_joint=Feature("unsupported", _P1_DETAIL),
         ),
         actuators=ActuatorCaps(
             facts=Feature("unsupported", _P1_DETAIL),
@@ -524,7 +528,7 @@ class _StateQuery(_Subface):
 
 
 class _UnsupportedKinematics(_Subface):
-    """Jacobian reads are capability-gated until P1."""
+    """Jacobian reads are capability-gated."""
 
     def jacobian(
         self,
@@ -543,7 +547,7 @@ class _UnsupportedKinematics(_Subface):
 
 
 class _UnsupportedGeometry(_Subface):
-    """Distance and AABB reads are capability-gated until P1."""
+    """Distance and AABB reads are capability-gated."""
 
     def distance(
         self,
@@ -569,17 +573,11 @@ class _UnsupportedGeometry(_Subface):
 
 
 class _UnsupportedContacts(_Subface):
-    """Contact reads are capability-gated until P1."""
+    """Contact reads are capability-gated until their own plans land."""
 
-    def manifold(
-        self,
-        a: EntityRef | None = None,
-        b: EntityRef | None = None,
-        *,
-        env: EnvSelection = None,
-    ) -> NoReturn:
-        """Reject contact manifold reads."""
-        del a, b, env
+    def manifold(self, group: str, *, env: EnvSelection = None) -> NoReturn:
+        """Reject a group-based contact manifold read on IsaacLab."""
+        del group, env
         self._open()
         raise QueryCapabilityError(
             self._query.backend, "contacts.manifold", "unsupported", _P1_DETAIL
@@ -603,7 +601,7 @@ class _UnsupportedContacts(_Subface):
 
 
 class _UnsupportedActuators(_Subface):
-    """Actuator runtime facts are capability-gated until P1."""
+    """Actuator runtime facts are capability-gated."""
 
     def facts(self, name: str, *, articulation: str | None = None) -> NoReturn:
         """Reject actuator runtime facts."""

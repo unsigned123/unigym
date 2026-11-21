@@ -292,7 +292,7 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
     with pytest.raises(QueryCapabilityError, match="geometry.aabb"):
         query.geometry.aabb(EntityRef("body", "base"))
     with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
-        query.contacts.manifold()
+        query.contacts.manifold("foot_floor")
     with pytest.raises(QueryCapabilityError, match="contacts.jacobian"):
         query.contacts.jacobian(EntityRef("body", "base"))
     with pytest.raises(QueryCapabilityError, match="actuators.facts"):
