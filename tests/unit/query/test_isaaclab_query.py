@@ -23,6 +23,7 @@ from unigym.backends.shared.isaaclab3_common.query import (
     ISAACLAB3_PHYSX_QUERY_CAPABILITIES,
     Isaaclab3Query,
 )
+from unigym.core.quat import to_xyzw
 from unigym.model import Actuator, Body, Joint, ModelIR, ModelSet, Table, UsdExt
 from unigym.query import (
     ComRef,
@@ -125,6 +126,8 @@ def _env(backend: str) -> SimpleNamespace:
         joint_vel=torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32),
         root_pos_w=torch.tensor([[0.0, 0.0, 1.0], [5.0, 0.0, 1.0]], dtype=torch.float32),
         root_quat_w=quats[:, 0],
+        root_lin_vel_w=torch.zeros((2, 3), dtype=torch.float32),
+        root_ang_vel_w=torch.zeros((2, 3), dtype=torch.float32),
     )
     asset = SimpleNamespace(
         data=data,
@@ -158,6 +161,55 @@ def _query(backend: str):
     if backend == "isaaclab2":
         return Isaaclab2Query(env), env
     return Isaaclab3Query(env), env
+
+
+def _transaction_env():
+    """Build an IL3 fake env with the live state-write face the scratch needs."""
+    query, env = _query("isaaclab3_physx")
+    data = env.robots["robot"].data
+    env.device = "cpu"
+    calls: list[str] = []
+
+    def set_root_state(
+        env_ids,
+        *,
+        name: str,
+        pos_w: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        lin_vel_w: torch.Tensor,
+        ang_vel_w: torch.Tensor,
+    ) -> torch.Tensor:
+        del name
+        ids = torch.as_tensor(env_ids, dtype=torch.int64)
+        data.root_pos_w[ids] = pos_w.to(data.root_pos_w.dtype)
+        data.root_quat_w[ids] = torch.as_tensor(to_xyzw(quat_wxyz)).to(data.root_quat_w.dtype)
+        data.root_lin_vel_w[ids] = lin_vel_w.to(data.root_lin_vel_w.dtype)
+        data.root_ang_vel_w[ids] = ang_vel_w.to(data.root_ang_vel_w.dtype)
+        calls.append("set_root_state")
+        return ids
+
+    def set_joint_state(
+        env_ids,
+        *,
+        articulation: str,
+        joint_names: list[str],
+        position: torch.Tensor,
+        velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        del articulation
+        ids = torch.as_tensor(env_ids, dtype=torch.int64)
+        columns = [list(data.joint_names).index(name) for name in joint_names]
+        data.joint_pos[ids[:, None], columns] = position.to(torch.float32)
+        if velocity is not None:
+            data.joint_vel[ids[:, None], columns] = velocity.to(torch.float32)
+        calls.append("set_joint_state")
+        return ids
+
+    env.set_root_state = set_root_state
+    env.set_joint_state = set_joint_state
+    env.scene = SimpleNamespace(write_data_to_sim=lambda: calls.append("write_data_to_sim"))
+    env.sim = SimpleNamespace(forward=lambda: calls.append("forward"))
+    return query, env, data, calls
 
 
 def _env_with_joint_types(joint_types: dict[str, str]) -> SimpleNamespace:
@@ -280,7 +332,23 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
     assert caps.supports("state.root_pose") == "native"
     assert caps.supports("state.site_pose") == "partial"
     assert caps.supports("state.com_pose") == "partial"
-    assert caps.supports("scratch.copy") == "unsupported"
+    if backend == "isaaclab2":
+        assert caps.scratch.mode == "copy"
+        assert caps.scratch.isolation == "bit_exact"
+        assert caps.supports("scratch.copy") == "unsupported"
+    else:
+        assert caps.scratch.mode == "transaction"
+        assert caps.scratch.isolation == "restored"
+        assert caps.supports("scratch.copy") == "synthetic"
+        assert caps.supports("scratch.live_untouched") == "partial"
+        assert caps.supports("scratch.set_root_state") == "synthetic"
+        assert caps.supports("scratch.set_joint_state") == "synthetic"
+        assert caps.supports("scratch.forward") == "synthetic"
+        assert caps.supports("scratch.body_pose") == "synthetic"
+        assert caps.supports("scratch.site_pose") == "synthetic"
+        assert caps.supports("scratch.com_pose") == "synthetic"
+        assert caps.supports("scratch.jacobian") == "synthetic"
+        assert caps.supports("scratch.geometry") == "unsupported"
     if backend == "isaaclab2":
         assert caps.supports("jacobian.body") == "unsupported"
         assert caps.supports("jacobian.site") == "unsupported"
@@ -618,6 +686,163 @@ def test_il3_jacobian_rejects_unsupported_frame_reference_and_geom() -> None:
         query.kinematics.jacobian(EntityRef("body", "link"), reference="com")
     with pytest.raises(QueryCapabilityError, match="jacobian.geom"):
         query.kinematics.jacobian(EntityRef("geom", "link_geom"))
+
+
+def test_il3_scratch_writes_joints_and_restores_on_close() -> None:
+    """A transaction writes the live buffers, forwards, and restores on close."""
+    query, _, data, calls = _transaction_env()
+    original_pos = data.joint_pos.clone()
+    original_vel = data.joint_vel.clone()
+
+    with query.scratch(0) as scratch:
+        scratch.set_joint_state(
+            "robot",
+            ("j1",),
+            torch.tensor([0.75]),
+            velocity=torch.tensor([2.5]),
+        )
+        scratch.forward()
+        assert float(data.joint_pos[0, 0]) == pytest.approx(0.75)
+        assert float(data.joint_vel[0, 0]) == pytest.approx(2.5)
+        assert tuple(scratch.body_pose("base").pos_w.shape) == (1, 3)
+        assert calls[-2:] == ["write_data_to_sim", "forward"]
+
+    assert calls[-2:] == ["write_data_to_sim", "forward"]
+    torch.testing.assert_close(data.joint_pos, original_pos)
+    torch.testing.assert_close(data.joint_vel, original_vel)
+
+
+def test_il3_scratch_writes_and_restores_a_free_root() -> None:
+    """A free root write round-trips through capture and restore."""
+    query, env, data, calls = _transaction_env()
+    original_pos = data.root_pos_w.clone()
+    original_quat = data.root_quat_w.clone()
+    original_lin = data.root_lin_vel_w.clone()
+    original_ang = data.root_ang_vel_w.clone()
+
+    pos = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
+    quat = torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float64)
+    with query.scratch(0) as scratch:
+        scratch.set_root_state(
+            "robot",
+            pos_w=pos,
+            quat_wxyz=quat,
+            lin_vel_w=torch.tensor([0.5, 0.0, 0.0], dtype=torch.float64),
+            ang_vel_w=torch.tensor([0.0, 0.0, 1.5], dtype=torch.float64),
+        )
+        torch.testing.assert_close(data.root_pos_w[0], pos.to(torch.float32))
+        torch.testing.assert_close(
+            data.root_quat_w[0], torch.as_tensor(to_xyzw(quat)).to(data.root_quat_w.dtype)
+        )
+        assert float(data.root_lin_vel_w[0, 0]) == pytest.approx(0.5)
+        assert float(data.root_ang_vel_w[0, 2]) == pytest.approx(1.5)
+        assert env.articulations["robot"].root == "free"
+
+    torch.testing.assert_close(data.root_pos_w, original_pos)
+    torch.testing.assert_close(data.root_quat_w, original_quat)
+    torch.testing.assert_close(data.root_lin_vel_w, original_lin)
+    torch.testing.assert_close(data.root_ang_vel_w, original_ang)
+    assert calls.count("set_root_state") == 2
+
+
+def test_il3_scratch_restores_after_a_body_exception() -> None:
+    """A body exception still restores the captured state and is preserved."""
+    query, _, data, calls = _transaction_env()
+    original_pos = data.joint_pos.clone()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with query.scratch(0) as scratch:
+            scratch.set_joint_state("robot", ("j2",), torch.tensor([-1.0]))
+            scratch.forward()
+            raise RuntimeError("boom")
+
+    torch.testing.assert_close(data.joint_pos, original_pos)
+    assert calls[-2:] == ["write_data_to_sim", "forward"]
+
+
+def test_il3_scratch_restore_failure_is_attached_to_the_body_exception() -> None:
+    """A failing restore never hides the body exception; it is attached as a note."""
+    query, env, _, _ = _transaction_env()
+    original_writer = env.set_joint_state
+
+    def failing(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("restore boom")
+
+    with pytest.raises(ValueError, match="body boom") as caught:
+        with query.scratch(0) as scratch:
+            scratch.set_joint_state("robot", ("j1",), torch.tensor([0.2]))
+            env.set_joint_state = failing
+            raise ValueError("body boom")
+
+    notes = getattr(caught.value, "__notes__", [])
+    assert any("restore boom" in note for note in notes)
+    assert any("ValueError" in note for note in notes)
+
+    env.set_joint_state = original_writer
+    with query.scratch(0):
+        pass
+
+
+@pytest.mark.parametrize("fixed_source", ("declared_root", "asset_is_fixed_base"))
+def test_il3_scratch_fixed_root_is_rejected_and_exit_skips_root_restore(
+    fixed_source: str,
+) -> None:
+    """A fixed root is read-only and never enters the restore-root set."""
+    query, env, data, calls = _transaction_env()
+    original = data.joint_pos.clone()
+    if fixed_source == "declared_root":
+        env.articulations["robot"].root = "fixed"
+    else:
+        env.robots["robot"].is_fixed_base = True
+
+    with query.scratch(0) as scratch:
+        with pytest.raises(QueryCapabilityError, match="fixed root"):
+            scratch.set_root_state(
+                "robot",
+                pos_w=torch.zeros(3, dtype=torch.float64),
+                quat_wxyz=torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float64),
+            )
+        scratch.set_joint_state("robot", ("j1",), torch.tensor([0.4]))
+        scratch.forward()
+        assert float(data.joint_pos[0, 0]) == pytest.approx(0.4)
+
+    assert "set_root_state" not in calls
+    torch.testing.assert_close(data.joint_pos, original)
+
+
+def test_il3_scratch_geometry_is_unsupported() -> None:
+    """A transaction scratch carries no geometry copy."""
+    query, _, _, _ = _transaction_env()
+
+    with query.scratch(0) as scratch:
+        with pytest.raises(QueryCapabilityError, match="scratch.geometry"):
+            scratch.geometry().distance(EntityRef("body", "base"), EntityRef("body", "link"))
+        with pytest.raises(QueryCapabilityError, match="scratch.geometry"):
+            scratch.geometry().aabb(EntityRef("body", "base"))
+
+
+def test_il3_scratch_is_exclusive_per_env_and_stale_after_close() -> None:
+    """One env holds one transaction; different envs may open concurrently."""
+    query, _, _, _ = _transaction_env()
+
+    with query.scratch(0) as scratch:
+        with pytest.raises(QueryCapabilityError, match="already has an active scratch"):
+            with query.scratch(0):
+                pass
+        with query.scratch(1) as other:
+            assert tuple(other.body_pose("base").env_ids.tolist()) == (1,)
+
+    with pytest.raises(QueryStaleError, match="scratch world is closed"):
+        scratch.body_pose("base")
+
+
+def test_il3_scratch_rejects_an_unknown_joint_name() -> None:
+    """Scratch joint writes resolve explicit names against the live joint order."""
+    query, _, _, _ = _transaction_env()
+
+    with query.scratch(0) as scratch:
+        with pytest.raises(QueryReferenceError, match="bogus"):
+            scratch.set_joint_state("robot", ("bogus",), torch.zeros(1))
 
 
 @pytest.mark.parametrize("joint_type", ("ball", "fixed"))

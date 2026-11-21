@@ -10,14 +10,16 @@ the simulator boundary and are converted to repo-internal ``wxyz`` on read.
 Model facts come from the published ``ModelIR``; live body/root/COM/joint/
 robot-profile-site reads are native.  Static actuator facts are a facts-only
 subset.  P1C-1 adds the native body/body-COM Jacobians and composes
-site/world-point rows from the body link Jacobian; actuator runtime state,
-scratch, geometry and contacts stay unsupported and raise
-``QueryCapabilityError``.
+site/world-point rows from the body link Jacobian.  P1C-2 adds the exclusive
+per-env transaction scratch: root/joint writes go through the live state-write
+face and close restores the captured state.  Actuator runtime state, geometry
+and contacts stay unsupported and raise ``QueryCapabilityError``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -27,7 +29,8 @@ from unigym.backends.shared.isaaclab_query import (
     IsaacLabQueryEnv,
     isaaclab_query_capabilities,
 )
-from unigym.query.capabilities import Feature, JacobianCaps, QueryCapabilities
+from unigym.query.capabilities import Feature, JacobianCaps, QueryCapabilities, ScratchCaps
+from unigym.query.facade import ScratchWorld
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
@@ -39,25 +42,60 @@ __all__ = [
     "isaaclab3_query_capabilities",
 ]
 
-_JACOBIAN_SCOPE = (
+_SCOPE = (
     "model facts + live pose + static actuator facts + native body/body-COM "
-    "Jacobian with synthetic site/world-point rows; no scratch/geometry/contact/"
-    "actuator-state"
+    "Jacobian with synthetic site/world-point rows + transaction scratch; no "
+    "scratch geometry/contact/actuator-state"
 )
+_SCRATCH_TRANSACTION = (
+    "exclusive per-env transaction over the live state; IsaacLab exposes no " "snapshot copy"
+)
+_SCRATCH_RESTORED = (
+    "captured root/joint state is restored and forwarded on close; restored, " "not bit-exact"
+)
+_SCRATCH_ROOT = (
+    "one free-root articulation through the live state-write face; a fixed root " "stays read-only"
+)
+_SCRATCH_JOINT = (
+    "explicit absolute 1-DOF hinge/slide joint positions and optional "
+    "velocities through the live state-write face"
+)
+_SCRATCH_FORWARD = "scene.write_data_to_sim() + sim.forward(); no implicit sync"
+_SCRATCH_READ = "the live articulation buffers inside the active transaction"
+_SCRATCH_GEOMETRY = "geometry and contact reads are not supported in an IsaacLab scratch"
 
 
 def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
-    """Return the P1C-1 capability declaration for one IsaacLab 3 identity."""
+    """Return the P1C-2 capability declaration for one IsaacLab 3 identity."""
     base = isaaclab_query_capabilities(backend)
     notes = dict(base.notes)
-    notes["scope"] = _JACOBIAN_SCOPE
+    notes["scope"] = _SCOPE
     notes["jacobian"] = (
         "body and body COM are native engine rows; site/world-point rows are "
         "synthesized from the body link row plus the offset; a subtree COM row is "
         "not exposed by the engine"
     )
+    notes["scratch"] = (
+        "exclusive per-env transaction; the live root/joint state is captured on "
+        "enter, written and forwarded by explicit calls, then restored on close. "
+        "There is no snapshot copy and no concurrent step/reset."
+    )
     return replace(
         base,
+        scratch=ScratchCaps(
+            copy=Feature("synthetic", _SCRATCH_TRANSACTION),
+            live_untouched=Feature("partial", _SCRATCH_RESTORED),
+            set_root_state=Feature("synthetic", _SCRATCH_ROOT),
+            set_joint_state=Feature("synthetic", _SCRATCH_JOINT),
+            forward=Feature("synthetic", _SCRATCH_FORWARD),
+            body_pose=Feature("synthetic", _SCRATCH_READ),
+            site_pose=Feature("synthetic", _SCRATCH_READ),
+            com_pose=Feature("synthetic", _SCRATCH_READ),
+            geometry=Feature("unsupported", _SCRATCH_GEOMETRY),
+            jacobian=Feature("synthetic", _SCRATCH_READ),
+            mode="transaction",
+            isolation="restored",
+        ),
         jacobian=JacobianCaps(
             body=Feature(
                 "native",
@@ -119,3 +157,8 @@ class Isaaclab3Query(IsaacLabQuery):
             quat_order="xyzw",
         )
         self.kinematics = IsaacLabJacobianQuery(self)
+
+    def scratch(self, env: int | None = None) -> AbstractContextManager[ScratchWorld]:
+        """Open one exclusive transaction scratch for *env* (default env 0)."""
+        self._require_open()
+        return self._open_scratch(self._scratch_env_id(env))

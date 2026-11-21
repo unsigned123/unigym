@@ -15,14 +15,15 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2)
 
 In scope:
 
 - `run.query` (trait-gated) and the facade protocols;
 - model facts from the published `ModelIR`;
 - live body/site/COM/root state;
-- per-env scratch copy with root/joint writes and `forward`;
+- per-env scratch copy with root/joint writes and `forward` (MuJoCo family) or
+  a per-env transaction scratch (IsaacLab 3);
 - geometry distance (`mj_geomDistance`) and AABB;
 - body/site/COM/world-point Jacobians;
 - group-based contact manifolds for the MuJoCo family (P1A-1);
@@ -31,7 +32,9 @@ In scope:
 - MuJoCo-family actuator facts and per-env runtime channels (P1B-1);
 - IsaacLab static actuator facts (P1B-2);
 - IsaacLab 3 body/body-COM Jacobians and composed site/world-point Jacobians
-  (P1C-1).
+  (P1C-1);
+- IsaacLab 3 transaction scratch with root/joint writes, `forward` and
+  body/site/COM/Jacobian reads (P1C-2).
 
 Out of scope:
 
@@ -40,7 +43,8 @@ Out of scope:
 - actuator group semantics beyond the published row and its declared joint
   names;
 - IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
-- IsaacLab scratch copies (P1C-2);
+- IsaacLab scratch geometry/contact reads;
+- an IsaacLab 2.x scratch (IL2 has no transaction card);
 - an IsaacLab subtree COM Jacobian (the engine exposes body COM only);
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
@@ -52,10 +56,10 @@ member.  P0A ships the MuJoCo implementation and the neutral contract;
 P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
 CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
 (`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
-scratch and geometry stay unsupported until later P1 work, IsaacLab actuator
-runtime state until later P1B work and IsaacLab contacts until P1C.  P1B-2 adds
+scratch geometry and contacts stay unsupported.  IsaacLab actuator runtime state
+stays unsupported, and IsaacLab contacts stay out of scope until P1C.  P1B-2 adds
 the IsaacLab static actuation facts subset; P1C-1 adds the IsaacLab 3 Jacobian
-subset.
+subset; P1C-2 adds the IsaacLab 3 transaction scratch.
 
 ## 1. Entry points
 
@@ -128,7 +132,7 @@ labelled honestly:
 | `actuators.state` | synthetic (CPU mirror runtime channels; not a warp device read) |
 
 IsaacLab 2.x / 3.x P0B-2 share the model+pose subset; P1C-1 adds the IsaacLab 3
-Jacobian subset:
+Jacobian subset and P1C-2 the IsaacLab 3 transaction scratch:
 
 | Group | Support |
 |---|---|
@@ -137,7 +141,10 @@ Jacobian subset:
 | `state.body_pose/root_pose/joint_position/joint_velocity` | native (live articulation buffers) |
 | `state.site_pose` | partial (robot-profile sites only: body + local offset; no USD prim/FrameTransformer) |
 | `state.com_pose` | partial (body COM position; identity `quat_wxyz` by contract; subtree unsupported) |
-| `scratch.*` | unsupported (P1C-2) |
+| `scratch.*` (IsaacLab 2.x) | unsupported (no transaction card) |
+| `scratch.copy/set_root_state/set_joint_state/forward/body_pose/site_pose/com_pose/jacobian` (IsaacLab 3.x) | synthetic (exclusive per-env transaction over the live state; no snapshot copy) |
+| `scratch.live_untouched` (IsaacLab 3.x) | partial (captured state restored on close; not bit-exact) |
+| `scratch.geometry` (IsaacLab 3.x) | unsupported (no geometry/contact copy in a transaction) |
 | `jacobian.*` (IsaacLab 2.x) | unsupported (no native Jacobian API) |
 | `jacobian.body` (IsaacLab 3.x) | native (engine body link Jacobian at the body origin) |
 | `jacobian.com` (IsaacLab 3.x) | partial (native body COM Jacobian; a subtree COM Jacobian is unsupported) |
@@ -428,6 +435,41 @@ MuJoCo semantics:
   `QueryStaleError`;
 - the live `MjData` is never mutated by a scratch read or write.
 
+IsaacLab 3 transaction semantics (P1C-2):
+
+- the capability object declares `scratch.mode = "transaction"` and
+  `scratch.isolation = "restored"`; the MuJoCo family keeps the default
+  `mode = "copy"`, `isolation = "bit_exact"`;
+- IsaacLab exposes no snapshot/restore, so `scratch` is an explicit per-env
+  transaction, not a copy.  Enter captures every free-root articulation's root
+  pose/velocity and every articulation's joint position/velocity for the
+  selected env;
+- `set_root_state` writes one free-root articulation through the env's live
+  state-write face; a fixed-root articulation raises `QueryCapabilityError`.
+  The live asset's `is_fixed_base` is the binding fact, so a runtime root
+  declared `free` over a fixed USD base is rejected, and such an articulation
+  never enters the restore-root set;
+- `set_joint_state` writes explicit absolute 1-DOF hinge/slide joint positions
+  and optional velocities through the live state-write face;
+- `forward()` runs `scene.write_data_to_sim()` + `sim.forward()`; there is no
+  implicit sync, and the caller must forward after writes before reading;
+- `body_pose`, `site_pose`, `com_pose` and `jacobian` read the live articulation
+  buffers inside the transaction; `geometry()` returns an unsupported typed
+  stub whose `distance`/`aabb` calls raise `QueryCapabilityError`
+  (`scratch.geometry`) because a transaction carries no geometry/contact copy;
+- close restores the captured free-root pose/velocity and the captured 1-DOF
+  hinge/slide joint position/velocity, runs the same write/forward flush, and
+  preserves an in-flight body exception.  A non-1-DOF joint is not written back
+  because the scratch write face cannot modify it.  A restore/flush failure
+  while a body exception is active is attached to that exception as a note; it
+  never replaces the body exception.  Isolation is `restored`, not bit-exact:
+  the live buffers are touched while the transaction is open;
+- one active scratch per env and per query object; a second concurrent scratch
+  for the same env fails loudly, while different envs may hold concurrent
+  scratches;
+- the caller must not step, reset or open a second scratch during the
+  transaction.  The query adds no lock; this is an engine-thread contract.
+
 ### Geometry notes
 
 - `distance` takes exactly one data source: live `env` (or `env=None` for all
@@ -526,15 +568,20 @@ Semantics:
   returned;
 - `actuators.facts` reports static actuator-group facts only (`slot=None`,
   `slot_kind="isaaclab_group"`, no ctrlrange/gear/gains/limits, joint names
-  from the published USD attrs).  `actuators.state`, `scratch`, `geometry` and
-  `contacts` are declared unsupported and raise `QueryCapabilityError`; contact
+  from the published USD attrs).  `actuators.state`, `geometry` and `contacts`
+  are declared unsupported and raise `QueryCapabilityError`; contact
   manifolds, the contact Jacobian and the contact wrench stay unsupported until
   P1C (P1A-2 is MuJoCo/mjWarp only);
+- IsaacLab 3 `scratch` is the transaction documented in §5: root/joint writes
+  go through the live state-write face and close restores the captured state.
+  IsaacLab 2.x keeps `scratch` unsupported; scratch `geometry()` returns an
+  unsupported typed stub whose `distance`/`aabb` calls raise on both;
 - IsaacLab 3 `kinematics.jacobian` reads the native body link / body COM rows
   and composes site/world-point rows from the body link row; IsaacLab 2.x has
   no native Jacobian API and keeps `jacobian.*` unsupported;
-- results are detached CPU torch copies.  Query never writes `env.obs`, never
-  records and never mutates live simulator state.
+- results are detached CPU torch copies.  Query never writes `env.obs` and
+  never records.  Outside an active transaction scratch it never mutates live
+  simulator state; a transaction scratch restores the captured state on close.
 
 The PhysX/Newton capability identity is unit-covered; the Newton real-env lane
 remains unverified until that lane environment is available.
