@@ -41,6 +41,7 @@ from isaaclab.utils import math as math_utils
 
 from unigym._typing import JsonValue, is_json_object
 from unigym.backends.isaaclab2.robots import articulation_cfg
+from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
 from unigym.core import quat
 
 from unigym.env.episode import parse_episode_length, sample_durations
@@ -61,6 +62,7 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from unigym.cameras import CameraManager
     from unigym.contacts import ContactManager
+    from unigym.query.facade import Query
     from unigym.runtime.actions import NamedAction
 
 
@@ -71,6 +73,7 @@ from unigym.env.backends.base import (
     normalize_state_quat,
     validate_state_tensor,
 )
+from unigym.query.errors import QueryStaleError
 
 BACKEND_CAPABILITIES = BackendCapabilities.full()
 
@@ -91,19 +94,12 @@ class _IsaacObsSite:
 def _site_body_index(body_names: Sequence[str], usd_name: str, site_name: str) -> int:
     """Resolve one profile USD body name against the live articulation order."""
     names = tuple(str(name) for name in body_names)
-    if usd_name in names:
-        return names.index(usd_name)
-    leaf = usd_name.rstrip("/").rsplit("/", 1)[-1]
-    matches = [
-        index
-        for index, name in enumerate(names)
-        if name == leaf or name.rstrip("/").rsplit("/", 1)[-1] == leaf
-    ]
+    matches = body_binding_candidates(names, usd_name)
     if len(matches) == 1:
         return matches[0]
     raise ValueError(
         f"observations.site {site_name!r}: body binding {usd_name!r} does not "
-        f"resolve to exactly one live body; candidates {matches}; "
+        f"resolve to exactly one live body; candidates {list(matches)}; "
         f"live bodies: {list(names)}"
     )
 
@@ -613,6 +609,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._closing = False
         self._stepping = False
         self._model_revision = 0
+        self._query_handle: Query | None = None
         self._asset_scene: ComposedAssetScene | None = None
         self.artifact_paths: dict[str, str] = {}
         self._dur_lo, self._dur_hi = (
@@ -1587,6 +1584,31 @@ class IsaaclabEnv(ManagerBasedEnv):
         )
 
     # ------------------------------------------------------------------ #
+    # optional runtime-query face (trait-gated by run.query)
+    # ------------------------------------------------------------------ #
+    @property
+    def query(self) -> Query:
+        """The live on-demand runtime-query facade (one cached instance).
+
+        The object is built lazily on first access and reused for this live
+        env instance, so ``run.query`` and ``env.query`` return the same
+        handle.  Query is not an observation channel: it never publishes to
+        ``env.obs`` and never records.
+
+        Raises:
+            QueryStaleError: The environment is already closed.
+        """
+        if self._closed or self._closing:
+            raise QueryStaleError(
+                "env.query for backend 'isaaclab2' is stale: the environment is closed"
+            )
+        if self._query_handle is None:
+            from unigym.backends.isaaclab2.query import Isaaclab2Query
+
+            self._query_handle = Isaaclab2Query(self)
+        return self._query_handle
+
+    # ------------------------------------------------------------------ #
     # teardown
     # ------------------------------------------------------------------ #
     def _raise_if_closed(self) -> None:
@@ -1615,6 +1637,8 @@ class IsaaclabEnv(ManagerBasedEnv):
             return
         self._closing = True
         try:
+            if self._query_handle is not None:
+                self._query_handle.close()
             self.sim.pause()
             super().close()
         finally:
