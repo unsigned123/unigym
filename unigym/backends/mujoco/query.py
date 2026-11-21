@@ -29,7 +29,15 @@ from unigym.query.capabilities import (
 __all__ = ["MUJOCO_QUERY_CAPABILITIES", "MujocoQuery"]
 
 _NATIVE = Feature("native")
-_P1A_DETAIL = "contact Jacobian and wrench-to-joint are added with the P1A-2 plan"
+_CONTACT_JACOBIAN = (
+    "contact constraint rows from dense data.efc_J at data.contact.efc_address; "
+    "effective row count follows model.opt.cone; columns follow the "
+    "articulation DOF layout; sparse efc_J is not mapped"
+)
+_CONTACT_WRENCH = (
+    "rows.T @ data.efc_force for the same contact rows, in the articulation "
+    "DOF layout; MuJoCo efc force sign/frame; dense efc_J only"
+)
 _P1_DETAIL = "actuator queries are added in P1B"
 _CONTACT_MANIFOLD = (
     "group-based active contacts from data.contact; force acts on the geom2 body "
@@ -82,8 +90,8 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
     geometry=GeometryCaps(distance=_NATIVE, aabb=_NATIVE),
     contacts=ContactCaps(
         manifold=Feature("native", _CONTACT_MANIFOLD),
-        jacobian=Feature("unsupported", _P1A_DETAIL),
-        wrench_to_joint=Feature("unsupported", _P1A_DETAIL),
+        jacobian=Feature("native", _CONTACT_JACOBIAN),
+        wrench_to_joint=Feature("native", _CONTACT_WRENCH),
     ),
     actuators=ActuatorCaps(
         facts=Feature("unsupported", _P1_DETAIL),

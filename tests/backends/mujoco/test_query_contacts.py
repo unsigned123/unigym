@@ -10,7 +10,7 @@ import pytest
 
 from unigym.backends.mujoco.query import MujocoQuery
 from unigym.contacts.manager import build_contact_manager
-from unigym.query import EntityRef, QueryCapabilityError, QueryReferenceError, QueryStaleError
+from unigym.query import QueryReferenceError, QueryStaleError
 from unigym.runtime.actions import NamedAction
 
 PROP_CRATE = """    <body name="Prop_crate" pos="0.3 0 0.05">
@@ -169,18 +169,15 @@ def test_manifold_after_query_close_is_stale(tiny_env_factory, tmp_path) -> None
         query.contacts.manifold("crate_floor")
 
 
-def test_contact_jacobian_and_wrench_stay_unsupported(tiny_env_factory, tmp_path) -> None:
-    """P1A-1 never returns a zero Jacobian or a fake wrench."""
+def test_contact_jacobian_and_wrench_are_native(tiny_env_factory, tmp_path) -> None:
+    """P1A-2 declares the contact constraint rows and wrench as native."""
     env = _env(tiny_env_factory, tmp_path, _manager())
     query = MujocoQuery(env)
 
     assert query.capabilities.supports("contacts.manifold") == "native"
-    assert query.capabilities.supports("contacts.jacobian") == "unsupported"
-    assert query.capabilities.supports("contacts.wrench_to_joint") == "unsupported"
-    with pytest.raises(QueryCapabilityError, match=r"contacts\.jacobian.*unsupported"):
-        query.contacts.jacobian(EntityRef("geom", "crate_geom"))
-    with pytest.raises(QueryCapabilityError, match=r"contacts\.wrench_to_joint.*unsupported"):
-        query.require("contacts.wrench_to_joint")
+    assert query.capabilities.supports("contacts.jacobian") == "native"
+    assert query.capabilities.supports("contacts.wrench_to_joint") == "native"
+    query.require("contacts.jacobian", "contacts.wrench_to_joint")
 
 
 def test_manifold_result_is_a_detached_copy(tiny_env_factory, tmp_path) -> None:

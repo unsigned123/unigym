@@ -2,8 +2,10 @@
 
 ``Query`` is the stable user entry (``run.query``); its subfaces group model
 facts, live state, kinematics, geometry, contacts and actuators.  The contact
-manifold face is group-based; the contact Jacobian and the actuator subface
-stay capability-gated until their own plans land.
+face is group-based: a manifold carries the active points, and the Jacobian and
+wrench-to-joint operations map one point's constraint rows into an
+articulation's DOF layout.  The actuator subface stays capability-gated until
+its own plan lands.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ from ..model.ir import Actuator, Body, Geom, Joint, ModelIR, Site
 from .base import (
     AABB,
     ComRef,
+    ContactJacobian,
     ContactManifold,
+    ContactPoint,
     DistanceResult,
     EntityRef,
     EnvSelection,
@@ -168,7 +172,7 @@ class GeometryQuery(Protocol):
 
 
 class ContactQuery(Protocol):
-    """Group-based contact manifolds; Jacobian is capability-gated."""
+    """Group-based contact manifolds and one point's constraint mapping."""
 
     def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
         """Return one declared contact group's active points.
@@ -179,16 +183,15 @@ class ContactQuery(Protocol):
         """
         ...
 
-    def jacobian(
-        self,
-        a: EntityRef,
-        b: EntityRef | None = None,
-        *,
-        point: int = 0,
-        env: EnvSelection = None,
-        frame: str = "world",
-    ) -> NoReturn:
-        """Return the Jacobian of one contact point (deferred)."""
+    def jacobian(self, point: ContactPoint, articulation: str) -> ContactJacobian:
+        """Return the contact-frame constraint Jacobian rows for one point.
+
+        ``point`` must come from a current manifold of the same env.
+        """
+        ...
+
+    def wrench_to_joint(self, point: ContactPoint, articulation: str) -> torch.Tensor:
+        """Return the contact force mapped to joint space as ``rows.T @ force``."""
         ...
 
 

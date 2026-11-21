@@ -42,8 +42,8 @@ def test_capability_object_is_mirror_honest() -> None:
     assert caps.supports("geometry.distance") == "synthetic"
     assert caps.supports("jacobian.com") == "partial"
     assert caps.supports("contacts.manifold") == "synthetic"
-    assert caps.supports("contacts.jacobian") == "unsupported"
-    assert caps.supports("contacts.wrench_to_joint") == "unsupported"
+    assert caps.supports("contacts.jacobian") == "synthetic"
+    assert caps.supports("contacts.wrench_to_joint") == "synthetic"
     assert caps.supports("actuators.state") == "unsupported"
     assert "mirror" in caps.notes
 

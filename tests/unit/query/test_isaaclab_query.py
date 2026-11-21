@@ -24,7 +24,14 @@ from unigym.backends.shared.isaaclab3_common.query import (
     Isaaclab3Query,
 )
 from unigym.model import Actuator, Body, Joint, ModelIR, ModelSet, Table
-from unigym.query import ComRef, EntityRef, Query, QueryCapabilityError, QueryReferenceError
+from unigym.query import (
+    ComRef,
+    ContactPoint,
+    EntityRef,
+    Query,
+    QueryCapabilityError,
+    QueryReferenceError,
+)
 from unigym.query.errors import QueryStaleError
 from unigym.robots.base import BodyBinding, CanonicalBodyId, RobotProfile
 from unigym.run.instance import RunInstance
@@ -279,9 +286,28 @@ def test_non_1dof_joint_reads_raise_capability_error(joint_type: str) -> None:
         query.state.joint_position("robot")
 
 
+def _contact_point() -> ContactPoint:
+    return ContactPoint(
+        env_id=0,
+        group="foot_floor",
+        body1="base",
+        body2="world",
+        geom1=None,
+        geom2=None,
+        pos_w=torch.zeros(3, dtype=torch.float64),
+        normal_w=None,
+        frame_w=None,
+        separation_m=0.0,
+        normal_force_n=1.0,
+        friction_force_w=None,
+        contact_id=0,
+    )
+
+
 def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
     """Scratch, Jacobian, geometry, contacts and actuators are P1."""
     query, _ = _query("isaaclab2")
+    point = _contact_point()
 
     with pytest.raises(QueryCapabilityError, match="scratch"):
         query.scratch()
@@ -294,7 +320,9 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
     with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
         query.contacts.manifold("foot_floor")
     with pytest.raises(QueryCapabilityError, match="contacts.jacobian"):
-        query.contacts.jacobian(EntityRef("body", "base"))
+        query.contacts.jacobian(point, "robot")
+    with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
+        query.contacts.wrench_to_joint(point, "robot")
     with pytest.raises(QueryCapabilityError, match="actuators.facts"):
         query.actuators.facts("a1")
     with pytest.raises(QueryCapabilityError, match="actuators.state"):

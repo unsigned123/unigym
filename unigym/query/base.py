@@ -19,6 +19,7 @@ from .errors import QueryShapeError
 __all__ = [
     "AABB",
     "ComRef",
+    "ContactJacobian",
     "ContactManifold",
     "ContactPoint",
     "DistanceResult",
@@ -102,6 +103,26 @@ def _finite_vector(value: torch.Tensor, field: str, length: int) -> torch.Tensor
 def _finite_matrix(value: torch.Tensor, field: str, rows: int, cols: int) -> torch.Tensor:
     """Validate a finite ``(rows, cols)`` tensor and return a detached copy."""
     matrix = _matrix(value, field, rows, cols)
+    if not bool(torch.isfinite(matrix).all()):
+        raise QueryShapeError(field, "finite values", str(matrix.tolist()))
+    return matrix
+
+
+def _finite_columns(value: torch.Tensor, field: str, cols: int) -> torch.Tensor:
+    """Validate a finite float64 ``(dim, cols)`` tensor and return a detached copy.
+
+    ``dim`` is the contact's own effective constraint-row count, so only the
+    column count is fixed by the articulation's DOF layout.
+    """
+    if not isinstance(value, torch.Tensor):
+        raise QueryShapeError(field, f"a torch.Tensor of shape (dim, {cols})", type(value).__name__)
+    if value.dtype != torch.float64:
+        raise QueryShapeError(field, "a float64 tensor", str(value.dtype))
+    if value.ndim != 2 or value.shape[1] != cols:
+        raise QueryShapeError(field, f"shape (dim, {cols})", str(tuple(value.shape)))
+    if value.shape[0] < 1:
+        raise QueryShapeError(field, "at least one constraint row", str(tuple(value.shape)))
+    matrix = value.detach().to("cpu").clone()
     if not bool(torch.isfinite(matrix).all()):
         raise QueryShapeError(field, "finite values", str(matrix.tolist()))
     return matrix
@@ -327,10 +348,14 @@ class ContactPoint:
     Force convention (MuJoCo ``mj_contactForce``): ``normal_force_n`` and
     ``friction_force_w`` act on the **geom2 body**.  ``normal_w`` points from
     geom1 to geom2, and ``frame_w`` rows are the contact axes
-    (normal, tangent1, tangent2) in world coordinates.  ``separation_m`` is
-    the signed surface separation (positive = separated).  ``contact_id`` is
-    an index into the backend's current contact list for that env; it is not
-    a stable cross-step identifier.
+    (normal, tangent1, tangent2) in world coordinates.  ``frame_w`` is a
+    basis for those three axes, not a per-constraint-row axis label: a
+    pyramidal contact's rows are friction-pyramid face normals such as
+    ``n +/- t1`` and ``n +/- t2`` (no pure normal row for ``condim=3``), and
+    ``condim`` 4/6 torsion/rolling rows are not described by ``frame_w`` at
+    all.  ``separation_m`` is the signed surface separation (positive =
+    separated).  ``contact_id`` is an index into the backend's current contact
+    list for that env; it is not a stable cross-step identifier.
     """
 
     env_id: int
@@ -418,3 +443,46 @@ class ContactManifold:
                 )
         object.__setattr__(self, "env_ids", ids)
         object.__setattr__(self, "group", group)
+
+
+@dataclass(frozen=True)
+class ContactJacobian:
+    """One active contact's constraint-row Jacobian block.
+
+    ``rows`` is the ``(rows, nv)`` contact constraint Jacobian for
+    ``ContactPoint.contact_id``, column-scoped to one articulation's DOF
+    layout.  ``rows`` may have more entries than the contact dimensionality:
+    it is the effective friction-cone row count, not ``ContactPoint``'s
+    contact dimensionality.
+
+    ``frame`` is ``"contact"``.  Rows are MuJoCo constraint rows, not a
+    per-row contact-axis list:
+
+    - elliptic contacts with ``condim >= 3`` have rows 0..2 equal to the
+      contact frame axes (normal, tangent1, tangent2); rows 3+ are
+      torsion/rolling constraints;
+    - pyramidal rows are friction-pyramid face normals such as ``n + t1``,
+      ``n - t1``, ``n + t2`` and ``n - t2``.  There is no pure normal row for
+      ``condim=3``; ``ContactPoint.frame_w`` is a basis for expressing a row
+      as a linear combination, not an axis label per row;
+    - ``condim`` 4/6 torsion and rolling rows are not described by
+      ``frame_w``.
+
+    The tensor is a detached CPU float64 copy.
+    """
+
+    env_id: int
+    frame: str
+    rows: torch.Tensor
+    layout: DofLayout
+
+    def __post_init__(self) -> None:
+        """Validate the frame, layout and ``(rows, nv)`` row block."""
+        env_id = _non_negative_int(self.env_id, "env_id")
+        if self.frame != "contact":
+            raise QueryShapeError("frame", "'contact'", repr(self.frame))
+        if not isinstance(self.layout, DofLayout):
+            raise QueryShapeError("layout", "a DofLayout", type(self.layout).__name__)
+        object.__setattr__(self, "env_id", env_id)
+        object.__setattr__(self, "frame", self.frame)
+        object.__setattr__(self, "rows", _finite_columns(self.rows, "rows", self.layout.nv))

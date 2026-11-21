@@ -10,6 +10,7 @@ from __future__ import annotations
 from .base import (
     AABB,
     ComRef,
+    ContactJacobian,
     ContactManifold,
     ContactPoint,
     DistanceResult,
@@ -57,6 +58,7 @@ __all__ = [
     "ActuatorQuery",
     "ComRef",
     "ContactCaps",
+    "ContactJacobian",
     "ContactManifold",
     "ContactPoint",
     "ContactQuery",

@@ -34,6 +34,7 @@ from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     AABB,
     ComRef,
+    ContactJacobian,
     ContactManifold,
     ContactPoint,
     DistanceResult,
@@ -118,6 +119,8 @@ _JOINT_TYPE_NAMES = {
 _ONE_DOF_JOINT_TYPES = frozenset(
     {int(mujoco.mjtJoint.mjJNT_SLIDE), int(mujoco.mjtJoint.mjJNT_HINGE)}
 )
+# MuJoCo's ``mjJAC_AUTO`` stores a sparse efc_J at or above this DOF count.
+_AUTO_SPARSE_NV = 60
 
 
 def _joint_type_name(joint_type: int) -> str:
@@ -314,6 +317,149 @@ class _QueryPart:
         if row.site_id is None:
             raise QueryReferenceError("site", row.name, (), "the model is not compiled")
         return int(row.site_id)
+
+    def _columns(self, articulation: str, *, op: str = "jacobian") -> tuple[np.ndarray, DofLayout]:
+        art = self._articulation(articulation)
+        model = self._env.mj_model
+        ir = self._ir(articulation)
+        base_id = self._compiled_base_body_id(art, ir)
+        if base_id is None:
+            if art.root == "free":
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    op,
+                    "unsupported",
+                    f"articulation {art.name!r} declares a free root but its "
+                    f"compiled free root/base body is unresolved (declare "
+                    f"profile.base_body or the articulation base body)",
+                )
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"articulation {art.name!r} base body is unresolved; cannot "
+                f"scope the compiled joint set",
+            )
+        if art.root == "free" and art.free_dof_adr is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"articulation {art.name!r} declares a free root but the "
+                f"compiled free joint is unresolved",
+            )
+        compiled = self._compiled_joints(model, base_id)
+        columns: list[int] = []
+        covered: set[int] = set()
+        base_dofs: tuple[str, ...] = ()
+        base_names: tuple[str, ...] = ()
+        if art.free_dof_adr is not None:
+            start = int(art.free_dof_adr)
+            info = compiled.get(start)
+            if info is None or info[1] != int(mujoco.mjtJoint.mjJNT_FREE):
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    op,
+                    "unsupported",
+                    f"articulation {art.name!r} declares a free root at dof "
+                    f"{start} but the compiled joint is not free",
+                )
+            base_body = str(art.base_body_id or art.base_body or "root")
+            base_dofs = tuple(f"{base_body}.{suffix}" for suffix in _BASE_DOF_SUFFIXES)
+            base_names = (base_body,)
+            columns.extend(range(start, start + 6))
+            covered.update(columns)
+        joint_names: list[str] = []
+        for name in art.joint_names:
+            row = ir.joints.get(name)
+            if row is None or row.dof_adr is None:
+                raise QueryReferenceError(
+                    op,
+                    name,
+                    ir.joints.names(),
+                    "the articulation joint is missing from the compiled IR",
+                )
+            dof = int(row.dof_adr)
+            info = compiled.get(dof)
+            if info is None:
+                raise QueryReferenceError(
+                    op,
+                    name,
+                    [value[2] for value in compiled.values()],
+                    "the joint is not in the articulation subtree",
+                )
+            _, joint_type, compiled_name = info
+            if joint_type not in _ONE_DOF_JOINT_TYPES:
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    op,
+                    "unsupported",
+                    f"articulation {art.name!r} joint {name!r} "
+                    f"({compiled_name!r}) has compiled type "
+                    f"{_joint_type_name(joint_type)!r}; only hinge/slide joints "
+                    f"and the free root are supported",
+                )
+            columns.append(dof)
+            joint_names.append(name)
+            covered.add(dof)
+        for dof, (_, joint_type, compiled_name) in compiled.items():
+            if dof in covered:
+                continue
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"articulation {art.name!r} has compiled joint "
+                f"{compiled_name!r} (compiled type "
+                f"{_joint_type_name(joint_type)!r}) outside the neutral "
+                f"joint table; only hinge/slide joints and the free root "
+                f"are supported",
+            )
+        order = base_dofs + tuple(joint_names)
+        layout = DofLayout(
+            articulation=articulation,
+            base_dofs=base_dofs,
+            base_names=base_names,
+            joint_names=tuple(joint_names),
+            nv=len(columns),
+            order=order,
+        )
+        return np.asarray(columns, dtype=np.int64), layout
+
+    def _compiled_base_body_id(self, art: ArticulationRuntime, ir: ModelIR) -> int | None:
+        name = str(art.base_body_id or art.base_body or "")
+        if name:
+            row = ir.bodies.get(name)
+            if row is not None and row.body_id is not None:
+                return int(row.body_id)
+        body_id = art.addresses.get("base_body_id")
+        if isinstance(body_id, int) and body_id >= 0:
+            return body_id
+        return None
+
+    def _compiled_joints(
+        self,
+        model: mujoco.MjModel,
+        base_id: int | None,
+    ) -> dict[int, tuple[int, int, str]]:
+        if base_id is None:
+            joint_ids = range(model.njnt)
+        else:
+            body_ids = _subtree_body_ids(model, base_id)
+            joint_ids = [
+                joint_id
+                for joint_id in range(model.njnt)
+                if int(model.jnt_bodyid[joint_id]) in body_ids
+            ]
+        compiled: dict[int, tuple[int, int, str]] = {}
+        for joint_id in joint_ids:
+            dof = int(model.jnt_dofadr[joint_id])
+            compiled[dof] = (
+                joint_id,
+                int(model.jnt_type[joint_id]),
+                str(model.joint(joint_id).name),
+            )
+        return compiled
 
 
 class MjFamilyQuery:
@@ -676,149 +822,6 @@ class _KinematicsQuery(_QueryPart):
             "pass articulation=... for a multi-articulation run",
         )
 
-    def _columns(self, articulation: str) -> tuple[np.ndarray, DofLayout]:
-        art = self._articulation(articulation)
-        model = self._env.mj_model
-        ir = self._ir(articulation)
-        base_id = self._compiled_base_body_id(art, ir)
-        if base_id is None:
-            if art.root == "free":
-                raise QueryCapabilityError(
-                    self._query.backend,
-                    "jacobian",
-                    "unsupported",
-                    f"articulation {art.name!r} declares a free root but its "
-                    f"compiled free root/base body is unresolved (declare "
-                    f"profile.base_body or the articulation base body)",
-                )
-            raise QueryCapabilityError(
-                self._query.backend,
-                "jacobian",
-                "unsupported",
-                f"articulation {art.name!r} base body is unresolved; cannot "
-                f"scope the compiled joint set",
-            )
-        if art.root == "free" and art.free_dof_adr is None:
-            raise QueryCapabilityError(
-                self._query.backend,
-                "jacobian",
-                "unsupported",
-                f"articulation {art.name!r} declares a free root but the "
-                f"compiled free joint is unresolved",
-            )
-        compiled = self._compiled_joints(model, base_id)
-        columns: list[int] = []
-        covered: set[int] = set()
-        base_dofs: tuple[str, ...] = ()
-        base_names: tuple[str, ...] = ()
-        if art.free_dof_adr is not None:
-            start = int(art.free_dof_adr)
-            info = compiled.get(start)
-            if info is None or info[1] != int(mujoco.mjtJoint.mjJNT_FREE):
-                raise QueryCapabilityError(
-                    self._query.backend,
-                    "jacobian",
-                    "unsupported",
-                    f"articulation {art.name!r} declares a free root at dof "
-                    f"{start} but the compiled joint is not free",
-                )
-            base_body = str(art.base_body_id or art.base_body or "root")
-            base_dofs = tuple(f"{base_body}.{suffix}" for suffix in _BASE_DOF_SUFFIXES)
-            base_names = (base_body,)
-            columns.extend(range(start, start + 6))
-            covered.update(columns)
-        joint_names: list[str] = []
-        for name in art.joint_names:
-            row = ir.joints.get(name)
-            if row is None or row.dof_adr is None:
-                raise QueryReferenceError(
-                    "jacobian",
-                    name,
-                    ir.joints.names(),
-                    "the articulation joint is missing from the compiled IR",
-                )
-            dof = int(row.dof_adr)
-            info = compiled.get(dof)
-            if info is None:
-                raise QueryReferenceError(
-                    "jacobian",
-                    name,
-                    [value[2] for value in compiled.values()],
-                    "the joint is not in the articulation subtree",
-                )
-            _, joint_type, compiled_name = info
-            if joint_type not in _ONE_DOF_JOINT_TYPES:
-                raise QueryCapabilityError(
-                    self._query.backend,
-                    "jacobian",
-                    "unsupported",
-                    f"articulation {art.name!r} joint {name!r} "
-                    f"({compiled_name!r}) has compiled type "
-                    f"{_joint_type_name(joint_type)!r}; only hinge/slide joints "
-                    f"and the free root are supported",
-                )
-            columns.append(dof)
-            joint_names.append(name)
-            covered.add(dof)
-        for dof, (_, joint_type, compiled_name) in compiled.items():
-            if dof in covered:
-                continue
-            raise QueryCapabilityError(
-                self._query.backend,
-                "jacobian",
-                "unsupported",
-                f"articulation {art.name!r} has compiled joint "
-                f"{compiled_name!r} (compiled type "
-                f"{_joint_type_name(joint_type)!r}) outside the neutral "
-                f"joint table; only hinge/slide joints and the free root "
-                f"are supported",
-            )
-        order = base_dofs + tuple(joint_names)
-        layout = DofLayout(
-            articulation=articulation,
-            base_dofs=base_dofs,
-            base_names=base_names,
-            joint_names=tuple(joint_names),
-            nv=len(columns),
-            order=order,
-        )
-        return np.asarray(columns, dtype=np.int64), layout
-
-    def _compiled_base_body_id(self, art: ArticulationRuntime, ir: ModelIR) -> int | None:
-        name = str(art.base_body_id or art.base_body or "")
-        if name:
-            row = ir.bodies.get(name)
-            if row is not None and row.body_id is not None:
-                return int(row.body_id)
-        body_id = art.addresses.get("base_body_id")
-        if isinstance(body_id, int) and body_id >= 0:
-            return body_id
-        return None
-
-    def _compiled_joints(
-        self,
-        model: mujoco.MjModel,
-        base_id: int | None,
-    ) -> dict[int, tuple[int, int, str]]:
-        if base_id is None:
-            joint_ids = range(model.njnt)
-        else:
-            body_ids = _subtree_body_ids(model, base_id)
-            joint_ids = [
-                joint_id
-                for joint_id in range(model.njnt)
-                if int(model.jnt_bodyid[joint_id]) in body_ids
-            ]
-        compiled: dict[int, tuple[int, int, str]] = {}
-        for joint_id in joint_ids:
-            dof = int(model.jnt_dofadr[joint_id])
-            compiled[dof] = (
-                joint_id,
-                int(model.jnt_type[joint_id]),
-                str(model.joint(joint_id).name),
-            )
-        return compiled
-
     def _fill(
         self,
         data: mujoco.MjData,
@@ -1063,20 +1066,177 @@ class _ContactQuery(_QueryPart):
                 )
         return ContactManifold(ids, group, tuple(points))
 
-    def jacobian(
-        self,
-        a: EntityRef,
-        b: EntityRef | None = None,
-        *,
-        point: int = 0,
-        env: EnvSelection = None,
-        frame: str = "world",
-    ) -> NoReturn:
-        """Reject contact Jacobian reads (deferred to the contact-Jacobian plan)."""
-        del a, b, point, env, frame
+    def jacobian(self, point: ContactPoint, articulation: str) -> ContactJacobian:
+        """Return the contact-frame constraint rows in the articulation layout.
+
+        ``rows`` is the ``efc_J`` block starting at the point's
+        ``contact.efc_address``, column-scoped to ``articulation``.  The block
+        is a detached CPU copy; the contact list and constraint solve are not
+        mutated.
+        """
         self._open()
         self._query.capabilities.require("contacts.jacobian")
-        raise AssertionError("contacts.jacobian is declared unsupported but require() returned")
+        rows, _, layout = self._contact_block(point, articulation, "contacts.jacobian")
+        return ContactJacobian(
+            env_id=point.env_id,
+            frame="contact",
+            rows=_tensor(rows),
+            layout=layout,
+        )
+
+    def wrench_to_joint(self, point: ContactPoint, articulation: str) -> torch.Tensor:
+        """Return ``rows.T @ efc_force`` in the articulation's DOF layout.
+
+        ``rows`` is the same contact constraint block as :meth:`jacobian` and
+        ``efc_force`` is MuJoCo's constraint-space force at those rows.  The
+        sign and frame follow the MuJoCo ``efc_J``/``efc_force`` convention;
+        no zero wrench is substituted when the rows are unavailable.
+        """
+        self._open()
+        self._query.capabilities.require("contacts.wrench_to_joint")
+        rows, force, _ = self._contact_block(point, articulation, "contacts.wrench_to_joint")
+        return _tensor(rows.T @ force)
+
+    def _contact_block(
+        self,
+        point: ContactPoint,
+        articulation: str,
+        op: str,
+    ) -> tuple[np.ndarray, np.ndarray, DofLayout]:
+        """Resolve one contact's constraint rows and force in DOF-layout order."""
+        if not isinstance(point, ContactPoint):
+            raise QueryShapeError("point", "a ContactPoint", type(point).__name__)
+        columns, layout = self._columns(articulation, op=op)
+        num_envs = self._env.num_envs
+        if point.env_id >= num_envs:
+            raise QueryReferenceError(
+                op,
+                f"env_id={point.env_id}",
+                (str(index) for index in range(num_envs)),
+                f"the point names an env outside this run (num_envs={num_envs})",
+            )
+        _, datas = self._frames(point.env_id)
+        data = datas[0]
+        model = self._env.mj_model
+        ncon = int(data.ncon)
+        if point.contact_id >= ncon:
+            raise QueryReferenceError(
+                op,
+                f"contact_id={point.contact_id}",
+                (str(index) for index in range(ncon)),
+                f"the current contact list has {ncon} entries",
+            )
+        self._verify_contact_point(point, data, model, op)
+        address = int(data.contact.efc_address[point.contact_id])
+        rows_count = self._effective_row_count(model, int(data.contact.dim[point.contact_id]), op)
+        nefc = int(data.nefc)
+        if address < 0 or address + rows_count > nefc:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"contact {point.contact_id} has no resolvable constraint rows "
+                f"(efc_address={address}, rows={rows_count}, nefc={nefc})",
+            )
+        efc_j = self._dense_efc_j(model, data, nefc, op)
+        block = np.array(
+            efc_j[address : address + rows_count, :],
+            dtype=np.float64,
+            copy=True,
+        )
+        force = np.array(
+            np.asarray(data.efc_force, dtype=np.float64).reshape(-1)[
+                address : address + rows_count
+            ],
+            dtype=np.float64,
+            copy=True,
+        )
+        return block[:, columns], force, layout
+
+    def _effective_row_count(self, model: mujoco.MjModel, dim: int, op: str) -> int:
+        """Return the constraint-row count for one contact's friction cone.
+
+        ``contact.dim`` is the contact dimensionality, not the number of
+        ``efc_J`` rows: a pyramidal cone uses paired friction rows
+        (``2 * (dim - 1)``), while an elliptic cone uses one row per dimension.
+        """
+        cone = int(model.opt.cone)
+        if cone == int(mujoco.mjtCone.mjCONE_ELLIPTIC):
+            return dim
+        if cone == int(mujoco.mjtCone.mjCONE_PYRAMIDAL):
+            return max(1, 2 * (dim - 1))
+        raise QueryCapabilityError(
+            self._query.backend,
+            op,
+            "unsupported",
+            f"unknown friction cone {cone}",
+        )
+
+    def _dense_efc_j(
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData,
+        nefc: int,
+        op: str,
+    ) -> np.ndarray:
+        """Return the dense ``(nefc, nv)`` constraint Jacobian.
+
+        MuJoCo stores a sparse constraint Jacobian in a compressed layout even
+        though the Python buffer is flat; this query maps only the dense
+        layout and fails loudly for a sparse solve instead of reshaping
+        compressed values as if they were dense rows.  ``mjJAC_AUTO`` selects
+        sparse when ``nv >= 60``.
+        """
+        mode = int(model.opt.jacobian)
+        sparse = mode == int(mujoco.mjtJacobian.mjJAC_SPARSE) or (
+            mode == int(mujoco.mjtJacobian.mjJAC_AUTO) and int(model.nv) >= _AUTO_SPARSE_NV
+        )
+        if sparse:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                "sparse efc_J is not mapped; only dense constraint Jacobians are supported",
+            )
+        dense = np.asarray(data.efc_J, dtype=np.float64)
+        expected = nefc * int(model.nv)
+        if dense.size != expected:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"efc_J has {dense.size} values but nefc={nefc} and nv={model.nv} "
+                f"require {expected}",
+            )
+        return dense.reshape(nefc, int(model.nv))
+
+    def _verify_contact_point(
+        self,
+        point: ContactPoint,
+        data: mujoco.MjData,
+        model: mujoco.MjModel,
+        op: str,
+    ) -> None:
+        """Reject a point whose contact id now names a different contact pair."""
+        contact_id = point.contact_id
+        geom1 = int(data.contact.geom[contact_id, 0])
+        geom2 = int(data.contact.geom[contact_id, 1])
+        body_names, geom_names = self._scene_names()
+        current = (
+            body_names[int(model.geom_bodyid[geom1])],
+            geom_names.get(geom1),
+            body_names[int(model.geom_bodyid[geom2])],
+            geom_names.get(geom2),
+        )
+        expected = (point.body1, point.geom1, point.body2, point.geom2)
+        if current != expected:
+            raise QueryReferenceError(
+                op,
+                f"contact_id={contact_id}",
+                (),
+                f"the current contact is {current!r}, but the point describes "
+                f"{expected!r}; refetch the contact manifold",
+            )
 
     def _group(self, group: str) -> tuple[ContactGroupSpec, tuple[int, ...], tuple[int, ...]]:
         if not isinstance(group, str) or not group:

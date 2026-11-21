@@ -29,7 +29,7 @@ from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
 from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
-from unigym.query.base import ComRef, EntityRef, EnvSelection, PointRef, Pose
+from unigym.query.base import ComRef, ContactPoint, EntityRef, EnvSelection, PointRef, Pose
 from unigym.query.capabilities import (
     ActuatorCaps,
     ContactCaps,
@@ -583,20 +583,20 @@ class _UnsupportedContacts(_Subface):
             self._query.backend, "contacts.manifold", "unsupported", _P1_DETAIL
         )
 
-    def jacobian(
-        self,
-        a: EntityRef,
-        b: EntityRef | None = None,
-        *,
-        point: int = 0,
-        env: EnvSelection = None,
-        frame: str = "world",
-    ) -> NoReturn:
+    def jacobian(self, point: ContactPoint, articulation: str) -> NoReturn:
         """Reject contact Jacobian reads."""
-        del a, b, point, env, frame
+        del point, articulation
         self._open()
         raise QueryCapabilityError(
             self._query.backend, "contacts.jacobian", "unsupported", _P1_DETAIL
+        )
+
+    def wrench_to_joint(self, point: ContactPoint, articulation: str) -> NoReturn:
+        """Reject contact wrench-to-joint reads."""
+        del point, articulation
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend, "contacts.wrench_to_joint", "unsupported", _P1_DETAIL
         )
 
 
