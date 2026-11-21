@@ -102,6 +102,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only (stubs; runtime gate below)
         ControlKey,
         ControlRuntime,
     )
+    from unigym.query.facade import Query
 else:
     try:  # mujoco is only importable in the host .venv_sim environment
         import mujoco
@@ -113,6 +114,7 @@ from unigym.env.backends.base import EnvStep
 from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.native import NativeHandle
 from unigym.env.obs import ObservationConfig, ObservationRegistry
+from unigym.query.errors import QueryStaleError
 from unigym.backends.obs_schema import build_schema
 from unigym.backends.shared.mjfamily.model.ir_access import body_id
 from unigym.backends.shared.mjfamily.props.reset_face import resolve_base_height, wire_reset_face
@@ -385,6 +387,8 @@ class MujocoEnv:
     _active_reset_env_id: int | None
     _closed: bool
     _closing: bool
+    # Optional runtime-query facade, built lazily on first ``env.query``.
+    _query_handle: Query | None
 
     def __init__(
         self,
@@ -455,6 +459,7 @@ class MujocoEnv:
         self._closed = False
         self._closing = False
         self._stepping = False
+        self._query_handle = None
         self._model_revision = 0
         self.camera_manager = camera_manager
         # feat/object-state : props join the MjSpec BEFORE compile
@@ -822,6 +827,31 @@ class MujocoEnv:
     def perm_pol2il(self) -> torch.Tensor:
         """Gather index: ``data_pol[:, perm_pol2il]`` -> MJ hinge order."""
         return self._perm_pol2il
+
+    # ------------------------------------------------------------------ #
+    # optional runtime-query face (trait-gated by run.query)
+    # ------------------------------------------------------------------ #
+    @property
+    def query(self) -> Query:
+        """The live on-demand runtime-query facade (one cached instance).
+
+        This is the optional backend face described by
+        ``docs/contracts/query_contract.md``.  ``run.query`` reuses this
+        object; the query factory in the registry is only a fallback for a
+        trait-declaring backend that exposes no ``env.query``.
+
+        Raises:
+            QueryStaleError: The environment is closed or closing.
+        """
+        if self._closed or self._closing:
+            raise QueryStaleError(
+                "env.query for backend 'mujoco' is stale: the environment is closed"
+            )
+        if self._query_handle is None:
+            from unigym.backends.mujoco.query import MujocoQuery
+
+            self._query_handle = MujocoQuery(self)
+        return self._query_handle
 
     # the camera rigs consume the raw simulator handles
     def native(self, backend: str) -> NativeHandle:
@@ -1613,6 +1643,8 @@ class MujocoEnv:
         if self._closed:
             return
         self._closing = True
+        if self._query_handle is not None:
+            self._query_handle.close()
         if self.camera_manager is not None:
             self.camera_manager.close()
         if self.prop_backend is not None:

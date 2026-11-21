@@ -25,7 +25,7 @@ import importlib
 import importlib.metadata
 import re
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import MappingProxyType
@@ -36,6 +36,9 @@ from unigym.registration import (
     BackendRegistrationPolicy,
     PackFace,
 )
+
+if TYPE_CHECKING:
+    from unigym.query.facade import QueryBackend
 
 __all__ = [
     "BACKEND_REGISTRATION_POLICIES",
@@ -128,6 +131,8 @@ class Trait(Enum):
     MODEL_USD_PRIMS = "MODEL_USD_PRIMS"  # USD prim hierarchy
     # --- model edits (global; no per-env face) ---
     MODEL_EDIT = "MODEL_EDIT"  # run.model_edit() transaction
+    # --- on-demand runtime query (not an observation channel) ---
+    RUNTIME_QUERY = "RUNTIME_QUERY"  # run.query -> Query facade
     # --- native escape hatch (external packs only; unstable) ---
     NATIVE_HANDLE = "NATIVE_HANDLE"  # env.native(backend) -> NativeHandle
 
@@ -242,6 +247,14 @@ class BackendInfo:
     """Optional model-edit writer declaration (``Trait.MODEL_EDIT``)."""
     model_edit_fields: frozenset[ModelEditField] = frozenset()
     """The model fields the backend's writer can edit (must equal provider)."""
+    query_backend: Callable[[], QueryBackend] | None = None
+    """Optional zero-argument factory for the backend's runtime-query class.
+
+    The returned class is constructed with the live env (``cls(env)``) and
+    implements :class:`unigym.query.facade.Query`.  Set exactly when the
+    backend declares ``Trait.RUNTIME_QUERY``; the engine import stays inside
+    the factory so this module remains stdlib-only at import time.
+    """
     model_handle: Callable[[], Callable[[object], object | None]] | None = None
     """Optional factory for the backend's compiled-model handle resolver.
 
@@ -573,6 +586,23 @@ def _validate_model_edit_declaration(
         )
 
 
+def _validate_query_declaration(
+    name: str,
+    info: BackendInfo,
+    traits: set[Trait],
+) -> None:
+    """Enforce ``RUNTIME_QUERY`` <-> ``query_backend`` consistency."""
+    declared = Trait.RUNTIME_QUERY in traits
+    if declared and info.query_backend is None:
+        raise RuntimeError(
+            f"backend {name!r}: RUNTIME_QUERY is declared but " f"query_backend is None"
+        )
+    if not declared and info.query_backend is not None:
+        raise RuntimeError(
+            f"backend {name!r}: query_backend is declared without the " f"RUNTIME_QUERY trait"
+        )
+
+
 def validate_trait_rules(backends=None) -> None:
     """Validate every registered backend's trait set against ``TRAIT_RULES``.
 
@@ -597,6 +627,7 @@ def validate_trait_rules(backends=None) -> None:
                     f"must be >= 1, got {scope.max_envs}"
                 )
         _validate_model_edit_declaration(name, info, traits)
+        _validate_query_declaration(name, info, traits)
         if not traits:
             continue
         layouts = [t for t in _LAYOUT_TRAITS if t in traits]
@@ -666,6 +697,7 @@ MUJOCO_TRAITS = _CORE | frozenset(
         Trait.MODEL_MOCAP,
         Trait.MODEL_EQ_SLOTS,
         Trait.MODEL_EDIT,  # global body/geom parameter transaction
+        Trait.RUNTIME_QUERY,  # on-demand query face (not an obs channel)
         Trait.NATIVE_HANDLE,  # external-pack-only identity handle
     }
 )
@@ -909,6 +941,13 @@ def _mujoco_model_handle() -> Callable[[object], object | None]:
     return model_handle
 
 
+def _mujoco_query_backend() -> QueryBackend:
+    """Load the MuJoCo runtime-query class lazily."""
+    from unigym.backends.mujoco.query import MujocoQuery
+
+    return MujocoQuery
+
+
 def _mjwarp_model_handle() -> Callable[[object], object | None]:
     """Load the mjwarp compiled-model handle resolver lazily."""
     from unigym.backends.mjwarp.model_handle import model_handle
@@ -1139,6 +1178,7 @@ _STATIC_INFO: dict[str, BackendInfo] = {
         ),
         model_edit_fields=MUJOCO_MODEL_EDIT_FIELDS,
         model_handle=_mujoco_model_handle,
+        query_backend=_mujoco_query_backend,
         prop_backend=_mujoco_prop_backend,
         camera_backend=_mujoco_rig_factory,
         director_ops=_mujoco_director_ops,

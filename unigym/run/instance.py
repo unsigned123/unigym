@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from unigym.backends.registry import CANONICAL_BACKENDS, Trait, backend_info
+from unigym.query.errors import QueryStaleError
 
 from .spec import RunSpec
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from unigym.logger import DataCollectLogger
     from unigym.model.live import LiveModel
     from unigym.props.base import PropManager
+    from unigym.query.facade import Query
     from unigym.recorder import Recorder
     from unigym.robots.base import RobotProfile
     from unigym.runtime.actions import OrderedActionGroup
@@ -125,6 +127,46 @@ class RunInstance:
     out_dir: str | None = None
     reset_on_termination: bool = False
     _closed: bool = field(default=False, init=False, repr=False)
+    _query: Query | None = field(default=None, init=False, repr=False)
+
+    @property
+    def query(self) -> Query:
+        """The trait-gated on-demand runtime query facade.
+
+        The query object is created lazily on first access and reused for the
+        lifetime of this live env instance.  It is not an observation channel
+        and never publishes or records.
+
+        Raises:
+            NotImplementedError: The live backend does not declare the
+                ``RUNTIME_QUERY`` trait (or exposes no query factory).
+            QueryStaleError: This run is already closed.
+        """
+        if self._closed:
+            raise QueryStaleError(
+                f"run.query for backend {self.spec.backend!r} is stale: the run is closed"
+            )
+        if self._query is not None:
+            return self._query
+        live = self.spec.backend
+        info = backend_info(live)
+        if Trait.RUNTIME_QUERY not in info.traits:
+            raise NotImplementedError(
+                f"backend {live!r} does not declare the RUNTIME_QUERY trait "
+                f"(run.query is optional and this backend declares it absent)"
+            )
+        env_query = getattr(self.env, "query", None)
+        if env_query is not None:
+            self._query = env_query
+            return env_query
+        factory = info.query_backend
+        if factory is None:
+            raise NotImplementedError(
+                f"backend {live!r} declares RUNTIME_QUERY but exposes no "
+                f"env.query and the registry declares no query_backend factory"
+            )
+        self._query = factory()(self.env)
+        return self._query
 
     @property
     def resolved_controls(self) -> tuple[ResolvedControl, ...]:
@@ -301,5 +343,9 @@ class RunInstance:
                 if callable(close):
                     close()
             finally:
-                if self.env is not None:
-                    self.env.close()
+                try:
+                    if self._query is not None:
+                        self._query.close()
+                finally:
+                    if self.env is not None:
+                        self.env.close()

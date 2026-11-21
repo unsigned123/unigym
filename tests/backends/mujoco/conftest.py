@@ -41,6 +41,7 @@ def build_tiny_env(
     adapter=None,
     observations=None,
     sites=None,
+    base_body: str | None = "base",
 ):
     """Construct the real backend from the fixture MJCF (CPU, no managers)."""
     from unigym.actuators import ActuationGroup
@@ -59,10 +60,12 @@ def build_tiny_env(
         default_joint_pos={name: 0.0 for name in JOINT_ORDER},
         assets=None,
         extra_action_sets={},
-        base_body="base",
+        base_body=base_body,
         foot_bodies=(),
         body_sets={},
-        body_bindings={"base": BodyBinding("base", {"mjcf": "base"})},
+        body_bindings=(
+            {} if base_body is None else {"base": BodyBinding("base", {"mjcf": "base"})}
+        ),
         sites={} if sites is None else sites,
     )
     actuation = ActuationGroup(
@@ -151,6 +154,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
         adapter=None,
         observations=None,
         sites=None,
+        base_body: str | None = "base",
     ):
         env = build_tiny_env(
             tiny_mjcf if mjcf is None else mjcf,
@@ -172,6 +176,7 @@ def tiny_env_factory(tiny_mjcf: Path) -> Callable[..., object]:
             adapter=adapter,
             observations=observations,
             sites=sites,
+            base_body=base_body,
         )
         created.append(env)
         return env
