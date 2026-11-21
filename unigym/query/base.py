@@ -18,6 +18,9 @@ from .errors import QueryShapeError
 
 __all__ = [
     "AABB",
+    "ActuatorFacts",
+    "ActuatorRuntime",
+    "ActuatorSlotKind",
     "ComRef",
     "ContactJacobian",
     "ContactManifold",
@@ -32,6 +35,10 @@ __all__ = [
 ]
 
 EntityKind = Literal["body", "site", "geom"]
+
+ActuatorSlotKind = Literal["mujoco_actuator", "isaaclab_joint", "isaaclab_group"]
+
+_ACTUATOR_SLOT_KINDS = frozenset({"mujoco_actuator", "isaaclab_joint", "isaaclab_group"})
 
 EnvSelection = int | Sequence[int] | torch.Tensor | None
 
@@ -154,6 +161,35 @@ def _name(value: str | None, field: str, *, optional: bool = False) -> str | Non
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be {'None or ' if optional else ''}a non-empty string")
     return value
+
+
+def _float_tuple(value: Sequence[float] | None, field: str) -> tuple[float, ...] | None:
+    """Validate a non-empty finite float tuple, preserving ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        raise QueryShapeError(field, "a non-empty sequence of finite floats", type(value).__name__)
+    values = tuple(_finite_scalar(item, field) for item in value)
+    if not values:
+        raise QueryShapeError(field, "a non-empty sequence of finite floats", "an empty sequence")
+    return values
+
+
+def _float_pair(value: Sequence[float] | None, field: str) -> tuple[float, float] | None:
+    """Validate a finite ``(low, high)`` pair, preserving ``None``."""
+    values = _float_tuple(value, field)
+    if values is None:
+        return None
+    if len(values) != 2:
+        raise QueryShapeError(field, "a (low, high) pair", str(len(values)))
+    return (values[0], values[1])
+
+
+def _optional_vector(value: torch.Tensor | None, field: str, length: int) -> torch.Tensor | None:
+    """Validate an optional ``(length,)`` floating tensor and return a copy."""
+    if value is None:
+        return None
+    return _vector(value, field, length)
 
 
 @dataclass(frozen=True)
@@ -486,3 +522,76 @@ class ContactJacobian:
         object.__setattr__(self, "env_id", env_id)
         object.__setattr__(self, "frame", self.frame)
         object.__setattr__(self, "rows", _finite_columns(self.rows, "rows", self.layout.nv))
+
+
+@dataclass(frozen=True)
+class ActuatorFacts:
+    """Static facts of one actuator, resolved from the published ``ModelIR``.
+
+    ``slot`` is the backend's compiled actuator slot; ``slot_kind`` names the
+    slot namespace so it is never mistaken for a neutral array index.  For the
+    MuJoCo family ``slot`` is the compiled ``MjModel`` actuator id and
+    ``slot_kind`` is ``"mujoco_actuator"``.  ``target`` is the neutral target
+    name (``None`` when the target has no neutral name); ``ctrlrange``,
+    ``gear``, ``gainprm`` and ``biasprm`` are ``None`` when the compiled row
+    does not declare them.
+    """
+
+    name: str
+    target: str | None
+    kind: str
+    slot: int | None
+    slot_kind: ActuatorSlotKind
+    ctrlrange: tuple[float, float] | None = None
+    gear: tuple[float, ...] | None = None
+    gainprm: tuple[float, ...] | None = None
+    biasprm: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate identities and declared parameter tuples."""
+        name = _name(self.name, "name")
+        target = _name(self.target, "target", optional=True)
+        kind = _name(self.kind, "kind")
+        if not isinstance(name, str) or not isinstance(kind, str):
+            raise ValueError("ActuatorFacts.name/kind must be strings")
+        if self.slot_kind not in _ACTUATOR_SLOT_KINDS:
+            raise ValueError(
+                f"ActuatorFacts.slot_kind must be one of {sorted(_ACTUATOR_SLOT_KINDS)}, "
+                f"got {self.slot_kind!r}"
+            )
+        slot = None if self.slot is None else _non_negative_int(self.slot, "slot")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "target", target)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "slot", slot)
+        object.__setattr__(self, "ctrlrange", _float_pair(self.ctrlrange, "ctrlrange"))
+        object.__setattr__(self, "gear", _float_tuple(self.gear, "gear"))
+        object.__setattr__(self, "gainprm", _float_tuple(self.gainprm, "gainprm"))
+        object.__setattr__(self, "biasprm", _float_tuple(self.biasprm, "biasprm"))
+
+
+@dataclass(frozen=True)
+class ActuatorRuntime:
+    """One actuator's per-env live runtime channel values.
+
+    ``env_ids`` selects the rows and preserves the requested order.  Each
+    field is a ``(E,)`` float tensor, or ``None`` when the backend cannot read
+    that channel.  Every tensor is a detached CPU copy, so mutating the result
+    cannot change live simulator state.
+    """
+
+    env_ids: torch.Tensor
+    ctrl: torch.Tensor | None = None
+    force: torch.Tensor | None = None
+    length: torch.Tensor | None = None
+    velocity: torch.Tensor | None = None
+
+    def __post_init__(self) -> None:
+        """Validate row counts and store detached CPU copies."""
+        ids = _env_tensor(self.env_ids)
+        rows = ids.numel()
+        object.__setattr__(self, "env_ids", ids)
+        object.__setattr__(self, "ctrl", _optional_vector(self.ctrl, "ctrl", rows))
+        object.__setattr__(self, "force", _optional_vector(self.force, "force", rows))
+        object.__setattr__(self, "length", _optional_vector(self.length, "length", rows))
+        object.__setattr__(self, "velocity", _optional_vector(self.velocity, "velocity", rows))

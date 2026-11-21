@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from types import TracebackType
-from typing import TYPE_CHECKING, NoReturn, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 import torch
@@ -33,6 +33,8 @@ from unigym.env.backends.base import normalize_state_env_ids
 from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     AABB,
+    ActuatorFacts,
+    ActuatorRuntime,
     ComRef,
     ContactJacobian,
     ContactManifold,
@@ -486,7 +488,7 @@ class MjFamilyQuery:
         self.kinematics = _KinematicsQuery(self)
         self.geometry = _GeometryQuery(self)
         self.contacts = _ContactQuery(self)
-        self.actuators = _UnsupportedActuators(self)
+        self.actuators = _ActuatorQuery(self)
 
     def require(self, *ops: str) -> None:
         """Raise when any named query operation is unsupported."""
@@ -1322,13 +1324,43 @@ class _ContactQuery(_QueryPart):
         return body_names, geom_names
 
 
-class _UnsupportedActuators:
-    def __init__(self, query: MjFamilyQuery) -> None:
-        self._query = query
+def _actuator_facts(row: Actuator) -> ActuatorFacts:
+    """Map one compiled ``ModelIR`` actuator row to neutral facts.
 
-    def facts(self, name: str, *, articulation: str | None = None) -> NoReturn:
-        del name, articulation
-        self._raise("actuators.facts")
+    The MuJoCo family's slot namespace is the compiled ``MjModel`` actuator
+    id, so every fact here is ``slot_kind="mujoco_actuator"``.  Empty declared
+    tuples become ``None`` so a caller cannot mistake "undeclared" for "zero
+    parameters".
+    """
+    return ActuatorFacts(
+        name=row.name,
+        target=row.target or None,
+        kind=row.kind,
+        slot=None if row.actuator_id is None else int(row.actuator_id),
+        slot_kind="mujoco_actuator",
+        ctrlrange=row.ctrlrange,
+        gear=tuple(row.gear) or None,
+        gainprm=tuple(row.gainprm) or None,
+        biasprm=tuple(row.biasprm) or None,
+    )
+
+
+def _series(values: list[float]) -> torch.Tensor:
+    """Return a detached float64 CPU vector, preserving an empty selection."""
+    return _tensor(np.asarray(values, dtype=np.float64))
+
+
+class _ActuatorQuery(_QueryPart):
+    """Compiled actuator facts plus per-env ``MjData`` runtime channels."""
+
+    def rows(self, articulation: str | None = None) -> tuple[ActuatorFacts, ...]:
+        self._open()
+        ir = self._ir(articulation)
+        return tuple(_actuator_facts(row) for row in ir.actuators)
+
+    def facts(self, name: str, *, articulation: str | None = None) -> ActuatorFacts:
+        self._open()
+        return _actuator_facts(self._actuator_row("actuators.facts", name, articulation))
 
     def state(
         self,
@@ -1336,14 +1368,33 @@ class _UnsupportedActuators:
         *,
         articulation: str | None = None,
         env: EnvSelection = None,
-    ) -> NoReturn:
-        del name, articulation, env
-        self._raise("actuators.state")
+    ) -> ActuatorRuntime:
+        self._open()
+        row = self._actuator_row("actuators.state", name, articulation)
+        if row.actuator_id is None:
+            ir = self._ir(articulation)
+            raise QueryReferenceError(
+                "actuators.state",
+                name,
+                ir.actuators.names(),
+                "the actuator has no compiled slot",
+            )
+        slot = int(row.actuator_id)
+        ids, datas = self._frames(env)
+        return ActuatorRuntime(
+            ids,
+            _series([float(data.ctrl[slot]) for data in datas]),
+            _series([float(data.actuator_force[slot]) for data in datas]),
+            _series([float(data.actuator_length[slot]) for data in datas]),
+            _series([float(data.actuator_velocity[slot]) for data in datas]),
+        )
 
-    def _raise(self, op: str) -> NoReturn:
-        self._query._require_open()
-        self._query.capabilities.require(op)
-        raise AssertionError(f"{op} is declared unsupported but require() returned")
+    def _actuator_row(self, op: str, name: str, articulation: str | None) -> Actuator:
+        ir = self._ir(articulation)
+        try:
+            return ir.actuators[name]
+        except KeyError:
+            raise QueryReferenceError(op, name, ir.actuators.names()) from None
 
 
 class _ScratchContext:

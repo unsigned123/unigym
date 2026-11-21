@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from .base import (
     AABB,
+    ActuatorFacts,
+    ActuatorRuntime,
+    ActuatorSlotKind,
     ComRef,
     ContactJacobian,
     ContactManifold,
@@ -55,7 +58,10 @@ from .facade import (
 __all__ = [
     "AABB",
     "ActuatorCaps",
+    "ActuatorFacts",
     "ActuatorQuery",
+    "ActuatorRuntime",
+    "ActuatorSlotKind",
     "ComRef",
     "ContactCaps",
     "ContactJacobian",

@@ -4,21 +4,24 @@
 facts, live state, kinematics, geometry, contacts and actuators.  The contact
 face is group-based: a manifold carries the active points, and the Jacobian and
 wrench-to-joint operations map one point's constraint rows into an
-articulation's DOF layout.  The actuator subface stays capability-gated until
-its own plan lands.
+articulation's DOF layout.  The actuator subface reads compiled facts and live
+per-env control/force/length/velocity channels; backends that cannot answer an
+operation declare it unsupported.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, NoReturn, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
 
 from ..model.ir import Actuator, Body, Geom, Joint, ModelIR, Site
 from .base import (
     AABB,
+    ActuatorFacts,
+    ActuatorRuntime,
     ComRef,
     ContactJacobian,
     ContactManifold,
@@ -196,10 +199,19 @@ class ContactQuery(Protocol):
 
 
 class ActuatorQuery(Protocol):
-    """Actuator runtime facts (capability-gated until P1)."""
+    """Static actuator facts and per-env live runtime channels."""
 
-    def facts(self, name: str, *, articulation: str | None = None) -> NoReturn:
-        """Return one actuator's runtime facts."""
+    def rows(self, articulation: str | None = None) -> tuple[ActuatorFacts, ...]:
+        """Return every selected actuator's facts in ``ModelIR`` order.
+
+        ``articulation=None`` reads the merged whole-scene table; a
+        multi-articulation run without a lossless merged IR raises
+        ``QueryReferenceError`` instead of choosing one articulation.
+        """
+        ...
+
+    def facts(self, name: str, *, articulation: str | None = None) -> ActuatorFacts:
+        """Return one actuator's static facts by neutral name."""
         ...
 
     def state(
@@ -208,8 +220,8 @@ class ActuatorQuery(Protocol):
         *,
         articulation: str | None = None,
         env: EnvSelection = None,
-    ) -> NoReturn:
-        """Return one actuator's per-env runtime state."""
+    ) -> ActuatorRuntime:
+        """Return one actuator's per-env control, force, length and velocity."""
         ...
 
 
@@ -326,7 +338,7 @@ class Query(Protocol):
 
     @property
     def actuators(self) -> ActuatorQuery:
-        """Actuator operations (capability-gated until P1)."""
+        """Actuator facts and live per-env runtime channels."""
         ...
 
     def scratch(self, env: int | None = None) -> AbstractContextManager[ScratchWorld]:

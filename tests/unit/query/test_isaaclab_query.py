@@ -324,6 +324,8 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
     with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
         query.contacts.wrench_to_joint(point, "robot")
     with pytest.raises(QueryCapabilityError, match="actuators.facts"):
+        query.actuators.rows()
+    with pytest.raises(QueryCapabilityError, match="actuators.facts"):
         query.actuators.facts("a1")
     with pytest.raises(QueryCapabilityError, match="actuators.state"):
         query.actuators.state("a1")

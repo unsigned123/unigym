@@ -603,6 +603,18 @@ class _UnsupportedContacts(_Subface):
 class _UnsupportedActuators(_Subface):
     """Actuator runtime facts are capability-gated."""
 
+    def rows(self, articulation: str | None = None) -> NoReturn:
+        """Reject actuator fact rows.
+
+        ``rows`` is the whole-table form of ``facts``; IsaacLab declares the
+        same ``actuators.facts`` operation unsupported for both.
+        """
+        del articulation
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend, "actuators.facts", "unsupported", _P1_DETAIL
+        )
+
     def facts(self, name: str, *, articulation: str | None = None) -> NoReturn:
         """Reject actuator runtime facts."""
         del name, articulation
