@@ -394,16 +394,19 @@ def test_contacts_without_a_declared_group_are_capability_gated(tiny_env) -> Non
 
     with pytest.raises(QueryCapabilityError, match=r"contacts\.manifold.*no contacts"):
         query.contacts.manifold("anything")
-    with pytest.raises(QueryCapabilityError, match=r"actuators.facts.*unsupported"):
-        query.actuators.facts("shoulder_motor")
 
 
-def test_require_gates_the_whole_facade(tiny_env) -> None:
-    """require() accepts implemented ops and rejects unimplemented ones."""
+def test_require_accepts_every_implemented_op(tiny_env) -> None:
+    """require() accepts every declared MuJoCo query operation."""
     query = _query(tiny_env)
-    query.require("model.ir", "state.body_pose", "geometry.distance")
-    with pytest.raises(QueryCapabilityError, match="actuators.state"):
-        query.require("actuators.state")
+
+    query.require(
+        "model.ir",
+        "state.body_pose",
+        "geometry.distance",
+        "actuators.facts",
+        "actuators.state",
+    )
 
 
 def test_query_after_close_is_stale(tiny_env) -> None:

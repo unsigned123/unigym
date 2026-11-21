@@ -41,7 +41,16 @@ _CONTACT_WRENCH = (
     "rows.T @ data.efc_force from the CPU mirror for the same contact rows, in "
     "the articulation DOF layout; dense efc_J only"
 )
-_P1_DETAIL = "actuator queries are added in P1B"
+_ACTUATOR_FACTS = (
+    "compiled ModelIR actuator row (CPU mirror model): compiled slot, "
+    "target/kind, ctrlrange, gear, gainprm, biasprm; "
+    "slot_kind='mujoco_actuator'"
+)
+_ACTUATOR_STATE = (
+    "CPU mirror data.ctrl / data.actuator_force / data.actuator_length / "
+    "data.actuator_velocity at the compiled slot; not a warp device read; "
+    "detached CPU copies"
+)
 _CONTACT_MIRROR = (
     "CPU contact mirror math; group-based active contacts regrouped from warp's "
     "contact solve, not a warp device read"
@@ -106,8 +115,8 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
         wrench_to_joint=Feature("synthetic", _CONTACT_WRENCH),
     ),
     actuators=ActuatorCaps(
-        facts=Feature("unsupported", _P1_DETAIL),
-        state=Feature("unsupported", _P1_DETAIL),
+        facts=Feature("synthetic", _ACTUATOR_FACTS),
+        state=Feature("synthetic", _ACTUATOR_STATE),
     ),
     notes={
         "engine_thread": _ENGINE_THREAD,

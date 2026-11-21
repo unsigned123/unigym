@@ -44,7 +44,8 @@ def test_capability_object_is_mirror_honest() -> None:
     assert caps.supports("contacts.manifold") == "synthetic"
     assert caps.supports("contacts.jacobian") == "synthetic"
     assert caps.supports("contacts.wrench_to_joint") == "synthetic"
-    assert caps.supports("actuators.state") == "unsupported"
+    assert caps.supports("actuators.facts") == "synthetic"
+    assert caps.supports("actuators.state") == "synthetic"
     assert "mirror" in caps.notes
 
 
@@ -195,14 +196,12 @@ def test_body_jacobian_matches_cpu_mujoco_on_the_mirror(tiny_env) -> None:
     np.testing.assert_allclose(jacobian.rot[0].numpy(), expected_r)
 
 
-def test_contacts_without_a_declared_group_and_actuators_are_gated(tiny_env) -> None:
-    """A run with no contacts: groups cannot answer; actuators stay unsupported."""
+def test_contacts_without_a_declared_group_are_capability_gated(tiny_env) -> None:
+    """A run with no contacts: groups cannot answer a manifold read."""
     query = _query(tiny_env)
 
     with pytest.raises(QueryCapabilityError, match=r"mjwarp.*contacts.manifold.*no contacts"):
         query.contacts.manifold("anything")
-    with pytest.raises(QueryCapabilityError, match=r"mjwarp.*actuators.facts"):
-        query.actuators.facts("shoulder_motor")
 
 
 def test_query_close_is_stale(tiny_env) -> None:

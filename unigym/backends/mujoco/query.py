@@ -38,7 +38,14 @@ _CONTACT_WRENCH = (
     "rows.T @ data.efc_force for the same contact rows, in the articulation "
     "DOF layout; MuJoCo efc force sign/frame; dense efc_J only"
 )
-_P1_DETAIL = "actuator queries are added in P1B"
+_ACTUATOR_FACTS = (
+    "compiled ModelIR actuator row: compiled slot, target/kind, ctrlrange, "
+    "gear, gainprm, biasprm; slot_kind='mujoco_actuator'"
+)
+_ACTUATOR_STATE = (
+    "live data.ctrl / data.actuator_force / data.actuator_length / "
+    "data.actuator_velocity at the compiled actuator slot; detached CPU copies"
+)
 _CONTACT_MANIFOLD = (
     "group-based active contacts from data.contact; force acts on the geom2 body "
     "in the MuJoCo contact frame, rotated to world"
@@ -94,8 +101,8 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
         wrench_to_joint=Feature("native", _CONTACT_WRENCH),
     ),
     actuators=ActuatorCaps(
-        facts=Feature("unsupported", _P1_DETAIL),
-        state=Feature("unsupported", _P1_DETAIL),
+        facts=Feature("native", _ACTUATOR_FACTS),
+        state=Feature("native", _ACTUATOR_STATE),
     ),
     notes={
         "engine_thread": _ENGINE_THREAD,

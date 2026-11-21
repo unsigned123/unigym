@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1)
 
 In scope:
 
@@ -27,11 +27,14 @@ In scope:
 - body/site/COM/world-point Jacobians;
 - group-based contact manifolds for the MuJoCo family (P1A-1);
 - contact constraint-row Jacobians and wrench-to-joint for the MuJoCo family
-  (P1A-2).
+  (P1A-2);
+- MuJoCo-family actuator facts and per-env runtime channels (P1B-1).
 
 Out of scope:
 
-- actuator runtime facts (P1B);
+- IsaacLab actuator facts/runtime (P1B-2);
+- writing `ctrl`, gains or limits, and PD target conversion;
+- actuator group semantics beyond the compiled row;
 - IsaacLab contact manifolds, contact Jacobians and wrench-to-joint (P1C);
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
@@ -43,8 +46,8 @@ member.  P0A ships the MuJoCo implementation and the neutral contract;
 P0B-1 adds the mjWarp implementation over the same MuJoCo-family math and the
 CPU `MjData` mirror.  P0B-2 adds the IsaacLab 2.x and IsaacLab 3.x
 (`isaaclab3_physx` / `isaaclab3_newton`) model+pose subset documented in §8;
-scratch, geometry, Jacobians, contacts and actuator runtime stay unsupported
-there until P1.
+scratch, geometry and Jacobians stay unsupported until later P1 work,
+IsaacLab actuators until P1B-2 and IsaacLab contacts until P1C.
 
 ## 1. Entry points
 
@@ -97,7 +100,8 @@ MuJoCo declares (P0A + P1A-2):
 | `geometry.*` | native |
 | `contacts.manifold` | native (group-based active contacts) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | native (dense contact constraint rows; effective rows follow `model.opt.cone`) |
-| `actuators.*` | unsupported (P1B) |
+| `actuators.facts` | native (compiled `ModelIR` actuator row) |
+| `actuators.state` | native (live `data.ctrl`/`actuator_force`/`actuator_length`/`actuator_velocity`) |
 
 mjWarp P0B-1/P1A-2 reads the CPU `MjData` mirror, so only the model facts and
 live state are native; scratch, the CPU math and the contact mirror are
@@ -112,7 +116,8 @@ labelled honestly:
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | synthetic (dense CPU mirror contact rows; effective rows follow `model.opt.cone`) |
-| `actuators.*` | unsupported (P1B) |
+| `actuators.facts` | synthetic (compiled CPU mirror model row) |
+| `actuators.state` | synthetic (CPU mirror runtime channels; not a warp device read) |
 
 IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
 
@@ -127,7 +132,7 @@ IsaacLab 2.x / 3.x P0B-2 declare only the model+pose subset:
 | `jacobian.*` | unsupported (P1) |
 | `geometry.*` | unsupported (P1) |
 | `contacts.*` | unsupported (P1C) |
-| `actuators.*` | unsupported (P1B) |
+| `actuators.*` | unsupported (P1B-2) |
 
 The contact/actuator subfaces exist on every backend; an operation the backend
 does not implement raises a typed capability error instead of returning a
@@ -175,6 +180,16 @@ Responses hold detached CPU torch copies.
   pyramidal rows are friction-pyramid face normals (no pure normal row for
   `condim=3`), and `condim` 4/6 torsion/rolling rows are outside `frame_w`.
   The tensor is a detached CPU float64 copy.
+- `ActuatorFacts(name, target, kind, slot, slot_kind, ctrlrange, gear,
+  gainprm, biasprm)`: one compiled actuator row.  `slot` is the backend slot
+  and `slot_kind` names its namespace; the MuJoCo family uses
+  `slot_kind="mujoco_actuator"` and the compiled `MjModel` actuator id.
+  `target` is the neutral target name (`None` when unnamed);
+  `ctrlrange`/`gear`/`gainprm`/`biasprm` are `None` when the compiled row
+  does not declare them.
+- `ActuatorRuntime(env_ids, ctrl, force, length, velocity)`: one actuator's
+  `(E,)` runtime channels for the selected envs.  A channel is `None` when the
+  backend cannot read it; every tensor is a detached CPU copy.
 
 `env=None` selects every env for state/geometry reads.  `env` may be an int, a
 sequence of ints or a tensor; output `env_ids` preserves the requested order.
@@ -197,6 +212,9 @@ geometry.aabb(entity, *, env=None)
 contacts.manifold(group, *, env=None) -> ContactManifold
 contacts.jacobian(point, articulation) -> ContactJacobian
 contacts.wrench_to_joint(point, articulation) -> torch.Tensor  # (nv,)
+actuators.rows(articulation=None) -> tuple[ActuatorFacts, ...]
+actuators.facts(name, *, articulation=None) -> ActuatorFacts
+actuators.state(name, *, articulation=None, env=None) -> ActuatorRuntime
 ```
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
@@ -301,6 +319,35 @@ current manifold of the same env; `articulation` owns the output layout.
 - `contacts.jacobian` and `contacts.wrench_to_joint` are declared `unsupported`
   on IsaacLab until P1C.  They raise `QueryCapabilityError`.
 
+### Actuators (P1B-1)
+
+`actuators.rows(articulation=None)` returns every compiled actuator's facts in
+`ModelIR` order; `actuators.facts(name, ...)` resolves one neutral actuator
+name, and `actuators.state(name, ..., env=None)` reads its live channels.
+
+- Facts come from the compiled `ModelIR` actuator row: `slot` is the compiled
+  `MjModel` actuator id, `slot_kind` is `"mujoco_actuator"`, and
+  `ctrlrange`/`gear`/`gainprm`/`biasprm` are the compiled values.  An
+  undeclared parameter tuple is `None`, never a zero-filled substitute.
+  Facts are static: a row that is not compiled still reports its neutral
+  identity with `slot=None`; only `state` requires a compiled slot.
+- Runtime reads `data.ctrl`, `data.actuator_force`, `data.actuator_length` and
+  `data.actuator_velocity` at the compiled slot, one value per selected env in
+  the requested order.  `env=None` selects every env; an empty selection
+  returns zero rows.
+- An unknown actuator name, or an ambiguous `articulation=None` on a
+  multi-articulation run without a merged IR, raises `QueryReferenceError`
+  naming the available actuators.  `facts` returns `slot=None` for an
+  uncompiled row; `state` on a row with no compiled slot raises
+  `QueryReferenceError` because there is no live channel to read.
+- A backend with no actuator face declares `actuators.facts`/`state`
+  unsupported and raises `QueryCapabilityError`; it never returns zero rows.
+- Querying an actuator never writes `ctrl`, gains or limits, never converts a
+  target and never runs `mj_forward`.  The mjWarp implementation reads the CPU
+  mirror only: no device sync and no live mirror mutation.
+- Results are detached CPU copies.  The actuator subface publishes no
+  observation and records nothing.
+
 ## 5. Scratch
 
 ```python
@@ -360,16 +407,17 @@ mirror per world.  The shared MuJoCo-family query reads only that mirror:
   contract does not repair it.
 
 This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
-`geometry.*`, `contacts.manifold`, `contacts.jacobian` and
-`contacts.wrench_to_joint` as `synthetic` while `model.*` and `state.*` stay
-`native`.
+`geometry.*`, `contacts.manifold`, `contacts.jacobian`,
+`contacts.wrench_to_joint` and `actuators.facts`/`actuators.state` as
+`synthetic` while `model.*` and `state.*` stay `native`.
 
 ## 7. Failures
 
 | Case | Error |
 |---|---|
 | unsupported operation | `QueryCapabilityError` naming backend/op/support |
-| unknown/ambiguous entity or contact group | `QueryReferenceError` with available names |
+| unknown/ambiguous entity, actuator or contact group | `QueryReferenceError` with available names |
+| `actuators.state` on a row with no compiled slot | `QueryReferenceError` (no fabricated slot; `facts` may report `slot=None`) |
 | contact query without a declared `contacts:` group | `QueryCapabilityError` (no all-contact fallback) |
 | contact id outside the current contact list | `QueryReferenceError` with the available contact ids |
 | in-range contact id now naming a different geom/body pair | `QueryReferenceError` (stale point; refetch the manifold) |
