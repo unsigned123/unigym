@@ -81,6 +81,9 @@ _GEOM_CONTACT = (
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
+_SCRATCH_CONTACTS = (
+    "group-based contact manifold from the scratch MjData; explicit forward required"
+)
 
 MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
     api_version=1,
@@ -117,6 +120,7 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
         com_pose=_NATIVE,
         geometry=_NATIVE,
         jacobian=_NATIVE,
+        contacts=Feature("native", _SCRATCH_CONTACTS),
     ),
     jacobian=JacobianCaps(
         body=_NATIVE,

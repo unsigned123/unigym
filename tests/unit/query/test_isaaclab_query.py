@@ -353,6 +353,7 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
         assert caps.supports("scratch.com_pose") == "synthetic"
         assert caps.supports("scratch.jacobian") == "synthetic"
         assert caps.supports("scratch.geometry") == "unsupported"
+    assert caps.supports("scratch.contacts") == "unsupported"
     if backend == "isaaclab2":
         assert caps.supports("jacobian.body") == "unsupported"
         assert caps.supports("jacobian.site") == "unsupported"
@@ -846,6 +847,19 @@ def test_il3_scratch_geometry_is_unsupported() -> None:
             scratch.geometry().distance(EntityRef("body", "base"), EntityRef("body", "link"))
         with pytest.raises(QueryCapabilityError, match="scratch.geometry"):
             scratch.geometry().aabb(EntityRef("body", "base"))
+
+
+def test_il3_scratch_contacts_are_typed_unsupported() -> None:
+    """A transaction scratch has no contact copy; scratch.contacts is typed unsupported."""
+    query, _, _, _ = _transaction_env()
+
+    with query.scratch(0) as scratch:
+        with pytest.raises(QueryCapabilityError) as caught:
+            scratch.contacts()
+
+    assert caught.value.op == "scratch.contacts"
+    assert caught.value.support == "unsupported"
+    assert caught.value.detail.strip()
 
 
 def test_il3_scratch_is_exclusive_per_env_and_stale_after_close() -> None:

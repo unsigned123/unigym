@@ -336,6 +336,15 @@ class ScratchWorld(Protocol):
         """Return a geometry subface bound to the scratch copy."""
         ...
 
+    def contacts(self) -> ContactQuery:
+        """Return a contact subface bound to the scratch copy.
+
+        Only the run's declared ``contacts:`` groups are visible; there is no
+        all-contact scan.  An explicit :meth:`forward` is required after
+        scratch writes before reading the manifold.
+        """
+        ...
+
     def jacobian(
         self,
         target: EntityRef | ComRef | PointRef,

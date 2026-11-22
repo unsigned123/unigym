@@ -91,6 +91,10 @@ _ENGINE_THREAD = (
 )
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; CPU mirror copy + mj_forward"
+_SCRATCH_CONTACTS = (
+    "CPU mirror contact math on the scratch copy; explicit forward required; "
+    "not a warp device read"
+)
 
 MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
     api_version=1,
@@ -127,6 +131,7 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
         com_pose=Feature("synthetic", _MIRROR),
         geometry=Feature("synthetic", _MIRROR),
         jacobian=Feature("synthetic", _MIRROR),
+        contacts=Feature("synthetic", _SCRATCH_CONTACTS),
     ),
     jacobian=JacobianCaps(
         body=Feature("synthetic", _CPU_MATH),

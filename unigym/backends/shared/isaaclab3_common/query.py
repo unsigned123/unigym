@@ -25,6 +25,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from unigym.backends.shared.isaaclab_query import (
+    SCRATCH_CONTACT_DETAIL,
     IsaacLabContactQuery,
     IsaacLabJacobianQuery,
     IsaacLabQuery,
@@ -123,6 +124,7 @@ def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
             com_pose=Feature("synthetic", _SCRATCH_READ),
             geometry=Feature("unsupported", _SCRATCH_GEOMETRY),
             jacobian=Feature("synthetic", _SCRATCH_READ),
+            contacts=Feature("unsupported", SCRATCH_CONTACT_DETAIL),
             mode="transaction",
             isolation="restored",
         ),

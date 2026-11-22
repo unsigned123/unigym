@@ -115,6 +115,10 @@ _SITE_STATE_DETAIL = (
 _ENGINE_THREAD = "engine thread only; query at a step boundary, no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH_GEOMETRY_DETAIL = "geometry and contact reads are not supported in an IsaacLab scratch"
+SCRATCH_CONTACT_DETAIL = (
+    "an IsaacLab transaction scratch carries no contact copy; the live contact "
+    "face is capability-gated, so scratch.contacts is unsupported"
+)
 _STATE_TWIST_DETAIL = (
     "the IsaacLab query exposes live articulation pose/joint buffers only; "
     "there is no typed rigid-object/root/COM velocity read face in P2"
@@ -248,6 +252,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
             com_pose=unsupported,
             geometry=unsupported,
             jacobian=unsupported,
+            contacts=unsupported,
         ),
         jacobian=JacobianCaps(
             body=unsupported,
@@ -1431,6 +1436,16 @@ class _TransactionScratch:
         """Reject geometry reads: a transaction scratch has no geometry copy."""
         self._open()
         return self._geometry
+
+    def contacts(self) -> NoReturn:
+        """Reject contact reads: a transaction scratch carries no contact copy."""
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "scratch.contacts",
+            "unsupported",
+            SCRATCH_CONTACT_DETAIL,
+        )
 
     def jacobian(
         self,
