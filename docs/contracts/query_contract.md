@@ -3,8 +3,8 @@
 Status: public, on-demand.  Requires `Trait.RUNTIME_QUERY`.  Scope covers the
 P0/P1 face plus P2-0 (object contract), P2-A (object/root/COM state), P2-B
 (object Jacobian), P2-C (cleanup/deprecation only), P2-D (gap
-classification) and P2g scratch contacts; P2-E adds the executable
-capability-matrix release gate.
+classification), P2g scratch contacts and P2h full active-contact scan; P2-E
+adds the executable capability-matrix release gate.
 
 Runtime query is a stable, name-addressed read face for model facts,
 live state, scratch worlds, geometry and Jacobians.  It is **not** an
@@ -34,6 +34,8 @@ In scope:
 - geometry distance (`mj_geomDistance`) and AABB;
 - body/site/COM/world-point Jacobians;
 - group-based contact manifolds for the MuJoCo family (P1A-1);
+- the full active-contact scan for the MuJoCo family with the reserved `"*"`
+  manifold group (P2h);
 - contact constraint-row Jacobians and wrench-to-joint for the MuJoCo family
   (P1A-2);
 - MuJoCo-family actuator facts and per-env runtime channels (P1B-1);
@@ -72,7 +74,7 @@ Out of scope:
 - IsaacLab scratch geometry/contact reads;
 - an IsaacLab 2.x scratch (IL2 has no transaction card);
 - an IsaacLab subtree COM Jacobian (the engine exposes body COM only);
-- all-contact world scans and an inactive/near-contact buffer;
+- an inactive/near-contact buffer;
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
   `probe_candidate`, `ResetPrimitives.probe` or `ContactManager.read_detail`
@@ -143,10 +145,11 @@ MuJoCo declares (P0A + P1A-2):
 | `state.*` | native |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (free-joint `qpos`/`qvel`, `xipos`/`subtree_com`, `mj_jacBodyCom`/`mj_jacSubtreeCom`) |
 | `scratch.*` | native (`copy`, `live_untouched`) |
-| `scratch.contacts` | native (group-based contact manifold from the scratch `MjData`; explicit `forward` required) |
+| `scratch.contacts` | native (contact manifolds and the full scan from the scratch `MjData`; explicit `forward` required) |
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only); `object` is the six-column free-prop Jacobian |
 | `geometry.*` | native |
 | `contacts.manifold` | native (group-based active contacts) |
+| `contacts.scan` | native (every active contact with the reserved `"*"` group; no group or `contact_manager` required) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | native (dense contact constraint rows; effective rows follow `model.opt.cone`) |
 | `actuators.facts` | native (compiled `ModelIR` actuator row) |
 | `actuators.state` | native (live `data.ctrl`/`actuator_force`/`actuator_length`/`actuator_velocity`) |
@@ -162,10 +165,11 @@ labelled honestly:
 | `state.*` | native (CPU mirror read) |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (same free-joint/COM math on the CPU mirror, not a warp device read) |
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
-| `scratch.contacts` | synthetic (CPU mirror contact math on the scratch copy; explicit `forward` required; not a warp device read) |
+| `scratch.contacts` | synthetic (CPU mirror contact math and full scan on the scratch copy; explicit `forward` required; not a warp device read) |
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial; `object` is the six-column free-prop Jacobian |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
+| `contacts.scan` | synthetic (every active CPU mirror contact with the reserved `"*"` group; not a warp device read) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | synthetic (dense CPU mirror contact rows; effective rows follow `model.opt.cone`) |
 | `actuators.facts` | synthetic (compiled CPU mirror model row) |
 | `actuators.state` | synthetic (CPU mirror runtime channels; not a warp device read) |
@@ -198,6 +202,7 @@ unsupported):
 | `geometry.*` | unsupported (P1) |
 | `contacts.manifold` (IsaacLab 3 PhysX) | partial (filtered pairwise manifolds for groups declared `manifold: true`; no contact-normal direction, geom ids, per-point tangent frame or friction) |
 | `contacts.manifold` (IsaacLab 2.x / IsaacLab 3 Newton) | unsupported |
+| `contacts.scan` | unsupported (no unfiltered all-contact scan; read a declared group manifold) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | unsupported (no IsaacLab contact constraint rows) |
 | `actuators.facts` | partial (static `ModelIR` actuator-group facts plus published USD joint names; `slot=None`, no ctrlrange/gear/gains/limits) |
 | `actuators.state` | unsupported (an IsaacLab group has no single scalar ctrl/force/length/velocity row) |
@@ -356,6 +361,7 @@ kinematics.object_jacobian(ref: ObjectRef, *, reference="body_origin"|"com",
 geometry.distance(a, b, *, max_distance_m=1.0, env=None, scratch=None)
 geometry.aabb(entity, *, env=None)
 contacts.manifold(group, *, env=None) -> ContactManifold
+contacts.scan(*, env=None) -> ContactManifold
 contacts.jacobian(point, articulation) -> ContactJacobian
 contacts.wrench_to_joint(point, articulation) -> torch.Tensor  # (nv,)
 actuators.rows(articulation=None) -> tuple[ActuatorFacts, ...]
@@ -552,12 +558,18 @@ world angular velocity.
 - IsaacLab 2 / IsaacLab 3 declare `jacobian.object` unsupported, and the direct
   `object_jacobian` method raises `QueryCapabilityError`.
 
-### Contacts (P1A-1 / P1A-2 / P1C-3)
+### Contacts (P1A-1 / P1A-2 / P1C-3 / P2h)
 
 `contacts.manifold(group, *, env=None)` is **group-based**.  `group` is
 required and resolves against the run's declared `contacts:` groups; the
-group owns the sensor/filter body ids, so there is no all-contact world scan
-and no implicit default group.
+group owns the sensor/filter body ids and there is no implicit default group.
+
+`contacts.scan(*, env=None)` is the **full active-contact scan**.  It returns
+every active contact in the selected envs, independent of any declared
+`contacts:` group, and requires no `contact_manager`.  The manifold group is
+the reserved sentinel `CONTACT_SCAN_GROUP = "*"` (exported from
+`unigym.query`); user contact group names are restricted to `[A-Za-z0-9_-]+`,
+so `"*"` cannot collide.  Every returned `ContactPoint.group` is `"*"`.
 
 - An unknown group raises `QueryReferenceError` naming the declared groups.
 - A run without a contact manager, or a group with no resolved sensor bodies,
@@ -568,9 +580,17 @@ and no implicit default group.
 - A `general` group matches a contact when one side is a sensor body and the
   other side is not; a `pairwise` group additionally requires the other side
   to be a declared filter body.
-- Points are in backend contact order, env-major, and every result is a
-  detached CPU copy.  Querying never mutates the contact list and never
-  publishes an observation.
+- Points from both reads are in backend contact order, env-major, and every
+  result is a detached CPU copy.  Querying never mutates the contact list and
+  never publishes an observation.
+- `scan` has the same force/frame/friction convention as `manifold`: the
+  force acts on the geom2 body and `frame_w` holds the world contact axes.
+- `scan` returns grouped and ungrouped contacts alike.  An empty env selection
+  returns an empty tuple, and a search with no active contacts is also empty,
+  not an error.
+- `ContactCaps.scan` has the safe default `Feature("unsupported", "not
+  declared")`; MuJoCo declares `native`, mjWarp `synthetic`, and every
+  IsaacLab identity `unsupported`.
 
 #### IsaacLab 3 PhysX filtered manifold (P1C-3)
 
@@ -697,6 +717,7 @@ with run.query.scratch(env_id) as scratch:
     jac = scratch.jacobian(EntityRef("body", "base"))
     distance = scratch.geometry().distance(a, b)
     points = scratch.contacts().manifold("crate_floor")
+    all_points = scratch.contacts().scan()
 ```
 
 MuJoCo semantics:
@@ -706,15 +727,15 @@ MuJoCo semantics:
 - one active scratch per env and per query object; a second concurrent
   scratch for the same env fails loudly, while different envs may hold
   concurrent scratches;
-- `ScratchWorld.contacts() -> ContactQuery` returns the same group-based
-  `ContactQuery` bound to the scratch `MjData`.  It covers the scratch's one
-  env only, resolves only the
-  run's declared `contacts:` groups, and has no all-contact scan or implicit
-  default group.  An explicit `scratch.forward()` is required after a scratch
-  write before reading the manifold; the API never forwards implicitly.  A
-  group with no scratch contact returns an empty `points` tuple.  The contact
-  Jacobian/wrench read the scratch constraint rows exactly like the live face;
-  a sparse `efc_J` stays unsupported;
+- `ScratchWorld.contacts() -> ContactQuery` returns the same `ContactQuery`
+  bound to the scratch `MjData`.  It covers the scratch's one env only, exposes
+  both the run's declared `contacts:` groups and the full `scan()` with the
+  reserved `"*"` group, and has no implicit default group.  An explicit
+  `scratch.forward()` is required after a scratch write before reading the
+  manifold or scan; the API never forwards implicitly.  A group with no scratch
+  contact returns an empty `points` tuple.  The contact Jacobian/wrench read the
+  scratch constraint rows exactly like the live face; a sparse `efc_J` stays
+  unsupported;
 - the live contact list and `MjData` are never mutated by `scratch.contacts`;
 - a subface captured from a scratch (`scratch.geometry()` / `scratch.jacobian()`
   / `scratch.contacts()`) becomes stale when the scratch context closes and
@@ -808,7 +829,8 @@ This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
 | `model.geom_contact` on an IR without an `mj` extension | `QueryCapabilityError` (`unsupported`; no default row) |
 | `model.geom_contact` on a geom absent from `mj.geom_contact` | `QueryReferenceError` with the extension's rows |
 | `actuators.state` on a row with no compiled slot | `QueryReferenceError` (no fabricated slot; `facts` may report `slot=None`) |
-| contact query without a declared `contacts:` group | `QueryCapabilityError` (no all-contact fallback) |
+| `manifold` without a declared `contacts:` group | `QueryCapabilityError` (use `scan` for every active contact) |
+| `scan` on IsaacLab | `QueryCapabilityError` (`contacts.scan`, unsupported; no unfiltered all-contact scan) |
 | `scratch.contacts` on a backend with no scratch contact copy (IsaacLab) | `QueryCapabilityError` (`scratch.contacts`, unsupported) |
 | contact id outside the current contact list | `QueryReferenceError` with the available contact ids |
 | in-range contact id now naming a different geom/body pair | `QueryReferenceError` (stale point; refetch the manifold) |

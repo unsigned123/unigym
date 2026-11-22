@@ -374,6 +374,7 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
             "isaaclab3_newton": "unsupported",
         }[backend]
     )
+    assert caps.supports("contacts.scan") == "unsupported"
     assert caps.supports("contacts.jacobian") == "unsupported"
     assert caps.supports("contacts.wrench_to_joint") == "unsupported"
     assert caps.supports("actuators.facts") == "partial"
@@ -971,6 +972,8 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
         query.geometry.aabb(EntityRef("body", "base"))
     with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
         query.contacts.manifold("foot_floor")
+    with pytest.raises(QueryCapabilityError, match="contacts.scan"):
+        query.contacts.scan()
     with pytest.raises(QueryCapabilityError, match="contacts.jacobian"):
         query.contacts.jacobian(point, "robot")
     with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
@@ -1180,3 +1183,18 @@ def test_physx_contact_jacobian_and_wrench_stay_typed_unsupported() -> None:
         query.contacts.jacobian(point, "robot")
     with pytest.raises(QueryCapabilityError, match="contacts.wrench_to_joint"):
         query.contacts.wrench_to_joint(point, "robot")
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_contact_scan_is_typed_unsupported(backend: str) -> None:
+    """No IsaacLab identity offers an unfiltered all-contact scan."""
+    query, _ = _query(backend)
+
+    assert query.capabilities.supports("contacts.scan") == "unsupported"
+    with pytest.raises(QueryCapabilityError) as caught:
+        query.contacts.scan()
+
+    assert caught.value.op == "contacts.scan"
+    assert caught.value.support == "unsupported"
+    assert caught.value.backend == backend
+    assert "all-contact scan" in caught.value.detail

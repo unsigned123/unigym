@@ -50,6 +50,10 @@ _CONTACT_MANIFOLD = (
     "group-based active contacts from data.contact; force acts on the geom2 body "
     "in the MuJoCo contact frame, rotated to world"
 )
+_CONTACT_SCAN = (
+    "every active contact from data.contact with the reserved '*' group; no "
+    "contacts: group or contact_manager required; env-major backend contact order"
+)
 _ROOT_STATE = (
     "free-base articulation qpos/qvel at the compiled free-joint addresses; "
     "linear qvel is world, angular qvel is converted from body-local with "
@@ -82,7 +86,8 @@ _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
 _SCRATCH_CONTACTS = (
-    "group-based contact manifold from the scratch MjData; explicit forward required"
+    "contact manifolds and the full active-contact scan from the scratch MjData; "
+    "explicit forward required"
 )
 
 MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
@@ -135,6 +140,7 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
     geometry=GeometryCaps(distance=_NATIVE, aabb=_NATIVE),
     contacts=ContactCaps(
         manifold=Feature("native", _CONTACT_MANIFOLD),
+        scan=Feature("native", _CONTACT_SCAN),
         jacobian=Feature("native", _CONTACT_JACOBIAN),
         wrench_to_joint=Feature("native", _CONTACT_WRENCH),
     ),

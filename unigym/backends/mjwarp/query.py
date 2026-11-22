@@ -55,6 +55,10 @@ _CONTACT_MIRROR = (
     "CPU contact mirror math; group-based active contacts regrouped from warp's "
     "contact solve, not a warp device read"
 )
+_CONTACT_SCAN = (
+    "every active contact from the CPU contact mirror with the reserved '*' group; "
+    "no contacts: group or contact_manager required; not a warp device read"
+)
 _ROOT_STATE = (
     "CPU mirror free-base articulation qpos/qvel at the compiled free-joint "
     "addresses; linear qvel is world, angular qvel is converted from "
@@ -92,8 +96,8 @@ _ENGINE_THREAD = (
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; CPU mirror copy + mj_forward"
 _SCRATCH_CONTACTS = (
-    "CPU mirror contact math on the scratch copy; explicit forward required; "
-    "not a warp device read"
+    "CPU mirror contact math and full active-contact scan on the scratch copy; "
+    "explicit forward required; not a warp device read"
 )
 
 MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
@@ -150,6 +154,7 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
     ),
     contacts=ContactCaps(
         manifold=Feature("synthetic", _CONTACT_MIRROR),
+        scan=Feature("synthetic", _CONTACT_SCAN),
         jacobian=Feature("synthetic", _CONTACT_JACOBIAN),
         wrench_to_joint=Feature("synthetic", _CONTACT_WRENCH),
     ),

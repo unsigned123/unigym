@@ -37,6 +37,7 @@ from unigym.query.base import (
     ActuatorRuntime,
     ComRef,
     ComState,
+    CONTACT_SCAN_GROUP,
     ContactJacobian,
     ContactManifold,
     ContactPoint,
@@ -1366,13 +1367,14 @@ class _GeometryQuery(_QueryPart):
 
 
 class _ContactQuery(_QueryPart):
-    """Group-based contact manifolds over the current CPU contact list.
+    """Contact manifolds over the current CPU contact list.
 
-    The group's declared sensor/filter body ids own the filter; there is no
-    all-contact world scan.  A contact matches a general group when one side
+    ``manifold`` filters to one declared group's sensor/filter body ids;
+    ``scan`` returns every active contact with the reserved ``"*"`` group and
+    needs no contact manager.  A contact matches a general group when one side
     is a sensor body and the other is not; a pairwise group additionally
     requires the other side to be a declared filter body.  Points preserve the
-    backend contact order, env-major.
+    backend contact order, env-major, and share one point-construction path.
     """
 
     def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
@@ -1386,14 +1388,10 @@ class _ContactQuery(_QueryPart):
         sensor_set = set(sensor_ids)
         filter_set = set(filter_ids)
         points: list[ContactPoint] = []
-        frc6 = np.zeros(6, dtype=np.float64)
         for env_index, data in enumerate(datas):
             env_id = int(ids[env_index])
             ncon = int(data.ncon)
             geoms = np.asarray(data.contact.geom)[:ncon]
-            frames = np.asarray(data.contact.frame)[:ncon].reshape(-1, 9)
-            positions = np.asarray(data.contact.pos)[:ncon]
-            separations = np.asarray(data.contact.dist)[:ncon]
             for contact_id in range(ncon):
                 geom1 = int(geoms[contact_id, 0])
                 geom2 = int(geoms[contact_id, 1])
@@ -1410,28 +1408,95 @@ class _ContactQuery(_QueryPart):
                         continue
                 elif other in sensor_set:
                     continue
-                mujoco.mj_contactForce(model, data, contact_id, frc6)
-                frame = frames[contact_id].reshape(3, 3)
-                tangential = np.zeros(3, dtype=np.float64)
-                tangential[1:3] = frc6[1:3]
                 points.append(
-                    ContactPoint(
-                        env_id=env_id,
-                        group=group,
-                        body1=body_names[body1],
-                        body2=body_names[body2],
-                        geom1=geom_names.get(geom1),
-                        geom2=geom_names.get(geom2),
-                        pos_w=_tensor(positions[contact_id]),
-                        normal_w=_tensor(frame[0]),
-                        frame_w=_tensor(frame),
-                        separation_m=float(separations[contact_id]),
-                        normal_force_n=float(frc6[0]),
-                        friction_force_w=_tensor(contact_frame_to_world(frame, tangential)),
-                        contact_id=contact_id,
+                    self._point(
+                        group,
+                        env_id,
+                        contact_id,
+                        data,
+                        body1,
+                        body2,
+                        geom1,
+                        geom2,
+                        body_names,
+                        geom_names,
                     )
                 )
         return ContactManifold(ids, group, tuple(points))
+
+    def scan(self, *, env: EnvSelection = None) -> ContactManifold:
+        """Return every active contact with the reserved scan group."""
+        self._open()
+        self._query.capabilities.require("contacts.scan")
+        ids, datas = self._frames(env)
+        body_names, geom_names = self._scene_names()
+        model = self._env.mj_model
+        points: list[ContactPoint] = []
+        for env_index, data in enumerate(datas):
+            env_id = int(ids[env_index])
+            ncon = int(data.ncon)
+            geoms = np.asarray(data.contact.geom)[:ncon]
+            for contact_id in range(ncon):
+                geom1 = int(geoms[contact_id, 0])
+                geom2 = int(geoms[contact_id, 1])
+                body1 = int(model.geom_bodyid[geom1])
+                body2 = int(model.geom_bodyid[geom2])
+                points.append(
+                    self._point(
+                        CONTACT_SCAN_GROUP,
+                        env_id,
+                        contact_id,
+                        data,
+                        body1,
+                        body2,
+                        geom1,
+                        geom2,
+                        body_names,
+                        geom_names,
+                    )
+                )
+        return ContactManifold(ids, CONTACT_SCAN_GROUP, tuple(points))
+
+    def _point(
+        self,
+        group: str,
+        env_id: int,
+        contact_id: int,
+        data: mujoco.MjData,
+        body1: int,
+        body2: int,
+        geom1: int,
+        geom2: int,
+        body_names: dict[int, str],
+        geom_names: dict[int, str],
+    ) -> ContactPoint:
+        """Build one neutral contact point from the CPU contact list.
+
+        Force convention (``mj_contactForce``): the normal and friction force
+        act on the geom2 body; ``frame_w`` rows are the world contact axes and
+        the friction is rotated from the contact frame.
+        """
+        model = self._env.mj_model
+        frc6 = np.zeros(6, dtype=np.float64)
+        mujoco.mj_contactForce(model, data, contact_id, frc6)
+        frame = np.asarray(data.contact.frame[contact_id], dtype=np.float64).reshape(3, 3)
+        tangential = np.zeros(3, dtype=np.float64)
+        tangential[1:3] = frc6[1:3]
+        return ContactPoint(
+            env_id=env_id,
+            group=group,
+            body1=body_names[body1],
+            body2=body_names[body2],
+            geom1=geom_names.get(geom1),
+            geom2=geom_names.get(geom2),
+            pos_w=_tensor(np.asarray(data.contact.pos[contact_id], dtype=np.float64)),
+            normal_w=_tensor(frame[0]),
+            frame_w=_tensor(frame),
+            separation_m=float(data.contact.dist[contact_id]),
+            normal_force_n=float(frc6[0]),
+            friction_force_w=_tensor(contact_frame_to_world(frame, tangential)),
+            contact_id=contact_id,
+        )
 
     def jacobian(self, point: ContactPoint, articulation: str) -> ContactJacobian:
         """Return the contact-frame constraint rows in the articulation layout.
@@ -1909,12 +1974,12 @@ class _ScratchWorld:
         return self._geometry
 
     def contacts(self) -> _ContactQuery:
-        """Return the group-based contact subface bound to the scratch copy.
+        """Return the contact subface bound to the scratch copy.
 
-        Only the run's declared ``contacts:`` groups are visible; there is no
-        all-contact scan and no implicit default group.  The caller must call
-        :meth:`forward` after a scratch write before reading the manifold.  The
-        subface covers this one env only and becomes stale when the scratch
+        Both the declared ``contacts:`` groups and the full
+        :meth:`_ContactQuery.scan` read the scratch ``MjData``.  The caller
+        must call :meth:`forward` after a scratch write before reading contacts.
+        The subface covers this one env only and becomes stale when the scratch
         closes.
         """
         self._open()

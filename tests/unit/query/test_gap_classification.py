@@ -93,6 +93,7 @@ def test_isaaclab_gap_operations_stay_declared_not_native(backend: str) -> None:
         "state.object_com_state",
         "jacobian.object",
         "scratch.contacts",
+        "contacts.scan",
         "contacts.jacobian",
         "contacts.wrench_to_joint",
         "actuators.state",
@@ -138,6 +139,15 @@ def test_newton_contact_gap_is_not_inferred_from_physx() -> None:
     assert caps["isaaclab3_physx"].supports("contacts.manifold") == "partial"
     assert caps["isaaclab3_newton"].supports("contacts.manifold") == "unsupported"
     assert "Newton" in caps["isaaclab3_newton"].contacts.manifold.detail
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_isaaclab_contact_scan_stays_unsupported(backend: str) -> None:
+    """IsaacLab keeps the all-contact scan unsupported with a teaching detail."""
+    scan = _backend_capabilities()[backend].contacts.scan
+
+    assert scan.support == "unsupported"
+    assert "all-contact scan" in scan.detail
 
 
 def test_query_capabilities_add_no_per_operation_traits() -> None:
