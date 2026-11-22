@@ -94,6 +94,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "scratch.com_pose": "native",
         "scratch.geometry": "native",
         "scratch.jacobian": "native",
+        "scratch.contacts": "native",
         "jacobian.body": "native",
         "jacobian.site": "native",
         "jacobian.com": "partial",
@@ -135,6 +136,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "scratch.com_pose": "synthetic",
         "scratch.geometry": "synthetic",
         "scratch.jacobian": "synthetic",
+        "scratch.contacts": "synthetic",
         "jacobian.body": "synthetic",
         "jacobian.site": "synthetic",
         "jacobian.com": "partial",
@@ -176,6 +178,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "scratch.com_pose": "unsupported",
         "scratch.geometry": "unsupported",
         "scratch.jacobian": "unsupported",
+        "scratch.contacts": "unsupported",
         "jacobian.body": "unsupported",
         "jacobian.site": "unsupported",
         "jacobian.com": "unsupported",
@@ -217,6 +220,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "scratch.com_pose": "synthetic",
         "scratch.geometry": "unsupported",
         "scratch.jacobian": "synthetic",
+        "scratch.contacts": "unsupported",
         "jacobian.body": "native",
         "jacobian.site": "synthetic",
         "jacobian.com": "partial",
@@ -258,6 +262,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "scratch.com_pose": "synthetic",
         "scratch.geometry": "unsupported",
         "scratch.jacobian": "synthetic",
+        "scratch.contacts": "unsupported",
         "jacobian.body": "native",
         "jacobian.site": "synthetic",
         "jacobian.com": "partial",
@@ -301,10 +306,10 @@ def _feature(caps: QueryCapabilities, op: str):
 
 
 def test_matrix_rows_cover_the_same_complete_operation_set() -> None:
-    """The fixture matrix is complete: five backends, the same 39 operations."""
+    """The fixture matrix is complete: five backends, the same 40 operations."""
     assert tuple(_MATRIX) == BACKENDS
     reference = set(_MATRIX["mujoco"])
-    assert len(reference) == 39
+    assert len(reference) == 40
     for backend in BACKENDS:
         assert set(_MATRIX[backend]) == reference, backend
     assert _MATRIX["mujoco"]["state.object_state"] == "native"

@@ -92,6 +92,7 @@ def test_isaaclab_gap_operations_stay_declared_not_native(backend: str) -> None:
         "state.object_state",
         "state.object_com_state",
         "jacobian.object",
+        "scratch.contacts",
         "contacts.jacobian",
         "contacts.wrench_to_joint",
         "actuators.state",

@@ -7,10 +7,12 @@ from pathlib import Path
 import mujoco
 import numpy as np
 import pytest
+import torch
 
 from unigym.backends.mujoco.query import MujocoQuery
 from unigym.contacts.manager import build_contact_manager
-from unigym.query import QueryReferenceError, QueryStaleError
+from unigym.props import build_prop_manager
+from unigym.query import ObjectRef, QueryReferenceError, QueryStaleError
 from unigym.runtime.actions import NamedAction
 
 PROP_CRATE = """    <body name="Prop_crate" pos="0.3 0 0.05">
@@ -55,6 +57,42 @@ def _step(env, steps: int = 5) -> None:
 
 def _env(tiny_env_factory, tmp_path, manager, num_envs: int = 1):
     return tiny_env_factory(mjcf=_mjcf(tmp_path), contact_manager=manager, num_envs=num_envs)
+
+
+def _prop_manager():
+    """Declare a free crate prop so the scratch can move it through the public face."""
+    return build_prop_manager(
+        {
+            "types": [
+                {
+                    "name": "crate",
+                    "type": "box",
+                    "size": [0.1, 0.1, 0.1],
+                    "aabb": {
+                        "center": [0.0, 0.0, 0.05],
+                        "half_extents": [0.05, 0.05, 0.05],
+                    },
+                    "placement": {
+                        "mode": "fixed",
+                        "x_range": [0.5, 0.5],
+                        "y_range": [0.0, 0.0],
+                        "z_range": [0.3, 0.3],
+                    },
+                }
+            ]
+        },
+        num_envs=1,
+        env_spacing=2.0,
+        device="cpu",
+        backend="mujoco",
+    )
+
+
+def _scratch_env(tiny_env_factory):
+    """Build a one-env crate scene and settle the crate onto the floor."""
+    env = tiny_env_factory(prop_manager=_prop_manager(), contact_manager=_manager())
+    _step(env, 60)
+    return env
 
 
 def test_manifold_reads_the_declared_group_contact(tiny_env_factory, tmp_path) -> None:
@@ -191,3 +229,57 @@ def test_manifold_result_is_a_detached_copy(tiny_env_factory, tmp_path) -> None:
     point.pos_w[0] = 123.0
 
     assert float(env.mj_data.contact.pos[contact_id][0]) == original
+
+
+def test_scratch_contacts_follow_writes_and_leave_live_contacts_untouched(
+    tiny_env_factory,
+) -> None:
+    """A scratch contact manifold tracks scratch writes while the live contacts stay put."""
+    env = _scratch_env(tiny_env_factory)
+    query = MujocoQuery(env)
+    live_ncon = int(env.mj_data.ncon)
+    live_contacts = np.asarray(env.mj_data.contact.pos[:live_ncon]).copy()
+    live_pose = query.state.object_state(ObjectRef("crate"))
+    live_pos = live_pose.pos_w[0].clone()
+    live_quat = live_pose.quat_wxyz[0].clone()
+    away = live_pos.clone()
+    away[2] += 1.0
+
+    with query.scratch(0) as scratch:
+        assert scratch.contacts().manifold("crate_floor").points
+
+        scratch.set_root_state("crate", pos_w=away, quat_wxyz=live_quat)
+        scratch.forward()
+        assert scratch.contacts().manifold("crate_floor").points == ()
+        assert int(env.mj_data.ncon) == live_ncon
+        np.testing.assert_allclose(
+            np.asarray(env.mj_data.contact.pos[:live_ncon]),
+            live_contacts,
+        )
+
+        scratch.set_root_state("crate", pos_w=live_pos, quat_wxyz=live_quat)
+        scratch.forward()
+        assert scratch.contacts().manifold("crate_floor").points
+
+    with pytest.raises(QueryStaleError, match="scratch"):
+        scratch.contacts().manifold("crate_floor")
+
+
+def test_scratch_contact_jacobian_reads_the_scratch_constraint_rows(tiny_env_factory) -> None:
+    """A scratch manifold point maps to scratch constraint rows in the articulation layout."""
+    env = _scratch_env(tiny_env_factory)
+    query = MujocoQuery(env)
+
+    with query.scratch(0) as scratch:
+        contacts = scratch.contacts()
+        point = contacts.manifold("crate_floor").points[0]
+        jacobian = contacts.jacobian(point, "tiny")
+        wrench = contacts.wrench_to_joint(point, "tiny")
+
+    assert jacobian.frame == "contact"
+    assert jacobian.layout.articulation == "tiny"
+    assert jacobian.rows.shape[0] > 0
+    assert jacobian.rows.shape[1] == jacobian.layout.nv
+    assert jacobian.layout.nv < env.mj_model.nv
+    assert tuple(wrench.shape) == (jacobian.layout.nv,)
+    assert torch.isfinite(wrench).all()

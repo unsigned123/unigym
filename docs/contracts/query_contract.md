@@ -2,8 +2,9 @@
 
 Status: public, on-demand.  Requires `Trait.RUNTIME_QUERY`.  Scope covers the
 P0/P1 face plus P2-0 (object contract), P2-A (object/root/COM state), P2-B
-(object Jacobian), P2-C (cleanup/deprecation only) and P2-D (gap
-classification); P2-E adds the executable capability-matrix release gate.
+(object Jacobian), P2-C (cleanup/deprecation only), P2-D (gap
+classification) and P2g scratch contacts; P2-E adds the executable
+capability-matrix release gate.
 
 Runtime query is a stable, name-addressed read face for model facts,
 live state, scratch worlds, geometry and Jacobians.  It is **not** an
@@ -28,6 +29,8 @@ In scope:
 - live body/site/COM/root state;
 - per-env scratch copy with root/joint writes and `forward` (MuJoCo family) or
   a per-env transaction scratch (IsaacLab 3);
+- the MuJoCo-family `scratch.contacts` group-based contact manifold bound to
+  the scratch copy;
 - geometry distance (`mj_geomDistance`) and AABB;
 - body/site/COM/world-point Jacobians;
 - group-based contact manifolds for the MuJoCo family (P1A-1);
@@ -140,6 +143,7 @@ MuJoCo declares (P0A + P1A-2):
 | `state.*` | native |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (free-joint `qpos`/`qvel`, `xipos`/`subtree_com`, `mj_jacBodyCom`/`mj_jacSubtreeCom`) |
 | `scratch.*` | native (`copy`, `live_untouched`) |
+| `scratch.contacts` | native (group-based contact manifold from the scratch `MjData`; explicit `forward` required) |
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only); `object` is the six-column free-prop Jacobian |
 | `geometry.*` | native |
 | `contacts.manifold` | native (group-based active contacts) |
@@ -158,6 +162,7 @@ labelled honestly:
 | `state.*` | native (CPU mirror read) |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (same free-joint/COM math on the CPU mirror, not a warp device read) |
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
+| `scratch.contacts` | synthetic (CPU mirror contact math on the scratch copy; explicit `forward` required; not a warp device read) |
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial; `object` is the six-column free-prop Jacobian |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
@@ -183,6 +188,7 @@ unsupported):
 | `scratch.copy/set_root_state/set_joint_state/forward/body_pose/site_pose/com_pose/jacobian` (IsaacLab 3.x) | synthetic (exclusive per-env transaction over the live state; no snapshot copy) |
 | `scratch.live_untouched` (IsaacLab 3.x) | partial (captured state restored on close; not bit-exact) |
 | `scratch.geometry` (IsaacLab 3.x) | unsupported (no geometry/contact copy in a transaction) |
+| `scratch.contacts` (IsaacLab 3.x) | unsupported (a transaction scratch carries no contact copy; the direct method raises `QueryCapabilityError`) |
 | `jacobian.*` (IsaacLab 2.x) | unsupported (no native Jacobian API) |
 | `jacobian.body` (IsaacLab 3.x) | native (engine body link Jacobian at the body origin) |
 | `jacobian.com` (IsaacLab 3.x) | partial (native body COM Jacobian; a subtree COM Jacobian is unsupported) |
@@ -690,6 +696,7 @@ with run.query.scratch(env_id) as scratch:
     pose = scratch.body_pose("base")
     jac = scratch.jacobian(EntityRef("body", "base"))
     distance = scratch.geometry().distance(a, b)
+    points = scratch.contacts().manifold("crate_floor")
 ```
 
 MuJoCo semantics:
@@ -699,8 +706,19 @@ MuJoCo semantics:
 - one active scratch per env and per query object; a second concurrent
   scratch for the same env fails loudly, while different envs may hold
   concurrent scratches;
-- a subface captured from a scratch (`scratch.geometry()` / `scratch.jacobian()`)
-  becomes stale when the scratch context closes and raises `QueryStaleError`;
+- `ScratchWorld.contacts() -> ContactQuery` returns the same group-based
+  `ContactQuery` bound to the scratch `MjData`.  It covers the scratch's one
+  env only, resolves only the
+  run's declared `contacts:` groups, and has no all-contact scan or implicit
+  default group.  An explicit `scratch.forward()` is required after a scratch
+  write before reading the manifold; the API never forwards implicitly.  A
+  group with no scratch contact returns an empty `points` tuple.  The contact
+  Jacobian/wrench read the scratch constraint rows exactly like the live face;
+  a sparse `efc_J` stays unsupported;
+- the live contact list and `MjData` are never mutated by `scratch.contacts`;
+- a subface captured from a scratch (`scratch.geometry()` / `scratch.jacobian()`
+  / `scratch.contacts()`) becomes stale when the scratch context closes and
+  raises `QueryStaleError`;
 - closing the context releases the copy; later reads raise
   `QueryStaleError`;
 - the live `MjData` is never mutated by a scratch read or write.
@@ -727,6 +745,9 @@ IsaacLab 3 transaction semantics (P1C-2):
   buffers inside the transaction; `geometry()` returns an unsupported typed
   stub whose `distance`/`aabb` calls raise `QueryCapabilityError`
   (`scratch.geometry`) because a transaction carries no geometry/contact copy;
+- `contacts()` raises `QueryCapabilityError` (`scratch.contacts`, unsupported):
+  a transaction scratch carries no contact copy, and the live contact face is
+  capability-gated per identity;
 - close restores the captured free-root pose/velocity and the captured 1-DOF
   hinge/slide joint position/velocity, runs the same write/forward flush, and
   preserves an in-flight body exception.  A non-1-DOF joint is not written back
@@ -788,6 +809,7 @@ This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
 | `model.geom_contact` on a geom absent from `mj.geom_contact` | `QueryReferenceError` with the extension's rows |
 | `actuators.state` on a row with no compiled slot | `QueryReferenceError` (no fabricated slot; `facts` may report `slot=None`) |
 | contact query without a declared `contacts:` group | `QueryCapabilityError` (no all-contact fallback) |
+| `scratch.contacts` on a backend with no scratch contact copy (IsaacLab) | `QueryCapabilityError` (`scratch.contacts`, unsupported) |
 | contact id outside the current contact list | `QueryReferenceError` with the available contact ids |
 | in-range contact id now naming a different geom/body pair | `QueryReferenceError` (stale point; refetch the manifold) |
 | point names an env outside the run | `QueryReferenceError` with the available env ids |

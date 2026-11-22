@@ -71,6 +71,7 @@ _MEMBERS: dict[str, tuple[str, ...]] = {
         "com_pose",
         "geometry",
         "jacobian",
+        "contacts",
     ),
     "jacobian": ("body", "site", "com", "point", "object"),
     "geometry": ("distance", "aabb"),
@@ -140,6 +141,7 @@ class ScratchCaps:
     com_pose: Feature
     geometry: Feature
     jacobian: Feature
+    contacts: Feature = _NOT_DECLARED
     mode: ScratchMode = "copy"
     isolation: ScratchIsolation = "bit_exact"
 

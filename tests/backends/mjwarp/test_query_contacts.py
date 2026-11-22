@@ -10,7 +10,8 @@ import pytest
 
 from unigym.backends.mjwarp.query import MjwarpQuery
 from unigym.contacts.manager import build_contact_manager
-from unigym.query import QueryReferenceError, QueryStaleError
+from unigym.props import build_prop_manager
+from unigym.query import ObjectRef, QueryReferenceError, QueryStaleError
 from unigym.runtime.actions import NamedAction
 
 PROP_CRATE = """    <body name="Prop_crate" pos="0.3 0 0.05">
@@ -55,6 +56,42 @@ def _step(env, steps: int = 5) -> None:
 
 def _env(tiny_env_factory, tmp_path, manager, num_envs: int = 1):
     return tiny_env_factory(mjcf=_mjcf(tmp_path), contact_manager=manager, num_envs=num_envs)
+
+
+def _prop_manager():
+    """Declare a free crate prop so the scratch can move it through the public face."""
+    return build_prop_manager(
+        {
+            "types": [
+                {
+                    "name": "crate",
+                    "type": "box",
+                    "size": [0.1, 0.1, 0.1],
+                    "aabb": {
+                        "center": [0.0, 0.0, 0.05],
+                        "half_extents": [0.05, 0.05, 0.05],
+                    },
+                    "placement": {
+                        "mode": "fixed",
+                        "x_range": [0.5, 0.5],
+                        "y_range": [0.0, 0.0],
+                        "z_range": [0.3, 0.3],
+                    },
+                }
+            ]
+        },
+        num_envs=1,
+        env_spacing=2.0,
+        device="cpu",
+        backend="mjwarp",
+    )
+
+
+def _scratch_env(tiny_env_factory):
+    """Build a one-env crate scene and settle the crate onto the floor."""
+    env = tiny_env_factory(prop_manager=_prop_manager(), contact_manager=_manager())
+    _step(env, 60)
+    return env
 
 
 def test_manifold_reads_the_cpu_mirror_contact(tiny_env_factory, tmp_path) -> None:
@@ -166,3 +203,32 @@ def test_contact_jacobian_and_wrench_are_synthetic(tiny_env_factory, tmp_path) -
     assert query.capabilities.supports("contacts.jacobian") == "synthetic"
     assert query.capabilities.supports("contacts.wrench_to_joint") == "synthetic"
     query.require("contacts.jacobian", "contacts.wrench_to_joint")
+
+
+def test_scratch_contacts_parity_on_the_cpu_mirror(tiny_env_factory) -> None:
+    """Scratch contact math runs on the CPU mirror copy and leaves the live mirror untouched."""
+    env = _scratch_env(tiny_env_factory)
+    query = MjwarpQuery(env)
+    live_ncon = int(env.mj_datas[0].ncon)
+    live_contacts = np.asarray(env.mj_datas[0].contact.pos[:live_ncon]).copy()
+    live_pose = query.state.object_state(ObjectRef("crate"))
+    live_pos = live_pose.pos_w[0].clone()
+    live_quat = live_pose.quat_wxyz[0].clone()
+    away = live_pos.clone()
+    away[2] += 1.0
+
+    with query.scratch(0) as scratch:
+        assert scratch.contacts().manifold("crate_floor").points
+
+        scratch.set_root_state("crate", pos_w=away, quat_wxyz=live_quat)
+        scratch.forward()
+        assert scratch.contacts().manifold("crate_floor").points == ()
+        assert int(env.mj_datas[0].ncon) == live_ncon
+        np.testing.assert_allclose(
+            np.asarray(env.mj_datas[0].contact.pos[:live_ncon]),
+            live_contacts,
+        )
+
+        scratch.set_root_state("crate", pos_w=live_pos, quat_wxyz=live_quat)
+        scratch.forward()
+        assert scratch.contacts().manifold("crate_floor").points

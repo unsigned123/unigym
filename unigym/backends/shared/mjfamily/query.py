@@ -1812,6 +1812,7 @@ class _ScratchWorld:
         self._state = _StateQuery(query, data=self._data, env_id=env_id, scratch=self)
         self._kinematics = _KinematicsQuery(query, data=self._data, env_id=env_id, scratch=self)
         self._geometry = _GeometryQuery(query, data=self._data, env_id=env_id, scratch=self)
+        self._contacts = _ContactQuery(query, data=self._data, env_id=env_id, scratch=self)
 
     def set_root_state(
         self,
@@ -1906,6 +1907,18 @@ class _ScratchWorld:
     def geometry(self) -> _GeometryQuery:
         self._open()
         return self._geometry
+
+    def contacts(self) -> _ContactQuery:
+        """Return the group-based contact subface bound to the scratch copy.
+
+        Only the run's declared ``contacts:`` groups are visible; there is no
+        all-contact scan and no implicit default group.  The caller must call
+        :meth:`forward` after a scratch write before reading the manifold.  The
+        subface covers this one env only and becomes stale when the scratch
+        closes.
+        """
+        self._open()
+        return self._contacts
 
     def jacobian(
         self,
