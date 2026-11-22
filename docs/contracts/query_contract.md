@@ -189,6 +189,30 @@ teaching detail on IsaacLab 2 / IsaacLab 3.  P2-B declares `jacobian.object`
 native on MuJoCo and synthetic on mjWarp; IsaacLab 2 / IsaacLab 3 keep it
 unsupported with the same teaching detail as the object state reads.
 
+### P2-D known gaps and classification
+
+This section classifies the remaining runtime-query backend gaps.  It records
+current behavior only: P2-D adds no implementation, promotes no operation and
+changes no capability value above.  A backend operation is a support claim only
+when a validated backend lane backs it; items marked "follow-up" or "no lane"
+stay at the declared `unsupported` or `partial` level.  The classification does
+not turn any gap into a new P2 implementation.
+
+| Gap | Classification | Rationale |
+|---|---|---|
+| Sparse `efc_J` | unsupported; dense-only | `contacts.jacobian`/`wrench_to_joint` map dense `data.efc_J` only.  A sparse layout (explicit, or `mjJAC_AUTO` at `nv >= 60`) raises `QueryCapabilityError`; compressed values are never reshaped as dense rows.  Dense constraint rows are already tested; sparse support is a follow-up. |
+| Mesh-exact geometry distance | unsupported/follow-up; `mesh_exact` false | `geometry.distance` uses `mj_geomDistance`, which is not a mesh-mesh exact distance.  `DistanceResult.mesh_exact` stays `false`; there is no exact-mesh support claim. |
+| IL3 contact normal/tangent/friction/geom ids | partial (existing P1C-3) | PhysX filtered manifolds expose position, signed separation and a non-negative normal-force magnitude.  `normal_w`/`frame_w`, per-point friction and geom ids are `None` because the engine filtered view does not prove them.  No change in P2-D. |
+| Configurable IL contact point cap | unsupported/follow-up | The PhysX manifold reserves `MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM = 4` contact slots per sensor body and env as a fixed backend declaration.  There is no per-group or per-run configuration. |
+| IL contact multi-env/multi-filter validation | partial/follow-up | The PhysX manifold validates the resolved filter width against the engine filter axis, rejects env ids outside the sensor slots and preserves the requested env order.  Cross-group and more general multi-filter validation remains follow-up. |
+| IL2 contact manifold | unsupported; no lane | IsaacLab 2 has no contact manifold implementation and no lane that would back a support claim; the direct read raises `QueryCapabilityError`. |
+| Newton runtime query completeness | unsupported; no lane | Newton shares the IsaacLab query code but has no validated real-env lane in P2, so no runtime-query completeness claim is made.  PhysX evidence is never reused for Newton. |
+| Newton contact normal/separation | unsupported; no lane | The Newton filtered contact manifold is not implemented; `contacts.manifold` is declared unsupported and raises `QueryCapabilityError`. |
+| IL scratch free-root real restore | partial; transaction | An IsaacLab 3 scratch writes the live state-write face and, on close, restores the captured free-root pose/velocity plus captured 1-DOF joint position/velocity and forwards again.  `set_root_state` on a fixed root raises.  It is a transaction, not a snapshot copy. |
+| IL scratch isolation/bit-exact | partial; `restored`, documented | `ScratchCaps.isolation == "restored"`, not `"bit_exact"`: live buffers are touched while the transaction is open.  The MuJoCo family keeps `mode="copy"` and `isolation="bit_exact"`. |
+| IL actuator runtime | unsupported; no lane | IsaacLab actuator groups expose no single scalar `ctrl`/`force`/`length`/`velocity` row, so `actuators.state` is unsupported and raises `QueryCapabilityError`; static `actuators.facts` remains `partial`. |
+| Query performance/caching/batch | documented per-env loop; no cache | State, geometry, Jacobian and contact reads iterate the selected per-env data (`mj_datas` or the articulation buffers) in requested order.  Query keeps no live-value cache and calls no implicit `forward`; "batch" is the env selection vector, not a vectorized engine call. |
+
 ## 3. Types
 
 All names are backend-neutral; no raw engine id appears in a public signature.
