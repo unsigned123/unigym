@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -103,6 +105,73 @@ def test_dof_layout_requires_order_to_start_with_base_dofs() -> None:
             nv=8,
             order=("a", "b", "c", "d", "e", "f", "shoulder", "elbow"),
         )
+
+
+def _object_layout() -> DofLayout:
+    base = ("crate.px", "crate.py", "crate.pz", "crate.rx", "crate.ry", "crate.rz")
+    return DofLayout(
+        articulation=None,
+        base_dofs=base,
+        base_names=("crate",),
+        joint_names=(),
+        nv=6,
+        order=base,
+        owner_kind="object",
+        owner="crate",
+    )
+
+
+def test_object_dof_layout_records_an_object_owner() -> None:
+    """An object layout is never labelled as an articulation."""
+    layout = _object_layout()
+
+    assert layout.owner_kind == "object"
+    assert layout.owner == "crate"
+    assert layout.articulation is None
+    assert layout.order == layout.base_dofs
+
+
+def test_object_dof_layout_rejects_a_non_null_articulation() -> None:
+    """An object layout must not name an articulation."""
+    with pytest.raises(ValueError, match="articulation must be None"):
+        replace(_object_layout(), articulation="tiny")
+
+
+def test_object_dof_layout_rejects_a_missing_owner() -> None:
+    """An object layout must name its owning prop."""
+    with pytest.raises(ValueError, match="owner must be non-empty"):
+        replace(_object_layout(), owner=None)
+
+
+def test_object_dof_layout_rejects_joints() -> None:
+    """A rigid free prop has no internal joints."""
+    layout = _object_layout()
+    with pytest.raises(ValueError, match="no joint_names"):
+        replace(layout, joint_names=("hinge",), nv=7, order=(*layout.base_dofs, "hinge"))
+
+
+def test_object_dof_layout_requires_six_columns() -> None:
+    """A rigid free prop is exactly a six-DOF object."""
+    with pytest.raises(ValueError, match="nv=6"):
+        replace(_object_layout(), nv=7, order=(*_object_layout().base_dofs, "extra"))
+
+
+def test_object_dof_layout_requires_six_base_dofs() -> None:
+    """The object layout's six columns are the free-joint DOFs."""
+    with pytest.raises(ValueError, match="six base_dofs"):
+        replace(_object_layout(), base_dofs=(), order=("a", "b", "c", "d", "e", "f"))
+
+
+def test_object_dof_layout_requires_one_base_name() -> None:
+    """A rigid free prop has one owning body name."""
+    with pytest.raises(ValueError, match="one base_names"):
+        replace(_object_layout(), base_names=())
+
+
+def test_articulation_dof_layout_rejects_an_object_owner() -> None:
+    """An articulation layout leaves the object owner unset."""
+    with pytest.raises(ValueError, match="owner must be None"):
+        replace(_layout(), owner="crate", owner_kind="articulation")
 
 
 def test_entity_ref_rejects_an_unknown_kind() -> None:

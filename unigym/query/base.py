@@ -22,6 +22,7 @@ __all__ = [
     "ActuatorRuntime",
     "ActuatorSlotKind",
     "ComRef",
+    "ComState",
     "ContactJacobian",
     "ContactManifold",
     "ContactPoint",
@@ -30,8 +31,10 @@ __all__ = [
     "EntityRef",
     "EnvSelection",
     "Jacobian",
+    "ObjectRef",
     "PointRef",
     "Pose",
+    "RigidState",
 ]
 
 EntityKind = Literal["body", "site", "geom"]
@@ -240,6 +243,24 @@ class ComRef:
 
 
 @dataclass(frozen=True)
+class ObjectRef:
+    """A declared prop object addressed by its public prop name.
+
+    P2 resolves only rigid free props: one body, one free joint, no internal
+    joints.  The prop namespace is the ``props:`` declaration and is disjoint
+    from articulation names.  There is no raw body id and no ``articulation``
+    field.
+    """
+
+    name: str
+
+    def __post_init__(self) -> None:
+        """Reject an empty object name."""
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("ObjectRef.name must be non-empty")
+
+
+@dataclass(frozen=True)
 class PointRef:
     """A world point attached to a body for Jacobian purposes."""
 
@@ -271,6 +292,62 @@ class Pose:
         object.__setattr__(self, "env_ids", ids)
         object.__setattr__(self, "pos_w", _matrix(self.pos_w, "pos_w", rows, 3))
         object.__setattr__(self, "quat_wxyz", _matrix(self.quat_wxyz, "quat_wxyz", rows, 4))
+
+
+@dataclass(frozen=True)
+class RigidState:
+    """A rigid body/root frame-origin pose and world-frame twist.
+
+    ``pos_w``/``quat_wxyz`` are the body-frame origin pose.  ``lin_vel_w`` is
+    the world linear velocity of that origin and ``ang_vel_w`` is the world
+    angular velocity.  A rigid free prop's root is its single rigid body.
+    """
+
+    env_ids: torch.Tensor
+    pos_w: torch.Tensor
+    quat_wxyz: torch.Tensor
+    lin_vel_w: torch.Tensor
+    ang_vel_w: torch.Tensor
+    frame: str = "world"
+    reference: str = "body_origin"
+
+    def __post_init__(self) -> None:
+        """Validate the row-count-linked pose/twist tensors and copy them."""
+        if self.frame != "world":
+            raise QueryShapeError("frame", "'world'", repr(self.frame))
+        if self.reference != "body_origin":
+            raise QueryShapeError("reference", "'body_origin'", repr(self.reference))
+        ids = _env_tensor(self.env_ids)
+        rows = ids.numel()
+        object.__setattr__(self, "env_ids", ids)
+        object.__setattr__(self, "pos_w", _finite_matrix(self.pos_w, "pos_w", rows, 3))
+        object.__setattr__(self, "quat_wxyz", _finite_matrix(self.quat_wxyz, "quat_wxyz", rows, 4))
+        object.__setattr__(self, "lin_vel_w", _finite_matrix(self.lin_vel_w, "lin_vel_w", rows, 3))
+        object.__setattr__(self, "ang_vel_w", _finite_matrix(self.ang_vel_w, "ang_vel_w", rows, 3))
+
+
+@dataclass(frozen=True)
+class ComState:
+    """A center-of-mass point: position and world linear velocity.
+
+    A COM is a point.  There is no ``quat_wxyz`` and no ``ang_vel_w`` here; a
+    rigid body's angular velocity is available from :class:`RigidState`.
+    """
+
+    env_ids: torch.Tensor
+    pos_w: torch.Tensor
+    lin_vel_w: torch.Tensor
+    frame: str = "world"
+
+    def __post_init__(self) -> None:
+        """Validate the row-count-linked position/velocity tensors and copy them."""
+        if self.frame != "world":
+            raise QueryShapeError("frame", "'world'", repr(self.frame))
+        ids = _env_tensor(self.env_ids)
+        rows = ids.numel()
+        object.__setattr__(self, "env_ids", ids)
+        object.__setattr__(self, "pos_w", _finite_matrix(self.pos_w, "pos_w", rows, 3))
+        object.__setattr__(self, "lin_vel_w", _finite_matrix(self.lin_vel_w, "lin_vel_w", rows, 3))
 
 
 @dataclass(frozen=True)
@@ -326,19 +403,41 @@ class AABB:
 
 @dataclass(frozen=True)
 class DofLayout:
-    """The per-column DOF layout of one articulation's Jacobian."""
+    """The per-column DOF layout of one articulation's or object's Jacobian.
 
-    articulation: str
+    An articulation layout names its articulation and leaves ``owner`` as
+    ``None``.  An object layout (a rigid free prop) is explicitly not an
+    articulation: ``articulation`` is ``None``, ``owner_kind`` is
+    ``"object"``, ``owner`` is the prop name, and the six free-joint columns
+    are ``base_dofs`` in ``order``.
+    """
+
+    articulation: str | None
     base_dofs: tuple[str, ...]
     base_names: tuple[str, ...]
     joint_names: tuple[str, ...]
     nv: int
     order: tuple[str, ...]
+    owner_kind: Literal["articulation", "object"] = "articulation"
+    owner: str | None = None
 
     def __post_init__(self) -> None:
-        """Validate tuple normalization and the column-count invariant."""
-        if not self.articulation:
-            raise ValueError("DofLayout.articulation must be non-empty")
+        """Validate tuple normalization, ownership and the column-count invariant."""
+        if self.owner_kind == "articulation":
+            if not self.articulation:
+                raise ValueError("DofLayout.articulation must be non-empty")
+            if self.owner is not None:
+                raise ValueError("DofLayout.owner must be None for an articulation layout")
+        elif self.owner_kind == "object":
+            if self.articulation is not None:
+                raise ValueError("DofLayout.articulation must be None for an object layout")
+            if not self.owner:
+                raise ValueError("DofLayout.owner must be non-empty for an object layout")
+        else:
+            raise ValueError(
+                "DofLayout.owner_kind must be 'articulation' or 'object', "
+                f"got {self.owner_kind!r}"
+            )
         base_dofs = tuple(str(name) for name in self.base_dofs)
         base_names = tuple(str(name) for name in self.base_names)
         joint_names = tuple(str(name) for name in self.joint_names)
@@ -357,6 +456,17 @@ class DofLayout:
             raise ValueError("DofLayout.order must start with base_dofs")
         if any(not name for name in (*base_dofs, *base_names, *joint_names, *order)):
             raise ValueError("DofLayout names must be non-empty")
+        if self.owner_kind == "object":
+            if joint_names:
+                raise ValueError("DofLayout object layouts must have no joint_names")
+            if len(base_dofs) != 6:
+                raise ValueError("DofLayout object layouts must have six base_dofs")
+            if len(base_names) != 1:
+                raise ValueError("DofLayout object layouts must have one base_names entry")
+            if self.nv != 6:
+                raise ValueError(f"DofLayout object layouts must have nv=6, got {self.nv}")
+            if order != base_dofs:
+                raise ValueError("DofLayout object layouts must have order == base_dofs")
         object.__setattr__(self, "base_dofs", base_dofs)
         object.__setattr__(self, "base_names", base_names)
         object.__setattr__(self, "joint_names", joint_names)

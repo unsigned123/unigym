@@ -55,6 +55,10 @@ _MEMBERS: dict[str, tuple[str, ...]] = {
         "root_pose",
         "joint_position",
         "joint_velocity",
+        "root_state",
+        "com_state",
+        "object_state",
+        "object_com_state",
     ),
     "scratch": (
         "copy",
@@ -68,7 +72,7 @@ _MEMBERS: dict[str, tuple[str, ...]] = {
         "geometry",
         "jacobian",
     ),
-    "jacobian": ("body", "site", "com", "point"),
+    "jacobian": ("body", "site", "com", "point", "object"),
     "geometry": ("distance", "aabb"),
     "contacts": ("manifold", "jacobian", "wrench_to_joint"),
     "actuators": ("facts", "state"),
@@ -88,6 +92,9 @@ class Feature:
             raise ValueError(
                 f"Feature.support must be one of {sorted(_SUPPORTS)}, got {self.support!r}"
             )
+
+
+_NOT_DECLARED = Feature("unsupported", "not declared")
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,10 @@ class StateCaps:
     root_pose: Feature
     joint_position: Feature
     joint_velocity: Feature
+    root_state: Feature = _NOT_DECLARED
+    com_state: Feature = _NOT_DECLARED
+    object_state: Feature = _NOT_DECLARED
+    object_com_state: Feature = _NOT_DECLARED
 
 
 @dataclass(frozen=True)
@@ -152,6 +163,7 @@ class JacobianCaps:
     site: Feature
     com: Feature
     point: Feature
+    object: Feature = _NOT_DECLARED
 
 
 @dataclass(frozen=True)

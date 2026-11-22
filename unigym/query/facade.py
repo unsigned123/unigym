@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 import torch
 
@@ -23,6 +23,7 @@ from .base import (
     ActuatorFacts,
     ActuatorRuntime,
     ComRef,
+    ComState,
     ContactJacobian,
     ContactManifold,
     ContactPoint,
@@ -30,8 +31,10 @@ from .base import (
     EntityRef,
     EnvSelection,
     Jacobian,
+    ObjectRef,
     PointRef,
     Pose,
+    RigidState,
 )
 from .capabilities import QueryCapabilities
 
@@ -116,6 +119,38 @@ class StateQuery(Protocol):
         """Return one articulation's free-root world pose."""
         ...
 
+    def root_state(self, articulation: str, *, env: EnvSelection = None) -> RigidState:
+        """Return one free-base articulation's root pose and world-frame twist."""
+        ...
+
+    def com_state(
+        self,
+        ref: ComRef,
+        *,
+        frame: str = "world",
+        env: EnvSelection = None,
+    ) -> ComState:
+        """Return one articulation body/subtree COM position and linear velocity."""
+        ...
+
+    def object_state(
+        self,
+        ref: ObjectRef,
+        *,
+        env: EnvSelection = None,
+    ) -> RigidState:
+        """Return one rigid free prop's root pose and world-frame twist."""
+        ...
+
+    def object_com_state(
+        self,
+        ref: ObjectRef,
+        *,
+        env: EnvSelection = None,
+    ) -> ComState:
+        """Return one rigid free prop's COM position and linear velocity."""
+        ...
+
     def joint_position(
         self,
         articulation: str,
@@ -151,6 +186,18 @@ class KinematicsQuery(Protocol):
         rotational: bool = True,
     ) -> Jacobian:
         """Return the translational/rotational Jacobian of one target."""
+        ...
+
+    def object_jacobian(
+        self,
+        ref: ObjectRef,
+        *,
+        reference: Literal["body_origin", "com"] = "body_origin",
+        env: EnvSelection = None,
+        frame: str = "world",
+        rotational: bool = True,
+    ) -> Jacobian:
+        """Return a rigid free prop's six-column world-frame Jacobian."""
         ...
 
 
