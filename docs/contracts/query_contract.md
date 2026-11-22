@@ -1,6 +1,9 @@
 # Runtime query contract
 
-Status: public, on-demand.  Requires `Trait.RUNTIME_QUERY`.
+Status: public, on-demand.  Requires `Trait.RUNTIME_QUERY`.  Scope covers the
+P0/P1 face plus P2-0 (object contract), P2-A (object/root/COM state), P2-B
+(object Jacobian), P2-C (cleanup/deprecation only) and P2-D (gap
+classification); P2-E adds the executable capability-matrix release gate.
 
 Runtime query is a stable, name-addressed read face for model facts,
 live state, scratch worlds, geometry and Jacobians.  It is **not** an
@@ -15,7 +18,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3 + P2-0)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3 + P2-0 + P2-A + P2-B + P2-C + P2-D + P2-E)
 
 In scope:
 
@@ -41,8 +44,18 @@ In scope:
   `DofLayout` ownership, the new subface signatures, and the name-only
   free-prop resolver;
 - P2-A MuJoCo-family object/root/COM state and world-frame velocity reads, with
-  the new state operations declared native on MuJoCo/mjWarp and typed
-  unsupported on IsaacLab.  The six-column object Jacobian remains P2-B.
+  the four new state operations declared native on MuJoCo/mjWarp and typed
+  unsupported on IsaacLab;
+- P2-B the MuJoCo-family six-column object Jacobian: `jacobian.object` is
+  native on MuJoCo and synthetic on mjWarp, with an object-owned `DofLayout`;
+- P2-C cleanup and deprecation only: `run.live` and
+  `ResetPrimitives.probe_candidate` warn and delegate to `run.live_for(name)` /
+  `probe`, and `ContactManager.read_detail` stays until its callers migrate.
+  P2 removes no public operation;
+- P2-D the backend-gap classification in §"P2-D known gaps and classification":
+  no gap is promoted to a support claim;
+- P2-E the exact five-backend capability matrix gate
+  (`tests/unit/query/test_capabilities_matrix.py`).
 
 Out of scope:
 
@@ -58,7 +71,8 @@ Out of scope:
 - all-contact world scans and an inactive/near-contact buffer;
 - any pack-specific consumer;
 - deleting `NativeHandle`, `ModelIR`, `run.model`, `run.live`,
-  `probe_candidate` or `ResetPrimitives.probe`.
+  `probe_candidate`, `ResetPrimitives.probe` or `ContactManager.read_detail`
+  (P2-C is warning-only deprecation, not removal).
 
 `env.query` is an optional backend face; `EnvBackend` gains no required
 member.  P0A ships the MuJoCo implementation and the neutral contract;
@@ -70,7 +84,11 @@ unsupported.  IsaacLab actuator runtime state stays unsupported.  P1B-2 adds
 the IsaacLab static actuation facts subset; P1C-1 adds the IsaacLab 3 Jacobian
 subset; P1C-2 adds the IsaacLab 3 transaction scratch; P1C-3 adds the PhysX
 filtered pairwise contact manifold (the IsaacLab 2.x / Newton contact manifold
-stays unsupported).
+stays unsupported).  P2-0 adds the object contract skeleton; P2-A adds the
+MuJoCo-family object/root/COM state; P2-B adds the six-column object Jacobian;
+P2-C deprecates (but does not remove) the legacy `run.live`/`probe_candidate`
+faces; P2-D classifies the remaining gaps; P2-E adds the executable matrix gate
+and changes no capability value.
 
 ## 1. Entry points
 
@@ -186,8 +204,18 @@ capability catalog.  `StateCaps` and `JacobianCaps` give them the safe default
 `Feature("unsupported", "not declared")`.  P2-A declares the four state
 operations explicitly: native on MuJoCo and mjWarp, and unsupported with a
 teaching detail on IsaacLab 2 / IsaacLab 3.  P2-B declares `jacobian.object`
-native on MuJoCo and synthetic on mjWarp; IsaacLab 2 / IsaacLab 3 keep it
-unsupported with the same teaching detail as the object state reads.
+native on MuJoCo and synthetic on mjWarp.  IsaacLab 2 inherits the shared
+unsupported teaching detail; IsaacLab 3 replaces the Jacobian group without
+declaring `object`, so it keeps the safe `Feature("unsupported", "not declared")`
+default.  On every IsaacLab identity the direct `object_state`,
+`object_com_state` and `object_jacobian` methods raise `QueryCapabilityError`;
+no IsaacLab object read or Jacobian is claimed.  Newton has no object lane and
+never inherits PhysX evidence.
+
+The five-backend matrix above is asserted operation-by-operation by
+`tests/unit/query/test_capabilities_matrix.py`: support levels, scratch
+mode/isolation, the exact `state`/`jacobian` member sets and the absence of
+per-operation traits.  P2-E changes no capability value.
 
 ### P2-D known gaps and classification
 
@@ -325,7 +353,8 @@ six-column object Jacobian.  A backend that has not declared
 `state.object_com_state` or `jacobian.object` raises `QueryCapabilityError`
 through the safe default.  On IsaacLab 2 / IsaacLab 3 the four state reads and
 `object_jacobian` are declared unsupported and their direct methods raise
-`QueryCapabilityError` rather than `AttributeError`.
+`QueryCapabilityError` rather than `AttributeError`.  The declared levels are
+pinned by `tests/unit/query/test_capabilities_matrix.py`.
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
 means the target's own origin: the body frame, the site frame, the subtree
