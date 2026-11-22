@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 from unigym._typing import JsonValue
+from unigym.actuator_law import ACTUATOR_LAW_REGISTRY
 from unigym.actuators.ir import ResolvedActuationGroup
 
 from unigym.robots.base import CanonicalBodyId
@@ -364,46 +365,52 @@ def drive_for_target_laws(
 ) -> str:
     """Derive the runtime drive from an action target and actuation laws.
 
-    The action group owns the target kind; the actuation groups own the
-    physical law.  The combination is explicit: ``position`` becomes
-    ``position_pd`` for ``standard_pd``/``computed_torque_pd`` or
-    ``position_servo`` for ``native_servo``; ``velocity`` requires
-    ``direct_velocity`` and ``torque`` requires ``direct_torque``.  A group
-    spanning incompatible laws (or a target with no native law) fails with a
-    teaching error instead of guessing a drive.
+    The action group owns the target kind; the registered actuation-law
+    descriptors own which drives each law serves.  The drive is the single
+    drive common to every resolved law whose :data:`DRIVE_TARGET` equals
+    *target*.  A group spanning incompatible laws, an unknown law, an
+    ambiguous drive set or a target with no native law fails with a teaching
+    error instead of guessing a drive.
     """
     unique = {str(law) for law in laws}
     if not unique:
         raise ControlError(f"{what} has no resolved actuation law")
-    if target == "position":
-        if unique <= {"standard_pd", "computed_torque_pd"}:
-            return "position_pd"
-        if unique <= {"native_servo"}:
-            return "position_servo"
+    unknown = sorted(unique - set(ACTUATOR_LAW_REGISTRY))
+    if unknown:
         raise ControlError(
-            f"{what} target 'position' spans incompatible actuation laws "
-            f"{sorted(unique)}; a position group must use only "
-            f"standard_pd/computed_torque_pd (position_pd) or native_servo "
-            f"(position_servo)"
+            f"{what} names unregistered actuation law {unknown[0]!r}; registered "
+            f"laws are {sorted(ACTUATOR_LAW_REGISTRY)}"
         )
-    if target == "velocity":
-        if unique <= {"direct_velocity"}:
-            return "velocity"
+    descriptors = [ACTUATOR_LAW_REGISTRY[law] for law in sorted(unique)]
+    common = set(descriptors[0].drives)
+    for descriptor in descriptors[1:]:
+        common &= set(descriptor.drives)
+    candidates = sorted(drive for drive in common if DRIVE_TARGET.get(drive) == target)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
         raise ControlError(
-            f"{what} target 'velocity' requires the direct_velocity actuation "
-            f"law, got {sorted(unique)}"
+            f"{what} target {target!r} is ambiguous across the common drives "
+            f"{candidates} of laws {sorted(unique)}"
         )
-    if target == "torque":
-        if unique <= {"direct_torque"}:
-            return "torque"
-        raise ControlError(
-            f"{what} target 'torque' requires the direct_torque actuation "
-            f"law, got {sorted(unique)}"
-        )
-    raise ControlError(
-        f"{what} target {target!r} has no native direct-drive actuation law; "
-        f"supported targets are position, velocity and torque"
+    target_drives = {
+        drive for drive, drive_target in DRIVE_TARGET.items() if drive_target == target
+    }
+    required_laws = sorted(
+        name
+        for name, descriptor in ACTUATOR_LAW_REGISTRY.items()
+        if not target_drives.isdisjoint(descriptor.drives)
     )
+    if not required_laws:
+        raise ControlError(
+            f"{what} target {target!r} has no native direct-drive actuation law; "
+            f"supported targets are position, velocity and torque"
+        )
+    if len(required_laws) == 1:
+        requirement = f"requires the {required_laws[0]} actuation law"
+    else:
+        requirement = f"requires one of the {', '.join(required_laws)} actuation laws"
+    raise ControlError(f"{what} target {target!r} {requirement}, got {sorted(unique)}")
 
 
 def _control_q0(

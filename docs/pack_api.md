@@ -799,8 +799,17 @@ position_pd    -> standard_pd or computed_torque_pd
 position_servo -> native_servo
 torque         -> direct_torque
 velocity       -> direct_velocity
-effort/current -> unsupported (no native direct-drive law)
+effort/current -> unsupported by built-in laws (no built-in direct-drive law)
 ```
+
+The matrix above is the built-in baseline. Registered actuator-law descriptors
+extend it: a pack law declares the existing drive(s) it serves in
+`ActuatorLawDescriptor.drives`, and `drive_for_target_laws` derives the runtime
+drive from the intersection of every resolved law's `drives` filtered by the
+action target. A registered law with `drives={"position_pd"}` therefore serves a
+`position` action like `standard_pd`. `CONTROL_DRIVES`/`DRIVE_TARGET` remain the
+closed drive vocabulary; a descriptor that names a drive outside it can never be
+selected.
 
 `direct_torque` writes the target torque to compiled `motor` actuators;
 `direct_velocity` writes the target velocity to compiled velocity servos.
