@@ -135,3 +135,9 @@ def test_sample_facade_delegates_require_to_capabilities() -> None:
     """The facade gate is the capability object's gate."""
     with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
         _SampleQuery().require("contacts.manifold")
+
+
+def test_sample_facade_keeps_object_members_undeclared() -> None:
+    """A constructor without the P2 members still yields typed defaults."""
+    with pytest.raises(QueryCapabilityError, match="not declared"):
+        _SampleQuery().require("state.object_state", "jacobian.object")

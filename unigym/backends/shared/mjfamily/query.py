@@ -44,6 +44,7 @@ from unigym.query.base import (
     EntityRef,
     EnvSelection,
     Jacobian,
+    ObjectRef,
     PointRef,
     Pose,
 )
@@ -438,6 +439,149 @@ class _QueryPart:
         if isinstance(body_id, int) and body_id >= 0:
             return body_id
         return None
+
+    def _object_addresses(
+        self,
+        op: str,
+        ref: ObjectRef,
+    ) -> tuple[int, int, int]:
+        """Return ``(body_id, free_qpos_adr, free_dof_adr)`` for a rigid free prop.
+
+        Name-only: it reads the prop backend's free-prop table and validates
+        the result against the compiled model.  It never consults ``_ir()`` or
+        ``model_set.merged``, and it reads no live state or Jacobian.
+        """
+        prop_backend = self._env.prop_backend
+        if prop_backend is None:
+            raise QueryReferenceError(op, ref.name, (), "no props are declared")
+        free = self._free_prop_names(prop_backend)
+        if ref.name in free:
+            return self._free_prop_addresses(op, ref.name, prop_backend)
+        if ref.name in self._prop_articulation_names(prop_backend):
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop {ref.name!r} is a free/anchored articulation prop; "
+                f"P2 supports rigid free props only",
+            )
+        if self._is_declared_prop(prop_backend, ref.name):
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop {ref.name!r} is declared but is not a rigid free prop "
+                f"(static/anchored props have no free joint)",
+            )
+        if ref.name in self._env.articulations:
+            raise QueryReferenceError(
+                op,
+                ref.name,
+                free,
+                "the name is an articulation; use state.root_state/com_state",
+            )
+        raise QueryReferenceError(op, ref.name, free)
+
+    def _free_prop_names(self, prop_backend: MujocoPropBackend) -> tuple[str, ...]:
+        """Return the prop backend's rigid free-prop names, or ``()``."""
+        names = getattr(prop_backend, "free_prop_names", None)
+        if not callable(names):
+            return ()
+        raw = names()
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return ()
+        return tuple(str(name) for name in raw)
+
+    def _prop_articulation_names(self, prop_backend: MujocoPropBackend) -> tuple[str, ...]:
+        """Return the prop backend's articulation-prop names, or ``()``."""
+        arts = getattr(prop_backend, "articulations", None)
+        if arts is None:
+            return ()
+        table = arts() if callable(arts) else arts
+        if not isinstance(table, Mapping):
+            return ()
+        return tuple(str(name) for name in table)
+
+    def _is_declared_prop(self, prop_backend: MujocoPropBackend, name: str) -> bool:
+        """Return whether *name* is a declared prop handler of any kind."""
+        manager = getattr(prop_backend, "prop_manager", None)
+        handler = getattr(manager, "handler", None)
+        if not callable(handler):
+            return False
+        return handler(name) is not None
+
+    def _free_prop_addresses(
+        self,
+        op: str,
+        name: str,
+        prop_backend: MujocoPropBackend,
+    ) -> tuple[int, int, int]:
+        """Resolve and validate one rigid free prop's compiled free-joint addresses."""
+        addresses = getattr(prop_backend, "free_addresses", None)
+        if not callable(addresses):
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"the prop backend lists {name!r} as a free prop but cannot "
+                f"resolve its addresses",
+            )
+        resolved = addresses(name)
+        if not isinstance(resolved, Sequence) or len(resolved) != 3:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"the prop backend did not resolve {name!r} to a " f"(body, qpos, dof) triple",
+            )
+        body, qpos_adr, dof_adr = resolved
+        body_id = int(body)
+        qpos = int(qpos_adr)
+        dof = int(dof_adr)
+        model = self._env.mj_model
+        if body_id < 0 or body_id >= model.nbody:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop {name!r} resolved to compiled body id {body_id}, "
+                f"outside 0..{model.nbody - 1}",
+            )
+        joints = int(model.body_jntnum[body_id])
+        if joints != 1:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop body {name!r} must carry exactly one free joint, got {joints} joints",
+            )
+        joint = int(model.body_jntadr[body_id])
+        if int(model.jnt_type[joint]) != int(mujoco.mjtJoint.mjJNT_FREE):
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop body {name!r} carries a non-free joint",
+            )
+        compiled_qpos = int(model.jnt_qposadr[joint])
+        if compiled_qpos != qpos:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop {name!r} qpos address {qpos} does not match the compiled "
+                f"free joint address {compiled_qpos}",
+            )
+        compiled_dof = int(model.jnt_dofadr[joint])
+        if compiled_dof != dof:
+            raise QueryCapabilityError(
+                self._query.backend,
+                op,
+                "unsupported",
+                f"prop {name!r} dof address {dof} does not match the compiled "
+                f"free joint address {compiled_dof}",
+            )
+        return body_id, qpos, dof
 
     def _compiled_joints(
         self,

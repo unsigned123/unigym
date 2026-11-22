@@ -151,3 +151,37 @@ def test_ops_enumerates_every_group_member() -> None:
     assert "geometry.aabb" in ops
     assert "contacts.jacobian" in ops
     assert "actuators.facts" in ops
+
+
+def test_object_members_default_to_unsupported_not_declared() -> None:
+    """An existing constructor keeps working; new members stay undeclared."""
+    caps = _capabilities()
+    object_ops = (
+        "state.root_state",
+        "state.com_state",
+        "state.object_state",
+        "state.object_com_state",
+        "jacobian.object",
+    )
+
+    for op in object_ops:
+        assert caps.supports(op) == "unsupported"
+        assert op in caps.ops()
+    with pytest.raises(QueryCapabilityError) as caught:
+        caps.require("state.object_state")
+    assert caught.value.detail == "not declared"
+
+
+def test_object_members_can_be_declared_explicitly() -> None:
+    """A backend may declare the new members without touching the old ones."""
+    caps = _capabilities()
+    declared = replace(
+        caps,
+        state=replace(caps.state, object_state=Feature("native")),
+        jacobian=replace(caps.jacobian, object=Feature("synthetic")),
+    )
+
+    assert declared.supports("state.object_state") == "native"
+    assert declared.supports("jacobian.object") == "synthetic"
+    assert declared.supports("state.object_com_state") == "unsupported"
+    assert declared.supports("state.root_pose") == "native"

@@ -15,7 +15,7 @@ observation channel:
 `obs` is unchanged.  Query is opt-in through the backend trait and the
 `BackendInfo.query_backend` lazy factory.
 
-## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3)
+## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3 + P2-0)
 
 In scope:
 
@@ -36,7 +36,11 @@ In scope:
 - IsaacLab 3 transaction scratch with root/joint writes, `forward` and
   body/site/COM/Jacobian reads (P1C-2);
 - IsaacLab 3 PhysX filtered pairwise contact manifolds for groups that declare
-  `manifold: true` (P1C-3).
+  `manifold: true` (P1C-3);
+- the P2-0 object contract skeleton: `ObjectRef`, `RigidState`, `ComState`,
+  `DofLayout` ownership, the new subface signatures, and the name-only
+  free-prop resolver.  P2-0 declares no backend support: the new capabilities
+  default to `unsupported`/`not declared` until P2-A/P2-B implement them.
 
 Out of scope:
 
@@ -168,6 +172,16 @@ The contact/actuator subfaces exist on every backend; an operation the backend
 does not implement raises a typed capability error instead of returning a
 default.
 
+### P2-0 object capability skeleton
+
+P2-0 adds the names `state.root_state`, `state.com_state`,
+`state.object_state`, `state.object_com_state` and `jacobian.object` to the
+capability catalog.  `StateCaps` and `JacobianCaps` give them the safe default
+`Feature("unsupported", "not declared")`, so every existing backend constructor
+keeps working and no backend claims object support in P2-0.  A backend declares
+them explicitly when the matching implementation card lands (P2-A state,
+P2-B Jacobian).
+
 ## 3. Types
 
 All names are backend-neutral; no raw engine id appears in a public signature.
@@ -179,15 +193,31 @@ Responses hold detached CPU torch copies.
   articulation base body; `subtree=True` reads subtree COM.
 - `PointRef(entity, point_w)`: a world point anchored to a **body**.
 - `Pose(env_ids, pos_w, quat_wxyz)`: world pose; `quat_wxyz` is `wxyz`.
+- `ObjectRef(name)`: a declared rigid free prop addressed by its public prop
+  name.  There is no raw body/joint id and no `articulation` field; P2 resolves
+  only rigid free props.  `name` is non-empty.
+- `RigidState(env_ids, pos_w, quat_wxyz, lin_vel_w, ang_vel_w,
+  frame="world", reference="body_origin")`: one rigid body/root frame-origin
+  pose and world-frame twist.  `lin_vel_w` is the world linear velocity at the
+  frame origin; `ang_vel_w` is the world angular velocity.  Only
+  `frame="world"` and `reference="body_origin"` are representable.
+- `ComState(env_ids, pos_w, lin_vel_w, frame="world")`: a center-of-mass point
+  position and world linear velocity.  A COM has no orientation and no angular
+  velocity; a rigid body's angular velocity is available from `RigidState`.
 - `DistanceResult(env_ids, signed_distance_m, closest_a_w, closest_b_w,
   normal_w, capped, mesh_exact)`: `capped` is true when the requested
   `max_distance_m` horizon was reached; `mesh_exact` is false in P0A.
 - `AABB(env_ids, min_w, max_w)`.
-- `DofLayout(articulation, base_dofs, base_names, joint_names, nv, order)`:
-  `order` has one label per Jacobian column and equals
-  `base_dofs + joint_names`.  A free base contributes six `base_dofs`
-  labels (`<base>.px` ... `<base>.rz`) and one `base_names` entry; a fixed
-  base contributes none.
+- `DofLayout(articulation, base_dofs, base_names, joint_names, nv, order,
+  owner_kind="articulation", owner=None)`: `order` has one label per Jacobian
+  column and equals `base_dofs + joint_names`.  A free base contributes six
+  `base_dofs` labels (`<base>.px` ... `<base>.rz`) and one `base_names` entry;
+  a fixed base contributes none.  An articulation layout keeps
+  `owner_kind="articulation"`, a non-empty `articulation` and `owner=None`.
+  An object layout (rigid free prop) is explicitly not an articulation:
+  `articulation=None`, `owner_kind="object"`, `owner` is the prop name,
+  `joint_names=()`, six `base_dofs`, one `base_names` entry, `nv=6` and
+  `order == base_dofs`.
 - `Jacobian(env_ids, transl, rot, layout, frame, reference)`: `transl` and
   `rot` are `(E, 3, nv)`.
 - `ContactPoint(env_id, group, body1, body2, geom1, geom2, pos_w, normal_w,
@@ -239,9 +269,15 @@ model.body/geom/site/joint/actuator(name, *, articulation=None)
 state.body_pose/site_pose(name, *, articulation=None, env=None) -> Pose
 state.com_pose(ref, *, frame="world", env=None) -> Pose
 state.root_pose(articulation, *, env=None) -> Pose
+state.root_state(articulation, *, env=None) -> RigidState
+state.com_state(ref, *, frame="world", env=None) -> ComState
+state.object_state(ref: ObjectRef, *, env=None) -> RigidState
+state.object_com_state(ref: ObjectRef, *, env=None) -> ComState
 state.joint_position/joint_velocity(articulation, *, joint_names=None, env=None)
 kinematics.jacobian(target, *, articulation=None, env=None,
                     frame="world", reference="body_origin", rotational=True)
+kinematics.object_jacobian(ref: ObjectRef, *, reference="body_origin"|"com",
+                           env=None, frame="world", rotational=True) -> Jacobian
 geometry.distance(a, b, *, max_distance_m=1.0, env=None, scratch=None)
 geometry.aabb(entity, *, env=None)
 contacts.manifold(group, *, env=None) -> ContactManifold
@@ -251,6 +287,13 @@ actuators.rows(articulation=None) -> tuple[ActuatorFacts, ...]
 actuators.facts(name, *, articulation=None) -> ActuatorFacts
 actuators.state(name, *, articulation=None, env=None) -> ActuatorRuntime
 ```
+
+P2-0 declares the object signatures above but ships no backend behavior: a
+backend that has not declared `state.root_state`, `state.com_state`,
+`state.object_state`, `state.object_com_state` or `jacobian.object` raises
+`QueryCapabilityError` through the safe default.  P2-A implements the state
+reads and P2-B the six-column object Jacobian; this document does not claim
+them as available yet.
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
 means the target's own origin: the body frame, the site frame, the subtree
