@@ -3,8 +3,9 @@
 Status: public, on-demand.  Requires `Trait.RUNTIME_QUERY`.  Scope covers the
 P0/P1 face plus P2-0 (object contract), P2-A (object/root/COM state), P2-B
 (object Jacobian), P2-C (cleanup/deprecation only), P2-D (gap
-classification), P2g scratch contacts and P2h full active-contact scan; P2-E
-adds the executable capability-matrix release gate.
+classification), P2g scratch contacts, P2h full active-contact scan and
+all-pair geometry distance; P2-E adds the executable capability-matrix release
+gate.
 
 Runtime query is a stable, name-addressed read face for model facts,
 live state, scratch worlds, geometry and Jacobians.  It is **not** an
@@ -31,7 +32,8 @@ In scope:
   a per-env transaction scratch (IsaacLab 3);
 - the MuJoCo-family `scratch.contacts` group-based contact manifold bound to
   the scratch copy;
-- geometry distance (`mj_geomDistance`) and AABB;
+- geometry distance (`mj_geomDistance`), AABB and the opt-in all-pair
+  collision-geom distance scan (P2h);
 - body/site/COM/world-point Jacobians;
 - group-based contact manifolds for the MuJoCo family (P1A-1);
 - the full active-contact scan for the MuJoCo family with the reserved `"*"`
@@ -147,7 +149,8 @@ MuJoCo declares (P0A + P1A-2):
 | `scratch.*` | native (`copy`, `live_untouched`) |
 | `scratch.contacts` | native (contact manifolds and the full scan from the scratch `MjData`; explicit `forward` required) |
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only); `object` is the six-column free-prop Jacobian |
-| `geometry.*` | native |
+| `geometry.*` | native (`distance`, `aabb`, and the opt-in `all_pairs` scan) |
+| `geometry.all_pairs` | native (every compiled collision geom, unique unordered `i < j`, same-body pairs excluded; `mj_geomDistance` per pair/env; `O(N^2)`) |
 | `contacts.manifold` | native (group-based active contacts) |
 | `contacts.scan` | native (every active contact with the reserved `"*"` group; no group or `contact_manager` required) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | native (dense contact constraint rows; effective rows follow `model.opt.cone`) |
@@ -168,6 +171,7 @@ labelled honestly:
 | `scratch.contacts` | synthetic (CPU mirror contact math and full scan on the scratch copy; explicit `forward` required; not a warp device read) |
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial; `object` is the six-column free-prop Jacobian |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
+| `geometry.all_pairs` | synthetic (CPU mirror all-pair scan; not a warp device read) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
 | `contacts.scan` | synthetic (every active CPU mirror contact with the reserved `"*"` group; not a warp device read) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | synthetic (dense CPU mirror contact rows; effective rows follow `model.opt.cone`) |
@@ -199,7 +203,7 @@ unsupported):
 | `jacobian.site` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the robot-profile site local offset) |
 | `jacobian.point` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the world-point offset) |
 | `jacobian.object` (IsaacLab 2.x / 3.x) | unsupported (no typed rigid-object read face; direct calls raise `QueryCapabilityError`) |
-| `geometry.*` | unsupported (P1) |
+| `geometry.*` | unsupported (P1; `all_pairs` is a MuJoCo-family surface) |
 | `contacts.manifold` (IsaacLab 3 PhysX) | partial (filtered pairwise manifolds for groups declared `manifold: true`; no contact-normal direction, geom ids, per-point tangent frame or friction) |
 | `contacts.manifold` (IsaacLab 2.x / IsaacLab 3 Newton) | unsupported |
 | `contacts.scan` | unsupported (no unfiltered all-contact scan; read a declared group manifold) |
@@ -281,6 +285,14 @@ Responses hold detached CPU torch copies.
 - `DistanceResult(env_ids, signed_distance_m, closest_a_w, closest_b_w,
   normal_w, capped, mesh_exact)`: `capped` is true when the requested
   `max_distance_m` horizon was reached; `mesh_exact` is false in P0A.
+- `DistancePair(geom_a, geom_b, signed_distance_m, capped, mesh_exact=False)`:
+  one unordered collision-geom pair.  `geom_a`/`geom_b` are canonical neutral
+  names; `signed_distance_m` and `capped` are `(E,)` and follow the scan env
+  order.  `capped` is true when the pair reached the scan horizon.  V1 carries
+  no closest points or normals.
+- `DistanceScan(env_ids, pairs)`: every collision-geom pair in stable ascending
+  order for the selected envs.  An empty selection keeps the full pair set with
+  zero-length rows.  The scan carries no contact-force or Jacobian rows.
 - `AABB(env_ids, min_w, max_w)`.
 - `DofLayout(articulation, base_dofs, base_names, joint_names, nv, order,
   owner_kind="articulation", owner=None)`: `order` has one label per Jacobian
@@ -360,6 +372,7 @@ kinematics.object_jacobian(ref: ObjectRef, *, reference="body_origin"|"com",
                            env=None, frame="world", rotational=True) -> Jacobian
 geometry.distance(a, b, *, max_distance_m=1.0, env=None, scratch=None)
 geometry.aabb(entity, *, env=None)
+geometry.all_pairs(*, max_distance_m=1.0, env=None) -> DistanceScan
 contacts.manifold(group, *, env=None) -> ContactManifold
 contacts.scan(*, env=None) -> ContactManifold
 contacts.jacobian(point, articulation) -> ContactJacobian
@@ -716,6 +729,7 @@ with run.query.scratch(env_id) as scratch:
     pose = scratch.body_pose("base")
     jac = scratch.jacobian(EntityRef("body", "base"))
     distance = scratch.geometry().distance(a, b)
+    scan = scratch.geometry().all_pairs(max_distance_m=0.5)
     points = scratch.contacts().manifold("crate_floor")
     all_points = scratch.contacts().scan()
 ```
@@ -786,12 +800,27 @@ IsaacLab 3 transaction semantics (P1C-2):
 
 - `distance` takes exactly one data source: live `env` (or `env=None` for all
   envs) or a `scratch` object, never both.
+- `all_pairs` is explicit opt-in: `distance` never calls it and no other read
+  triggers it.  It scans every compiled collision geom (`contype != 0 or
+  conaffinity != 0`), keeps unique unordered pairs `i < j`, and excludes
+  same-body pairs because their relative transform is fixed and not useful for
+  clearance.  It runs `mj_geomDistance` per pair and env without an implicit
+  `mj_forward`; the cost is `O(N^2)` in the number of collision geoms.  Names
+  come from the merged/scene IR; a truly unnamed geom gets a stable synthetic
+  non-empty name, never a raw compiled id.  Each row reports `capped` when the
+  pair reaches `max_distance_m`; `mesh_exact` stays `false` and V1 carries no
+  closest points or normals.  Live and scratch reads share the same
+  implementation: `scratch.geometry().all_pairs(...)` scans the scratch copy
+  and needs an explicit `forward()` after scratch writes.
 - `AABB` is conservative: primitive extents for box/sphere/capsule/cylinder/
   ellipsoid and the bounding radius for a mesh.  A plane or heightfield has no
   finite AABB and raises `QueryCapabilityError`.
 - When the requested `max_distance_m` horizon is reached, `capped` is true and
   the returned closest points/normal are not meaningful for the true surface
   pair (MuJoCo returns the horizon with zero `fromto`).
+- `all_pairs` uses the same horizon rule per pair.  It requires a finite
+  positive `max_distance_m` and raises `QueryShapeError` otherwise; it never
+  inserts an empty or fake pair for an invalid request.
 
 ## 6. mjWarp CPU mirror semantics
 
@@ -802,8 +831,9 @@ mirror per world.  The shared MuJoCo-family query reads only that mirror:
 - live state is a read of the mirror (`env.mj_datas[e]`), never a device read;
 - scratch is a private `mj_copyData` of the mirror plus `mj_forward`; it is a
   CPU copy, not a device clone;
-- geometry (`mj_geomDistance`), Jacobians and the contact manifold run as CPU
-  MuJoCo math on the mirror or scratch copy;
+- geometry (`mj_geomDistance`, including the opt-in `all_pairs` scan),
+  Jacobians and the contact manifold run as CPU MuJoCo math on the mirror or
+  scratch copy;
 - `contacts.manifold` reads the mirror contact list and force solve; it is
   `synthetic`, not a native warp device read;
 - `contacts.jacobian` and `contacts.wrench_to_joint` read the mirror
@@ -884,15 +914,17 @@ Semantics:
   returned;
 - `actuators.facts` reports static actuator-group facts only (`slot=None`,
   `slot_kind="isaaclab_group"`, no ctrlrange/gear/gains/limits, joint names
-  from the published USD attrs).  `actuators.state` and `geometry` are declared
-  unsupported and raise `QueryCapabilityError`; IsaacLab 3 PhysX
+  from the published USD attrs).  `actuators.state` and `geometry` (including
+  `geometry.all_pairs`) are declared unsupported and raise
+  `QueryCapabilityError`; IsaacLab 3 PhysX
   `contacts.manifold` is `partial` for opted-in pairwise groups (P1C-3), while
   the IsaacLab 2.x / Newton contact manifold and every contact
   Jacobian/wrench-to-joint read stay unsupported;
 - IsaacLab 3 `scratch` is the transaction documented in §5: root/joint writes
   go through the live state-write face and close restores the captured state.
   IsaacLab 2.x keeps `scratch` unsupported; scratch `geometry()` returns an
-  unsupported typed stub whose `distance`/`aabb` calls raise on both;
+  unsupported typed stub whose `distance`/`aabb`/`all_pairs` calls raise on
+  both;
 - IsaacLab 3 `kinematics.jacobian` reads the native body link / body COM rows
   and composes site/world-point rows from the body link row; IsaacLab 2.x has
   no native Jacobian API and keeps `jacobian.*` unsupported;

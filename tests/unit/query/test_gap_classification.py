@@ -93,6 +93,7 @@ def test_isaaclab_gap_operations_stay_declared_not_native(backend: str) -> None:
         "state.object_com_state",
         "jacobian.object",
         "scratch.contacts",
+        "geometry.all_pairs",
         "contacts.scan",
         "contacts.jacobian",
         "contacts.wrench_to_joint",
@@ -148,6 +149,22 @@ def test_isaaclab_contact_scan_stays_unsupported(backend: str) -> None:
 
     assert scan.support == "unsupported"
     assert "all-contact scan" in scan.detail
+
+
+def test_geometry_all_pairs_is_mujoco_native_and_isaaclab_unsupported() -> None:
+    """The all-pair scan is a MuJoCo-family surface, never an IsaacLab claim."""
+    caps = _backend_capabilities()
+
+    mujoco = caps["mujoco"].geometry.all_pairs
+    assert mujoco.support == "native"
+    assert "O(N^2)" in mujoco.detail
+    assert "same-body" in mujoco.detail
+    assert caps["mjwarp"].supports("geometry.all_pairs") == "synthetic"
+
+    for backend in ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"):
+        feature = caps[backend].geometry.all_pairs
+        assert feature.support == "unsupported", backend
+        assert "collision-geom pair" in feature.detail, backend
 
 
 def test_query_capabilities_add_no_per_operation_traits() -> None:

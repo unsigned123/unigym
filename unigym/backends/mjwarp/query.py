@@ -87,6 +87,11 @@ _GEOM_CONTACT = (
     "CPU mirror of the compiled model's geom contact row: friction/solref/"
     "solimp/margin/gap/priority/condim; a frozen GeomContact, not a warp device read"
 )
+_GEOM_ALL_PAIRS = (
+    "CPU mirror all-pair collision-geom scan: every geom with contype != 0 or "
+    "conaffinity != 0, unique unordered i < j, same-body pairs excluded; "
+    "mj_geomDistance per pair/env; O(N^2); not a warp device read"
+)
 _MIRROR = "CPU mirror copy (mj_copyData + mj_forward); not a warp device clone"
 _CPU_MATH = "CPU MuJoCo math on the mirror copy"
 _ENGINE_THREAD = (
@@ -151,6 +156,7 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
     geometry=GeometryCaps(
         distance=Feature("synthetic", _CPU_MATH),
         aabb=Feature("synthetic", _CPU_MATH),
+        all_pairs=Feature("synthetic", _GEOM_ALL_PAIRS),
     ),
     contacts=ContactCaps(
         manifold=Feature("synthetic", _CONTACT_MIRROR),

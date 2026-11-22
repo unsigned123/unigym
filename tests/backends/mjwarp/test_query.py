@@ -40,6 +40,7 @@ def test_capability_object_is_mirror_honest() -> None:
     assert caps.supports("scratch.forward") == "synthetic"
     assert caps.supports("jacobian.body") == "synthetic"
     assert caps.supports("geometry.distance") == "synthetic"
+    assert caps.supports("geometry.all_pairs") == "synthetic"
     assert caps.supports("jacobian.com") == "partial"
     assert caps.supports("contacts.manifold") == "synthetic"
     assert caps.supports("contacts.jacobian") == "synthetic"
@@ -177,6 +178,31 @@ def test_geometry_distance_and_aabb_use_the_mirror(tiny_env) -> None:
     box = query.geometry.aabb(EntityRef("body", "base"))
     np.testing.assert_allclose(box.min_w[0].numpy(), center - half)
     np.testing.assert_allclose(box.max_w[0].numpy(), center + half)
+
+
+def test_all_pairs_uses_the_cpu_mirror_distance_math(tiny_env) -> None:
+    """The mirror all-pair scan matches direct mirror distance for every pair."""
+    query = _query(tiny_env)
+
+    scan = query.geometry.all_pairs(max_distance_m=10.0)
+
+    assert [(pair.geom_a, pair.geom_b) for pair in scan.pairs] == [
+        ("floor", "base_geom"),
+        ("floor", "link_geom"),
+        ("floor", "tip_geom"),
+        ("base_geom", "link_geom"),
+        ("base_geom", "tip_geom"),
+        ("link_geom", "tip_geom"),
+    ]
+    for pair in scan.pairs:
+        direct = query.geometry.distance(
+            EntityRef("geom", pair.geom_a),
+            EntityRef("geom", pair.geom_b),
+            max_distance_m=10.0,
+        )
+        np.testing.assert_allclose(pair.signed_distance_m.numpy(), direct.signed_distance_m.numpy())
+        assert pair.capped.tolist() == direct.capped.tolist()
+        assert pair.mesh_exact is False
 
 
 def test_body_jacobian_matches_cpu_mujoco_on_the_mirror(tiny_env) -> None:

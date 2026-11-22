@@ -27,7 +27,9 @@ __all__ = [
     "ContactJacobian",
     "ContactManifold",
     "ContactPoint",
+    "DistancePair",
     "DistanceResult",
+    "DistanceScan",
     "DofLayout",
     "EntityRef",
     "EnvSelection",
@@ -141,6 +143,20 @@ def _finite_columns(value: torch.Tensor, field: str, cols: int) -> torch.Tensor:
     if not bool(torch.isfinite(matrix).all()):
         raise QueryShapeError(field, "finite values", str(matrix.tolist()))
     return matrix
+
+
+def _finite_series(value: torch.Tensor, field: str) -> torch.Tensor:
+    """Validate a finite 1-D floating tensor and return a detached copy."""
+    if not isinstance(value, torch.Tensor):
+        raise QueryShapeError(field, "a 1-D floating tensor", type(value).__name__)
+    if not value.is_floating_point():
+        raise QueryShapeError(field, "a floating tensor", str(value.dtype))
+    if value.ndim != 1:
+        raise QueryShapeError(field, "a 1-D floating tensor", str(tuple(value.shape)))
+    series = value.detach().to("cpu").clone()
+    if not bool(torch.isfinite(series).all()):
+        raise QueryShapeError(field, "finite values", str(series.tolist()))
+    return series
 
 
 def _finite_scalar(value: float, field: str) -> float:
@@ -383,6 +399,100 @@ class DistanceResult:
         object.__setattr__(self, "closest_b_w", _matrix(self.closest_b_w, "closest_b_w", rows, 3))
         object.__setattr__(self, "normal_w", _matrix(self.normal_w, "normal_w", rows, 3))
         object.__setattr__(self, "capped", capped.detach().to("cpu").clone())
+
+
+@dataclass(frozen=True)
+class DistancePair:
+    """One unordered collision-geom pair's per-env signed distance.
+
+    ``geom_a``/``geom_b`` are canonical neutral names in the scan's stable
+    ascending pair order.  ``signed_distance_m`` and ``capped`` are ``(E,)``
+    and follow the scan's env order; ``capped`` is true when the pair reached
+    the scan's ``max_distance_m`` horizon.  ``mesh_exact`` is false:
+    ``mj_geomDistance`` is not an exact mesh-mesh distance.  V1 carries no
+    closest points or normals.
+    """
+
+    geom_a: str
+    geom_b: str
+    signed_distance_m: torch.Tensor
+    capped: torch.Tensor
+    mesh_exact: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the names and the row-linked distance/cap tensors."""
+        geom_a = _name(self.geom_a, "geom_a")
+        geom_b = _name(self.geom_b, "geom_b")
+        if not isinstance(geom_a, str) or not isinstance(geom_b, str):
+            raise ValueError("distance pair geom names must be strings")
+        if geom_a == geom_b:
+            raise QueryShapeError("geom_b", "a different geom than geom_a", geom_a)
+        distance = _finite_series(self.signed_distance_m, "signed_distance_m")
+        capped = self.capped
+        if not isinstance(capped, torch.Tensor) or capped.dtype != torch.bool:
+            raise QueryShapeError("capped", "a bool tensor", type(capped).__name__)
+        if tuple(capped.shape) != tuple(distance.shape):
+            raise QueryShapeError(
+                "capped",
+                f"shape {tuple(distance.shape)}",
+                str(tuple(capped.shape)),
+            )
+        object.__setattr__(self, "geom_a", geom_a)
+        object.__setattr__(self, "geom_b", geom_b)
+        object.__setattr__(self, "signed_distance_m", distance)
+        object.__setattr__(self, "capped", capped.detach().to("cpu").clone())
+
+
+@dataclass(frozen=True)
+class DistanceScan:
+    """Every collision-geom pair's per-env signed distance.
+
+    ``env_ids`` is the selected env vector and preserves the requested order.
+    ``pairs`` holds unique unordered pairs in stable ascending order.  Each
+    pair's ``(E,)`` tensors have one row per selected env.  An empty selection
+    keeps the full pair set with zero-length rows.  The scan covers every
+    compiled collision geom (``contype != 0 or conaffinity != 0``), excludes
+    same-body pairs, and carries no contact force or Jacobian rows.
+    """
+
+    env_ids: torch.Tensor
+    pairs: tuple[DistancePair, ...]
+
+    def __post_init__(self) -> None:
+        """Validate the env selection and every pair's row count."""
+        ids = _env_tensor(self.env_ids)
+        if not isinstance(self.pairs, tuple):
+            raise TypeError(f"pairs must be a tuple, got {type(self.pairs).__name__}")
+        rows = ids.numel()
+        seen: set[tuple[str, str]] = set()
+        for pair in self.pairs:
+            if not isinstance(pair, DistancePair):
+                raise TypeError(f"pairs must hold DistancePair, got {type(pair).__name__}")
+            if tuple(pair.signed_distance_m.shape) != (rows,):
+                raise QueryShapeError(
+                    "signed_distance_m",
+                    f"shape ({rows},)",
+                    str(tuple(pair.signed_distance_m.shape)),
+                )
+            if tuple(pair.capped.shape) != (rows,):
+                raise QueryShapeError(
+                    "capped",
+                    f"shape ({rows},)",
+                    str(tuple(pair.capped.shape)),
+                )
+            key = (
+                (pair.geom_a, pair.geom_b)
+                if pair.geom_a < pair.geom_b
+                else (pair.geom_b, pair.geom_a)
+            )
+            if key in seen:
+                raise QueryShapeError(
+                    "pairs",
+                    "unique unordered geom pairs",
+                    f"{pair.geom_a!r}/{pair.geom_b!r}",
+                )
+            seen.add(key)
+        object.__setattr__(self, "env_ids", ids)
 
 
 @dataclass(frozen=True)

@@ -82,6 +82,11 @@ _GEOM_CONTACT = (
     "compiled ModelIR mj.geom_contact row: geom friction/solref/solimp/margin/"
     "gap/priority/condim; a frozen GeomContact, no raw MjExt"
 )
+_GEOM_ALL_PAIRS = (
+    "every compiled collision-geom pair (contype != 0 or conaffinity != 0), "
+    "unique unordered i < j, same-body pairs excluded; mj_geomDistance per "
+    "pair/env; O(N^2); no closest points or normals; mesh_exact false"
+)
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
@@ -137,7 +142,11 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
         point=_NATIVE,
         object=Feature("native", _OBJECT_JACOBIAN),
     ),
-    geometry=GeometryCaps(distance=_NATIVE, aabb=_NATIVE),
+    geometry=GeometryCaps(
+        distance=_NATIVE,
+        aabb=_NATIVE,
+        all_pairs=Feature("native", _GEOM_ALL_PAIRS),
+    ),
     contacts=ContactCaps(
         manifold=Feature("native", _CONTACT_MANIFOLD),
         scan=Feature("native", _CONTACT_SCAN),

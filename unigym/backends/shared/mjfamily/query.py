@@ -41,7 +41,9 @@ from unigym.query.base import (
     ContactJacobian,
     ContactManifold,
     ContactPoint,
+    DistancePair,
     DistanceResult,
+    DistanceScan,
     DofLayout,
     EntityRef,
     EnvSelection,
@@ -214,6 +216,23 @@ def _identity_quats(rows: int) -> np.ndarray:
     return out
 
 
+def _distance_limit(value: float) -> float:
+    """Validate a finite positive geometry distance horizon."""
+    if isinstance(value, (bool, str, bytes)):
+        raise QueryShapeError("max_distance_m", "a finite positive distance", repr(value))
+    try:
+        limit = float(value)
+    except (TypeError, ValueError):
+        raise QueryShapeError(
+            "max_distance_m",
+            "a finite positive distance",
+            type(value).__name__,
+        ) from None
+    if not np.isfinite(limit) or limit <= 0.0:
+        raise QueryShapeError("max_distance_m", "a finite positive distance", repr(limit))
+    return limit
+
+
 def _scratch_vector(value: torch.Tensor, field: str, length: int) -> np.ndarray:
     """Validate a scratch write vector and return a finite float64 array."""
     if not isinstance(value, torch.Tensor):
@@ -338,6 +357,41 @@ class _QueryPart:
         if row.site_id is None:
             raise QueryReferenceError("site", row.name, (), "the model is not compiled")
         return int(row.site_id)
+
+    def _scene_names(self) -> tuple[dict[int, str], dict[int, str]]:
+        """Return ``(body id -> name, geom id -> name)`` for the whole scene.
+
+        The merged IR is the neutral whole-scene name source.  A run without a
+        lossless merge falls back to the union of its articulation IRs; bodies
+        and geoms outside every articulation (world, props, supports) keep
+        their compiled names, which is the neutral vocabulary for scene-owned
+        geometry.
+        """
+        model_set = self._model_set()
+        if model_set.merged is not None:
+            irs = (model_set.merged,)
+        else:
+            irs = tuple(model_set.articulations.values())
+        body_names: dict[int, str] = {}
+        geom_names: dict[int, str] = {}
+        for ir in irs:
+            for body in ir.bodies:
+                if body.body_id is not None:
+                    body_names.setdefault(int(body.body_id), body.name)
+            for geom in ir.geoms:
+                if geom.geom_id is not None:
+                    geom_names.setdefault(int(geom.geom_id), geom.name)
+        model = self._env.mj_model
+        for body_id in range(model.nbody):
+            if body_id not in body_names:
+                name = str(model.body(body_id).name)
+                body_names[body_id] = name or f"<unnamed:body:{body_id}>"
+        for geom_id in range(model.ngeom):
+            if geom_id not in geom_names:
+                name = str(model.geom(geom_id).name)
+                if name:
+                    geom_names[geom_id] = name
+        return body_names, geom_names
 
     def _columns(self, articulation: str, *, op: str = "jacobian") -> tuple[np.ndarray, DofLayout]:
         art = self._articulation(articulation)
@@ -1259,9 +1313,7 @@ class _GeometryQuery(_QueryPart):
                     type(scratch).__name__,
                 )
             return scratch.geometry().distance(a, b, max_distance_m=max_distance_m)
-        limit = float(max_distance_m)
-        if not np.isfinite(limit) or limit <= 0.0:
-            raise QueryShapeError("max_distance_m", "a finite positive distance", repr(limit))
+        limit = _distance_limit(max_distance_m)
         geom_a = self._require_geom(a)
         geom_b = self._require_geom(b)
         ids, datas = self._frames(env)
@@ -1292,6 +1344,45 @@ class _GeometryQuery(_QueryPart):
             mesh_exact=False,
         )
 
+    def all_pairs(
+        self,
+        *,
+        max_distance_m: float = 1.0,
+        env: EnvSelection = None,
+    ) -> DistanceScan:
+        """Return every collision-geom pair's per-env signed distance.
+
+        The pair set is built once from the compiled model: every geom with
+        ``contype != 0 or conaffinity != 0``, unique unordered pairs in
+        ascending compiled order, excluding same-body pairs.  Each pair runs
+        ``mj_geomDistance`` against the selected env data; no ``mj_forward`` is
+        implied.  The cost is ``O(N^2)`` in the number of collision geoms.
+        """
+        self._open()
+        self._query.capabilities.require("geometry.all_pairs")
+        limit = _distance_limit(max_distance_m)
+        pair_specs = self._collision_pairs()
+        ids, datas = self._frames(env)
+        model = self._env.mj_model
+        pairs: list[DistancePair] = []
+        for name_a, name_b, geom_a, geom_b in pair_specs:
+            distances: list[float] = []
+            capped: list[bool] = []
+            for data in datas:
+                fromto = np.zeros(6, dtype=np.float64)
+                raw = float(mujoco.mj_geomDistance(model, data, geom_a, geom_b, limit, fromto))
+                distances.append(raw)
+                capped.append(raw >= limit)
+            pairs.append(
+                DistancePair(
+                    name_a,
+                    name_b,
+                    _tensor(np.asarray(distances, dtype=np.float64)),
+                    torch.tensor(capped, dtype=torch.bool),
+                )
+            )
+        return DistanceScan(ids, tuple(pairs))
+
     def aabb(self, entity: EntityRef, *, env: EnvSelection = None) -> AABB:
         self._open()
         rows = self._entity_geoms(entity)
@@ -1304,6 +1395,47 @@ class _GeometryQuery(_QueryPart):
             lower.append(np.min([bound[0] for bound in bounds], axis=0))
             upper.append(np.max([bound[1] for bound in bounds], axis=0))
         return AABB(ids, _tensor(_stack(lower, 3)), _tensor(_stack(upper, 3)))
+
+    def _collision_pairs(self) -> list[tuple[str, str, int, int]]:
+        """Return the stable collision-geom pair list with neutral names.
+
+        Only compiled geoms with ``contype != 0 or conaffinity != 0`` are
+        eligible.  Pairs are unique unordered ``i < j`` compiled-id pairs in
+        ascending order, with same-body pairs removed.  Names come from the
+        merged/scene IR where available; a truly unnamed geom gets a stable
+        synthetic ordinal name, never its raw compiled id.
+        """
+        model = self._env.mj_model
+        names = self._geom_names(model)
+        collision_ids = [
+            geom_id
+            for geom_id in range(model.ngeom)
+            if int(model.geom_contype[geom_id]) != 0 or int(model.geom_conaffinity[geom_id]) != 0
+        ]
+        specs: list[tuple[str, str, int, int]] = []
+        for position, geom_a in enumerate(collision_ids):
+            for geom_b in collision_ids[position + 1 :]:
+                if int(model.geom_bodyid[geom_a]) == int(model.geom_bodyid[geom_b]):
+                    continue
+                specs.append((names[geom_a], names[geom_b], geom_a, geom_b))
+        return specs
+
+    def _geom_names(self, model: mujoco.MjModel) -> dict[int, str]:
+        """Return one non-empty neutral name for every compiled geom."""
+        _, names = self._scene_names()
+        used = set(names.values())
+        ordinal = 0
+        for geom_id in range(model.ngeom):
+            if geom_id in names:
+                continue
+            while True:
+                candidate = f"unnamed_geom_{ordinal}"
+                ordinal += 1
+                if candidate not in used:
+                    break
+            names[geom_id] = candidate
+            used.add(candidate)
+        return names
 
     def _require_geom(self, entity: EntityRef) -> int:
         if entity.kind != "geom":
@@ -1717,41 +1849,6 @@ class _ContactQuery(_QueryPart):
             return body_ids[native]
         except KeyError:
             raise QueryReferenceError("contacts.manifold", native, body_ids) from None
-
-    def _scene_names(self) -> tuple[dict[int, str], dict[int, str]]:
-        """Return ``(body id -> name, geom id -> name)`` for the whole scene.
-
-        The merged IR is the neutral whole-scene name source.  A run without a
-        lossless merge falls back to the union of its articulation IRs; bodies
-        and geoms outside every articulation (world, props, supports) keep
-        their compiled names, which is the neutral vocabulary for scene-owned
-        geometry.
-        """
-        model_set = self._model_set()
-        if model_set.merged is not None:
-            irs = (model_set.merged,)
-        else:
-            irs = tuple(model_set.articulations.values())
-        body_names: dict[int, str] = {}
-        geom_names: dict[int, str] = {}
-        for ir in irs:
-            for body in ir.bodies:
-                if body.body_id is not None:
-                    body_names.setdefault(int(body.body_id), body.name)
-            for geom in ir.geoms:
-                if geom.geom_id is not None:
-                    geom_names.setdefault(int(geom.geom_id), geom.name)
-        model = self._env.mj_model
-        for body_id in range(model.nbody):
-            if body_id not in body_names:
-                name = str(model.body(body_id).name)
-                body_names[body_id] = name or f"<unnamed:body:{body_id}>"
-        for geom_id in range(model.ngeom):
-            if geom_id not in geom_names:
-                name = str(model.geom(geom_id).name)
-                if name:
-                    geom_names[geom_id] = name
-        return body_names, geom_names
 
 
 def _actuator_facts(row: Actuator) -> ActuatorFacts:
