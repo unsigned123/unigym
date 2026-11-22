@@ -16,9 +16,10 @@ Quickstart (no doctest markers on purpose)::
 
     env = unigym.make(run, kind="gym")       # Gymnasium single-env facade
 
-Use ``run.model`` for the frozen model IR, ``run.live`` for zero-copy
-dynamic proxies and ``run.step`` / ``run.steps`` for the default synchronous
-runner.
+Use ``run.model`` for the frozen model IR and ``run.live_for(name)`` for
+zero-copy dynamic proxies (``run.live`` is deprecated).  Typed runtime reads
+are available from ``run.build().query``; ``run.step`` / ``run.steps`` drive
+the default synchronous runner.
 """
 
 from __future__ import annotations

@@ -1178,8 +1178,12 @@ model without collision geoms, or an unknown owner/geom/support reference
 raises the neutral, pack-catchable `ProbeCapabilityError` exported by
 `unigym.initializers`; packs never need the backend-private probe module.
 Malformed shapes or types remain value errors.  The legacy
-`probe_candidate(rule, position, yaw, clearance)` region entry remains and
-delegates to `probe`.
+`probe_candidate(rule, position, yaw, clearance)` region entry is deprecated:
+it emits a `DeprecationWarning` and delegates to `probe` with the same
+behavior.  New code must build a `ProbeRequest`.  The legacy entry is removed
+only after zero-caller proof; today its remaining references are its
+definition/wiring, the backend regression test and documentation (this document
+and the query contract's out-of-scope note).
 
 ### Run resources
 
