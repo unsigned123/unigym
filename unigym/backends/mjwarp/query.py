@@ -74,6 +74,11 @@ _OBJECT_COM_STATE = (
     "CPU mirror single rigid free prop body COM from xipos plus "
     "mj_jacBodyCom @ qvel; world linear velocity only; not a warp device read"
 )
+_OBJECT_JACOBIAN = (
+    "CPU mirror six free-joint columns of mj_jacBody (reference='body_origin') "
+    "or mj_jacBodyCom (reference='com') at the resolved prop body; world rows, "
+    "angular columns in the free-joint body-local qvel basis; not a warp device read"
+)
 _MIRROR = "CPU mirror copy (mj_copyData + mj_forward); not a warp device clone"
 _CPU_MATH = "CPU MuJoCo math on the mirror copy"
 _ENGINE_THREAD = (
@@ -127,6 +132,7 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
             "subtree COM is translational only",
         ),
         point=Feature("synthetic", _CPU_MATH),
+        object=Feature("synthetic", _OBJECT_JACOBIAN),
     ),
     geometry=GeometryCaps(
         distance=Feature("synthetic", _CPU_MATH),

@@ -47,14 +47,14 @@ def _prop_manager(num_envs: int = 1):
 
 
 def test_object_state_capabilities_are_native_mirror_reads() -> None:
-    """P2-A state reads keep the existing native CPU-mirror state convention."""
+    """P2-A state reads keep the native mirror convention; P2-B Jacobian is synthetic."""
     caps = MJWARP_QUERY_CAPABILITIES
 
     assert caps.supports("state.root_state") == "native"
     assert caps.supports("state.com_state") == "native"
     assert caps.supports("state.object_state") == "native"
     assert caps.supports("state.object_com_state") == "native"
-    assert caps.supports("jacobian.object") == "unsupported"
+    assert caps.supports("jacobian.object") == "synthetic"
 
 
 def test_object_state_and_com_parity_on_the_cpu_mirror(tiny_env_factory) -> None:
@@ -132,7 +132,42 @@ def test_mirror_object_reads_are_detached_and_do_not_mutate_live_data(tiny_env_f
     state = query.state.object_state(ObjectRef("crate"))
     state.pos_w[0, 0] = 123.0
     query.state.object_com_state(ObjectRef("crate"))
+    jac = query.kinematics.object_jacobian(ObjectRef("crate"), reference="com")
+    jac.transl[0, 0, 0] = 789.0
+    jac.rot[0, 0, 0] = 987.0
 
     np.testing.assert_array_equal(data.qpos, qpos)
     np.testing.assert_array_equal(data.qvel, qvel)
     np.testing.assert_array_equal(data.xipos, xipos)
+
+
+def test_object_jacobian_mirror_parity_for_origin_and_com(tiny_env_factory) -> None:
+    """The synthetic mirror Jacobian equals the sliced MuJoCo body/body-COM math."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    data = env.mj_datas[0]
+    body_id, qadr, vadr = env.prop_backend.free_addresses("crate")
+    data.qpos[qadr : qadr + 3] = [0.4, 0.1, 0.5]
+    data.qpos[qadr + 3 : qadr + 7] = _QUAT_90_Y
+    data.qvel[vadr : vadr + 3] = [0.1, 0.2, 0.3]
+    data.qvel[vadr + 3 : vadr + 6] = [0.3, -0.4, 0.5]
+    mujoco.mj_forward(env.mj_model, data)
+    columns = np.arange(vadr, vadr + 6, dtype=np.int64)
+
+    origin = query.kinematics.object_jacobian(ObjectRef("crate"), reference="body_origin")
+    com = query.kinematics.object_jacobian(ObjectRef("crate"), reference="com")
+
+    jacp = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    jacr = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    mujoco.mj_jacBody(env.mj_model, data, jacp, jacr, body_id)
+    np.testing.assert_allclose(origin.transl[0].numpy(), jacp[:, columns], atol=1e-12)
+    np.testing.assert_allclose(origin.rot[0].numpy(), jacr[:, columns], atol=1e-12)
+
+    jacp_com = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    jacr_com = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    mujoco.mj_jacBodyCom(env.mj_model, data, jacp_com, jacr_com, body_id)
+    np.testing.assert_allclose(com.transl[0].numpy(), jacp_com[:, columns], atol=1e-12)
+    np.testing.assert_allclose(com.rot[0].numpy(), jacr_com[:, columns], atol=1e-12)
+    assert com.layout.owner_kind == "object"
+    assert com.layout.owner == "crate"
+    assert com.layout.articulation is None

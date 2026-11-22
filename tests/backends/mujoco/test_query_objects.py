@@ -401,10 +401,10 @@ def test_object_resolution_works_without_a_merged_ir(tmp_path, tiny_mjcf) -> Non
         env.close()
 
 
-def test_object_capabilities_are_native_and_jacobian_object_is_not_declared(
+def test_object_capabilities_are_native_and_jacobian_object_is_native(
     tiny_env_factory,
 ) -> None:
-    """P2-A declares the four state reads native and leaves jacobian.object at P2-B."""
+    """P2-A/P2-B declare the object state reads and Jacobian native."""
     env = tiny_env_factory(prop_manager=_prop_manager())
     query = _query(env)
 
@@ -413,7 +413,7 @@ def test_object_capabilities_are_native_and_jacobian_object_is_not_declared(
     assert query.capabilities.supports("state.com_state") == "native"
     assert query.capabilities.supports("state.object_state") == "native"
     assert query.capabilities.supports("state.object_com_state") == "native"
-    assert query.capabilities.supports("jacobian.object") == "unsupported"
+    assert query.capabilities.supports("jacobian.object") == "native"
 
 
 def test_object_com_state_rejects_a_non_world_frame(tiny_env_factory) -> None:
@@ -423,3 +423,233 @@ def test_object_com_state_rejects_a_non_world_frame(tiny_env_factory) -> None:
 
     with pytest.raises(QueryCapabilityError, match="state.com_state.*local"):
         query.state.com_state(ComRef("tiny", body="base"), frame="local")
+
+
+def _fixed_articulation_manager(tmp_path):
+    asset = tmp_path / "laptop_anchored.xml"
+    asset.write_text(
+        """<mujoco model="laptop">
+  <worldbody>
+    <body name="laptop_root">
+      <geom name="laptop_geom" type="box" size="0.1 0.1 0.02"/>
+      <body name="lid" pos="0 0 0.02">
+        <joint name="lid_hinge" type="hinge" axis="0 1 0"/>
+        <geom name="lid_geom" type="box" size="0.1 0.1 0.01"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>""",
+        encoding="utf-8",
+    )
+    return build_prop_manager(
+        {
+            "types": [
+                {
+                    "name": "laptop",
+                    "type": "articulation",
+                    "asset": str(asset),
+                    "joints": {"lid_hinge": {"mode": "passive"}},
+                    "placement": {
+                        "mode": "fixed",
+                        "x_range": [1.0, 1.0],
+                        "y_range": [0.0, 0.0],
+                        "z_range": [0.5, 0.5],
+                    },
+                }
+            ]
+        },
+        num_envs=1,
+        env_spacing=2.0,
+        device="cpu",
+        backend="mujoco",
+    )
+
+
+def _skew(vector: np.ndarray) -> np.ndarray:
+    x, y, z = vector
+    return np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]], dtype=np.float64)
+
+
+def test_object_jacobian_shape_layout_and_free_joint_columns(tiny_env_factory) -> None:
+    """The object Jacobian is (E, 3, 6) with an object layout and free-joint columns."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    body_id, _, vadr = _write_prop(
+        env,
+        "crate",
+        pos=np.array([0.4, 0.1, 0.5]),
+        quat=_QUAT_90_Y,
+        lin=np.array([0.1, 0.2, 0.3]),
+        ang_local=np.array([0.3, -0.4, 0.5]),
+    )
+    data = env.mj_datas[0]
+
+    jac = query.kinematics.object_jacobian(ObjectRef("crate"))
+
+    assert tuple(jac.transl.shape) == (1, 3, 6)
+    assert tuple(jac.rot.shape) == (1, 3, 6)
+    assert jac.frame == "world"
+    assert jac.reference == "body_origin"
+    layout = jac.layout
+    assert layout.owner_kind == "object"
+    assert layout.owner == "crate"
+    assert layout.articulation is None
+    assert layout.nv == 6
+    assert layout.joint_names == ()
+    assert layout.base_names == ("crate",)
+    base_dofs = tuple(f"crate.{suffix}" for suffix in ("px", "py", "pz", "rx", "ry", "rz"))
+    assert layout.base_dofs == base_dofs
+    assert layout.order == base_dofs
+
+    jacp = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    jacr = np.zeros((3, env.mj_model.nv), dtype=np.float64)
+    mujoco.mj_jacBody(env.mj_model, data, jacp, jacr, body_id)
+    np.testing.assert_allclose(jac.transl[0].numpy(), jacp[:, vadr : vadr + 6])
+    np.testing.assert_allclose(jac.rot[0].numpy(), jacr[:, vadr : vadr + 6])
+
+
+def test_object_jacobian_com_reference_matches_velocity_and_origin_offset(
+    tiny_env_factory,
+) -> None:
+    """COM/body-origin blocks relate by the offset term and reproduce the reads."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    body_id, _, vadr = _write_prop(
+        env,
+        "crate",
+        pos=np.array([0.4, 0.1, 0.5]),
+        quat=_QUAT_90_Y,
+        lin=np.array([0.1, 0.2, 0.3]),
+        ang_local=np.array([0.3, -0.4, 0.5]),
+    )
+    data = env.mj_datas[0]
+    qvel6 = np.asarray(data.qvel[vadr : vadr + 6], dtype=np.float64)
+
+    state = query.state.object_state(ObjectRef("crate"))
+    com = query.state.object_com_state(ObjectRef("crate"))
+    origin_jac = query.kinematics.object_jacobian(ObjectRef("crate"), reference="body_origin")
+    com_jac = query.kinematics.object_jacobian(ObjectRef("crate"), reference="com")
+
+    np.testing.assert_allclose(
+        com.lin_vel_w[0].numpy(), com_jac.transl[0].numpy() @ qvel6, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        state.ang_vel_w[0].numpy(), com_jac.rot[0].numpy() @ qvel6, atol=1e-12
+    )
+
+    offset = com.pos_w[0].numpy() - state.pos_w[0].numpy()
+    expected = com_jac.transl[0].numpy() + _skew(offset) @ com_jac.rot[0].numpy()
+    np.testing.assert_allclose(origin_jac.transl[0].numpy(), expected, atol=1e-12)
+    np.testing.assert_allclose(origin_jac.rot[0].numpy(), com_jac.rot[0].numpy(), atol=1e-12)
+    assert np.linalg.norm(offset) > 0.0
+    assert np.linalg.norm(origin_jac.transl[0].numpy() - com_jac.transl[0].numpy()) > 0.0
+
+
+def test_object_jacobian_translation_matches_finite_difference(tiny_env_factory) -> None:
+    """Perturbing each free-joint qvel column reproduces the translational block."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    _write_prop(
+        env,
+        "crate",
+        pos=np.array([0.4, 0.1, 0.5]),
+        quat=_QUAT_90_Y,
+        lin=np.array([0.1, 0.2, 0.3]),
+        ang_local=np.array([0.3, -0.4, 0.5]),
+    )
+    model = env.mj_model
+    data = env.mj_datas[0]
+    body_id, _, vadr = env.prop_backend.free_addresses("crate")
+    qpos0 = data.qpos.copy()
+    x0 = np.asarray(data.xpos[body_id], dtype=np.float64).copy()
+    jac = query.kinematics.object_jacobian(ObjectRef("crate"))
+    eps = 1e-6
+    finite = np.zeros((3, 6), dtype=np.float64)
+    try:
+        for column in range(6):
+            qvel = np.zeros(model.nv, dtype=np.float64)
+            qvel[vadr + column] = 1.0
+            qpos = qpos0.copy()
+            mujoco.mj_integratePos(model, qpos, qvel, eps)
+            data.qpos[:] = qpos
+            mujoco.mj_forward(model, data)
+            finite[:, column] = (np.asarray(data.xpos[body_id]) - x0) / eps
+    finally:
+        data.qpos[:] = qpos0
+        mujoco.mj_forward(model, data)
+
+    np.testing.assert_allclose(jac.transl[0].numpy(), finite, atol=1e-5)
+    np.testing.assert_array_equal(data.qpos, qpos0)
+
+
+def test_object_jacobian_rotational_false_zeros_only_the_rotational_block(
+    tiny_env_factory,
+) -> None:
+    """The explicit rotational=False request zeroes only the angular block."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    _write_prop(
+        env,
+        "crate",
+        pos=np.array([0.4, 0.1, 0.5]),
+        quat=_QUAT_90_Y,
+        lin=np.array([0.1, 0.2, 0.3]),
+        ang_local=np.array([0.3, -0.4, 0.5]),
+    )
+
+    full = query.kinematics.object_jacobian(ObjectRef("crate"), reference="com")
+    transl_only = query.kinematics.object_jacobian(
+        ObjectRef("crate"), reference="com", rotational=False
+    )
+
+    assert np.linalg.norm(full.rot[0].numpy()) > 0.0
+    np.testing.assert_allclose(transl_only.transl[0].numpy(), full.transl[0].numpy())
+    np.testing.assert_array_equal(transl_only.rot[0].numpy(), np.zeros((3, 6)))
+
+
+def test_object_jacobian_rejects_unknown_and_non_rigid_props(tiny_env_factory, tmp_path) -> None:
+    """Unknown names are reference errors; static/articulation props are capability errors."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+
+    with pytest.raises(QueryReferenceError, match=r"ghost.*crate"):
+        query.kinematics.object_jacobian(ObjectRef("ghost"))
+    with pytest.raises(QueryReferenceError, match="use state.root_state/com_state"):
+        query.kinematics.object_jacobian(ObjectRef("tiny"))
+    with pytest.raises(QueryCapabilityError, match="jacobian.object.*local"):
+        query.kinematics.object_jacobian(ObjectRef("crate"), frame="local")
+
+    articulated = tiny_env_factory(prop_manager=_free_articulation_manager(tmp_path))
+    with pytest.raises(QueryCapabilityError, match="rigid free props only"):
+        _query(articulated).kinematics.object_jacobian(ObjectRef("laptop"))
+
+    anchored = tiny_env_factory(prop_manager=_fixed_articulation_manager(tmp_path))
+    with pytest.raises(QueryCapabilityError, match="free/anchored articulation prop"):
+        _query(anchored).kinematics.object_jacobian(ObjectRef("laptop"))
+
+
+def test_object_jacobian_multi_env_detached_and_live_state_unchanged(tiny_env_factory) -> None:
+    """Multi-env selection preserves order and reads detach without mutating live state."""
+    env = tiny_env_factory(num_envs=2, prop_manager=_prop_manager(num_envs=2))
+    query = _query(env)
+    live_qpos = env.mj_datas[0].qpos.copy()
+    live_qvel = env.mj_datas[0].qvel.copy()
+    live_xipos = env.mj_datas[0].xipos.copy()
+
+    jac = query.kinematics.object_jacobian(ObjectRef("crate"), reference="com", env=[1, 0])
+
+    assert tuple(jac.env_ids.tolist()) == (1, 0)
+    assert tuple(jac.transl.shape) == (2, 3, 6)
+    jac.transl[0, 0, 0] = 123.0
+    jac.rot[0, 0, 0] = 456.0
+    np.testing.assert_array_equal(env.mj_datas[0].qpos, live_qpos)
+    np.testing.assert_array_equal(env.mj_datas[0].qvel, live_qvel)
+    np.testing.assert_array_equal(env.mj_datas[0].xipos, live_xipos)
+
+
+def test_object_jacobian_requires_a_prop_backend(tiny_env) -> None:
+    """No declared props cannot silently answer an object Jacobian."""
+    query = _query(tiny_env)
+
+    with pytest.raises(QueryReferenceError, match="no props are declared"):
+        query.kinematics.object_jacobian(ObjectRef("crate"))
