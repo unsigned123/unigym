@@ -102,6 +102,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "jacobian.object": "native",
         "geometry.distance": "native",
         "geometry.aabb": "native",
+        "geometry.all_pairs": "native",
         "contacts.manifold": "native",
         "contacts.scan": "native",
         "contacts.jacobian": "native",
@@ -145,6 +146,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "jacobian.object": "synthetic",
         "geometry.distance": "synthetic",
         "geometry.aabb": "synthetic",
+        "geometry.all_pairs": "synthetic",
         "contacts.manifold": "synthetic",
         "contacts.scan": "synthetic",
         "contacts.jacobian": "synthetic",
@@ -188,6 +190,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "jacobian.object": "unsupported",
         "geometry.distance": "unsupported",
         "geometry.aabb": "unsupported",
+        "geometry.all_pairs": "unsupported",
         "contacts.manifold": "unsupported",
         "contacts.scan": "unsupported",
         "contacts.jacobian": "unsupported",
@@ -231,6 +234,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "jacobian.object": "unsupported",
         "geometry.distance": "unsupported",
         "geometry.aabb": "unsupported",
+        "geometry.all_pairs": "unsupported",
         "contacts.manifold": "partial",
         "contacts.scan": "unsupported",
         "contacts.jacobian": "unsupported",
@@ -274,6 +278,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "jacobian.object": "unsupported",
         "geometry.distance": "unsupported",
         "geometry.aabb": "unsupported",
+        "geometry.all_pairs": "unsupported",
         "contacts.manifold": "unsupported",
         "contacts.scan": "unsupported",
         "contacts.jacobian": "unsupported",
@@ -311,10 +316,10 @@ def _feature(caps: QueryCapabilities, op: str):
 
 
 def test_matrix_rows_cover_the_same_complete_operation_set() -> None:
-    """The fixture matrix is complete: five backends, the same 41 operations."""
+    """The fixture matrix is complete: five backends, the same 42 operations."""
     assert tuple(_MATRIX) == BACKENDS
     reference = set(_MATRIX["mujoco"])
-    assert len(reference) == 41
+    assert len(reference) == 42
     for backend in BACKENDS:
         assert set(_MATRIX[backend]) == reference, backend
     assert _MATRIX["mujoco"]["state.object_state"] == "native"

@@ -13,13 +13,17 @@ import torch
 from unigym.backends.mujoco.query import MujocoQuery
 from unigym.core import quat as quat_math
 from unigym.model import GeomContact
+from unigym.props import build_prop_manager
 from unigym.query import (
     ComRef,
+    DistancePair,
+    DistanceScan,
     EntityRef,
     PointRef,
     Query,
     QueryCapabilityError,
     QueryReferenceError,
+    QueryShapeError,
     QueryStaleError,
 )
 from unigym.run.instance import RunInstance
@@ -52,6 +56,50 @@ def _with_ball_joint(source: Path, tmp_path: Path) -> Path:
     target = tmp_path / "tiny_arm_ball.xml"
     target.write_text(text.replace(marker, replacement, 1), encoding="utf-8")
     return target
+
+
+def _with_extra_base_geoms(source: Path, tmp_path: Path) -> Path:
+    """Copy the tiny MJCF with a same-body collision geom and a visual geom."""
+    text = source.read_text(encoding="utf-8")
+    marker = '<geom name="base_geom" type="box" size="0.08 0.08 0.08" mass="2.0"/>'
+    replacement = (
+        marker
+        + '\n          <geom name="base_aux" type="sphere" size="0.02" mass="0.1"/>'
+        + '\n          <geom name="base_visual" type="sphere" size="0.02" mass="0.1"'
+        + ' contype="0" conaffinity="0"/>'
+    )
+    target = tmp_path / "tiny_arm_extra_geoms.xml"
+    target.write_text(text.replace(marker, replacement, 1), encoding="utf-8")
+    return target
+
+
+def _prop_manager():
+    """Return a one-crate prop manager for scratch distance tests."""
+    return build_prop_manager(
+        {
+            "types": [
+                {
+                    "name": "crate",
+                    "type": "box",
+                    "size": [0.1, 0.1, 0.1],
+                    "aabb": {
+                        "center": [0.0, 0.0, 0.05],
+                        "half_extents": [0.05, 0.05, 0.05],
+                    },
+                    "placement": {
+                        "mode": "fixed",
+                        "x_range": [0.5, 0.5],
+                        "y_range": [0.0, 0.0],
+                        "z_range": [0.3, 0.3],
+                    },
+                }
+            ]
+        },
+        num_envs=1,
+        env_spacing=2.0,
+        device="cpu",
+        backend="mujoco",
+    )
 
 
 def test_model_facts_come_from_the_compiled_ir(tiny_env) -> None:
@@ -264,6 +312,134 @@ def test_geometry_distance_rejects_env_and_scratch_together(tiny_env) -> None:
     with query.scratch(0) as scratch:
         with pytest.raises(ValueError, match="exactly one of env or scratch"):
             query.geometry.distance(a, b, env=0, scratch=scratch)
+
+
+def _pair(scan: DistanceScan, geom_a: str, geom_b: str) -> DistancePair:
+    return next(pair for pair in scan.pairs if {pair.geom_a, pair.geom_b} == {geom_a, geom_b})
+
+
+def test_all_pairs_is_the_collision_geom_pair_set(tiny_env_factory, tiny_mjcf, tmp_path) -> None:
+    """All-pair scan keeps collision geoms, unique i<j pairs, no same-body pair."""
+    env = tiny_env_factory(mjcf=_with_extra_base_geoms(tiny_mjcf, tmp_path))
+    query = _query(env)
+
+    scan = query.geometry.all_pairs(max_distance_m=10.0)
+
+    assert isinstance(scan, DistanceScan)
+    got = [(pair.geom_a, pair.geom_b) for pair in scan.pairs]
+    assert got == [
+        ("floor", "base_geom"),
+        ("floor", "base_aux"),
+        ("floor", "link_geom"),
+        ("floor", "tip_geom"),
+        ("base_geom", "link_geom"),
+        ("base_geom", "tip_geom"),
+        ("base_aux", "link_geom"),
+        ("base_aux", "tip_geom"),
+        ("link_geom", "tip_geom"),
+    ]
+    names = {name for pair in got for name in pair}
+    assert "base_visual" not in names
+    assert all(pair.geom_a != pair.geom_b for pair in scan.pairs)
+    assert len(got) == len(set(got))
+
+
+def test_all_pairs_row_matches_direct_distance(tiny_env) -> None:
+    """One pair row equals the direct geometry.distance read."""
+    query = _query(tiny_env)
+
+    scan = query.geometry.all_pairs(max_distance_m=10.0)
+    pair = _pair(scan, "base_geom", "tip_geom")
+    direct = query.geometry.distance(
+        EntityRef("geom", "base_geom"),
+        EntityRef("geom", "tip_geom"),
+        max_distance_m=10.0,
+    )
+
+    np.testing.assert_allclose(pair.signed_distance_m.numpy(), direct.signed_distance_m.numpy())
+    assert pair.capped.tolist() == direct.capped.tolist()
+    assert pair.mesh_exact is False
+
+
+def test_all_pairs_caps_at_the_requested_horizon(tiny_env) -> None:
+    """A pair at or beyond the horizon reports the cap distance and capped flag."""
+    query = _query(tiny_env)
+    uncapped = query.geometry.all_pairs(max_distance_m=10.0)
+    pair = _pair(uncapped, "base_geom", "tip_geom")
+    assert pair.capped.tolist() == [False]
+    horizon = float(pair.signed_distance_m[0]) / 2.0
+
+    capped = query.geometry.all_pairs(max_distance_m=horizon)
+    capped_pair = _pair(capped, "base_geom", "tip_geom")
+
+    assert capped_pair.capped.tolist() == [True]
+    assert float(capped_pair.signed_distance_m[0]) == pytest.approx(horizon)
+
+
+@pytest.mark.parametrize("horizon", (0.0, -1.0, float("inf"), float("nan")))
+def test_all_pairs_rejects_an_invalid_horizon(tiny_env, horizon: float) -> None:
+    """A non-positive or non-finite horizon is a typed shape error."""
+    with pytest.raises(QueryShapeError, match="max_distance_m"):
+        _query(tiny_env).geometry.all_pairs(max_distance_m=horizon)
+
+
+def test_all_pairs_follows_env_order_and_empty_selection(tiny_env_factory) -> None:
+    """Pair rows follow the requested env order; an empty selection keeps pair shape."""
+    env = tiny_env_factory(num_envs=2)
+    query = _query(env)
+
+    scan = query.geometry.all_pairs(env=[1, 0], max_distance_m=10.0)
+    direct = query.geometry.distance(
+        EntityRef("geom", "base_geom"),
+        EntityRef("geom", "tip_geom"),
+        max_distance_m=10.0,
+        env=[1, 0],
+    )
+    pair = _pair(scan, "base_geom", "tip_geom")
+
+    assert scan.env_ids.tolist() == [1, 0]
+    assert all(tuple(row.signed_distance_m.shape) == (2,) for row in scan.pairs)
+    np.testing.assert_allclose(pair.signed_distance_m.numpy(), direct.signed_distance_m.numpy())
+
+    empty = query.geometry.all_pairs(env=[], max_distance_m=10.0)
+    assert empty.env_ids.tolist() == []
+    assert [(row.geom_a, row.geom_b) for row in empty.pairs] == [
+        (row.geom_a, row.geom_b) for row in scan.pairs
+    ]
+    assert all(tuple(row.signed_distance_m.shape) == (0,) for row in empty.pairs)
+    assert all(tuple(row.capped.shape) == (0,) for row in empty.pairs)
+
+
+def test_scratch_all_pairs_moves_a_prop_without_touching_live(tiny_env_factory) -> None:
+    """A scratch prop move changes scratch pair distances and leaves live rows intact."""
+    env = tiny_env_factory(prop_manager=_prop_manager())
+    query = _query(env)
+    live_before = query.geometry.all_pairs(max_distance_m=10.0)
+
+    with query.scratch(0) as scratch:
+        scratch.set_root_state(
+            "crate",
+            pos_w=torch.tensor([0.4, 0.1, 2.0], dtype=torch.float64),
+            quat_wxyz=torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float64),
+        )
+        scratch.forward()
+        moved = scratch.geometry().all_pairs(max_distance_m=10.0)
+
+    live_after = query.geometry.all_pairs(max_distance_m=10.0)
+    crate_pairs = [
+        pair for pair in moved.pairs if any("crate" in name for name in (pair.geom_a, pair.geom_b))
+    ]
+    assert crate_pairs
+
+    before = {
+        (row.geom_a, row.geom_b): float(row.signed_distance_m[0]) for row in live_before.pairs
+    }
+    after = {(row.geom_a, row.geom_b): float(row.signed_distance_m[0]) for row in live_after.pairs}
+    moved_values = {
+        (row.geom_a, row.geom_b): float(row.signed_distance_m[0]) for row in crate_pairs
+    }
+    assert any(abs(moved_values[key] - before[key]) > 1e-6 for key in moved_values)
+    assert after == before
 
 
 def test_aabb_matches_the_box_geometry(tiny_env) -> None:

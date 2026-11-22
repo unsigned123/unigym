@@ -366,6 +366,8 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
         assert caps.supports("jacobian.point") == "synthetic"
     assert caps.supports("jacobian.object") == "unsupported"
     assert caps.supports("geometry.distance") == "unsupported"
+    assert caps.supports("geometry.aabb") == "unsupported"
+    assert caps.supports("geometry.all_pairs") == "unsupported"
     assert (
         caps.supports("contacts.manifold")
         == {
@@ -848,6 +850,8 @@ def test_il3_scratch_geometry_is_unsupported() -> None:
             scratch.geometry().distance(EntityRef("body", "base"), EntityRef("body", "link"))
         with pytest.raises(QueryCapabilityError, match="scratch.geometry"):
             scratch.geometry().aabb(EntityRef("body", "base"))
+        with pytest.raises(QueryCapabilityError, match="scratch.geometry"):
+            scratch.geometry().all_pairs()
 
 
 def test_il3_scratch_contacts_are_typed_unsupported() -> None:
@@ -957,6 +961,18 @@ def test_object_jacobian_is_typed_unsupported(backend: str) -> None:
     assert caught.value.backend == backend
 
 
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_geometry_all_pairs_is_typed_unsupported(backend: str) -> None:
+    """All-pair geometry distance raises a typed error, not AttributeError."""
+    query, _ = _query(backend)
+
+    assert query.capabilities.supports("geometry.all_pairs") == "unsupported"
+    with pytest.raises(QueryCapabilityError) as caught:
+        query.geometry.all_pairs()
+    assert caught.value.op == "geometry.all_pairs"
+    assert caught.value.backend == backend
+
+
 def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
     """Scratch, Jacobian, geometry and contacts are P1; actuator state is too."""
     query, _ = _query("isaaclab2")
@@ -970,6 +986,8 @@ def test_unsupported_subfaces_raise_typed_capability_errors() -> None:
         query.geometry.distance(EntityRef("geom", "a"), EntityRef("geom", "b"))
     with pytest.raises(QueryCapabilityError, match="geometry.aabb"):
         query.geometry.aabb(EntityRef("body", "base"))
+    with pytest.raises(QueryCapabilityError, match="geometry.all_pairs"):
+        query.geometry.all_pairs()
     with pytest.raises(QueryCapabilityError, match="contacts.manifold"):
         query.contacts.manifold("foot_floor")
     with pytest.raises(QueryCapabilityError, match="contacts.scan"):

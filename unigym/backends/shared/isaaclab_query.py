@@ -97,6 +97,10 @@ _ACTUATOR_STATE_DETAIL = (
 _GEOM_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; " "no geom facts are synthesized"
 )
+_GEOM_ALL_PAIRS_DETAIL = (
+    "IsaacLab exposes no compiled collision-geom pair set; all-pair geometry "
+    "distance is a MuJoCo-family surface"
+)
 _CONTACT_SCAN_DETAIL = (
     "IsaacLab exposes no unfiltered all-contact scan; read a declared contact "
     "group manifold instead (PhysX groups declared manifold: true)"
@@ -268,6 +272,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
         geometry=GeometryCaps(
             distance=Feature("unsupported", _P1_DETAIL),
             aabb=Feature("unsupported", _P1_DETAIL),
+            all_pairs=Feature("unsupported", _GEOM_ALL_PAIRS_DETAIL),
         ),
         contacts=ContactCaps(
             manifold=Feature("unsupported", _P1_DETAIL),
@@ -1201,6 +1206,22 @@ class _UnsupportedGeometry(_Subface):
         self._open()
         raise QueryCapabilityError(self._query.backend, "geometry.aabb", "unsupported", _P1_DETAIL)
 
+    def all_pairs(
+        self,
+        *,
+        max_distance_m: float = 1.0,
+        env: EnvSelection = None,
+    ) -> NoReturn:
+        """Reject the all-pair geometry distance scan."""
+        del max_distance_m, env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "geometry.all_pairs",
+            "unsupported",
+            _GEOM_ALL_PAIRS_DETAIL,
+        )
+
 
 class _UnsupportedScratchGeometry:
     """Distance and AABB reads are capability-gated inside a transaction scratch."""
@@ -1231,6 +1252,22 @@ class _UnsupportedScratchGeometry:
     def aabb(self, entity: EntityRef, *, env: EnvSelection = None) -> NoReturn:
         """Reject geometry AABB reads in a transaction scratch."""
         del entity, env
+        self._world._open()
+        raise QueryCapabilityError(
+            self._world._query.backend,
+            "scratch.geometry",
+            "unsupported",
+            _SCRATCH_GEOMETRY_DETAIL,
+        )
+
+    def all_pairs(
+        self,
+        *,
+        max_distance_m: float = 1.0,
+        env: EnvSelection = None,
+    ) -> NoReturn:
+        """Reject all-pair geometry distance reads in a transaction scratch."""
+        del max_distance_m, env
         self._world._open()
         raise QueryCapabilityError(
             self._world._query.backend,

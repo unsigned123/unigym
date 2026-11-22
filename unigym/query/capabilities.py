@@ -74,7 +74,7 @@ _MEMBERS: dict[str, tuple[str, ...]] = {
         "contacts",
     ),
     "jacobian": ("body", "site", "com", "point", "object"),
-    "geometry": ("distance", "aabb"),
+    "geometry": ("distance", "aabb", "all_pairs"),
     "contacts": ("manifold", "scan", "jacobian", "wrench_to_joint"),
     "actuators": ("facts", "state"),
 }
@@ -175,6 +175,7 @@ class GeometryCaps:
 
     distance: Feature
     aabb: Feature
+    all_pairs: Feature = _NOT_DECLARED
 
 
 @dataclass(frozen=True)

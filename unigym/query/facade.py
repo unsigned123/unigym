@@ -28,6 +28,7 @@ from .base import (
     ContactManifold,
     ContactPoint,
     DistanceResult,
+    DistanceScan,
     EntityRef,
     EnvSelection,
     Jacobian,
@@ -227,6 +228,22 @@ class GeometryQuery(Protocol):
 
     def aabb(self, entity: EntityRef, *, env: EnvSelection = None) -> AABB:
         """Return the world AABB of one geom or body."""
+        ...
+
+    def all_pairs(
+        self,
+        *,
+        max_distance_m: float = 1.0,
+        env: EnvSelection = None,
+    ) -> DistanceScan:
+        """Return every collision-geom pair's signed distance, opt-in.
+
+        The scan covers all compiled collision geoms, keeps unique unordered
+        pairs ``i < j``, excludes same-body pairs, and runs
+        ``mj_geomDistance`` per pair/env.  It is ``O(N^2)`` in the number of
+        collision geoms and is never called implicitly by :meth:`distance`.
+        Same-body pairs are omitted because their relative transform is fixed.
+        """
         ...
 
 
