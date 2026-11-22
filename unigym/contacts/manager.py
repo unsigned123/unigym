@@ -203,11 +203,18 @@ class ContactManager:
         return [f"contact_ops/{s.name}" for s in self.specs]
 
     def read_detail(self, name: str) -> list[dict]:
-        """Per-contact records for one group (JSON-ready list of dicts;
+        """Legacy per-contact records for one group (JSON-ready dicts).
+
         contacts/backends/mujoco.py ``read_detail`` carries the record
-        schema + the v_t computation).  A backend without the detail
-        face fails fast -- a silent empty list would read as 'no
-        contact' and poison the slip criterion."""
+        schema + the legacy ``v_t`` computation.  A backend without the
+        detail face fails fast -- a silent empty list would read as 'no
+        contact' and poison the slip criterion.
+
+        Do not remove this face until ``query.contacts.manifold`` exposes
+        equivalent fields (including the legacy ``v_t`` detail) and the
+        internal observation providers migrate.  It runs on the per-step
+        observation path, so it deliberately emits no deprecation warning.
+        """
         fn = getattr(self.backend, "read_detail", None)
         if not callable(fn):
             raise NotImplementedError(

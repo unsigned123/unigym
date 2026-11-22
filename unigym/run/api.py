@@ -30,8 +30,9 @@ The three introspection levels are deliberately separate surfaces:
   the live runtime (never a duplicated ``ModelIR.meta`` list);
 * ``run.cameras`` -- the DECLARED :class:`CameraSet`
   (``run.model.merged.cameras`` is the compiled table);
-* ``run.live`` / ``run.live_for(name)`` -- zero-copy dynamic proxies bound
-  to the live env (one articulation at a time).
+* ``run.live_for(name)`` -- zero-copy dynamic proxies bound to the live env
+  (one articulation at a time).  ``run.live`` is the deprecated
+  single-articulation convenience form; typed reads use ``run.build().query``.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ import json
 import logging
 import os
 import tempfile
+import warnings
 from argparse import Namespace
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
@@ -1381,7 +1383,14 @@ class Run:
 
     @property
     def live(self) -> LiveModel:
-        """Zero-copy live proxies over the single articulation (built on demand).
+        """Deprecated: use :meth:`live_for` or ``run.build().query``.
+
+        Emits ``DeprecationWarning`` and preserves the historical binding
+        (built on demand).  Migrate live proxy reads to
+        ``run.live_for(name)`` and typed reads to ``run.build().query``.
+        The deprecation is warning-only: the delegation and returned value
+        are unchanged.  Retained until zero-caller proof; removal requires a
+        separate owner-approved change.
 
         A one-articulation run binds its only IR; a multi-articulation run
         requires :meth:`live_for` with an explicit name (no first-binding
@@ -1390,6 +1399,12 @@ class Run:
         Raises:
             RuntimeError: The run was closed or has several articulations.
         """
+        warnings.warn(
+            "Run.live is deprecated; use run.live_for(name) for live proxies "
+            "and run.build().query for typed reads",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.live_for()
 
     def native(self, backend: str) -> NativeHandle:

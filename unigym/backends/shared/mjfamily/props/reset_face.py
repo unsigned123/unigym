@@ -20,10 +20,11 @@ RNG consumption order stay bitwise (determinism red line).
 
 ``_region_probe_request`` is the region-bound candidate-probe face
 (the backend's collision-query seam the placement sampler reaches
-through ``ResetPrimitives.probe_candidate``).  ``ResetPrimitives.probe``
-is the generic request face: it resolves declared free roots, copies the
-live reset ``MjData`` into a private scratch object and evaluates explicit
-or automatic collision pairs without mutating live data or the model.
+through the deprecated ``ResetPrimitives.probe_candidate`` alias).
+``ResetPrimitives.probe`` is the generic request face: it resolves
+declared free roots, copies the live reset ``MjData`` into a private
+scratch object and evaluates explicit or automatic collision pairs
+without mutating live data or the model.
 
 Scope: only the mujoco and mjwarp reset chains build this face.  The
 isaaclab2 backend does not construct ``ResetPrimitives`` and is not
@@ -34,6 +35,7 @@ callbacks to its state-write methods.
 
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -472,6 +474,12 @@ def build_reset_primitives(env) -> ResetPrimitives:
         return probe_free_poses(m, env._active_data, request, roots)
 
     def probe_candidate(rule, position, yaw, clearance):
+        warnings.warn(
+            "ResetPrimitives.probe_candidate is deprecated; migrate to "
+            "ResetPrimitives.probe(ProbeRequest(...))",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from unigym.initializers.placement import PlacementCapabilityError
 
         try:

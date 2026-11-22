@@ -144,6 +144,11 @@ unit and the explicit sensor/filter refs.
 - `read_detail` records carry `sensor_key`, `other_key`, `sensor_owner`,
   `other_owner`, `sensor_scope`, `other_scope`, `sensor_native`,
   `other_native` in addition to the force/velocity facts.
+- `read_detail` is a deferred legacy face.  The query contact manifold does not
+  yet expose equivalent fields (including the legacy `v_t` detail), so the
+  internal observation providers keep using it and it must not be removed
+  until that migration is lossless.  It emits no deprecation warning because
+  it runs on the per-step observation path.
 - mjWarp reuses the same backend over its CPU mirror.
 
 ### IsaacLab2 / IsaacLab3 (shared face)

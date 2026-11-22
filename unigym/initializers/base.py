@@ -371,7 +371,12 @@ class ResetPrimitives:
     object_collision_bounds: Callable[[str], Any] = None  # type: ignore[assignment]
     """Return conservative collision bounds or raise PlacementCapabilityError."""
     probe_candidate: Callable[..., Any] = None  # type: ignore[assignment]
-    """Probe a candidate without mutating live simulation state."""
+    """Deprecated region candidate probe (behavior-preserving alias).
+
+    Emits ``DeprecationWarning``; migrate to ``probe(ProbeRequest(...))``.
+    Retained until zero-caller proof: the only remaining callers are this
+    definition/wiring, the pack API docs and the backend regression test.
+    Removal requires a separate owner-approved change."""
 
 
 @dataclass(frozen=True)

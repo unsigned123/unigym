@@ -8,6 +8,7 @@ owned recorder close hook and the env backend (the pre-split
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,7 +242,14 @@ class RunInstance:
 
     @property
     def live(self) -> LiveModel:
-        """Live, zero-copy proxies over :attr:`model`.
+        """Deprecated: use :meth:`live_for` or :attr:`query`.
+
+        Emits ``DeprecationWarning`` and preserves the historical binding:
+        a fresh zero-copy proxy over the single articulation.  Migrate live
+        proxy reads to ``live_for(name)`` and typed reads to ``query``.  The
+        deprecation is warning-only: the delegation and returned value are
+        unchanged.  Retained until zero-caller proof; removal requires a
+        separate owner-approved change.
 
         A fresh binding is returned on every access; nothing mutable is
         cached here, and the proxies hold only a weak reference to the
@@ -256,6 +264,12 @@ class RunInstance:
                 :meth:`live_for` with a name), or the env's backend has no
                 live binding yet (mujoco/mjwarp today).
         """
+        warnings.warn(
+            "RunInstance.live is deprecated; use live_for(name) for live "
+            "proxies and query for typed reads",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.live_for()
 
     def native(self, backend: str) -> NativeHandle:

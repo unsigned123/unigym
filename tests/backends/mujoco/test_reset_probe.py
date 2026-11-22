@@ -398,8 +398,10 @@ def test_probe_applies_the_override_orientation(tiny_env_factory):
     assert rotated.distances_m != identity.distances_m
 
 
-def test_probe_candidate_still_returns_region_probe_results(tiny_env_factory):
-    """The legacy region entry delegates to ``probe`` with the proprietary pairs."""
+def test_probe_candidate_warns_once_and_still_returns_region_probe_results(
+    tiny_env_factory,
+):
+    """The deprecated region entry warns once per call and delegates to ``probe``."""
     env = tiny_env_factory(prop_manager=_prop_manager())
     env._placement_regions = {
         "shelf": RegionDefinition(
@@ -413,9 +415,13 @@ def test_probe_candidate_still_returns_region_probe_results(tiny_env_factory):
     primitives = build_reset_primitives(env)
     rule = PlacementRule(object_name="crate", relation="on", region_key="shelf")
 
-    clear = primitives.probe_candidate(rule, (0.5, 0.0, 0.3), 0.0, 0.01)
-    hit = primitives.probe_candidate(rule, (0.5, 0.0, -0.1), 0.0, 0.01)
+    with pytest.warns(DeprecationWarning, match="probe_candidate") as clear_warnings:
+        clear = primitives.probe_candidate(rule, (0.5, 0.0, 0.3), 0.0, 0.01)
+    with pytest.warns(DeprecationWarning, match="probe_candidate") as hit_warnings:
+        hit = primitives.probe_candidate(rule, (0.5, 0.0, -0.1), 0.0, 0.01)
 
+    assert len(clear_warnings) == 1
+    assert len(hit_warnings) == 1
     assert clear.accepted is True
     assert hit.accepted is False
     assert hit.reason == "penetration"
