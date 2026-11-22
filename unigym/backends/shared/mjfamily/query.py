@@ -30,7 +30,7 @@ from unigym.contacts.base import ContactGroupSpec
 from unigym.contacts.inventory import resolve_refs
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
-from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
+from unigym.model import Actuator, Body, Geom, GeomContact, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     AABB,
     ActuatorFacts,
@@ -712,6 +712,33 @@ class _ModelQuery(_QueryPart):
             return ir.actuators[name]
         except KeyError:
             raise QueryReferenceError("actuator", name, ir.actuators.names()) from None
+
+    def geom_contact(
+        self,
+        name: str,
+        *,
+        articulation: str | None = None,
+    ) -> GeomContact:
+        self._open()
+        geom = self._geom_row(name, articulation)
+        ir = self._ir(articulation)
+        mj = ir.mj
+        if mj is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "model.geom_contact",
+                "unsupported",
+                "the selected ModelIR has no 'mj' extension, so it carries no "
+                "geom contact row; geom contact parameters are a MuJoCo-family surface",
+            )
+        try:
+            return mj.geom_contact[geom.name]
+        except KeyError:
+            raise QueryReferenceError(
+                "model.geom_contact",
+                geom.name,
+                mj.geom_contact.names(),
+            ) from None
 
 
 class _StateQuery(_QueryPart):

@@ -40,7 +40,7 @@ from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
 from unigym.contacts.base import ContactGroupSpec
 from unigym.core import quat as quat_math
 from unigym.env.backends.base import normalize_state_env_ids
-from unigym.model import Actuator, Body, Geom, Joint, ModelIR, ModelSet, Site
+from unigym.model import Actuator, Body, Geom, GeomContact, Joint, ModelIR, ModelSet, Site
 from unigym.query.base import (
     ActuatorFacts,
     ComRef,
@@ -96,6 +96,10 @@ _ACTUATOR_STATE_DETAIL = (
 )
 _GEOM_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; " "no geom facts are synthesized"
+)
+_GEOM_CONTACT_DETAIL = (
+    "the IsaacLab ModelIR has no 'mj' extension; MuJoCo-family geom contact "
+    "parameters are not synthesized"
 )
 _SITE_MODEL_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; "
@@ -219,6 +223,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
             site=Feature("unsupported", _SITE_MODEL_DETAIL),
             joint=native,
             actuator=native,
+            geom_contact=Feature("unsupported", _GEOM_CONTACT_DETAIL),
         ),
         state=StateCaps(
             body_pose=native,
@@ -443,6 +448,18 @@ class _ModelQuery(_Subface):
         """Return one actuator row by neutral name."""
         self._open()
         return self._query._actuator_row(name, articulation)
+
+    def geom_contact(
+        self,
+        name: str,
+        *,
+        articulation: str | None = None,
+    ) -> GeomContact:
+        """Reject geom contact parameters: the IsaacLab ModelIR has no mj extension."""
+        del name, articulation
+        self._open()
+        self._query.capabilities.require("model.geom_contact")
+        raise AssertionError("model.geom_contact is declared unsupported but require() returned")
 
 
 class _StateQuery(_Subface):

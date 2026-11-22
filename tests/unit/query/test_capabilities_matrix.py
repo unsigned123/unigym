@@ -73,6 +73,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "model.site": "native",
         "model.joint": "native",
         "model.actuator": "native",
+        "model.geom_contact": "native",
         "state.body_pose": "native",
         "state.site_pose": "native",
         "state.com_pose": "native",
@@ -113,6 +114,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "model.site": "native",
         "model.joint": "native",
         "model.actuator": "native",
+        "model.geom_contact": "native",
         "state.body_pose": "native",
         "state.site_pose": "native",
         "state.com_pose": "native",
@@ -153,6 +155,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "model.site": "unsupported",
         "model.joint": "native",
         "model.actuator": "native",
+        "model.geom_contact": "unsupported",
         "state.body_pose": "native",
         "state.site_pose": "partial",
         "state.com_pose": "partial",
@@ -193,6 +196,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "model.site": "unsupported",
         "model.joint": "native",
         "model.actuator": "native",
+        "model.geom_contact": "unsupported",
         "state.body_pose": "native",
         "state.site_pose": "partial",
         "state.com_pose": "partial",
@@ -233,6 +237,7 @@ _MATRIX: dict[str, dict[str, str]] = {
         "model.site": "unsupported",
         "model.joint": "native",
         "model.actuator": "native",
+        "model.geom_contact": "unsupported",
         "state.body_pose": "native",
         "state.site_pose": "partial",
         "state.com_pose": "partial",
@@ -296,10 +301,10 @@ def _feature(caps: QueryCapabilities, op: str):
 
 
 def test_matrix_rows_cover_the_same_complete_operation_set() -> None:
-    """The fixture matrix is complete: five backends, the same 38 operations."""
+    """The fixture matrix is complete: five backends, the same 39 operations."""
     assert tuple(_MATRIX) == BACKENDS
     reference = set(_MATRIX["mujoco"])
-    assert len(reference) == 38
+    assert len(reference) == 39
     for backend in BACKENDS:
         assert set(_MATRIX[backend]) == reference, backend
     assert _MATRIX["mujoco"]["state.object_state"] == "native"

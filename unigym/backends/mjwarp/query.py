@@ -79,6 +79,10 @@ _OBJECT_JACOBIAN = (
     "or mj_jacBodyCom (reference='com') at the resolved prop body; world rows, "
     "angular columns in the free-joint body-local qvel basis; not a warp device read"
 )
+_GEOM_CONTACT = (
+    "CPU mirror of the compiled model's geom contact row: friction/solref/"
+    "solimp/margin/gap/priority/condim; a frozen GeomContact, not a warp device read"
+)
 _MIRROR = "CPU mirror copy (mj_copyData + mj_forward); not a warp device clone"
 _CPU_MATH = "CPU MuJoCo math on the mirror copy"
 _ENGINE_THREAD = (
@@ -98,6 +102,7 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
         site=_NATIVE,
         joint=_NATIVE,
         actuator=_NATIVE,
+        geom_contact=Feature("native", _GEOM_CONTACT),
     ),
     state=StateCaps(
         body_pose=_NATIVE,

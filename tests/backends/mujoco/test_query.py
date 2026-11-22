@@ -12,6 +12,7 @@ import torch
 
 from unigym.backends.mujoco.query import MujocoQuery
 from unigym.core import quat as quat_math
+from unigym.model import GeomContact
 from unigym.query import (
     ComRef,
     EntityRef,
@@ -71,6 +72,32 @@ def test_unknown_body_names_the_available_bodies(tiny_env) -> None:
     """A missing name is a reference error, never a silent miss."""
     with pytest.raises(QueryReferenceError, match=r"bogus.*base"):
         _query(tiny_env).model.body("bogus")
+
+
+def test_geom_contact_matches_the_compiled_model(tiny_env) -> None:
+    """The public geom contact row equals the compiled IR and MjModel values."""
+    query = _query(tiny_env)
+    contact = query.model.geom_contact("base_geom")
+    ir = query.model.ir()
+    assert ir.mj is not None
+    assert contact == ir.mj.geom_contact["base_geom"]
+    assert isinstance(contact, GeomContact)
+
+    model = tiny_env.mj_model
+    geom_id = model.geom("base_geom").id
+    assert contact.friction == tuple(float(value) for value in model.geom_friction[geom_id])
+    assert contact.solref == tuple(float(value) for value in model.geom_solref[geom_id])
+    assert contact.solimp == tuple(float(value) for value in model.geom_solimp[geom_id])
+    assert contact.margin == float(model.geom_margin[geom_id])
+    assert contact.gap == float(model.geom_gap[geom_id])
+    assert contact.priority == int(model.geom_priority[geom_id])
+    assert contact.condim == int(model.geom_condim[geom_id])
+
+
+def test_unknown_geom_contact_names_the_available_geoms(tiny_env) -> None:
+    """An unknown geom is a reference error naming the available geoms."""
+    with pytest.raises(QueryReferenceError, match=r"bogus.*base_geom"):
+        _query(tiny_env).model.geom_contact("bogus")
 
 
 def test_body_root_and_com_poses_match_mjdata(tiny_env) -> None:
@@ -536,6 +563,25 @@ def _two_arm_query(tmp_path, tiny_mjcf):
 
     env = _two_articulation_env(tmp_path, tiny_mjcf)
     return env, _query(env)
+
+
+def test_geom_contact_is_articulation_scoped_without_a_merged_ir(tmp_path, tiny_mjcf) -> None:
+    """A per-articulation IR answers the read; the ambiguous whole-scene read fails."""
+    env, query = _two_arm_query(tmp_path, tiny_mjcf)
+    try:
+        assert env.model_set.merged is None
+        left = query.model.geom_contact("left_base_geom", articulation="left")
+        left_ir = query.model.ir("left")
+        assert left_ir.mj is not None
+        assert left == left_ir.mj.geom_contact["left_base_geom"]
+
+        with pytest.raises(QueryReferenceError, match="articulation"):
+            query.model.geom_contact("left_base_geom")
+        with pytest.raises(QueryReferenceError, match="geom") as caught:
+            query.model.geom_contact("right_base_geom", articulation="left")
+        assert "right_base_geom" not in caught.value.available
+    finally:
+        env.close()
 
 
 def test_jacobian_uses_the_entity_reference_articulation(tmp_path, tiny_mjcf) -> None:
