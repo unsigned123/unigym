@@ -395,9 +395,17 @@ relationship is per joint and only about compatibility between the action
 | `velocity` | `direct_velocity` | `velocity` |
 | `torque` | `direct_torque` | `torque` |
 
-`effort` and `current` are legal `NamedAction.kind` values, but no direct-drive
-actuation law is implemented for them today, so the build fails with a teaching
-error instead of inventing a drive.
+The table is the built-in baseline. A pack may register an
+`ActuatorLawDescriptor` whose `drives` names an existing drive; such a law is
+derived exactly like a built-in one (the runtime drive is the drive common to
+every resolved law that serves the target). The drive and target vocabularies
+stay closed: a descriptor drive absent from `DRIVE_TARGET` cannot be selected.
+
+`effort` and `current` are legal `NamedAction.kind` values, but no built-in
+direct-drive actuation law serves them today, so the build fails with a teaching
+error instead of inventing a drive. A pack may register a descriptor that serves
+one of those drives; the closed `DRIVE_TARGET` vocabulary still owns the target
+mapping.
 
 There is no 1:1 requirement in either direction. One authored action group may
 cover joints served by several actuation groups, and an actuation group may

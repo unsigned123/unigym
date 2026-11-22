@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 import torch
 
+from unigym.actuator_law import (
+    ActuatorLawDescriptor,
+    register_actuator_law,
+    restore_actuator_laws,
+    snapshot_actuator_laws,
+)
 from unigym.actuators.ir import ActuationGroup, resolve_actuation_groups
+from unigym.registration import reset_registration
 from unigym.robots.base import RobotProfile
 from unigym.runtime.actions import (
     OrderedActionGroup,
@@ -20,11 +27,22 @@ from unigym.runtime.controllers import (
     ArticulationRuntime,
     ControlRuntime,
     build_control_runtimes,
+    drive_for_target_laws,
     validate_action_coverage,
     validate_policy_bindings,
 )
 from unigym.runtime.controls import ControlError
 from unigym.scenes.articulation import ArticulationSpec, JointSpec
+
+
+@pytest.fixture(autouse=True)
+def _isolate_actuator_laws():
+    """Restore the actuator-law registry so no test law leaks."""
+    laws = snapshot_actuator_laws()
+    reset_registration()
+    yield
+    restore_actuator_laws(laws)
+    reset_registration()
 
 
 def _group(
@@ -187,6 +205,87 @@ def test_build_rejects_incompatible_target_and_law():
 
     with pytest.raises(ControlError, match="requires the direct_torque"):
         _build((group,), arm, _profile({"body": ("a",)}, {"a": 0.0}), law="standard_pd")
+
+
+def _register_law(name: str, drives: frozenset[str]) -> None:
+    register_actuator_law(ActuatorLawDescriptor(name=name, drives=drives))
+
+
+@pytest.mark.parametrize(
+    ("target", "laws", "expected"),
+    [
+        ("position", ("standard_pd",), "position_pd"),
+        ("position", ("computed_torque_pd",), "position_pd"),
+        ("position", ("standard_pd", "computed_torque_pd"), "position_pd"),
+        ("position", ("native_servo",), "position_servo"),
+        ("velocity", ("direct_velocity",), "velocity"),
+        ("torque", ("direct_torque",), "torque"),
+    ],
+)
+def test_drive_for_target_laws_maps_builtin_laws(target, laws, expected):
+    """Every built-in law still resolves to its declared drive."""
+    assert drive_for_target_laws(target, laws, what="group 'body'") == expected
+
+
+def test_drive_for_target_laws_accepts_a_registered_law_for_an_existing_drive():
+    """A pack law declaring an existing drive is derived like a builtin."""
+    _register_law("acme.pd", frozenset({"position_pd"}))
+
+    drive = drive_for_target_laws("position", ("acme.pd",), what="group 'body'")
+
+    assert drive == "position_pd"
+
+
+def test_build_derives_position_drive_from_a_registered_pack_law():
+    """A pack-registered position_pd law builds a position control runtime."""
+    _register_law("acme.pd", frozenset({"position_pd"}))
+    arm = ArticulationSpec(name="arm", joints=(JointSpec("a"),))
+
+    runtime = _build(
+        (_group(joints=("a",)),),
+        arm,
+        _profile({"body": ("a",)}, {"a": 0.0}),
+        law="acme.pd",
+    )[0]
+
+    assert (runtime.target, runtime.drive) == ("position", "position_pd")
+
+
+def test_drive_for_target_laws_intersects_registered_and_builtin_laws():
+    """A pack law and a builtin law sharing a drive resolve to that drive."""
+    _register_law("acme.pd", frozenset({"position_pd"}))
+
+    drive = drive_for_target_laws("position", ("acme.pd", "standard_pd"), what="group 'body'")
+
+    assert drive == "position_pd"
+
+
+def test_drive_for_target_laws_rejects_incompatible_mixed_laws():
+    """Laws whose drives do not intersect fail instead of guessing."""
+    with pytest.raises(ControlError, match=r"target 'position' requires one of the"):
+        drive_for_target_laws("position", ("standard_pd", "native_servo"), what="group 'body'")
+
+
+def test_drive_for_target_laws_rejects_an_unregistered_law():
+    """An unknown law fails naming the law and the registered set."""
+    with pytest.raises(ControlError, match=r"unregistered actuation law 'ghost'.*standard_pd"):
+        drive_for_target_laws("position", ("ghost",), what="group 'body'")
+
+
+def test_drive_for_target_laws_rejects_ambiguous_common_drives():
+    """A law serving two drives for one target is ambiguous, not first-wins."""
+    _register_law("acme.dual", frozenset({"position_pd", "position_servo"}))
+
+    with pytest.raises(ControlError, match="ambiguous across the common drives"):
+        drive_for_target_laws("position", ("acme.dual",), what="group 'body'")
+
+
+def test_drive_for_target_laws_rejects_a_drive_outside_the_closed_vocabulary():
+    """A descriptor drive absent from DRIVE_TARGET can never be selected."""
+    _register_law("acme.warp_drive", frozenset({"mystery"}))
+
+    with pytest.raises(ControlError, match=r"target 'position'.*acme\.warp_drive"):
+        drive_for_target_laws("position", ("acme.warp_drive",), what="group 'body'")
 
 
 def test_build_control_runtimes_uses_joint_and_profile_q0_defaults():
