@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from math import isfinite
 from types import TracebackType
-from typing import NoReturn, Protocol, runtime_checkable
+from typing import Literal, NoReturn, Protocol, runtime_checkable
 
 import torch
 
@@ -249,6 +249,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
             site=unsupported,
             com=unsupported,
             point=unsupported,
+            object=Feature("unsupported", _STATE_TWIST_DETAIL),
         ),
         geometry=GeometryCaps(
             distance=Feature("unsupported", _P1_DETAIL),
@@ -755,6 +756,25 @@ class IsaacLabJacobianQuery(_Subface):
             )
         raise QueryShapeError("target", "an EntityRef, ComRef or PointRef", type(target).__name__)
 
+    def object_jacobian(
+        self,
+        ref: ObjectRef,
+        *,
+        reference: Literal["body_origin", "com"] = "body_origin",
+        env: EnvSelection = None,
+        frame: str = "world",
+        rotational: bool = True,
+    ) -> NoReturn:
+        """Reject rigid-object Jacobians: there is no typed prop read face."""
+        del ref, reference, env, frame, rotational
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "jacobian.object",
+            "unsupported",
+            _STATE_TWIST_DETAIL,
+        )
+
     def _body_rows(
         self,
         target: EntityRef,
@@ -1111,6 +1131,22 @@ class _UnsupportedKinematics(_Subface):
         del target, articulation, env, frame, reference, rotational
         self._open()
         raise QueryCapabilityError(self._query.backend, "jacobian", "unsupported", _P1_DETAIL)
+
+    def object_jacobian(
+        self,
+        ref: ObjectRef,
+        *,
+        reference: Literal["body_origin", "com"] = "body_origin",
+        env: EnvSelection = None,
+        frame: str = "world",
+        rotational: bool = True,
+    ) -> NoReturn:
+        """Reject rigid-object Jacobian reads."""
+        del ref, reference, env, frame, rotational
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend, "jacobian.object", "unsupported", _P1_DETAIL
+        )
 
 
 class _UnsupportedGeometry(_Subface):

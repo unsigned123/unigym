@@ -362,6 +362,7 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
         assert caps.supports("jacobian.site") == "synthetic"
         assert caps.supports("jacobian.com") == "partial"
         assert caps.supports("jacobian.point") == "synthetic"
+    assert caps.supports("jacobian.object") == "unsupported"
     assert caps.supports("geometry.distance") == "unsupported"
     assert (
         caps.supports("contacts.manifold")
@@ -913,6 +914,18 @@ def test_state_twist_operations_are_typed_unsupported(backend: str) -> None:
         query.state.object_state(ObjectRef("crate"))
     with pytest.raises(QueryCapabilityError, match="state.object_com_state"):
         query.state.object_com_state(ObjectRef("crate"))
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_object_jacobian_is_typed_unsupported(backend: str) -> None:
+    """Direct object_jacobian calls raise a typed capability error, not AttributeError."""
+    query, _ = _query(backend)
+
+    assert query.capabilities.supports("jacobian.object") == "unsupported"
+    with pytest.raises(QueryCapabilityError) as caught:
+        query.kinematics.object_jacobian(ObjectRef("crate"))
+    assert caught.value.op == "jacobian.object"
+    assert caught.value.backend == backend
 
 
 def test_unsupported_subfaces_raise_typed_capability_errors() -> None:

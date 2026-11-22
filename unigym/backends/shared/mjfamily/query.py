@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from types import TracebackType
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 import numpy as np
 import torch
@@ -131,6 +131,21 @@ _AUTO_SPARSE_NV = 60
 def _joint_type_name(joint_type: int) -> str:
     """Return the MuJoCo joint type name (or its integer spelling)."""
     return _JOINT_TYPE_NAMES.get(joint_type, str(joint_type))
+
+
+def _object_layout(name: str) -> DofLayout:
+    """Return the six-column free-joint layout owned by one rigid free prop."""
+    base_dofs = tuple(f"{name}.{suffix}" for suffix in _BASE_DOF_SUFFIXES)
+    return DofLayout(
+        articulation=None,
+        base_dofs=base_dofs,
+        base_names=(name,),
+        joint_names=(),
+        nv=6,
+        order=base_dofs,
+        owner_kind="object",
+        owner=name,
+    )
 
 
 def _subtree_body_ids(model: mujoco.MjModel, root: int) -> set[int]:
@@ -1034,6 +1049,56 @@ class _KinematicsQuery(_QueryPart):
             jacp = np.zeros((3, model.nv), dtype=np.float64)
             jacr = np.zeros((3, model.nv), dtype=np.float64)
             self._fill(data, jacp, jacr, target, art_name)
+            transl.append(np.asarray(jacp[:, columns], dtype=np.float64))
+            rot.append(np.asarray(jacr[:, columns], dtype=np.float64) if rotational else zeros)
+        return Jacobian(
+            ids,
+            torch.tensor(np.stack(transl, axis=0) if transl else np.empty((0, 3, layout.nv))),
+            torch.tensor(np.stack(rot, axis=0) if rot else np.empty((0, 3, layout.nv))),
+            layout,
+            frame,
+            reference,
+        )
+
+    def object_jacobian(
+        self,
+        ref: ObjectRef,
+        *,
+        reference: Literal["body_origin", "com"] = "body_origin",
+        env: EnvSelection = None,
+        frame: str = "world",
+        rotational: bool = True,
+    ) -> Jacobian:
+        self._open()
+        if frame != "world":
+            raise QueryCapabilityError(
+                self._query.backend,
+                "jacobian.object",
+                "unsupported",
+                f"frame={frame!r}; only 'world' is implemented",
+            )
+        if reference not in ("body_origin", "com"):
+            raise QueryCapabilityError(
+                self._query.backend,
+                "jacobian.object",
+                "unsupported",
+                f"reference={reference!r}; use 'body_origin' or 'com'",
+            )
+        body_id, _, dof_adr = self._object_addresses("jacobian.object", ref)
+        model = self._env.mj_model
+        columns = np.arange(dof_adr, dof_adr + 6, dtype=np.int64)
+        layout = _object_layout(ref.name)
+        ids, datas = self._frames(env)
+        transl: list[np.ndarray] = []
+        rot: list[np.ndarray] = []
+        zeros = np.zeros((3, len(columns)), dtype=np.float64)
+        for data in datas:
+            jacp = np.zeros((3, model.nv), dtype=np.float64)
+            jacr = np.zeros((3, model.nv), dtype=np.float64)
+            if reference == "body_origin":
+                mujoco.mj_jacBody(model, data, jacp, jacr, body_id)
+            else:
+                mujoco.mj_jacBodyCom(model, data, jacp, jacr, body_id)
             transl.append(np.asarray(jacp[:, columns], dtype=np.float64))
             rot.append(np.asarray(jacr[:, columns], dtype=np.float64) if rotational else zeros)
         return Jacobian(

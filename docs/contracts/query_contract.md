@@ -120,7 +120,7 @@ MuJoCo declares (P0A + P1A-2):
 | `state.*` | native |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (free-joint `qpos`/`qvel`, `xipos`/`subtree_com`, `mj_jacBodyCom`/`mj_jacSubtreeCom`) |
 | `scratch.*` | native (`copy`, `live_untouched`) |
-| `jacobian.*` | native; `com` is partial (subtree COM has translation only) |
+| `jacobian.*` | native; `com` is partial (subtree COM has translation only); `object` is the six-column free-prop Jacobian |
 | `geometry.*` | native |
 | `contacts.manifold` | native (group-based active contacts) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | native (dense contact constraint rows; effective rows follow `model.opt.cone`) |
@@ -137,7 +137,7 @@ labelled honestly:
 | `state.*` | native (CPU mirror read) |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (same free-joint/COM math on the CPU mirror, not a warp device read) |
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
-| `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial |
+| `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial; `object` is the six-column free-prop Jacobian |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
 | `contacts.manifold` | synthetic (CPU contact mirror, not a warp device read) |
 | `contacts.jacobian`, `contacts.wrench_to_joint` | synthetic (dense CPU mirror contact rows; effective rows follow `model.opt.cone`) |
@@ -166,6 +166,7 @@ unsupported):
 | `jacobian.com` (IsaacLab 3.x) | partial (native body COM Jacobian; a subtree COM Jacobian is unsupported) |
 | `jacobian.site` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the robot-profile site local offset) |
 | `jacobian.point` (IsaacLab 3.x) | synthetic (body link Jacobian composed with the world-point offset) |
+| `jacobian.object` (IsaacLab 2.x / 3.x) | unsupported (no typed rigid-object read face; direct calls raise `QueryCapabilityError`) |
 | `geometry.*` | unsupported (P1) |
 | `contacts.manifold` (IsaacLab 3 PhysX) | partial (filtered pairwise manifolds for groups declared `manifold: true`; no contact-normal direction, geom ids, per-point tangent frame or friction) |
 | `contacts.manifold` (IsaacLab 2.x / IsaacLab 3 Newton) | unsupported |
@@ -182,10 +183,11 @@ default.
 P2-0 added the names `state.root_state`, `state.com_state`,
 `state.object_state`, `state.object_com_state` and `jacobian.object` to the
 capability catalog.  `StateCaps` and `JacobianCaps` give them the safe default
-`Feature("unsupported", "not declared")`.  P2-A now declares the four state
+`Feature("unsupported", "not declared")`.  P2-A declares the four state
 operations explicitly: native on MuJoCo and mjWarp, and unsupported with a
-teaching detail on IsaacLab 2 / IsaacLab 3.  `jacobian.object` stays at the
-default until P2-B lands.
+teaching detail on IsaacLab 2 / IsaacLab 3.  P2-B declares `jacobian.object`
+native on MuJoCo and synthetic on mjWarp; IsaacLab 2 / IsaacLab 3 keep it
+unsupported with the same teaching detail as the object state reads.
 
 ## 3. Types
 
@@ -293,13 +295,13 @@ actuators.facts(name, *, articulation=None) -> ActuatorFacts
 actuators.state(name, *, articulation=None, env=None) -> ActuatorRuntime
 ```
 
-P2-A implements the four state reads on the MuJoCo family; P2-B will implement
-the six-column object Jacobian.  A backend that has not declared
+P2-A implements the four state reads on the MuJoCo family; P2-B implements the
+six-column object Jacobian.  A backend that has not declared
 `state.root_state`, `state.com_state`, `state.object_state`,
 `state.object_com_state` or `jacobian.object` raises `QueryCapabilityError`
-through the safe default.  On IsaacLab 2 / IsaacLab 3 the four state reads are
-declared unsupported and their direct methods raise `QueryCapabilityError`
-rather than `AttributeError`.
+through the safe default.  On IsaacLab 2 / IsaacLab 3 the four state reads and
+`object_jacobian` are declared unsupported and their direct methods raise
+`QueryCapabilityError` rather than `AttributeError`.
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
 means the target's own origin: the body frame, the site frame, the subtree
@@ -401,6 +403,64 @@ world-frame and every result is a detached CPU copy; reads never call
 - An empty env selection returns zero-row results; multi-env selection preserves
   the requested order.  Angle and position reads are engine values, never
   renormalized or repaired by the query.
+
+### Object Jacobian (P2-B)
+
+`kinematics.object_jacobian(ref: ObjectRef, *, reference="body_origin"|"com",
+env=None, frame="world", rotational=True)` is the MuJoCo-family six-column
+Jacobian of one rigid free prop.  It returns the shared `Jacobian` type with an
+object-owned layout:
+
+```python
+base_dofs = (f"{prop}.px", f"{prop}.py", f"{prop}.pz",
+             f"{prop}.rx", f"{prop}.ry", f"{prop}.rz")
+DofLayout(
+    articulation=None,
+    base_dofs=base_dofs,
+    base_names=(prop,),
+    joint_names=(),
+    nv=6,
+    order=base_dofs,
+    owner_kind="object",
+    owner=prop,
+)
+```
+
+The layout is explicitly **not** an articulation: `articulation is None`,
+`owner_kind="object"` and `owner` is the prop name.  The six columns are the
+compiled free-joint `qvel` order:
+
+```text
+columns 0..2 = free-joint world linear qvel (vx, vy, vz)
+columns 3..5 = free-joint body-local angular qvel (wx, wy, wz)
+```
+
+The Jacobian output rows are world-frame.  `J @ qvel6` therefore yields the
+world twist: the translational block is a world linear velocity and the
+rotational block, combined with the body-local angular `qvel` basis, is the
+world angular velocity.
+
+- `reference="body_origin"` reads `mj_jacBody`; `reference="com"` reads
+  `mj_jacBodyCom`.  Both return `transl` and `rot` as `(E, 3, 6)`; the
+  rotational block is reference-point invariant.
+- `rotational=False` returns a zero rotational block and the real
+  translational block.  That explicit request is the only reason for a zero
+  block; an unsupported channel raises `QueryCapabilityError`.
+- The body-origin and body-COM translational blocks satisfy
+  `J_origin.transl = J_com.transl + skew(com - origin) @ J_com.rot`.
+- Resolution reuses the P2-A name-only `_object_addresses`: no `_ir()` and no
+  `model_set.merged`, so a multi-articulation run without a merged IR still
+  resolves the prop.
+- `frame` other than `"world"` and `reference` other than `"body_origin"`/
+  `"com"` raise `QueryCapabilityError`.  A static, anchored or
+  free-articulation prop raises `QueryCapabilityError`; an unknown name raises
+  `QueryReferenceError` listing the free props; an articulation name passed as
+  an `ObjectRef` raises `QueryReferenceError` with the state-read hint.
+- Reads never call `mj_forward`, never mutate live `MjData`, and every result
+  is a detached CPU copy.  An empty env selection returns zero-row results;
+  multi-env selection preserves the requested order.
+- IsaacLab 2 / IsaacLab 3 declare `jacobian.object` unsupported, and the direct
+  `object_jacobian` method raises `QueryCapabilityError`.
 
 ### Contacts (P1A-1 / P1A-2 / P1C-3)
 

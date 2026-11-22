@@ -69,6 +69,11 @@ _OBJECT_COM_STATE = (
     "single rigid free prop body COM from xipos plus mj_jacBodyCom @ qvel; "
     "world linear velocity only, no COM angular velocity; no raw handles"
 )
+_OBJECT_JACOBIAN = (
+    "six free-joint columns of mj_jacBody (reference='body_origin') or "
+    "mj_jacBodyCom (reference='com') at the resolved prop body; world rows, "
+    "angular columns in the free-joint body-local qvel basis; no subtree"
+)
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
@@ -116,6 +121,7 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
             "body COM has translational+rotational; subtree COM is translational only",
         ),
         point=_NATIVE,
+        object=Feature("native", _OBJECT_JACOBIAN),
     ),
     geometry=GeometryCaps(distance=_NATIVE, aabb=_NATIVE),
     contacts=ContactCaps(
