@@ -20,12 +20,28 @@ PROP_CRATE = """    <body name="Prop_crate" pos="0.3 0 0.05">
       <geom name="crate_geom" type="box" size="0.05 0.05 0.05" mass="0.5"/>
     </body>"""
 
+PROP_DECOY = """    <body name="Prop_decoy" pos="-0.3 0 0.05">
+      <freejoint/>
+      <geom name="decoy_geom" type="box" size="0.05 0.05 0.05" mass="0.5"/>
+    </body>"""
+
 
 def _mjcf(tmp_path: Path) -> Path:
     from tests.backends.mujoco.conftest import tiny_mjcf_source
 
     source = tiny_mjcf_source().replace("  </worldbody>", PROP_CRATE + "\n  </worldbody>", 1)
     path = tmp_path / "query_contacts.xml"
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
+def _mjcf_with_decoy(tmp_path: Path) -> Path:
+    from tests.backends.mujoco.conftest import tiny_mjcf_source
+
+    source = tiny_mjcf_source().replace(
+        "  </worldbody>", PROP_CRATE + "\n" + PROP_DECOY + "\n  </worldbody>", 1
+    )
+    path = tmp_path / "query_contacts_scan.xml"
     path.write_text(source, encoding="utf-8")
     return path
 
@@ -283,3 +299,96 @@ def test_scratch_contact_jacobian_reads_the_scratch_constraint_rows(tiny_env_fac
     assert jacobian.layout.nv < env.mj_model.nv
     assert tuple(wrench.shape) == (jacobian.layout.nv,)
     assert torch.isfinite(wrench).all()
+
+
+def test_scan_reads_active_contacts_without_a_declared_group(tiny_env_factory, tmp_path) -> None:
+    """A scene with no contacts: section still scans its active contacts."""
+    env = tiny_env_factory(mjcf=_mjcf(tmp_path), contact_manager=None)
+    _step(env)
+    query = MujocoQuery(env)
+
+    assert env.contact_manager is None
+    manifold = query.contacts.scan()
+
+    assert manifold.group == "*"
+    assert manifold.env_ids.tolist() == [0]
+    assert manifold.points
+    assert all(point.group == "*" for point in manifold.points)
+    bodies = {name for point in manifold.points for name in (point.body1, point.body2)}
+    assert {"Prop_crate", "world"} <= bodies
+    assert query.capabilities.supports("contacts.scan") == "native"
+
+
+def test_scan_returns_grouped_and_ungrouped_contacts(tiny_env_factory, tmp_path) -> None:
+    """The scan includes contacts outside the declared contact group."""
+    env = tiny_env_factory(mjcf=_mjcf_with_decoy(tmp_path), contact_manager=_manager())
+    _step(env)
+    query = MujocoQuery(env)
+
+    grouped = query.contacts.manifold("crate_floor")
+    scanned = query.contacts.scan()
+
+    assert grouped.points
+    assert not any("Prop_decoy" in (point.body1, point.body2) for point in grouped.points)
+    assert any("Prop_decoy" in (point.body1, point.body2) for point in scanned.points)
+    assert any("Prop_crate" in (point.body1, point.body2) for point in scanned.points)
+    assert len(scanned.points) > len(grouped.points)
+    assert all(point.group == "*" for point in scanned.points)
+
+
+def test_scan_preserves_env_order_and_empty_selection(tiny_env_factory, tmp_path) -> None:
+    """The scan follows the requested env order and returns an empty selection."""
+    env = _env(tiny_env_factory, tmp_path, _manager(), num_envs=2)
+    _step(env)
+    query = MujocoQuery(env)
+
+    manifold = query.contacts.scan(env=[1, 0])
+    order = {env_id: index for index, env_id in enumerate([1, 0])}
+    point_order = [order[point.env_id] for point in manifold.points]
+
+    assert manifold.env_ids.tolist() == [1, 0]
+    assert manifold.points
+    assert point_order == sorted(point_order)
+
+    empty = query.contacts.scan(env=[])
+    assert empty.group == "*"
+    assert empty.env_ids.numel() == 0
+    assert empty.points == ()
+
+
+def test_scratch_scan_follows_writes_and_leaves_live_contacts_untouched(
+    tiny_env_factory,
+) -> None:
+    """A scratch scan tracks scratch contacts while the live contact list stays put."""
+    env = _scratch_env(tiny_env_factory)
+    query = MujocoQuery(env)
+    live_ncon = int(env.mj_data.ncon)
+    live_contacts = np.asarray(env.mj_data.contact.pos[:live_ncon]).copy()
+    live_pose = query.state.object_state(ObjectRef("crate"))
+    live_pos = live_pose.pos_w[0].clone()
+    live_quat = live_pose.quat_wxyz[0].clone()
+    away = live_pos.clone()
+    away[2] += 1.0
+
+    with query.scratch(0) as scratch:
+        before = scratch.contacts().scan()
+        assert before.group == "*"
+        assert before.points
+
+        scratch.set_root_state("crate", pos_w=away, quat_wxyz=live_quat)
+        scratch.forward()
+        after = scratch.contacts().scan()
+        assert not any("Prop_crate" in (point.body1, point.body2) for point in after.points)
+        assert int(env.mj_data.ncon) == live_ncon
+        np.testing.assert_allclose(
+            np.asarray(env.mj_data.contact.pos[:live_ncon]),
+            live_contacts,
+        )
+
+        scratch.set_root_state("crate", pos_w=live_pos, quat_wxyz=live_quat)
+        scratch.forward()
+        restored = scratch.contacts().scan()
+        assert any("Prop_crate" in (point.body1, point.body2) for point in restored.points)
+
+    with pytest.raises(QueryStaleError, match="scratch"):
+        scratch.contacts().scan()

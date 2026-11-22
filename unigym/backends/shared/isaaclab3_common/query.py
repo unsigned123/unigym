@@ -148,6 +148,7 @@ def _isaaclab3_capabilities(backend: str) -> QueryCapabilities:
         ),
         contacts=ContactCaps(
             manifold=manifold,
+            scan=base.contacts.scan,
             jacobian=base.contacts.jacobian,
             wrench_to_joint=base.contacts.wrench_to_joint,
         ),

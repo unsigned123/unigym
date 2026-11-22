@@ -97,6 +97,10 @@ _ACTUATOR_STATE_DETAIL = (
 _GEOM_DETAIL = (
     "the IsaacLab ModelIR carries bodies/joints/actuators only; " "no geom facts are synthesized"
 )
+_CONTACT_SCAN_DETAIL = (
+    "IsaacLab exposes no unfiltered all-contact scan; read a declared contact "
+    "group manifold instead (PhysX groups declared manifold: true)"
+)
 _GEOM_CONTACT_DETAIL = (
     "the IsaacLab ModelIR has no 'mj' extension; MuJoCo-family geom contact "
     "parameters are not synthesized"
@@ -267,6 +271,7 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
         ),
         contacts=ContactCaps(
             manifold=Feature("unsupported", _P1_DETAIL),
+            scan=Feature("unsupported", _CONTACT_SCAN_DETAIL),
             jacobian=Feature("unsupported", _P1_DETAIL),
             wrench_to_joint=Feature("unsupported", _P1_DETAIL),
         ),
@@ -1647,6 +1652,14 @@ class _UnsupportedContacts(_Subface):
         self._open()
         raise QueryCapabilityError(
             self._query.backend, "contacts.manifold", "unsupported", _P1_DETAIL
+        )
+
+    def scan(self, *, env: EnvSelection = None) -> ContactManifold:
+        """Reject an unfiltered all-contact scan on IsaacLab."""
+        del env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend, "contacts.scan", "unsupported", _CONTACT_SCAN_DETAIL
         )
 
     def jacobian(self, point: ContactPoint, articulation: str) -> NoReturn:

@@ -23,6 +23,7 @@ __all__ = [
     "ActuatorSlotKind",
     "ComRef",
     "ComState",
+    "CONTACT_SCAN_GROUP",
     "ContactJacobian",
     "ContactManifold",
     "ContactPoint",
@@ -44,6 +45,10 @@ ActuatorSlotKind = Literal["mujoco_actuator", "isaaclab_joint", "isaaclab_group"
 _ACTUATOR_SLOT_KINDS = frozenset({"mujoco_actuator", "isaaclab_joint", "isaaclab_group"})
 
 EnvSelection = int | Sequence[int] | torch.Tensor | None
+
+# Reserved manifold group for the full active-contact scan.  User contact group
+# names are restricted to ``[A-Za-z0-9_-]+``, so ``"*"`` cannot collide.
+CONTACT_SCAN_GROUP = "*"
 
 
 def _env_tensor(env_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:

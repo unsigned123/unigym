@@ -231,14 +231,23 @@ class GeometryQuery(Protocol):
 
 
 class ContactQuery(Protocol):
-    """Group-based contact manifolds and one point's constraint mapping."""
+    """Group-based contact manifolds, the full scan and one point's mapping."""
 
     def manifold(self, group: str, *, env: EnvSelection = None) -> ContactManifold:
         """Return one declared contact group's active points.
 
         ``group`` is required and resolves against the run's ``contacts:``
-        groups; the group owns the body filter.  There is no all-contact
-        world scan and no implicit default group.
+        groups; the group owns the body filter.  Use :meth:`scan` for every
+        active contact regardless of declared groups.
+        """
+        ...
+
+    def scan(self, *, env: EnvSelection = None) -> ContactManifold:
+        """Return every active contact in the selected envs.
+
+        No ``contacts:`` group and no ``contact_manager`` is required.  Points
+        carry the reserved ``"*"`` group and follow backend contact order,
+        env-major.
         """
         ...
 
@@ -339,9 +348,9 @@ class ScratchWorld(Protocol):
     def contacts(self) -> ContactQuery:
         """Return a contact subface bound to the scratch copy.
 
-        Only the run's declared ``contacts:`` groups are visible; there is no
-        all-contact scan.  An explicit :meth:`forward` is required after
-        scratch writes before reading the manifold.
+        The declared ``contacts:`` groups and the full :meth:`ContactQuery.scan`
+        are visible on the scratch data.  An explicit :meth:`forward` is
+        required after scratch writes before reading contacts.
         """
         ...
 
@@ -398,7 +407,7 @@ class Query(Protocol):
 
     @property
     def contacts(self) -> ContactQuery:
-        """Group-based contact manifold reads."""
+        """Contact manifold and full active-contact scan reads."""
         ...
 
     @property
