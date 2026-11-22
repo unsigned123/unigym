@@ -86,6 +86,7 @@ def test_isaaclab_gap_operations_stay_declared_not_native(backend: str) -> None:
     """IL contact/Newton/actuator/scratch gaps keep a non-native declared level."""
     caps = _backend_capabilities()[backend]
     unsupported = (
+        "model.geom_contact",
         "state.root_state",
         "state.com_state",
         "state.object_state",

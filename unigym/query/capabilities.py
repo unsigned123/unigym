@@ -47,7 +47,7 @@ _GROUP_ORDER = (
     "actuators",
 )
 _MEMBERS: dict[str, tuple[str, ...]] = {
-    "model": ("ir", "body", "geom", "site", "joint", "actuator"),
+    "model": ("ir", "body", "geom", "site", "joint", "actuator", "geom_contact"),
     "state": (
         "body_pose",
         "site_pose",
@@ -107,6 +107,7 @@ class ModelCaps:
     site: Feature
     joint: Feature
     actuator: Feature
+    geom_contact: Feature = _NOT_DECLARED
 
 
 @dataclass(frozen=True)

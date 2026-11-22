@@ -331,6 +331,7 @@ def test_capabilities_name_the_backend_and_stay_honest(backend: str) -> None:
     assert caps.supports("model.actuator") == "native"
     assert caps.supports("model.geom") == "unsupported"
     assert caps.supports("model.site") == "unsupported"
+    assert caps.supports("model.geom_contact") == "unsupported"
     assert caps.supports("state.body_pose") == "native"
     assert caps.supports("state.root_pose") == "native"
     assert caps.supports("state.site_pose") == "partial"
@@ -393,6 +394,19 @@ def test_model_facts_come_from_the_published_ir() -> None:
         query.model.site("ee")
     with pytest.raises(QueryReferenceError, match="bogus"):
         query.model.body("bogus")
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_geom_contact_is_typed_unsupported(backend: str) -> None:
+    """Every IsaacLab identity rejects geom contact parameters with a typed error."""
+    query, _ = _query(backend)
+
+    with pytest.raises(QueryCapabilityError) as caught:
+        query.model.geom_contact("base_geom")
+
+    assert caught.value.op == "model.geom_contact"
+    assert caught.value.support == "unsupported"
+    assert caught.value.detail.strip()
 
 
 @pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))

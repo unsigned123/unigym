@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 import torch
 
-from ..model.ir import Actuator, Body, Geom, Joint, ModelIR, Site
+from ..model.ir import Actuator, Body, Geom, GeomContact, Joint, ModelIR, Site
 from .base import (
     AABB,
     ActuatorFacts,
@@ -79,6 +79,15 @@ class ModelQuery(Protocol):
 
     def actuator(self, name: str, *, articulation: str | None = None) -> Actuator:
         """Return one actuator row by neutral name."""
+        ...
+
+    def geom_contact(
+        self,
+        name: str,
+        *,
+        articulation: str | None = None,
+    ) -> GeomContact:
+        """Return one geom's MuJoCo-family contact parameters by neutral name."""
         ...
 
 

@@ -74,6 +74,10 @@ _OBJECT_JACOBIAN = (
     "mj_jacBodyCom (reference='com') at the resolved prop body; world rows, "
     "angular columns in the free-joint body-local qvel basis; no subtree"
 )
+_GEOM_CONTACT = (
+    "compiled ModelIR mj.geom_contact row: geom friction/solref/solimp/margin/"
+    "gap/priority/condim; a frozen GeomContact, no raw MjExt"
+)
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
@@ -88,6 +92,7 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
         site=_NATIVE,
         joint=_NATIVE,
         actuator=_NATIVE,
+        geom_contact=Feature("native", _GEOM_CONTACT),
     ),
     state=StateCaps(
         body_pose=_NATIVE,

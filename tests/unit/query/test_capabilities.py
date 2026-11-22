@@ -145,6 +145,7 @@ def test_ops_enumerates_every_group_member() -> None:
     ops = _capabilities().ops()
 
     assert "model.ir" in ops
+    assert "model.geom_contact" in ops
     assert "state.root_pose" in ops
     assert "scratch.forward" in ops
     assert "jacobian.point" in ops
@@ -170,6 +171,19 @@ def test_object_members_default_to_unsupported_not_declared() -> None:
     with pytest.raises(QueryCapabilityError) as caught:
         caps.require("state.object_state")
     assert caught.value.detail == "not declared"
+
+
+def test_geom_contact_member_defaults_to_unsupported_not_declared() -> None:
+    """An existing constructor keeps working; geom_contact stays undeclared."""
+    caps = _capabilities()
+
+    assert caps.supports("model.geom_contact") == "unsupported"
+    with pytest.raises(QueryCapabilityError) as caught:
+        caps.require("model.geom_contact")
+    assert caught.value.detail == "not declared"
+
+    declared = replace(caps, model=replace(caps.model, geom_contact=Feature("native")))
+    assert declared.supports("model.geom_contact") == "native"
 
 
 def test_object_members_can_be_declared_explicitly() -> None:

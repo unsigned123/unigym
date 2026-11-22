@@ -24,6 +24,7 @@ In scope:
 
 - `run.query` (trait-gated) and the facade protocols;
 - model facts from the published `ModelIR`;
+- public MuJoCo-family geom contact parameters (`model.geom_contact`);
 - live body/site/COM/root state;
 - per-env scratch copy with root/joint writes and `forward` (MuJoCo family) or
   a per-env transaction scratch (IsaacLab 3);
@@ -135,6 +136,7 @@ MuJoCo declares (P0A + P1A-2):
 | Group | Support |
 |---|---|
 | `model.*` | native |
+| `model.geom_contact` | native (compiled `ModelIR` `mj.geom_contact` row) |
 | `state.*` | native |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (free-joint `qpos`/`qvel`, `xipos`/`subtree_com`, `mj_jacBodyCom`/`mj_jacSubtreeCom`) |
 | `scratch.*` | native (`copy`, `live_untouched`) |
@@ -152,6 +154,7 @@ labelled honestly:
 | Group | Support |
 |---|---|
 | `model.*` | native (CPU mirror of the compiled model) |
+| `model.geom_contact` | native (CPU mirror of the compiled `mj.geom_contact` row; not a warp device read) |
 | `state.*` | native (CPU mirror read) |
 | `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (same free-joint/COM math on the CPU mirror, not a warp device read) |
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
@@ -171,6 +174,7 @@ unsupported):
 |---|---|
 | `model.ir/body/joint/actuator` | native (published `ModelIR`) |
 | `model.geom/site` | unsupported (the IsaacLab `ModelIR` carries no geom/site facts; none are synthesized) |
+| `model.geom_contact` | unsupported (the IsaacLab `ModelIR` has no `mj` extension; MuJoCo-family contact parameters are not synthesized) |
 | `state.body_pose/root_pose/joint_position/joint_velocity` | native (live articulation buffers) |
 | `state.site_pose` | partial (robot-profile sites only: body + local offset; no USD prim/FrameTransformer) |
 | `state.com_pose` | partial (body COM position; identity `quat_wxyz` by contract; subtree unsupported) |
@@ -314,6 +318,11 @@ Responses hold detached CPU torch copies.
 - `ActuatorRuntime(env_ids, ctrl, force, length, velocity)`: one actuator's
   `(E,)` runtime channels for the selected envs.  A channel is `None` when the
   backend cannot read it; every tensor is a detached CPU copy.
+- `GeomContact(name, friction, solref, solimp, margin, gap, priority, condim)`:
+  one geom's MuJoCo-family contact parameters, keyed by the geom's canonical IR
+  name.  `friction`/`solref`/`solimp` are compiled parameter tuples and
+  `margin`/`gap`/`priority`/`condim` are scalar compiled values; a `None`
+  parameter was not published.  The row carries no raw `MjExt` or engine id.
 
 `env=None` selects every env for state/geometry reads.  `env` may be an int, a
 sequence of ints or a tensor; output `env_ids` preserves the requested order.
@@ -325,6 +334,7 @@ zero-row responses.  Scratch is one env: `scratch(None)` selects env 0.
 ```python
 model.ir(articulation=None) -> ModelIR
 model.body/geom/site/joint/actuator(name, *, articulation=None)
+model.geom_contact(name, *, articulation=None) -> GeomContact
 state.body_pose/site_pose(name, *, articulation=None, env=None) -> Pose
 state.com_pose(ref, *, frame="world", env=None) -> Pose
 state.root_pose(articulation, *, env=None) -> Pose
@@ -417,6 +427,27 @@ shortened layout.
 Only 1-DOF hinge/slide joints are exposed by `joint_position`/
 `joint_velocity`; another joint type raises a capability error naming the
 joint.
+
+### Geom contact parameters
+
+`model.geom_contact(name, *, articulation=None)` returns the frozen
+`GeomContact` row from the selected articulation's published `ModelIR` `mj`
+extension.  It is a MuJoCo-family surface: MuJoCo and mjWarp declare it
+`native`; IsaacLab 2.x, IsaacLab 3.x PhysX and IsaacLab 3.x Newton declare it
+`unsupported` and the direct method raises `QueryCapabilityError`.
+
+- `name` resolves through the existing geom table, so an unknown name raises
+  `QueryReferenceError` naming the available geoms.
+- `articulation=None` reads the merged whole-scene IR when it exists; a
+  multi-articulation run without a merged IR raises `QueryReferenceError` and
+  must pass `articulation=...`.
+- A selected IR without the `mj` extension raises `QueryCapabilityError`
+  (`model.geom_contact`, `unsupported`); a missing `mj.geom_contact` row raises
+  `QueryReferenceError` naming that extension's rows.  Neither case returns a
+  default row.
+- The row carries the compiled contact parameters (`friction`, `solref`,
+  `solimp`, `margin`, `gap`, `priority`, `condim`); no `MjExt` or raw engine
+  handle crosses the public boundary.
 
 ### Object, root and COM state (P2-A)
 
@@ -753,6 +784,8 @@ This is why the mjWarp capability object labels `scratch.*`, `jacobian.*`,
 |---|---|
 | unsupported operation | `QueryCapabilityError` naming backend/op/support |
 | unknown/ambiguous entity, actuator or contact group | `QueryReferenceError` with available names |
+| `model.geom_contact` on an IR without an `mj` extension | `QueryCapabilityError` (`unsupported`; no default row) |
+| `model.geom_contact` on a geom absent from `mj.geom_contact` | `QueryReferenceError` with the extension's rows |
 | `actuators.state` on a row with no compiled slot | `QueryReferenceError` (no fabricated slot; `facts` may report `slot=None`) |
 | contact query without a declared `contacts:` group | `QueryCapabilityError` (no all-contact fallback) |
 | contact id outside the current contact list | `QueryReferenceError` with the available contact ids |
