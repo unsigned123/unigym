@@ -31,6 +31,7 @@ from unigym.query import (
     ComRef,
     ContactPoint,
     EntityRef,
+    ObjectRef,
     PointRef,
     Query,
     QueryCapabilityError,
@@ -886,6 +887,32 @@ def _contact_point() -> ContactPoint:
         friction_force_w=None,
         contact_id=0,
     )
+
+
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_state_twist_operations_are_typed_unsupported(backend: str) -> None:
+    """Direct object/root/COM twist calls raise the typed capability error."""
+    query, _ = _query(backend)
+    caps = query.capabilities
+    for op in (
+        "state.root_state",
+        "state.com_state",
+        "state.object_state",
+        "state.object_com_state",
+    ):
+        assert caps.supports(op) == "unsupported"
+        with pytest.raises(QueryCapabilityError, match="typed rigid-object") as caught:
+            caps.require(op)
+        assert caught.value.op == op
+
+    with pytest.raises(QueryCapabilityError, match="state.root_state"):
+        query.state.root_state("robot")
+    with pytest.raises(QueryCapabilityError, match="state.com_state"):
+        query.state.com_state(ComRef("robot", body="base"))
+    with pytest.raises(QueryCapabilityError, match="state.object_state"):
+        query.state.object_state(ObjectRef("crate"))
+    with pytest.raises(QueryCapabilityError, match="state.object_com_state"):
+        query.state.object_com_state(ObjectRef("crate"))
 
 
 def test_unsupported_subfaces_raise_typed_capability_errors() -> None:

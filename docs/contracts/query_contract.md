@@ -39,8 +39,10 @@ In scope:
   `manifold: true` (P1C-3);
 - the P2-0 object contract skeleton: `ObjectRef`, `RigidState`, `ComState`,
   `DofLayout` ownership, the new subface signatures, and the name-only
-  free-prop resolver.  P2-0 declares no backend support: the new capabilities
-  default to `unsupported`/`not declared` until P2-A/P2-B implement them.
+  free-prop resolver;
+- P2-A MuJoCo-family object/root/COM state and world-frame velocity reads, with
+  the new state operations declared native on MuJoCo/mjWarp and typed
+  unsupported on IsaacLab.  The six-column object Jacobian remains P2-B.
 
 Out of scope:
 
@@ -116,6 +118,7 @@ MuJoCo declares (P0A + P1A-2):
 |---|---|
 | `model.*` | native |
 | `state.*` | native |
+| `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (free-joint `qpos`/`qvel`, `xipos`/`subtree_com`, `mj_jacBodyCom`/`mj_jacSubtreeCom`) |
 | `scratch.*` | native (`copy`, `live_untouched`) |
 | `jacobian.*` | native; `com` is partial (subtree COM has translation only) |
 | `geometry.*` | native |
@@ -132,6 +135,7 @@ labelled honestly:
 |---|---|
 | `model.*` | native (CPU mirror of the compiled model) |
 | `state.*` | native (CPU mirror read) |
+| `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | native (same free-joint/COM math on the CPU mirror, not a warp device read) |
 | `scratch.*` | synthetic (CPU mirror copy, not a device clone) |
 | `jacobian.*` | synthetic (CPU MuJoCo math on the mirror); `com` is partial |
 | `geometry.*` | synthetic (CPU MuJoCo math on the mirror) |
@@ -152,6 +156,7 @@ unsupported):
 | `state.body_pose/root_pose/joint_position/joint_velocity` | native (live articulation buffers) |
 | `state.site_pose` | partial (robot-profile sites only: body + local offset; no USD prim/FrameTransformer) |
 | `state.com_pose` | partial (body COM position; identity `quat_wxyz` by contract; subtree unsupported) |
+| `state.root_state`, `state.com_state`, `state.object_state`, `state.object_com_state` | unsupported (IsaacLab exposes live articulation pose/joint buffers only; no typed rigid-object/root/COM velocity read face in P2) |
 | `scratch.*` (IsaacLab 2.x) | unsupported (no transaction card) |
 | `scratch.copy/set_root_state/set_joint_state/forward/body_pose/site_pose/com_pose/jacobian` (IsaacLab 3.x) | synthetic (exclusive per-env transaction over the live state; no snapshot copy) |
 | `scratch.live_untouched` (IsaacLab 3.x) | partial (captured state restored on close; not bit-exact) |
@@ -172,15 +177,15 @@ The contact/actuator subfaces exist on every backend; an operation the backend
 does not implement raises a typed capability error instead of returning a
 default.
 
-### P2-0 object capability skeleton
+### P2 object capability catalog
 
-P2-0 adds the names `state.root_state`, `state.com_state`,
+P2-0 added the names `state.root_state`, `state.com_state`,
 `state.object_state`, `state.object_com_state` and `jacobian.object` to the
 capability catalog.  `StateCaps` and `JacobianCaps` give them the safe default
-`Feature("unsupported", "not declared")`, so every existing backend constructor
-keeps working and no backend claims object support in P2-0.  A backend declares
-them explicitly when the matching implementation card lands (P2-A state,
-P2-B Jacobian).
+`Feature("unsupported", "not declared")`.  P2-A now declares the four state
+operations explicitly: native on MuJoCo and mjWarp, and unsupported with a
+teaching detail on IsaacLab 2 / IsaacLab 3.  `jacobian.object` stays at the
+default until P2-B lands.
 
 ## 3. Types
 
@@ -288,12 +293,13 @@ actuators.facts(name, *, articulation=None) -> ActuatorFacts
 actuators.state(name, *, articulation=None, env=None) -> ActuatorRuntime
 ```
 
-P2-0 declares the object signatures above but ships no backend behavior: a
-backend that has not declared `state.root_state`, `state.com_state`,
-`state.object_state`, `state.object_com_state` or `jacobian.object` raises
-`QueryCapabilityError` through the safe default.  P2-A implements the state
-reads and P2-B the six-column object Jacobian; this document does not claim
-them as available yet.
+P2-A implements the four state reads on the MuJoCo family; P2-B will implement
+the six-column object Jacobian.  A backend that has not declared
+`state.root_state`, `state.com_state`, `state.object_state`,
+`state.object_com_state` or `jacobian.object` raises `QueryCapabilityError`
+through the safe default.  On IsaacLab 2 / IsaacLab 3 the four state reads are
+declared unsupported and their direct methods raise `QueryCapabilityError`
+rather than `AttributeError`.
 
 P0A supports `frame="world"` and `reference="body_origin"`.  `body_origin`
 means the target's own origin: the body frame, the site frame, the subtree
@@ -356,6 +362,45 @@ shortened layout.
 Only 1-DOF hinge/slide joints are exposed by `joint_position`/
 `joint_velocity`; another joint type raises a capability error naming the
 joint.
+
+### Object, root and COM state (P2-A)
+
+`state.root_state`, `state.com_state`, `state.object_state` and
+`state.object_com_state` are MuJoCo-family reads.  All public velocities are
+world-frame and every result is a detached CPU copy; reads never call
+`mj_forward`/`mj_subtreeVel`, never mutate live `MjData` and do not use
+`data.cvel`.
+
+- A free joint stores world linear velocity in `qvel[dof:dof+3]` and
+  **body-local** angular velocity in `qvel[dof+3:dof+6]`.  The public angular
+  velocity is `R(quat_wxyz) @ qvel_local`, the inverse of the
+  `scratch.set_root_state` world-to-local convention.
+- `state.root_state` is articulation-only and reads the compiled free-joint
+  `qpos`/`qvel`; `lin_vel_w` is at the body-frame origin.  A fixed root raises
+  `QueryReferenceError`; a declared-but-unresolved free root raises
+  `QueryCapabilityError`, matching `state.root_pose`.  The free root's six DOFs
+  are never conflated with `joint_velocity`.
+- `state.com_state(ComRef(subtree=False))` reads body COM `xipos` and
+  `mj_jacBodyCom @ qvel`; `subtree=True` reads `subtree_com` and
+  `mj_jacSubtreeCom @ qvel`.  `ComState` carries linear velocity only: a
+  subtree COM has no defined rigid angular velocity, and a body/object angular
+  velocity is available from `RigidState`.  A fixed body COM velocity is the
+  engine's exact zero, not a fabricated value.
+- `state.object_state(ObjectRef)` resolves a rigid free prop through the
+  name-only free-prop resolver.  Position and `wxyz` quaternion come from the
+  free-joint `qpos`; linear velocity is world `qvel` at the body origin and
+  angular velocity is converted from body-local as above.
+- `state.object_com_state(ObjectRef)` reads the prop's single rigid body
+  `xipos` and `mj_jacBodyCom @ qvel`.  It has no angular velocity.
+- Prop resolution never calls `_ir()`/`model_set.merged`, so a
+  multi-articulation run with no merged IR still resolves a rigid free prop.
+  An unknown name raises `QueryReferenceError` listing the free props; an
+  articulation name passed as an `ObjectRef` raises `QueryReferenceError` with
+  a hint to use `state.root_state`/`state.com_state`; a static, anchored or
+  free-articulation prop raises `QueryCapabilityError`.
+- An empty env selection returns zero-row results; multi-env selection preserves
+  the requested order.  Angle and position reads are engine values, never
+  renormalized or repaired by the query.
 
 ### Contacts (P1A-1 / P1A-2 / P1C-3)
 

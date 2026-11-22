@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from unigym.backends.mujoco.query import MujocoQuery
+from unigym.core import quat as quat_math
 from unigym.query import (
     ComRef,
     EntityRef,
@@ -325,6 +326,83 @@ def test_resolved_free_root_still_produces_the_full_layout(tiny_env) -> None:
     assert jacobian.layout.nv == tiny_env.mj_model.nv
     assert len(jacobian.layout.base_dofs) == 6
     assert tuple(root.pos_w.shape) == (1, 3)
+
+
+def test_root_state_reads_free_joint_qvel_in_world_frame(tiny_env) -> None:
+    """A free-base root twist is qpos/qvel with local angular converted to world."""
+    query = _query(tiny_env)
+    model, data = tiny_env.mj_model, tiny_env.mj_data
+    art = tiny_env.articulations["tiny"]
+    qadr = int(art.free_qpos_adr)
+    dadr = int(art.free_dof_adr)
+    quat = np.array([0.7071067811865476, 0.0, 0.7071067811865476, 0.0])
+    position = np.array([0.4, -0.2, 0.9])
+    linear = np.array([0.1, -0.2, 0.3])
+    angular_local = np.array([0.4, -0.5, 0.6])
+
+    data.qpos[qadr : qadr + 3] = position
+    data.qpos[qadr + 3 : qadr + 7] = quat
+    data.qvel[dadr : dadr + 3] = linear
+    data.qvel[dadr + 3 : dadr + 6] = angular_local
+    data.qvel[np.asarray(art.jdr_art, dtype=np.int64)] = [1.1, -1.2]
+    mujoco.mj_forward(model, data)
+
+    state = query.state.root_state("tiny")
+
+    np.testing.assert_allclose(state.pos_w[0].numpy(), position)
+    np.testing.assert_allclose(state.quat_wxyz[0].numpy(), quat)
+    np.testing.assert_allclose(state.lin_vel_w[0].numpy(), linear)
+    expected = quat_math.to_rotmat(quat) @ angular_local
+    np.testing.assert_allclose(state.ang_vel_w[0].numpy(), expected)
+    assert not np.allclose(state.ang_vel_w[0].numpy(), angular_local)
+    assert tuple(state.ang_vel_w.shape) == (1, 3)
+    assert not np.allclose(state.ang_vel_w[0].numpy()[0], 1.1)
+
+
+def test_com_state_uses_the_body_and_subtree_com_jacobians(tiny_env) -> None:
+    """COM velocity is mj_jacBodyCom/mj_jacSubtreeCom @ qvel at the COM point."""
+    query = _query(tiny_env)
+    model, data = tiny_env.mj_model, tiny_env.mj_data
+    body_id = model.body("base").id
+    data.qvel[:] = np.linspace(-0.4, 0.6, model.nv)
+    mujoco.mj_forward(model, data)
+
+    body = query.state.com_state(ComRef("tiny", body="base"))
+    subtree = query.state.com_state(ComRef("tiny", body="base", subtree=True))
+
+    expected_body = np.zeros((3, model.nv), dtype=np.float64)
+    expected_rot = np.zeros((3, model.nv), dtype=np.float64)
+    mujoco.mj_jacBodyCom(model, data, expected_body, expected_rot, body_id)
+    np.testing.assert_allclose(body.pos_w[0].numpy(), data.xipos[body_id])
+    np.testing.assert_allclose(body.lin_vel_w[0].numpy(), expected_body @ data.qvel)
+
+    expected_subtree = np.zeros((3, model.nv), dtype=np.float64)
+    mujoco.mj_jacSubtreeCom(model, data, expected_subtree, body_id)
+    np.testing.assert_allclose(subtree.pos_w[0].numpy(), data.subtree_com[body_id])
+    np.testing.assert_allclose(subtree.lin_vel_w[0].numpy(), expected_subtree @ data.qvel)
+
+
+def test_fixed_asset_root_state_matches_root_pose_error_and_fixed_com_is_zero(
+    tiny_env_factory, tiny_mjcf, tmp_path
+) -> None:
+    """A free-declared fixed asset matches root_pose; a fixed body COM is engine zero."""
+    fixed = tmp_path / "tiny_arm_fixed.xml"
+    fixed.write_text(
+        tiny_mjcf.read_text(encoding="utf-8").replace('<freejoint name="root"/>', ""),
+        encoding="utf-8",
+    )
+    env = tiny_env_factory(mjcf=fixed)
+    query = _query(env)
+
+    with pytest.raises(QueryCapabilityError, match="free root") as state_error:
+        query.state.root_state("tiny")
+    with pytest.raises(QueryCapabilityError, match="free root") as pose_error:
+        query.state.root_pose("tiny")
+    assert state_error.value.op == "state.root_state"
+    assert pose_error.value.op == "state.root_pose"
+
+    com = query.state.com_state(ComRef("tiny", body="base"))
+    np.testing.assert_allclose(com.lin_vel_w[0].numpy(), np.zeros(3))
 
 
 def test_empty_env_selection_returns_zero_rows(tiny_env) -> None:

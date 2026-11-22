@@ -50,6 +50,7 @@ from unigym.query.base import (
     EntityRef,
     EnvSelection,
     Jacobian,
+    ObjectRef,
     PointRef,
     Pose,
 )
@@ -110,6 +111,10 @@ _SITE_STATE_DETAIL = (
 _ENGINE_THREAD = "engine thread only; query at a step boundary, no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH_GEOMETRY_DETAIL = "geometry and contact reads are not supported in an IsaacLab scratch"
+_STATE_TWIST_DETAIL = (
+    "the IsaacLab query exposes live articulation pose/joint buffers only; "
+    "there is no typed rigid-object/root/COM velocity read face in P2"
+)
 
 
 @runtime_checkable
@@ -222,6 +227,10 @@ def isaaclab_query_capabilities(backend: str) -> QueryCapabilities:
             root_pose=native,
             joint_position=native,
             joint_velocity=native,
+            root_state=Feature("unsupported", _STATE_TWIST_DETAIL),
+            com_state=Feature("unsupported", _STATE_TWIST_DETAIL),
+            object_state=Feature("unsupported", _STATE_TWIST_DETAIL),
+            object_com_state=Feature("unsupported", _STATE_TWIST_DETAIL),
         ),
         scratch=ScratchCaps(
             copy=unsupported,
@@ -561,6 +570,56 @@ class _StateQuery(_Subface):
         pos = self._query._read_env_rows("state.root_pose", data, "root_pos_w", ids, 3)
         quat = self._query._read_env_rows("state.root_pose", data, "root_quat_w", ids, 4, True)
         return Pose(ids, pos, quat)
+
+    def root_state(self, articulation: str, *, env: EnvSelection = None) -> NoReturn:
+        """Reject free-root twist reads: IsaacLab has no typed state-twist face."""
+        del articulation, env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "state.root_state",
+            "unsupported",
+            _STATE_TWIST_DETAIL,
+        )
+
+    def com_state(
+        self,
+        ref: ComRef,
+        *,
+        frame: str = "world",
+        env: EnvSelection = None,
+    ) -> NoReturn:
+        """Reject COM velocity reads: IsaacLab exposes no typed COM twist face."""
+        del ref, frame, env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "state.com_state",
+            "unsupported",
+            _STATE_TWIST_DETAIL,
+        )
+
+    def object_state(self, ref: ObjectRef, *, env: EnvSelection = None) -> NoReturn:
+        """Reject rigid-object state reads: there is no typed prop read face."""
+        del ref, env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "state.object_state",
+            "unsupported",
+            _STATE_TWIST_DETAIL,
+        )
+
+    def object_com_state(self, ref: ObjectRef, *, env: EnvSelection = None) -> NoReturn:
+        """Reject rigid-object COM velocity reads: no typed prop read face."""
+        del ref, env
+        self._open()
+        raise QueryCapabilityError(
+            self._query.backend,
+            "state.object_com_state",
+            "unsupported",
+            _STATE_TWIST_DETAIL,
+        )
 
     def joint_position(
         self,

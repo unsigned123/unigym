@@ -36,6 +36,7 @@ from unigym.query.base import (
     ActuatorFacts,
     ActuatorRuntime,
     ComRef,
+    ComState,
     ContactJacobian,
     ContactManifold,
     ContactPoint,
@@ -47,6 +48,7 @@ from unigym.query.base import (
     ObjectRef,
     PointRef,
     Pose,
+    RigidState,
 )
 from unigym.query.capabilities import QueryCapabilities
 from unigym.query.errors import (
@@ -752,6 +754,43 @@ class _StateQuery(_QueryPart):
         ]
         return Pose(ids, _tensor(_stack(positions, 3)), _tensor(_identity_quats(len(datas))))
 
+    def com_state(
+        self,
+        ref: ComRef,
+        *,
+        frame: str = "world",
+        env: EnvSelection = None,
+    ) -> ComState:
+        self._open()
+        if frame != "world":
+            raise QueryCapabilityError(
+                self._query.backend,
+                "state.com_state",
+                "unsupported",
+                f"frame={frame!r}; only 'world' is implemented",
+            )
+        body_id = self._com_body_id(ref, op="state.com_state")
+        ids, datas = self._frames(env)
+        model = self._env.mj_model
+        positions: list[np.ndarray] = []
+        velocities: list[np.ndarray] = []
+        for data in datas:
+            position = data.subtree_com[body_id] if ref.subtree else data.xipos[body_id]
+            positions.append(np.asarray(position, dtype=np.float64))
+            jacp = np.zeros((3, model.nv), dtype=np.float64)
+            if ref.subtree:
+                mujoco.mj_jacSubtreeCom(model, data, jacp, body_id)
+            else:
+                jacr = np.zeros((3, model.nv), dtype=np.float64)
+                mujoco.mj_jacBodyCom(model, data, jacp, jacr, body_id)
+            velocities.append(np.asarray(jacp @ np.asarray(data.qvel, dtype=np.float64)))
+        return ComState(
+            ids,
+            _tensor(_stack(positions, 3)),
+            _tensor(_stack(velocities, 3)),
+            frame,
+        )
+
     def root_pose(self, articulation: str, *, env: EnvSelection = None) -> Pose:
         self._open()
         art = self._articulation(articulation)
@@ -776,6 +815,96 @@ class _StateQuery(_QueryPart):
         quats = [np.asarray(data.qpos[adr + 3 : adr + 7], dtype=np.float64) for data in datas]
         return Pose(ids, _tensor(_stack(positions, 3)), _tensor(_stack(quats, 4)))
 
+    def root_state(self, articulation: str, *, env: EnvSelection = None) -> RigidState:
+        self._open()
+        art = self._articulation(articulation)
+        if art.free_qpos_adr is None:
+            if art.root == "free":
+                raise QueryCapabilityError(
+                    self._query.backend,
+                    "state.root_state",
+                    "unsupported",
+                    f"articulation {articulation!r} declares a free root but "
+                    f"the compiled free joint is unresolved",
+                )
+            raise QueryReferenceError(
+                "root_state",
+                articulation,
+                (),
+                "the articulation has a fixed root",
+            )
+        if art.free_dof_adr is None:
+            raise QueryCapabilityError(
+                self._query.backend,
+                "state.root_state",
+                "unsupported",
+                f"articulation {articulation!r} declares a free root but "
+                f"the compiled free joint dof address is unresolved",
+            )
+        qpos_adr = int(art.free_qpos_adr)
+        dof_adr = int(art.free_dof_adr)
+        ids, datas = self._frames(env)
+        positions: list[np.ndarray] = []
+        quats: list[np.ndarray] = []
+        linear: list[np.ndarray] = []
+        angular: list[np.ndarray] = []
+        for data in datas:
+            quat = np.asarray(data.qpos[qpos_adr + 3 : qpos_adr + 7], dtype=np.float64)
+            rotation = np.asarray(quat_math.to_rotmat(quat), dtype=np.float64)
+            positions.append(np.asarray(data.qpos[qpos_adr : qpos_adr + 3], dtype=np.float64))
+            quats.append(quat)
+            linear.append(np.asarray(data.qvel[dof_adr : dof_adr + 3], dtype=np.float64))
+            angular.append(
+                rotation @ np.asarray(data.qvel[dof_adr + 3 : dof_adr + 6], dtype=np.float64)
+            )
+        return RigidState(
+            ids,
+            _tensor(_stack(positions, 3)),
+            _tensor(_stack(quats, 4)),
+            _tensor(_stack(linear, 3)),
+            _tensor(_stack(angular, 3)),
+        )
+
+    def object_state(self, ref: ObjectRef, *, env: EnvSelection = None) -> RigidState:
+        self._open()
+        _, qpos_adr, dof_adr = self._object_addresses("state.object_state", ref)
+        ids, datas = self._frames(env)
+        positions: list[np.ndarray] = []
+        quats: list[np.ndarray] = []
+        linear: list[np.ndarray] = []
+        angular: list[np.ndarray] = []
+        for data in datas:
+            quat = np.asarray(data.qpos[qpos_adr + 3 : qpos_adr + 7], dtype=np.float64)
+            rotation = np.asarray(quat_math.to_rotmat(quat), dtype=np.float64)
+            positions.append(np.asarray(data.qpos[qpos_adr : qpos_adr + 3], dtype=np.float64))
+            quats.append(quat)
+            linear.append(np.asarray(data.qvel[dof_adr : dof_adr + 3], dtype=np.float64))
+            angular.append(
+                rotation @ np.asarray(data.qvel[dof_adr + 3 : dof_adr + 6], dtype=np.float64)
+            )
+        return RigidState(
+            ids,
+            _tensor(_stack(positions, 3)),
+            _tensor(_stack(quats, 4)),
+            _tensor(_stack(linear, 3)),
+            _tensor(_stack(angular, 3)),
+        )
+
+    def object_com_state(self, ref: ObjectRef, *, env: EnvSelection = None) -> ComState:
+        self._open()
+        body_id, _, _ = self._object_addresses("state.object_com_state", ref)
+        ids, datas = self._frames(env)
+        model = self._env.mj_model
+        positions: list[np.ndarray] = []
+        velocities: list[np.ndarray] = []
+        for data in datas:
+            positions.append(np.asarray(data.xipos[body_id], dtype=np.float64))
+            jacp = np.zeros((3, model.nv), dtype=np.float64)
+            jacr = np.zeros((3, model.nv), dtype=np.float64)
+            mujoco.mj_jacBodyCom(model, data, jacp, jacr, body_id)
+            velocities.append(np.asarray(jacp @ np.asarray(data.qvel, dtype=np.float64)))
+        return ComState(ids, _tensor(_stack(positions, 3)), _tensor(_stack(velocities, 3)))
+
     def joint_position(
         self,
         articulation: str,
@@ -796,14 +925,14 @@ class _StateQuery(_QueryPart):
         self._open()
         return self._joint_values(articulation, joint_names, env, velocity=True)
 
-    def _com_body_id(self, ref: ComRef) -> int:
+    def _com_body_id(self, ref: ComRef, *, op: str = "com_pose") -> int:
         art = self._articulation(ref.articulation)
         name = ref.body
         if name is None:
             name = str(art.base_body_id or art.base_body or "")
         if not name:
             raise QueryReferenceError(
-                "com_pose",
+                op,
                 ref.articulation,
                 (),
                 "no base body is declared for this articulation",

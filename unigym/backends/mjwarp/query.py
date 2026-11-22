@@ -55,6 +55,25 @@ _CONTACT_MIRROR = (
     "CPU contact mirror math; group-based active contacts regrouped from warp's "
     "contact solve, not a warp device read"
 )
+_ROOT_STATE = (
+    "CPU mirror free-base articulation qpos/qvel at the compiled free-joint "
+    "addresses; linear qvel is world, angular qvel is converted from "
+    "body-local with R(quat); not a warp device read"
+)
+_COM_STATE = (
+    "CPU mirror body COM from xipos plus mj_jacBodyCom @ qvel; subtree COM "
+    "from subtree_com plus mj_jacSubtreeCom @ qvel; world linear velocity "
+    "only; not a warp device read"
+)
+_OBJECT_STATE = (
+    "CPU mirror rigid free prop qpos/qvel at the resolved free-joint addresses; "
+    "linear qvel is world, angular qvel is converted from body-local with "
+    "R(quat); not a warp device read"
+)
+_OBJECT_COM_STATE = (
+    "CPU mirror single rigid free prop body COM from xipos plus "
+    "mj_jacBodyCom @ qvel; world linear velocity only; not a warp device read"
+)
 _MIRROR = "CPU mirror copy (mj_copyData + mj_forward); not a warp device clone"
 _CPU_MATH = "CPU MuJoCo math on the mirror copy"
 _ENGINE_THREAD = (
@@ -82,6 +101,10 @@ MJWARP_QUERY_CAPABILITIES = QueryCapabilities(
         root_pose=_NATIVE,
         joint_position=_NATIVE,
         joint_velocity=_NATIVE,
+        root_state=Feature("native", _ROOT_STATE),
+        com_state=Feature("native", _COM_STATE),
+        object_state=Feature("native", _OBJECT_STATE),
+        object_com_state=Feature("native", _OBJECT_COM_STATE),
     ),
     scratch=ScratchCaps(
         copy=Feature("synthetic", _MIRROR),

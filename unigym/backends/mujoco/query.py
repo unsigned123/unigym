@@ -50,6 +50,25 @@ _CONTACT_MANIFOLD = (
     "group-based active contacts from data.contact; force acts on the geom2 body "
     "in the MuJoCo contact frame, rotated to world"
 )
+_ROOT_STATE = (
+    "free-base articulation qpos/qvel at the compiled free-joint addresses; "
+    "linear qvel is world, angular qvel is converted from body-local with "
+    "R(quat); body-frame origin pose and world-frame twist"
+)
+_COM_STATE = (
+    "body COM from xipos plus mj_jacBodyCom @ qvel; subtree COM from "
+    "subtree_com plus mj_jacSubtreeCom @ qvel; world linear velocity only, "
+    "no COM angular velocity"
+)
+_OBJECT_STATE = (
+    "rigid free prop qpos/qvel at the resolved free-joint addresses; linear "
+    "qvel is world, angular qvel is converted from body-local with R(quat); "
+    "body-frame origin pose and world-frame twist; no raw handles"
+)
+_OBJECT_COM_STATE = (
+    "single rigid free prop body COM from xipos plus mj_jacBodyCom @ qvel; "
+    "world linear velocity only, no COM angular velocity; no raw handles"
+)
 _ENGINE_THREAD = "engine thread only; no concurrent step/reset"
 _COPIES = "detached CPU torch copies; no obs publication or record writes"
 _SCRATCH = "one exclusive scratch per env; mj_copyData + mj_forward"
@@ -72,6 +91,10 @@ MUJOCO_QUERY_CAPABILITIES = QueryCapabilities(
         root_pose=_NATIVE,
         joint_position=_NATIVE,
         joint_velocity=_NATIVE,
+        root_state=Feature("native", _ROOT_STATE),
+        com_state=Feature("native", _COM_STATE),
+        object_state=Feature("native", _OBJECT_STATE),
+        object_com_state=Feature("native", _OBJECT_COM_STATE),
     ),
     scratch=ScratchCaps(
         copy=_NATIVE,
