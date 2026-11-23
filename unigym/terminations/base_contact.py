@@ -26,14 +26,16 @@ The geometry approximation judges exactly one articulation
 from __future__ import annotations
 
 import math
-
-import torch
-
-from unigym.evaluation import EvalContext
+from typing import TYPE_CHECKING
 
 from .articulation import ArticulationTermination
 from .base import body_tilt_exceeded, parse_body_names
 from .fall import DEFAULT_HEIGHT_THRESHOLD, DEFAULT_TILT_THRESHOLD
+
+if TYPE_CHECKING:
+    import torch
+
+    from unigym.evaluation import EvalContext
 
 
 class BaseContactTermination(ArticulationTermination):
@@ -60,6 +62,8 @@ class BaseContactTermination(ArticulationTermination):
         self._cos_tilt = None if self.tilt_threshold is None else math.cos(self.tilt_threshold)
 
     def check(self, ctx: EvalContext) -> torch.Tensor:
+        import torch
+
         record = ctx.env.record()
         forces = record.get("body_contact_forces")
         names = record.get("body_names")
@@ -75,6 +79,8 @@ class BaseContactTermination(ArticulationTermination):
 
     def _check_approx(self, ctx: EvalContext) -> torch.Tensor:
         """Height+tilt approximation (subset of FallTermination's OR)."""
+        import torch
+
         source = self.source(ctx)
         base_pos_w = source.get("base_pos_w")
         gravity_b = source.get("gravity_b")

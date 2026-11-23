@@ -19,13 +19,15 @@ required param and the live state is read from the evaluation record.
 from __future__ import annotations
 
 import math
-
-import torch
-
-from unigym.evaluation import EvalContext
+from typing import TYPE_CHECKING
 
 from .articulation import ArticulationTermination
 from .base import body_tilt_exceeded
+
+if TYPE_CHECKING:
+    import torch
+
+    from unigym.evaluation import EvalContext
 
 DEFAULT_HEIGHT_THRESHOLD = 0.15  # m below which the height term fires
 DEFAULT_TILT_THRESHOLD = 0.8  # rad (~46 deg) body tilt from vertical
@@ -53,6 +55,8 @@ class FallTermination(ArticulationTermination):
         self._cos_tilt = None if self.tilt_threshold is None else math.cos(self.tilt_threshold)
 
     def check(self, ctx: EvalContext) -> torch.Tensor:
+        import torch
+
         source = self.source(ctx)
         base_pos_w = source.get("base_pos_w")
         gravity_b = source.get("gravity_b")

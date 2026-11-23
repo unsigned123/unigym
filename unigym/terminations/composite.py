@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import torch
-
-from unigym.evaluation import EvalContext
+from typing import TYPE_CHECKING
 
 from .base import Termination
+
+if TYPE_CHECKING:
+    import torch
+
+    from unigym.evaluation import EvalContext
 
 
 def _require_vector_context(ctx: EvalContext) -> None:
@@ -20,6 +23,8 @@ def _require_vector_context(ctx: EvalContext) -> None:
 
 def _normalize_device(device: str | torch.device) -> torch.device:
     """Normalize an unindexed ``cuda`` device to the current CUDA index."""
+    import torch
+
     normalized = torch.device(device)
     if normalized.type == "cuda" and normalized.index is None:
         index = torch.cuda.current_device() if torch.cuda.is_available() else 0
@@ -34,6 +39,8 @@ def _same_device(left: str | torch.device, right: str | torch.device) -> bool:
 
 def _validate_mask(term_name: str, mask: object, ctx: EvalContext) -> torch.Tensor:
     """Validate one term's mask: bool ``(num_envs,)`` on the context device."""
+    import torch
+
     if not isinstance(mask, torch.Tensor):
         raise TypeError(
             f"termination {term_name!r} returned {type(mask).__name__}, "
@@ -119,6 +126,8 @@ class TerminationGroup:
 
     def check(self, ctx: EvalContext) -> torch.Tensor:
         """Combined ``(N,)`` bool mask (True = the group fires)."""
+        import torch
+
         detail = self.check_detail(ctx)
         combined = self.combine(detail)
         if combined is None:
