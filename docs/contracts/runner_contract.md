@@ -123,7 +123,9 @@ Mode composition is fixed:
 
 A custom sink replaces only the benchmark consumer; `CollectSink` recording
 stays first in `collect`/`both`.  Adapter `extra_sinks` stay prepended and the
-director/timeline/bridge tail remains appended.
+director/timeline/bridge tail remains appended.  `Director`, `Bridge`,
+`MetricsWriter` and adapter `extra_sinks` are internal privileged runtime hooks,
+not part of the public Sink surface or custom-Sink examples.
 
 `CollectSink` is built from a read-only facts snapshot (the resolved control
 rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it

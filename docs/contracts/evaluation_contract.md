@@ -191,8 +191,8 @@ The boundaries are:
   `WatcherEngine.on_tick` from the engine's own wired env, retained until the
   next tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs`
   read through it; the expression namespace exposes `view` but no raw `env`.
-  The step bundle carries no live env and is not a view source.  Views are not
-  checkpointed; the watcher rewind payload is unchanged.
+  The step bundle carries no live env.  Views are not checkpointed; the watcher
+  rewind payload is unchanged.
 
 Evaluation order is contract for the consumers that adopt it, not a convention
 to reorder for convenience.
