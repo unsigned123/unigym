@@ -1646,6 +1646,7 @@ def _build_sinks(
             min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
             max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
             director=director,
+            env=env,
         )
         if bench_tasks:  # no tasks -> nothing to wait for
             stop_when = eval_session.episodes_done

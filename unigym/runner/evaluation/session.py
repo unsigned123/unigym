@@ -18,8 +18,10 @@ collaborators and injects them, so the session stays reporter-agnostic.
 Callback contract (docs/contracts/runner_contract.md §3):
 
 * ``on_step(t, bundle)`` -- buffer per-env step slices (``_KEY_MAP`` key
-  normalization identical to CollectSink) and maintain the early-stop flag
-  (``completed episodes >= min_episodes``) plus step counters;
+  normalization identical to CollectSink), dispatch ``trigger='both'`` tasks
+  against one vector-scoped context (per-env CPU ``TickSample``s land on the
+  buffered step) and maintain the early-stop flag (``completed episodes >=
+  min_episodes``) plus step counters;
 * ``on_episode_end(env_ids, bundle)`` -- BEFORE the reset chain: per env,
   take the buffered history and delegate to the ``EpisodeEvaluator`` (it
   assembles ``EpisodeData`` and builds the scoped context; ``ended_by_termination``
@@ -42,11 +44,20 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from unigym.benchmarks.base import Task
+import numpy as np
+import torch
+
+from unigym.benchmarks.base import Task, TickResult
 from unigym.benchmarks.reporting import EpisodeReporter
 from unigym.core.episode_result import EpisodeResultView
+from unigym.evaluation import EvalContext
+
+from .buffer import TickSample
+from .scoring import build_env_view
 
 if TYPE_CHECKING:
+    from unigym.env.backends.base import EnvBackend
+
     from .buffer import EpisodeBuffer
     from .scoring import EpisodeEvaluator
 
@@ -71,6 +82,65 @@ def _record_key(key: str) -> str:
     return key
 
 
+def _tick_samples(result: object, task_name: str, num_envs: int) -> list[TickSample]:
+    """Validate one vector ``TickResult`` and slice it into per-env samples.
+
+    A wrong return type, a non-tensor / non-mapping metric, a metric whose
+    leading axis is not the env axis, or a non-bool / wrong-shape ``fired``
+    raises with a teaching message; the caller disables the task.
+    """
+    if not isinstance(result, TickResult):
+        raise TypeError(
+            f"task '{task_name}' on_tick returned {type(result).__name__}, " "expected TickResult"
+        )
+    metrics = result.metrics
+    if not hasattr(metrics, "items"):
+        raise TypeError(
+            f"task '{task_name}' TickResult.metrics must be a mapping, "
+            f"got {type(metrics).__name__}"
+        )
+    per_env: list[dict[str, np.ndarray]] = [{} for _ in range(num_envs)]
+    for key, value in metrics.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                f"task '{task_name}' tick metric key must be a non-empty string, got {key!r}"
+            )
+        if not torch.is_tensor(value):
+            raise TypeError(
+                f"task '{task_name}' tick metric {key!r} must be a tensor, "
+                f"got {type(value).__name__}"
+            )
+        if value.ndim < 1 or value.shape[0] != num_envs:
+            raise ValueError(
+                f"task '{task_name}' tick metric {key!r} must have a leading "
+                f"env axis ({num_envs}, ...), got shape {tuple(value.shape)}"
+            )
+        array = value.detach().to("cpu").numpy()
+        for ei in range(num_envs):
+            per_env[ei][key] = np.array(array[ei], copy=True)
+    fired = result.fired
+    fired_array: np.ndarray | None = None
+    if fired is not None:
+        if not torch.is_tensor(fired) or fired.dtype is not torch.bool:
+            raise TypeError(
+                f"task '{task_name}' TickResult.fired must be a bool tensor or "
+                f"None, got {type(fired).__name__}"
+            )
+        if tuple(fired.shape) != (num_envs,):
+            raise ValueError(
+                f"task '{task_name}' TickResult.fired must have shape "
+                f"({num_envs},), got {tuple(fired.shape)}"
+            )
+        fired_array = fired.detach().to("cpu").numpy()
+    return [
+        TickSample(
+            metrics=per_env[ei],
+            fired=None if fired_array is None else np.array(fired_array[ei], copy=True),
+        )
+        for ei in range(num_envs)
+    ]
+
+
 class EvaluationSession:
     """Drive the evaluation lifecycle over injected collaborators.
 
@@ -91,6 +161,8 @@ class EvaluationSession:
             labelled ``directed: true`` in the report (honest boundary:
             directed successes never mix into physics-legal claims,
             director_contract.md §7).
+        env: live env backend used only to scope the per-tick vector
+            ``EvalContext``; ``None`` is the explicit record/obs-only mode.
     """
 
     def __init__(
@@ -105,6 +177,7 @@ class EvaluationSession:
         min_episodes: int = 1,
         max_steps: int = 100000,
         director=None,
+        env: EnvBackend | None = None,
     ):
         self.tasks = list(tasks)
         self.meta = dict(meta or {})
@@ -124,6 +197,10 @@ class EvaluationSession:
         self._t0 = time.time()
         self._metrics_pending: list[dict] = []  # bridge metrics feed
         self._director = director
+        self._env = env
+        # tasks disabled for the RUN by a per-tick contract failure; process
+        # truth (never restored by a rewind) and never per-env partial
+        self._disabled_tasks: set[str] = set()
 
     # ------------------------------------------------------------------ #
     # early stop predicate (passed to SyncRunner.run(stop_when=...))
@@ -153,9 +230,57 @@ class EvaluationSession:
         if eff_cmd is not None:
             rec["command"] = eff_cmd
         self.episode_buffer.append_step(rec)
+        self._dispatch_ticks(t, rec, bundle)
         self.steps_total = t + 1
         self._stop = self.episodes_done()
         self.reporter.note_progress(episodes_total=self.n_episodes, steps_total=self.steps_total)
+
+    def _dispatch_ticks(self, t: int, rec: dict, bundle: dict) -> None:
+        """Run active ``both`` tasks once on one vector-scoped context.
+
+        Buffering happens before dispatch, so a failing task can never lose
+        episode history.  The context is separate from the runner's
+        termination context and is closed in ``finally``.  Any contract
+        failure disables the offending task for the RUN (one log line) and
+        leaves every other task untouched.
+        """
+        active = [
+            task
+            for task in self.tasks
+            if task.trigger == "both" and task.name not in self._disabled_tasks
+        ]
+        if not active:
+            return
+        ctx = EvalContext(
+            env=build_env_view(
+                self._env,
+                record=rec,
+                obs=bundle.get("obs"),
+                env_id=None,
+                num_envs=self.num_envs,
+            ),
+            t=t,
+        )
+        try:
+            for task in active:
+                try:
+                    samples = _tick_samples(task.on_tick(ctx), task.name, self.num_envs)
+                except Exception as exc:  # noqa: BLE001 -- isolate/disable task
+                    self._disable_task(task.name, exc)
+                    continue
+                for ei, sample in enumerate(samples):
+                    self.episode_buffer.append_tick(ei, task.name, sample)
+        finally:
+            ctx.close()
+
+    def _disable_task(self, name: str, exc: Exception) -> None:
+        """Disable one task for the run after a per-tick contract failure."""
+        self._disabled_tasks.add(name)
+        print(
+            f"[benchmark] task '{name}' disabled for this run: on_tick "
+            f"contract failure {exc!r}",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------ #
     # rewind marking (Round B B1; engine boundary notification)
@@ -193,7 +318,9 @@ class EvaluationSession:
             episode_results[ei] = ()
             if not taken.steps:
                 continue
-            evaluation = self.evaluator.evaluate(taken, bundle, ei)
+            evaluation = self.evaluator.evaluate(
+                taken, bundle, ei, skip_tasks=frozenset(self._disabled_tasks)
+            )
             ep = evaluation.episode
             # directed labelling: the Director's per-env mark is
             # still live here (this session runs before the director's

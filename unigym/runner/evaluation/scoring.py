@@ -16,9 +16,12 @@ The evaluator is benchmark-layer: it depends on ``unigym.benchmarks`` and
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from unigym.benchmarks.base import EpisodeData, EpisodeResult, Task
+import numpy as np
+
+from unigym.benchmarks.base import EpisodeData, EpisodeResult, Task, TickTrace
 from unigym.benchmarks.episode import EpisodeLimits, timeline_time_s
 from unigym.benchmarks.reporting import EpisodeEvaluation, TaskScore
 from unigym.benchmarks.termination import (
@@ -37,8 +40,55 @@ from .buffer import TakenEpisode
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
+    from unigym.env.obs import ObsSnapshot
 
-__all__ = ["EpisodeEvaluator"]
+__all__ = ["EpisodeEvaluator", "build_env_view"]
+
+
+def build_env_view(
+    env: EnvBackend | None,
+    *,
+    record: Mapping[str, object],
+    obs: ObsSnapshot | None,
+    env_id: int | None,
+    num_envs: int,
+) -> EnvView:
+    """Build a read-only evaluation view at one runner boundary.
+
+    Production wiring injects ``env``: the view carries that backend's
+    device/label/articulations and a lazy read-only query factory.  With
+    ``env is None`` (direct unit wiring) the view is explicitly
+    record/obs-only and ``query`` is unavailable.
+    """
+    if env is None:
+        return EnvView(
+            record=record,
+            obs=obs,
+            env_id=env_id,
+            num_envs=num_envs,
+            device="cpu",
+            backend="record-only",
+        )
+
+    def _query_factory() -> Query:
+        query = getattr(env, "query", None)
+        if not isinstance(query, Query):
+            raise NotImplementedError(f"backend {type(env).__name__!r} has no runtime query")
+        return query
+
+    query_factory = (
+        _query_factory if inspect.getattr_static(env, "query", None) is not None else None
+    )
+    return EnvView(
+        record=record,
+        obs=obs,
+        env_id=env_id,
+        num_envs=num_envs,
+        device=getattr(env, "device", "cpu"),
+        backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
+        query_factory=query_factory,
+        articulations=getattr(env, "articulations", None) or {},
+    )
 
 
 class EpisodeEvaluator:
@@ -101,6 +151,7 @@ class EpisodeEvaluator:
         episode_termination = (
             EpisodeTermination.from_terminations(core_terms) if core_terms else None
         )
+        ticks, tick_failed = self._assemble_ticks(taken, ei, skip_tasks)
         ep = EpisodeData(
             data=assemble_episode(steps),
             env_id=ei,
@@ -123,9 +174,10 @@ class EpisodeEvaluator:
             reset_reason=reset.get("reset_reason"),
             termination=episode_termination,
             terminations=(() if episode_termination is None else episode_termination.all),
+            ticks=ticks,
         )
         scores, views, task_terms = self._score_tasks(
-            ep, self._eval_context(ei, bundle), ei, skip_tasks
+            ep, self._eval_context(ei, bundle), ei, skip_tasks | tick_failed
         )
         # task-declared terminations participate in core precedence;
         # extensions stay JSON-only in the per-episode document.
@@ -202,46 +254,45 @@ class EpisodeEvaluator:
                 )
         return terms
 
-    def _eval_context(self, ei: int, bundle: dict) -> EvalContext:
-        """Build the read-only per-env context for one due env.
+    def _assemble_ticks(
+        self, taken: TakenEpisode, ei: int, skip_tasks: frozenset[str]
+    ) -> tuple[Mapping[str, TickTrace] | None, frozenset[str]]:
+        """Assemble per-task tick traces for the non-skipped ``both`` tasks.
 
-        Production wiring injects ``env``: the view carries that backend's
-        device/label/articulations and a lazy read-only query factory.  With
-        ``env is None`` (direct unit wiring) the view is explicitly
-        record/obs-only and ``query`` is unavailable.
+        Returns ``(ticks, failed)`` where ``ticks`` is ``None`` when the run
+        has no ``both`` task at all and ``failed`` names tasks whose buffered
+        trace is structurally inconsistent (unstable key set, missing sample,
+        wrong shape).  A failed task is omitted from this episode's scores and
+        views exactly like a raising task, consistently for every env.
         """
-        env = self._env
-        if env is None:
-            return EvalContext(
-                env=EnvView(
-                    record=bundle["record"],
-                    obs=bundle.get("obs"),
-                    env_id=ei,
-                    num_envs=self.num_envs,
-                    device="cpu",
-                    backend="record-only",
+        configured = [task for task in self.tasks if getattr(task, "trigger", "episode") == "both"]
+        if not configured:
+            return None, frozenset()
+        traces: dict[str, TickTrace] = {}
+        failed: set[str] = set()
+        for task in configured:
+            if task.name in skip_tasks:
+                continue
+            try:
+                traces[task.name] = _trace_from_steps(task.name, taken.ticks, len(taken.steps))
+            except _TickTraceError as exc:
+                failed.add(task.name)
+                print(
+                    f"[benchmark] task '{task.name}' tick trace invalid on "
+                    f"env{ei}: {exc} (skipped)",
+                    flush=True,
                 )
-            )
+        return traces, frozenset(failed)
 
-        def _query_factory() -> Query:
-            query = getattr(env, "query", None)
-            if not isinstance(query, Query):
-                raise NotImplementedError(f"backend {type(env).__name__!r} has no runtime query")
-            return query
-
-        query_factory = (
-            _query_factory if inspect.getattr_static(env, "query", None) is not None else None
-        )
+    def _eval_context(self, ei: int, bundle: dict) -> EvalContext:
+        """Build the read-only per-env context for one due env."""
         return EvalContext(
-            env=EnvView(
+            env=build_env_view(
+                self._env,
                 record=bundle["record"],
                 obs=bundle.get("obs"),
                 env_id=ei,
                 num_envs=self.num_envs,
-                device=getattr(env, "device", "cpu"),
-                backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-                query_factory=query_factory,
-                articulations=getattr(env, "articulations", None) or {},
             )
         )
 
@@ -300,3 +351,55 @@ class EpisodeEvaluator:
         finally:
             eval_ctx.close()
         return scores, views, task_terms
+
+
+class _TickTraceError(ValueError):
+    """A buffered tick trace violates the stable key set / shape contract."""
+
+
+def _trace_from_steps(task_name: str, tick_steps: list[dict], length: int) -> TickTrace:
+    """Stack one task's per-step samples into a ``(T, ...)`` trace.
+
+    The metric key set and the presence of ``fired`` must be stable across
+    every buffered step; any drift, missing sample or step-count mismatch
+    raises :class:`_TickTraceError` so the caller can fail the task.
+    """
+    if len(tick_steps) != length:
+        raise _TickTraceError(f"buffered tick steps {len(tick_steps)} != episode length {length}")
+    if not tick_steps:
+        return TickTrace()
+    first = tick_steps[0].get(task_name)
+    if first is None:
+        raise _TickTraceError("missing tick sample on the first step")
+    keys = tuple(first.metrics)
+    for key in keys:
+        if not isinstance(key, str) or not key:
+            raise _TickTraceError(f"invalid metric key {key!r}")
+    fired_present = first.fired is not None
+    values: dict[str, list[np.ndarray]] = {key: [] for key in keys}
+    fired_values: list[np.ndarray] = []
+    for index, step in enumerate(tick_steps):
+        sample = step.get(task_name)
+        if sample is None:
+            raise _TickTraceError(f"missing tick sample on step {index}")
+        if set(sample.metrics) != set(keys):
+            raise _TickTraceError(
+                f"metric key set drift on step {index}: "
+                f"{sorted(sample.metrics)} != {sorted(keys)}"
+            )
+        if (sample.fired is not None) != fired_present:
+            raise _TickTraceError(f"fired presence drift on step {index}")
+        for key in keys:
+            values[key].append(np.asarray(sample.metrics[key]))
+        if fired_present:
+            fired_values.append(np.asarray(sample.fired))
+    metrics: dict[str, np.ndarray] = {}
+    for key, series in values.items():
+        try:
+            metrics[key] = np.stack(series)
+        except ValueError as exc:
+            raise _TickTraceError(
+                f"metric {key!r} has inconsistent per-step shapes: {exc}"
+            ) from exc
+    fired = None if not fired_present else np.asarray(fired_values, dtype=bool)
+    return TickTrace(metrics=metrics, fired=fired)

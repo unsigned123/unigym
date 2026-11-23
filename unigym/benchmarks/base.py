@@ -34,14 +34,16 @@ from __future__ import annotations
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 from .termination import EpisodeTermination, Termination
 
 if TYPE_CHECKING:
+    import torch
+
     from unigym.evaluation import EvalContext
     from unigym.packs.runtime import PackRuntime
 
@@ -189,6 +191,35 @@ def resolve_episode_key(data: dict, key: str, articulation: str | None) -> str:
     return key
 
 
+@dataclass(frozen=True, slots=True)
+class TickResult:
+    """One policy-tick detection result for the whole env vector.
+
+    Attributes:
+        metrics: metric name -> tensor whose leading axis is the env axis
+            (``(num_envs,)`` or ``(num_envs, ...)``).  Values are borrowed
+            for the callback and copied into the buffer by the session.
+        fired: optional bool detection mask ``(num_envs,)``.
+    """
+
+    metrics: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    fired: torch.Tensor | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TickTrace:
+    """One task's per-episode tick history, already per env.
+
+    Attributes:
+        metrics: metric name -> numpy array with a leading time axis
+            (``(T,)`` or ``(T, ...)``).
+        fired: optional bool history ``(T,)``.
+    """
+
+    metrics: Mapping[str, np.ndarray] = field(default_factory=dict)
+    fired: np.ndarray | None = None
+
+
 @dataclass
 class EpisodeData:
     """One completed episode, assembled pre-reset by EvaluationSession.
@@ -218,6 +249,10 @@ class EpisodeData:
         terminal_index: canonical tick of the primary termination.
         termination: the structured primary/all termination bundle.
         terminations: the full tuple of terminating reasons for the tick.
+        ticks: per-task ``TickTrace`` history for ``trigger='both'`` tasks,
+            keyed by task name; ``None`` when the episode requested no
+            per-tick detection.  Tick traces are scoring inputs, not report
+            fields.
     """
 
     data: dict[str, np.ndarray]
@@ -242,6 +277,7 @@ class EpisodeData:
     terminal_index: int | None = None
     termination: EpisodeTermination | None = None
     terminations: tuple[Termination, ...] = ()
+    ticks: Mapping[str, TickTrace] | None = None
 
     def __post_init__(self) -> None:
         length = int(self.length)
@@ -297,6 +333,41 @@ class EpisodeData:
                     f"episode-local axis 0..{length} (global run ticks are "
                     "not episode ticks)"
                 )
+        if self.ticks is not None:
+            if not isinstance(self.ticks, Mapping):
+                raise TypeError(
+                    f"ticks must be a Mapping[str, TickTrace] or None, "
+                    f"got {type(self.ticks).__name__}"
+                )
+            normalized = dict(self.ticks)
+            for task_name, trace in normalized.items():
+                if not isinstance(task_name, str) or not task_name:
+                    raise ValueError(
+                        f"tick trace key must be a non-empty task name, got {task_name!r}"
+                    )
+                if not isinstance(trace, TickTrace):
+                    raise TypeError(
+                        f"tick trace {task_name!r} must be a TickTrace, "
+                        f"got {type(trace).__name__}"
+                    )
+                for key, value in trace.metrics.items():
+                    if not isinstance(key, str) or not key:
+                        raise ValueError(f"tick metric key must be a non-empty string, got {key!r}")
+                    array = np.asarray(value)
+                    if array.shape[:1] != (length,):
+                        raise ValueError(
+                            f"tick trace {task_name!r} metric {key!r} shape "
+                            f"{array.shape} does not start with the episode "
+                            f"length ({length},)"
+                        )
+                if trace.fired is not None:
+                    fired = np.asarray(trace.fired)
+                    if fired.shape != (length,):
+                        raise ValueError(
+                            f"tick trace {task_name!r} fired shape {fired.shape} "
+                            f"!= episode length ({length},)"
+                        )
+            object.__setattr__(self, "ticks", normalized)
 
 
 @dataclass(frozen=True)
@@ -346,12 +417,16 @@ class Task(ABC):
     name: str = "task"
     #: subclasses reading per-articulation robot state set this True
     requires_articulation: bool = False
+    #: Evaluation cadence: ``episode`` (default, ``score`` only) or ``both``
+    #: (``on_tick`` every policy tick plus ``score`` at episode end).
+    trigger: Literal["episode", "both"] = "episode"
 
     def __init__(self, params: dict | None = None, meta: dict | None = None):
         self.params: dict = dict(params or {})
         self.meta: dict = dict(meta or {})
         self.p = self.params  # convenience shorthand
         self.articulation: str | None = self._bind_articulation()
+        self.trigger = self._bind_trigger()
         if self.requires_articulation and self.articulation is None:
             raise ValueError(
                 f"benchmark task '{self.name}' reads per-articulation robot "
@@ -381,9 +456,31 @@ class Task(ABC):
             )
         return name
 
+    def _bind_trigger(self) -> Literal["episode", "both"]:
+        """Resolve the authored ``trigger`` param over the class cadence."""
+        declared = self.p.get("trigger", type(self).trigger)
+        if declared not in ("episode", "both"):
+            raise ValueError(
+                f"benchmark task '{self.name}': trigger must be 'episode' or "
+                f"'both', got {declared!r}"
+            )
+        return declared
+
     def resolve_key(self, data: dict, key: str) -> str:
         """Recorded key for *key* under this task's declared articulation."""
         return resolve_episode_key(data, key, self.articulation)
+
+    def on_tick(self, ctx: EvalContext) -> TickResult:
+        """Per-policy-tick detection for a ``trigger='both'`` task.
+
+        Called once per policy tick with ONE vector-scoped ``ctx``
+        (``ctx.env.env_id is None``, ``ctx.t`` is the policy tick).  The
+        default is an empty result; a ``both`` task must override it.  The
+        hook is detection/annotation only: it cannot step, reset, write or
+        request termination.
+        """
+        del ctx
+        return TickResult()
 
     @abstractmethod
     def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult:
@@ -524,6 +621,48 @@ def _require_live_task(task: Task) -> None:
                     f"{expected}; got {method_name}{signature} (retain_frames must "
                     "be keyword-only with a default)"
                 )
+    trigger = getattr(task, "trigger", "episode")
+    if trigger not in ("episode", "both"):
+        raise ValueError(
+            f"benchmark task {name!r} ({type(task).__name__}): trigger must be "
+            f"'episode' or 'both', got {trigger!r}"
+        )
+    if trigger == "both":
+        on_tick = getattr(task, "on_tick", None)
+        if on_tick is None or not callable(on_tick):
+            raise ValueError(
+                f"benchmark task {name!r} ({type(task).__name__}) declares "
+                f"trigger='both' and must implement on_tick(self, ctx)"
+            )
+        if getattr(on_tick, "__func__", None) is Task.on_tick:
+            raise ValueError(
+                f"benchmark task {name!r} ({type(task).__name__}) declares "
+                "trigger='both' but does not override the default no-op "
+                "on_tick(self, ctx)"
+            )
+        signature = inspect.signature(on_tick)
+        positional = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind in _POSITIONAL_KINDS
+        ]
+        required_keyword = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+            and parameter.default is inspect.Parameter.empty
+        ]
+        variadic = any(
+            parameter.kind is inspect.Parameter.VAR_POSITIONAL
+            for parameter in signature.parameters.values()
+        )
+        names = tuple(parameter.name for parameter in positional)
+        if variadic or names != ("ctx",) or required_keyword:
+            raise ValueError(
+                f"benchmark task {name!r} ({type(task).__name__}) declares "
+                f"trigger='both' and must implement on_tick(self, ctx); got "
+                f"on_tick{signature}"
+            )
 
 
 def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[Task]:

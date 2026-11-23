@@ -61,11 +61,40 @@ Benchmark tasks are live-first episode scorers:
 
 ```python
 class Task:
+    trigger: Literal["episode", "both"] = "episode"
+
+    def on_tick(self, ctx: EvalContext) -> TickResult: ...
     def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult: ...
     def score_detail(
         self, ep: EpisodeData, ctx: EvalContext, *, retain_frames: bool = False
     ) -> tuple[EpisodeResult, dict, dict]: ...
 ```
+
+`trigger` is resolved once at construction from the authored `trigger:` param
+(default: the class attribute) and validated at build time.  `episode` (the
+default) calls only `score`.  `both` additionally calls `on_tick` once per
+policy tick with one VECTOR-scoped context (`ctx.env.env_id is None`,
+`ctx.t == tick`); it still calls `score` at episode end.  There is no
+`tick`-only trigger.  A `both` task must override the default no-op `on_tick`
+with exactly `on_tick(self, ctx)`; `FormulaTask` cannot satisfy `both` and is
+rejected at build.
+
+`on_tick` returns `TickResult(metrics: Mapping[str, torch.Tensor], fired:
+torch.Tensor | None)`; every metric has a leading env axis `(num_envs, ...)`
+and `fired` is bool `(num_envs,)`.  It is detection/annotation only: it cannot
+step, reset, write or request termination.  The session converts each tick to
+per-env CPU numpy `TickSample`s, so a per-tick contract failure (bad return
+type, wrong shape/dtype) disables that task for the RUN (logged once; later
+episodes score without it and the report shows `n_episodes: 0`).  The disable
+set is process truth and is never reverted by a rewind.
+
+Per-task histories are assembled into `EpisodeData.ticks: Mapping[str,
+TickTrace] | None` (`None` when the run has no `both` task).  A trace's metric
+arrays have a leading time axis `(T,)`/`(T, ...)` and `fired` is `(T,)` bool.
+The key set must be stable across every step of one episode; a mismatch fails
+that task for the episode (omitted from scores/views) without affecting other
+tasks.  Ticks are inputs to `score`, never report fields; the report/results
+schema is unchanged.
 
 `EpisodeData` remains the episode history/timeline/metrics payload.  `ctx` is
 the read-only, per-env `unigym.evaluation` context created by
