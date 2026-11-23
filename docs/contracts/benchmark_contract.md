@@ -7,6 +7,22 @@
 Benchmark report is a deliberate break.  Core owns one episode contract;
 pack/task code never re-derives timeline, deadlines or termination facts.
 
+## Runtime ownership
+
+`EvaluationSession` (`unigym.runner.evaluation.session`) is the public runner
+sink and episode-lifecycle owner.  It drives buffering, dispatches
+`trigger: both` ticks, scores at episode end, publishes
+`bundle["episode_results"]`, counts the early-stop fuse and forwards rewind
+marks; it owns neither a scoring formula nor the report schema.
+
+`EpisodeBuffer` (`unigym.runner.evaluation.buffer`) owns the open-episode step
+slices, rewind marks and per-step tick samples and imports no benchmark type.
+`EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) assembles the
+`EpisodeData`, creates the per-env context and invokes the tasks.
+`EpisodeReporter` (protocol, `unigym.benchmarks.reporting`) owns run-level
+observation; `BenchmarkReporter` is its benchmark implementation and owns
+`benchmark_report.json` / `results.json`.  There is no `BenchmarkSink`.
+
 ## Timeline
 
 Canonical integer tick axis:
@@ -18,9 +34,9 @@ recorded frame i:      tick=i+1, time=(i+1)*policy_dt
 ```
 
 `EpisodeData.step_index` is `int64 1..T`; `EpisodeData.time_s` is the
-authoritative `step_index * policy_dt` mapping.  Recorders, benchmark sinks
-and parity probes must use these arrays, never `arange * dt` starting at 0 or
-`duration_s`.  `duration_s` is a compatibility summary only
+authoritative `step_index * policy_dt` mapping.  Recorders, benchmark
+evaluation and parity probes must use these arrays, never `arange * dt`
+starting at 0 or `duration_s`.  `duration_s` is a compatibility summary only
 (`time_s[-1]` when present).
 
 `EpisodeData.reset_sample` is the pre-policy-step observation sample captured
@@ -52,8 +68,8 @@ enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
   ENGINE > MANUAL`; `priority` only breaks ties inside one outcome.
 
 `EpisodeResult.success` stays task-judged and is never inferred from an
-outcome.  Tasks may return `EpisodeResult.termination`; the sink validates
-and includes it in the report.
+outcome.  Tasks may return `EpisodeResult.termination`; the evaluator validates
+it and the reporter includes it in the report.
 
 ## Task API
 
@@ -166,3 +182,17 @@ command layer never depends on the benchmark or evaluation layer.
 `results.json` (schema `results`) carries the same `run` identity and the
 per-episode termination/extensions document.  Extension payloads are
 preserved per episode; core never invents or merges schemas.
+
+## Migration
+
+`BenchmarkSink` is removed in this release; there is no compatibility alias.
+Use `EvaluationSession` (`unigym.runner.evaluation.session`) with the injected
+`EpisodeBuffer`, `EpisodeEvaluator` and `BenchmarkReporter`.  The schema and
+artifact constants (`REPORT_SCHEMA`, `RESULTS_SCHEMA`, `METRICS_NPZ`,
+`RESULTS_JSON`) live in `unigym.benchmarks.reporting`.
+
+The `Task` authoring API remains: `score(self, ep, ctx)`,
+`score_detail(self, ep, ctx, *, retain_frames=False)` and `aggregate` are
+unchanged.  `trigger="both"` and `on_tick(self, ctx)` are additive opt-in
+surface; default `trigger="episode"` behavior is unchanged.  Tick results are
+scoring inputs, not report fields, so the report/results schema does not change.

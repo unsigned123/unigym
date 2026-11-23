@@ -1,8 +1,14 @@
 """Evaluation pipeline building blocks for runner sinks.
 
-This package exposes the pure episode history buffer.  Task evaluation and the
-public sink live in their own modules (``scoring`` and ``session``); importing
-``unigym.runner.evaluation`` does not pull the benchmark reporting layer.
+The package-level public exports are intentionally buffer-only:
+``EpisodeBuffer``, ``TakenEpisode`` and ``TickSample``.  The buffer imports no
+benchmark type, so importing ``unigym.runner.evaluation`` does not pull the
+benchmark or reporting layer.
+
+The other collaborators are imported by their owning module path, not
+re-exported here: ``unigym.runner.evaluation.session.EvaluationSession`` (the
+public runner sink), ``unigym.runner.evaluation.scoring.EpisodeEvaluator`` and
+``unigym.benchmarks.reporting.EpisodeReporter`` / ``BenchmarkReporter``.
 """
 
 from __future__ import annotations

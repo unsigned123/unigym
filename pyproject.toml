@@ -444,7 +444,6 @@ convention = "google"
 "unigym/robots/__init__.py" = ["D103"]
 "unigym/robots/base.py" = ["D102"]
 "unigym/robots/g1.py" = ["D205", "D209", "D417"]
-"unigym/runner/sinks/benchmark.py" = ["D102", "D205", "D209", "D415"]
 "unigym/runner/sinks/collect.py" = ["D102"]
 "unigym/runner/sinks/fanout.py" = ["D102"]
 "unigym/scripts/analyze_cli.py" = ["D103", "D205", "D209", "D415"]
