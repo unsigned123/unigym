@@ -15,11 +15,22 @@ from unigym.errors import ConfigError
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run import SinkContext, SinkFactory, SinkSpec
 from unigym.run.api import Run, load
-from unigym.run.sink import resolve_sink_factory
+from unigym.run.sink import build_custom_sink, resolve_sink_factory
 from unigym.run.spec import build_spec
 from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
 from unigym.sink import Sink
 from unigym.world import World
+from tests._support.fakes.external_sink import (
+    DirectProviderSink,
+    IncompleteRewindProvider,
+    NamelessRewindProvider,
+    NonCallableRewindSink,
+    NonCallableStopSink,
+    PartialSink,
+    ProviderSink,
+    RecordingSink,
+    RewindProvider,
+)
 
 
 def _cfg(**overrides: JsonValue) -> dict[str, JsonValue]:
@@ -399,3 +410,100 @@ def test_run_api_rejects_a_malformed_sink_path() -> None:
     """A malformed API path fails at SinkSpec creation, before any build."""
     with pytest.raises(ConfigError, match="must be 'module:callable'"):
         Run(_cfg(), sink="bad-path")
+
+
+def _context() -> SinkContext:
+    spec = build_spec(_cfg(), _args())
+    return SinkContext(
+        spec=spec,
+        mode=spec.mode,
+        out_dir="data_out/r",
+        num_envs=1,
+        policy_dt=0.02,
+        seed=0,
+        action_groups=(),
+        run_identity=None,
+        options={},
+    )
+
+
+def test_build_custom_sink_calls_the_factory_once_and_returns_its_sink() -> None:
+    context = _context()
+    sink = RecordingSink()
+    calls: list[SinkContext] = []
+
+    def factory(ctx: SinkContext) -> RecordingSink:
+        calls.append(ctx)
+        return sink
+
+    assert build_custom_sink(factory, context) is sink
+    assert calls == [context]
+
+
+def test_build_custom_sink_reports_missing_required_callbacks() -> None:
+    def factory(ctx: SinkContext) -> PartialSink:
+        del ctx
+        return PartialSink()
+
+    with pytest.raises(TypeError, match="missing callbacks") as info:
+        build_custom_sink(factory, _context())  # type: ignore[arg-type]
+
+    message = str(info.value)
+    assert "PartialSink" in message
+    assert "on_episode_end" in message
+    assert "on_step_end" in message
+    assert "on_run_end" in message
+
+
+@pytest.mark.parametrize(
+    ("sink", "field"),
+    [(NonCallableStopSink(), "stop_when"), (NonCallableRewindSink(), "on_rewind")],
+    ids=["stop-when", "on-rewind"],
+)
+def test_build_custom_sink_requires_callable_optional_capabilities(sink, field) -> None:
+    def factory(ctx: SinkContext) -> object:
+        del ctx
+        return sink
+
+    with pytest.raises(TypeError, match=rf"{field} must be callable"):
+        build_custom_sink(factory, _context())  # type: ignore[arg-type]
+
+
+def test_build_custom_sink_accepts_a_valid_rewind_provider() -> None:
+    sink = ProviderSink(RewindProvider())
+
+    def factory(ctx: SinkContext) -> ProviderSink:
+        del ctx
+        return sink
+
+    assert build_custom_sink(factory, _context()) is sink
+    assert sink.supplier_calls == 0
+
+
+def test_build_custom_sink_accepts_a_direct_rewind_provider_shape() -> None:
+    sink = DirectProviderSink(RewindProvider())
+
+    def factory(ctx: SinkContext) -> DirectProviderSink:
+        del ctx
+        return sink
+
+    assert build_custom_sink(factory, _context()) is sink
+
+
+@pytest.mark.parametrize(
+    ("provider", "missing"),
+    [
+        (IncompleteRewindProvider(), "apply_rewind_state"),
+        (NamelessRewindProvider(), "name"),
+    ],
+    ids=["missing-apply", "missing-name"],
+)
+def test_build_custom_sink_reports_an_invalid_rewind_provider(provider, missing) -> None:
+    def factory(ctx: SinkContext) -> DirectProviderSink:
+        del ctx
+        return DirectProviderSink(provider)
+
+    with pytest.raises(TypeError, match="rewind_provider is missing") as info:
+        build_custom_sink(factory, _context())
+
+    assert missing in str(info.value)

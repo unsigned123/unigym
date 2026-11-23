@@ -52,6 +52,7 @@ from unigym.runtime.controllers import (
     build_control_runtimes,
     control_key,
 )
+from unigym.sink import StoppingSink
 from unigym.terminations import (
     TerminationGroup,
     build_termination_group,
@@ -75,7 +76,7 @@ if TYPE_CHECKING:
     from unigym.recorder import Recorder
     from unigym.robots.base import CanonicalBodyId, RobotProfile
     from unigym.runner.evaluation.session import EvaluationSession
-    from unigym.runtime.bridge import Bridge
+    from unigym.runtime.bridge import Bridge, MetricsSource
     from unigym.runtime.controllers import ControlRuntime
     from unigym.runtime.rewind_providers import RewindStateProvider
     from unigym.scenes.articulation import (
@@ -88,6 +89,7 @@ if TYPE_CHECKING:
     from unigym.watchers.timeline import EventLog, TimelineSink
 
     from .instance import RunEnv
+    from .sink import SinkFactory
 
 
 #: Backends whose explicit selection is verified against the live stack
@@ -213,7 +215,7 @@ class _SinkBundle(TypedDict):
     sink: Sink
     timeline: TimelineSink
     event_log: EventLog
-    eval_session: EvaluationSession | None
+    metrics_source: MetricsSource | None
     stop_when: Callable[[], bool] | None
     watch_specs: list[dict[str, JsonValue]] | None
 
@@ -1509,6 +1511,76 @@ def _episode_limits(bench_cfg: dict[str, JsonValue], policy_dt: float) -> Episod
     return limits
 
 
+def _compose_primary_sink(
+    mode: str,
+    *,
+    collect_sink: Sink | None,
+    eval_session: Sink | None,
+    custom_sink: Sink | None,
+) -> Sink:
+    """Select the mode's primary sink from the built parts (pure matrix).
+
+    ``custom_sink`` replaces the built-in benchmark session in ``benchmark``
+    mode and is appended after the unchanged ``CollectSink`` in ``collect`` /
+    ``both``.  With no custom sink every mode keeps its existing selection.
+    """
+    from unigym.runner.sinks import FanOutSink
+
+    def require(sink: Sink | None, role: str) -> Sink:
+        if sink is None:
+            raise RuntimeError(f"no {role} sink selected for run mode {mode!r}")
+        return sink
+
+    if mode == "collect":
+        collect = require(collect_sink, "collect")
+        return collect if custom_sink is None else FanOutSink(collect, custom_sink)
+    if mode == "benchmark":
+        return custom_sink if custom_sink is not None else require(eval_session, "evaluation")
+    if mode == "both":
+        collect = require(collect_sink, "collect")
+        if custom_sink is not None:
+            return FanOutSink(collect, custom_sink)
+        return FanOutSink(collect, require(eval_session, "evaluation"))
+    raise ValueError(f"unsupported run mode {mode!r} (one of: collect | benchmark | both)")
+
+
+def _sink_stop_when(sink: Sink | None) -> Callable[[], bool] | None:
+    """Return a sink's read-only stop predicate, or ``None`` when absent."""
+    if isinstance(sink, StoppingSink) and callable(sink.stop_when):
+        return sink.stop_when
+    return None
+
+
+def _combine_stop(
+    first: Callable[[], bool] | None,
+    second: Callable[[], bool] | None,
+) -> Callable[[], bool] | None:
+    """OR two optional stop predicates, preserving the single-predicate object.
+
+    Polling is read-only and short-circuits in argument order, so the first
+    predicate's stop decision wins without calling the second.
+    """
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return lambda: bool(first() or second())
+
+
+def _metrics_source_for(sink: Sink | None) -> MetricsSource | None:
+    """Return the sink's bridge telemetry feed when it structurally declares one."""
+    if sink is None:
+        return None
+    required = ("metrics_drain", "metrics_task", "metrics_progress", "metrics_report")
+    if not all(callable(getattr(sink, member, None)) for member in required):
+        return None
+    from unigym.runtime.bridge import MetricsSource
+
+    if isinstance(sink, MetricsSource):
+        return sink
+    return None
+
+
 def _build_sinks(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
@@ -1535,8 +1607,9 @@ def _build_sinks(
     contact_manager: ContactManager | None,
     pack_runtime: PackRuntime | None,
     action_groups: Sequence[OrderedActionGroup] = (),
+    custom_sink_factory: SinkFactory | None = None,
 ) -> _SinkBundle:
-    """Step 5: director + timeline + mode sink composition."""
+    """Step 5: director + timeline + mode-aware sink composition."""
     from unigym.benchmarks.reporting import BenchmarkReporter
     from unigym.runner.evaluation.buffer import EpisodeBuffer
     from unigym.runner.evaluation.scoring import EpisodeEvaluator
@@ -1598,79 +1671,110 @@ def _build_sinks(
             action_groups=action_groups,
         )
     eval_session: EvaluationSession | None = None
-    stop_when: Callable[[], bool] | None = None
+    standard_stop: Callable[[], bool] | None = None
+    run_identity: RunIdentity | None = None
     if mode in ("benchmark", "both"):
         if task_meta is None:
             raise RuntimeError("benchmark mode requires task metadata")
         if pack_runtime is None:
             raise RuntimeError("benchmark mode requires a pack runtime")
-        # benchmark tasks resolve through the runtime ``benchmarks`` catalog
-        # face (no run-config pack list, no repository scan)
-        bench_tasks = build_tasks(
-            _config_dict_list(bench_cfg.get("tasks")),
-            dict(task_meta),
-            pack_runtime,
-        )
+        # A custom sink owns benchmark control flow: do not build/resolve the
+        # built-in tasks, buffer, evaluator, reporter or session.  The core
+        # horizon still applies, so identity + deadline are stamped either way.
+        bench_tasks = None
+        if custom_sink_factory is None:
+            # benchmark tasks resolve through the runtime ``benchmarks``
+            # catalog face (no run-config pack list, no repository scan)
+            bench_tasks = build_tasks(
+                _config_dict_list(bench_cfg.get("tasks")),
+                dict(task_meta),
+                pack_runtime,
+            )
         run_identity = _run_identity(spec, cfg, env, num_envs, seed, policy_dt)
         # the runner bundle carries the same identity (benchmark contract)
         env.run_identity = run_identity
         limits = _episode_limits(bench_cfg, policy_dt)
         env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
-        report_meta = dict(task_meta)
-        report_meta["sim_dt"] = run_identity.sim_dt
-        if contact_manager is not None:
-            report_meta["contacts"] = contact_manager.metadata()
-        # benchmark.retain_metric_frames -> metrics.npz
-        retain_frames = bool(bench_cfg.get("retain_metric_frames", False))
-        episode_buffer = EpisodeBuffer(num_envs)
-        evaluator = EpisodeEvaluator(
-            tasks=bench_tasks,
-            meta=report_meta,
-            env=env,
-            limits=limits,
-            retain_frames=retain_frames,
-        )
-        reporter = BenchmarkReporter(
-            tasks=bench_tasks,
-            meta=report_meta,
-            report_path=os.path.join(out_dir, "benchmark_report.json"),
-            run_identity=run_identity,
-        )
-        eval_session = EvaluationSession(
-            tasks=bench_tasks,
-            buffer=episode_buffer,
-            evaluator=evaluator,
-            reporter=reporter,
-            meta=report_meta,
+        if bench_tasks is not None:
+            report_meta = dict(task_meta)
+            report_meta["sim_dt"] = run_identity.sim_dt
+            if contact_manager is not None:
+                report_meta["contacts"] = contact_manager.metadata()
+            # benchmark.retain_metric_frames -> metrics.npz
+            retain_frames = bool(bench_cfg.get("retain_metric_frames", False))
+            episode_buffer = EpisodeBuffer(num_envs)
+            evaluator = EpisodeEvaluator(
+                tasks=bench_tasks,
+                meta=report_meta,
+                env=env,
+                limits=limits,
+                retain_frames=retain_frames,
+            )
+            reporter = BenchmarkReporter(
+                tasks=bench_tasks,
+                meta=report_meta,
+                report_path=os.path.join(out_dir, "benchmark_report.json"),
+                run_identity=run_identity,
+            )
+            eval_session = EvaluationSession(
+                tasks=bench_tasks,
+                buffer=episode_buffer,
+                evaluator=evaluator,
+                reporter=reporter,
+                meta=report_meta,
+                num_envs=num_envs,
+                min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
+                max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
+                director=director,
+                env=env,
+            )
+            if bench_tasks:  # no tasks -> nothing to wait for
+                standard_stop = eval_session.episodes_done
+
+    custom_sink: Sink | None = None
+    if custom_sink_factory is not None:
+        from .sink import SinkContext, build_custom_sink
+
+        declaration = spec.custom_sink
+        if declaration is None:
+            raise RuntimeError("custom sink factory resolved without a declaration")
+        ctx = SinkContext(
+            spec=spec,
+            mode=mode,
+            out_dir=out_dir,
             num_envs=num_envs,
-            min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
-            max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
-            director=director,
-            env=env,
+            policy_dt=policy_dt,
+            seed=seed,
+            action_groups=tuple(action_groups),
+            run_identity=run_identity,
+            options=declaration.options,
         )
-        if bench_tasks:  # no tasks -> nothing to wait for
-            stop_when = eval_session.episodes_done
-    sink: Sink | None
-    if mode == "benchmark":
-        sink = eval_session
-    elif mode == "both":
-        # CollectSink first, EvaluationSession second
-        sink = FanOutSink(collect_sink, eval_session)
-    else:
-        sink = collect_sink
+        custom_sink = build_custom_sink(custom_sink_factory, ctx)
+
+    primary_sink = _compose_primary_sink(
+        mode,
+        collect_sink=collect_sink,
+        eval_session=eval_session,
+        custom_sink=custom_sink,
+    )
+    stop_when = _combine_stop(
+        _sink_stop_when(primary_sink) if custom_sink is not None else None,
+        standard_stop,
+    )
+    sink = primary_sink
     # adapter-provided diagnostics sinks (generic hook, engine stays
     # adapter-agnostic): mounted AHEAD of the standard chain so extra keys
     # they write land before the standard sinks buffer the same step
     for extra_sink in adapter.extra_sinks(env, out_dir):
-        sink = extra_sink if sink is None else FanOutSink(extra_sink, sink)
-    if sink is None:
-        raise RuntimeError(f"no sink selected for run mode {mode!r}")
+        sink = FanOutSink(extra_sink, sink)
     return {
         "director": director,
         "sink": sink,
         "timeline": timeline,
         "event_log": event_log,
-        "eval_session": eval_session,
+        "metrics_source": _metrics_source_for(
+            eval_session if eval_session is not None else custom_sink
+        ),
         "stop_when": stop_when,
         "watch_specs": watch_specs,
     }
@@ -1684,7 +1788,7 @@ def _build_bridge_and_wiring(
     adapter: Adapter,
     camera_manager: CameraManager | None,
     out_dir: str,
-    eval_session: EvaluationSession | None,
+    metrics_source: MetricsSource | None,
     sink: Sink,
     timeline: TimelineSink,
     director: Director | None,
@@ -1722,7 +1826,7 @@ def _build_bridge_and_wiring(
         # fail-fast on oversize) + benchmark telemetry feed (report draft,
         # episode rings; None in collect-only runs)
         config_doc=cfg,
-        metrics_source=eval_session,
+        metrics_source=metrics_source,
     )
     # runtime debug console: step/inspect/save_npz handlers on
     # the bridge dispatch table (docs/contracts/console_contract.md)
@@ -1895,6 +1999,13 @@ def build_instance(spec: RunSpec) -> RunInstance:
             "discover(entry_points=True) at the composition boundary and "
             "pass it to build_spec"
         )
+    # Resolve a configured custom sink factory BEFORE any engine allocation:
+    # a bad import path must fail here, never after a half-built backend.
+    custom_sink_factory: SinkFactory | None = None
+    if spec.custom_sink is not None:
+        from .sink import resolve_sink_factory
+
+        custom_sink_factory = resolve_sink_factory(spec.custom_sink, spec.config_path)
     seed = spec.seed
     import torch
 
@@ -2158,6 +2269,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sensing["contact_manager"],
         pack_runtime,
         effective_groups,
+        custom_sink_factory,
     )
     # The run's one SignalBus exists BEFORE the bridge/wiring seam: the
     # watcher engine publishes into it and joins the rewind providers at
@@ -2172,7 +2284,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         adapter,
         sensing["camera_manager"],
         built["out_dir"],
-        sinks["eval_session"],
+        sinks["metrics_source"],
         sinks["sink"],
         sinks["timeline"],
         sinks["director"],

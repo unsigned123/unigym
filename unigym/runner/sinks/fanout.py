@@ -39,3 +39,15 @@ class FanOutSink:
 
     def on_run_end(self) -> dict:
         return {type(sink).__name__: sink.on_run_end() for sink in self.sinks}
+
+    def stop_when(self) -> bool:
+        """OR every child that declares ``stop_when``; read-only and cheap.
+
+        A nested fan-out participates through its own ``stop_when`` method, so
+        the composite never flattens or recurses here itself.
+        """
+        for sink in self.sinks:
+            fn = getattr(sink, "stop_when", None)
+            if callable(fn) and fn():
+                return True
+        return False

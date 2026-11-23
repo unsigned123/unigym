@@ -1,11 +1,12 @@
-"""Construction-side data contract for a custom sink.
+"""Construction-side contract for a custom sink.
 
 A run may declare one custom :class:`unigym.sink.Sink` by config
 (``sink: {factory: ..., options: ...}``) or by API
-(``Run(..., sink=SinkSpec(...))``).  This module owns only the inert
-declaration and its boundary validation: it never imports the factory target
-eagerly and never invokes the factory.  Building the sink with a
-:class:`SinkContext` belongs to the run builder.
+(``Run(..., sink=SinkSpec(...))``).  This module owns the inert declaration and
+its boundary validation (no eager factory import), plus the resolved-factory
+helpers: :func:`resolve_sink_factory` imports a configured path once without
+calling it, and :func:`build_custom_sink` invokes the resolved factory with a
+:class:`SinkContext` and validates the returned sink's callback shape.
 
 The module stays import-light: it depends on the public sink protocol, the
 shared JSON typing alias and the config error type, plus the standard library.
@@ -31,10 +32,25 @@ if TYPE_CHECKING:
     from unigym.run.spec import RunSpec
     from unigym.runtime.actions import OrderedActionGroup
 
-__all__ = ["SinkContext", "SinkFactory", "SinkSpec", "resolve_sink_factory"]
+__all__ = [
+    "SinkContext",
+    "SinkFactory",
+    "SinkSpec",
+    "build_custom_sink",
+    "resolve_sink_factory",
+]
 
 #: ``module:attribute`` where both sides are dotted Python identifiers.
 _FACTORY_PATH = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+
+#: The four non-optional runner callbacks every custom sink must implement.
+_REQUIRED_CALLBACKS = ("on_step", "on_episode_end", "on_step_end", "on_run_end")
+#: Optional capabilities: absent is fine, present must be callable.
+_OPTIONAL_CALLBACKS = ("on_rewind", "stop_when")
+#: A ``rewind_provider`` (or direct provider) payload-key + state callbacks.
+_PROVIDER_CALLBACKS = ("rewind_state", "apply_rewind_state")
+
+_MISSING: object = object()
 
 
 def _empty_options() -> dict[str, JsonValue]:
@@ -142,3 +158,48 @@ def resolve_sink_factory(spec: SinkSpec, config_path: str) -> SinkFactory:
     # The runtime callable check above is the only guarantee available here:
     # a factory's parameter/return contract is structural, not introspectable.
     return cast(SinkFactory, target)
+
+
+def build_custom_sink(factory: SinkFactory, ctx: SinkContext) -> Sink:
+    """Invoke a resolved custom-sink factory exactly once and validate its shape.
+
+    The factory receives the construction-time :class:`SinkContext` and owns
+    building its sink.  The returned object is validated structurally: the four
+    required callbacks must exist and be callable; ``on_rewind`` / ``stop_when``
+    are optional but must be callable when present; a declared
+    ``rewind_provider`` must be a callable supplier or an already valid
+    provider shape.  Validation never calls the callbacks.
+    """
+    sink = factory(ctx)
+    missing = [name for name in _REQUIRED_CALLBACKS if not callable(getattr(sink, name, None))]
+    if missing:
+        raise TypeError(f"custom sink {type(sink).__name__} is missing callbacks: {missing}")
+    for name in _OPTIONAL_CALLBACKS:
+        callback = getattr(sink, name, _MISSING)
+        if callback is not _MISSING and not callable(callback):
+            raise TypeError(f"custom sink {type(sink).__name__}.{name} must be callable")
+    _validate_rewind_provider(sink)
+    return sink
+
+
+def _validate_rewind_provider(sink: Sink) -> None:
+    """Fail fast when a custom sink declares an invalid ``rewind_provider``.
+
+    ``None`` means "no provider" (the same meaning the discovery walk gives
+    it).  A callable is accepted as the supplier contract and is not invoked
+    here; a non-callable value must already be a valid provider: a non-empty
+    string ``name`` (the checkpoint payload key) plus callable
+    ``rewind_state`` / ``apply_rewind_state``.
+    """
+    provider = getattr(sink, "rewind_provider", None)
+    if provider is None or callable(provider):
+        return
+    missing: list[str] = []
+    name = getattr(provider, "name", None)
+    if not isinstance(name, str) or not name:
+        missing.append("name")
+    for callback in _PROVIDER_CALLBACKS:
+        if not callable(getattr(provider, callback, None)):
+            missing.append(callback)
+    if missing:
+        raise TypeError(f"custom sink {type(sink).__name__}.rewind_provider is missing: {missing}")
