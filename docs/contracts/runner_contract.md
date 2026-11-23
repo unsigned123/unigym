@@ -6,7 +6,9 @@ The `SyncRunner` callback stream is the single source of episode facts.  The
 ```text
 t             policy tick counter
 record        per-env backend record (canonical keys + contact facts)
-terminated    (N,) bool, engine termination group
+terminated    (N,) bool, live termination group
+alive         (N,) bool, not terminated and finite policy observation
+term_metrics  per-group/total termination firing fractions
 reset_env_ids (N,) due ids, backend episode clock
 terminations  {env_id: EpisodeTermination}   # term group + core horizon
 step_index    canonical tick (t+1)
@@ -32,6 +34,22 @@ Lifecycle:
 4. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
 5. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
+
+Termination evaluation is a live post-step/pre-reset boundary:
+
+```text
+env.step -> observation snapshot -> one vector EvalContext
+         -> TerminationGroup.check_detail(ctx) once
+         -> terminated / alive / term_metrics / terminations
+         -> ctx.close()
+         -> sink.on_step
+```
+
+The bundle has no recorded termination state: `terminations` and
+`term_metrics` are derived from the same one detail pass, and the context is
+closed before any sink observes the bundle.  Termination never reads the
+env-level joint-limit compatibility views; joint limits are owned by
+`ArticulationRuntime.joint_pos_limits`.
 
 `build_instance` creates the run's one `SignalBus` **before**
 `_build_bridge_and_wiring`, hands it to the watcher attach seam, calls

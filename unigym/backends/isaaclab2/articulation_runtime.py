@@ -291,7 +291,10 @@ def _bind_control_order(env, controls) -> None:
             continue
         lim = torch.as_tensor(lim)
         perm = art.perm_il2pol
-        env._joint_limits_by_articulation[art.name] = (lim[:, perm, 0], lim[:, perm, 1])
+        # ``perm_il2pol`` gathers asset order into the record/body-control
+        # policy order, which is also the live ``joint_pos`` record order.
+        art.joint_pos_limits = (lim[:, perm, 0], lim[:, perm, 1])
+        env._joint_limits_by_articulation[art.name] = art.joint_pos_limits
 
 
 def bind_articulations(env) -> None:

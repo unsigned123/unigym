@@ -1094,27 +1094,22 @@ class Isaaclab3EnvBase(ManagerBasedEnv):
 
     @property
     def policy_joint_pos_limits(self) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Soft joint position limits in policy order: ``(lower, upper)``.
+        """First articulation's soft limits in policy order: ``(lower, upper)``.
 
-        Shape ``(N, num_joints)`` each, gathered from the articulation's joint
-        limits (IL order, (N, dof, 2)).  ``joint_limits_sim`` is preferred when
-        a build exposes it; ``joint_pos_limits`` is the rc1 face and fallback.
-        Returns ``None`` when the underlying data is unavailable (before sim
-        init).  Feeds ``TerminationState.joint_pos_limits``.
+        Shape ``(N, num_joints)`` each.  This is a compatibility view over the
+        first declared ``ArticulationRuntime.joint_pos_limits`` (record/body-
+        control policy order); ``None`` when that articulation declares no
+        limits.
         """
-        data = self.robot.data
-        lim = getattr(data, "joint_limits_sim", None)
-        if lim is None:
-            lim = getattr(data, "joint_pos_limits", None)
-        if lim is None:
-            return None
-        lim = _torch_view(lim)
-        return (lim[:, self._perm_il2pol, 0], lim[:, self._perm_il2pol, 1])
+        first = next(iter(self.articulations.values()), None)
+        return None if first is None else first.joint_pos_limits
 
     @property
-    def joint_pos_limits_by_articulation(self):
-        """``{articulation: (lower, upper)}`` for joint-limit terminations."""
-        return getattr(self, "_joint_limits_by_articulation", None)
+    def joint_pos_limits_by_articulation(
+        self,
+    ) -> dict[str, tuple[torch.Tensor, torch.Tensor] | None]:
+        """Compatibility view over every ``ArticulationRuntime.joint_pos_limits``."""
+        return {name: art.joint_pos_limits for name, art in self.articulations.items()}
 
     # ------------------------------------------------------------------ #
     # obs cache

@@ -292,7 +292,15 @@ def _body_control(env, art_name):
 
 
 def _bind_articulation_limits(env, art_order, model) -> None:
-    """Per-articulation limits (asset order) + the record policy-order view."""
+    """Per-articulation limits in record/body-control policy order.
+
+    The ``articulation/<name>/joint_pos`` record leaf follows ``jadr_pol``
+    (the body control's order), so the limits on the runtime fact use that
+    same order.  The full asset order stays on ``jadr_art`` /
+    ``robot_joint_names`` for the observation schema and query surface.  The
+    env-level mapping is only a compatibility view derived from the runtime
+    fact.
+    """
     import mujoco
 
     env._joint_limits_by_articulation = {}
@@ -301,9 +309,6 @@ def _bind_articulation_limits(env, art_order, model) -> None:
         return
     for art in art_order:
         body = _body_control(env, art.name)
-        # the record/extra policy-order view is the body control's order (the
-        # ``jadr_pol`` semantics); the full asset order stays on
-        # ``jadr_art`` / ``robot_joint_names`` for the observation schema.
         if body is not None:
             art.jadr_pol = np.asarray(body.addresses["jadr"], dtype=np.int64)
             art.jdr_pol = np.asarray(body.addresses["jdr"], dtype=np.int64)
@@ -321,12 +326,13 @@ def _bind_articulation_limits(env, art_order, model) -> None:
             )
         jnt_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in names]
         ranges = model.jnt_range[np.asarray(jnt_ids, dtype=np.int64)]
-        env._joint_limits_by_articulation[art.name] = (
+        art.joint_pos_limits = (
             torch.tensor(ranges[:, 0], dtype=torch.float32).unsqueeze(0).expand(env.num_envs, -1),
             torch.tensor(ranges[:, 1], dtype=torch.float32).unsqueeze(0).expand(env.num_envs, -1),
         )
-    first_limits = env._joint_limits_by_articulation.get(art_order[0].name)
-    env._joint_limits = first_limits
+    for art in art_order:
+        env._joint_limits_by_articulation[art.name] = art.joint_pos_limits
+    env._joint_limits = art_order[0].joint_pos_limits
 
 
 def init_tables(env, model, *, label=None) -> None:

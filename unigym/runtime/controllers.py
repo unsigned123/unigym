@@ -173,7 +173,8 @@ class ArticulationRuntime:
         base_body_id: the canonical base body id (public/meta fact).
         body_sets: named canonical body groups.
         joint_pos_limits: per-env ``(lower, upper)`` soft joint limits, each
-            ``(N, len(joint_names))`` and aligned with ``joint_names`` order;
+            ``(N, len(joint_names))`` in the record/body-control policy joint
+            order (the same order as ``articulation/<name>/joint_pos``);
             ``None`` when the asset declares no limits.  This field is the
             single owner of joint-limit facts for the evaluation context.
         contacts: the effective contact sensor inventory (or ``None``).

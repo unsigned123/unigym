@@ -16,10 +16,11 @@ unified termination check, then hands a *bundle* to the consumer-side sink:
     sink.on_run_end() -> dict                     # final summary
 
 The runner owns control flow only: recording, video, logging and
-statistics all live in the sink (docs/contracts/runner_contract.md).  terminated/alive
-are computed here (``TerminationState.from_extra`` + ``term_group.check``) —
-pure tensor ops, no RNG consumption, so moving them relative to collect.py's
-inline computation cannot perturb bit-exact rollouts.
+statistics all live in the sink (docs/contracts/runner_contract.md).  The
+post-step/pre-reset termination boundary builds one read-only
+``EvalContext``, evaluates the group's detail exactly once and derives
+terminated/alive/facts from that same detail — pure tensor ops, no RNG
+consumption, so the rollout remains bit-exact.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from unigym.benchmarks.termination import (
     Termination,
     TerminationSource,
 )
+from unigym.evaluation import EnvView, EvalContext
 from unigym.runner.base import StepResult
 from unigym.runtime.actions import (
     LEGAL_ACTION_KINDS,
@@ -45,7 +47,6 @@ from unigym.runtime.actions import (
     resolve_control_dt,
 )
 from unigym.runtime.bridge import RewindBoundary
-from unigym.terminations import TerminationState
 
 
 def _joint_target(
@@ -230,20 +231,6 @@ def _reset_sample_arrays(snapshot) -> dict[str, np.ndarray]:
     return out
 
 
-def _joint_limits_by_articulation(env):
-    """``{articulation: (lower, upper)}`` for joint-limit terminations.
-
-    Prefers the backend's per-articulation mapping (v103.6; no first
-    binding).  A flat ``policy_joint_pos_limits`` is accepted ONLY when the
-    env proves exactly one policy controller -- the documented cardinality
-    convenience, never a primary fallback.
-    """
-    mapping = getattr(env, "joint_pos_limits_by_articulation", None)
-    if mapping is not None:
-        return dict(mapping)
-    return None
-
-
 class SyncRunner:
     """Drives the act/step/record/reset loop against any EnvBackend.
 
@@ -399,10 +386,6 @@ class SyncRunner:
         self._started = False
         self._cmd = None
         self._obs_frame = None
-        # joint-limit terminations consume a per-articulation limits mapping
-        self._term_joint_limits = None
-        if any(getattr(t, "requires_joint_limits", False) for t in term_group.terminations):
-            self._term_joint_limits = _joint_limits_by_articulation(env)
         # benchmark contract episode facts: per-env reset sample/legality and the
         # run identity (stamped on the env by the run build).
         # test doubles may carry no env surface at all; benchmark facts then
@@ -531,7 +514,9 @@ class SyncRunner:
             "reset_reason": self._reset_reason[ei],
         }
 
-    def _termination_facts(self, state, clock_due) -> dict[int, EpisodeTermination]:
+    def _termination_facts(
+        self, detail: dict[str, torch.Tensor], clock_due
+    ) -> dict[int, EpisodeTermination]:
         """Per-env core terminations for this tick (term group + deadline).
 
         Every stamped ``step_index``/``time_s`` is EPISODE-LOCAL (frame 0 is
@@ -544,7 +529,6 @@ class SyncRunner:
             time_s = None if self.control_dt is None else float(index) * float(self.control_dt)
             return {"step_index": index, "time_s": time_s}
 
-        detail = self.term_group.check_detail(state) if len(self.term_group) else {}
         for name, mask in detail.items():
             code = f"env.{name}"
             for ei in torch.nonzero(mask).squeeze(-1).tolist():
@@ -662,22 +646,53 @@ class SyncRunner:
         eff_cmd = cmd
         if eff_cmd is None and generates_command:
             eff_cmd = adapter.last_command
-        # unified termination check (pure tensor ops, no RNG consumption)
+        # unified live termination boundary (post-step/pre-reset; pure tensor
+        # ops, no RNG consumption).  One context is built per tick and closed
+        # before the sink observes the bundle.
         record = step.record
-        term_state = TerminationState.from_extra(record, joint_pos_limits=self._term_joint_limits)
-        terminated = self.term_group.check(term_state)
-        alive = (~terminated) & torch.isfinite(obs_frame).all(dim=-1)
-        term_metrics = {
-            "terminated": float(terminated.float().mean()),
-            "fallen": float(terminated.float().mean()),
-        }
-        if len(self.term_group) > 1:
-            for k, m in self.term_group.check_detail(term_state).items():
-                term_metrics[f"term_{k}"] = float(m.float().mean())
-        # benchmark contract: structured per-env terminations for this tick
-        # (term-group reasons + the core engine horizon).  Core-neutral
-        # outcome/source vocabulary; no Task/Gym language here.
-        terminations = self._termination_facts(term_state, step.reset_env_ids)
+
+        def _query_factory():
+            try:
+                return env.query
+            except AttributeError as exc:
+                raise NotImplementedError(
+                    f"backend {type(env).__name__!r} has no runtime query"
+                ) from exc
+
+        eval_ctx = EvalContext(
+            env=EnvView(
+                record=record,
+                obs=obs_snapshot,
+                env_id=None,
+                num_envs=self._num_envs,
+                device=device,
+                backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
+                query_factory=_query_factory,
+                articulations=getattr(env, "articulations", None) or {},
+            ),
+            t=t,
+        )
+        try:
+            detail = self.term_group.check_detail(eval_ctx)
+            terminated = self.term_group.combine(detail)
+            if terminated is None:
+                terminated = torch.zeros(
+                    eval_ctx.num_envs, dtype=torch.bool, device=eval_ctx.env.device
+                )
+            alive = (~terminated) & torch.isfinite(obs_frame).all(dim=-1)
+            term_metrics = {
+                "terminated": float(terminated.float().mean()),
+                "fallen": float(terminated.float().mean()),
+            }
+            if len(self.term_group) > 1:
+                for k, m in detail.items():
+                    term_metrics[f"term_{k}"] = float(m.float().mean())
+            # benchmark contract: structured per-env terminations for this tick
+            # (term-group reasons + the core engine horizon).  Core-neutral
+            # outcome/source vocabulary; no Task/Gym language here.
+            terminations = self._termination_facts(detail, step.reset_env_ids)
+        finally:
+            eval_ctx.close()
         step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
         time_s = (
             None
@@ -696,7 +711,6 @@ class SyncRunner:
             "action_group_values": group_values,
             "terminated": terminated,
             "alive": alive,
-            "term_state": term_state,
             "term_metrics": term_metrics,
             "terminations": terminations,
             "step_index": step_index,
