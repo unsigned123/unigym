@@ -42,9 +42,27 @@ def test_episode_data_carries_contract_fields():
         "terminal_index",
         "termination",
         "terminations",
+        "ticks",
     ):
         assert name in fields
+    assert fields["ticks"].default is None
     assert "termination" in EpisodeResult.__dataclass_fields__
+
+
+def test_task_trigger_and_on_tick_are_the_opt_in_cadence_surface():
+    """``trigger`` defaults to episode and ``on_tick`` is a real no-op hook."""
+    from unigym.benchmarks import TickResult, TickTrace
+
+    assert Task.trigger == "episode"
+    on_tick = inspect.signature(Task.on_tick)
+    assert list(on_tick.parameters) == ["self", "ctx"]
+
+    result = TickResult()
+    assert result.metrics == {}
+    assert result.fired is None
+    trace = TickTrace()
+    assert trace.metrics == {}
+    assert trace.fired is None
 
 
 def test_termination_module_is_core_neutral():

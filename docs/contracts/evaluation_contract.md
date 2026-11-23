@@ -46,6 +46,14 @@ scoring argument; they are not duplicated on the context.
   query access raises the query layer's stale error.  The view owner still
   closes the view.
 
+### 2.1 Per-tick benchmark contexts
+
+A `trigger: both` benchmark task receives one VECTOR-scoped context per policy
+tick (`env_id is None`, `t` = the policy tick), created and closed by
+`EvaluationSession` inside its own callback.  It is separate from the runner's
+termination context (closed before `on_step`) and from the per-env episode-end
+context created by `EpisodeEvaluator`.  A task cannot reach a raw env through it.
+
 ## 3. Scope
 
 - `env_id is None`: vector scope.  `record()`/`obs()` return every env's rows;

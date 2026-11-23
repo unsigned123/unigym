@@ -6,7 +6,10 @@ implement ``score(self, ep, ctx)``; an overriding task also implements
 validates those signatures at build time, so a legacy ``score(ep)`` task fails
 loudly instead of being silently skipped by the sink.
 
-``EpisodeData`` remains the episode history/timeline/metrics payload.  A report
+A task opts into per-policy-tick detection with ``trigger: both`` and an
+overridden ``on_tick(self, ctx)``; its ``TickTrace`` history reaches ``score``
+through ``EpisodeData.ticks`` and never appears in the report.  ``EpisodeData``
+remains the episode history/timeline/metrics payload.  A report
 is a live run observation: there is no guarantee that a stored episode can be
 scored again from history alone.  The module stays importable without
 torch/isaaclab (the context type is a type-checking-only import).  Concrete
@@ -20,6 +23,8 @@ from .base import (
     EpisodeData,
     EpisodeResult,
     Task,
+    TickResult,
+    TickTrace,
     build_tasks,
     register,
 )
@@ -51,6 +56,8 @@ __all__ = [
     "Termination",
     "TerminationExtension",
     "TerminationSource",
+    "TickResult",
+    "TickTrace",
     "build_tasks",
     "register",
     "timeline_step_index",
