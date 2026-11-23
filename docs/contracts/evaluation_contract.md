@@ -22,8 +22,11 @@ EvalQueryUnavailableError   no runtime query at this boundary
 `EnvView` is a concrete owner class with private slots, not a bare protocol, so
 the wrong shape cannot be substituted.  It exposes `num_envs`, `env_id`,
 `scope_size`, `device`, `has_query`, `query`, `record()`, `obs()`,
-`articulation(name)`, `joint_pos_limits(name)` and `close()`.  It exposes no
-`env`, `native`, `step`, `reset`, `forward`, write, scratch or query `close`.
+`articulation(name)`, `articulation_names`, `articulation_facts(name,
+control=None)`, `joint_pos_limits(name)`, `controls`, `with_record(record)`,
+`for_env(env_id)` and `close()`.  It exposes no `env`, `native`, `step`, `reset`,
+`forward`, write, scratch, query `close`, mutable `ControlRuntime` /
+`ArticulationRuntime` object or backend address/command/strategy field.
 
 `EvalContext` carries only `env` and an optional `t`.  The record, observation
 snapshot and episode payload are reached through `ctx.env` and the existing
@@ -42,6 +45,10 @@ scoring argument; they are not duplicated on the context.
 - Every accessor and every `EvalQuery` method after `close()` raises
   `EvalViewStaleError`.  A callback that retains the context and reads it on a
   later episode fails instead of silently scoring the next state.
+- Derived views (`with_record`, `for_env`) are children of the view they came
+  from.  A child's `close()` is independent and idempotent; closing the parent
+  invalidates every descendant through the parent chain, and `_ensure_open`
+  follows that chain.  Closing a child never closes its parent.
 - If the run/env closes while a view is open, record/obs remain boundary data;
   query access raises the query layer's stale error.  The view owner still
   closes the view.
@@ -73,6 +80,44 @@ context created by `EpisodeEvaluator`.  A task cannot reach a raw env through it
   the record/body-control policy joint order: the same order as the live
   `articulation/<name>/joint_pos` leaf.  This is not asset `joint_names` order
   when a body control reorders the joints.
+
+### 3.1 Control and articulation facts
+
+`EnvView` accepts runtime control rows at construction and projects them to
+frozen `ResolvedControl` values; plan-row input is not part of this slice.
+
+- `controls: Mapping[ControlKey, ResolvedControl]` is a read-only mapping keyed
+  by `(articulation, control name)`.  Every constructor mapping key must equal
+  `(control.articulation, control.name)`; a mismatch fails with
+  `EvalViewError`.  Only neutral plan fields (`name`, `articulation`, `adapter`,
+  `joint_set`, `source`, `joint_names`, `drive`, `target`, `q0`, `role`) are
+  exposed; mutable runtime controls and their backend addresses, command and
+  strategy are never exposed.
+- `articulation_names` is the sorted tuple of declared articulation names.
+- `articulation_facts(name, control=None)` returns the existing
+  `runtime.controllers.articulation_facts` vocabulary (joint names, asset joint
+  names, action group, base body, foot bodies, body sets, contacts) as a
+  read-only top-level mapping.  `control=None` requires exactly one body-role
+  control for that articulation; zero or multiple raises `EvalViewError`.  An
+  explicit `control` name selects that `(articulation, control)` row and fails
+  fast when it is undeclared.
+- `joint_pos_limits(name)` remains the joint-limit authority and reads the
+  private articulation runtime fact.
+
+### 3.2 Derived views
+
+- `with_record(record)` returns a child that preserves the parent's scope,
+  observation snapshot, query factory and articulation/control facts and
+  substitutes only the record.  It is scope-preserving: a per-env parent yields
+  a per-env child.
+- `for_env(env_id)` returns a per-env child of a vector view.  It raises
+  `EvalViewError` on an already per-env view or an env id outside
+  `[0, num_envs)`.
+- Derived views share observation references and the underlying record values,
+  the lazy query factory and the articulation/control facts; they copy no arrays
+  and open no new data.  `with_record` substitutes the record mapping itself.
+  Each child builds its own scoped `EvalQuery` lazily when read, so a parent and
+  its children cannot leak one another's env selection.
 
 ## 4. No mutation
 

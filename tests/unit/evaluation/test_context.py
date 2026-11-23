@@ -17,7 +17,7 @@ from unigym.evaluation import (
     EvalQueryUnavailableError,
 )
 from unigym.query.facade import Query
-from unigym.runtime.controllers import ArticulationRuntime
+from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime, ResolvedControl
 
 
 class _SampleQuery:
@@ -77,6 +77,7 @@ def _view(
     env_id: int | None = None,
     query_factory: Callable[[], Query] | None = None,
     articulations: dict[str, ArticulationRuntime] | None = None,
+    controls: dict[tuple[str, str], ControlRuntime] | None = None,
 ) -> EnvView:
     return EnvView(
         record=_record(num_envs),
@@ -87,7 +88,29 @@ def _view(
         backend="fake",
         query_factory=query_factory,
         articulations=articulations,
+        controls=controls,
     )
+
+
+def _control(
+    name: str = "legs",
+    *,
+    articulation: str = "g1",
+    role: str = "body",
+    joints: tuple[str, ...] = ("j0", "j1"),
+) -> ControlRuntime:
+    return ControlRuntime(
+        name=name,
+        adapter="manual",
+        articulation=articulation,
+        joint_names=joints,
+        q0=(0.0,) * len(joints),
+        role=role,
+    )
+
+
+def _controls(*rows: ControlRuntime) -> dict[tuple[str, str], ControlRuntime]:
+    return {(row.articulation, row.name): row for row in rows}
 
 
 @pytest.mark.parametrize("num_envs", [1, 3])
@@ -288,11 +311,16 @@ def test_close_is_idempotent_and_every_accessor_is_stale() -> None:
         lambda: view.record(),
         lambda: view.obs(),
         lambda: view.articulation("g1"),
+        lambda: view.articulation_facts("g1"),
         lambda: view.joint_pos_limits("g1"),
         lambda: view.num_envs,
         lambda: view.env_id,
         lambda: view.scope_size,
         lambda: view.device,
+        lambda: view.controls,
+        lambda: view.articulation_names,
+        lambda: view.with_record({}),
+        lambda: view.for_env(0),
         lambda: view.has_query,
         lambda: view.query,
     ):
@@ -367,3 +395,243 @@ def test_invalid_construction_fails_fast() -> None:
         EnvView(record={}, obs=None, env_id=3, num_envs=3)
     with pytest.raises(EvalViewError, match="num_envs"):
         EnvView(record={}, obs=_obs(2), env_id=None, num_envs=3)
+
+
+def test_controls_project_to_frozen_resolved_rows() -> None:
+    """Runtime controls are exposed only as frozen ``ResolvedControl`` rows."""
+    control = _control()
+    view = _view(articulations=_g1(None), controls=_controls(control))
+
+    row = view.controls[("g1", "legs")]
+
+    assert isinstance(row, ResolvedControl)
+    assert (row.name, row.articulation) == ("legs", "g1")
+    assert row.joint_names == ("j0", "j1")
+    assert row.role == "body"
+    with pytest.raises(TypeError):
+        view.controls[("g1", "legs")] = row
+
+
+def test_controls_key_must_match_control_identity() -> None:
+    """A mapping key that is not ``(articulation, name)`` fails at construction."""
+    control = _control()
+
+    with pytest.raises(EvalViewError, match=r"controls key.*does not match"):
+        _view(articulations=_g1(None), controls={("g1", "arm"): control})
+
+
+def test_controls_must_be_a_mapping_or_none() -> None:
+    """A non-mapping controls payload fails at construction."""
+    with pytest.raises(EvalViewError, match="controls must be a mapping"):
+        EnvView(
+            record={},
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            controls=[_control()],  # type: ignore[arg-type]
+        )
+
+
+def test_controls_values_must_be_control_runtimes() -> None:
+    """A raw object in the controls mapping fails at construction."""
+    with pytest.raises(EvalViewError, match="must be a ControlRuntime"):
+        EnvView(
+            record={},
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            controls={("g1", "legs"): object()},  # type: ignore[dict-item]
+        )
+
+
+def test_articulation_names_are_declared_and_sorted() -> None:
+    """The names come from the declared articulation facts, sorted."""
+    articulations = _g1(None)
+    articulations["arm"] = ArticulationRuntime(
+        name="arm", root="fixed", joint_names=("a",), q0=(0.0,)
+    )
+
+    view = _view(articulations=articulations)
+
+    assert view.articulation_names == ("arm", "g1")
+
+
+def test_articulation_facts_selects_the_single_body_control() -> None:
+    """``control=None`` uses the articulation's one body-role control."""
+    view = _view(articulations=_g1(None), controls=_controls(_control()))
+
+    facts = view.articulation_facts("g1")
+
+    assert facts["joint_names"] == ["j0", "j1"]
+    assert facts["asset_joint_names"] == ["j0", "j1"]
+    assert facts["action_group"] == "legs"
+    with pytest.raises(TypeError):
+        facts["action_group"] = "other"
+
+
+def test_articulation_facts_explicit_control_selects_that_row() -> None:
+    """An explicit control name selects its ``(articulation, control)`` row."""
+    view = _view(
+        articulations=_g1(None),
+        controls=_controls(
+            _control("legs", role="body"),
+            _control("arm", role="aux", joints=("j0",)),
+        ),
+    )
+
+    facts = view.articulation_facts("g1", "arm")
+
+    assert facts["action_group"] == "arm"
+    assert facts["joint_names"] == ["j0"]
+
+
+def test_articulation_facts_requires_a_body_control_when_implicit() -> None:
+    """Zero body-role controls fail instead of guessing an aux row."""
+    view = _view(articulations=_g1(None), controls=_controls(_control(role="aux")))
+
+    with pytest.raises(EvalViewError, match=r"no body-role control.*available controls: legs"):
+        view.articulation_facts("g1")
+
+
+def test_articulation_facts_rejects_ambiguous_body_controls() -> None:
+    """Multiple body-role controls require an explicit control name."""
+    view = _view(
+        articulations=_g1(None),
+        controls=_controls(
+            _control("legs", role="body"),
+            _control("torso", role="body", joints=("j0",)),
+        ),
+    )
+
+    with pytest.raises(EvalViewError, match=r"multiple body-role controls"):
+        view.articulation_facts("g1")
+
+
+def test_articulation_facts_rejects_unknown_control_and_articulation() -> None:
+    """Unknown facts names fail fast with the available set."""
+    view = _view(articulations=_g1(None), controls=_controls(_control()))
+
+    with pytest.raises(EvalViewError, match=r"no control 'arm'.*available controls: legs"):
+        view.articulation_facts("g1", "arm")
+    with pytest.raises(EvalViewError, match=r"no runtime facts.*available: g1"):
+        view.articulation_facts("missing")
+
+
+def test_with_record_substitutes_only_the_record() -> None:
+    """The child keeps scope/facts/query and shares the record value objects."""
+    parent = _view(
+        num_envs=3,
+        articulations=_g1(None),
+        controls=_controls(_control()),
+        query_factory=lambda: _SampleQuery(),
+    )
+    new_record = {
+        "articulation/g1/joint_pos": torch.zeros(3, 2),
+        "extra": torch.ones(3),
+    }
+
+    child = parent.with_record(new_record)
+
+    assert (child.env_id, child.scope_size) == (None, 3)
+    assert "extra" in child.record()
+    assert "time_in_episode" not in child.record()
+    assert child.record()["extra"] is new_record["extra"]
+    assert "time_in_episode" in parent.record()
+    assert child.controls is parent.controls
+    assert child.articulation_names == ("g1",)
+    assert child.articulation_facts("g1")["action_group"] == "legs"
+    assert child.has_query is True
+
+
+def test_with_record_preserves_per_env_scope() -> None:
+    """A per-env parent keeps its one-row scope over the substituted record."""
+    parent = _view(num_envs=3, env_id=1)
+
+    child = parent.with_record({"x": torch.arange(3, dtype=torch.float32)})
+
+    assert (child.env_id, child.scope_size) == (1, 1)
+    assert child.record()["x"].tolist() == [1.0]
+
+
+def test_for_env_scopes_record_obs_and_limits() -> None:
+    """A vector child for one env slices record, obs and joint limits."""
+    lower = torch.tensor([[-1.0, -2.0], [-3.0, -4.0], [-5.0, -6.0]])
+    upper = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    parent = _view(
+        num_envs=3,
+        articulations=_g1((lower, upper)),
+        controls=_controls(_control()),
+    )
+
+    child = parent.for_env(1)
+
+    assert (child.env_id, child.scope_size, child.num_envs) == (1, 1, 3)
+    assert child.record()["articulation/g1/joint_pos"].shape == (1, 2)
+    assert child.record()["articulation/g1/joint_pos"].tolist() == [[2.0, 3.0]]
+    obs = child.obs()
+    assert obs is not None and obs.value("articulation/g1/joint_pos").shape == (1, 2)
+    got_lower, got_upper = child.joint_pos_limits("g1")
+    assert got_lower.tolist() == [[-3.0, -4.0]]
+    assert got_upper.tolist() == [[3.0, 4.0]]
+    assert child.controls is parent.controls
+    assert child.articulation_facts("g1", "legs")["action_group"] == "legs"
+
+
+def test_for_env_rejects_per_env_and_out_of_range_views() -> None:
+    """``for_env`` is vector-only and validates the env id."""
+    vector = _view(num_envs=3)
+    per_env = _view(num_envs=3, env_id=1)
+
+    with pytest.raises(EvalViewError, match="only valid on a vector view"):
+        per_env.for_env(0)
+    for bad in (-1, 3, True):
+        with pytest.raises(EvalViewError):
+            vector.for_env(bad)
+
+
+def test_child_close_is_independent_of_the_parent() -> None:
+    """Closing a derived child leaves the parent usable and is idempotent."""
+    parent = _view(num_envs=3)
+    child = parent.for_env(0)
+
+    child.close()
+    child.close()
+
+    with pytest.raises(EvalViewStaleError):
+        child.record()
+    assert parent.record()["time_in_episode"].shape == (3,)
+
+
+def test_closing_the_parent_invalidates_every_child() -> None:
+    """Parent close reaches children and grandchildren through the chain."""
+    parent = _view(num_envs=3)
+    child = parent.with_record(dict(_record(3)))
+    grandchild = child.for_env(1)
+
+    parent.close()
+
+    for derived in (child, grandchild):
+        with pytest.raises(EvalViewStaleError):
+            derived.record()
+
+
+def test_child_query_is_independent_and_never_closed_with_the_view() -> None:
+    """Each derived view lazily builds its own query; close drops only its own."""
+    raw: list[_SampleQuery] = []
+
+    def factory() -> _SampleQuery:
+        handle = _SampleQuery()
+        raw.append(handle)
+        return handle
+
+    parent = _view(num_envs=3, query_factory=factory)
+    child = parent.for_env(1)
+
+    child_query = child.query
+    parent_query = parent.query
+    assert child_query is not parent_query
+    assert raw[0].closed is False and raw[1].closed is False
+
+    child.close()
+    assert raw[0].closed is False
+    assert parent_query is parent.query
