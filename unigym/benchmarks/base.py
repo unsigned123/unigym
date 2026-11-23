@@ -3,7 +3,7 @@
 A benchmark run evaluates completed episodes instead of (or alongside)
 recording them.  The data path is:
 
-    SyncRunner --callbacks--> BenchmarkSink --EpisodeData + EvalContext-->
+    SyncRunner --callbacks--> EvaluationSession --EpisodeData + EvalContext-->
         Task.score --EpisodeResult--> Task.aggregate --> benchmark_report.json
 
 Contract (docs/contracts/benchmark_contract.md):
@@ -11,7 +11,7 @@ Contract (docs/contracts/benchmark_contract.md):
 * two-phase scoring: ``score(ep, ctx) -> EpisodeResult`` per episode and
   ``aggregate(results) -> dict`` at run end;
 * ``ep`` is the episode history/timeline/metrics payload; ``ctx`` is the
-  read-only, per-env live context created by ``BenchmarkSink`` before reset.
+  read-only, per-env live context created by ``EvaluationSession`` before reset.
   Tasks may read ``ctx.env.record()``, ``ctx.env.obs()`` and (when the
   backend exposes it) ``ctx.env.query``; they cannot mutate, step, reset or
   read another env.  The context is closed after all tasks for that env.
@@ -191,7 +191,7 @@ def resolve_episode_key(data: dict, key: str, articulation: str | None) -> str:
 
 @dataclass
 class EpisodeData:
-    """One completed episode, assembled pre-reset by BenchmarkSink.
+    """One completed episode, assembled pre-reset by EvaluationSession.
 
     Attributes:
         data: per-key numpy arrays with (T, .) leading time axis, keyed by
@@ -466,7 +466,7 @@ _POSITIONAL_KINDS = (
 def _require_live_task(task: Task) -> None:
     """Reject a task that does not implement the live scoring signatures.
 
-    ``BenchmarkSink`` isolates task exceptions, so a legacy ``score(ep)`` task
+    ``EvaluationSession`` isolates task exceptions, so a legacy ``score(ep)`` task
     would be silently skipped instead of rejected.  Validation happens here at
     build time: ``score(self, ep, ctx)`` and
     ``score_detail(self, ep, ctx, *, retain_frames=False)``.
@@ -550,7 +550,7 @@ def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[
     legacy task fails here instead of being silently skipped by the sink.
 
     Unknown task names raise ValueError (mirrors the adapter registry).
-    Duplicate task names raise ValueError (BenchmarkSink keys results by
+    Duplicate task names raise ValueError (EvaluationSession keys results by
     task name -- duplicates would silently merge).
     """
     from .packs import discover_packs  # lazy: packs.py imports this module
@@ -583,7 +583,7 @@ def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[
         _require_live_task(task)
         if task.name in seen_names:
             raise ValueError(
-                f"duplicate benchmark task name '{task.name}' (BenchmarkSink "
+                f"duplicate benchmark task name '{task.name}' (EvaluationSession "
                 "keys results by task name; give formula tasks unique "
                 "yaml names)"
             )

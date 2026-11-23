@@ -108,7 +108,7 @@ class EpisodeResultView:
 ```
 
 `EpisodeEvaluator` builds the views after each task returns successfully and
-the `BenchmarkSink` publishes them on the episode-end bundle as
+the `EvaluationSession` publishes them on the episode-end bundle as
 `bundle["episode_results"] = {env_id: (view, ...)}`: one tuple per due env in
 task declaration order.  A task that raises is omitted exactly as it is omitted
 from the report.  The view copies its metrics into a read-only mapping and

@@ -10,17 +10,17 @@ adapter / env backend / sampler / terminations / recorder /
 language / writer / logger / sink / runner).  The rollout control flow lives
 in ``unigym.runner.sync.SyncRunner``; everything consumer-side
 lives in sinks -- ``runner.sinks.collect.CollectSink`` (recording,
-video, logging) and ``runner.sinks.benchmark.BenchmarkSink``
+video, logging) and ``runner.evaluation.session.EvaluationSession``
 (episode scoring, docs/contracts/benchmark_contract.md) -- see docs/contracts/runner_contract.md.
 
 The yaml ``mode`` key selects the consumer wiring (default ``"collect"``):
 
 * ``collect``   -- CollectSink only (the original behavior, bit-exact).
-* ``benchmark`` -- BenchmarkSink only: tasks score completed episodes,
+* ``benchmark`` -- EvaluationSession only: tasks score completed episodes,
   ``benchmark_report.json`` lands in the output dir, the loop stops early
   once ``benchmark.min_episodes`` episodes completed (and never exceeds
   ``benchmark.max_steps``).
-* ``both``      -- CollectSink + BenchmarkSink behind a FanOutSink; the
+* ``both``      -- CollectSink + EvaluationSession behind a FanOutSink; the
   collect side stays bit-exact while episodes are scored in parallel.
 
 Rollout order per policy step (engine):

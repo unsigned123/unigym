@@ -17,7 +17,7 @@ run_identity  RunIdentity (benchmark runs)
 reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
               present on on_episode_end for the ending episode
 episode_results {env_id: (EpisodeResultView, ...)}
-              present on on_episode_end when a BenchmarkSink scored the
+              present on on_episode_end when an EvaluationSession scored the
               episode; per-env, task declaration order, read-only
 env           live EnvBackend, sink wiring only (watchers/bridge)
 ```
@@ -68,26 +68,27 @@ on_episode_end (before env.reset_envs)
               -> Task.score/episode incl. score_detail, declaration order
               -> ctx.close() in finally
               -> merge task terminations + validate the episode axis
-         -> BenchmarkSink accumulates the EpisodeEvaluation
+         -> EvaluationSession forwards the EpisodeEvaluation
          -> publish episode_results for the sampler
 ```
 
 `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) owns the episode facts,
-the task invocation and the final termination merge.  `BenchmarkSink` publishes
-`bundle["episode_results"]` and keeps the run-level accumulation until report
-ownership moves to a reporter.
+the task invocation and the final termination merge.  `EvaluationSession`
+(`unigym.runner.evaluation.session`) publishes `bundle["episode_results"]` and
+delegates run-level accumulation and report writing to the injected
+`EpisodeReporter` (`BenchmarkReporter` in benchmark runs).
 
 A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
 `ctx.env.query`; it cannot step, reset, write or read another env.  The core
 `env` bundle field is not the task context.
 
 Open-episode history is owned by `EpisodeBuffer`
-(`unigym.runner.evaluation.buffer`): `BenchmarkSink.on_step` appends the
+(`unigym.runner.evaluation.buffer`): `EvaluationSession.on_step` appends the
 normalized per-step record, `on_rewind` attaches a rewind mark to every open
 buffer, and `on_episode_end` removes one env's steps and marks with `take`.
 The rewind provider snapshots/restores that buffer (steps, marks, tick traces,
 episode stamp and the episode fuse) under the `"benchmark"` provider name.
-`FanOutSink.on_rewind` forwards to every child recursively, so a benchmark sink
+`FanOutSink.on_rewind` forwards to every child recursively, so an evaluation session
 nested below director or adapter fan-outs still receives the mark exactly once.
 
 `build_instance` creates the run's one `SignalBus` **before**

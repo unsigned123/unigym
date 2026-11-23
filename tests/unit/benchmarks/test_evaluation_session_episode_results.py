@@ -1,4 +1,4 @@
-"""BenchmarkSink publishes per-env EpisodeResultView tuples at episode end."""
+"""EvaluationSession publishes per-env EpisodeResultView tuples at episode end."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ import torch
 
 from tests._support.fakes.benchmark_env import FakeBenchmarkEnv
 from unigym.benchmarks.base import EpisodeResult, Task
+from unigym.benchmarks.reporting import BenchmarkReporter
 from unigym.core.episode_result import EpisodeResultView
 from unigym.env.obs import ObsSnapshot, ObservationSchema, ObservationSpec
 from unigym.evaluation import EvalQueryUnavailableError, EvalViewError, EvalViewStaleError
-from unigym.runner.sinks.benchmark import BenchmarkSink
+from unigym.runner.evaluation.buffer import EpisodeBuffer
+from unigym.runner.evaluation.scoring import EpisodeEvaluator
+from unigym.runner.evaluation.session import EvaluationSession
 
 
 class _ScoredTask(Task):
@@ -49,13 +52,22 @@ class _FailingTask(Task):
         raise RuntimeError("task scoring failed")
 
 
-def _sink(tmp_path, tasks, *, num_envs: int = 1) -> BenchmarkSink:
-    return BenchmarkSink(
-        tasks=list(tasks),
-        meta={"num_envs": num_envs, "policy_dt": 0.02},
+def _session(tmp_path, tasks, *, num_envs: int = 1, env=None) -> EvaluationSession:
+    tasks = list(tasks)
+    meta = {"num_envs": num_envs, "policy_dt": 0.02}
+    return EvaluationSession(
+        tasks=tasks,
+        buffer=EpisodeBuffer(num_envs),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta, env=env),
+        reporter=BenchmarkReporter(
+            tasks=tasks,
+            meta=meta,
+            report_path=str(tmp_path / "benchmark_report.json"),
+        ),
+        meta=meta,
+        num_envs=num_envs,
         min_episodes=1,
         max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
     )
 
 
@@ -85,7 +97,7 @@ def _episode_bundle(*episode_ids: int) -> dict:
     return bundle
 
 
-def test_sink_publishes_successful_views_in_declaration_order(tmp_path):
+def test_session_publishes_successful_views_in_declaration_order(tmp_path):
     """Views follow declaration order, not name order, and skip failing tasks."""
     tasks = [
         _ScoredTask("acme/zeta", 1.0),
@@ -95,7 +107,7 @@ def test_sink_publishes_successful_views_in_declaration_order(tmp_path):
         _ScoredTask("acme/mike", 3.0, success=None),
         _FailingTask("acme/broken_last"),
     ]
-    sink = _sink(tmp_path, tasks)
+    sink = _session(tmp_path, tasks)
     bundle = _step_bundle(7)
     sink.on_step(0, bundle)
 
@@ -112,9 +124,9 @@ def test_sink_publishes_successful_views_in_declaration_order(tmp_path):
     assert all(isinstance(view, EpisodeResultView) for view in views)
 
 
-def test_sink_keys_views_by_env_id_not_position(tmp_path):
+def test_session_keys_views_by_env_id_not_position(tmp_path):
     """Two due envs are keyed by their real ids in arrival order."""
-    sink = _sink(tmp_path, [_EnvTask()], num_envs=2)
+    sink = _session(tmp_path, [_EnvTask()], num_envs=2)
     bundle = _step_bundle(7, 8)
     sink.on_step(0, bundle)
 
@@ -126,9 +138,9 @@ def test_sink_keys_views_by_env_id_not_position(tmp_path):
     assert results[0][0].metrics["env_id"] == 0.0
 
 
-def test_sink_publishes_an_empty_tuple_for_a_due_env_without_scored_steps(tmp_path):
+def test_session_publishes_an_empty_tuple_for_a_due_env_without_scored_steps(tmp_path):
     """A boundary with no buffered frames still names the env with no views."""
-    sink = _sink(tmp_path, [_ScoredTask("acme/good", 1.0)])
+    sink = _session(tmp_path, [_ScoredTask("acme/good", 1.0)])
     bundle = _episode_bundle(0)
 
     sink.on_episode_end(torch.tensor([0]), bundle)
@@ -136,9 +148,9 @@ def test_sink_publishes_an_empty_tuple_for_a_due_env_without_scored_steps(tmp_pa
     assert bundle["episode_results"] == {0: ()}
 
 
-def test_sink_episode_results_are_isolated_from_scored_metrics(tmp_path):
+def test_session_episode_results_are_isolated_from_scored_metrics(tmp_path):
     """The published view owns a copy; later metric mutation cannot leak in."""
-    sink = _sink(tmp_path, [_ScoredTask("acme/good", 1.5)])
+    sink = _session(tmp_path, [_ScoredTask("acme/good", 1.5)])
     bundle = _step_bundle(7)
     sink.on_step(0, bundle)
     sink.on_episode_end(torch.tensor([0]), bundle)
@@ -149,9 +161,9 @@ def test_sink_episode_results_are_isolated_from_scored_metrics(tmp_path):
     assert dict(bundle["episode_results"][0][0].metrics) == {"score": 1.5}
 
 
-def test_sink_episode_results_keys_are_actual_env_ids(tmp_path):
+def test_session_episode_results_keys_are_actual_env_ids(tmp_path):
     """The mapping is keyed by env id even when due ids are not the full set."""
-    sink = _sink(tmp_path, [_EnvTask()], num_envs=3)
+    sink = _session(tmp_path, [_EnvTask()], num_envs=3)
     bundle = _step_bundle(7, 8, 9)
     sink.on_step(0, bundle)
 
@@ -261,22 +273,15 @@ def _live_step_bundle(count: int) -> dict:
     }
 
 
-def _sink_with_env(tmp_path, tasks, *, num_envs: int, env=None) -> BenchmarkSink:
-    return BenchmarkSink(
-        tasks=list(tasks),
-        meta={"num_envs": num_envs, "policy_dt": 0.02},
-        min_episodes=1,
-        max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
-        env=env,
-    )
+def _session_with_env(tmp_path, tasks, *, num_envs: int, env=None) -> EvaluationSession:
+    return _session(tmp_path, tasks, num_envs=num_envs, env=env)
 
 
-def test_sink_builds_a_per_env_live_context_and_closes_it(tmp_path):
+def test_session_builds_a_per_env_live_context_and_closes_it(tmp_path):
     """Tasks see the due env id, a ``(1, ...)`` record and a stale context."""
     seen: list[object] = []
     env = FakeBenchmarkEnv(num_envs=2)
-    sink = _sink_with_env(tmp_path, [_ContextTask(seen)], num_envs=2, env=env)
+    sink = _session_with_env(tmp_path, [_ContextTask(seen)], num_envs=2, env=env)
     bundle = _live_step_bundle(2)
     sink.on_step(0, bundle)
 
@@ -289,9 +294,9 @@ def test_sink_builds_a_per_env_live_context_and_closes_it(tmp_path):
         seen[0].env.num_envs
 
 
-def test_sink_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
+def test_session_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
     """``ctx.env.obs()`` carries only the due env's row, not the vector."""
-    sink = _sink_with_env(
+    sink = _session_with_env(
         tmp_path,
         [_ObsTask()],
         num_envs=2,
@@ -315,10 +320,10 @@ def test_sink_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
     assert result.metrics == {"obs_rows": 1.0, "obs_value": 3.0}
 
 
-def test_sink_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
+def test_session_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
     """The query factory is lazy; a pure task never opens the query handle."""
     env = FakeBenchmarkEnv(num_envs=1)
-    sink = _sink_with_env(tmp_path, [_ScoredTask("acme/pure", 2.0)], num_envs=1, env=env)
+    sink = _session_with_env(tmp_path, [_ScoredTask("acme/pure", 2.0)], num_envs=1, env=env)
     bundle = _live_step_bundle(1)
     sink.on_step(0, bundle)
 
@@ -331,7 +336,7 @@ def test_sink_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
 def test_record_only_context_has_no_query_and_isolates_query_callers(tmp_path):
     """Without an injected env the context is explicitly query-unavailable."""
     errors: list[Exception] = []
-    sink = _sink_with_env(
+    sink = _session_with_env(
         tmp_path,
         [_HasQueryTask(), _QueryCallTask(errors)],
         num_envs=1,
@@ -351,7 +356,7 @@ def test_per_env_query_rejects_another_env_and_isolates_the_task(tmp_path):
     """A scoped query read for another env is an error, not a cross-env read."""
     errors: list[Exception] = []
     env = FakeBenchmarkEnv(num_envs=2)
-    sink = _sink_with_env(tmp_path, [_CrossEnvTask(errors)], num_envs=2, env=env)
+    sink = _session_with_env(tmp_path, [_CrossEnvTask(errors)], num_envs=2, env=env)
     bundle = _live_step_bundle(2)
     sink.on_step(0, bundle)
 

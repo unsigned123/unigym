@@ -801,7 +801,7 @@ class SyncRunner:
         Args:
             stop_when: optional predicate checked at the top of every step;
                 when True the loop ends early and the normal ``on_run_end``
-                teardown runs (B1: BenchmarkSink's min_episodes gate).
+                teardown runs (B1: EvaluationSession's min_episodes gate).
                 Default None reproduces the fixed-length rollout bitwise.
         """
         self._start()

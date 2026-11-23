@@ -1,8 +1,8 @@
 """Evaluation pipeline building blocks for runner sinks.
 
-The package owns the pieces that turn the runner callback stream into scored
-episodes.  This slice exposes the pure episode history buffer; task
-evaluation and report ownership arrive in later slices.
+This package exposes the pure episode history buffer.  Task evaluation and the
+public sink live in their own modules (``scoring`` and ``session``); importing
+``unigym.runner.evaluation`` does not pull the benchmark reporting layer.
 """
 
 from __future__ import annotations

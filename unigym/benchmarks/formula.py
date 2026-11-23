@@ -27,11 +27,11 @@ comparators gte/lte/gt/lt/between([lo, hi])/eq (inclusive bounds).  At most
 TWO combinator levels (a leaf may sit at any depth; a third combinator
 level is a spec error).  Evaluation is strict-boolean, numpy-free.
 
-Fail-fast discipline (deliberate, differs from BenchmarkSink's per-task
+Fail-fast discipline (deliberate, differs from EvaluationSession's per-task
 isolation): ONE failing metric raises ValueError inside ``score`` -- the
 task never returns partial metrics.  A formula error is a *definition*
 error by the task author (bad key/params), silently missing metrics would
-poison the report far harder than a loud, named failure; BenchmarkSink
+poison the report far harder than a loud, named failure; EvaluationSession
 still isolates the whole task per episode.
 
 v1 guardrails: term templates are a whitelist (benchmarks/terms.py), every

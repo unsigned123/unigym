@@ -102,6 +102,10 @@ class EpisodeReporter(Protocol):
         """Record one completed episode evaluation and its director label."""
         ...
 
+    def note_progress(self, *, episodes_total: int, steps_total: int) -> None:
+        """Publish the live run counters for the bounded draft report."""
+        ...
+
     def draft_report(self) -> dict:
         """Return the bounded live report document."""
         ...

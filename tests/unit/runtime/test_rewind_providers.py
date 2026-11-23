@@ -5,12 +5,15 @@ from __future__ import annotations
 import pytest
 import torch
 
+from unigym.benchmarks.reporting import BenchmarkReporter
 from unigym.initializers.base import InitializerBase
-from unigym.runner.sinks.benchmark import BenchmarkSink
+from unigym.runner.evaluation.buffer import EpisodeBuffer
+from unigym.runner.evaluation.scoring import EpisodeEvaluator
+from unigym.runner.evaluation.session import EvaluationSession
 from unigym.runner.sinks.fanout import FanOutSink
 from unigym.runtime.rewind import RewindGateError
 from unigym.runtime.rewind_providers import (
-    BenchmarkSinkProvider,
+    EvaluationSessionProvider,
     InitializerStateProvider,
     build_rewind_providers,
 )
@@ -20,13 +23,22 @@ def _initializer(seed: int = 0) -> InitializerBase:
     return InitializerBase({"seed": seed}, None, None)
 
 
-def _benchmark_sink(tmp_path, *, num_envs: int = 1) -> BenchmarkSink:
-    return BenchmarkSink(
-        tasks=[],
-        meta={"num_envs": num_envs, "policy_dt": 0.02},
+def _session(tmp_path, *, num_envs: int = 1) -> EvaluationSession:
+    tasks: list = []
+    meta = {"num_envs": num_envs, "policy_dt": 0.02}
+    return EvaluationSession(
+        tasks=tasks,
+        buffer=EpisodeBuffer(num_envs),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta),
+        reporter=BenchmarkReporter(
+            tasks=tasks,
+            meta=meta,
+            report_path=str(tmp_path / "benchmark_report.json"),
+        ),
+        meta=meta,
+        num_envs=num_envs,
         min_episodes=5,
         max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
     )
 
 
@@ -90,19 +102,19 @@ def test_initializer_provider_validate_rejects_unrestorable_state(initializer, s
         provider.validate_rewind_state(state)
 
 
-def test_benchmark_provider_mounts_on_episode_buffer(tmp_path):
-    """A sink exposing an episode_buffer mounts the benchmark provider."""
-    sink = _benchmark_sink(tmp_path)
+def test_evaluation_session_provider_mounts_on_episode_buffer(tmp_path):
+    """A session exposing an episode_buffer mounts the benchmark provider."""
+    sink = _session(tmp_path)
 
     providers = build_rewind_providers(sink)
 
     assert [provider.name for provider in providers] == ["benchmark"]
-    assert isinstance(providers[0], BenchmarkSinkProvider)
+    assert isinstance(providers[0], EvaluationSessionProvider)
 
 
-def test_benchmark_provider_restore_returns_open_steps_and_clears_marks(tmp_path):
+def test_evaluation_session_provider_restore_returns_open_steps_and_clears_marks(tmp_path):
     """Restoring the snapshot drops the abandoned branch's step and rewind mark."""
-    sink = _benchmark_sink(tmp_path)
+    sink = _session(tmp_path)
     sink.on_step(0, _step_bundle(episode_id=0))
     provider = build_rewind_providers(sink)[0]
     state = provider.rewind_state()
@@ -119,9 +131,9 @@ def test_benchmark_provider_restore_returns_open_steps_and_clears_marks(tmp_path
     assert provider.rewind_state()["episode_stamp"] == 0
 
 
-def test_benchmark_provider_restores_episode_fuse(tmp_path):
+def test_evaluation_session_provider_restores_episode_fuse(tmp_path):
     """n_episodes and the derived _stop latch ride the fork back."""
-    sink = _benchmark_sink(tmp_path)
+    sink = _session(tmp_path)
     sink.n_episodes = 2
     sink._stop = True
     provider = build_rewind_providers(sink)[0]
@@ -135,9 +147,9 @@ def test_benchmark_provider_restores_episode_fuse(tmp_path):
     assert sink._stop is True
 
 
-def test_benchmark_provider_refuses_cross_episode_rewind(tmp_path):
+def test_evaluation_session_provider_refuses_cross_episode_rewind(tmp_path):
     """A checkpoint from another episode is refused by both rewind phases."""
-    sink = _benchmark_sink(tmp_path)
+    sink = _session(tmp_path)
     sink.on_step(0, _step_bundle(episode_id=0))
     provider = build_rewind_providers(sink)[0]
     state = provider.rewind_state()
@@ -171,8 +183,8 @@ def test_nested_fanout_forwards_on_rewind_once_per_child():
 
 
 def test_nested_fanout_marks_a_real_benchmark_buffer_once(tmp_path):
-    """A benchmark sink below a nested fan-out receives the rewind mark."""
-    sink = _benchmark_sink(tmp_path)
+    """An evaluation session below a nested fan-out receives the rewind mark."""
+    sink = _session(tmp_path)
     sink.on_step(0, _step_bundle(episode_id=0))
 
     FanOutSink(FanOutSink(sink)).on_rewind({"tick": 1, "restored_tick": 0, "snap_id": 2})

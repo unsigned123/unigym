@@ -18,7 +18,7 @@ Public surface:
   and per-ref resolution with duplicate/ambiguous/unknown failures.
 
 Record channel: the env backends merge ``manager.read()`` into ``extra`` so
-the keys flow through CollectSink/BenchmarkSink into npz / episode buffers
+the keys flow through CollectSink/EvaluationSession into npz / episode buffers
 (L2 loop).  Obs path: adapters may request ``contact/<name>`` keys
 (decoupled from recording).  Contract docs: ``docs/contracts/contacts_contract.md``.
 
