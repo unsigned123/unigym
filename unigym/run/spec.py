@@ -37,6 +37,7 @@ from unigym.backends.registry import (
 )
 from unigym.core.paths import expand_placeholders
 from unigym.env.obs import ObservationConfig, ObsConfigError
+from unigym.run.sink import SinkSpec
 from unigym.runtime.actions import (
     OrderedActionSpec,
     PolicyBinding,
@@ -165,6 +166,9 @@ class RunSpec:
     #: path, keyed by articulation name.  Non-serialized: these bypass the
     #: registry factory lookup only.
     robot_profiles: Mapping[str, RobotProfile] | None = None
+    #: an optional custom sink declaration from ``sink:`` or ``Run(sink=...)``.
+    #: Construction-side data only: no factory is resolved or invoked here.
+    custom_sink: SinkSpec | None = None
 
 
 def _route_content(
@@ -695,6 +699,50 @@ def _validate_episode_clock(
         )
 
 
+def _parse_sink_section(sink_value: object, config_path: str) -> SinkSpec | None:
+    """Normalize the optional top-level ``sink:`` declaration.
+
+    The shape is closed: exactly ``factory`` (required) and ``options``
+    (optional).  A custom sink is mode-independent data at this boundary; the
+    builder decides how it composes with the mode-selected built-in sinks.
+    """
+    from unigym.errors import ConfigError
+
+    if sink_value is None:
+        return None
+    if not is_json_object(sink_value):
+        raise ConfigError(f"{config_path}: sink must be a mapping with factory/options")
+    for key in sink_value:
+        if not isinstance(key, str):
+            raise ConfigError(f"{config_path}: sink keys must be strings, got {key!r}")
+    unknown = sorted(key for key in sink_value if key not in ("factory", "options"))
+    if unknown:
+        raise ConfigError(
+            f"{config_path}: sink.{unknown[0]} is not supported (allowed: factory, options)"
+        )
+    if "factory" not in sink_value:
+        raise ConfigError(
+            f"{config_path}: sink.factory must be a non-empty 'module:callable' string"
+        )
+    factory = sink_value["factory"]
+    if not isinstance(factory, str):
+        raise ConfigError(
+            f"{config_path}: sink.factory={factory!r} must be a non-empty "
+            "'module:callable' string"
+        )
+    if not factory:
+        raise ConfigError(
+            f"{config_path}: sink.factory must be a non-empty 'module:callable' string"
+        )
+    options = sink_value.get("options", {})
+    if not is_json_object(options):
+        raise ConfigError(f"{config_path}: sink.options must be a string-keyed mapping")
+    try:
+        return SinkSpec(factory=factory, options=options)
+    except ConfigError as exc:
+        raise ConfigError(f"{config_path}: {exc}") from exc
+
+
 def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
@@ -818,6 +866,12 @@ def build_spec(
             "(provides: benchmarks: [{id: <id>, resource: <pack dir>}]) "
             "-- build the runtime and pass it to build_spec instead"
         )
+    if "sink" in benchmark_cfg:
+        raise ConfigError(
+            f"{args.config}: benchmark.sink is not supported; use the top-level "
+            "sink: section (a custom sink is mode-independent)"
+        )
+    custom_sink = _parse_sink_section(cfg.get("sink"), args.config)
     if "filters" in cfg:
         raise ConfigError(
             f"{args.config}: top-level `filters:` is no longer supported; "
@@ -945,4 +999,5 @@ def build_spec(
         device=device,
         pack_runtime=runtime,
         robot_profiles=robot_profiles,
+        custom_sink=custom_sink,
     )
