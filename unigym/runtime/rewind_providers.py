@@ -14,8 +14,9 @@ the restore, after the adapter, fail-fast.
 
 Providers (v1 coverage, design §1.3 table):
 
-* ``BenchmarkSinkProvider`` (name ``"benchmark"``) -- the open episode
-  buffers (``ep_bufs``) + the per-env rewind marks riding them.  Counter
+* ``BenchmarkSinkProvider`` (name ``"benchmark"``) -- the sink's
+  :class:`~unigym.runner.evaluation.buffer.EpisodeBuffer` open episode
+  buffers + the per-env rewind marks riding them.  Counter
   policy (contract §4.1): scored-RESULT bookkeeping
   (``results`` / ``episode_docs`` / ``episodes`` / ``steps_total`` / the
   bridge metrics feed) is PROCESS TRUTH and is NOT restored -- it keeps
@@ -68,7 +69,7 @@ from __future__ import annotations
 import copy
 import os
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 
@@ -88,6 +89,27 @@ __all__ = [
 
 EpisodeBuffers: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
 MarksState: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
+
+
+@runtime_checkable
+class _EpisodeBufferFace(Protocol):
+    """The runner ``EpisodeBuffer`` face the benchmark provider delegates to.
+
+    ``runtime/rewind_providers.py`` stays duck-typed: the buffer is reached
+    through this protocol (and the sink's ``episode_buffer`` attribute), so
+    the runtime layer does not import the runner package at module scope.
+    """
+
+    bufs: list[list[dict[str, SnapshotValue]]]
+    rewinds: list[list[dict[str, SnapshotValue]]]
+
+    def snapshot(self) -> dict[str, SnapshotValue]: ...
+
+    def restore(self, state: Mapping[str, SnapshotValue]) -> None: ...
+
+    def episode_stamp(self) -> int | None: ...
+
+    def dump(self, out_dir: str, base: str) -> list[str]: ...
 
 
 class _ShardWriterFace(Protocol):
@@ -127,14 +149,14 @@ class InitializerStateProvider:
 class _EpisodeBufferProvider:
     """Shared sink-state machinery (benchmark buffers; collect fuse/cursor).
 
-    Subclasses name the facility and point ``_bufs``/``_marks`` at the
-    sink's attributes.  The snapshot is a DEEP copy (fresh numpy arrays);
-    the apply writes back in place (list identity preserved -- the sink
-    holds the reference).  An optional ``episode_stamp`` (the episode id
-    of the buffer's last frame) rides the state: a rewind whose
-    checkpoint belongs to a DIFFERENT episode than the live one is
-    refused fail-fast (the v1 boundary -- cross-episode rewind is out of
-    scope, design §0).
+    Subclasses name the facility and expose ``_buffer`` (a runner
+    ``EpisodeBuffer``) or ``_bufs``/``_marks`` directly.  The snapshot is a
+    DEEP copy (fresh numpy arrays); the apply writes back in place (list
+    identity preserved -- the sink holds the reference).  An optional
+    ``episode_stamp`` (the episode id of the buffer's last frame) rides the
+    state: a rewind whose checkpoint belongs to a DIFFERENT episode than the
+    live one is refused fail-fast (the v1 boundary -- cross-episode rewind is
+    out of scope, design §0).
     """
 
     name = ""
@@ -144,11 +166,17 @@ class _EpisodeBufferProvider:
         self.num_envs = int(getattr(sink, "num_envs", 1))
 
     # -- the sink attributes (subclass pins) -------------------------- #
+    def _buffer(self) -> _EpisodeBufferFace | None:
+        """The runner episode buffer when the facility owns one."""
+        return None
+
     def _bufs(self) -> EpisodeBuffers:
-        raise NotImplementedError
+        buffer = self._buffer()
+        return None if buffer is None else buffer.bufs
 
     def _marks(self) -> MarksState:
-        return None
+        buffer = self._buffer()
+        return None if buffer is None else buffer.rewinds
 
     def _fuse(self) -> dict[str, SnapshotValue]:
         """The facility's episode-fuse counters.
@@ -161,19 +189,24 @@ class _EpisodeBufferProvider:
 
     # -- provider protocol --------------------------------------------- #
     def rewind_state(self) -> dict[str, SnapshotValue]:
-        """Deep-copied buffers + marks + episode stamp + fuse counters."""
-        bufs = self._bufs()
-        marks_state = self._marks()
-        state: dict[str, SnapshotValue] = {
-            "bufs": [[_copy_slice(s) for s in buf] for buf in (bufs or [])],
-            "marks": (
-                [[dict(m) for m in marks] for marks in marks_state]
-                if marks_state is not None
-                else None
-            ),
-            "episode_stamp": self._live_stamp(bufs),
-            "fuse": self._fuse(),
-        }
+        """Deep-copied buffers + marks + ticks + episode stamp + fuse counters."""
+        buffer = self._buffer()
+        if buffer is not None:
+            state = buffer.snapshot()
+        else:
+            bufs = self._bufs()
+            marks_state = self._marks()
+            state = {
+                "bufs": [[_copy_slice(s) for s in buf] for buf in (bufs or [])],
+                "marks": (
+                    [[dict(m) for m in marks] for marks in marks_state]
+                    if marks_state is not None
+                    else None
+                ),
+                "ticks": None,
+                "episode_stamp": self._live_stamp(bufs),
+            }
+        state["fuse"] = self._fuse()
         return state
 
     def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
@@ -199,11 +232,15 @@ class _EpisodeBufferProvider:
         # pre-flight validate_rewind_state) -- second line behind the
         # controller's pre-flight
         self._guard_state(bufs, state)
-        if bufs is not None:
-            bufs[:] = [[_copy_slice(s) for s in buf] for buf in state["bufs"]]
-        marks = self._marks()
-        if marks is not None and state.get("marks") is not None:
-            marks[:] = [[dict(m) for m in m_list] for m_list in state["marks"]]
+        buffer = self._buffer()
+        if buffer is not None:
+            buffer.restore(state)
+        else:
+            if bufs is not None:
+                bufs[:] = [[_copy_slice(s) for s in buf] for buf in state["bufs"]]
+            marks = self._marks()
+            if marks is not None and state.get("marks") is not None:
+                marks[:] = [[dict(m) for m in m_list] for m_list in state["marks"]]
         fuse: Mapping[str, SnapshotValue] = state.get("fuse") or {}
         live_fuse = self._fuse()
         for k, v in fuse.items():
@@ -249,6 +286,9 @@ class _EpisodeBufferProvider:
         frames -- or when the facility has no buffers at all: a collect
         run keeps none.
         """
+        buffer = self._buffer()
+        if buffer is not None:
+            return buffer.episode_stamp()
         if bufs is None:
             return None
         for buf in bufs:
@@ -269,6 +309,10 @@ class _EpisodeBufferProvider:
         restore, so the unguarded enumerate(None) blocked undo for every
         plain collect run).
         """
+        buffer = self._buffer()
+        if buffer is not None:
+            return buffer.dump(out_dir, base)
+
         from unigym.runner.episodes import assemble_episode
 
         bufs = self._bufs()
@@ -302,11 +346,9 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
         # rewound retry from tripping a premature run_end on a count the
         # abandoned branch already spent.
 
-    def _bufs(self) -> EpisodeBuffers:
-        return getattr(self.sink, "ep_bufs", None)
-
-    def _marks(self) -> MarksState:
-        return getattr(self.sink, "_ep_rewinds", None)
+    def _buffer(self) -> _EpisodeBufferFace | None:
+        buffer = getattr(self.sink, "episode_buffer", None)
+        return buffer if isinstance(buffer, _EpisodeBufferFace) else None
 
     def _fuse(self) -> dict[str, SnapshotValue]:
         return {
@@ -454,11 +496,9 @@ def build_rewind_providers(
                 walk(child)
             return
         kind = type(s).__name__
-        if kind == "BenchmarkSink" or hasattr(s, "_ep_rewinds"):
+        if getattr(s, "episode_buffer", None) is not None:
             out.append(BenchmarkSinkProvider(s))
-        elif kind == "CollectSink" or (
-            hasattr(s, "ep_bufs") and getattr(s, "ep_bufs", None) is not None
-        ):
+        elif kind == "CollectSink":
             out.append(CollectSinkProvider(s))
 
     walk(sink)
