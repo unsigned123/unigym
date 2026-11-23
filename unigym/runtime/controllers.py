@@ -172,6 +172,10 @@ class ArticulationRuntime:
         base_body: the backend-native base/root body name (model lookups).
         base_body_id: the canonical base body id (public/meta fact).
         body_sets: named canonical body groups.
+        joint_pos_limits: per-env ``(lower, upper)`` soft joint limits, each
+            ``(N, len(joint_names))`` and aligned with ``joint_names`` order;
+            ``None`` when the asset declares no limits.  This field is the
+            single owner of joint-limit facts for the evaluation context.
         contacts: the effective contact sensor inventory (or ``None``).
         addresses: backend-specific address bookkeeping (free joint, base
             body id, ...).
@@ -192,6 +196,7 @@ class ArticulationRuntime:
     base_body: str = ""
     base_body_id: CanonicalBodyId | None = None
     body_sets: Mapping[str, tuple[CanonicalBodyId, ...]] = field(default_factory=_empty_body_sets)
+    joint_pos_limits: tuple[torch.Tensor, torch.Tensor] | None = None
     contacts: ContactSensorInventory | None = None
     addresses: dict = field(default_factory=dict)
     profile: RobotProfile | None = None

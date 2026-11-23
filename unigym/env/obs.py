@@ -769,6 +769,44 @@ class ObsSnapshot:
     def values(self) -> Mapping[str, torch.Tensor]:
         return self._values
 
+    def select(self, env_ids: Sequence[int] | torch.Tensor) -> ObsSnapshot:
+        """Return a same-schema snapshot restricted to *env_ids*.
+
+        Values keep their leading per-env axis (``(len(env_ids), ...)``), so a
+        per-env selection is ``(1, ...)`` and an empty selection is
+        ``(0, ...)``.  The schema is preserved.  Per-contact detail is dropped:
+        detail records have no declared env axis, so slicing them per env would
+        fabricate an ordering guarantee the backend never promised.  Values are
+        borrowed from this snapshot and must not be retained past the boundary.
+        """
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.dtype not in (torch.int32, torch.int64):
+                raise ObsContractError(
+                    f"env_ids must be an integer tensor, got dtype {env_ids.dtype}"
+                )
+            ids = env_ids.detach().to("cpu").reshape(-1).to(torch.int64)
+        else:
+            ids = torch.as_tensor(list(env_ids), dtype=torch.int64)
+        if ids.numel() and (bool((ids < 0).any()) or bool((ids >= self.num_envs).any())):
+            raise ObsContractError(
+                f"env_ids {ids.tolist()} are outside [0, num_envs={self.num_envs})"
+            )
+        values = {
+            key: (
+                value.index_select(0, ids.to(device=value.device))
+                if value.ndim >= 1 and value.shape[0] == self.num_envs
+                else value
+            )
+            for key, value in self._values.items()
+        }
+        return ObsSnapshot(
+            values,
+            schema=self.schema,
+            num_envs=ids.numel(),
+            device=self.device,
+            t=self.t,
+        )
+
     def get(self, key: str) -> torch.Tensor | None:
         return self._values.get(key)
 
