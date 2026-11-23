@@ -20,12 +20,35 @@ episode_results {env_id: (EpisodeResultView, ...)}
               present on on_episode_end when an EvaluationSession scored the
               episode; per-env, task declaration order, read-only
 env           live EnvBackend, sink wiring only (watchers/bridge)
+view          the tick's one read-only boundary EnvView; valid at on_step /
+              on_episode_end, None at on_step_end
 ```
 
 `bundle["env"]` is sink wiring for the watcher/bridge transport, not a user
 evaluation surface.  Termination and benchmark evaluation receive the read-only
 `unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
 walk the backend.
+
+## Boundary view lifetime
+
+Each tick builds exactly one vector-scoped `unigym.evaluation.EnvView` from the
+post-step record and observation snapshot, before the termination check.  The
+runner owns that view and uses it for both termination and the sink callbacks:
+
+- `bundle["view"]` is the same object at `on_step` and `on_episode_end`, and
+  both callbacks may read it;
+- `bundle["view"] is None` at `on_step_end`: the runner closes the view before
+  the reset chain starts and before `on_step_end` runs;
+- `on_step_end` still carries the current pre-reset `bundle["record"]` and
+  `bundle["obs"]` facts; only the view is invalidated;
+- a sink must not close the view, retain it past its callback, store it in
+  rewind state or put it in a checkpoint provider payload.
+
+The runner closes the view on every path: normal tick, termination-check
+exception, sink exception, `on_episode_end` exception, reset-mask exception,
+reset-chain failure and `RewindBoundary`.  A termination-check exception closes
+the view and invokes no sink callback.  A rewind closes the view first and the
+abandoned branch runs no `on_episode_end`, reset chain or `on_step_end`.
 
 ## Sink protocol
 
@@ -126,18 +149,21 @@ not infer statefulness.
 Termination evaluation is a live post-step/pre-reset boundary:
 
 ```text
-env.step -> observation snapshot -> one vector EvalContext
+env.step -> observation snapshot -> one vector EnvView (runner-owned)
          -> TerminationGroup.check_detail(ctx) once
          -> terminated / alive / term_metrics / terminations
-         -> ctx.close()
-         -> sink.on_step
+         -> sink.on_step (same view in bundle["view"])
+         -> due / reset mask -> sink.on_episode_end (same view)
+         -> view.close(); bundle["view"] = None
+         -> reset chain -> sink.on_step_end (view is None)
 ```
 
 The bundle carries no `term_state` entry: `terminations` and `term_metrics`
-are derived from the same one detail pass, and the context is closed before any
-sink observes the bundle.  Termination is live-only and never reads the
-env-level joint-limit compatibility views; joint limits are owned by
-`ArticulationRuntime.joint_pos_limits` in record/policy joint order.
+are derived from the same one detail pass, and that same boundary view is the
+one the sink observes during `on_step`/`on_episode_end`.  Termination is
+live-only and never reads the env-level joint-limit compatibility views; joint
+limits are owned by `ArticulationRuntime.joint_pos_limits` in record/policy
+joint order.
 
 Benchmark evaluation is the second live boundary:
 

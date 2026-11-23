@@ -17,10 +17,12 @@ unified termination check, then hands a *bundle* to the consumer-side sink:
 
 The runner owns control flow only: recording, video, logging and
 statistics all live in the sink (docs/contracts/runner_contract.md).  The
-post-step/pre-reset termination boundary builds one read-only
-``EvalContext``, evaluates the group's detail exactly once and derives
-terminated/alive/facts from that same detail — pure tensor ops, no RNG
-consumption, so the rollout remains bit-exact.
+post-step/pre-reset boundary builds one read-only ``EnvView``, evaluates the
+group's detail exactly once and derives terminated/alive/facts from that same
+detail — pure tensor ops, no RNG consumption, so the rollout remains
+bit-exact.  That same view is the tick's single Sink boundary view: it rides
+``bundle["view"]`` through ``on_step``/``on_episode_end`` and is closed before
+the reset chain and ``on_step_end``.
 """
 
 from __future__ import annotations
@@ -644,8 +646,10 @@ class SyncRunner:
         if eff_cmd is None and generates_command:
             eff_cmd = adapter.last_command
         # unified live termination boundary (post-step/pre-reset; pure tensor
-        # ops, no RNG consumption).  One context is built per tick and closed
-        # before the sink observes the bundle.
+        # ops, no RNG consumption).  The runner builds ONE read-only boundary
+        # view per tick, uses it for the termination check and hands that same
+        # view to the sink.  It stays valid through on_step/on_episode_end; the
+        # finally below closes it before the reset chain and on_step_end.
         record = step.record
 
         def _query_factory():
@@ -656,20 +660,20 @@ class SyncRunner:
                     f"backend {type(env).__name__!r} has no runtime query"
                 ) from exc
 
-        eval_ctx = EvalContext(
-            env=EnvView(
-                record=record,
-                obs=obs_snapshot,
-                env_id=None,
-                num_envs=self._num_envs,
-                device=device,
-                backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-                query_factory=_query_factory,
-                articulations=getattr(env, "articulations", None) or {},
-            ),
-            t=t,
+        view = EnvView(
+            record=record,
+            obs=obs_snapshot,
+            env_id=None,
+            num_envs=self._num_envs,
+            device=device,
+            backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
+            query_factory=_query_factory,
+            articulations=getattr(env, "articulations", None) or {},
         )
+        due = step.reset_env_ids
+        bundle: dict = {}
         try:
+            eval_ctx = EvalContext(env=view, t=t)
             detail = self.term_group.check_detail(eval_ctx)
             terminated = self.term_group.combine(detail)
             if terminated is None:
@@ -688,103 +692,113 @@ class SyncRunner:
             # (term-group reasons + the core engine horizon).  Core-neutral
             # outcome/source vocabulary; no Task/Gym language here.
             terminations = self._termination_facts(detail, step.reset_env_ids)
-        finally:
-            eval_ctx.close()
-        step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
-        time_s = (
-            None
-            if self.control_dt is None
-            else step_index.to(torch.float32) * float(self.control_dt)
-        )
-        bundle = {
-            "t": t,
-            "raw": raw,
-            "targets": targets,
-            "obs": obs_snapshot,
-            "obs_frame": obs_frame,
-            "obs_collect": obs_collect,
-            "record": record,
-            "cmd": eff_cmd,
-            "action_group_values": group_values,
-            "terminated": terminated,
-            "alive": alive,
-            "term_metrics": term_metrics,
-            "terminations": terminations,
-            "step_index": step_index,
-            "time_s": time_s,
-            "reset_state": {
-                int(ei): {
-                    "reset_index": 0,
-                    "reset_valid": self._reset_valid[ei],
-                    "reset_reason": self._reset_reason[ei],
-                }
-                for ei in range(self._num_envs)
-            },
-            "run_identity": self.run_identity,
-            "env": env,
-        }
-        try:
-            self.sink.on_step(t, bundle)
-        except RewindBoundary as rb:
-            # rewind boundary (Round B B1): the rest of this iteration
-            # (episode-end + reset chain) belongs to the abandoned
-            # timeline branch -- drop it, adopt the snapshot's
-            # iteration state and continue from the restored tick.
-            self._tick = int(rb.next_tick)
-            st, self._rewind_state = self._rewind_state, None
-            if st is not None:
-                obs_frame = st.get("obs_frame")
-                cmd = st.get("cmd")
-            self._obs_frame = obs_frame
-            self._cmd = cmd
-            self._notify_rewind(dict(getattr(rb, "info", {}) or {}))
-            return StepResult(
-                t=t,
-                obs=obs_snapshot,
-                record=record,
-                reset_env_ids=torch.zeros(0, dtype=torch.int64, device=device),
-                terminated=terminated,
+            step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
+            time_s = (
+                None
+                if self.control_dt is None
+                else step_index.to(torch.float32) * float(self.control_dt)
             )
-        self._tick = t + 1
-        # reset policy: episode clock due | (terminated | custom mask)
-        due = step.reset_env_ids
-        added = None
-        if self.reset_mask_fn is not None:
-            added = torch.as_tensor(self.reset_mask_fn(bundle), dtype=torch.int64, device=device)
-        elif self.reset_on_termination:
-            added = torch.nonzero(terminated).squeeze(-1).to(torch.int64)
-        if added is not None and added.numel() > 0:
-            due = torch.unique(torch.cat([due.to(torch.int64), added]))
-        if due.numel() > 0:
-            # the episode's START facts (reset sample/legality) ride the
-            # episode-end bundle; they were captured at this episode's reset.
-            bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
-            # record-before-reset: episode-end data side happens BEFORE
-            # the reset chain (sink flushes episodes/videos/counts here)
-            self.sink.on_episode_end(due, bundle)
-            # sampler feedback rides the same boundary: AFTER the sinks (they
-            # populate bundle["episode_results"]) and BEFORE sampler.reset, so
-            # prior-episode results can shape the next command.  Runs even when
-            # auto_reset=False (only the reset chain below is skipped).  The
-            # mapping is wrapped read-only: the sampler observes, never edits.
-            if sampler is not None:
-                on_episode_end = getattr(sampler, "on_episode_end", None)
-                if callable(on_episode_end):
-                    results = bundle.get("episode_results") or {}
-                    on_episode_end(due, MappingProxyType(dict(results)))
-            if self.auto_reset:
-                env.reset_envs(due)
-                adapter.on_reset(due)
+            bundle = {
+                "t": t,
+                "raw": raw,
+                "targets": targets,
+                "obs": obs_snapshot,
+                "obs_frame": obs_frame,
+                "obs_collect": obs_collect,
+                "record": record,
+                "cmd": eff_cmd,
+                "action_group_values": group_values,
+                "terminated": terminated,
+                "alive": alive,
+                "term_metrics": term_metrics,
+                "terminations": terminations,
+                "step_index": step_index,
+                "time_s": time_s,
+                "reset_state": {
+                    int(ei): {
+                        "reset_index": 0,
+                        "reset_valid": self._reset_valid[ei],
+                        "reset_reason": self._reset_reason[ei],
+                    }
+                    for ei in range(self._num_envs)
+                },
+                "run_identity": self.run_identity,
+                "env": env,
+                "view": view,
+            }
+            try:
+                self.sink.on_step(t, bundle)
+            except RewindBoundary as rb:
+                # rewind boundary (Round B B1): close the boundary view FIRST,
+                # then drop the rest of this iteration (episode-end + reset
+                # chain + step-end belong to the abandoned timeline branch),
+                # adopt the snapshot's iteration state and continue from the
+                # restored tick.
+                view.close()
+                bundle["view"] = None
+                self._tick = int(rb.next_tick)
+                st, self._rewind_state = self._rewind_state, None
+                if st is not None:
+                    obs_frame = st.get("obs_frame")
+                    cmd = st.get("cmd")
+                self._obs_frame = obs_frame
+                self._cmd = cmd
+                self._notify_rewind(dict(getattr(rb, "info", {}) or {}))
+                return StepResult(
+                    t=t,
+                    obs=obs_snapshot,
+                    record=record,
+                    reset_env_ids=torch.zeros(0, dtype=torch.int64, device=device),
+                    terminated=terminated,
+                )
+            self._tick = t + 1
+            # reset policy: episode clock due | (terminated | custom mask)
+            added = None
+            if self.reset_mask_fn is not None:
+                added = torch.as_tensor(
+                    self.reset_mask_fn(bundle), dtype=torch.int64, device=device
+                )
+            elif self.reset_on_termination:
+                added = torch.nonzero(terminated).squeeze(-1).to(torch.int64)
+            if added is not None and added.numel() > 0:
+                due = torch.unique(torch.cat([due.to(torch.int64), added]))
+            if due.numel() > 0:
+                # the episode's START facts (reset sample/legality) ride the
+                # episode-end bundle; they were captured at this episode's reset.
+                bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
+                # record-before-reset: episode-end data side happens BEFORE
+                # the reset chain (sink flushes episodes/videos/counts here)
+                self.sink.on_episode_end(due, bundle)
+                # sampler feedback rides the same boundary: AFTER the sinks (they
+                # populate bundle["episode_results"]) and BEFORE sampler.reset, so
+                # prior-episode results can shape the next command.  Runs even when
+                # auto_reset=False (only the reset chain below is skipped).  The
+                # mapping is wrapped read-only: the sampler observes, never edits.
                 if sampler is not None:
-                    cmd = sampler.reset(due)
-                if getattr(observations, "command", False):
-                    env.obs.set_command(cmd)
-                if getattr(observations, "prev_action", False):
-                    env.obs.set_prev_action(None)
-                for raw in due.tolist():
-                    self._episode_step[int(raw)] = 0
-                # capture the NEXT episode's pre-policy-step reset sample
-                self._record_reset_facts(due.tolist())
+                    on_episode_end = getattr(sampler, "on_episode_end", None)
+                    if callable(on_episode_end):
+                        results = bundle.get("episode_results") or {}
+                        on_episode_end(due, MappingProxyType(dict(results)))
+        finally:
+            # the tick's ONE boundary view: valid through on_step and
+            # on_episode_end, closed before the reset chain and on_step_end.
+            view.close()
+            if "view" in bundle:
+                bundle["view"] = None
+
+        if due.numel() > 0 and self.auto_reset:
+            env.reset_envs(due)
+            adapter.on_reset(due)
+            if sampler is not None:
+                cmd = sampler.reset(due)
+            if getattr(observations, "command", False):
+                env.obs.set_command(cmd)
+            if getattr(observations, "prev_action", False):
+                env.obs.set_prev_action(None)
+            for raw in due.tolist():
+                self._episode_step[int(raw)] = 0
+            # capture the NEXT episode's pre-policy-step reset sample
+            self._record_reset_facts(due.tolist())
         self.sink.on_step_end(t, bundle)
         self._obs_frame = obs_frame
         self._cmd = cmd

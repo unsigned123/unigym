@@ -58,8 +58,9 @@ scoring argument; they are not duplicated on the context.
 A `trigger: both` benchmark task receives one VECTOR-scoped context per policy
 tick (`env_id is None`, `t` = the policy tick), created and closed by
 `EvaluationSession` inside its own callback.  It is separate from the runner's
-termination context (closed before `on_step`) and from the per-env episode-end
-context created by `EpisodeEvaluator`.  A task cannot reach a raw env through it.
+boundary view (`bundle["view"]`, closed after `on_episode_end`) and from the
+per-env episode-end context created by `EpisodeEvaluator`.  A task cannot reach
+a raw env through it.
 
 ## 3. Scope
 
@@ -168,12 +169,13 @@ converted into an empty result or a default.
 The boundaries are:
 
 - termination: vector view, after `env.step` and the observation snapshot,
-  before the step sink; pre-reset state.  `Termination.check(ctx)` returns a
-  bool `(num_envs,)` mask on the context device; `TerminationGroup`
-  evaluates each term once, validates every mask and closes the context
-  before the sink observes the bundle.  `build_terminations` inspects each
-  instantiated term and rejects any `check` that is not exactly
-  `check(self, ctx)`, so a legacy `check(self, state)` term fails at build;
+  before reset; pre-reset state.  `Termination.check(ctx)` returns a bool
+  `(num_envs,)` mask on the context device; `TerminationGroup` evaluates each
+  term once and validates every mask.  The same view is exposed as
+  `bundle["view"]` to the step sink and closed after `on_episode_end`.
+  `build_terminations` inspects each instantiated term and rejects any `check`
+  that is not exactly `check(self, ctx)`, so a legacy `check(self, state)` term
+  fails at build;
 - benchmark: per-env view inside `EvaluationSession.on_episode_end`, before reset,
   built by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`).
   `Task.score(ep, ctx)` and `Task.score_detail(ep, ctx, *, retain_frames=False)`
