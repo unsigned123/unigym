@@ -5,8 +5,7 @@ Owns the recording / logging / video side of a collection run:
 * per-step rec dict assembly (``_KEY_MAP`` renaming, obs / action_raw /
   action_target / in_recovery / command / language),
 * language generation with ``interval_steps`` throttling,
-* shard writing (direct ``writer.append``) or per-env episode buffering
-  + filter-chain flush when filters are active,
+* shard writing (direct ``writer.append`` per policy step),
 * recorder frame capture and per-episode video writing,
 * DataCollectLogger feeding (log_step / log_episode / write_summary) and
   the n_episodes / step_metrics statistics (duty, term).
@@ -15,16 +14,15 @@ Callback contract (docs/contracts/runner_contract.md):
 
 * ``on_step(t, bundle)`` — pre-reset data side; the computation order inside
   matches the original collect.py loop exactly (rec build -> language ->
-  filter buffer / writer.append -> camera capture).
+  writer.append -> camera capture).
 * ``on_episode_end(env_ids, bundle)`` — the due branch's data-side part,
-  called by the engine BEFORE ``env.reset_envs``: flush episodes (filter
-  mode) or log durations, write the episode video, count the episode.
-  The reset chain itself (env.reset_envs / adapter.on_reset / sampler.reset)
-  is driven by the engine.
+  called by the engine BEFORE ``env.reset_envs``: log durations, write the
+  episode video, count the episode.  The reset chain itself
+  (env.reset_envs / adapter.on_reset / sampler.reset) is driven by the engine.
 * ``on_step_end(t, bundle)`` — per-step metrics dict + ``logger.log_step``,
   kept AFTER the reset chain exactly like the original code.
-* ``on_run_end()`` — remaining flushes, ``writer.finalize``, summary.json;
-  returns the summary dict.
+* ``on_run_end()`` — ``writer.finalize``, summary.json; returns the summary
+  dict.
 """
 
 from __future__ import annotations
@@ -45,9 +43,7 @@ from unigym.runtime.actions import (
 )
 from unigym.runtime.controllers import articulation_facts
 
-from ..episodes import _flush_episode, slice_step_for_env
-
-# extra key -> standardized episode_data key (for filters + writer).  The
+# extra key -> standardized shard-column key (for the writer).  The
 # namespaced form (``articulation/<name>/base_pos_w``) maps by SUFFIX so the
 # recorded column keeps the historical leaf name under its namespace.
 _KEY_MAP = {
@@ -185,7 +181,6 @@ class CollectSink:
         *,
         writer,
         logger,
-        filter_chain,
         language_gen,
         lang_interval,
         recorder,
@@ -205,8 +200,6 @@ class CollectSink:
     ):
         self.writer = writer
         self.logger = logger
-        self.filter_chain = filter_chain
-        self.filter_active = len(filter_chain) > 0
         self.language_gen = language_gen
         self.lang_interval = int(lang_interval)
         self.recorder = recorder
@@ -235,10 +228,6 @@ class CollectSink:
         )
         if self._action_groups is not None:
             self.writer.meta["action_groups"] = self._action_groups
-        # per-env episode buffer (only when filters active)
-        self.ep_bufs: list[list[dict]] = (
-            [[] for _ in range(self.num_envs)] if self.filter_active else []
-        )
         # recorder frame buffer (per-episode, for env record_env only)
         self.rec_frames: list[np.ndarray] = []
         self.rec_ep_id = 0
@@ -365,12 +354,7 @@ class CollectSink:
         audit = getattr(self.adapter, "on_recorded_step", None)
         if callable(audit):
             audit(t, rec)
-        if self.filter_active:
-            # buffer per-env step slices for episode-level filtering
-            for ei in range(self.num_envs):
-                self.ep_bufs[ei].append(slice_step_for_env(rec, ei))
-        else:
-            self.writer.append(rec)
+        self.writer.append(rec)
         # camera capture (recorder reads its referenced camera's env slice)
         if self.recorder.enabled and t % self.recorder.record_interval == 0:
             frame = self.recorder.capture_frame()
@@ -383,14 +367,9 @@ class CollectSink:
     def on_episode_end(self, env_ids, bundle: dict) -> None:
         record = bundle["record"]
         due_list = env_ids.tolist()
-        if self.filter_active:
-            for ei in due_list:
-                _flush_episode(self.ep_bufs[ei], self.filter_chain, self.writer, self.logger)
-                self.ep_bufs[ei] = []
-        else:
-            for ei in due_list:
-                dur = float(record["time_in_episode"][ei])
-                self.logger.log_episode({"duration_s": dur}, kept=True)
+        for ei in due_list:
+            dur = float(record["time_in_episode"][ei])
+            self.logger.log_episode({"duration_s": dur})
         # recorder: write video if record_env's episode ended
         if self.recorder.enabled and self.recorder.record_env in due_list:
             if self.rec_frames:
@@ -431,16 +410,9 @@ class CollectSink:
         self.logger.log_step(t, step_metrics)
 
     # ------------------------------------------------------------------ #
-    # run end: remaining flushes + finalize + summary
+    # run end: finalize + summary
     # ------------------------------------------------------------------ #
     def on_run_end(self) -> dict:
-        # flush remaining incomplete episodes (filter mode)
-        if self.filter_active:
-            for ei in range(self.num_envs):
-                if self.ep_bufs[ei]:
-                    _flush_episode(self.ep_bufs[ei], self.filter_chain, self.writer, self.logger)
-                    self.ep_bufs[ei] = []
-
         # flush remaining recorder frames (incomplete last episode)
         if self.recorder.enabled and self.rec_frames:
             path = os.path.join(
@@ -451,11 +423,7 @@ class CollectSink:
 
         self.writer.finalize()
         wall = time.time() - self._t0
-        total_records = (
-            self.writer.total_steps
-            if self.filter_active
-            else self.writer.total_steps * self.num_envs
-        )
+        total_records = self.writer.total_steps * self.num_envs
         summary_extra = {
             "wall_time_s": wall,
             "num_episodes": self.n_episodes,

@@ -337,7 +337,6 @@ markers = [
     "domain_runner: runner domain tests",
     "domain_contacts: contact-group domain tests",
     "domain_terminations: termination domain tests",
-    "domain_filters: filter domain tests",
     "domain_robots: robot domain tests",
     "domain_actuators: actuation domain tests",
     "domain_adapters: adapter domain tests",
@@ -431,9 +430,6 @@ convention = "google"
 "unigym/env/backends/base.py" = ["D102"]
 "unigym/env/obs_catalog.py" = ["D205", "D209", "D415"]
 "unigym/executors.py" = ["D101", "D103", "D403"]
-"unigym/filters/base.py" = ["D402"]
-"unigym/filters/base_contact.py" = ["D102"]
-"unigym/filters/velocity.py" = ["D102", "D205", "D415"]
 "unigym/io/__init__.py" = ["D104"]
 "unigym/io/writer.py" = ["D101", "D102", "D205", "D209", "D415"]
 "unigym/language/template.py" = ["D102"]

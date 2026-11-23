@@ -818,6 +818,14 @@ def build_spec(
             "(provides: benchmarks: [{id: <id>, resource: <pack dir>}]) "
             "-- build the runtime and pass it to build_spec instead"
         )
+    if "filters" in cfg:
+        raise ConfigError(
+            f"{args.config}: top-level `filters:` is no longer supported; "
+            "episode filtering was removed from the collect pipeline and "
+            "episodes are now written directly, one step at a time | hint: "
+            "delete the `filters:` section; if you need offline episode "
+            "selection, filter the recorded shards after the run"
+        )
     env_cfg = _require_config(cfg.get("env"), "env")
     col_cfg = _require_config(cfg.get("collect"), "collect")
     adapter_cfg = _require_config(cfg.get("adapter") or {}, "adapter")

@@ -6,9 +6,9 @@ Replaces the scattered ``print`` calls and hand-written ``summary.json`` in
 * accumulates per-step metrics via :class:`StatsCollector` (sliding window +
   full-run percentiles),
 * prints progress at a configurable interval using window means,
-* tracks per-episode durations and filter accept/reject counts,
+* tracks per-episode durations and counts,
 * writes a rich ``summary.json`` at the end (config snapshot + git hash +
-  full statistics + filter stats + throughput).
+  full statistics + throughput).
 
 Yaml usage (indirectly, via ``collect.py``)::
 
@@ -98,13 +98,6 @@ class DataCollectLogger:
         self._log_interval = max(1, int(log_interval))
         self._stats = StatsCollector(window_size=log_interval, dist_keys=dist_keys)
         self._episode_durations: list[float] = []
-        self._episode_snapshots: list[dict] = []
-        self._filter_stats: dict = {
-            "total_episodes": 0,
-            "kept_episodes": 0,
-            "discarded_episodes": 0,
-            "discards_by_filter": {},
-        }
         self._shard_count = 0
         self._t0 = time.time()
         self._git_hash = _git_hash(_GIT_DIR)
@@ -117,10 +110,6 @@ class DataCollectLogger:
             "overall_means": self._stats.overall_means,
             "distributions": self._stats.distributions,
         }
-
-    @property
-    def filter_stats(self) -> dict:
-        return dict(self._filter_stats)
 
     @property
     def elapsed(self) -> float:
@@ -181,29 +170,12 @@ class DataCollectLogger:
     # ------------------------------------------------------------------ #
     # per-episode logging
     # ------------------------------------------------------------------ #
-    def log_episode(self, episode_info: dict, kept: bool, filter_reason: str | None = None) -> None:
+    def log_episode(self, episode_info: dict) -> None:
         """Record episode-level statistics at episode end.
 
         ``episode_info`` should contain at least ``duration_s`` (float).
         """
-        dur = float(episode_info.get("duration_s", 0.0))
-        self._episode_durations.append(dur)
-        self._filter_stats["total_episodes"] += 1
-        if kept:
-            self._filter_stats["kept_episodes"] += 1
-        else:
-            self._filter_stats["discarded_episodes"] += 1
-            if filter_reason:
-                self._filter_stats["discards_by_filter"][filter_reason] = (
-                    self._filter_stats["discards_by_filter"].get(filter_reason, 0) + 1
-                )
-        self._episode_snapshots.append(
-            {
-                "duration_s": dur,
-                "kept": kept,
-                "filter_reason": filter_reason,
-            }
-        )
+        self._episode_durations.append(float(episode_info.get("duration_s", 0.0)))
 
     # ------------------------------------------------------------------ #
     # per-shard logging
@@ -286,7 +258,6 @@ class DataCollectLogger:
                     "p50": (float(np.percentile(durs, 50)) if durs.size else None),
                 },
             },
-            "filter_stats": dict(self._filter_stats),
         }
         if extra:
             summary.update(extra)

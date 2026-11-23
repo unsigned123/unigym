@@ -34,7 +34,6 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "runner": "domain_runner",
     "contacts": "domain_contacts",
     "terminations": "domain_terminations",
-    "filters": "domain_filters",
     "robots": "domain_robots",
     "actuators": "domain_actuators",
     "adapters": "domain_adapters",

@@ -18,7 +18,6 @@ def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, e
     sink = CollectSink(
         writer=writer,
         logger=logger,
-        filter_chain=[],
         language_gen=language_gen,
         lang_interval=1,
         recorder=SimpleNamespace(enabled=False),
@@ -61,7 +60,7 @@ def _bundle(targets, t, projection=None, *, step_index=None, time_s=None, reset_
     return bundle
 
 
-def test_non_filter_path_publishes_episode_local_timeline_and_reset_columns():
+def test_publishes_episode_local_timeline_and_reset_columns():
     """CollectSink writes tick 1/time dt (not the global t) + reset facts."""
     sink, records = _sink()
     bundle = _bundle(
@@ -81,7 +80,7 @@ def test_non_filter_path_publishes_episode_local_timeline_and_reset_columns():
     assert rec["reset_reason"] == ["blocked"]
 
 
-def test_non_filter_path_marks_unknown_reset_validity():
+def test_marks_unknown_reset_validity():
     sink, records = _sink()
     bundle = _bundle(
         (),

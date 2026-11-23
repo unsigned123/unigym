@@ -181,6 +181,19 @@ def test_spec_rejects_the_removed_camera_depth_key():
         Run(cfg).spec
 
 
+def test_spec_rejects_the_removed_filters_key_with_a_migration_hint():
+    """Episode filtering is gone; a `filters:` section fails at spec construction."""
+    cfg = _live_cfg()
+    cfg["filters"] = [{"name": "base_contact", "params": {}}]
+
+    with pytest.raises(ConfigError, match="filters") as excinfo:
+        Run(cfg).spec
+
+    message = str(excinfo.value)
+    assert "no longer supported" in message
+    assert "hint:" in message
+
+
 def test_spec_keeps_a_renamed_profile_backed_articulation():
     """A renamed articulation selecting a profile is valid run construction."""
     cfg = _live_cfg()

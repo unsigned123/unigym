@@ -41,7 +41,6 @@ from unigym.benchmarks.episode import (
     RunIdentity,
 )
 from unigym.env.backends import build_env_backend
-from unigym.filters import build_filter_chain
 from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder
 from unigym.robots import build_robot_profile
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
     from unigym.contacts.manager import ContactManager
     from unigym.director import Director
     from unigym.env.backends.base import EnvBackend
-    from unigym.filters.base import EpisodeFilter
     from unigym.io.writer import ShardWriter
     from unigym.language.base import LanguageGenerator
     from unigym.packs.runtime import PackRuntime
@@ -246,8 +244,6 @@ class _RunMeta(TypedDict, total=False):
     obs_collect_overridden: bool
     language_generator: str | None
     language_interval_steps: int
-    filters: JsonValue
-    filter_active: bool
     terminations: JsonValue
     init_pose: JsonValue
     camera_enabled: bool
@@ -1521,7 +1517,6 @@ def _build_sinks(
     adapter: Adapter,
     writer: ShardWriter,
     logger: DataCollectLogger,
-    filter_chain: list[EpisodeFilter],
     language_gen: LanguageGenerator | None,
     lang_interval: int,
     recorder: Recorder,
@@ -1581,7 +1576,6 @@ def _build_sinks(
         collect_sink = CollectSink(
             writer=writer,
             logger=logger,
-            filter_chain=filter_chain,
             language_gen=language_gen,
             lang_interval=lang_interval,
             recorder=recorder,
@@ -2012,16 +2006,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         total_steps,
     )
 
-    # pluggable filter chain (episode-level)
-    articulation_names = list(env.articulations or {})
-    filter_chain = build_filter_chain(
-        _config_list(cfg.get("filters")), articulations=articulation_names
-    )
-    filter_active = len(filter_chain) > 0
-    if filter_active:
-        names = [type(f).__name__ for f in filter_chain]
-        print(f"[collect] filter chain ({len(filter_chain)}): {names}", flush=True)
-
     # unified termination checks (detection-only; episodes still end by
     # duration).  In ``core`` mode the ``terminations:`` section is the
     # explicit source and no default fall group is synthesised when it is
@@ -2077,8 +2061,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
             type(built["language_gen"]).__name__ if built["language_gen"] is not None else None
         ),
         "language_interval_steps": built["lang_interval"],
-        "filters": cfg.get("filters"),
-        "filter_active": filter_active,
         # contact force-fact provenance (benchmark contract): static owner/frame/
         # unit/bodies metadata lives in meta, never in per-step records.
         **(
@@ -2138,7 +2120,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         adapter,
         writer,
         logger,
-        filter_chain,
         built["language_gen"],
         built["lang_interval"],
         sensing["recorder"],
