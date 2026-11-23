@@ -242,3 +242,185 @@ def test_deadline_is_not_stamped_after_overrun(tmp_path):
     report = sink.on_run_end()
     codes = {term["code"] for episode in report["episode_terminations"] for term in episode["all"]}
     assert "runtime.task_deadline" not in codes
+
+
+_EXPECTED_RUN = {
+    "schema_version": 2,
+    "backend": "mujoco",
+    "device": "cpu",
+    "num_envs": 1,
+    "seed": 7,
+    "policy_dt": 0.02,
+    "sim_dt": 0.005,
+    "reset_seed": 2,
+    "world_id": "flat",
+    "articulations": [{"name": "g1", "profile": "g1"}],
+    "observation_schema_version": 3,
+    "model_revision": 4,
+}
+
+_ENV_FALL = {
+    "outcome": "failure",
+    "code": "env.fall",
+    "source": "environment",
+    "step_index": 1,
+    "time_s": 0.02,
+    "metrics": {},
+    "extensions": {},
+    "priority": 0,
+}
+
+_DEADLINE = {
+    "outcome": "deadline",
+    "code": "runtime.task_deadline",
+    "source": "runtime",
+    "step_index": 1,
+    "time_s": 0.02,
+    "metrics": {"timeout_steps": 1.0},
+    "extensions": {},
+    "priority": 0,
+}
+
+_TASK_SUCCESS = {
+    "outcome": "success",
+    "code": "task.success",
+    "source": "custom",
+    "step_index": 1,
+    "time_s": 0.02,
+    "metrics": {},
+    "extensions": {
+        "dummy": {
+            "namespace": "dummy",
+            "schema_version": 1,
+            "data": {"reason": "all_good"},
+        }
+    },
+    "priority": 0,
+}
+
+_EXPECTED_REPORT = {
+    "schema": "benchmark_report",
+    "run_name": "r",
+    "meta": {
+        "run": _EXPECTED_RUN,
+        "joint_names_count": 0,
+        "policy_dt": 0.02,
+        "sim_dt": None,
+        "seed": 7,
+    },
+    "tasks": {
+        "dummy": {
+            "params": {},
+            "n_episodes": 1,
+            "metrics": {
+                "quality": {
+                    "mean": 1.0,
+                    "std": 0.0,
+                    "min": 1.0,
+                    "max": 1.0,
+                    "p10": 1.0,
+                    "p90": 1.0,
+                }
+            },
+            "success_rate": 1.0,
+        }
+    },
+    "episodes_total": 1,
+    "steps_total": 1,
+    "terminal_outcome_counts": {"success": 1},
+    "terminal_code_counts": {"task.success": 1},
+    "terminal_source_counts": {"custom": 1},
+    "episode_terminations": [
+        {
+            "env": 0,
+            "episode_id": 0,
+            "primary": _TASK_SUCCESS,
+            "all": [_ENV_FALL, _DEADLINE, _TASK_SUCCESS],
+        }
+    ],
+    "directed": False,
+    "episodes_directed": [{"episode_id": 0, "env_id": 0, "directed": False}],
+    "rewound": False,
+    "episodes_rewound": [{"episode_id": 0, "env_id": 0, "rewound": False}],
+    "wall_time_s": None,
+}
+
+_EXPECTED_RESULTS = {
+    "schema": "results",
+    "run": _EXPECTED_RUN,
+    "run_dir": "sub",
+    "backend": "mujoco",
+    "episodes": [
+        {
+            "env": 0,
+            "episode_id": 0,
+            "verdict": "success",
+            "gate": "dummy",
+            "predicates": {},
+            "metrics": {"quality": 1.0},
+            "rewound": False,
+            "termination": {
+                "primary": _TASK_SUCCESS,
+                "all": [_ENV_FALL, _DEADLINE, _TASK_SUCCESS],
+            },
+            "reset": {
+                "index": 0,
+                "valid": True,
+                "reason": None,
+                "sample_keys": ["articulation/g1/joint_pos"],
+            },
+        }
+    ],
+    "source": "engine",
+    "terminal_outcome_counts": {"success": 1},
+    "terminal_code_counts": {"task.success": 1},
+    "terminal_source_counts": {"custom": 1},
+}
+
+
+def test_report_and_results_serialization_is_unchanged(tmp_path, monkeypatch):
+    """The fixed-scenario report/results bytes are stable across the refactor."""
+    monkeypatch.chdir(tmp_path)
+    sink = BenchmarkSink(
+        tasks=[_DummyTask(params={}, meta={})],
+        meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7, "backend": "mujoco"},
+        min_episodes=1,
+        max_steps=10,
+        report_path="sub/benchmark_report.json",
+        limits=EpisodeLimits(timeout_steps=1),
+        run_identity=_identity(),
+    )
+    step = _step_bundle()
+    sink.on_step(0, step)
+    end = dict(step)
+    end["terminated"] = torch.tensor([True])
+    end["reset_facts"] = {
+        0: {
+            "reset_index": 0,
+            "reset_sample": {"articulation/g1/joint_pos": torch.zeros(2)},
+            "reset_valid": True,
+            "reset_reason": None,
+        }
+    }
+    end["terminations"] = {
+        0: EpisodeTermination(
+            primary=Termination(
+                outcome=EpisodeOutcome.FAILURE,
+                code="env.fall",
+                source=TerminationSource.ENVIRONMENT,
+                step_index=1,
+                time_s=0.02,
+            )
+        )
+    }
+    sink.on_episode_end(torch.tensor([0]), end)
+    sink.on_run_end()
+
+    results_text = (tmp_path / "sub" / "results.json").read_text()
+    assert results_text == json.dumps(_EXPECTED_RESULTS, indent=1, ensure_ascii=False)
+
+    on_disk = json.loads((tmp_path / "sub" / "benchmark_report.json").read_text())
+    on_disk["wall_time_s"] = None
+    assert json.dumps(on_disk, indent=2, ensure_ascii=False) == json.dumps(
+        _EXPECTED_REPORT, indent=2, ensure_ascii=False
+    )
