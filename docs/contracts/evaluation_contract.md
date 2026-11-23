@@ -121,13 +121,14 @@ The boundaries are:
   before the sink observes the bundle.  `build_terminations` inspects each
   instantiated term and rejects any `check` that is not exactly
   `check(self, ctx)`, so a legacy `check(self, state)` term fails at build;
-- benchmark: per-env view inside `BenchmarkSink.on_episode_end`, before reset.
+- benchmark: per-env view inside `BenchmarkSink.on_episode_end`, before reset,
+  built by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`).
   `Task.score(ep, ctx)` and `Task.score_detail(ep, ctx, *, retain_frames=False)`
-  receive one context scoped to `ep.env_id`; the sink closes it in `finally`
-  after all tasks for that env.  A task exception is isolated and skipped; an
-  old task signature is rejected by `build_tasks` at build time.  A sink wired
-  without an env (direct unit use) builds an explicit record/obs-only context
-  whose query is unavailable;
+  receive one context scoped to `ep.env_id`; the evaluator closes it in
+  `finally` after all tasks for that env.  A task exception is isolated and
+  skipped; an old task signature is rejected by `build_tasks` at build time.  A
+  sink wired without an env (direct unit use) builds an explicit record/obs-only
+  context whose query is unavailable;
 - watcher: one vector-scoped view (`env_id is None`) built by
   `WatcherEngine.on_tick` from the step bundle/env, retained until the next
   tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs` read

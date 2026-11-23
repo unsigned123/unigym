@@ -2,10 +2,12 @@
 
 Same callback mechanism and episode-buffering machinery as CollectSink
 (``slice_step_for_env``/``assemble_episode`` from ``runner/episodes.py``),
-but instead of writing shards it assembles each completed episode into an
-``EpisodeData`` (pre-reset -- record-before-reset invariant), scores it with
-every configured ``benchmarks`` Task, and at run end aggregates the results
-into ``benchmark_report.json``.
+but instead of writing shards it delegates each completed episode (pre-reset --
+record-before-reset invariant) to an
+``unigym.runner.evaluation.scoring.EpisodeEvaluator``, which assembles the
+``EpisodeData`` and scores it with every configured ``benchmarks`` Task.  The
+sink accumulates the evaluations and at run end aggregates the results into
+``benchmark_report.json``.
 
 Callback contract (docs/contracts/runner_contract.md §3):
 
@@ -13,14 +15,11 @@ Callback contract (docs/contracts/runner_contract.md §3):
   normalization identical to CollectSink) and maintain the early-stop flag
   (``completed episodes >= min_episodes``) plus step counters;
 * ``on_episode_end(env_ids, bundle)`` -- BEFORE the reset chain: per env,
-  assemble ``EpisodeData`` (duration from ``record["time_in_episode"]``,
-  ``ended_by_termination`` from ``bundle["terminated"][env_id]`` -- the
-  terminated mask covers ALL envs, so it must be indexed with the due id,
-  never sliced by position), build one read-only per-env ``EvalContext``
-  over ``bundle["record"]``/``bundle["obs"]`` and the injected env's lazy
-  query face, score it with each task in declaration order, then close the
-  context in ``finally`` (one task raising is logged with the task name and
-  skipped -- a broken task never poisons the run), count the episode;
+  take the buffered history and delegate to the ``EpisodeEvaluator`` (it
+  assembles ``EpisodeData`` and builds the scoped context; ``ended_by_termination``
+  comes from ``bundle["terminated"][env_id]`` -- the terminated mask covers ALL
+  envs, so it must be indexed with the due id, never sliced by position),
+  then accumulate the returned ``EpisodeEvaluation``; count the episode;
 * ``on_step_end(t, bundle)`` -- light progress printing (every 500 steps);
 * ``on_run_end()`` -- per-task ``aggregate`` -> report dict -> write
   ``benchmark_report.json`` -> return the report (the engine's ``run()``
@@ -34,7 +33,6 @@ context is the only path to the engine, and it is read-only and per-env.
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import time
@@ -42,28 +40,18 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from unigym.benchmarks.base import EpisodeData, EpisodeResult, Task
-from unigym.benchmarks.episode import (
-    EpisodeLimits,
-    RunIdentity,
-    timeline_time_s,
-)
+from unigym.benchmarks.base import EpisodeData, Task
+from unigym.benchmarks.episode import EpisodeLimits, RunIdentity
 from unigym.benchmarks.termination import (
-    EpisodeOutcome,
-    EpisodeTermination,
     Termination,
-    TerminationExtension,
-    TerminationSource,
     code_counts,
     outcome_counts,
     source_counts,
 )
 from unigym.core.episode_result import EpisodeResultView
-from unigym.evaluation import EnvView, EvalContext
-from unigym.query.facade import Query
 
-from ..episodes import assemble_episode
 from ..evaluation.buffer import EpisodeBuffer
+from ..evaluation.scoring import EpisodeEvaluator
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
@@ -143,7 +131,6 @@ class BenchmarkSink:
         env: EnvBackend | None = None,
     ):
         self.tasks = list(tasks)
-        self._env = env
         self.meta = dict(meta)
         self.limits = limits
         self.run_identity = run_identity
@@ -154,6 +141,16 @@ class BenchmarkSink:
         # benchmark_contract §results)
         self.retain_frames = bool(retain_frames)
         self.num_envs = int(meta.get("num_envs", 1))
+        # episode facts + task invocation are owned by the evaluator; the sink
+        # only accumulates its evaluations (report ownership moves in a later
+        # slice)
+        self.evaluator = EpisodeEvaluator(
+            tasks=self.tasks,
+            meta=self.meta,
+            env=env,
+            limits=limits,
+            retain_frames=self.retain_frames,
+        )
         # open-episode history (steps + rewind marks + tick samples) is owned
         # by the buffer; the sink only delegates append/take/mark
         self.episode_buffer = EpisodeBuffer(self.num_envs)
@@ -224,247 +221,45 @@ class BenchmarkSink:
     # ------------------------------------------------------------------ #
     # episode end (before-reset data side; reset chain is engine-driven)
     # ------------------------------------------------------------------ #
-    def _episode_core_terminations(
-        self, ei: int, length: int, bundle: dict, reset: dict
-    ) -> list[Termination]:
-        """Core facts for one episode: env terms, reset legality, deadline."""
-        policy_dt = float(self.meta.get("policy_dt") or 0.0)
-        time_s = length * policy_dt if policy_dt > 0.0 else None
-        terms: list[Termination] = []
-        bundle_terms = (bundle.get("terminations") or {}).get(int(ei))
-        if bundle_terms is not None:
-            terms.extend(bundle_terms.all)
-        if reset.get("reset_valid") is False:
-            extensions = {}
-            reason = reset.get("reset_reason")
-            if reason:
-                extensions["initializer"] = TerminationExtension(
-                    namespace="initializer", schema_version=1, data={"reason": str(reason)}
-                )
-            terms.append(
-                Termination(
-                    outcome=EpisodeOutcome.INVALID_RESET,
-                    code="initializer.invalid_reset",
-                    source=TerminationSource.INITIALIZER,
-                    step_index=0,
-                    time_s=0.0,
-                    extensions=extensions,
-                )
-            )
-        if self.limits is not None and policy_dt > 0.0:
-            timeout_steps = self.limits.validate_against(policy_dt)
-            # deadline fires EXACTLY at the declared tick; an overrun (length
-            # > timeout_steps) did not end through the deadline authority and
-            # must not be stamped as one.
-            if timeout_steps is not None and length == timeout_steps:
-                terms.append(
-                    Termination(
-                        outcome=EpisodeOutcome.DEADLINE,
-                        code="runtime.task_deadline",
-                        source=TerminationSource.RUNTIME,
-                        step_index=length,
-                        time_s=time_s,
-                        metrics={"timeout_steps": float(timeout_steps)},
-                    )
-                )
-        return terms
-
-    def _eval_context(self, ei: int, bundle: dict) -> EvalContext:
-        """Build the read-only per-env context for one due env.
-
-        Production wiring injects ``env``: the view carries that backend's
-        device/label/articulations and a lazy read-only query factory.  With
-        ``env is None`` (direct unit wiring) the view is explicitly
-        record/obs-only and ``query`` is unavailable.
-        """
-        env = self._env
-        if env is None:
-            return EvalContext(
-                env=EnvView(
-                    record=bundle["record"],
-                    obs=bundle.get("obs"),
-                    env_id=ei,
-                    num_envs=self.num_envs,
-                    device="cpu",
-                    backend="record-only",
-                )
-            )
-
-        def _query_factory() -> Query:
-            query = getattr(env, "query", None)
-            if not isinstance(query, Query):
-                raise NotImplementedError(f"backend {type(env).__name__!r} has no runtime query")
-            return query
-
-        query_factory = (
-            _query_factory if inspect.getattr_static(env, "query", None) is not None else None
-        )
-        return EvalContext(
-            env=EnvView(
-                record=bundle["record"],
-                obs=bundle.get("obs"),
-                env_id=ei,
-                num_envs=self.num_envs,
-                device=getattr(env, "device", "cpu"),
-                backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-                query_factory=query_factory,
-                articulations=getattr(env, "articulations", None) or {},
-            )
-        )
-
-    def _score_tasks(
-        self,
-        ep: EpisodeData,
-        eval_ctx: EvalContext,
-        ei: int,
-    ) -> tuple[list[EpisodeResultView], list[Termination], EpisodeResult | None]:
-        """Score every task in declaration order, isolating task failures."""
-        primary = None
-        task_terms: list[Termination] = []
-        views: list[EpisodeResultView] = []
-        try:
-            for task in self.tasks:
-                try:
-                    result, leaves, frames = task.score_detail(
-                        ep, eval_ctx, retain_frames=self.retain_frames
-                    )
-                    if not isinstance(result, EpisodeResult):
-                        raise TypeError(
-                            f"task '{task.name}' returned {type(result).__name__}, "
-                            "expected EpisodeResult"
-                        )
-                    if result.termination is not None:
-                        if not isinstance(result.termination, Termination):
-                            raise TypeError(
-                                f"task '{task.name}' returned a non-Termination "
-                                f"termination ({type(result.termination).__name__})"
-                            )
-                        task_terms.append(result.termination)
-                    self.results[task.name].append(result)
-                    views.append(
-                        EpisodeResultView(
-                            task=task.name,
-                            success=result.success,
-                            metrics=result.metrics,
-                        )
-                    )
-                    if primary is None:
-                        primary = result
-                    # results episode doc (engine's own
-                    # verdicts -- analyze/probe render, never re-compute)
-                    self.episode_docs.append(
-                        {
-                            "env": int(ei),
-                            "episode_id": ep.episode_id,
-                            "verdict": _verdict(result.success, ep.ended_by_termination),
-                            "gate": task.name,
-                            "predicates": dict(leaves),
-                            "metrics": {k: float(v) for k, v in result.metrics.items()},
-                            "rewound": ep.rewound,
-                            **({"frames": frames} if frames else {}),
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001 -- isolate tasks
-                    print(
-                        f"[benchmark] task '{task.name}' failed on "
-                        f"env{ei}/ep{ep.episode_id}: {exc!r} (skipped)",
-                        flush=True,
-                    )
-        finally:
-            eval_ctx.close()
-        return views, task_terms, primary
-
     def on_episode_end(self, env_ids, bundle: dict) -> None:
-        record = bundle["record"]
-        terminated = bundle["terminated"]  # (N,) mask over ALL envs
-        reset_facts = bundle.get("reset_facts") or {}
-        policy_dt = float(self.meta.get("policy_dt") or 0.0)
-        sim_dt = float(self.meta.get("sim_dt") or 0.0)
         # per-env read-only result views for the sampler hook: successful
         # tasks only, in task declaration order (a raising task is omitted
         # exactly as it is omitted from the report)
         episode_results: dict[int, tuple[EpisodeResultView, ...]] = {}
-        for ei in env_ids.tolist():
-            taken = self.episode_buffer.take(int(ei))
-            steps = taken.steps
-            rewinds = taken.rewinds
+        for env_id in env_ids.tolist():
+            ei = int(env_id)
+            taken = self.episode_buffer.take(ei)
             self.n_episodes += 1
-            episode_results[int(ei)] = ()
-            if not steps:
+            episode_results[ei] = ()
+            if not taken.steps:
                 continue
-            length = len(steps)
-            reset = dict(reset_facts.get(int(ei)) or {})
-            times = timeline_time_s(length, policy_dt) if policy_dt > 0.0 else None
-            core_terms = self._episode_core_terminations(int(ei), length, bundle, reset)
-            episode_termination = (
-                EpisodeTermination.from_terminations(core_terms) if core_terms else None
-            )
-            ep = EpisodeData(
-                data=assemble_episode(steps),
-                env_id=int(ei),
-                episode_id=int(record["episode_id"][ei]),
-                length=length,
-                duration_s=(
-                    float(times[-1])
-                    if times is not None and len(times)
-                    else float(record["time_in_episode"][ei])
-                ),
-                # index by env id -- terminated is a full (N,) mask, NOT a
-                # per-due vector even when len(env_ids) == num_envs
-                ended_by_termination=bool(terminated[ei]),
-                rewound=bool(rewinds),
-                policy_dt=policy_dt,
-                sim_dt=sim_dt,
-                reset_index=0,
-                reset_sample=reset.get("reset_sample"),
-                reset_valid=reset.get("reset_valid"),
-                reset_reason=reset.get("reset_reason"),
-                termination=episode_termination,
-                terminations=(() if episode_termination is None else episode_termination.all),
-            )
+            evaluation = self.evaluator.evaluate(taken, bundle, ei)
+            ep = evaluation.episode
             self.episodes.append(ep)
             # directed labelling: the Director's per-env mark is
             # still live here (this sink runs before the director's
             # episode-end snapshot in the fan-out)
-            directed = bool(
-                self._director is not None and self._director.is_episode_directed(int(ei))
-            )
+            directed = bool(self._director is not None and self._director.is_episode_directed(ei))
             self.episode_directed.append(directed)
-            # bridge metrics feed: PRIMARY task (first) supplies the
-            # episode's reward/success slot (exact alignment with the env
-            # order the engine hands to every sink, bridge included).
-            # One read-only per-env context is built before reset and closed
-            # in ``_score_tasks`` after every task for this env.
+            # results episode docs (engine's own verdicts -- analyze/probe
+            # render, never re-compute); declaration order, successful tasks
             docs_start = len(self.episode_docs)
-            views, task_terms, primary = self._score_tasks(
-                ep, self._eval_context(int(ei), bundle), int(ei)
-            )
-            # task-declared terminations participate in core precedence;
-            # extensions stay JSON-only in the per-episode document.
-            episode_results[int(ei)] = tuple(views)
-            all_terms = list(core_terms) + task_terms
-            final_termination = (
-                EpisodeTermination.from_terminations(all_terms) if all_terms else None
-            )
-            # Contract gate: EVERY recorded termination (including a task's
-            # declared Termination) must live on the episode-local axis.  A
-            # global run tick here would silently corrupt terminal_index and
-            # the report; reject it instead of normalizing.
-            if final_termination is not None:
-                for term in final_termination.all:
-                    step = term.step_index
-                    if step is not None and not 0 <= step <= length:
-                        raise ValueError(
-                            "benchmark episode contract: termination "
-                            f"{term.code!r} step_index={step} is outside the "
-                            f"episode-local axis 0..{length} (global run ticks "
-                            "are not episode ticks)"
-                        )
-            ep.termination = final_termination
-            ep.terminations = () if final_termination is None else final_termination.all
-            ep.terminal_index = (
-                None if final_termination is None else final_termination.primary.step_index
-            )
+            for score in evaluation.scores:
+                self.results[score.task].append(score.result)
+                self.episode_docs.append(
+                    {
+                        "env": ei,
+                        "episode_id": ep.episode_id,
+                        "verdict": _verdict(score.result.success, ep.ended_by_termination),
+                        "gate": score.task,
+                        "predicates": dict(score.leaves),
+                        "metrics": {k: float(v) for k, v in score.result.metrics.items()},
+                        "rewound": ep.rewound,
+                        **({"frames": score.frames} if score.frames else {}),
+                    }
+                )
+            episode_results[ei] = evaluation.views
+            final_termination = evaluation.termination
             termination_doc = None if final_termination is None else final_termination.to_json()
             for doc in self.episode_docs[docs_start:]:
                 doc["termination"] = termination_doc
@@ -476,7 +271,7 @@ class BenchmarkSink:
                 }
             self._episode_terminations.append(
                 {
-                    "env": int(ei),
+                    "env": ei,
                     "episode_id": ep.episode_id,
                     "primary": (
                         None if final_termination is None else final_termination.primary.to_json()
@@ -491,6 +286,10 @@ class BenchmarkSink:
             self._terminal_primary.append(
                 None if final_termination is None else final_termination.primary
             )
+            # bridge metrics feed: PRIMARY task (first successful) supplies the
+            # episode's reward/success slot (exact alignment with the env
+            # order the engine hands to every sink, bridge included).
+            primary = evaluation.scores[0].result if evaluation.scores else None
             self._metrics_pending.append(
                 {
                     "reward": (primary.metrics.get("reward") if primary is not None else None),

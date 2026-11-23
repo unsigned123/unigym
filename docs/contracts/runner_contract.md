@@ -61,12 +61,21 @@ Benchmark evaluation is the second live boundary:
 
 ```text
 on_episode_end (before env.reset_envs)
-         -> assemble EpisodeData
-         -> one per-env EvalContext scoped to ep.env_id
-         -> Task.score/episode incl. score_detail, declaration order
-         -> ctx.close() in finally
+         -> EpisodeBuffer.take(env_id)
+         -> EpisodeEvaluator.evaluate(taken, bundle, env_id)
+              -> assemble EpisodeData + core terminations
+              -> one per-env EvalContext scoped to ep.env_id
+              -> Task.score/episode incl. score_detail, declaration order
+              -> ctx.close() in finally
+              -> merge task terminations + validate the episode axis
+         -> BenchmarkSink accumulates the EpisodeEvaluation
          -> publish episode_results for the sampler
 ```
+
+`EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) owns the episode facts,
+the task invocation and the final termination merge.  `BenchmarkSink` publishes
+`bundle["episode_results"]` and keeps the run-level accumulation until report
+ownership moves to a reporter.
 
 A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
 `ctx.env.query`; it cannot step, reset, write or read another env.  The core
