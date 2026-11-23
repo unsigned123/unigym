@@ -8,11 +8,12 @@ condition interface with no articulation knowledge.
 
 from __future__ import annotations
 
-from typing import Mapping
-
-from unigym.evaluation import EvalContext
+from typing import TYPE_CHECKING, Mapping
 
 from .base import Termination
+
+if TYPE_CHECKING:
+    from unigym.evaluation import EvalContext
 
 
 class ArticulationTermination(Termination):

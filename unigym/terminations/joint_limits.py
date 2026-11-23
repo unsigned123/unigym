@@ -9,11 +9,14 @@ termination never fires.
 
 from __future__ import annotations
 
-import torch
-
-from unigym.evaluation import EvalContext
+from typing import TYPE_CHECKING
 
 from .articulation import ArticulationTermination
+
+if TYPE_CHECKING:
+    import torch
+
+    from unigym.evaluation import EvalContext
 
 
 class JointLimitTermination(ArticulationTermination):
@@ -31,6 +34,8 @@ class JointLimitTermination(ArticulationTermination):
         self.margin = float(self.params.get("margin", 0.05))
 
     def check(self, ctx: EvalContext) -> torch.Tensor:
+        import torch
+
         source = self.source(ctx)
         joint_pos = source.get("joint_pos")
         if not isinstance(joint_pos, torch.Tensor):

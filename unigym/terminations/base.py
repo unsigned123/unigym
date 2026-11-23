@@ -15,11 +15,12 @@ primary binding.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
-import torch
+if TYPE_CHECKING:
+    import torch
 
-from unigym.evaluation import EvalContext
+    from unigym.evaluation import EvalContext
 
 
 def body_tilt_exceeded(projected_gravity_b: torch.Tensor, cos_threshold: float) -> torch.Tensor:
