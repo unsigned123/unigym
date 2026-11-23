@@ -6,8 +6,10 @@ but instead of writing shards it delegates each completed episode (pre-reset --
 record-before-reset invariant) to an
 ``unigym.runner.evaluation.scoring.EpisodeEvaluator``, which assembles the
 ``EpisodeData`` and scores it with every configured ``benchmarks`` Task.  The
-sink accumulates the evaluations and at run end aggregates the results into
-``benchmark_report.json``.
+sink feeds the successful evaluations to a
+``unigym.benchmarks.reporting.BenchmarkReporter``, which owns the run-level
+aggregation and the ``benchmark_report.json`` / ``results.json`` /
+``metrics.npz`` artifacts.
 
 Callback contract (docs/contracts/runner_contract.md §3):
 
@@ -19,10 +21,10 @@ Callback contract (docs/contracts/runner_contract.md §3):
   assembles ``EpisodeData`` and builds the scoped context; ``ended_by_termination``
   comes from ``bundle["terminated"][env_id]`` -- the terminated mask covers ALL
   envs, so it must be indexed with the due id, never sliced by position),
-  then accumulate the returned ``EpisodeEvaluation``; count the episode;
+  then hand the evaluation to the reporter and count the episode;
 * ``on_step_end(t, bundle)`` -- light progress printing (every 500 steps);
-* ``on_run_end()`` -- per-task ``aggregate`` -> report dict -> write
-  ``benchmark_report.json`` -> return the report (the engine's ``run()``
+* ``on_run_end()`` -- ``reporter.finish(...)`` (per-task ``aggregate`` ->
+  report dict -> write artifacts) and return the report (the engine's ``run()``
   return value).  Incomplete (still-buffered) episodes are NOT scored:
   benchmarks judge completed episodes only.
 
@@ -33,20 +35,17 @@ context is the only path to the engine, and it is read-only and per-env.
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from typing import TYPE_CHECKING
 
-import numpy as np
-
-from unigym.benchmarks.base import EpisodeData, Task
+from unigym.benchmarks.base import Task
 from unigym.benchmarks.episode import EpisodeLimits, RunIdentity
-from unigym.benchmarks.termination import (
-    Termination,
-    code_counts,
-    outcome_counts,
-    source_counts,
+from unigym.benchmarks.reporting import (
+    METRICS_NPZ,
+    REPORT_SCHEMA,
+    RESULTS_JSON,
+    RESULTS_SCHEMA,
+    BenchmarkReporter,
 )
 from unigym.core.episode_result import EpisodeResultView
 
@@ -55,6 +54,14 @@ from ..evaluation.scoring import EpisodeEvaluator
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
+
+__all__ = [
+    "BenchmarkSink",
+    "METRICS_NPZ",
+    "REPORT_SCHEMA",
+    "RESULTS_JSON",
+    "RESULTS_SCHEMA",
+]
 
 # extra key -> recorded episode_data key (identical to CollectSink's map;
 # applied by SUFFIX so ``articulation/<name>/base_pos_w`` -> ``.../base_pos``)
@@ -73,22 +80,6 @@ def _record_key(key: str) -> str:
     if sep and leaf in _KEY_MAP:
         return f"{head}/{_KEY_MAP[leaf]}"
     return key
-
-
-REPORT_SCHEMA = "benchmark_report"
-RESULTS_SCHEMA = "results"
-METRICS_NPZ = "metrics.npz"
-RESULTS_JSON = "results.json"
-
-
-def _verdict(success, ended_by_termination: bool) -> str:
-    """Results verdict (analyze_contract §6): the task is the judge --
-    success verdicts win over the observational termination flag."""
-    if success is True:
-        return "success"
-    if success is False:
-        return "fail"
-    return "fell" if ended_by_termination else "na"
 
 
 class BenchmarkSink:
@@ -132,42 +123,34 @@ class BenchmarkSink:
     ):
         self.tasks = list(tasks)
         self.meta = dict(meta)
-        self.limits = limits
-        self.run_identity = run_identity
         self.min_episodes = int(min_episodes)
         self.max_steps = int(max_steps)
-        self.report_path = str(report_path)
-        # retain the per-frame metric sequences (metrics.npz,
-        # benchmark_contract §results)
-        self.retain_frames = bool(retain_frames)
         self.num_envs = int(meta.get("num_envs", 1))
         # episode facts + task invocation are owned by the evaluator; the sink
-        # only accumulates its evaluations (report ownership moves in a later
-        # slice)
+        # only feeds evaluated episodes to the report owner
         self.evaluator = EpisodeEvaluator(
             tasks=self.tasks,
             meta=self.meta,
             env=env,
             limits=limits,
-            retain_frames=self.retain_frames,
+            retain_frames=bool(retain_frames),
         )
         # open-episode history (steps + rewind marks + tick samples) is owned
         # by the buffer; the sink only delegates append/take/mark
         self.episode_buffer = EpisodeBuffer(self.num_envs)
-        self.episodes: list[EpisodeData] = []  # all scored EpisodeData
-        self.results: dict[str, list] = {t.name: [] for t in self.tasks}
-        # per-(episode, task) detail docs, results.json face
-        self.episode_docs: list[dict] = []
+        # run-level aggregation and report/results/metrics writing
+        self.reporter = BenchmarkReporter(
+            tasks=self.tasks,
+            meta=self.meta,
+            report_path=str(report_path),
+            run_identity=run_identity,
+        )
         self.n_episodes = 0
         self.steps_total = 0
         self._stop = False
         self._t0 = time.time()
         self._metrics_pending: list[dict] = []  # bridge metrics feed
         self._director = director
-        self.episode_directed: list[bool] = []  # parallel to episodes
-        # per-episode structured termination docs (benchmark report)
-        self._episode_terminations: list[dict] = []
-        self._terminal_primary: list[Termination | None] = []
 
     # ------------------------------------------------------------------ #
     # early stop predicate (passed to SyncRunner.run(stop_when=...))
@@ -198,6 +181,7 @@ class BenchmarkSink:
         self.episode_buffer.append_step(rec)
         self.steps_total = t + 1
         self._stop = self.episodes_done()
+        self.reporter.note_progress(episodes_total=self.n_episodes, steps_total=self.steps_total)
 
     # ------------------------------------------------------------------ #
     # rewind marking (Round B B1; engine boundary notification)
@@ -235,57 +219,12 @@ class BenchmarkSink:
                 continue
             evaluation = self.evaluator.evaluate(taken, bundle, ei)
             ep = evaluation.episode
-            self.episodes.append(ep)
             # directed labelling: the Director's per-env mark is
             # still live here (this sink runs before the director's
             # episode-end snapshot in the fan-out)
             directed = bool(self._director is not None and self._director.is_episode_directed(ei))
-            self.episode_directed.append(directed)
-            # results episode docs (engine's own verdicts -- analyze/probe
-            # render, never re-compute); declaration order, successful tasks
-            docs_start = len(self.episode_docs)
-            for score in evaluation.scores:
-                self.results[score.task].append(score.result)
-                self.episode_docs.append(
-                    {
-                        "env": ei,
-                        "episode_id": ep.episode_id,
-                        "verdict": _verdict(score.result.success, ep.ended_by_termination),
-                        "gate": score.task,
-                        "predicates": dict(score.leaves),
-                        "metrics": {k: float(v) for k, v in score.result.metrics.items()},
-                        "rewound": ep.rewound,
-                        **({"frames": score.frames} if score.frames else {}),
-                    }
-                )
+            self.reporter.on_episode(evaluation, directed=directed)
             episode_results[ei] = evaluation.views
-            final_termination = evaluation.termination
-            termination_doc = None if final_termination is None else final_termination.to_json()
-            for doc in self.episode_docs[docs_start:]:
-                doc["termination"] = termination_doc
-                doc["reset"] = {
-                    "index": 0,
-                    "valid": ep.reset_valid,
-                    "reason": ep.reset_reason,
-                    "sample_keys": ([] if ep.reset_sample is None else sorted(ep.reset_sample)),
-                }
-            self._episode_terminations.append(
-                {
-                    "env": ei,
-                    "episode_id": ep.episode_id,
-                    "primary": (
-                        None if final_termination is None else final_termination.primary.to_json()
-                    ),
-                    "all": (
-                        []
-                        if final_termination is None
-                        else [t.to_json() for t in final_termination.all]
-                    ),
-                }
-            )
-            self._terminal_primary.append(
-                None if final_termination is None else final_termination.primary
-            )
             # bridge metrics feed: PRIMARY task (first successful) supplies the
             # episode's reward/success slot (exact alignment with the env
             # order the engine hands to every sink, bridge included).
@@ -301,6 +240,7 @@ class BenchmarkSink:
         # hand the per-env views to the engine, which forwards them to the
         # command sampler right after this callback (same boundary bundle)
         bundle["episode_results"] = episode_results
+        self.reporter.note_progress(episodes_total=self.n_episodes, steps_total=self.steps_total)
 
     # ------------------------------------------------------------------ #
     # light progress (post-reset, mirrors CollectSink's logging rhythm)
@@ -316,121 +256,12 @@ class BenchmarkSink:
     # ------------------------------------------------------------------ #
     # run end: aggregate + report json + summary dict
     # ------------------------------------------------------------------ #
-    def _report_body(self, wall: float | None) -> dict:
-        """The report document (on_run_end shape; draft when wall is None)."""
-        tasks_report = {}
-        for task in self.tasks:
-            results = self.results[task.name]
-            agg = task.aggregate(results)
-            tasks_report[task.name] = {
-                "params": dict(task.params),
-                "n_episodes": agg.get("n_episodes", len(results)),
-                "metrics": {k: v for k, v in agg.items() if isinstance(v, dict)},
-                "success_rate": agg.get("success_rate"),
-            }
-        run_identity = None if self.run_identity is None else self.run_identity.to_json()
-        contacts = self.meta.get("contacts")
-        return {
-            "schema": REPORT_SCHEMA,
-            "run_name": self.meta.get("run_name"),
-            "meta": {
-                "run": run_identity,
-                "joint_names_count": len(self.meta.get("joint_names") or []),
-                "policy_dt": self.meta.get("policy_dt"),
-                "sim_dt": self.meta.get("sim_dt"),
-                "seed": self.meta.get("seed"),
-                **({"contacts": contacts} if contacts is not None else {}),
-            },
-            "tasks": tasks_report,
-            "episodes_total": self.n_episodes,
-            "steps_total": self.steps_total,
-            # benchmark contract terminal facts (per-episode extensions preserved
-            # in ``episode_terminations``; no cross-namespace aggregation)
-            "terminal_outcome_counts": outcome_counts(self._terminal_primary),
-            "terminal_code_counts": code_counts(self._terminal_primary),
-            "terminal_source_counts": source_counts(self._terminal_primary),
-            "episode_terminations": list(self._episode_terminations),
-            # directed boundary (contract §7): per-episode flags +
-            # the aggregate; directed successes are fixture validations,
-            # never policy capability
-            "directed": any(self.episode_directed),
-            "episodes_directed": [
-                {"episode_id": ep.episode_id, "env_id": ep.env_id, "directed": d}
-                for ep, d in zip(self.episodes, self.episode_directed)
-            ],
-            # rewind boundary (Round B B1, benchmark_contract §4): episodes
-            # that straddled a timeline fork keep ALL forked data and are
-            # labelled -- rewound successes never mix into physics-legal
-            # claims either
-            "rewound": any(ep.rewound for ep in self.episodes),
-            "episodes_rewound": [
-                {"episode_id": ep.episode_id, "env_id": ep.env_id, "rewound": ep.rewound}
-                for ep in self.episodes
-            ],
-            "wall_time_s": wall,
-        }
-
     def on_run_end(self) -> dict:
-        report = self._report_body(wall=time.time() - self._t0)
-        parent = os.path.dirname(self.report_path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(self.report_path, "w") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-        self._write_results()
-        print(f"[benchmark] report -> {self.report_path}", flush=True)
-        for name, entry in report["tasks"].items():
-            print(
-                f"[benchmark]   {name}: n={entry['n_episodes']} "
-                f"success_rate={entry['success_rate']}",
-                flush=True,
-            )
-        return report
-
-    # ------------------------------------------------------------------ #
-    # results.json / metrics.npz (benchmark_contract §results)
-    # ------------------------------------------------------------------ #
-    def results_document(self) -> dict:
-        """The results document (engine verdicts; zero re-derivation)."""
-        episodes = []
-        for doc in self.episode_docs:
-            episodes.append({k: v for k, v in doc.items() if k != "frames"})
-        backend = self.meta.get("backend")
-        return {
-            "schema": RESULTS_SCHEMA,
-            # complete run identity even for benchmark-only runs without
-            # meta.json (no pack fills these fields manually).
-            "run": (None if self.run_identity is None else self.run_identity.to_json()),
-            "run_dir": os.path.dirname(self.report_path) or ".",
-            "backend": backend,
-            "episodes": episodes,
-            "source": "engine",
-            "terminal_outcome_counts": outcome_counts(self._terminal_primary),
-            "terminal_code_counts": code_counts(self._terminal_primary),
-            "terminal_source_counts": source_counts(self._terminal_primary),
-        }
-
-    def _write_results(self) -> None:
-        parent = os.path.dirname(self.report_path)
-        if not parent or not self.episode_docs:
-            return  # nothing scored
-        doc = self.results_document()
-        with open(os.path.join(parent, RESULTS_JSON), "w") as f:
-            json.dump(doc, f, indent=1, ensure_ascii=False)
-        frames = {
-            f"metric/e{i}/{mid}": fr
-            for i, d in enumerate(self.episode_docs)
-            for mid, fr in (d.get("frames") or {}).items()
-        }
-        if frames:
-            np.savez(os.path.join(parent, METRICS_NPZ), **frames)
-            print(
-                f"[benchmark] results -> {RESULTS_JSON} + {METRICS_NPZ} "
-                f"({len(frames)} frame series)",
-                flush=True,
-            )
-        else:
-            print(f"[benchmark] results -> {RESULTS_JSON}", flush=True)
+        return self.reporter.finish(
+            episodes_total=self.n_episodes,
+            steps_total=self.steps_total,
+            wall_time_s=time.time() - self._t0,
+        )
 
     # ------------------------------------------------------------------ #
     # bridge metrics feed (duck-typed source; runtime_contract §2)
@@ -454,25 +285,11 @@ class BenchmarkSink:
         return {
             "episodes": self.n_episodes,
             "min_episodes": self.min_episodes,
-            "by_task": {t.name: len(self.results[t.name]) for t in self.tasks},
+            "by_task": {t.name: len(self.reporter.results[t.name]) for t in self.tasks},
         }
 
     def metrics_report(self) -> dict | None:
-        """Draft report (same shape as on_run_end, wall_time_s=None).
-
-        The per-episode ``episodes_directed`` / ``episodes_rewound``
-        detail is OMITTED here
-        (the final artifact keeps it): it grows one entry per episode,
-        and the typed-query ack block clips at PAYLOAD_JSON (8KB) -- a
-        ~130+-episode draft used to arrive unparseable, which the query
-        face answers as ``{"report": null}`` mid-run.  The draft is the
-        LIVE view's data source; its aggregate face is bounded by
-        construction (per-task stats only).
-        """
+        """Bounded live report (reporter-owned draft; no growing lists)."""
         if not self.tasks:
             return None
-        body = self._report_body(wall=None)
-        body.pop("episodes_directed", None)
-        body.pop("episodes_rewound", None)
-        body.pop("episode_terminations", None)
-        return body
+        return self.reporter.draft_report()

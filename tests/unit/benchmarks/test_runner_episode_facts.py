@@ -153,7 +153,7 @@ def test_multi_episode_ticks_are_local_and_invalid_reset_reaches_episode(tmp_pat
     summary = runner.run(stop_when=sink.episodes_done)
 
     assert summary["episodes_total"] == 2
-    first, second = sink.episodes
+    first, second = sink.reporter.episodes
     # episode 2 starts at tick 1, not at the global run tick 3/4
     for ep in (first, second):
         assert ep.step_index.tolist() == [1, 2]

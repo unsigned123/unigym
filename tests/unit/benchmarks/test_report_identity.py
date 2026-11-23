@@ -134,8 +134,8 @@ def test_task_termination_outside_episode_axis_is_rejected(tmp_path):
 @pytest.mark.parametrize("step_index", [None, 1])
 def test_task_termination_within_episode_axis_is_accepted(tmp_path, step_index):
     sink = _run_single_step_episode(tmp_path, _TermTask(step_index))
-    assert sink.episodes[0].terminal_index == step_index
-    assert sink.episode_docs[0]["termination"]["primary"]["step_index"] == step_index
+    assert sink.reporter.episodes[0].terminal_index == step_index
+    assert sink.reporter.episode_docs[0]["termination"]["primary"]["step_index"] == step_index
 
 
 def _step_bundle():
