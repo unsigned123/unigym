@@ -189,6 +189,7 @@ tests/
 │   ├── assets/
 │   ├── adapters/
 │   ├── backends/                # framework-level registry tests only
+│   ├── evaluation/              # read-only live evaluation context
 │   └── sim/                     # experimental simulation facade
 ├── backends/
 │   ├── mujoco/
@@ -258,6 +259,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_adapters` | `tests/unit/adapters/**` |
 | `domain_assets` | `tests/unit/assets/**` |
 | `domain_backends` | `tests/unit/backends/**` |
+| `domain_evaluation` | `tests/unit/evaluation/**` |
 | `domain_sim` | `tests/unit/sim/**` |
 | `domain_initializers` | `tests/unit/initializers/**` |
 | `backend_agnostic` | no specific backend |
