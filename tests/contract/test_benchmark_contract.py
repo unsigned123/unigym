@@ -65,6 +65,20 @@ def test_task_trigger_and_on_tick_are_the_opt_in_cadence_surface():
     assert trace.fired is None
 
 
+def test_public_export_contract_is_buffer_only_and_exposes_tick_types():
+    """Ticks are public benchmark types; evaluation re-exports only the buffer."""
+    import importlib.util
+
+    import unigym.benchmarks as benchmarks
+    import unigym.runner.evaluation as evaluation
+
+    assert {"TickResult", "TickTrace"} <= set(benchmarks.__all__)
+    assert set(evaluation.__all__) == {"EpisodeBuffer", "TakenEpisode", "TickSample"}
+    assert "EvaluationSession" not in evaluation.__all__
+    assert importlib.util.find_spec("unigym.runner.evaluation.session") is not None
+    assert "BenchmarkSink" not in benchmarks.__all__
+
+
 def test_termination_module_is_core_neutral():
     source = inspect.getsource(__import__("unigym.benchmarks.termination", fromlist=["x"]))
     assert "import gymnasium" not in source

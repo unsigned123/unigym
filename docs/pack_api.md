@@ -1332,10 +1332,15 @@ compatibility shim and no dual-signature period.
 - A benchmark plugin task must implement `score(self, ep, ctx)` and, when it
   overrides the detail face, `score_detail(self, ep, ctx, *,
   retain_frames=False)`.  `build_tasks` validates both signatures at build time
-  and rejects a legacy `score(ep)` before the sink's exception isolation can
-  turn it into a silently missing report task.  `EpisodeData` remains the
-  episode history payload; a report is a live run observation and is not
-  guaranteed to be reproduced from stored episode data.
+  and rejects a legacy `score(ep)` before the evaluation session's exception
+  isolation can turn it into a silently missing report task.  `EpisodeData`
+  remains the episode history payload; a report is a live run observation and
+  is not guaranteed to be reproduced from stored episode data.
+- The public `BenchmarkSink` is removed; use `EvaluationSession`
+  (`unigym.runner.evaluation.session`) with the injected `EpisodeBuffer`,
+  `EpisodeEvaluator` and `BenchmarkReporter`.  There is no compatibility alias.
+  The `Task` authoring API is unchanged (`score`, `score_detail`, `aggregate`);
+  `trigger: both` plus `on_tick(self, ctx)` are additive opt-in surface.
 - The episode filter subsystem is removed.  A run config that declares an
   episode-filter section fails at spec construction with a migration hint;
   there is no filter chain and no reconstruction of terminated episodes from

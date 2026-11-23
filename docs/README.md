@@ -18,9 +18,13 @@ Process documents:
   read-only, boundary-scoped `EvalContext`/`EnvView`, scoped `EvalQuery`, and
   the live termination/benchmark boundaries.
 - [Benchmark contract](contracts/benchmark_contract.md) - canonical
-  episode timeline, deadline authority, live task signatures and report schema.
+  episode timeline, deadline authority, the `EvaluationSession` /
+  `EpisodeBuffer` / `EpisodeEvaluator` / `BenchmarkReporter` ownership split,
+  live task signatures (including opt-in `trigger: both` ticks) and report
+  schema.
 - [Runner contract](contracts/runner_contract.md) - the sink callback bundle
-  (timeline/reset/termination facts) and the live evaluation boundaries.
+  (timeline/reset/termination facts) and the live evaluation boundaries,
+  including rewind fan-out and the `benchmark` rewind provider.
 - [Command sampler contract](contracts/command_sampler_contract.md) - sampler
   lifecycle hooks, custom factory authoring and rewind participation.
 - [Report templates](templates/) - design brief, completion, review and blocked

@@ -86,10 +86,13 @@ Open-episode history is owned by `EpisodeBuffer`
 (`unigym.runner.evaluation.buffer`): `EvaluationSession.on_step` appends the
 normalized per-step record, `on_rewind` attaches a rewind mark to every open
 buffer, and `on_episode_end` removes one env's steps and marks with `take`.
-The rewind provider snapshots/restores that buffer (steps, marks, tick traces,
-episode stamp and the episode fuse) under the `"benchmark"` provider name.
-`FanOutSink.on_rewind` forwards to every child recursively, so an evaluation session
-nested below director or adapter fan-outs still receives the mark exactly once.
+The rewind provider (`EvaluationSessionProvider`) snapshots/restores that buffer
+(steps, marks, tick traces, episode stamp and the episode fuse) under the
+`"benchmark"` provider name.  `FanOutSink.on_rewind` forwards to every child
+recursively, so an evaluation session nested below director or adapter fan-outs
+still receives the mark exactly once.  A tick-contract failure disables the task
+for the run; that disabled set is process truth and a rewind never re-enables
+it.
 
 `build_instance` creates the run's one `SignalBus` **before**
 `_build_bridge_and_wiring`, hands it to the watcher attach seam, calls
