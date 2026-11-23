@@ -1627,6 +1627,7 @@ def _build_sinks(
             retain_frames=bool(bench_cfg.get("retain_metric_frames", False)),
             limits=limits,
             run_identity=run_identity,
+            env=env,
         )
         if bench_tasks:  # no tasks -> nothing to wait for
             stop_when = bench_sink.episodes_done

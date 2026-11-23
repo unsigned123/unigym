@@ -1,15 +1,18 @@
 """First benchmark tasks (B1 reference implementations).
 
-Both tasks are pure episode judges: they read the recorded-key arrays of an
-``EpisodeData`` and return an ``EpisodeResult``.  Units are documented per
-parameter/metric in each docstring (metric keys themselves stay unit-less,
-flat snake_case).
+Both tasks read the recorded-key arrays of an ``EpisodeData`` and return an
+``EpisodeResult``.  They accept the live per-env ``EvalContext`` for the
+scoring API but ignore it: their metrics are pure functions of the episode
+history.  Units are documented per parameter/metric in each docstring (metric
+keys themselves stay unit-less, flat snake_case).
 
 * ``stand``             -- upright/height quality of a standing policy.
 * ``velocity_tracking`` -- per-frame body-frame velocity command tracking.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -19,6 +22,9 @@ from .base import (
     Task,
     register,
 )
+
+if TYPE_CHECKING:
+    from unigym.evaluation import EvalContext
 
 
 @register
@@ -62,7 +68,8 @@ class StandTask(Task):
         self._alive_tol = float(self.p.get("alive_tolerance", 0.2))
         self._alive_thr = float(self.p.get("alive_threshold", 0.9))
 
-    def score(self, ep: EpisodeData) -> EpisodeResult:
+    def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult:
+        del ctx
         g = np.asarray(ep.data[self.resolve_key(ep.data, "gravity_b")], dtype=float)  # (T, 3)
         z = np.asarray(ep.data[self.resolve_key(ep.data, "base_pos")], dtype=float)[:, 2]  # (T,)
         upright = np.abs(g[:, 2] + 1.0) <= self._alive_tol
@@ -128,7 +135,8 @@ class VelocityTrackingTask(Task):
         self._err_thr = float(self.p.get("error_threshold", 0.5))
         self._succ_frac = float(self.p.get("success_fraction", 0.8))
 
-    def score(self, ep: EpisodeData) -> EpisodeResult:
+    def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult:
+        del ctx
         v = np.asarray(ep.data[self.resolve_key(ep.data, "base_lin_vel")], dtype=float)[
             :, :2
         ]  # (T, 2)

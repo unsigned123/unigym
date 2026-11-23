@@ -38,7 +38,8 @@ def _identity() -> RunIdentity:
 class _DummyTask(Task):
     name = "dummy"
 
-    def score(self, ep):
+    def score(self, ep, ctx):
+        del ep, ctx
         return EpisodeResult(
             metrics={"quality": 1.0},
             success=True,
@@ -84,7 +85,8 @@ class _TermTask(Task):
         super().__init__({}, {})
         self._step_index = step_index
 
-    def score(self, ep):
+    def score(self, ep, ctx):
+        del ep, ctx
         return EpisodeResult(
             metrics={"quality": 1.0},
             success=True,

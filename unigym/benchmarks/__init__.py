@@ -1,7 +1,9 @@
-"""Benchmark tasks: episode scoring/registry (B1).
+"""Benchmark tasks: live-first episode scoring/registry (B1).
 
-numpy-only, zero isaaclab -- offline unit-testable.  Concrete tasks live in
-``tasks.py`` and self-register via ``@register`` on import.
+Tasks receive the episode history plus a read-only per-env ``EvalContext``.
+The module stays importable without torch/isaaclab (the context type is a
+type-checking-only import).  Concrete tasks live in ``tasks.py`` and
+self-register via ``@register`` on import.
 """
 
 from __future__ import annotations

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
+from tests._support.fakes.benchmark_env import FakeBenchmarkEnv
 from unigym.benchmarks.base import EpisodeResult, Task
 from unigym.core.episode_result import EpisodeResultView
+from unigym.env.obs import ObsSnapshot, ObservationSchema, ObservationSpec
+from unigym.evaluation import EvalQueryUnavailableError, EvalViewError, EvalViewStaleError
 from unigym.runner.sinks.benchmark import BenchmarkSink
 
 
@@ -18,8 +22,8 @@ class _ScoredTask(Task):
         self.value = value
         self.success = success
 
-    def score(self, ep) -> EpisodeResult:
-        del ep
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep, ctx
         return EpisodeResult(metrics={"score": self.value}, success=self.success)
 
 
@@ -28,7 +32,8 @@ class _EnvTask(Task):
 
     name = "acme/env"
 
-    def score(self, ep) -> EpisodeResult:
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ctx
         return EpisodeResult(metrics={"env_id": float(ep.env_id)}, success=True)
 
 
@@ -39,8 +44,8 @@ class _FailingTask(Task):
         super().__init__()
         self.name = name
 
-    def score(self, ep) -> EpisodeResult:
-        del ep
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep, ctx
         raise RuntimeError("task scoring failed")
 
 
@@ -156,3 +161,203 @@ def test_sink_episode_results_keys_are_actual_env_ids(tmp_path):
     assert list(results) == [2]
     assert results[2][0].metrics["env_id"] == 2.0
     assert 0 not in results
+
+
+class _ContextTask(Task):
+    """Scores from the scoped record and the read-only query."""
+
+    name = "acme/context"
+
+    def __init__(self, seen: list[object]) -> None:
+        super().__init__()
+        self._seen = seen
+
+    def score(self, ep, ctx) -> EpisodeResult:
+        self._seen.append(ctx)
+        record = ctx.env.record()
+        return EpisodeResult(
+            metrics={
+                "env_id": float(ctx.env_id),
+                "rows": float(record["articulation/g1/joint_pos"].shape[0]),
+                "query_backend": float(ctx.env.query.backend == "fake"),
+            },
+            success=True,
+        )
+
+
+class _CrossEnvTask(Task):
+    """A per-env task that tries to read another env through the query."""
+
+    name = "acme/cross_env"
+
+    def __init__(self, errors: list[Exception]) -> None:
+        super().__init__()
+        self._errors = errors
+
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep
+        try:
+            ctx.env.query.state.root_pose("g1", env=0)
+        except Exception as exc:
+            self._errors.append(exc)
+            raise
+        return EpisodeResult(metrics={"ok": 1.0}, success=True)
+
+
+class _HasQueryTask(Task):
+    """Record-only context reports query unavailability explicitly."""
+
+    name = "acme/has_query"
+
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep
+        return EpisodeResult(metrics={"has_query": float(ctx.env.has_query)}, success=True)
+
+
+class _QueryCallTask(Task):
+    """Touching the unavailable query fails and is isolated."""
+
+    name = "acme/query_call"
+
+    def __init__(self, errors: list[Exception]) -> None:
+        super().__init__()
+        self._errors = errors
+
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep
+        try:
+            ctx.env.query
+        except Exception as exc:
+            self._errors.append(exc)
+            raise
+        return EpisodeResult(metrics={"unexpected": 1.0}, success=True)
+
+
+class _ObsTask(Task):
+    """Reads the per-env scoped observation snapshot."""
+
+    name = "acme/obs"
+
+    def score(self, ep, ctx) -> EpisodeResult:
+        del ep
+        obs = ctx.env.obs()
+        assert obs is not None
+        value = obs.value("articulation/g1/joint_pos")
+        return EpisodeResult(
+            metrics={"obs_rows": float(value.shape[0]), "obs_value": float(value[0, 0])},
+            success=True,
+        )
+
+
+def _live_step_bundle(count: int) -> dict:
+    return {
+        "record": {
+            "episode_id": torch.arange(count, dtype=torch.int64),
+            "time_in_episode": torch.full((count,), 0.02),
+            "articulation/g1/joint_pos": torch.zeros(count, 2),
+        },
+        "cmd": None,
+        "terminated": torch.zeros(count, dtype=torch.bool),
+    }
+
+
+def _sink_with_env(tmp_path, tasks, *, num_envs: int, env=None) -> BenchmarkSink:
+    return BenchmarkSink(
+        tasks=list(tasks),
+        meta={"num_envs": num_envs, "policy_dt": 0.02},
+        min_episodes=1,
+        max_steps=10,
+        report_path=str(tmp_path / "benchmark_report.json"),
+        env=env,
+    )
+
+
+def test_sink_builds_a_per_env_live_context_and_closes_it(tmp_path):
+    """Tasks see the due env id, a ``(1, ...)`` record and a stale context."""
+    seen: list[object] = []
+    env = FakeBenchmarkEnv(num_envs=2)
+    sink = _sink_with_env(tmp_path, [_ContextTask(seen)], num_envs=2, env=env)
+    bundle = _live_step_bundle(2)
+    sink.on_step(0, bundle)
+
+    sink.on_episode_end(torch.tensor([1]), bundle)
+
+    result = sink.results["acme/context"][0]
+    assert result.metrics == {"env_id": 1.0, "rows": 1.0, "query_backend": 1.0}
+    assert env.query_reads == 1
+    with pytest.raises(EvalViewStaleError):
+        seen[0].env.num_envs
+
+
+def test_sink_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
+    """``ctx.env.obs()`` carries only the due env's row, not the vector."""
+    sink = _sink_with_env(
+        tmp_path,
+        [_ObsTask()],
+        num_envs=2,
+        env=FakeBenchmarkEnv(num_envs=2),
+    )
+    bundle = _live_step_bundle(2)
+    schema = ObservationSchema(
+        {"articulation/g1/joint_pos": ObservationSpec("articulation/g1/joint_pos", (2,), "f32")}
+    )
+    bundle["obs"] = ObsSnapshot(
+        {"articulation/g1/joint_pos": torch.tensor([[1.0, 2.0], [3.0, 4.0]])},
+        schema=schema,
+        num_envs=2,
+        device="cpu",
+    )
+    sink.on_step(0, bundle)
+
+    sink.on_episode_end(torch.tensor([1]), bundle)
+
+    result = sink.results["acme/obs"][0]
+    assert result.metrics == {"obs_rows": 1.0, "obs_value": 3.0}
+
+
+def test_sink_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
+    """The query factory is lazy; a pure task never opens the query handle."""
+    env = FakeBenchmarkEnv(num_envs=1)
+    sink = _sink_with_env(tmp_path, [_ScoredTask("acme/pure", 2.0)], num_envs=1, env=env)
+    bundle = _live_step_bundle(1)
+    sink.on_step(0, bundle)
+
+    sink.on_episode_end(torch.tensor([0]), bundle)
+
+    assert sink.results["acme/pure"][0].metrics == {"score": 2.0}
+    assert env.query_reads == 0
+
+
+def test_record_only_context_has_no_query_and_isolates_query_callers(tmp_path):
+    """Without an injected env the context is explicitly query-unavailable."""
+    errors: list[Exception] = []
+    sink = _sink_with_env(
+        tmp_path,
+        [_HasQueryTask(), _QueryCallTask(errors)],
+        num_envs=1,
+    )
+    bundle = _live_step_bundle(1)
+    sink.on_step(0, bundle)
+
+    sink.on_episode_end(torch.tensor([0]), bundle)
+
+    assert sink.results["acme/has_query"][0].metrics == {"has_query": 0.0}
+    assert sink.results["acme/query_call"] == []
+    assert len(errors) == 1
+    assert isinstance(errors[0], EvalQueryUnavailableError)
+
+
+def test_per_env_query_rejects_another_env_and_isolates_the_task(tmp_path):
+    """A scoped query read for another env is an error, not a cross-env read."""
+    errors: list[Exception] = []
+    env = FakeBenchmarkEnv(num_envs=2)
+    sink = _sink_with_env(tmp_path, [_CrossEnvTask(errors)], num_envs=2, env=env)
+    bundle = _live_step_bundle(2)
+    sink.on_step(0, bundle)
+
+    sink.on_episode_end(torch.tensor([1]), bundle)
+
+    assert sink.results["acme/cross_env"] == []
+    assert env.query_reads == 1
+    assert len(errors) == 1
+    assert isinstance(errors[0], EvalViewError)
