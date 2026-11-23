@@ -19,9 +19,10 @@ Callback contract (docs/contracts/runner_contract.md §3):
 
 * ``on_step(t, bundle)`` -- buffer per-env step slices (``_KEY_MAP`` key
   normalization identical to CollectSink), dispatch ``trigger='both'`` tasks
-  against one vector-scoped context (per-env CPU ``TickSample``s land on the
-  buffered step) and maintain the early-stop flag (``completed episodes >=
-  min_episodes``) plus step counters;
+  against one vector-scoped context derived from the runner's boundary view
+  (``bundle["view"].with_record(normalized_record)``; per-env CPU
+  ``TickSample``s land on the buffered step) and maintain the early-stop flag
+  (``completed episodes >= min_episodes``) plus step counters;
 * ``on_episode_end(env_ids, bundle)`` -- BEFORE the reset chain: per env,
   take the buffered history and delegate to the ``EpisodeEvaluator`` (it
   assembles ``EpisodeData`` and builds the scoped context; ``ended_by_termination``
@@ -36,7 +37,9 @@ Callback contract (docs/contracts/runner_contract.md §3):
 
 Device/thread discipline matches CollectSink: episode buffers hold cpu
 clones (``slice_step_for_env``).  ``EpisodeData`` stays numpy; the live
-context is the only path to the engine, and it is read-only and per-env.
+context is the only path to the engine, it is read-only, vector-scoped for
+per-tick dispatch and per-env for episode scoring, and it is always derived
+from the runner-owned ``bundle["view"]`` boundary view.
 """
 
 from __future__ import annotations
@@ -50,13 +53,11 @@ import torch
 from unigym.benchmarks.base import Task, TickResult
 from unigym.benchmarks.reporting import EpisodeReporter
 from unigym.core.episode_result import EpisodeResultView
-from unigym.evaluation import EvalContext
+from unigym.evaluation import EvalContext, EvalViewError
 
 from .buffer import TickSample
-from .scoring import build_env_view
 
 if TYPE_CHECKING:
-    from unigym.env.backends.base import EnvBackend
     from unigym.runtime.rewind_providers import EvaluationSessionProvider
 
     from .buffer import EpisodeBuffer
@@ -162,8 +163,9 @@ class EvaluationSession:
             labelled ``directed: true`` in the report (honest boundary:
             directed successes never mix into physics-legal claims,
             director_contract.md §7).
-        env: live env backend used only to scope the per-tick vector
-            ``EvalContext``; ``None`` is the explicit record/obs-only mode.
+
+    The session holds no live env.  Per-tick tasks read the runner-owned
+    boundary view (``bundle["view"]``); a bundle without that view fails fast.
     """
 
     def __init__(
@@ -178,7 +180,6 @@ class EvaluationSession:
         min_episodes: int = 1,
         max_steps: int = 100000,
         director=None,
-        env: EnvBackend | None = None,
     ):
         self.tasks = list(tasks)
         self.meta = dict(meta or {})
@@ -198,7 +199,6 @@ class EvaluationSession:
         self._t0 = time.time()
         self._metrics_pending: list[dict] = []  # bridge metrics feed
         self._director = director
-        self._env = env
         # tasks disabled for the RUN by a per-tick contract failure; process
         # truth (never restored by a rewind) and never per-env partial
         self._disabled_tasks: set[str] = set()
@@ -250,11 +250,20 @@ class EvaluationSession:
         """Run active ``both`` tasks once on one vector-scoped context.
 
         Buffering happens before dispatch, so a failing task can never lose
-        episode history.  The context is separate from the runner's
-        termination context and is closed in ``finally``.  Any contract
-        failure disables the offending task for the RUN (one log line) and
-        leaves every other task untouched.
+        episode history.  The context is derived from the runner's boundary
+        view (``bundle["view"].with_record(rec)``), so the normalized record
+        keys reach ``on_tick``.  The derived child is closed in ``finally``;
+        the shared boundary view is owned by the runner and is never closed
+        here.  A missing view fails fast.  Any contract failure disables the
+        offending task for the RUN (one log line) and leaves every other task
+        untouched.
         """
+        view = bundle.get("view")
+        if view is None:
+            raise EvalViewError(
+                "benchmark tick dispatch requires bundle['view']; the runner "
+                "publishes one read-only boundary view per tick"
+            )
         active = [
             task
             for task in self.tasks
@@ -262,16 +271,7 @@ class EvaluationSession:
         ]
         if not active:
             return
-        ctx = EvalContext(
-            env=build_env_view(
-                self._env,
-                record=rec,
-                obs=bundle.get("obs"),
-                env_id=None,
-                num_envs=self.num_envs,
-            ),
-            t=t,
-        )
+        ctx = EvalContext(env=view.with_record(rec), t=t)
         try:
             for task in active:
                 try:

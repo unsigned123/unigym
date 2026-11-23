@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from unigym.benchmarks.reporting import BenchmarkReporter
+from unigym.evaluation import EnvView
 from unigym.initializers.base import InitializerBase
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
@@ -43,12 +44,20 @@ def _session(tmp_path, *, num_envs: int = 1) -> EvaluationSession:
 
 
 def _step_bundle(*, episode_id: int = 0, num_envs: int = 1) -> dict:
+    record = {
+        "episode_id": torch.full((num_envs,), episode_id, dtype=torch.int64),
+        "time_in_episode": torch.zeros(num_envs),
+    }
     return {
-        "record": {
-            "episode_id": torch.full((num_envs,), episode_id, dtype=torch.int64),
-            "time_in_episode": torch.zeros(num_envs),
-        },
+        "record": record,
         "cmd": None,
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=num_envs,
+            backend="record-only",
+        ),
     }
 
 

@@ -10,7 +10,12 @@ from unigym.benchmarks.base import EpisodeResult, Task
 from unigym.benchmarks.reporting import BenchmarkReporter
 from unigym.core.episode_result import EpisodeResultView
 from unigym.env.obs import ObsSnapshot, ObservationSchema, ObservationSpec
-from unigym.evaluation import EvalQueryUnavailableError, EvalViewError, EvalViewStaleError
+from unigym.evaluation import (
+    EnvView,
+    EvalQueryUnavailableError,
+    EvalViewError,
+    EvalViewStaleError,
+)
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 from unigym.runner.evaluation.session import EvaluationSession
@@ -52,13 +57,13 @@ class _FailingTask(Task):
         raise RuntimeError("task scoring failed")
 
 
-def _session(tmp_path, tasks, *, num_envs: int = 1, env=None) -> EvaluationSession:
+def _session(tmp_path, tasks, *, num_envs: int = 1) -> EvaluationSession:
     tasks = list(tasks)
     meta = {"num_envs": num_envs, "policy_dt": 0.02}
     return EvaluationSession(
         tasks=tasks,
         buffer=EpisodeBuffer(num_envs),
-        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta, env=env),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta),
         reporter=BenchmarkReporter(
             tasks=tasks,
             meta=meta,
@@ -71,20 +76,51 @@ def _session(tmp_path, tasks, *, num_envs: int = 1, env=None) -> EvaluationSessi
     )
 
 
-def _step_bundle(*episode_ids: int) -> dict:
+def _view(
+    record: dict,
+    *,
+    num_envs: int,
+    obs: ObsSnapshot | None = None,
+    env: FakeBenchmarkEnv | None = None,
+) -> EnvView:
+    if env is not None:
+        return env.view(record, obs=obs)
+    return EnvView(
+        record=record,
+        obs=obs,
+        env_id=None,
+        num_envs=num_envs,
+        backend="record-only",
+    )
+
+
+def _step_bundle(
+    *episode_ids: int,
+    env: FakeBenchmarkEnv | None = None,
+    obs: ObsSnapshot | None = None,
+) -> dict:
     count = len(episode_ids)
-    return {
-        "record": {
-            "episode_id": torch.tensor(episode_ids, dtype=torch.int64),
-            "time_in_episode": torch.full((count,), 0.02),
-        },
+    record = {
+        "episode_id": torch.tensor(episode_ids, dtype=torch.int64),
+        "time_in_episode": torch.full((count,), 0.02),
+    }
+    bundle = {
+        "record": record,
         "cmd": None,
         "terminated": torch.zeros(count, dtype=torch.bool),
+        "view": _view(record, num_envs=count, obs=obs, env=env),
     }
+    if obs is not None:
+        bundle["obs"] = obs
+    return bundle
 
 
-def _episode_bundle(*episode_ids: int) -> dict:
-    bundle = _step_bundle(*episode_ids)
+def _episode_bundle(
+    *episode_ids: int,
+    env: FakeBenchmarkEnv | None = None,
+    obs: ObsSnapshot | None = None,
+) -> dict:
+    bundle = _step_bundle(*episode_ids, env=env, obs=obs)
     bundle["reset_facts"] = {
         ei: {
             "reset_index": 0,
@@ -261,28 +297,34 @@ class _ObsTask(Task):
         )
 
 
-def _live_step_bundle(count: int) -> dict:
-    return {
-        "record": {
-            "episode_id": torch.arange(count, dtype=torch.int64),
-            "time_in_episode": torch.full((count,), 0.02),
-            "articulation/g1/joint_pos": torch.zeros(count, 2),
-        },
+def _live_step_bundle(
+    count: int,
+    *,
+    env: FakeBenchmarkEnv | None = None,
+    obs: ObsSnapshot | None = None,
+) -> dict:
+    record = {
+        "episode_id": torch.arange(count, dtype=torch.int64),
+        "time_in_episode": torch.full((count,), 0.02),
+        "articulation/g1/joint_pos": torch.zeros(count, 2),
+    }
+    bundle = {
+        "record": record,
         "cmd": None,
         "terminated": torch.zeros(count, dtype=torch.bool),
+        "view": _view(record, num_envs=count, obs=obs, env=env),
     }
-
-
-def _session_with_env(tmp_path, tasks, *, num_envs: int, env=None) -> EvaluationSession:
-    return _session(tmp_path, tasks, num_envs=num_envs, env=env)
+    if obs is not None:
+        bundle["obs"] = obs
+    return bundle
 
 
 def test_session_builds_a_per_env_live_context_and_closes_it(tmp_path):
     """Tasks see the due env id, a ``(1, ...)`` record and a stale context."""
     seen: list[object] = []
     env = FakeBenchmarkEnv(num_envs=2)
-    sink = _session_with_env(tmp_path, [_ContextTask(seen)], num_envs=2, env=env)
-    bundle = _live_step_bundle(2)
+    sink = _session(tmp_path, [_ContextTask(seen)], num_envs=2)
+    bundle = _live_step_bundle(2, env=env)
     sink.on_step(0, bundle)
 
     sink.on_episode_end(torch.tensor([1]), bundle)
@@ -292,26 +334,24 @@ def test_session_builds_a_per_env_live_context_and_closes_it(tmp_path):
     assert env.query_reads == 1
     with pytest.raises(EvalViewStaleError):
         seen[0].env.num_envs
+    # episode scoring closes only its derived per-env child
+    assert bundle["view"].num_envs == 2
 
 
 def test_session_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
     """``ctx.env.obs()`` carries only the due env's row, not the vector."""
-    sink = _session_with_env(
-        tmp_path,
-        [_ObsTask()],
-        num_envs=2,
-        env=FakeBenchmarkEnv(num_envs=2),
-    )
-    bundle = _live_step_bundle(2)
+    env = FakeBenchmarkEnv(num_envs=2)
+    sink = _session(tmp_path, [_ObsTask()], num_envs=2)
     schema = ObservationSchema(
         {"articulation/g1/joint_pos": ObservationSpec("articulation/g1/joint_pos", (2,), "f32")}
     )
-    bundle["obs"] = ObsSnapshot(
+    obs = ObsSnapshot(
         {"articulation/g1/joint_pos": torch.tensor([[1.0, 2.0], [3.0, 4.0]])},
         schema=schema,
         num_envs=2,
         device="cpu",
     )
+    bundle = _live_step_bundle(2, env=env, obs=obs)
     sink.on_step(0, bundle)
 
     sink.on_episode_end(torch.tensor([1]), bundle)
@@ -323,8 +363,8 @@ def test_session_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
 def test_session_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
     """The query factory is lazy; a pure task never opens the query handle."""
     env = FakeBenchmarkEnv(num_envs=1)
-    sink = _session_with_env(tmp_path, [_ScoredTask("acme/pure", 2.0)], num_envs=1, env=env)
-    bundle = _live_step_bundle(1)
+    sink = _session(tmp_path, [_ScoredTask("acme/pure", 2.0)], num_envs=1)
+    bundle = _live_step_bundle(1, env=env)
     sink.on_step(0, bundle)
 
     sink.on_episode_end(torch.tensor([0]), bundle)
@@ -334,13 +374,9 @@ def test_session_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
 
 
 def test_record_only_context_has_no_query_and_isolates_query_callers(tmp_path):
-    """Without an injected env the context is explicitly query-unavailable."""
+    """Without a live env the context is explicitly query-unavailable."""
     errors: list[Exception] = []
-    sink = _session_with_env(
-        tmp_path,
-        [_HasQueryTask(), _QueryCallTask(errors)],
-        num_envs=1,
-    )
+    sink = _session(tmp_path, [_HasQueryTask(), _QueryCallTask(errors)], num_envs=1)
     bundle = _live_step_bundle(1)
     sink.on_step(0, bundle)
 
@@ -356,8 +392,8 @@ def test_per_env_query_rejects_another_env_and_isolates_the_task(tmp_path):
     """A scoped query read for another env is an error, not a cross-env read."""
     errors: list[Exception] = []
     env = FakeBenchmarkEnv(num_envs=2)
-    sink = _session_with_env(tmp_path, [_CrossEnvTask(errors)], num_envs=2, env=env)
-    bundle = _live_step_bundle(2)
+    sink = _session(tmp_path, [_CrossEnvTask(errors)], num_envs=2)
+    bundle = _live_step_bundle(2, env=env)
     sink.on_step(0, bundle)
 
     sink.on_episode_end(torch.tensor([1]), bundle)

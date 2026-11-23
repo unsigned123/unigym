@@ -56,11 +56,13 @@ scoring argument; they are not duplicated on the context.
 ### 2.1 Per-tick benchmark contexts
 
 A `trigger: both` benchmark task receives one VECTOR-scoped context per policy
-tick (`env_id is None`, `t` = the policy tick), created and closed by
-`EvaluationSession` inside its own callback.  It is separate from the runner's
-boundary view (`bundle["view"]`, closed after `on_episode_end`) and from the
-per-env episode-end context created by `EpisodeEvaluator`.  A task cannot reach
-a raw env through it.
+tick (`env_id is None`, `t` = the policy tick), derived by `EvaluationSession`
+from the runner-owned boundary view (`bundle["view"].with_record(normalized
+record)`) and closed inside its own callback.  It is a child of the runner's
+boundary view (`bundle["view"]`, closed after `on_episode_end`), never the
+parent itself; the parent is not closed by the session.  It is separate from
+the per-env episode-end context derived by `EpisodeEvaluator`.  A task cannot
+reach a raw env through it.
 
 ## 3. Scope
 
@@ -177,13 +179,14 @@ The boundaries are:
   that is not exactly `check(self, ctx)`, so a legacy `check(self, state)` term
   fails at build;
 - benchmark: per-env view inside `EvaluationSession.on_episode_end`, before reset,
-  built by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`).
+  derived by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) as
+  `bundle["view"].for_env(ep.env_id)`.
   `Task.score(ep, ctx)` and `Task.score_detail(ep, ctx, *, retain_frames=False)`
-  receive one context scoped to `ep.env_id`; the evaluator closes it in
-  `finally` after all tasks for that env.  A task exception is isolated and
-  skipped; an old task signature is rejected by `build_tasks` at build time.  A
-  sink wired without an env (direct unit use) builds an explicit record/obs-only
-  context whose query is unavailable;
+  receive one context scoped to `ep.env_id`; the evaluator closes that child in
+  `finally` after all tasks for that env and never closes the vector parent.  A
+  task exception is isolated and skipped; an old task signature is rejected by
+  `build_tasks` at build time.  A bundle without `bundle["view"]` fails fast
+  instead of scoring blind;
 - watcher: one vector-scoped view (`env_id is None`) built by
   `WatcherEngine.on_tick` from the step bundle/env, retained until the next
   tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs` read

@@ -8,6 +8,7 @@ import torch
 
 from unigym.benchmarks.base import EpisodeResult, Task, TickResult
 from unigym.benchmarks.reporting import BenchmarkReporter
+from unigym.evaluation import EnvView, EvalViewError
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 from unigym.runner.evaluation.session import EvaluationSession
@@ -172,14 +173,42 @@ class _EpisodeTask(Task):
         return EpisodeResult(metrics={"episode": 1.0}, success=True)
 
 
+class _RecordTickTask(Task):
+    """Both-cadence task recording the record keys it observes."""
+
+    name = "acme/record"
+    trigger = "both"
+
+    def __init__(self, *, num_envs: int = 1) -> None:
+        super().__init__()
+        self.num_envs = num_envs
+        self.keys: list[tuple[str, ...]] = []
+
+    def on_tick(self, ctx):
+        self.keys.append(tuple(sorted(ctx.env.record())))
+        return TickResult(metrics={"det": torch.zeros(self.num_envs)})
+
+    def score(self, ep, ctx):
+        del ep, ctx
+        return EpisodeResult(metrics={"record": 1.0}, success=True)
+
+
 def _step_bundle(episode_id: int = 0, num_envs: int = 1) -> dict:
+    record = {
+        "episode_id": torch.full((num_envs,), episode_id, dtype=torch.int64),
+        "time_in_episode": torch.full((num_envs,), 0.02),
+    }
     return {
-        "record": {
-            "episode_id": torch.full((num_envs,), episode_id, dtype=torch.int64),
-            "time_in_episode": torch.full((num_envs,), 0.02),
-        },
+        "record": record,
         "raw": None,
         "cmd": None,
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=num_envs,
+            backend="record-only",
+        ),
     }
 
 
@@ -218,6 +247,59 @@ def test_on_tick_receives_one_vector_context_at_the_policy_tick(tmp_path):
     session.on_step(4, _step_bundle(num_envs=2))
 
     assert task.log == [("tick", None, 4, 2)]
+
+
+def test_tick_context_receives_the_normalized_record(tmp_path):
+    """The ``with_record`` child carries CollectSink's normalized record keys."""
+    task = _RecordTickTask(num_envs=1)
+    session = _session(tmp_path, [task])
+    record = {
+        "episode_id": torch.tensor([0], dtype=torch.int64),
+        "time_in_episode": torch.tensor([0.02]),
+        "articulation/g1/base_pos_w": torch.zeros(1, 3),
+    }
+    bundle = {
+        "record": record,
+        "raw": torch.zeros(1, 2),
+        "cmd": torch.zeros(1, 1),
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            backend="record-only",
+        ),
+    }
+
+    session.on_step(0, bundle)
+
+    keys = task.keys[0]
+    assert "articulation/g1/base_pos" in keys
+    assert "articulation/g1/base_pos_w" not in keys
+    assert "action_raw" in keys
+    assert "command" in keys
+
+
+def test_tick_dispatch_does_not_close_the_shared_boundary_view(tmp_path):
+    """Tick dispatch closes only its derived child, never ``bundle["view"]``."""
+    session = _session(tmp_path, [_VectorTickTask(num_envs=1)])
+    bundle = _step_bundle()
+    parent = bundle["view"]
+
+    session.on_step(0, bundle)
+
+    assert parent.num_envs == 1
+    assert "episode_id" in parent.record()
+
+
+def test_tick_dispatch_requires_the_runner_boundary_view(tmp_path):
+    """A bundle without ``view`` fails fast before any task ticks."""
+    session = _session(tmp_path, [_VectorTickTask(num_envs=1)])
+    bundle = _step_bundle()
+    del bundle["view"]
+
+    with pytest.raises(EvalViewError, match=r"bundle\['view'\]"):
+        session.on_step(0, bundle)
 
 
 def test_tick_metrics_are_sliced_per_env_to_cpu_numpy(tmp_path):

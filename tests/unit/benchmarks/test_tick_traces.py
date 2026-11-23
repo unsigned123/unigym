@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from unigym.benchmarks.base import EpisodeData, EpisodeResult, Task, TickResult, TickTrace
+from unigym.evaluation import EnvView
 from unigym.runner.evaluation.buffer import TakenEpisode, TickSample
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 
@@ -99,14 +100,22 @@ def _taken(
 
 
 def _bundle(*, episode_id: int = 5) -> dict:
+    record = {
+        "episode_id": torch.tensor([episode_id]),
+        "time_in_episode": torch.tensor([0.02]),
+    }
     return {
-        "record": {
-            "episode_id": torch.tensor([episode_id]),
-            "time_in_episode": torch.tensor([0.02]),
-        },
+        "record": record,
         "terminated": torch.tensor([False]),
         "reset_facts": {},
         "terminations": {},
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            backend="record-only",
+        ),
     }
 
 

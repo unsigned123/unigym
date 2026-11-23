@@ -16,7 +16,12 @@ from unigym.benchmarks.termination import (
     TerminationSource,
 )
 from unigym.env.obs import ObsSnapshot, ObservationSchema, ObservationSpec
-from unigym.evaluation import EvalQueryUnavailableError, EvalViewStaleError
+from unigym.evaluation import (
+    EnvView,
+    EvalQueryUnavailableError,
+    EvalViewError,
+    EvalViewStaleError,
+)
 from unigym.runner.evaluation.buffer import TakenEpisode
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 
@@ -44,16 +49,29 @@ def _bundle(
     terminations: dict | None = None,
     obs: ObsSnapshot | None = None,
     num_envs: int = 1,
+    env: FakeBenchmarkEnv | None = None,
 ) -> dict:
+    record = {
+        "episode_id": torch.tensor([episode_id] * num_envs),
+        "time_in_episode": torch.full((num_envs,), 0.02),
+        "articulation/g1/joint_pos": torch.zeros(num_envs, 2),
+    }
     bundle = {
-        "record": {
-            "episode_id": torch.tensor([episode_id] * num_envs),
-            "time_in_episode": torch.full((num_envs,), 0.02),
-            "articulation/g1/joint_pos": torch.zeros(num_envs, 2),
-        },
+        "record": record,
         "terminated": torch.tensor([terminated] * num_envs),
         "reset_facts": reset_facts or {},
         "terminations": terminations or {},
+        "view": (
+            env.view(record, obs=obs)
+            if env is not None
+            else EnvView(
+                record=record,
+                obs=obs,
+                env_id=None,
+                num_envs=num_envs,
+                backend="record-only",
+            )
+        ),
     }
     if obs is not None:
         bundle["obs"] = obs
@@ -64,12 +82,11 @@ def _evaluator(
     tasks: list[Task],
     *,
     meta: dict | None = None,
-    env=None,
     limits: EpisodeLimits | None = None,
 ) -> EpisodeEvaluator:
     if meta is None:
         meta = {"num_envs": 1, "policy_dt": 0.02, "sim_dt": 0.005}
-    return EpisodeEvaluator(tasks=tasks, meta=meta, env=env, limits=limits)
+    return EpisodeEvaluator(tasks=tasks, meta=meta, limits=limits)
 
 
 class _NoopTask(Task):
@@ -270,11 +287,11 @@ class _ContextTask(Task):
 
 
 def test_context_is_per_env_scoped_and_stale_after_scoring():
-    """The task sees one env's rows and the context is closed afterwards."""
+    """The task sees one env's rows and its child context is closed afterwards."""
     seen: list[object] = []
     env = FakeBenchmarkEnv(num_envs=2)
-    bundle = _bundle(num_envs=2)
-    evaluator = _evaluator([_ContextTask(seen)], meta={"num_envs": 2, "policy_dt": 0.02}, env=env)
+    bundle = _bundle(num_envs=2, env=env)
+    evaluator = _evaluator([_ContextTask(seen)], meta={"num_envs": 2, "policy_dt": 0.02})
 
     evaluation = evaluator.evaluate(_taken(), bundle, 1)
 
@@ -286,6 +303,9 @@ def test_context_is_per_env_scoped_and_stale_after_scoring():
     assert env.query_reads == 1
     with pytest.raises(EvalViewStaleError):
         seen[0].env.num_envs
+    # the evaluator closes only its derived child; the vector parent stays open
+    assert bundle["view"].num_envs == 2
+    assert bundle["view"].record()["articulation/g1/joint_pos"].shape[0] == 2
 
 
 class _ObsTask(Task):
@@ -313,10 +333,11 @@ def test_observation_snapshot_is_scoped_to_the_due_env():
     evaluator = _evaluator(
         [_ObsTask()],
         meta={"num_envs": 2, "policy_dt": 0.02},
-        env=FakeBenchmarkEnv(num_envs=2),
     )
 
-    evaluation = evaluator.evaluate(_taken(), _bundle(num_envs=2, obs=obs), 1)
+    evaluation = evaluator.evaluate(
+        _taken(), _bundle(num_envs=2, obs=obs, env=FakeBenchmarkEnv(num_envs=2)), 1
+    )
 
     assert evaluation.scores[0].result.metrics == {"obs_value": 3.0}
 
@@ -324,9 +345,9 @@ def test_observation_snapshot_is_scoped_to_the_due_env():
 def test_query_is_lazy_for_a_pure_task():
     """A task that ignores the context never opens the runtime query."""
     env = FakeBenchmarkEnv(num_envs=1)
-    evaluator = _evaluator([_NoopTask()], env=env)
+    evaluator = _evaluator([_NoopTask()])
 
-    evaluator.evaluate(_taken(), _bundle(), 0)
+    evaluator.evaluate(_taken(), _bundle(env=env), 0)
 
     assert env.query_reads == 0
 
@@ -367,6 +388,16 @@ def test_record_only_context_has_no_query_and_isolates_query_callers():
     assert evaluation.scores[0].result.metrics == {"has_query": 0.0}
     assert len(errors) == 1
     assert isinstance(errors[0], EvalQueryUnavailableError)
+
+
+def test_evaluate_requires_the_runner_boundary_view():
+    """A bundle without ``view`` fails fast instead of scoring blind."""
+    evaluator = _evaluator([_NoopTask()])
+    bundle = _bundle()
+    del bundle["view"]
+
+    with pytest.raises(EvalViewError, match=r"bundle\['view'\]"):
+        evaluator.evaluate(_taken(), bundle, 0)
 
 
 def test_episode_data_fields_and_values_are_unchanged():

@@ -1720,7 +1720,6 @@ def _build_sinks(
             evaluator = EpisodeEvaluator(
                 tasks=bench_tasks,
                 meta=report_meta,
-                env=env,
                 limits=limits,
                 retain_frames=retain_frames,
             )
@@ -1740,7 +1739,6 @@ def _build_sinks(
                 min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
                 max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
                 director=director,
-                env=env,
             )
             if bench_tasks:  # no tasks -> nothing to wait for
                 standard_stop = eval_session.episodes_done

@@ -3,11 +3,16 @@
 ``EpisodeEvaluator`` owns the benchmark episode-end decision surface: it builds
 the :class:`~unigym.benchmarks.base.EpisodeData` from the buffered history and
 the runner bundle (data, ids, timeline, reset facts and core terminations),
-creates one read-only per-env :class:`~unigym.evaluation.EvalContext`, invokes
-every task in declaration order with exception isolation, merges the core and
-task terminations under benchmark precedence, and validates the episode-local
-axis.  It returns an :class:`~unigym.benchmarks.reporting.EpisodeEvaluation`;
-it writes no report and keeps no run-level accumulator.
+derives one read-only per-env :class:`~unigym.evaluation.EvalContext` from the
+runner-owned ``bundle["view"]`` boundary view, invokes every task in declaration
+order with exception isolation, merges the core and task terminations under
+benchmark precedence, and validates the episode-local axis.  It returns an
+:class:`~unigym.benchmarks.reporting.EpisodeEvaluation`; it writes no report and
+keeps no run-level accumulator.
+
+The evaluator owns each per-env view child it derives and closes it in
+``finally``; the shared vector parent (``bundle["view"]``) remains owned by the
+runner and is never closed here.
 
 The evaluator is benchmark-layer: it depends on ``unigym.benchmarks`` and
 ``unigym.evaluation`` but not on a reporter implementation or the runner sinks.
@@ -15,9 +20,7 @@ The evaluator is benchmark-layer: it depends on ``unigym.benchmarks`` and
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -32,63 +35,12 @@ from unigym.core.episode_termination import (
     TerminationExtension,
     TerminationSource,
 )
-from unigym.evaluation import EnvView, EvalContext
-from unigym.query.facade import Query
+from unigym.evaluation import EvalContext, EvalViewError
 
 from ..episodes import assemble_episode
 from .buffer import TakenEpisode
 
-if TYPE_CHECKING:
-    from unigym.env.backends.base import EnvBackend
-    from unigym.env.obs import ObsSnapshot
-
-__all__ = ["EpisodeEvaluator", "build_env_view"]
-
-
-def build_env_view(
-    env: EnvBackend | None,
-    *,
-    record: Mapping[str, object],
-    obs: ObsSnapshot | None,
-    env_id: int | None,
-    num_envs: int,
-) -> EnvView:
-    """Build a read-only evaluation view at one runner boundary.
-
-    Production wiring injects ``env``: the view carries that backend's
-    device/label/articulations and a lazy read-only query factory.  With
-    ``env is None`` (direct unit wiring) the view is explicitly
-    record/obs-only and ``query`` is unavailable.
-    """
-    if env is None:
-        return EnvView(
-            record=record,
-            obs=obs,
-            env_id=env_id,
-            num_envs=num_envs,
-            device="cpu",
-            backend="record-only",
-        )
-
-    def _query_factory() -> Query:
-        query = getattr(env, "query", None)
-        if not isinstance(query, Query):
-            raise NotImplementedError(f"backend {type(env).__name__!r} has no runtime query")
-        return query
-
-    query_factory = (
-        _query_factory if inspect.getattr_static(env, "query", None) is not None else None
-    )
-    return EnvView(
-        record=record,
-        obs=obs,
-        env_id=env_id,
-        num_envs=num_envs,
-        device=getattr(env, "device", "cpu"),
-        backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-        query_factory=query_factory,
-        articulations=getattr(env, "articulations", None) or {},
-    )
+__all__ = ["EpisodeEvaluator"]
 
 
 class EpisodeEvaluator:
@@ -98,11 +50,13 @@ class EpisodeEvaluator:
         tasks: instantiated ``benchmarks.base.Task`` objects in declaration
             order.
         meta: run-level context (``policy_dt``, ``sim_dt``, ``num_envs``).
-        env: the live env backend used only to scope the per-env evaluation
-            context; ``None`` is the explicit record/obs-only mode.
         limits: declared episode deadline, or ``None``.
         retain_frames: whether ``score_detail`` retains per-frame metric
             series.
+
+    The evaluator holds no live env.  Each due env's task context is a
+    per-env child derived from the runner-owned ``bundle["view"]``; a bundle
+    without that view fails fast.
     """
 
     def __init__(
@@ -110,13 +64,11 @@ class EpisodeEvaluator:
         *,
         tasks: list[Task],
         meta: dict,
-        env: EnvBackend | None = None,
         limits: EpisodeLimits | None = None,
         retain_frames: bool = False,
     ):
         self.tasks = list(tasks)
         self.meta = dict(meta)
-        self._env = env
         self.limits = limits
         self.retain_frames = bool(retain_frames)
         self.num_envs = int(self.meta.get("num_envs", 1))
@@ -285,16 +237,18 @@ class EpisodeEvaluator:
         return traces, frozenset(failed)
 
     def _eval_context(self, ei: int, bundle: dict) -> EvalContext:
-        """Build the read-only per-env context for one due env."""
-        return EvalContext(
-            env=build_env_view(
-                self._env,
-                record=bundle["record"],
-                obs=bundle.get("obs"),
-                env_id=ei,
-                num_envs=self.num_envs,
+        """Derive the read-only per-env context for one due env.
+
+        The child is a ``for_env`` derivation of the runner-owned
+        ``bundle["view"]``; the caller closes it and never closes the parent.
+        """
+        view = bundle.get("view")
+        if view is None:
+            raise EvalViewError(
+                "benchmark evaluation requires bundle['view']; the runner "
+                "publishes one read-only boundary view per tick"
             )
-        )
+        return EvalContext(env=view.for_env(ei))
 
     def _score_tasks(
         self,
