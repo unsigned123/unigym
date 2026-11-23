@@ -147,7 +147,43 @@ The boundaries are:
 Evaluation order is contract for the consumers that adopt it, not a convention
 to reorder for convenience.
 
-## 9. Non-goals
+## 9. Shared condition predicates
+
+`unigym.conditions` is the canonical predicate layer for genuinely duplicated
+state conditions:
+
+```text
+Condition.evaluate(ctx: EvalContext) -> (ctx.env.scope_size,) bool
+```
+
+- `unigym.conditions` (the package import) is torch-free: it exports only the
+  structural `Condition` protocol and `ConditionError` from
+  `unigym.conditions.base`.  Concrete modules
+  (`unigym.conditions.height`, `.tilt`, `.joint_limit`) may import torch.
+- Domain packages (`unigym.terminations`, `unigym.benchmarks`) must import
+  concrete conditions locally at use time, never at their package import time.
+- A condition is live, read-only, effect-free and stateless.  It accepts only an
+  `EvalContext`; it never receives a raw env, backend handle or mutable state,
+  and it never produces a termination fact, `WatchResult`, `TickResult` or
+  report field.
+- `HeightCondition` reads an articulation `base_pos_w` leaf or an explicit
+  record key and supports the termination threshold form and the watcher
+  threshold/op or band forms.
+- `TiltCondition` reads projected `gravity_b` or a quaternion (`base_quat_w`
+  style) source; gravity thresholds are radians and quaternion thresholds are
+  degrees.
+- `JointLimitCondition` reads policy-order `joint_pos` plus the articulation's
+  soft limits.  `band` mode matches `JointLimitTermination`; `magnitude` mode
+  matches the watcher `joint_limit` template.  Missing limits produce an
+  all-false mask; the watcher adapter still pre-validates limits to preserve its
+  `WatchError`/fail-safe contract.
+- Domain ownership is unchanged: terminations own fail-fast masks and episode
+  facts; watchers own `WatchResult`, messages/data, signals, actions and the
+  trigger layer; benchmark tasks own `TickResult`/`TickTrace`.  A task may
+  compose a condition inside `on_tick(ctx)`; there is no core `Task.condition`
+  API.
+
+## 10. Non-goals
 
 - No deterministic replay or offline re-scoring guarantee.
 - No removal of `EpisodeData`, reports or history.
@@ -156,7 +192,7 @@ to reorder for convenience.
 - No recorded/offline termination state or reconstruction from stored episode
   data.
 
-## 10. Removed episode filters
+## 11. Removed episode filters
 
 The episode filter subsystem is removed in this release.  There is no offline
 filter chain, no generic recorded-termination filter and no compatibility shim;

@@ -477,7 +477,14 @@ class Task(ABC):
         (``ctx.env.env_id is None``, ``ctx.t`` is the policy tick).  The
         default is an empty result; a ``both`` task must override it.  The
         hook is detection/annotation only: it cannot step, reset, write or
-        request termination.
+        request termination.  A task may compose a canonical condition here::
+
+            from unigym.conditions.height import HeightCondition
+
+            mask = HeightCondition(articulation="g1", threshold=0.2).evaluate(ctx)
+            return TickResult(fired=mask)
+
+        There is no core ``Task.condition`` field.
         """
         del ctx
         return TickResult()

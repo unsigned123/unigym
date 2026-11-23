@@ -28,9 +28,12 @@ live in the trigger layer (design §8.5 -- semantics decoupled).
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import Level, WatchContext, WatchError, WatchResult, finite
+
+if TYPE_CHECKING:
+    from unigym.evaluation import EvalContext
 
 __all__ = ["TEMPLATE_REGISTRY", "get_template", "validate_template_params"]
 
@@ -265,13 +268,25 @@ def _entity_quat(ctx: WatchContext, entity: str, env: int):
 def _tilt_check(ctx: WatchContext, p: dict) -> WatchResult:
     import numpy as np
 
-    env = int(p.get("env") or 0)
-    q, name = _entity_quat(ctx, p["entity"], env)
-    q = np.asarray(_to_np(q)[env], dtype=float)  # wxyz (contract)
-    w, x, y, z = q / max(np.linalg.norm(q), 1e-9)
+    from unigym.conditions.tilt import TiltCondition
+
+    explicit_env = p.get("env")
+    env = int(explicit_env if explicit_env is not None else 0)
+    source, name = _entity_quat(ctx, p["entity"], env)
+    row = np.asarray(_to_np(source)[env], dtype=float)  # wxyz (contract)
+    w, x, y, z = row / max(np.linalg.norm(row), 1e-9)
     up_z = 1.0 - 2.0 * (y * y + z * z)  # rotated world-up z
     deg = float(np.degrees(np.arccos(np.clip(up_z, -1.0, 1.0))))
-    if deg <= float(p["max_deg"]):
+    record_key = name[len("record/") :]
+    condition = TiltCondition(
+        source="base_quat_w",
+        record_key=record_key,
+        threshold=float(p["max_deg"]),
+        unit="deg",
+    )
+    mask = condition.evaluate(_condition_context(ctx, record_key, source))
+    fired = bool(mask[env]) if explicit_env is not None else bool(mask.any())
+    if not fired:
         return NOT_FIRED
     return WatchResult(
         fired=True,
@@ -293,24 +308,62 @@ def _to_np(v):
     return _to_numpy(v)
 
 
+def _condition_context(ctx: WatchContext, record_key: str, value: object) -> EvalContext:
+    """Build the read-only EvalContext a template condition evaluates against.
+
+    Live watcher ticks already carry the tick's vector view.  Offline unit
+    contexts have no view, so the predicate gets a transient view carrying the
+    one record leaf the condition reads; this preserves the documented
+    bundle-only fallback without exposing a raw env.
+    """
+    from unigym.evaluation import EnvView, EvalContext
+
+    if ctx.view is not None:
+        return EvalContext(env=ctx.view, t=ctx.t)
+    shape = getattr(value, "shape", None)
+    size = int(shape[0]) if isinstance(shape, tuple) and shape else 1
+    view = EnvView(
+        record={record_key: value},
+        obs=None,
+        env_id=None,
+        num_envs=size if size > 0 else 1,
+        device="cpu",
+        backend="offline watcher",
+    )
+    return EvalContext(env=view, t=ctx.t)
+
+
 def _height_check(ctx: WatchContext, p: dict) -> WatchResult:
-    pos = ctx.pose(p["entity"], env=int(p.get("env") or 0))
+    from unigym.conditions.height import HeightCondition
+
+    explicit_env = p.get("env")
+    env = int(explicit_env if explicit_env is not None else 0)
+    pos = ctx.pose(p["entity"], env=env)
     z = float(pos[2])
+    key = (
+        "record/base_pos_w"
+        if p["entity"] in ("base", "pelvis", "robot")
+        else f"record/object/{p['entity']}/pos"
+    )
+    record_key = key[len("record/") :]
+    source = ctx.key(key)
     band = p.get("band")
-    if band is not None:
-        fired = not (float(band[0]) <= z <= float(band[1]))
-        desc = f"outside band {band}"
-    else:
-        fired, _, _ = ctx.compare(
-            "record/base_pos_w"
-            if p["entity"] in ("base", "pelvis", "robot")
-            else f"record/object/{p['entity']}/pos",
-            p.get("op", "lt"),
-            float(p["z"]),
-            dim=2,
-            env=p.get("env") or 0,
-        )
-        desc = f"{p.get('op', 'lt')} {p['z']}"
+    try:
+        if band is not None:
+            condition = HeightCondition(record_key=record_key, band=band, dim=2)
+            desc = f"outside band {band}"
+        else:
+            condition = HeightCondition(
+                record_key=record_key,
+                threshold=float(p["z"]),
+                op=p.get("op", "lt"),
+                dim=2,
+            )
+            desc = f"{p.get('op', 'lt')} {p['z']}"
+        mask = condition.evaluate(_condition_context(ctx, record_key, source))
+    except ValueError as exc:
+        raise WatchError(str(exc), ctx.keys()) from exc
+    fired = bool(mask[env]) if explicit_env is not None else bool(mask.any())
     if not fired:
         return NOT_FIRED
     return WatchResult(
@@ -373,6 +426,9 @@ def _infer_joint_articulation(ctx: WatchContext) -> str:
 def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     import numpy as np
 
+    from unigym.conditions.joint_limit import JointLimitCondition
+    from unigym.evaluation import EvalContext
+
     articulation = p.get("articulation")
     key = p.get("key")
     if articulation is None and isinstance(key, str) and key.startswith("record/articulation/"):
@@ -389,13 +445,22 @@ def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     if limits is None:
         raise WatchError(f"joint_limit: articulation {articulation!r} declares no joint limits")
     lim = _limit_magnitude(limits)  # (N, J)
-    q = _to_np(ctx.key(f"record/articulation/{articulation}/joint_pos")).astype(float)
+    record_key = f"articulation/{articulation}/joint_pos"
+    q = _to_np(ctx.key(f"record/{record_key}")).astype(float)
     margin = float(p.get("margin", 0.1))
     band = lim - margin
-    viol = np.abs(q) >= band
-    envs = [int(i) for i in np.nonzero(viol.any(axis=-1))[0]]
-    if not envs:
+    condition = JointLimitCondition(
+        articulation=articulation,
+        record_key=record_key,
+        mode="magnitude",
+        margin=margin,
+    )
+    mask = condition.evaluate(EvalContext(env=view, t=ctx.t))
+    explicit_env = p.get("env")
+    fired = bool(mask[int(explicit_env)]) if explicit_env is not None else bool(mask.any())
+    if not fired:
         return NOT_FIRED
+    envs = [int(i) for i in np.nonzero(mask.detach().cpu().numpy())[0]]
     worst = float((np.abs(q) - band).max()) if q.size else 0.0
     return WatchResult(
         fired=True,

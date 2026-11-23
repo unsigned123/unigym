@@ -104,6 +104,25 @@ type, wrong shape/dtype) disables that task for the RUN (logged once; later
 episodes score without it and the report shows `n_episodes: 0`).  The disable
 set is process truth and is never reverted by a rewind.
 
+A task may compose a canonical condition inside `on_tick`; there is no core
+`Task.condition` field:
+
+```python
+from unigym.benchmarks.base import Task, TickResult
+from unigym.conditions.height import HeightCondition
+
+
+class LowBaseTask(Task):
+    trigger = "both"
+
+    def on_tick(self, ctx):
+        mask = HeightCondition(articulation="g1", threshold=0.2).evaluate(ctx)
+        return TickResult(fired=mask)
+```
+
+`TickResult` remains the benchmark-owned detection payload; the condition only
+computes the mask and the task/session own trace and scoring effects.
+
 Per-task histories are assembled into `EpisodeData.ticks: Mapping[str,
 TickTrace] | None` (`None` when the run has no `both` task).  A trace's metric
 arrays have a leading time axis `(T,)`/`(T, ...)` and `fired` is `(T,)` bool.

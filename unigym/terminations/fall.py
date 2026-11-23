@@ -22,7 +22,6 @@ import math
 from typing import TYPE_CHECKING
 
 from .articulation import ArticulationTermination
-from .base import body_tilt_exceeded
 
 if TYPE_CHECKING:
     import torch
@@ -57,6 +56,9 @@ class FallTermination(ArticulationTermination):
     def check(self, ctx: EvalContext) -> torch.Tensor:
         import torch
 
+        from unigym.conditions.height import HeightCondition
+        from unigym.conditions.tilt import TiltCondition
+
         source = self.source(ctx)
         base_pos_w = source.get("base_pos_w")
         gravity_b = source.get("gravity_b")
@@ -65,7 +67,17 @@ class FallTermination(ArticulationTermination):
                 f"FallTermination requires {self.articulation!r} base_pos_w "
                 f"in the evaluation record"
             )
-        fallen = base_pos_w[..., 2] < self.height_threshold
+        fallen = HeightCondition(
+            articulation=self.articulation,
+            threshold=self.height_threshold,
+        ).evaluate(ctx)
         if self._cos_tilt is not None and isinstance(gravity_b, torch.Tensor):
-            fallen = fallen | body_tilt_exceeded(gravity_b, self._cos_tilt)
+            tilted = TiltCondition(
+                source="gravity_b",
+                articulation=self.articulation,
+                threshold=self.tilt_threshold,
+                unit="rad",
+                missing="false",
+            ).evaluate(ctx)
+            fallen = fallen | tilted
         return fallen
