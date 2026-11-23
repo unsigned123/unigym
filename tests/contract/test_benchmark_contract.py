@@ -80,7 +80,7 @@ def test_public_export_contract_is_buffer_only_and_exposes_tick_types():
 
 
 def test_termination_module_is_core_neutral():
-    source = inspect.getsource(__import__("unigym.benchmarks.termination", fromlist=["x"]))
+    source = inspect.getsource(__import__("unigym.core.episode_termination", fromlist=["x"]))
     assert "import gymnasium" not in source
     assert "from gymnasium" not in source
     values = {outcome.value for outcome in EpisodeOutcome}

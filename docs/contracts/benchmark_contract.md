@@ -55,7 +55,9 @@ enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
 
 ## Terminations
 
-`unigym.benchmarks.termination` defines the core-neutral fact object:
+`unigym.core.episode_termination` is the canonical owner of the core-neutral
+fact object.  `unigym.benchmarks.termination` remains a documented re-export
+shim for the historical import path and defines no facts of its own:
 
 - `EpisodeOutcome`: `success | failure | deadline | invalid_reset | engine | manual`
 - `TerminationSource`: `environment | initializer | runtime | custom`

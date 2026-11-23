@@ -31,7 +31,7 @@ from types import MappingProxyType
 import numpy as np
 import torch
 
-from unigym.benchmarks.termination import (
+from unigym.core.episode_termination import (
     EpisodeOutcome,
     EpisodeTermination,
     Termination,

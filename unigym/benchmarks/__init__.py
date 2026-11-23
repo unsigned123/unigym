@@ -26,6 +26,15 @@ run-level report/results schema.  There is no ``BenchmarkSink``.
 
 from __future__ import annotations
 
+from unigym.core.episode_termination import (
+    EpisodeOutcome,
+    EpisodeTermination,
+    Termination,
+    TerminationExtension,
+    TerminationSource,
+)
+
+from . import termination as termination
 from .base import (
     TASK_REGISTRY,
     EpisodeData,
@@ -42,13 +51,6 @@ from .episode import (
     RunIdentity,
     timeline_step_index,
     timeline_time_s,
-)
-from .termination import (
-    EpisodeOutcome,
-    EpisodeTermination,
-    Termination,
-    TerminationExtension,
-    TerminationSource,
 )
 
 __all__ = [
