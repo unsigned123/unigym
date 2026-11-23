@@ -70,7 +70,7 @@ from __future__ import annotations
 import copy
 import os
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeGuard, runtime_checkable
 
 import numpy as np
 
@@ -470,37 +470,78 @@ class CollectSinkProvider(_EpisodeBufferProvider):
             w.restore_commit(commit)
 
 
+def _provider_problem(candidate: object) -> str | None:
+    """Describe why *candidate* is not a rewind provider (None when valid).
+
+    The structural provider shape is a non-empty string ``name`` plus callable
+    ``rewind_state`` / ``apply_rewind_state``; ``validate_rewind_state`` is
+    accepted when present and must then be callable.
+    """
+    problems: list[str] = []
+    name = getattr(candidate, "name", None)
+    if not isinstance(name, str) or not name:
+        problems.append("name must be a non-empty string")
+    for method in ("rewind_state", "apply_rewind_state"):
+        if not callable(getattr(candidate, method, None)):
+            problems.append(f"{method} must be callable")
+    validate = getattr(candidate, "validate_rewind_state", None)
+    if validate is not None and not callable(validate):
+        problems.append("validate_rewind_state must be callable when present")
+    return "; ".join(problems) if problems else None
+
+
+def _is_rewind_provider(candidate: object) -> TypeGuard[RewindStateProvider]:
+    """Structural provider check shared by discovery and supplier validation."""
+    return _provider_problem(candidate) is None
+
+
 def build_rewind_providers(
     sink: object, initializer: object | None = None
 ) -> list[RewindStateProvider]:
-    """One provider per provider-capable sink in the fan-out chain.
+    """One provider per provider-capable sink, discovered structurally.
 
     collect_cli wiring; a plain sink or None -> whatever applies.
 
-    The walk RECURSES into nested fan-outs -- production wraps
-    the sink chain (``FanOutSink(FanOutSink(collect, timeline), ...)``
-    etc.), and the one-level walk saw only the wrappers, so the
-    providers silently never mounted in real runs (the mixed-shard
-    undo artifacts are that hole's symptom).  Depth-first in
-    construction order; identity-deduped against diamond re-visits.
+    Discovery is capability-based, never class-name or attribute sniffing:
+
+    1. a node that itself satisfies the provider protocol is the provider;
+    2. otherwise a ``rewind_provider`` attribute/method supplies one; a
+       declared supplier that does not yield a valid provider fails fast;
+    3. otherwise ``sinks`` children are walked.
+
+    The walk RECURSES into nested fan-outs -- production wraps the sink chain
+    (``FanOutSink(FanOutSink(collect, timeline), ...)`` etc.) -- depth-first in
+    construction order, identity-deduped against diamond re-visits.  Provider
+    names are checkpoint payload keys, so duplicates fail at build time; the
+    rewind controller keeps its own guard as the second line.
     """
     out: list[RewindStateProvider] = []
     seen: list[object] = []
 
-    def walk(s: object | None) -> None:
-        if s is None or any(s is x for x in seen):
+    def walk(node: object | None) -> None:
+        if node is None or any(node is x for x in seen):
             return
-        seen.append(s)
-        fan = getattr(s, "sinks", None)
-        if fan is not None:
-            for child in fan:
+        seen.append(node)
+        if _is_rewind_provider(node):
+            out.append(node)
+            return
+        supplier = getattr(node, "rewind_provider", None)
+        if supplier is not None:
+            supplied = supplier() if callable(supplier) else supplier
+            if not _is_rewind_provider(supplied):
+                problem = _provider_problem(supplied) or "not a provider"
+                raise TypeError(
+                    f"{type(node).__name__}.rewind_provider must supply a "
+                    f"rewind provider (non-empty 'name' plus callable "
+                    f"'rewind_state'/'apply_rewind_state'); got "
+                    f"{type(supplied).__name__}: {problem}"
+                )
+            out.append(supplied)
+            return
+        children = getattr(node, "sinks", None)
+        if children is not None:
+            for child in children:
                 walk(child)
-            return
-        kind = type(s).__name__
-        if getattr(s, "episode_buffer", None) is not None:
-            out.append(EvaluationSessionProvider(s))
-        elif kind == "CollectSink":
-            out.append(CollectSinkProvider(s))
 
     walk(sink)
     if (
@@ -509,6 +550,12 @@ def build_rewind_providers(
         and callable(getattr(initializer, "restore_state", None))
     ):
         out.append(InitializerStateProvider(initializer))
+    names = [provider.name for provider in out]
+    if len(set(names)) != len(names):
+        raise ValueError(
+            f"duplicate rewind provider names: {names}; provider names are "
+            "checkpoint payload keys and must be unique"
+        )
     return out
 
 

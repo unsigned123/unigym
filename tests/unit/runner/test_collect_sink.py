@@ -10,6 +10,7 @@ import torch
 from unigym.runner.sinks.collect import CollectSink, action_group_contract
 from unigym.runtime.actions import ActionGroupValue, NamedAction, OrderedActionGroup
 from unigym.runtime.controllers import ControlRuntime
+from unigym.runtime.rewind_providers import CollectSinkProvider
 
 
 def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, env=None):
@@ -36,6 +37,16 @@ def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, e
         action_groups=action_groups,
     )
     return sink, records
+
+
+def test_rewind_provider_is_the_canonical_collect_wrapper():
+    """The collect sink exposes its episode_runner provider without owning logic."""
+    sink, _ = _sink()
+
+    provider = sink.rewind_provider
+
+    assert isinstance(provider, CollectSinkProvider)
+    assert provider.name == "episode_runner"
 
 
 def _bundle(targets, t, projection=None, *, step_index=None, time_s=None, reset_state=None):

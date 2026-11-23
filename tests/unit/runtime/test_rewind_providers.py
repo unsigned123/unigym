@@ -112,6 +112,16 @@ def test_evaluation_session_provider_mounts_on_episode_buffer(tmp_path):
     assert isinstance(providers[0], EvaluationSessionProvider)
 
 
+def test_evaluation_session_rewind_provider_is_the_canonical_wrapper(tmp_path):
+    """The session exposes its benchmark provider without moving provider logic."""
+    sink = _session(tmp_path)
+
+    provider = sink.rewind_provider
+
+    assert isinstance(provider, EvaluationSessionProvider)
+    assert provider.name == "benchmark"
+
+
 def test_evaluation_session_provider_restore_returns_open_steps_and_clears_marks(tmp_path):
     """Restoring the snapshot drops the abandoned branch's step and rewind mark."""
     sink = _session(tmp_path)

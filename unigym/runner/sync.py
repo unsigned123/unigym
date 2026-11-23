@@ -400,13 +400,10 @@ class SyncRunner:
         self.run_identity = getattr(env, "run_identity", None)
 
     def _notify_rewind(self, info: dict) -> None:
-        """Fan ``on_rewind`` out to every sink that declares it."""
-        fan = getattr(self.sink, "sinks", None)
-        targets = list(fan) if fan is not None else [self.sink]
-        for s in targets:
-            fn = getattr(s, "on_rewind", None)
-            if callable(fn):
-                fn(info)
+        """Notify the sink of a rewind; composites forward to their children."""
+        fn = getattr(self.sink, "on_rewind", None)
+        if callable(fn):
+            fn(info)
 
     def _validate_targets(self, actions) -> None:
         """Validate one tick's action surface against the adapter partition.

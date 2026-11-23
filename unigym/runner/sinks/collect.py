@@ -31,6 +31,7 @@ import json
 import os
 import time
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -42,6 +43,9 @@ from unigym.runtime.actions import (
     OrderedActionSpec,
 )
 from unigym.runtime.controllers import articulation_facts
+
+if TYPE_CHECKING:
+    from unigym.runtime.rewind_providers import CollectSinkProvider
 
 # extra key -> standardized shard-column key (for the writer).  The
 # namespaced form (``articulation/<name>/base_pos_w``) maps by SUFFIX so the
@@ -234,6 +238,13 @@ class CollectSink:
         self.n_episodes = self.num_envs  # initial batch
         self.last_language = [""] * self.num_envs  # cached between lang_interval steps
         self._t0 = time.time()
+
+    @property
+    def rewind_provider(self) -> CollectSinkProvider:
+        """The canonical collect provider wrapper (name ``episode_runner``)."""
+        from unigym.runtime.rewind_providers import CollectSinkProvider
+
+        return CollectSinkProvider(self)
 
     # ------------------------------------------------------------------ #
     # per-step recording (pre-reset data side)
