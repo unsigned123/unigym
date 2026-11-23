@@ -1,30 +1,37 @@
-"""Benchmark task protocol (B1): pure episode judges, zero isaaclab.
+"""Benchmark task protocol (B1): live-first episode scorers.
 
 A benchmark run evaluates completed episodes instead of (or alongside)
 recording them.  The data path is:
 
-    SyncRunner --callbacks--> BenchmarkSink --EpisodeData--> Task.score
-        --EpisodeResult--> Task.aggregate --> benchmark_report.json
+    SyncRunner --callbacks--> BenchmarkSink --EpisodeData + EvalContext-->
+        Task.score --EpisodeResult--> Task.aggregate --> benchmark_report.json
 
 Contract (docs/contracts/benchmark_contract.md):
 
-* two-phase scoring: ``score(ep) -> EpisodeResult`` per episode (pure
-  function of the episode data -- tasks never touch the environment) and
+* two-phase scoring: ``score(ep, ctx) -> EpisodeResult`` per episode and
   ``aggregate(results) -> dict`` at run end;
-* ``Task(params, meta)`` binds all configuration at construction time so
-  scoring itself is parameter-free;
+* ``ep`` is the episode history/timeline/metrics payload; ``ctx`` is the
+  read-only, per-env live context created by ``BenchmarkSink`` before reset.
+  Tasks may read ``ctx.env.record()``, ``ctx.env.obs()`` and (when the
+  backend exposes it) ``ctx.env.query``; they cannot mutate, step, reset or
+  read another env.  The context is closed after all tasks for that env.
+* ``Task(params, meta)`` binds all configuration at construction time;
 * ``success`` (task-judged quality) is recorded separately from
   ``ended_by_termination`` (engine-observed early termination) -- early
   termination is NOT automatically a failure, each task decides;
-* numpy-only: EpisodeData arrays are plain numpy (T, .) in *recorded key
-  names* (the shard npz names, e.g. ``base_pos``/``gravity_b``), so tasks
-  are unit-testable offline with synthetic episodes.
+* ``EpisodeData`` arrays are plain numpy (T, .) in *recorded key names*
+  (the shard npz names, e.g. ``base_pos``/``gravity_b``), so pure tasks stay
+  unit-testable with synthetic episodes;
+* there is no offline re-scoring guarantee: reports are live run
+  observations, not reconstructible artifacts.
 
-This module is intentionally importable without torch/isaaclab.
+This module remains importable without torch/isaaclab (the context type is a
+type-checking-only import).
 """
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,6 +42,7 @@ import numpy as np
 from .termination import EpisodeTermination, Termination
 
 if TYPE_CHECKING:
+    from unigym.evaluation import EvalContext
     from unigym.packs.runtime import PackRuntime
 
 
@@ -378,8 +386,29 @@ class Task(ABC):
         return resolve_episode_key(data, key, self.articulation)
 
     @abstractmethod
-    def score(self, ep: EpisodeData) -> EpisodeResult:
-        """Score one episode; pure function, no side effects."""
+    def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult:
+        """Score one episode from its history and its live per-env context.
+
+        ``ctx.env`` is read-only and scoped to ``ep.env_id``; a task may not
+        mutate/step/reset the environment or read another env.  Tasks that
+        only need ``ep`` may ignore ``ctx``.
+        """
+
+    def score_detail(
+        self,
+        ep: EpisodeData,
+        ctx: EvalContext,
+        *,
+        retain_frames: bool = False,
+    ) -> tuple[EpisodeResult, dict, dict]:
+        """``score`` plus optional formula leaves/frames.
+
+        The default has no declaration-derived detail: it returns
+        ``(score(ep, ctx), {}, {})``.  ``FormulaTask`` overrides it to attach
+        predicate leaves and per-frame series.
+        """
+        del retain_frames
+        return self.score(ep, ctx), {}, {}
 
     def aggregate(self, results: list[EpisodeResult]) -> dict:
         """Default run-level aggregation (overridable).
@@ -428,6 +457,75 @@ def register(cls: type[Task]) -> type[Task]:
     return cls
 
 
+_POSITIONAL_KINDS = (
+    inspect.Parameter.POSITIONAL_ONLY,
+    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+)
+
+
+def _require_live_task(task: Task) -> None:
+    """Reject a task that does not implement the live scoring signatures.
+
+    ``BenchmarkSink`` isolates task exceptions, so a legacy ``score(ep)`` task
+    would be silently skipped instead of rejected.  Validation happens here at
+    build time: ``score(self, ep, ctx)`` and
+    ``score_detail(self, ep, ctx, *, retain_frames=False)``.
+    """
+    name = getattr(task, "name", type(task).__name__)
+    for method_name, expected in (
+        ("score", "score(self, ep, ctx)"),
+        ("score_detail", "score_detail(self, ep, ctx, *, retain_frames=False)"),
+    ):
+        method = getattr(task, method_name, None)
+        if method is None or not callable(method):
+            raise ValueError(
+                f"benchmark task {name!r} ({type(task).__name__}) has no callable "
+                f"{method_name}; expected {expected}"
+            )
+        signature = inspect.signature(method)
+        positional = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind in _POSITIONAL_KINDS
+        ]
+        required_keyword = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+            and parameter.default is inspect.Parameter.empty
+        ]
+        variadic = any(
+            parameter.kind is inspect.Parameter.VAR_POSITIONAL
+            for parameter in signature.parameters.values()
+        )
+        names = tuple(parameter.name for parameter in positional)
+        if variadic or names != ("ep", "ctx") or required_keyword:
+            raise ValueError(
+                f"benchmark task {name!r} ({type(task).__name__}) must implement "
+                f"{expected}; got {method_name}{signature} | hint: a pure task "
+                "migrates with `def score(self, ep, ctx): del ctx`"
+            )
+        if method_name == "score_detail":
+            retained = signature.parameters.get("retain_frames")
+            overridden = getattr(type(task), "score_detail", None) is not Task.score_detail
+            if overridden and retained is None:
+                raise ValueError(
+                    f"benchmark task {name!r} ({type(task).__name__}) must implement "
+                    f"{expected}; got {method_name}{signature} (an overridden "
+                    "score_detail must declare keyword-only `retain_frames` with "
+                    "a default)"
+                )
+            if retained is not None and (
+                retained.kind is not inspect.Parameter.KEYWORD_ONLY
+                or retained.default is inspect.Parameter.empty
+            ):
+                raise ValueError(
+                    f"benchmark task {name!r} ({type(task).__name__}) must implement "
+                    f"{expected}; got {method_name}{signature} (retain_frames must "
+                    "be keyword-only with a default)"
+                )
+
+
 def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[Task]:
     """Instantiate tasks from yaml ``benchmark.tasks`` sections.
 
@@ -445,6 +543,11 @@ def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[
     pack discovery reads only its ``benchmarks`` catalog entries
     (benchmarks/packs.discover_packs).  ``<pack>/*`` wildcard sections
     expand to the whole pack (sorted).
+
+    Every instantiated task (registry, formula or pack plugin) must implement
+    the live ``score(self, ep, ctx)`` and
+    ``score_detail(self, ep, ctx, *, retain_frames=False)`` signatures; a
+    legacy task fails here instead of being silently skipped by the sink.
 
     Unknown task names raise ValueError (mirrors the adapter registry).
     Duplicate task names raise ValueError (BenchmarkSink keys results by
@@ -477,6 +580,7 @@ def build_tasks(sections: list[dict], meta: dict, runtime: PackRuntime) -> list[
                 f"{cls_key!r} (only 'formula', a pack reference, or "
                 f"omitted for the named registry {sorted(TASK_REGISTRY)})"
             )
+        _require_live_task(task)
         if task.name in seen_names:
             raise ValueError(
                 f"duplicate benchmark task name '{task.name}' (BenchmarkSink "

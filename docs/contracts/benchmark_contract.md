@@ -55,6 +55,37 @@ enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
 outcome.  Tasks may return `EpisodeResult.termination`; the sink validates
 and includes it in the report.
 
+## Task API
+
+Benchmark tasks are live-first episode scorers:
+
+```python
+class Task:
+    def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult: ...
+    def score_detail(
+        self, ep: EpisodeData, ctx: EvalContext, *, retain_frames: bool = False
+    ) -> tuple[EpisodeResult, dict, dict]: ...
+```
+
+`EpisodeData` remains the episode history/timeline/metrics payload.  `ctx` is
+the read-only, per-env `unigym.evaluation` context created by `BenchmarkSink`
+at episode end, before reset, scoped to `ep.env_id`.  Tasks may read
+`ctx.env.record()`, `ctx.env.obs()` and, when the backend exposes a runtime
+query, `ctx.env.query`; they cannot mutate, step or reset the env or read
+another env.  Values from `record()`/`obs()` are borrowed for the callback.
+
+The sink builds one context per due env and closes it in `finally` after every
+task for that env.  A task exception is isolated and skipped (the task is
+omitted from the report and result views).  Signature errors are different: an
+old `score(ep)` or a legacy `score_detail(..., retain_frames)` fails at build
+time with a teaching error, so a broken task can never be silently omitted.
+
+Built-in tasks (`stand`, `velocity_tracking`) accept `ctx` and ignore it; their
+metrics remain pure functions of `EpisodeData`.  `FormulaTask` overrides both
+faces and attaches predicate leaves/frames.  There is no offline re-scoring
+guarantee: a report is a live run observation and cannot be reconstructed from
+stored episode data alone.
+
 ## Result views
 
 `unigym.core.episode_result.EpisodeResultView` is the read-only handoff used by
@@ -73,8 +104,8 @@ publishes them on the episode-end bundle as
 `bundle["episode_results"] = {env_id: (view, ...)}`: one tuple per due env in
 task declaration order.  A task that raises is omitted exactly as it is omitted
 from the report.  The view copies its metrics into a read-only mapping and
-carries no `EpisodeData`, numpy array or task object, so `Task.score(ep)` stays
-pure and the command layer never depends on the benchmark layer.
+carries no `EpisodeData`, numpy array, task object or `EvalContext`, so the
+command layer never depends on the benchmark or evaluation layer.
 
 ## Reports
 

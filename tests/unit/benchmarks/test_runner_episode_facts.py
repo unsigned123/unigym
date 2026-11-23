@@ -114,7 +114,8 @@ class _NoopAdapter:
 class _ZeroTask(Task):
     name = "zero"
 
-    def score(self, ep):
+    def score(self, ep, ctx):
+        del ep, ctx
         return EpisodeResult(metrics={"m": 1.0}, success=None)
 
 

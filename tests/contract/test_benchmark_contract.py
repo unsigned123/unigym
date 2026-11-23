@@ -6,12 +6,20 @@ import inspect
 from dataclasses import fields
 from pathlib import Path
 
+import pytest
 
-from unigym.benchmarks.base import EpisodeData, EpisodeResult
+from unigym.benchmarks.base import (
+    TASK_REGISTRY,
+    EpisodeData,
+    EpisodeResult,
+    Task,
+    build_tasks,
+)
 from unigym.benchmarks.episode import EpisodeLimits
 from unigym.benchmarks.termination import EpisodeOutcome, Termination
 from unigym.contacts.base import ContactGroupSpec
 from unigym.initializers.base import ResetOutcome, wrap_initializer_result
+from unigym.packs.runtime import discover
 from unigym.runner.sinks import benchmark as benchmark_sink
 
 
@@ -92,3 +100,67 @@ def test_termination_extension_payload_is_json_safe():
     )
     assert term.to_json()["step_index"] == 1
     assert term.to_json()["metrics"] == {}
+
+
+class _LegacyScoreTask(Task):
+    """A pre-live task: one positional ``ep`` argument."""
+
+    name = "contract_legacy_score"
+
+    def score(self, ep):
+        del ep
+        return EpisodeResult(metrics={}, success=None)
+
+
+class _LegacyDetailTask(Task):
+    """A pre-live detail face: ``retain_frames`` as a second positional arg."""
+
+    name = "contract_legacy_detail"
+
+    def score(self, ep, ctx):
+        del ep, ctx
+        return EpisodeResult(metrics={}, success=None)
+
+    def score_detail(self, ep, retain_frames=False):
+        del ep, retain_frames
+        return EpisodeResult(metrics={}, success=None), {}, {}
+
+
+class _MissingRetainTask(Task):
+    """An override that forgot the keyword-only ``retain_frames`` parameter."""
+
+    name = "contract_missing_retain"
+
+    def score(self, ep, ctx):
+        del ep, ctx
+        return EpisodeResult(metrics={}, success=None)
+
+    def score_detail(self, ep, ctx):
+        del ep, ctx
+        return EpisodeResult(metrics={}, success=None), {}, {}
+
+
+def _build_registered(cls: type[Task]) -> list[Task]:
+    TASK_REGISTRY[cls.name] = cls
+    try:
+        return build_tasks([{"name": cls.name}], {"articulations": {}}, discover([]))
+    finally:
+        TASK_REGISTRY.pop(cls.name, None)
+
+
+def test_build_tasks_rejects_the_legacy_score_signature():
+    """An old ``score(self, ep)`` task fails at build, not silently in the sink."""
+    with pytest.raises(ValueError, match=r"score\(self, ep, ctx\)"):
+        _build_registered(_LegacyScoreTask)
+
+
+def test_build_tasks_rejects_the_legacy_score_detail_signature():
+    """An old positional ``retain_frames`` detail face fails at build."""
+    with pytest.raises(ValueError, match=r"score_detail\(self, ep, ctx"):
+        _build_registered(_LegacyDetailTask)
+
+
+def test_build_tasks_rejects_an_override_without_retain_frames():
+    """An override that drops ``retain_frames`` would fail at sink time."""
+    with pytest.raises(ValueError, match=r"must declare keyword-only `retain_frames`"):
+        _build_registered(_MissingRetainTask)

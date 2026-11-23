@@ -11,6 +11,7 @@ objects. This directory is not collected and contains no tests.
 | `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
 | `command_sampler.py` | `unigym.commands.base.CommandSampler` — the custom sampler factory seam | `RecordingSampler` stores its factory parameters, records `bind_env` / `on_episode_end` calls verbatim and declares no rewind capability |
 | `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `last_actions` records the lowered action mapping of the last tick, `terminated_rows` / `due_rows` set the step result's `(N,)` termination mask and episode-clock due ids (reported only, never reset during `step`), `close` is idempotent, `fail_next_tick` raises once after advancing the clock |
+| `benchmark_env.py` | the live evaluation-context env/query boundary (`num_envs` / `device` / backend label / articulations / lazy `query`) | `FakeBenchmarkEnv` counts query accesses; `FakeBenchmarkQuery` exposes the read-only protocol shape, records the env selection of `state.root_pose`, and raises from `scratch()` instead of inventing a world; no reset or physics state |
 
 Every Python module in this directory (except the package marker) must appear
 in the manifest table; `tests/meta/test_stub_policy.py` enforces this.

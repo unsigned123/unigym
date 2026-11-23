@@ -43,10 +43,15 @@ Python Task -- the DSL is the fast path, not the universal path.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from .base import EpisodeData, EpisodeResult, Task, robot_state_key_uses
 from .terms import get_term, metric_frames, validate_term_spec
+
+if TYPE_CHECKING:
+    from unigym.evaluation import EvalContext
 
 # reserved metric ids (Task.aggregate output keys)
 _RESERVED_METRIC_IDS = ("success_rate", "n_episodes")
@@ -361,7 +366,7 @@ class FormulaTask(Task):
         success: predicate tree over metric ids (optional; absent ->
             EpisodeResult.success is None).
 
-    score(ep): evaluates every metric (term template on the episode),
+    score(ep, ctx): evaluates every metric (term template on the episode);
     then the predicate tree, returning EpisodeResult(metrics, success).
     A metric term raising is wrapped and re-raised as ValueError naming
     the metric id -- fail-fast by design: definition errors are the task
@@ -400,7 +405,8 @@ class FormulaTask(Task):
             self._metrics.append((item["id"], item["term"], get_term(item["term"]), params_))
         self._success = self.params.get("success")
 
-    def score(self, ep: EpisodeData) -> EpisodeResult:
+    def score(self, ep: EpisodeData, ctx: EvalContext) -> EpisodeResult:
+        del ctx
         metrics: dict[str, float] = {}
         for mid, _name, term_fn, spec in self._metrics:
             try:
@@ -420,7 +426,13 @@ class FormulaTask(Task):
     # ------------------------------------------------------------------ #
     # detailed face (results.json; benchmark_contract §results)
     # ------------------------------------------------------------------ #
-    def score_detail(self, ep: EpisodeData, retain_frames: bool = False) -> tuple:
+    def score_detail(
+        self,
+        ep: EpisodeData,
+        ctx: EvalContext,
+        *,
+        retain_frames: bool = False,
+    ) -> tuple:
         """``score`` plus the declaration-derived detail face.
 
         Returns ``(EpisodeResult, leaves, frames)`` where
@@ -437,6 +449,7 @@ class FormulaTask(Task):
 
         Zero re-derivation: one metric pass feeds metrics + leaves + frames.
         """
+        del ctx
         metrics: dict[str, float] = {}
         frames: dict[str, np.ndarray] = {}
         for mid, term_name, term_fn, spec in self._metrics:
