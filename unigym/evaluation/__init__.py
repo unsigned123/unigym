@@ -1,8 +1,9 @@
 """Read-only, boundary-scoped evaluation context for live runs.
 
-Termination and benchmark scoring consume this context; watcher convergence is
-deferred, so watchers keep their existing ``WatchContext`` and ``env``
-expression surface.  The public surface is minimal and typed: :class:`EvalContext`,
+Termination, benchmark scoring and watchers consume this context.  Termination
+and benchmark build one view per callback and close it after the callback;
+watchers retain one vector-scoped view per tick until the next tick replaces
+it.  The public surface is minimal and typed: :class:`EvalContext`,
 :class:`EnvView`, the read-only :class:`EvalQuery` adapter and the evaluation
 errors.  No accessor returns a raw runtime ``Query``; ``EnvView.query`` returns
 the scoped :class:`EvalQuery` subset.
