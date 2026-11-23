@@ -89,6 +89,7 @@ selectors = [
   "tests/integration/test_cli_smoke.py",
   "tests/integration/test_daemon_cli.py",
   "tests/integration/test_pack_cli_provenance.py",
+  "tests/integration/test_external_sink.py",
 ]
 
 [lanes.daemon]

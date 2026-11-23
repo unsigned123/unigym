@@ -391,6 +391,27 @@ def test_requires_pack_runtime_detects_a_world_provider_fragment():
     assert requires_pack_runtime(cfg) is True
 
 
+def test_requires_pack_runtime_skips_the_mode_clause_for_a_custom_sink():
+    """A custom sink owns benchmark tasks, so the mode alone needs no runtime."""
+    assert requires_pack_runtime(_cfg(mode="benchmark")) is True
+    assert (
+        requires_pack_runtime(_cfg(mode="benchmark", sink={"factory": "acme.sinks:make_benchmark"}))
+        is False
+    )
+    assert requires_pack_runtime(_cfg(mode="benchmark"), custom_sink=True) is False
+    # A custom sink must not mask a separate runtime need (e.g. a pack asset).
+    assert (
+        requires_pack_runtime(
+            _cfg(
+                mode="benchmark",
+                sink={"factory": "acme.sinks:make_benchmark"},
+                props={"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]},
+            )
+        )
+        is True
+    )
+
+
 def test_run_spec_has_no_legacy_scene_field():
     """RunSpec no longer exposes a dead/mistyped ``scene`` mapping."""
     spec = build_spec(_cfg(), _args())

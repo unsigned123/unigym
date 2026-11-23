@@ -46,6 +46,17 @@ fixed ports or machine paths are used. The lane sets
 `UNIGYM_ORPHAN_SWEEP=off` so a test daemon cannot probe or sweep unrelated
 machine-global SHM/daemon state.
 
+### External sink seam
+
+`test_external_sink.py` builds a real tiny-arm run from the shared MJCF and
+injects the importable custom sink from `tests/_support/fakes/external_sink.py`
+by API (`SinkSpec(factory=...)`) and by a temporary YAML `sink.factory` path.  It
+drives the full `runner.run(stop_when=instance.stop_when)` loop, proves the sink
+saw all four lifecycle callbacks and stopped after two episodes, and checks the
+stateful sink's namespaced rewind provider is in `instance.rewind_providers`.
+The benchmark case proves a custom sink builds and runs without the built-in
+benchmark tasks or a pack runtime.
+
 ## Run explicitly
 
 ```bash

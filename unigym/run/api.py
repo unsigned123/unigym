@@ -1195,7 +1195,10 @@ class Run:
         runtime: PackRuntime | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
-        if runtime is None and requires_pack_runtime(cfg):
+        custom_sink = self._sink_spec is not None
+        needs_runtime = requires_pack_runtime(cfg, custom_sink=custom_sink)
+
+        if runtime is None and needs_runtime:
             if not self._discover_runtime:
                 from unigym.errors import ConfigError
 
@@ -1210,7 +1213,7 @@ class Run:
             runtime = discover(entry_points=True)
             runtime.activate_all()
             self._pack_runtime = runtime
-        elif runtime is not None and requires_pack_runtime(cfg):
+        elif runtime is not None and needs_runtime:
             # An explicitly injected runtime is activated here too: a config
             # that needs a pack must not reach SPEC with an inert runtime.
             runtime.activate_all()

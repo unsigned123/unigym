@@ -1674,15 +1674,17 @@ def _build_sinks(
     standard_stop: Callable[[], bool] | None = None
     run_identity: RunIdentity | None = None
     if mode in ("benchmark", "both"):
+        # A custom sink owns benchmark control flow: do not build/resolve the
+        # built-in tasks, buffer, evaluator, reporter or session.  The task
+        # metadata is still computed for every benchmark/both run; only the
+        # runtime is exclusive to the built-in task path.  The core horizon
+        # still applies, so identity + deadline are stamped either way.
         if task_meta is None:
             raise RuntimeError("benchmark mode requires task metadata")
-        if pack_runtime is None:
-            raise RuntimeError("benchmark mode requires a pack runtime")
-        # A custom sink owns benchmark control flow: do not build/resolve the
-        # built-in tasks, buffer, evaluator, reporter or session.  The core
-        # horizon still applies, so identity + deadline are stamped either way.
         bench_tasks = None
         if custom_sink_factory is None:
+            if pack_runtime is None:
+                raise RuntimeError("benchmark mode requires a pack runtime")
             # benchmark tasks resolve through the runtime ``benchmarks``
             # catalog face (no run-config pack list, no repository scan)
             bench_tasks = build_tasks(
@@ -1992,7 +1994,10 @@ def build_instance(spec: RunSpec) -> RunInstance:
         _materialize_pack_actuators(spec, info.name)
     mode = spec.mode
     pack_runtime = spec.pack_runtime
-    if mode in ("benchmark", "both") and pack_runtime is None:
+    # The built-in benchmark path resolves its tasks through the runtime
+    # ``benchmarks`` face.  A custom sink owns benchmark control flow and gets
+    # no built-in tasks, so the mode alone does not require a runtime.
+    if mode in ("benchmark", "both") and spec.custom_sink is None and pack_runtime is None:
         raise ValueError(
             f"run mode {mode!r} requires a pack runtime: benchmark packs are "
             "declared on the PackRuntime 'benchmarks' face | hint: build "

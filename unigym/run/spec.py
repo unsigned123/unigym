@@ -483,22 +483,30 @@ def _needs_actuator_law_runtime(cfg: dict[str, JsonValue]) -> bool:
     return any(law not in ACTUATOR_LAW_REGISTRY for law in laws)
 
 
-def requires_pack_runtime(cfg: dict[str, JsonValue], mode: str | None = None) -> bool:
+def requires_pack_runtime(
+    cfg: dict[str, JsonValue],
+    mode: str | None = None,
+    *,
+    custom_sink: bool = False,
+) -> bool:
     """True when a run config needs an explicit runtime at its boundary.
 
     A catalog ``scene_preset`` (or an unregistered inline provider), a
-    benchmark/both run, an adapter other than the built-in ``manual``, a
-    ``pack:`` reference (or asset placeholder token), or a prop-template
-    selection needs the runtime.  A ``release:`` reference does not: it is
-    resolved by the ``unigym.asset_release`` provider or the ``unigym_robots``
-    fallback.  The helper is the one composition-boundary decision shared by
-    ``Run``, ``collect_cli`` and ``describe_cli``; it does not build or cache a
-    runtime.
+    benchmark/both run that builds the built-in tasks, an adapter other than
+    the built-in ``manual``, a ``pack:`` reference (or asset placeholder
+    token), or a prop-template selection needs the runtime.  A custom sink owns
+    benchmark control flow, so a benchmark/both run with ``custom_sink=True``
+    does not need a runtime for the mode alone (its other declarations still
+    count).  A ``release:`` reference does not: it is resolved by the
+    ``unigym.asset_release`` provider or the ``unigym_robots`` fallback.  The
+    helper is the one composition-boundary decision shared by ``Run``,
+    ``collect_cli`` and ``describe_cli``; it does not build or cache a runtime.
     """
     if "scene_preset" in cfg and _scene_preset_needs_runtime(cfg.get("scene_preset")):
         return True
     run_mode = cfg.get("mode", "collect") if mode is None else mode
-    if run_mode in ("benchmark", "both"):
+    declared_sink = custom_sink or cfg.get("sink") is not None
+    if run_mode in ("benchmark", "both") and not declared_sink:
         return True
     adapter_name = _declared_adapter_name(cfg)
     if adapter_name is not None and adapter_name != "manual":
