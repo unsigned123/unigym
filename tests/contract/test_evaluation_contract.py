@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import subprocess
 import sys
 
 import pytest
 
 import unigym.evaluation as evaluation
+import unigym.terminations as terminations
 from unigym.evaluation import EnvView, EvalContext, EvalQuery
 
 _FORBIDDEN_VIEW_ATTRS = frozenset(
@@ -106,3 +108,28 @@ def test_import_evaluation_loads_no_heavy_backend() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
+
+
+def _positional_parameters(func) -> list[str]:
+    return [
+        name
+        for name, parameter in inspect.signature(func).parameters.items()
+        if parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+
+
+def test_termination_check_takes_one_live_context() -> None:
+    """The public termination API is ``check(ctx)`` with no recorded state."""
+    assert _positional_parameters(terminations.Termination.check) == ["self", "ctx"]
+    assert _positional_parameters(terminations.TerminationGroup.check) == ["self", "ctx"]
+    assert _positional_parameters(terminations.TerminationGroup.check_detail) == [
+        "self",
+        "ctx",
+    ]
+
+
+def test_termination_state_is_not_exported() -> None:
+    """The recorded/offline termination state concept is gone."""
+    assert "TerminationState" not in terminations.__all__
+    assert not hasattr(terminations, "TerminationState")

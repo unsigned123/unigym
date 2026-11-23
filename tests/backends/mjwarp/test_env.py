@@ -77,6 +77,20 @@ def test_policy_joint_pos_limits_follow_the_control_order(tiny_env):
     assert bool((lower <= upper).all())
 
 
+def test_articulation_joint_pos_limits_follow_the_record_order(tiny_env):
+    """The runtime limits use the record ``joint_pos`` order, not asset order."""
+    art = tiny_env.articulations["tiny"]
+    assert art.joint_names == ("shoulder", "elbow")
+    assert tiny_env.controls[("tiny", "tiny")].joint_names == ("elbow", "shoulder")
+    assert art.joint_pos_limits is not None
+
+    lower, upper = art.joint_pos_limits
+    torch.testing.assert_close(lower, torch.tensor([[-0.5, -1.57]]))
+    torch.testing.assert_close(upper, torch.tensor([[1.0, 1.57]]))
+    assert tiny_env.joint_pos_limits_by_articulation["tiny"] is art.joint_pos_limits
+    assert tiny_env.policy_joint_pos_limits is art.joint_pos_limits
+
+
 def test_joint_permutation_maps_il_and_policy_order_both_ways(tiny_env):
     """The IL<->policy permutation is a real reorder and round-trips exactly."""
     assert tiny_env.perm_il2pol.tolist() == [1, 0]

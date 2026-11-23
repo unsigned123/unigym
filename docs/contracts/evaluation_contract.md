@@ -1,9 +1,9 @@
 # Evaluation context contract
 
-Status: additive.  `unigym.evaluation` defines the read-only, boundary-scoped
-context that live termination, benchmark scoring and (later) watchers consume.
-No existing consumer is switched in this change, so current behavior is
-unchanged.
+Status: `unigym.evaluation` defines the read-only, boundary-scoped context that
+live termination consumes; benchmark scoring and (later) watchers adopt the
+same boundary.  Termination is live-only: there is no recorded/offline state
+path.
 
 The context is a facade over the existing env `record` / observation / runtime
 query faces at one engine-thread boundary.  It is not a new backend lifecycle,
@@ -59,8 +59,10 @@ scoring argument; they are not duplicated on the context.
 - `joint_pos_limits(name)` reads the articulation runtime fact
   (`ArticulationRuntime.joint_pos_limits`), scoped like `record()`.  A declared
   articulation with no limits returns `None`; an undeclared articulation fails
-  fast.  Limits are `(lower, upper)`, each `(scope_size, len(joint_names))`,
-  aligned with the articulation's `joint_names` order.
+  fast.  Limits are `(lower, upper)`, each `(scope_size, len(joint_names))`, in
+  the record/body-control policy joint order: the same order as the live
+  `articulation/<name>/joint_pos` leaf.  This is not asset `joint_names` order
+  when a body control reorders the joints.
 
 ## 4. No mutation
 
@@ -108,10 +110,15 @@ converted into an empty result or a default.
 
 ## 8. Boundaries (consumer plan)
 
-This change defines the context only.  The intended boundaries are:
+The boundaries are:
 
 - termination: vector view, after `env.step` and the observation snapshot,
-  before the step sink; pre-reset state;
+  before the step sink; pre-reset state.  `Termination.check(ctx)` returns a
+  bool `(num_envs,)` mask on the context device; `TerminationGroup`
+  evaluates each term once, validates every mask and closes the context
+  before the sink observes the bundle.  `build_terminations` inspects each
+  instantiated term and rejects any `check` that is not exactly
+  `check(self, ctx)`, so a legacy `check(self, state)` term fails at build;
 - benchmark: per-env view inside episode-end scoring, before reset;
 - watcher: deferred; watchers keep their current `WatchContext` and `env`
   expression surface until a separate owner decision.
@@ -125,4 +132,5 @@ to reorder for convenience.
 - No removal of `EpisodeData`, reports or history.
 - No writable/scratch/native evaluation surface.
 - No cross-env read from a per-env view.
-- No consumer switch in this additive change.
+- No recorded/offline termination state or reconstruction from stored episode
+  data.

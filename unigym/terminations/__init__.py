@@ -1,8 +1,9 @@
-"""Termination registry + builders (numpy/torch agnostic, unit-testable).
+"""Termination registry + builders (live-only, unit-testable).
 
-Yaml usage (top-level ``terminations`` section, optional; entries are
-OR-combined — any term firing marks the env "terminated" for
-logging; nothing actually resets in collection mode)::
+Each term receives the read-only live :class:`~unigym.evaluation.EvalContext`
+and returns a per-env bool mask.  Yaml usage (top-level ``terminations``
+section, optional; entries are OR-combined — any term firing marks the env
+"terminated" for logging; nothing actually resets in collection mode)::
 
     terminations:
       - name: fall
@@ -23,6 +24,7 @@ construction, whether the run has one binding or several.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 from unigym.provenance import (
@@ -33,7 +35,7 @@ from unigym.provenance import (
 )
 
 from .articulation import ArticulationTermination
-from .base import Termination, TerminationState
+from .base import Termination
 from .composite import InvertedTermination, TerminationGroup
 from .fall import (
     COS_DEFAULT_TILT,
@@ -194,12 +196,34 @@ def restore_termination_registry(snapshot: TerminationRegistrySnapshot) -> None:
     snapshot.restore(TERMINATION_REGISTRY, _TERMINATION_ORIGINS)
 
 
+def _require_live_check(term: Termination) -> None:
+    """Reject a term that does not implement the live ``check(self, ctx)``."""
+    signature = inspect.signature(term.check)
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    variadic = any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    )
+    if variadic or len(positional) != 1 or positional[0].name != "ctx":
+        raise ValueError(
+            f"termination {term.name!r} ({type(term).__name__}) must implement "
+            f"check(self, ctx); got check{signature}"
+        )
+
+
 def build_terminations(cfg: list | None) -> list[Termination]:
     """Build a list of terminations from the yaml ``terminations`` section.
 
     Per-articulation terms must carry an explicit ``articulation`` (top-level
-    or under ``params``); the term's own base class enforces it.  ``None``/
-    empty cfg -> empty list.
+    or under ``params``); the term's own base class enforces it.  Every
+    instantiated term must implement the live ``check(self, ctx)`` signature;
+    a legacy ``check(self, state)`` or a different arity fails at build time,
+    not on the first tick.  ``None``/empty cfg -> empty list.
     """
     terms: list[Termination] = []
     if not cfg:
@@ -215,6 +239,7 @@ def build_terminations(cfg: list | None) -> list[Termination]:
         if explicit is not None:
             params["articulation"] = explicit
         term = TERMINATION_REGISTRY[name](params, name=name)
+        _require_live_check(term)
         if entry.get("invert", False):  # NOT(term) health conditions
             term = InvertedTermination(term, name=name)
         terms.append(term)
@@ -233,7 +258,6 @@ def build_termination_group(cfg: list | None, mode: str = "or") -> TerminationGr
 __all__ = [
     "Termination",
     "ArticulationTermination",
-    "TerminationState",
     "TerminationGroup",
     "InvertedTermination",
     "FallTermination",

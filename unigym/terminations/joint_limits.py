@@ -1,18 +1,19 @@
 """Joint-limit termination: joint positions beyond soft limits (+margin).
 
 Fires when any joint sits outside ``[lower + margin, upper - margin]``.
-Requires this articulation's ``joint_pos`` (``state.articulations[name]``)
-and its ``(lower, upper)`` limits (``state.joint_pos_limits[name]``); without
-limits the termination never fires.
-
-Limits are keyed by articulation (no first binding); the run layer
-supplies a ``{name: (lower, upper)}`` mapping.
+Requires this articulation's live ``joint_pos`` and its
+``(lower, upper)`` limits from ``ctx.env.joint_pos_limits(name)``.  Limits and
+positions share the record/body-control policy order; without limits the
+termination never fires.
 """
 
 from __future__ import annotations
 
+import torch
+
+from unigym.evaluation import EvalContext
+
 from .articulation import ArticulationTermination
-from .base import TerminationState, all_false
 
 
 class JointLimitTermination(ArticulationTermination):
@@ -25,25 +26,24 @@ class JointLimitTermination(ArticulationTermination):
             ``joint_pos > upper - margin``.
     """
 
-    requires_joint_limits = True
-
     def __init__(self, params: dict | None = None, name: str | None = None):
         super().__init__(params, name)
         self.margin = float(self.params.get("margin", 0.05))
 
-    def check(self, state: TerminationState):
-        source = self.source(state)
+    def check(self, ctx: EvalContext) -> torch.Tensor:
+        source = self.source(ctx)
         joint_pos = source.get("joint_pos")
-        if joint_pos is None:
+        if not isinstance(joint_pos, torch.Tensor):
             raise ValueError(
-                f"JointLimitTermination requires {self.articulation!r} " f"joint_pos in state"
+                f"JointLimitTermination requires {self.articulation!r} "
+                f"joint_pos in the evaluation record"
             )
-        limits = (state.joint_pos_limits or {}).get(self.articulation)
+        limits = ctx.env.joint_pos_limits(self.articulation)
         if limits is None:
-            return all_false(joint_pos)
+            return torch.zeros(joint_pos.shape[0], dtype=torch.bool, device=joint_pos.device)
         lower, upper = limits
         if lower is None or upper is None:
-            return all_false(joint_pos)
+            return torch.zeros(joint_pos.shape[0], dtype=torch.bool, device=joint_pos.device)
         below = joint_pos < (lower + self.margin)
         above = joint_pos > (upper - self.margin)
         return (below | above).sum(-1) > 0

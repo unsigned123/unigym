@@ -10,15 +10,17 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from .base import Termination, TerminationState
+from unigym.evaluation import EvalContext
+
+from .base import Termination
 
 
 class ArticulationTermination(Termination):
-    """A condition over exactly one articulation's state.
+    """A condition over exactly one articulation's live state.
 
     params:
         articulation: REQUIRED articulation name; the term reads
-            ``articulation/<name>/...`` from :class:`TerminationState`.
+            ``articulation/<name>/...`` from the evaluation record.
     """
 
     requires_articulation = True
@@ -33,6 +35,6 @@ class ArticulationTermination(Termination):
             )
         self.articulation = str(articulation)
 
-    def source(self, state: TerminationState) -> Mapping:
-        """This term's articulation state map (``articulation/<name>/...``)."""
-        return state.articulation(self.articulation, term=type(self).__name__)
+    def source(self, ctx: EvalContext) -> Mapping[str, object]:
+        """This term's articulation record leaves (``articulation/<name>/...``)."""
+        return ctx.env.articulation(self.articulation)
