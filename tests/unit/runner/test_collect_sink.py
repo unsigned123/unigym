@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
 import torch
 
+from unigym.evaluation import EnvView
 from unigym.runner.sinks.collect import CollectSink, action_group_contract
 from unigym.runtime.actions import ActionGroupValue, NamedAction, OrderedActionGroup
-from unigym.runtime.controllers import ControlRuntime
+from unigym.runtime.controllers import (
+    ArticulationRuntime,
+    ControlRuntime,
+    ResolvedControl,
+)
 from unigym.runtime.rewind_providers import CollectSinkProvider
 
 
-def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, env=None):
+def _sink(
+    action_groups=None,
+    *,
+    logger=None,
+    language_gen=None,
+    adapter=None,
+    controls=(),
+    articulation_facts=None,
+):
     records: list[dict] = []
-    writer = SimpleNamespace(meta={}, append=records.append, shard_count=0)
+    writer = SimpleNamespace(
+        meta={},
+        append=records.append,
+        shard_count=0,
+        total_steps=0,
+        finalize=lambda: None,
+    )
     sink = CollectSink(
         writer=writer,
         logger=logger,
@@ -23,7 +43,8 @@ def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, e
         lang_interval=1,
         recorder=SimpleNamespace(enabled=False),
         adapter=SimpleNamespace() if adapter is None else adapter,
-        env=SimpleNamespace(controls={}) if env is None else env,
+        controls=controls,
+        articulation_facts={} if articulation_facts is None else articulation_facts,
         num_envs=1,
         total_steps=2,
         device="cpu",
@@ -39,6 +60,38 @@ def _sink(action_groups=None, *, logger=None, language_gen=None, adapter=None, e
     return sink, records
 
 
+def _view(controls, *, articulations=None, record=None) -> EnvView:
+    return EnvView(
+        record={} if record is None else record,
+        obs=None,
+        env_id=None,
+        num_envs=1,
+        device="cpu",
+        backend="fake",
+        articulations=articulations,
+        controls=controls,
+    )
+
+
+def _artifact(name: str = "go2") -> ArticulationRuntime:
+    return ArticulationRuntime(
+        name=name,
+        joint_names=("hip", "knee"),
+        q0=(0.0, 0.0),
+        base_body="base",
+        base_body_id="base",
+    )
+
+
+def _summary_writer(captured: list[dict]):
+    def write_summary(total_records=None, shards=None, extra=None):
+        summary = {"total_records": total_records, "shards": shards, **(extra or {})}
+        captured.append(summary)
+        return summary
+
+    return SimpleNamespace(write_summary=write_summary)
+
+
 def test_rewind_provider_is_the_canonical_collect_wrapper():
     """The collect sink exposes its episode_runner provider without owning logic."""
     sink, _ = _sink()
@@ -49,7 +102,16 @@ def test_rewind_provider_is_the_canonical_collect_wrapper():
     assert provider.name == "episode_runner"
 
 
-def _bundle(targets, t, projection=None, *, step_index=None, time_s=None, reset_state=None):
+def _bundle(
+    targets,
+    t,
+    projection=None,
+    *,
+    step_index=None,
+    time_s=None,
+    reset_state=None,
+    view=None,
+):
     bundle = {
         "t": t,
         "raw": None,
@@ -61,6 +123,7 @@ def _bundle(targets, t, projection=None, *, step_index=None, time_s=None, reset_
             "episode_id": torch.tensor([0], dtype=torch.int64),
         },
         "cmd": None,
+        "view": view,
     }
     if step_index is not None:
         bundle["step_index"] = step_index
@@ -270,13 +333,18 @@ def test_collect_projection_errors_name_joints(targets, match):
         sink.on_step(0, _bundle(targets, 0))
 
 
-def _policy_runtime(name: str, articulation: str) -> ControlRuntime:
+def _policy_runtime(
+    name: str,
+    articulation: str,
+    *,
+    joints: tuple[str, ...] = ("hip", "knee"),
+) -> ControlRuntime:
     return ControlRuntime(
         name=name,
         adapter="manual",
         articulation=articulation,
-        joint_names=("hip", "knee"),
-        q0=(0.0, 0.0),
+        joint_names=joints,
+        q0=(0.0,) * len(joints),
         drive="position_pd",
         target="position",
         role="body",
@@ -302,13 +370,13 @@ def test_language_state_keys_follow_the_articulation_not_the_group_name():
 
     runtime = _policy_runtime("legs", "go2")
     adapter = SimpleNamespace(build_language_states=lambda extra, cmd: dict(extra))
-    sink, records = _sink(
-        language_gen=_Language(),
-        adapter=adapter,
-        env=SimpleNamespace(controls={"go2/legs": runtime}),
-    )
+    sink, records = _sink(language_gen=_Language(), adapter=adapter)
     bundle = _bundle((), 0)
     bundle["record"].update(_named_state_extra())
+    bundle["view"] = _view(
+        {(runtime.articulation, runtime.name): runtime},
+        articulations={"go2": _artifact("go2")},
+    )
 
     sink.on_step(0, bundle)
 
@@ -320,20 +388,26 @@ def test_language_state_keys_follow_the_articulation_not_the_group_name():
 
 
 def test_step_metrics_state_keys_follow_the_articulation_not_the_group_name():
-    """Per-runtime metrics read ``articulation/<articulation>/...`` extra keys."""
+    """Step metrics use the control rows cached from the live boundary view."""
     steps: list[dict] = []
     runtime = _policy_runtime("legs", "go2")
-    sink, _ = _sink(
-        logger=SimpleNamespace(log_step=lambda t, metrics: steps.append(metrics)),
-        env=SimpleNamespace(controls={"go2/legs": runtime}),
+    sink, _ = _sink(logger=SimpleNamespace(log_step=lambda t, metrics: steps.append(metrics)))
+    state = _named_state_extra()
+    bundle = _bundle((), 0)
+    bundle["record"].update(state)
+    bundle["view"] = _view(
+        {(runtime.articulation, runtime.name): runtime},
+        articulations={"go2": _artifact("go2")},
     )
 
+    sink.on_step(0, bundle)
     sink.on_step_end(
         0,
         {
-            "record": _named_state_extra(),
+            "record": state,
             "alive": torch.tensor([True]),
             "term_metrics": {},
+            "view": None,
         },
     )
 
@@ -355,3 +429,100 @@ def test_direct_construction_falls_back_to_per_entry_columns():
         "action_target/go2/hip,knee",
     ]
     assert records[0]["action_target/go2/hip,knee"].tolist() == [[3.0, 4.0]]
+
+
+def test_collect_sink_has_no_live_env_constructor_or_attribute():
+    """The sink is built from facts, never a live env."""
+    sink, _ = _sink()
+
+    assert "env" not in inspect.signature(CollectSink).parameters
+    assert not hasattr(sink, "env")
+
+
+def test_zero_tick_summary_uses_the_build_snapshot():
+    """A run that never stepped still writes its static articulation facts."""
+    captured: list[dict] = []
+    control = ResolvedControl(
+        name="legs",
+        articulation="go2",
+        adapter="manual",
+        joint_set=None,
+        source="action_spec",
+        joint_names=("hip", "knee"),
+        drive="position_pd",
+        target="position",
+        q0=(0.0, 0.0),
+        role="body",
+    )
+    facts = {
+        "go2": {
+            "joint_names": ["hip", "knee"],
+            "asset_joint_names": ["hip", "knee"],
+            "action_group": "legs",
+            "base_body": "base",
+            "foot_bodies": [],
+            "body_sets": {},
+            "contacts": None,
+        }
+    }
+    sink, _ = _sink(
+        logger=_summary_writer(captured),
+        controls=(control,),
+        articulation_facts=facts,
+    )
+
+    summary = sink.on_run_end()
+
+    assert summary["articulations"] == facts
+    assert summary["num_episodes"] == 1
+    assert captured[0]["articulations"] == facts
+
+
+def test_run_end_uses_facts_cached_from_the_first_live_view():
+    """Run-end facts come from the first view that carried controls."""
+    captured: list[dict] = []
+    runtime = _policy_runtime("legs", "go2")
+    sink, _ = _sink(logger=_summary_writer(captured))
+    sink.on_step(
+        0,
+        _bundle(
+            (),
+            0,
+            view=_view(
+                {(runtime.articulation, runtime.name): runtime},
+                articulations={"go2": _artifact("go2")},
+            ),
+        ),
+    )
+
+    summary = sink.on_run_end()
+
+    assert summary["articulations"]["go2"]["action_group"] == "legs"
+    assert summary["articulations"]["go2"]["joint_names"] == ["hip", "knee"]
+
+
+def test_multiple_body_controls_per_articulation_keep_last_write_wins():
+    """The summary keeps the historical last-body-control-per-articulation row."""
+    captured: list[dict] = []
+    legs = _policy_runtime("legs", "go2")
+    arms = _policy_runtime("arms", "go2", joints=("shoulder", "elbow"))
+    sink, _ = _sink(logger=_summary_writer(captured))
+    sink.on_step(
+        0,
+        _bundle(
+            (),
+            0,
+            view=_view(
+                {
+                    (legs.articulation, legs.name): legs,
+                    (arms.articulation, arms.name): arms,
+                },
+                articulations={"go2": _artifact("go2")},
+            ),
+        ),
+    )
+
+    summary = sink.on_run_end()
+
+    assert summary["articulations"]["go2"]["action_group"] == "arms"
+    assert summary["articulations"]["go2"]["joint_names"] == ["shoulder", "elbow"]

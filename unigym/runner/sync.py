@@ -669,6 +669,7 @@ class SyncRunner:
             backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
             query_factory=_query_factory,
             articulations=getattr(env, "articulations", None) or {},
+            controls=getattr(env, "controls", None) or {},
         )
         due = step.reset_env_ids
         bundle: dict = {}

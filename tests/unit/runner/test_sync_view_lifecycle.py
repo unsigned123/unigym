@@ -60,9 +60,11 @@ class _ProbeTermination(Termination):
     def __init__(self) -> None:
         super().__init__(None, "probe")
         self.seen: EvalContext | None = None
+        self.control_keys: tuple[tuple[str, str], ...] = ()
 
     def check(self, ctx: EvalContext) -> torch.Tensor:
         self.seen = ctx
+        self.control_keys = tuple(ctx.env.controls)
         return torch.zeros(ctx.num_envs, dtype=torch.bool, device=ctx.env.device)
 
 
@@ -124,6 +126,7 @@ def test_one_view_reaches_on_step_and_on_episode_end():
         env.close()
 
     assert term.seen is not None
+    assert term.control_keys == tuple(env.controls)
     assert len(sink.step_bundles) == 1
     assert len(sink.episode_end_bundles) == 1
     step_view = sink.step_views[0]

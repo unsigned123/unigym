@@ -1650,6 +1650,17 @@ def _build_sinks(
     # sink selection by yaml ``mode`` (collect = unchanged default path)
     collect_sink: CollectSink | None = None
     if mode != "benchmark":
+        # Read-only build-time facts: the collect sink keeps no live env, and a
+        # zero-tick run still writes an honest per-articulation summary.  Body
+        # controls key their facts by articulation; the historical
+        # last-write-wins behavior for multiple body controls is preserved.
+        control_snapshot = tuple(build_control_plan(_control_rows(env.controls)))
+        articulation_snapshot = {
+            control.articulation: articulation_facts(
+                env.articulations[control.articulation], control
+            )
+            for control in _body_controls(env)
+        }
         collect_sink = CollectSink(
             writer=writer,
             logger=logger,
@@ -1657,7 +1668,8 @@ def _build_sinks(
             lang_interval=lang_interval,
             recorder=recorder,
             adapter=adapter,
-            env=env,
+            controls=control_snapshot,
+            articulation_facts=articulation_snapshot,
             num_envs=num_envs,
             total_steps=total_steps,
             device=device,

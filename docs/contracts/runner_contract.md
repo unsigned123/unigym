@@ -27,7 +27,9 @@ view          the tick's one read-only boundary EnvView; valid at on_step /
 `bundle["env"]` is sink wiring for the watcher/bridge transport, not a user
 evaluation surface.  Termination and benchmark evaluation receive the read-only
 `unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
-walk the backend.
+walk the backend.  The built-in `CollectSink` keeps no live env: it is
+constructed with a read-only build-time facts snapshot and does not read
+`bundle["env"]`.
 
 ## Boundary view lifetime
 
@@ -122,6 +124,15 @@ Mode composition is fixed:
 A custom sink replaces only the benchmark consumer; `CollectSink` recording
 stays first in `collect`/`both`.  Adapter `extra_sinks` stay prepended and the
 director/timeline/bridge tail remains appended.
+
+`CollectSink` is built from a read-only facts snapshot (the resolved control
+rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it
+derives policy controls from `bundle["view"]` and caches the resolved rows and
+body-control facts from the first view that carries controls.  `on_step_end`
+uses those cached/build rows (the view is already `None`), and `on_run_end`
+writes the cached/build `{articulation: facts}` summary.  Multiple body
+controls of one articulation keep the historical last-write-wins row.  A
+zero-tick run has no view, so it still writes the build-time summary.
 
 `stop_when` is optional and read-only.  `FanOutSink.stop_when` ORs its
 children.  Exactly one of the two predicates can be present per run:
