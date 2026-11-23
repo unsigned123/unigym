@@ -202,6 +202,36 @@ def test_registry_provenance_modules_are_engine_free() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.subprocess
+def test_condition_package_import_is_torch_free() -> None:
+    """The conditions package exports the protocol without loading a heavy root."""
+    code = (
+        "import sys\n"
+        "import unigym.conditions\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        f"{sorted(_HEAVY_ROOTS)!r})\n"
+        "assert not heavy, heavy\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_benchmark_package_import_stays_torch_free() -> None:
+    """The benchmark package imports without pulling torch at module load."""
+    code = (
+        "import sys\n"
+        "import unigym.benchmarks\n"
+        "assert 'torch' not in sys.modules, 'torch imported'\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("name", _LEGACY_NAMES)
 def test_public_facades_advertise_no_legacy_scene_names(name: str) -> None:
     """The repository's public facades expose no removed scene vocabulary."""

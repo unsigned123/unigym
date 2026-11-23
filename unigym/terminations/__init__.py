@@ -1,7 +1,10 @@
 """Termination registry + builders (live-only, unit-testable).
 
 Each term receives the read-only live :class:`~unigym.evaluation.EvalContext`
-and returns a per-env bool mask.  Yaml usage (top-level ``terminations``
+and returns a per-env bool mask.  ``FallTermination`` and
+``JointLimitTermination`` delegate their predicates to the canonical conditions
+in ``unigym.conditions`` via local imports, keeping this package import
+torch-free.  Yaml usage (top-level ``terminations``
 section, optional; entries are OR-combined — any term firing marks the env
 "terminated" for logging; nothing actually resets in collection mode)::
 

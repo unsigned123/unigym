@@ -36,6 +36,8 @@ class JointLimitTermination(ArticulationTermination):
     def check(self, ctx: EvalContext) -> torch.Tensor:
         import torch
 
+        from unigym.conditions.joint_limit import JointLimitCondition
+
         source = self.source(ctx)
         joint_pos = source.get("joint_pos")
         if not isinstance(joint_pos, torch.Tensor):
@@ -43,12 +45,8 @@ class JointLimitTermination(ArticulationTermination):
                 f"JointLimitTermination requires {self.articulation!r} "
                 f"joint_pos in the evaluation record"
             )
-        limits = ctx.env.joint_pos_limits(self.articulation)
-        if limits is None:
-            return torch.zeros(joint_pos.shape[0], dtype=torch.bool, device=joint_pos.device)
-        lower, upper = limits
-        if lower is None or upper is None:
-            return torch.zeros(joint_pos.shape[0], dtype=torch.bool, device=joint_pos.device)
-        below = joint_pos < (lower + self.margin)
-        above = joint_pos > (upper - self.margin)
-        return (below | above).sum(-1) > 0
+        return JointLimitCondition(
+            articulation=self.articulation,
+            mode="band",
+            margin=self.margin,
+        ).evaluate(ctx)

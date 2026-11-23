@@ -120,6 +120,30 @@ API and must not be read by a predicate.  Watcher state reads go through
   selects that articulation.
 
 
+## Condition-backed templates
+
+`height`, `tilt` and `joint_limit` delegate their predicate to the canonical
+conditions in `unigym.conditions` while the watcher template keeps ownership of
+`level`, `message`, `data`, `actions` and signals.
+
+- The condition returns a vector bool mask.  When the watcher declaration has no
+  explicit `env` parameter, `WatchResult.fired = bool(mask.any())` (global any).
+  When `env: <index>` is explicit, `fired = bool(mask[env])`, retaining the
+  selected-env decision.
+- This is a scalar trigger adapter, not per-env trigger state.  With no explicit
+  `env`, a fire caused by one env still produces the template's existing
+  evidence fields computed for the diagnostic env (env 0 for `height`/`tilt`);
+  the message/data field shapes are unchanged.
+- `joint_limit` keeps the watcher magnitude mode (default margin `0.1`) and
+  still reports all violating env indexes in `data["envs"]` plus `worst_over`,
+  even when an explicit `env` selects the fired decision.
+- `height` keeps the threshold/op and inclusive-band forms; `tilt` keeps the
+  quaternion-degree form.  Missing keys, missing views and missing articulation
+  limits remain data-shaped `WatchError`s, so the engine's degrade/strike
+  fail-safe is unchanged.
+- Trigger edge/level/once/cooldown, action execution, signal publication and the
+  rewind payload remain `WatcherEngine`-owned and unchanged.
+
 ## Out of scope
 
 - template/expression signal authoring and a derived signal language;

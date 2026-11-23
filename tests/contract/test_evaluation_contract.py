@@ -133,3 +133,15 @@ def test_termination_state_is_not_exported() -> None:
     """The recorded/offline termination state concept is gone."""
     assert "TerminationState" not in terminations.__all__
     assert not hasattr(terminations, "TerminationState")
+
+
+def test_condition_package_exports_only_the_torch_free_protocol() -> None:
+    """The base conditions import exposes the protocol, not concrete torch classes."""
+    import unigym.conditions as conditions
+
+    assert conditions.__all__ == ["Condition", "ConditionError"]
+    assert _positional_parameters(conditions.Condition.evaluate) == ["self", "ctx"]
+    assert issubclass(conditions.ConditionError, ValueError)
+    assert not hasattr(conditions, "HeightCondition")
+    assert not hasattr(conditions, "TiltCondition")
+    assert not hasattr(conditions, "JointLimitCondition")
