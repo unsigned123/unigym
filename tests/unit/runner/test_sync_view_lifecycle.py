@@ -129,6 +129,10 @@ def test_one_view_reaches_on_step_and_on_episode_end():
     assert term.control_keys == tuple(env.controls)
     assert len(sink.step_bundles) == 1
     assert len(sink.episode_end_bundles) == 1
+    # The bundle carries the boundary view and never a live env.
+    assert "env" not in sink.step_bundles[0]
+    assert "env" not in sink.episode_end_bundles[0]
+    assert "env" not in sink.step_end_bundles[0]
     step_view = sink.step_views[0]
     assert step_view is term.seen.env
     assert sink.episode_end_views[0] is step_view

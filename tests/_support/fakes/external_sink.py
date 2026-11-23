@@ -334,12 +334,17 @@ class ExternalSink:
         self.stop_polls = 0
         self.episode_env_ids: list[tuple[int, ...]] = []
         self.last_episode_end_tick: int | None = None
+        self.view_seen = False
+        self.env_key_seen = False
+        self.step_end_view_none = True
 
     def on_step(self, t: int, bundle: dict[str, object]) -> None:
-        del t, bundle
+        del t
+        self._observe_boundary(bundle)
         self.step_calls += 1
 
     def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        self._observe_boundary(bundle)
         self.episode_end_calls += 1
         ids = _episode_env_ids(env_ids)
         self.episodes_completed += len(ids)
@@ -349,8 +354,18 @@ class ExternalSink:
             self.last_episode_end_tick = tick
 
     def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
-        del t, bundle
+        del t
+        if bundle.get("view") is not None:
+            self.step_end_view_none = False
         self.step_end_calls += 1
+
+    def _observe_boundary(self, bundle: dict[str, object]) -> None:
+        """Read the public boundary view and record the retired env key."""
+        self.env_key_seen = self.env_key_seen or "env" in bundle
+        view = bundle.get("view")
+        if isinstance(view, EnvView):
+            view.record()
+            self.view_seen = True
 
     def on_run_end(self) -> dict[str, object]:
         self.run_end_calls += 1

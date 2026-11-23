@@ -188,11 +188,11 @@ The boundaries are:
   `build_tasks` at build time.  A bundle without `bundle["view"]` fails fast
   instead of scoring blind;
 - watcher: one vector-scoped view (`env_id is None`) built by
-  `WatcherEngine.on_tick` from the step bundle/env, retained until the next
-  tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs` read
-  through it; the expression namespace exposes `view` but no raw `env`.
-  `bundle["env"]` is not a watcher API.  Views are not checkpointed; the
-  watcher rewind payload is unchanged.
+  `WatcherEngine.on_tick` from the engine's own wired env, retained until the
+  next tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs`
+  read through it; the expression namespace exposes `view` but no raw `env`.
+  The step bundle carries no live env and is not a view source.  Views are not
+  checkpointed; the watcher rewind payload is unchanged.
 
 Evaluation order is contract for the consumers that adopt it, not a convention
 to reorder for convenience.

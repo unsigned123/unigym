@@ -1822,6 +1822,12 @@ def _build_bridge_and_wiring(
     # sink.on_step and is honoured through the engine's existing stop_when
     # seam (normal break -> on_run_end teardown, no exception plumbing).
     from unigym.runtime.bridge import Bridge, make_run_id
+    from unigym.runtime.metrics import StepClock
+
+    # Metrics read only the policy step period.  Narrow the live backend to
+    # that capability at the composition boundary; an absent step_dt keeps
+    # the metrics writer's historical "no sim time / no step count" behavior.
+    step_clock = env if isinstance(env, StepClock) else None
 
     bridge = Bridge(
         make_run_id(spec.run_name),
@@ -1839,6 +1845,7 @@ def _build_bridge_and_wiring(
         # episode rings; None in collect-only runs)
         config_doc=cfg,
         metrics_source=metrics_source,
+        env=step_clock,
     )
     # runtime debug console: step/inspect/save_npz handlers on
     # the bridge dispatch table (docs/contracts/console_contract.md)

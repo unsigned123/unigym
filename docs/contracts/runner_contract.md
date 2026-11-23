@@ -19,17 +19,17 @@ reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
 episode_results {env_id: (EpisodeResultView, ...)}
               present on on_episode_end when an EvaluationSession scored the
               episode; per-env, task declaration order, read-only
-env           live EnvBackend, sink wiring only (watchers/bridge)
 view          the tick's one read-only boundary EnvView; valid at on_step /
               on_episode_end, None at on_step_end
 ```
 
-`bundle["env"]` is sink wiring for the watcher/bridge transport, not a user
-evaluation surface.  Termination and benchmark evaluation receive the read-only
-`unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
-walk the backend.  The built-in `CollectSink` keeps no live env: it is
-constructed with a read-only build-time facts snapshot and does not read
-`bundle["env"]`.
+The bundle carries no live env.  Internal runtime hooks that need the engine
+receive it at construction: `WatcherEngine` builds its view from its own wired
+env, and `Bridge`/`MetricsWriter` receive the step-clock capability at
+construction.  Termination and benchmark evaluation receive the read-only
+`unigym.evaluation` context; a sink or task reads `bundle["view"]` rather than
+walking a live backend.  The built-in `CollectSink` keeps no live env: it is
+constructed with a read-only build-time facts snapshot.
 
 ## Boundary view lifetime
 
@@ -198,8 +198,8 @@ delegates run-level accumulation and report writing to the injected
 `EpisodeReporter` (`BenchmarkReporter` in benchmark runs).
 
 A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
-`ctx.env.query`; it cannot step, reset, write or read another env.  The core
-`env` bundle field is not the task context.
+`ctx.env.query`; it cannot step, reset, write or read another env.  The bundle
+has no live env field; `ctx.env` is the read-only task view.
 
 Open-episode history is owned by `EpisodeBuffer`
 (`unigym.runner.evaluation.buffer`): `EvaluationSession.on_step` appends the

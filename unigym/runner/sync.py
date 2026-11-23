@@ -724,7 +724,6 @@ class SyncRunner:
                     for ei in range(self._num_envs)
                 },
                 "run_identity": self.run_identity,
-                "env": env,
                 "view": view,
             }
             try:

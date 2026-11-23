@@ -117,6 +117,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
 
     from unigym.cameras.manager import CameraManager
     from unigym.cameras.base import CameraSpec
+    from unigym.runtime.metrics import StepClock
 
 __all__ = [
     "Bridge",
@@ -901,6 +902,10 @@ class Bridge:
             metrics_drain() / metrics_task() / metrics_progress() /
             metrics_report().  Feeds the metrics block at episode end and
             the ``report`` query; None = collect-only run (null report).
+        env: optional step-clock capability (the policy step period) used
+            for the metrics block's sim-time/fps and episode step counts.
+            It is captured at construction; the step bundle is never read
+            for an env.
     """
 
     # Wall-clock floor of the FROZEN RENDER PUMP for counter-mode
@@ -941,6 +946,7 @@ class Bridge:
         log_path: str | None = None,
         config_doc: Mapping[str, JsonValue] | None = None,
         metrics_source: MetricsSource | None = None,
+        env: StepClock | None = None,
     ):
         self.run_id = str(run_id)
         self.shm_name = SHM_PREFIX + self.run_id
@@ -1044,6 +1050,7 @@ class Bridge:
 
         self._metrics = MetricsWriter(buf)
         self._metrics_source = metrics_source
+        self._env = env
         self._config_doc = None
         if config_doc is not None:
             try:  # JSON-safe snapshot, captured ONCE
@@ -1106,7 +1113,7 @@ class Bridge:
         # metrics feed: bounded rings + document (existing sink
         # hook -- no new engine plumbing; benchmark facts come from the
         # duck-typed source scored BEFORE this callback in the fan-out).
-        self._metrics.note_episode(env_ids, bundle, source=self._metrics_source)
+        self._metrics.note_episode(env_ids, bundle, source=self._metrics_source, env=self._env)
         # watchers: callable on_reset lifecycle hooks (§8.3); never fatal
         if self._watchers is not None:
             try:
@@ -1164,7 +1171,7 @@ class Bridge:
         self._last_metrics = metrics
         self._write_status_locked(step=int(t), metrics=metrics)
         # tick-level metrics cost = timing scalars only (µs)
-        self._metrics.note_tick(int(t), bundle.get("env") if isinstance(bundle, dict) else None)
+        self._metrics.note_tick(int(t), self._env)
         self._bundle = bundle  # inspector view of this step
         if self._gate.arrive():  # paused + budget exhausted -> park
             self._gate_park()

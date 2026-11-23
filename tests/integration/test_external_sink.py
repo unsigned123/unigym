@@ -149,6 +149,11 @@ def _assert_lifecycle(sink: ExternalSink, runner: Runner) -> None:
     assert sink.run_end_calls == 1
     assert sink.stop_polls >= 1
     assert sink.stop_when() is True
+    # The public boundary view is the observation surface; the retired
+    # bundle env key is absent and no view is exposed at on_step_end.
+    assert sink.view_seen is True
+    assert sink.env_key_seen is False
+    assert sink.step_end_view_none is True
     # The loop stopped at the tick that closed episode 2, not at the budget.
     assert sink.last_episode_end_tick is not None
     assert sink.last_episode_end_tick == runner.ticks_done - 1
