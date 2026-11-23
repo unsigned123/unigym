@@ -140,3 +140,12 @@ to reorder for convenience.
 - No cross-env read from a per-env view.
 - No recorded/offline termination state or reconstruction from stored episode
   data.
+
+## 10. Removed episode filters
+
+The episode filter subsystem is removed in this release.  There is no offline
+filter chain, no generic recorded-termination filter and no compatibility shim;
+a run config that declares an episode-filter section is rejected fail-fast at
+spec construction with a migration hint.  Reintroducing filters later is a new,
+data-only feature over `EpisodeData`, never a revival of the recorded
+termination state path this contract deletes.

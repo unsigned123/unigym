@@ -140,6 +140,18 @@ class _MissingRetainTask(Task):
         return EpisodeResult(metrics={}, success=None), {}, {}
 
 
+def test_task_public_scoring_signatures_are_live_first():
+    """The base protocol is ``score(ep, ctx)`` with a keyword-only detail flag."""
+    score = inspect.signature(Task.score)
+    assert list(score.parameters) == ["self", "ep", "ctx"]
+
+    detail = inspect.signature(Task.score_detail)
+    assert list(detail.parameters) == ["self", "ep", "ctx", "retain_frames"]
+    retained = detail.parameters["retain_frames"]
+    assert retained.kind is inspect.Parameter.KEYWORD_ONLY
+    assert retained.default is False
+
+
 def _build_registered(cls: type[Task]) -> list[Task]:
     TASK_REGISTRY[cls.name] = cls
     try:

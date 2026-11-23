@@ -18,3 +18,19 @@ def test_public_names_resolve():
     """Every advertised public name is importable through the lazy facade."""
     for name in unigym.__all__:
         assert getattr(unigym, name) is not None
+
+
+def test_evaluation_public_names_resolve():
+    """The evaluation context facade exports exactly its advertised names."""
+    import unigym.evaluation as evaluation
+
+    assert set(evaluation.__all__) == {
+        "EnvView",
+        "EvalContext",
+        "EvalQuery",
+        "EvalQueryUnavailableError",
+        "EvalViewError",
+        "EvalViewStaleError",
+    }
+    for name in evaluation.__all__:
+        assert getattr(evaluation, name) is not None, name

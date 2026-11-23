@@ -81,7 +81,7 @@ old `score(ep)` or a legacy `score_detail(..., retain_frames)` fails at build
 time with a teaching error, so a broken task can never be silently omitted.
 
 Built-in tasks (`stand`, `velocity_tracking`) accept `ctx` and ignore it; their
-metrics remain pure functions of `EpisodeData`.  `FormulaTask` overrides both
+metrics are computed only from `EpisodeData`.  `FormulaTask` overrides both
 faces and attaches predicate leaves/frames.  There is no offline re-scoring
 guarantee: a report is a live run observation and cannot be reconstructed from
 stored episode data alone.

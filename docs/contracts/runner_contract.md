@@ -19,7 +19,13 @@ reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
 episode_results {env_id: (EpisodeResultView, ...)}
               present on on_episode_end when a BenchmarkSink scored the
               episode; per-env, task declaration order, read-only
+env           live EnvBackend, sink wiring only (watchers/bridge)
 ```
+
+`bundle["env"]` is sink wiring for the watcher/bridge transport, not a user
+evaluation surface.  Termination and benchmark evaluation receive the read-only
+`unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
+walk the backend.
 
 Lifecycle:
 
@@ -45,11 +51,26 @@ env.step -> observation snapshot -> one vector EvalContext
          -> sink.on_step
 ```
 
-The bundle has no recorded termination state: `terminations` and
-`term_metrics` are derived from the same one detail pass, and the context is
-closed before any sink observes the bundle.  Termination never reads the
+The bundle carries no `term_state` entry: `terminations` and `term_metrics`
+are derived from the same one detail pass, and the context is closed before any
+sink observes the bundle.  Termination is live-only and never reads the
 env-level joint-limit compatibility views; joint limits are owned by
-`ArticulationRuntime.joint_pos_limits`.
+`ArticulationRuntime.joint_pos_limits` in record/policy joint order.
+
+Benchmark evaluation is the second live boundary:
+
+```text
+on_episode_end (before env.reset_envs)
+         -> assemble EpisodeData
+         -> one per-env EvalContext scoped to ep.env_id
+         -> Task.score/episode incl. score_detail, declaration order
+         -> ctx.close() in finally
+         -> publish episode_results for the sampler
+```
+
+A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
+`ctx.env.query`; it cannot step, reset, write or read another env.  The core
+`env` bundle field is not the task context.
 
 `build_instance` creates the run's one `SignalBus` **before**
 `_build_bridge_and_wiring`, hands it to the watcher attach seam, calls

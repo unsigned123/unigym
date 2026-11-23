@@ -117,7 +117,14 @@ def register_robot(name: str, factory: Callable[..., RobotProfile]) -> Callable[
 
 
 def register_termination(name: str, cls):
-    """Register a termination class in the core termination registry."""
+    """Register a live termination class in the core termination registry.
+
+    The class must implement ``check(self, ctx)`` and read the read-only
+    :class:`unigym.evaluation.EvalContext`.  This is a hard migration: the prior
+    recorded-state API and its state type are gone, with no compatibility shim.
+    ``build_terminations`` rejects a legacy signature at build time, so a stale
+    pack cannot fail lazily on the first tick.
+    """
     from unigym.terminations import register_termination as register
 
     return register(name, cls)
