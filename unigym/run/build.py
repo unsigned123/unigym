@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
     from unigym.robots.base import CanonicalBodyId, RobotProfile
-    from unigym.runner.sinks.benchmark import BenchmarkSink
+    from unigym.runner.evaluation.session import EvaluationSession
     from unigym.runtime.bridge import Bridge
     from unigym.runtime.controllers import ControlRuntime
     from unigym.runtime.rewind_providers import RewindStateProvider
@@ -213,7 +213,7 @@ class _SinkBundle(TypedDict):
     sink: Sink
     timeline: TimelineSink
     event_log: EventLog
-    bench_sink: BenchmarkSink | None
+    eval_session: EvaluationSession | None
     stop_when: Callable[[], bool] | None
     watch_specs: list[dict[str, JsonValue]] | None
 
@@ -1537,9 +1537,13 @@ def _build_sinks(
     action_groups: Sequence[OrderedActionGroup] = (),
 ) -> _SinkBundle:
     """Step 5: director + timeline + mode sink composition."""
-    from unigym.runner.sinks import BenchmarkSink, CollectSink, FanOutSink
+    from unigym.benchmarks.reporting import BenchmarkReporter
+    from unigym.runner.evaluation.buffer import EpisodeBuffer
+    from unigym.runner.evaluation.scoring import EpisodeEvaluator
+    from unigym.runner.evaluation.session import EvaluationSession
+    from unigym.runner.sinks import CollectSink, FanOutSink
 
-    # director (before the sinks so BenchmarkSink can label
+    # director (before the sinks so EvaluationSession can label
     # episodes directed): status_fn wires in after the bridge exists
     director: Director | None = None
     if spec.direct:
@@ -1593,7 +1597,7 @@ def _build_sinks(
             command_dim=command_dim,
             action_groups=action_groups,
         )
-    bench_sink: BenchmarkSink | None = None
+    eval_session: EvaluationSession | None = None
     stop_when: Callable[[], bool] | None = None
     if mode in ("benchmark", "both"):
         if task_meta is None:
@@ -1616,27 +1620,41 @@ def _build_sinks(
         report_meta["sim_dt"] = run_identity.sim_dt
         if contact_manager is not None:
             report_meta["contacts"] = contact_manager.metadata()
-        bench_sink = BenchmarkSink(
+        # benchmark.retain_metric_frames -> metrics.npz
+        retain_frames = bool(bench_cfg.get("retain_metric_frames", False))
+        episode_buffer = EpisodeBuffer(num_envs)
+        evaluator = EpisodeEvaluator(
             tasks=bench_tasks,
             meta=report_meta,
+            env=env,
+            limits=limits,
+            retain_frames=retain_frames,
+        )
+        reporter = BenchmarkReporter(
+            tasks=bench_tasks,
+            meta=report_meta,
+            report_path=os.path.join(out_dir, "benchmark_report.json"),
+            run_identity=run_identity,
+        )
+        eval_session = EvaluationSession(
+            tasks=bench_tasks,
+            buffer=episode_buffer,
+            evaluator=evaluator,
+            reporter=reporter,
+            meta=report_meta,
+            num_envs=num_envs,
             min_episodes=_config_int(bench_cfg.get("min_episodes", 1)),
             max_steps=_config_int(bench_cfg.get("max_steps", 100000)),
-            report_path=os.path.join(out_dir, "benchmark_report.json"),
             director=director,
-            # benchmark.retain_metric_frames -> metrics.npz
-            retain_frames=bool(bench_cfg.get("retain_metric_frames", False)),
-            limits=limits,
-            run_identity=run_identity,
-            env=env,
         )
         if bench_tasks:  # no tasks -> nothing to wait for
-            stop_when = bench_sink.episodes_done
+            stop_when = eval_session.episodes_done
     sink: Sink | None
     if mode == "benchmark":
-        sink = bench_sink
+        sink = eval_session
     elif mode == "both":
-        # CollectSink first, BenchmarkSink second
-        sink = FanOutSink(collect_sink, bench_sink)
+        # CollectSink first, EvaluationSession second
+        sink = FanOutSink(collect_sink, eval_session)
     else:
         sink = collect_sink
     # adapter-provided diagnostics sinks (generic hook, engine stays
@@ -1651,7 +1669,7 @@ def _build_sinks(
         "sink": sink,
         "timeline": timeline,
         "event_log": event_log,
-        "bench_sink": bench_sink,
+        "eval_session": eval_session,
         "stop_when": stop_when,
         "watch_specs": watch_specs,
     }
@@ -1665,7 +1683,7 @@ def _build_bridge_and_wiring(
     adapter: Adapter,
     camera_manager: CameraManager | None,
     out_dir: str,
-    bench_sink: BenchmarkSink | None,
+    eval_session: EvaluationSession | None,
     sink: Sink,
     timeline: TimelineSink,
     director: Director | None,
@@ -1703,7 +1721,7 @@ def _build_bridge_and_wiring(
         # fail-fast on oversize) + benchmark telemetry feed (report draft,
         # episode rings; None in collect-only runs)
         config_doc=cfg,
-        metrics_source=bench_sink,
+        metrics_source=eval_session,
     )
     # runtime debug console: step/inspect/save_npz handlers on
     # the bridge dispatch table (docs/contracts/console_contract.md)
@@ -2153,7 +2171,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         adapter,
         sensing["camera_manager"],
         built["out_dir"],
-        sinks["bench_sink"],
+        sinks["eval_session"],
         sinks["sink"],
         sinks["timeline"],
         sinks["director"],

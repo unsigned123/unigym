@@ -14,7 +14,8 @@ the restore, after the adapter, fail-fast.
 
 Providers (v1 coverage, design §1.3 table):
 
-* ``BenchmarkSinkProvider`` (name ``"benchmark"``) -- the sink's
+* ``EvaluationSessionProvider`` (name ``"benchmark"``) -- the benchmark
+  sink (:class:`~unigym.runner.evaluation.session.EvaluationSession`)'s
   :class:`~unigym.runner.evaluation.buffer.EpisodeBuffer` open episode
   buffers + the per-env rewind marks riding them.  Counter
   policy (contract §4.1): scored-RESULT bookkeeping
@@ -47,7 +48,7 @@ Providers (v1 coverage, design §1.3 table):
   of those is a qualitative reference only (runtime_contract §4.2).
 
 Both providers also implement ``dump_attempt(dir, base)`` -- the §1.4
-sidecar, run before a rewind applies.  ``BenchmarkSinkProvider`` writes
+sidecar, run before a rewind applies.  ``EvaluationSessionProvider`` writes
 the CURRENT (abandoned-branch) buffer frames to ``<out_dir>/attempts/``
 as npz (one key per env field, ``assemble_episode`` stacked) so no data is
 ever discarded.  ``CollectSinkProvider`` is buffer-less and writes
@@ -80,7 +81,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.io.writer import ShardWriter
 
 __all__ = [
-    "BenchmarkSinkProvider",
+    "EvaluationSessionProvider",
     "CollectSinkProvider",
     "InitializerStateProvider",
     "build_rewind_providers",
@@ -93,7 +94,7 @@ MarksState: TypeAlias = list[list[dict[str, SnapshotValue]]] | None
 
 @runtime_checkable
 class _EpisodeBufferFace(Protocol):
-    """The runner ``EpisodeBuffer`` face the benchmark provider delegates to.
+    """The runner ``EpisodeBuffer`` face the evaluation-session provider delegates to.
 
     ``runtime/rewind_providers.py`` stays duck-typed: the buffer is reached
     through this protocol (and the sink's ``episode_buffer`` attribute), so
@@ -331,8 +332,8 @@ class _EpisodeBufferProvider:
         return [path]
 
 
-class BenchmarkSinkProvider(_EpisodeBufferProvider):
-    """The benchmark sink's open episode buffers (name ``benchmark``)."""
+class EvaluationSessionProvider(_EpisodeBufferProvider):
+    """The evaluation session's open episode buffers (name ``benchmark``)."""
 
     name = "benchmark"
 
@@ -497,7 +498,7 @@ def build_rewind_providers(
             return
         kind = type(s).__name__
         if getattr(s, "episode_buffer", None) is not None:
-            out.append(BenchmarkSinkProvider(s))
+            out.append(EvaluationSessionProvider(s))
         elif kind == "CollectSink":
             out.append(CollectSinkProvider(s))
 

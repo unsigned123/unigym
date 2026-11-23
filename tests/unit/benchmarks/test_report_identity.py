@@ -16,7 +16,10 @@ from unigym.benchmarks.termination import (
     TerminationExtension,
     TerminationSource,
 )
-from unigym.runner.sinks.benchmark import BenchmarkSink
+from unigym.benchmarks.reporting import BenchmarkReporter
+from unigym.runner.evaluation.buffer import EpisodeBuffer
+from unigym.runner.evaluation.scoring import EpisodeEvaluator
+from unigym.runner.evaluation.session import EvaluationSession
 
 
 def _identity() -> RunIdentity:
@@ -100,15 +103,39 @@ class _TermTask(Task):
         )
 
 
-def _run_single_step_episode(tmp_path, task):
-    sink = BenchmarkSink(
-        tasks=[task],
-        meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7},
+def _session(
+    tmp_path,
+    tasks,
+    *,
+    meta=None,
+    limits=None,
+    run_identity=None,
+    report_path=None,
+):
+    tasks = list(tasks)
+    if meta is None:
+        meta = {"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7}
+    if report_path is None:
+        report_path = str(tmp_path / "benchmark_report.json")
+    return EvaluationSession(
+        tasks=tasks,
+        buffer=EpisodeBuffer(int(meta.get("num_envs", 1))),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta, limits=limits),
+        reporter=BenchmarkReporter(
+            tasks=tasks,
+            meta=meta,
+            report_path=report_path,
+            run_identity=run_identity,
+        ),
+        meta=meta,
+        num_envs=int(meta.get("num_envs", 1)),
         min_episodes=1,
         max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
-        run_identity=_identity(),
     )
+
+
+def _run_single_step_episode(tmp_path, task):
+    sink = _session(tmp_path, [task], run_identity=_identity())
     step = _step_bundle()
     sink.on_step(0, step)
     end = dict(step)
@@ -151,12 +178,10 @@ def _step_bundle():
 
 
 def test_report_has_run_identity_counts_and_extensions(tmp_path):
-    sink = BenchmarkSink(
-        tasks=[_DummyTask(params={}, meta={})],
+    sink = _session(
+        tmp_path,
+        [_DummyTask(params={}, meta={})],
         meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7, "backend": "mujoco"},
-        min_episodes=1,
-        max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
         limits=EpisodeLimits(timeout_steps=1),
         run_identity=_identity(),
     )
@@ -215,12 +240,9 @@ def test_report_has_run_identity_counts_and_extensions(tmp_path):
 
 
 def test_deadline_is_not_stamped_after_overrun(tmp_path):
-    sink = BenchmarkSink(
-        tasks=[_DummyTask(params={}, meta={})],
-        meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7},
-        min_episodes=1,
-        max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
+    sink = _session(
+        tmp_path,
+        [_DummyTask(params={}, meta={})],
         limits=EpisodeLimits(timeout_steps=1),
         run_identity=_identity(),
     )
@@ -381,14 +403,13 @@ _EXPECTED_RESULTS = {
 def test_report_and_results_serialization_is_unchanged(tmp_path, monkeypatch):
     """The fixed-scenario report/results bytes are stable across the refactor."""
     monkeypatch.chdir(tmp_path)
-    sink = BenchmarkSink(
-        tasks=[_DummyTask(params={}, meta={})],
+    sink = _session(
+        tmp_path,
+        [_DummyTask(params={}, meta={})],
         meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 7, "backend": "mujoco"},
-        min_episodes=1,
-        max_steps=10,
-        report_path="sub/benchmark_report.json",
         limits=EpisodeLimits(timeout_steps=1),
         run_identity=_identity(),
+        report_path="sub/benchmark_report.json",
     )
     step = _step_bundle()
     sink.on_step(0, step)

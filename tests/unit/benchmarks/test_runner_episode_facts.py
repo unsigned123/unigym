@@ -1,4 +1,4 @@
-"""Runner -> BenchmarkSink episode facts: local ticks + reset outcome path."""
+"""Runner -> EvaluationSession episode facts: local ticks + reset outcome path."""
 
 from __future__ import annotations
 
@@ -8,11 +8,14 @@ import torch
 
 from unigym.benchmarks.base import EpisodeResult, Task
 from unigym.benchmarks.episode import RunIdentity
+from unigym.benchmarks.reporting import BenchmarkReporter
 from unigym.benchmarks.termination import EpisodeOutcome
 from unigym.env.backends.base import EnvStep
 from unigym.env.obs import ObsSnapshot, ObservationSchema
 from unigym.initializers.base import ResetOutcome
-from unigym.runner.sinks.benchmark import BenchmarkSink
+from unigym.runner.evaluation.buffer import EpisodeBuffer
+from unigym.runner.evaluation.scoring import EpisodeEvaluator
+from unigym.runner.evaluation.session import EvaluationSession
 from unigym.runner.sync import SyncRunner
 from unigym.terminations import TerminationGroup
 
@@ -132,13 +135,22 @@ def _identity():
 
 def test_multi_episode_ticks_are_local_and_invalid_reset_reaches_episode(tmp_path):
     env = _ScriptedEnv(lengths=(2, 2))
-    sink = BenchmarkSink(
-        tasks=[_ZeroTask(params={}, meta={})],
-        meta={"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 0},
+    tasks = [_ZeroTask(params={}, meta={})]
+    meta = {"run_name": "r", "num_envs": 1, "policy_dt": 0.02, "seed": 0}
+    sink = EvaluationSession(
+        tasks=tasks,
+        buffer=EpisodeBuffer(1),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta),
+        reporter=BenchmarkReporter(
+            tasks=tasks,
+            meta=meta,
+            report_path=str(tmp_path / "benchmark_report.json"),
+            run_identity=_identity(),
+        ),
+        meta=meta,
+        num_envs=1,
         min_episodes=2,
         max_steps=4,
-        report_path=str(tmp_path / "benchmark_report.json"),
-        run_identity=_identity(),
     )
     runner = SyncRunner(
         cfg={"collect": {"steps": 4}},

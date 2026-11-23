@@ -93,9 +93,9 @@ export function analysisCard(runId) {
 
 /* benchmark report card (contract §1.20): per-task verdicts from
  * TWO faces of the same document.  While the run is alive the typed
- * report query (§1.6) returns BenchmarkSink's LIVE DRAFT (updated per
+ * report query (§1.6) returns EvaluationSession's LIVE DRAFT (updated per
  * episode); the artifact face serves the FINAL benchmark_report.json
- * (BenchmarkSink lands it at run END -- a millisecond window before the
+ * (EvaluationSession lands it at run END -- a millisecond window before the
  * run leaves the live view, so it wins when caught).  A collect-only
  * run (draft null + no benchmark tasks) says so explicitly -- that
  * fallback is information, NOT an error, so it never touches the shared

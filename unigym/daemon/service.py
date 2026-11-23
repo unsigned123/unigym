@@ -646,7 +646,7 @@ class DaemonService:
             )
 
     def _draft_edge(self, key: str, r: dict) -> None:
-        """bench.draft edge (the BenchmarkSink per-episode update).
+        """bench.draft edge (the EvaluationSession per-episode update).
 
         The daemon-side face: the registry's episodes counter -- fetch
         the live draft once per edge, throttled to >=1s per run.

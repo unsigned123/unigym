@@ -30,7 +30,9 @@ from unigym.benchmarks.termination import (
     Termination,
     TerminationSource,
 )
-from unigym.runner.sinks.benchmark import BenchmarkSink
+from unigym.runner.evaluation.buffer import EpisodeBuffer
+from unigym.runner.evaluation.scoring import EpisodeEvaluator
+from unigym.runner.evaluation.session import EvaluationSession
 
 _REPORT_KEYS = [
     "schema",
@@ -137,22 +139,30 @@ def _sink(
     *,
     director=None,
     retain_frames: bool = False,
-) -> BenchmarkSink:
-    return BenchmarkSink(
-        tasks=list(tasks),
-        meta={
-            "run_name": "r",
-            "num_envs": 1,
-            "policy_dt": 0.02,
-            "seed": 7,
-            "backend": "mujoco",
-        },
+) -> EvaluationSession:
+    tasks = list(tasks)
+    meta = {
+        "run_name": "r",
+        "num_envs": 1,
+        "policy_dt": 0.02,
+        "seed": 7,
+        "backend": "mujoco",
+    }
+    return EvaluationSession(
+        tasks=tasks,
+        buffer=EpisodeBuffer(1),
+        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta, retain_frames=retain_frames),
+        reporter=BenchmarkReporter(
+            tasks=tasks,
+            meta=meta,
+            report_path=str(tmp_path / "benchmark_report.json"),
+            run_identity=_identity(),
+        ),
+        meta=meta,
+        num_envs=1,
         min_episodes=2,
         max_steps=10,
-        report_path=str(tmp_path / "benchmark_report.json"),
         director=director,
-        retain_frames=retain_frames,
-        run_identity=_identity(),
     )
 
 
@@ -200,7 +210,7 @@ def _env_fall() -> EpisodeTermination:
     )
 
 
-def _two_episode_sink(tmp_path) -> tuple[BenchmarkSink, _FirstEpisodeDirector]:
+def _two_episode_session(tmp_path) -> tuple[EvaluationSession, _FirstEpisodeDirector]:
     """Two episodes, two tasks (one failing), one directed, one rewound."""
     director = _FirstEpisodeDirector()
     sink = _sink(
@@ -229,7 +239,7 @@ def _two_episode_sink(tmp_path) -> tuple[BenchmarkSink, _FirstEpisodeDirector]:
 
 def test_fixed_scenario_writes_the_exact_report_and_results(tmp_path):
     """Report keys/counts/aggregation and results order are behavior-stable."""
-    sink, _ = _two_episode_sink(tmp_path)
+    sink, _ = _two_episode_session(tmp_path)
 
     report = sink.on_run_end()
 
@@ -350,7 +360,7 @@ def test_empty_run_keeps_the_report_shape_without_results_files(tmp_path):
 
 def test_draft_report_drops_growing_lists_but_keeps_the_aggregate(tmp_path):
     """The bounded live draft has the final aggregates and no per-episode rows."""
-    sink, _ = _two_episode_sink(tmp_path)
+    sink, _ = _two_episode_session(tmp_path)
 
     draft = sink.metrics_report()
     report = sink.on_run_end()

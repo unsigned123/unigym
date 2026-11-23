@@ -236,7 +236,7 @@ class Director:
             self._directed.discard(ei)
 
     def is_episode_directed(self, env_id: int) -> bool:
-        """Live per-env mark (BenchmarkSink asks BEFORE the snapshot)."""
+        """Live per-env mark (EvaluationSession asks BEFORE the snapshot)."""
         return int(env_id) in self._directed
 
     def on_step_end(self, t, bundle) -> None:

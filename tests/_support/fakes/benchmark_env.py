@@ -1,11 +1,11 @@
-"""Typed benchmark-sink doubles for the live per-env evaluation boundary.
+"""Typed evaluation-session doubles for the live per-env evaluation boundary.
 
-``FakeBenchmarkEnv`` exposes the run-layer facts ``BenchmarkSink`` reads when
-it builds a per-env ``EvalContext``: ``num_envs``, ``device``, the backend
+``FakeBenchmarkEnv`` exposes the run-layer facts ``EvaluationSession`` reads
+when it builds a per-env ``EvalContext``: ``num_envs``, ``device``, the backend
 label, the articulation map and a lazy runtime-query property.  The query
 subfaces are intentionally minimal: only ``state.root_pose`` is meaningful
 (it records the env selection so a test can prove per-env scoping).  The
-query handle still exposes the full protocol shape at runtime so the sink's
+query handle still exposes the full protocol shape at runtime so the session's
 ``isinstance(..., Query)`` availability check succeeds.
 
 Limitations: no physics, no state writes, no scratch world, no contact or

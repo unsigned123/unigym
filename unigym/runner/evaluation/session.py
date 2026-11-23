@@ -1,15 +1,19 @@
-"""BenchmarkSink: episode-scoring consumer (B1), sibling of CollectSink.
+"""EvaluationSession: the runner sink for benchmark evaluation.
 
-Same callback mechanism and episode-buffering machinery as CollectSink
-(``slice_step_for_env``/``assemble_episode`` from ``runner/episodes.py``),
-but instead of writing shards it delegates each completed episode (pre-reset --
-record-before-reset invariant) to an
-``unigym.runner.evaluation.scoring.EpisodeEvaluator``, which assembles the
-``EpisodeData`` and scores it with every configured ``benchmarks`` Task.  The
-sink feeds the successful evaluations to a
-``unigym.benchmarks.reporting.BenchmarkReporter``, which owns the run-level
-aggregation and the ``benchmark_report.json`` / ``results.json`` /
-``metrics.npz`` artifacts.
+The session is the public runner sink for benchmark mode (``mode: benchmark``
+and ``both``).  It owns the evaluation lifecycle -- early stop, per-step
+buffering, episode-end dispatch, rewind marks, the bridge metrics feed and the
+per-task success counters -- and drives three injected collaborators:
+
+* an :class:`~unigym.runner.evaluation.buffer.EpisodeBuffer` owns the
+  open-episode history (per-env step slices, rewind marks);
+* an :class:`~unigym.runner.evaluation.scoring.EpisodeEvaluator` assembles the
+  ``EpisodeData`` and invokes every configured benchmark task;
+* an :class:`~unigym.benchmarks.reporting.EpisodeReporter` owns run-level
+  aggregation and artifact writing (``BenchmarkReporter`` in benchmark runs).
+
+The session constructs none of them: benchmark wiring builds the concrete
+collaborators and injects them, so the session stays reporter-agnostic.
 
 Callback contract (docs/contracts/runner_contract.md §3):
 
@@ -39,29 +43,14 @@ import time
 from typing import TYPE_CHECKING
 
 from unigym.benchmarks.base import Task
-from unigym.benchmarks.episode import EpisodeLimits, RunIdentity
-from unigym.benchmarks.reporting import (
-    METRICS_NPZ,
-    REPORT_SCHEMA,
-    RESULTS_JSON,
-    RESULTS_SCHEMA,
-    BenchmarkReporter,
-)
+from unigym.benchmarks.reporting import EpisodeReporter
 from unigym.core.episode_result import EpisodeResultView
 
-from ..evaluation.buffer import EpisodeBuffer
-from ..evaluation.scoring import EpisodeEvaluator
-
 if TYPE_CHECKING:
-    from unigym.env.backends.base import EnvBackend
+    from .buffer import EpisodeBuffer
+    from .scoring import EpisodeEvaluator
 
-__all__ = [
-    "BenchmarkSink",
-    "METRICS_NPZ",
-    "REPORT_SCHEMA",
-    "RESULTS_JSON",
-    "RESULTS_SCHEMA",
-]
+__all__ = ["EvaluationSession"]
 
 # extra key -> recorded episode_data key (identical to CollectSink's map;
 # applied by SUFFIX so ``articulation/<name>/base_pos_w`` -> ``.../base_pos``)
@@ -82,69 +71,53 @@ def _record_key(key: str) -> str:
     return key
 
 
-class BenchmarkSink:
-    """Scores completed episodes with a set of benchmark Tasks.
+class EvaluationSession:
+    """Drive the evaluation lifecycle over injected collaborators.
 
     Args:
-        tasks: instantiated ``benchmarks.base.Task`` objects.
-        meta: run-level context dict handed to tasks and embedded in the
-            report (``run_name``, ``seed``, ``policy_dt``,
-            ``joint_names``, ``num_envs``).
+        tasks: instantiated ``benchmarks.base.Task`` objects in declaration
+            order (task identity and the metrics feed key order).
+        buffer: the open-episode history owner.
+        evaluator: the episode assembler and task invoker.
+        reporter: the run-level aggregation and artifact writer.
+        meta: optional run-level context (only ``num_envs`` is read here).
+        num_envs: env-vector width; defaults to ``meta["num_envs"]`` or 1.
         min_episodes: early-stop threshold -- ``stop_when`` (passed to
             ``SyncRunner.run``) becomes True once this many episodes
             have completed.
         max_steps: configured step budget (informational; the engine's
             loop length is wired by collect.py).
-        report_path: where ``benchmark_report.json`` is written at run end.
-        director: optional Director  -- episodes it touched are
+        director: optional Director -- episodes it touched are
             labelled ``directed: true`` in the report (honest boundary:
             directed successes never mix into physics-legal claims,
             director_contract.md §7).
-        env: the live env backend, injected by ``_build_sinks``.  It is used
-            only to scope the per-env evaluation context (device, backend
-            label, articulations and a lazy read-only query factory); it is
-            never read from ``bundle["env"]``.  ``None`` is the explicit
-            record-only mode for direct unit wiring: the context has
-            ``record``/``obs`` and no query.
     """
 
     def __init__(
         self,
+        *,
         tasks: list[Task],
-        meta: dict,
-        min_episodes: int,
-        max_steps: int,
-        report_path: str,
+        buffer: EpisodeBuffer,
+        evaluator: EpisodeEvaluator,
+        reporter: EpisodeReporter,
+        meta: dict | None = None,
+        num_envs: int | None = None,
+        min_episodes: int = 1,
+        max_steps: int = 100000,
         director=None,
-        retain_frames: bool = False,
-        limits: EpisodeLimits | None = None,
-        run_identity: RunIdentity | None = None,
-        env: EnvBackend | None = None,
     ):
         self.tasks = list(tasks)
-        self.meta = dict(meta)
+        self.meta = dict(meta or {})
         self.min_episodes = int(min_episodes)
         self.max_steps = int(max_steps)
-        self.num_envs = int(meta.get("num_envs", 1))
-        # episode facts + task invocation are owned by the evaluator; the sink
-        # only feeds evaluated episodes to the report owner
-        self.evaluator = EpisodeEvaluator(
-            tasks=self.tasks,
-            meta=self.meta,
-            env=env,
-            limits=limits,
-            retain_frames=bool(retain_frames),
-        )
-        # open-episode history (steps + rewind marks + tick samples) is owned
-        # by the buffer; the sink only delegates append/take/mark
-        self.episode_buffer = EpisodeBuffer(self.num_envs)
-        # run-level aggregation and report/results/metrics writing
-        self.reporter = BenchmarkReporter(
-            tasks=self.tasks,
-            meta=self.meta,
-            report_path=str(report_path),
-            run_identity=run_identity,
-        )
+        self.num_envs = int(self.meta.get("num_envs", 1) if num_envs is None else num_envs)
+        # injected collaborators; the session constructs none of them
+        self.evaluator = evaluator
+        self.episode_buffer = buffer
+        self.reporter = reporter
+        # per-task successful-score counters (the reporter's result lists are
+        # not part of the reporter protocol; the session owns the live feed)
+        self._task_counts: dict[str, int] = {t.name: 0 for t in self.tasks}
         self.n_episodes = 0
         self.steps_total = 0
         self._stop = False
@@ -156,13 +129,14 @@ class BenchmarkSink:
     # early stop predicate (passed to SyncRunner.run(stop_when=...))
     # ------------------------------------------------------------------ #
     def episodes_done(self) -> bool:
-        """True once ``n_episodes >= min_episodes`` (engine early stop)."""
+        """Return True once ``n_episodes >= min_episodes`` (engine early stop)."""
         return self.n_episodes >= self.min_episodes
 
     # ------------------------------------------------------------------ #
     # per-step buffering (pre-reset data side, like CollectSink)
     # ------------------------------------------------------------------ #
     def on_step(self, t: int, bundle: dict) -> None:
+        """Buffer one normalized per-env step and update the run counters."""
         record = bundle["record"]
         rec = {}
         for k, v in record.items():
@@ -194,7 +168,8 @@ class BenchmarkSink:
         ``{tick, restored_tick, snap_id, label?}``.  The records stay
         attached to the open buffers and ride the assembled episodes as
         the ``rewound`` flag + per-episode rewind rows (directed family,
-        benchmark_contract §4)."""
+        benchmark_contract §4).
+        """
         self.episode_buffer.mark_rewound(info)
         print(
             f"[rewind] episode buffers marked rewound at tick "
@@ -206,6 +181,7 @@ class BenchmarkSink:
     # episode end (before-reset data side; reset chain is engine-driven)
     # ------------------------------------------------------------------ #
     def on_episode_end(self, env_ids, bundle: dict) -> None:
+        """Evaluate and publish every due env before the reset chain."""
         # per-env read-only result views for the sampler hook: successful
         # tasks only, in task declaration order (a raising task is omitted
         # exactly as it is omitted from the report)
@@ -220,10 +196,12 @@ class BenchmarkSink:
             evaluation = self.evaluator.evaluate(taken, bundle, ei)
             ep = evaluation.episode
             # directed labelling: the Director's per-env mark is
-            # still live here (this sink runs before the director's
+            # still live here (this session runs before the director's
             # episode-end snapshot in the fan-out)
             directed = bool(self._director is not None and self._director.is_episode_directed(ei))
             self.reporter.on_episode(evaluation, directed=directed)
+            for score in evaluation.scores:
+                self._task_counts[score.task] = self._task_counts.get(score.task, 0) + 1
             episode_results[ei] = evaluation.views
             # bridge metrics feed: PRIMARY task (first successful) supplies the
             # episode's reward/success slot (exact alignment with the env
@@ -246,6 +224,7 @@ class BenchmarkSink:
     # light progress (post-reset, mirrors CollectSink's logging rhythm)
     # ------------------------------------------------------------------ #
     def on_step_end(self, t: int, bundle: dict) -> None:
+        """Print light run progress every 500 policy steps."""
         if (t + 1) % 500 == 0:
             print(
                 f"[benchmark] step {t + 1}/{self.max_steps} | episodes "
@@ -257,6 +236,7 @@ class BenchmarkSink:
     # run end: aggregate + report json + summary dict
     # ------------------------------------------------------------------ #
     def on_run_end(self) -> dict:
+        """Finish the run: aggregate, write artifacts and return the report."""
         return self.reporter.finish(
             episodes_total=self.n_episodes,
             steps_total=self.steps_total,
@@ -267,29 +247,31 @@ class BenchmarkSink:
     # bridge metrics feed (duck-typed source; runtime_contract §2)
     # ------------------------------------------------------------------ #
     def metrics_drain(self) -> list[dict]:
-        """Per-episode {reward, success} scored since the previous drain
-        (order-aligned with the engine's env_ids; the bridge consumes this
-        right after its own on_episode_end callback)."""
+        """Drain per-episode ``{reward, success}`` scored since the last call.
+
+        Order-aligned with the engine's env_ids; the bridge consumes this
+        right after its own on_episode_end callback.
+        """
         out, self._metrics_pending = self._metrics_pending, []
         return out
 
     def metrics_task(self) -> dict | None:
-        """Primary task identity (canonical ``<pack>/<task>`` split)."""
+        """Return the primary task identity (canonical ``<pack>/<task>`` split)."""
         if not self.tasks:
             return None
         pack, _, name = self.tasks[0].name.rpartition("/")
         return {"pack": pack or None, "name": name or self.tasks[0].name}
 
     def metrics_progress(self) -> dict:
-        """Benchmark counters for the live view (episode-level)."""
+        """Return benchmark counters for the live view (episode-level)."""
         return {
             "episodes": self.n_episodes,
             "min_episodes": self.min_episodes,
-            "by_task": {t.name: len(self.reporter.results[t.name]) for t in self.tasks},
+            "by_task": dict(self._task_counts),
         }
 
     def metrics_report(self) -> dict | None:
-        """Bounded live report (reporter-owned draft; no growing lists)."""
+        """Return the bounded live report (reporter-owned draft; no growing lists)."""
         if not self.tasks:
             return None
         return self.reporter.draft_report()

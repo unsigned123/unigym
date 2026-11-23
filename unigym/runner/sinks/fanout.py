@@ -2,7 +2,7 @@
 
 Used for ``mode: both`` (collect + benchmark in one rollout).  Sinks are
 called synchronously in construction order -- CollectSink first, then
-BenchmarkSink -- and each sees the identical
+EvaluationSession -- and each sees the identical
 bundle objects, so recording and scoring cannot diverge.
 """
 
@@ -13,7 +13,7 @@ class FanOutSink:
     """Compose sinks behind one object satisfying the sink contract.
 
     ``on_run_end`` returns ``{sink_class_name: summary_dict}``; with the
-    standard pair that is ``{"CollectSink": ..., "BenchmarkSink": ...}``.
+    standard pair that is ``{"CollectSink": ..., "EvaluationSession": ...}``.
     """
 
     def __init__(self, *sinks):

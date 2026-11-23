@@ -121,7 +121,7 @@ The boundaries are:
   before the sink observes the bundle.  `build_terminations` inspects each
   instantiated term and rejects any `check` that is not exactly
   `check(self, ctx)`, so a legacy `check(self, state)` term fails at build;
-- benchmark: per-env view inside `BenchmarkSink.on_episode_end`, before reset,
+- benchmark: per-env view inside `EvaluationSession.on_episode_end`, before reset,
   built by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`).
   `Task.score(ep, ctx)` and `Task.score_detail(ep, ctx, *, retain_frames=False)`
   receive one context scoped to `ep.env_id`; the evaluator closes it in

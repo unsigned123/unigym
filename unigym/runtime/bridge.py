@@ -289,7 +289,7 @@ CommandHandler: TypeAlias = Callable[[int, dict[str, JsonValue]], AckResult]
 
 @runtime_checkable
 class MetricsSource(Protocol):
-    """The duck-typed benchmark telemetry feed (BenchmarkSink is ref impl)."""
+    """The duck-typed benchmark telemetry feed (EvaluationSession is ref impl)."""
 
     def metrics_drain(self) -> Sequence[Mapping[str, JsonValue]]: ...
 
@@ -897,7 +897,7 @@ class Bridge:
             snapshot; oversize fails fast HERE (startup assert), not at
             query time (design §2).
         metrics_source: optional duck-typed benchmark telemetry feed
-            (BenchmarkSink is the reference impl; runner_contract §3.1):
+            (EvaluationSession is the reference impl; runner_contract §3.1):
             metrics_drain() / metrics_task() / metrics_progress() /
             metrics_report().  Feeds the metrics block at episode end and
             the ``report`` query; None = collect-only run (null report).
