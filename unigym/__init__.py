@@ -32,6 +32,7 @@ __all__ = [
     "Run",
     "load",
     "make",
+    "Sink",
     "World",
     "Camera",
     "Box",
@@ -57,6 +58,7 @@ _LAZY = {
     "Run": ("unigym.run.api", "Run"),
     "load": ("unigym.run.api", "load"),
     "make": ("unigym.run.api", "make"),
+    "Sink": ("unigym.sink", "Sink"),
     "World": ("unigym.world", "World"),
     "Camera": ("unigym.camera", "Camera"),
     "Box": ("unigym.world", "Box"),
@@ -97,6 +99,7 @@ if TYPE_CHECKING:
     from unigym.run.api import Run, load, make
     from unigym.scenes.terrain import Terrain
     from unigym.sim import Control, Observation, Simulation, SimulationBuilder
+    from unigym.sink import Sink
     from unigym.world import Box, Capsule, Cylinder, Plane, Sphere, World
 
 

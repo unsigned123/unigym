@@ -27,6 +27,30 @@ evaluation surface.  Termination and benchmark evaluation receive the read-only
 `unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
 walk the backend.
 
+## Sink protocol
+
+The public contract is `unigym.sink.Sink`.  It is re-exported as `unigym.Sink`
+and `unigym.runner.Sink`; `unigym.run.instance.Sink` resolves to the same
+object.  It has exactly four required callbacks, driven only by `SyncRunner`:
+
+- `on_step(t, bundle)` — pre-reset data side.
+- `on_episode_end(env_ids, bundle)` — episode-end data side, before the reset
+  chain.
+- `on_step_end(t, bundle)` — post-reset metrics side.
+- `on_run_end() -> dict` — flush the run and return the sink summary.
+
+A sink may additionally implement an optional capability protocol:
+
+- `unigym.sink.RewindAwareSink` — `on_rewind(info)` receives one rewind/fork
+  mark.  It labels the abandoned branch; it is not state restoration.
+- `unigym.sink.StoppingSink` — `stop_when() -> bool` declares a sink-owned
+  early stop decision (not yet polled by core); stopping the run remains the
+  runner's job.
+
+These protocols describe optional capabilities only; publishing them adds no
+new runner control flow.  `FanOutSink` composes sinks in construction order,
+forwards every callback to each child and structurally satisfies `Sink`.
+
 Lifecycle:
 
 1. `on_step(t, bundle)` — pre-reset data side.  Timeline columns are

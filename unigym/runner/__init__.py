@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from unigym.sink import RewindAwareSink, Sink, StoppingSink
+
 from .base import Runner, StepResult
 from .external import ExternalRunner
 from .gym import GymEnvRunner, GymRunner, GymVectorRunner
@@ -66,8 +68,11 @@ __all__ = [
     "GymEnvRunner",
     "GymRunner",
     "GymVectorRunner",
+    "RewindAwareSink",
     "Runner",
+    "Sink",
     "StepResult",
+    "StoppingSink",
     "SyncRunner",
     "make_runner",
 ]

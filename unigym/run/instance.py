@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from unigym.backends.registry import CANONICAL_BACKENDS, Trait, backend_info
 from unigym.query.errors import QueryStaleError
+from unigym.sink import Sink
 
 from .spec import RunSpec
 
@@ -75,23 +76,6 @@ if TYPE_CHECKING:
         def native(self, backend: str) -> NativeHandle:
             """Return the backend's unstable native escape hatch."""
             ...
-
-
-class Sink(Protocol):
-    """The engine sink contract (collect/benchmark/fan-out/bridge chain)."""
-
-    def on_step(self, t: int, bundle: dict[str, object]) -> None:
-        """Consume one pre-reset engine step."""
-
-    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
-        """Consume the episode-end data side before the reset chain."""
-
-    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
-        """Consume one post-reset engine step (metrics side)."""
-
-    def on_run_end(self) -> dict[str, object]:
-        """Flush the run and return the sink summary."""
-        ...
 
 
 def _empty_providers() -> list[RewindStateProvider]:
