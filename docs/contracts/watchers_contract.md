@@ -70,6 +70,26 @@ state.  On restore the engine re-creates the callable and forces
 context before `check()`.  Restoring `setup_done = True` without re-running
 setup is never valid.
 
+## Evaluation context (deferred)
+
+Watcher convergence onto `unigym.evaluation` is deferred; this is the C4 gap
+recorded in the live-first plan, not a shipped property.
+
+- watchers keep their current `WatchContext` and do not use `EvalContext`,
+  `EnvView` or `EvalQuery`;
+- the expression/callable namespace still exposes `env` and `bundle`, so the
+  read-only/no-mutation guarantee of the evaluation contract does not yet apply
+  to watchers;
+- the `joint_limit` template's env-level limits
+  (`policy_joint_pos_limits` and `joint_pos_limits_by_articulation`) are
+  compatibility views derived from `ArticulationRuntime.joint_pos_limits`
+  (record/policy articulation order).  They remain until C4 moves the template
+  to `ctx.view.joint_pos_limits(articulation)`; termination code must not read
+  them.
+
+A later C4 change that removes `env` from the expression namespace is a
+separate user-facing contract break and requires its own owner decision.
+
 ## Out of scope
 
 - template/expression signal authoring and a derived signal language;

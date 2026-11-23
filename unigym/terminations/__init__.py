@@ -73,6 +73,13 @@ def register_termination(
 ) -> Callable[..., Termination]:
     """Register one termination class in the process-global registry.
 
+    The registered class is live-only: :meth:`Termination.check` must be
+    ``check(self, ctx)`` and receive the read-only
+    :class:`~unigym.evaluation.EvalContext`.  ``build_terminations`` inspects
+    every instantiated term and rejects a legacy ``check(self, state)`` (or any
+    other arity) at build time.  There is no compatibility shim and no recorded
+    termination state path.
+
     Args:
         name: Termination name the run config selects in ``terminations[].name``.
         cls: A callable returning a :class:`Termination`.

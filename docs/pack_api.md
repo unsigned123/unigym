@@ -1317,6 +1317,35 @@ boundary when none is supplied, and `analyze --metric` does the same.
 `unigym benchmarks list` builds the runtime; `unigym benchmarks validate <dir>`
 keeps loading one explicit directory through `load_pack`.
 
+### Live evaluation migration (external terminations and tasks)
+
+The live-first evaluation contract is a deliberate pack-API break.  There is no
+compatibility shim and no dual-signature period.
+
+- An external termination class registered through `register_termination` must
+  implement `check(self, ctx)`, where `ctx` is the read-only
+  [`unigym.evaluation.EvalContext`](contracts/evaluation_contract.md).  The
+  prior recorded-state concept and its state type are gone.
+  `build_terminations` inspects each instantiated term and rejects a legacy
+  `check(self, state)` at build time, so a stale pack cannot fail lazily on the
+  first tick.
+- A benchmark plugin task must implement `score(self, ep, ctx)` and, when it
+  overrides the detail face, `score_detail(self, ep, ctx, *,
+  retain_frames=False)`.  `build_tasks` validates both signatures at build time
+  and rejects a legacy `score(ep)` before the sink's exception isolation can
+  turn it into a silently missing report task.  `EpisodeData` remains the
+  episode history payload; a report is a live run observation and is not
+  guaranteed to be reproduced from stored episode data.
+- The episode filter subsystem is removed.  A run config that declares an
+  episode-filter section fails at spec construction with a migration hint;
+  there is no filter chain and no reconstruction of terminated episodes from
+  history.
+
+Pack faces (`terminations`, `benchmarks`, `tasks`) keep their manifest names and
+locators; only the in-process callable signatures change.  See
+[`contracts/evaluation_contract.md`](contracts/evaluation_contract.md) and
+[`contracts/benchmark_contract.md`](contracts/benchmark_contract.md).
+
 ### Pack context
 
 A pack entrypoint receives exactly one explicit `PackContext`:

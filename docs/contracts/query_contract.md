@@ -123,6 +123,23 @@ MuJoCo's `env.query` caches one `MujocoQuery`; mjWarp's `env.query` caches one
 return the same object, and closing the env closes that handle
 (`QueryStaleError` on later use).
 
+### Evaluation-context query subset
+
+`unigym.evaluation.EnvView.query` (reachable as `ctx.env.query`) is not this
+full facade.  It is the read-only, env-scoped
+[`EvalQuery`](evaluation_contract.md) adapter:
+
+- it exposes only the read subfaces (`backend`, `capabilities`, `model`,
+  `state`, `kinematics`, `geometry`, `contacts`, `actuators`, `require`);
+- it has no `scratch()` and no `close()`, so it cannot open a writable world or
+  close the run-shared handle;
+- a per-env view fixes the env selection and rejects a request or contact point
+  outside its scope;
+- every method becomes stale after `EnvView.close()`.
+
+`run.query` remains the full facade with `scratch()`/`close()`; evaluation
+callbacks receive the scoped subset, never the raw `Query`.
+
 ## 2. Capabilities
 
 ```python

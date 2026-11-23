@@ -14,10 +14,13 @@ Process documents:
   `AssetInstance` fields, backend matrix, resolution, digest and refusals.
 - [Model-edit contract](contracts/model_edit_contract.md) - global
   `run.model_edit()` body/geom transaction, field matrix and backend limits.
+- [Evaluation context contract](contracts/evaluation_contract.md) - the
+  read-only, boundary-scoped `EvalContext`/`EnvView`, scoped `EvalQuery`, and
+  the live termination/benchmark boundaries.
 - [Benchmark contract](contracts/benchmark_contract.md) - canonical
-  episode timeline, deadline authority, termination facts and report schema.
+  episode timeline, deadline authority, live task signatures and report schema.
 - [Runner contract](contracts/runner_contract.md) - the sink callback bundle
-  (timeline/reset/termination facts).
+  (timeline/reset/termination facts) and the live evaluation boundaries.
 - [Command sampler contract](contracts/command_sampler_contract.md) - sampler
   lifecycle hooks, custom factory authoring and rewind participation.
 - [Report templates](templates/) - design brief, completion, review and blocked

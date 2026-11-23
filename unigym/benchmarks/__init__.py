@@ -1,9 +1,16 @@
-"""Benchmark tasks: live-first episode scoring/registry (B1).
+"""Benchmark tasks: live-first episode scoring/registry.
 
-Tasks receive the episode history plus a read-only per-env ``EvalContext``.
-The module stays importable without torch/isaaclab (the context type is a
-type-checking-only import).  Concrete tasks live in ``tasks.py`` and
-self-register via ``@register`` on import.
+Tasks receive the episode history plus a read-only per-env ``EvalContext`` and
+implement ``score(self, ep, ctx)``; an overriding task also implements
+``score_detail(self, ep, ctx, *, retain_frames=False)``.  ``build_tasks``
+validates those signatures at build time, so a legacy ``score(ep)`` task fails
+loudly instead of being silently skipped by the sink.
+
+``EpisodeData`` remains the episode history/timeline/metrics payload.  A report
+is a live run observation: there is no guarantee that a stored episode can be
+scored again from history alone.  The module stays importable without
+torch/isaaclab (the context type is a type-checking-only import).  Concrete
+tasks live in ``tasks.py`` and self-register via ``@register`` on import.
 """
 
 from __future__ import annotations
