@@ -72,6 +72,15 @@ A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
 `ctx.env.query`; it cannot step, reset, write or read another env.  The core
 `env` bundle field is not the task context.
 
+Open-episode history is owned by `EpisodeBuffer`
+(`unigym.runner.evaluation.buffer`): `BenchmarkSink.on_step` appends the
+normalized per-step record, `on_rewind` attaches a rewind mark to every open
+buffer, and `on_episode_end` removes one env's steps and marks with `take`.
+The rewind provider snapshots/restores that buffer (steps, marks, tick traces,
+episode stamp and the episode fuse) under the `"benchmark"` provider name.
+`FanOutSink.on_rewind` forwards to every child recursively, so a benchmark sink
+nested below director or adapter fan-outs still receives the mark exactly once.
+
 `build_instance` creates the run's one `SignalBus` **before**
 `_build_bridge_and_wiring`, hands it to the watcher attach seam, calls
 `sampler.bind_env(env)` and then `sampler.bind_signals(signals)` at the

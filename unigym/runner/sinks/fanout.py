@@ -23,6 +23,12 @@ class FanOutSink:
         for sink in self.sinks:
             sink.on_step(t, bundle)
 
+    def on_rewind(self, info) -> None:
+        for sink in self.sinks:
+            fn = getattr(sink, "on_rewind", None)
+            if callable(fn):
+                fn(info)
+
     def on_episode_end(self, env_ids, bundle) -> None:
         for sink in self.sinks:
             sink.on_episode_end(env_ids, bundle)

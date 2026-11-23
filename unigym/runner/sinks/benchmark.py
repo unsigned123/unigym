@@ -62,7 +62,8 @@ from unigym.core.episode_result import EpisodeResultView
 from unigym.evaluation import EnvView, EvalContext
 from unigym.query.facade import Query
 
-from ..episodes import assemble_episode, slice_step_for_env
+from ..episodes import assemble_episode
+from ..evaluation.buffer import EpisodeBuffer
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
@@ -153,7 +154,9 @@ class BenchmarkSink:
         # benchmark_contract §results)
         self.retain_frames = bool(retain_frames)
         self.num_envs = int(meta.get("num_envs", 1))
-        self.ep_bufs: list[list[dict]] = [[] for _ in range(self.num_envs)]
+        # open-episode history (steps + rewind marks + tick samples) is owned
+        # by the buffer; the sink only delegates append/take/mark
+        self.episode_buffer = EpisodeBuffer(self.num_envs)
         self.episodes: list[EpisodeData] = []  # all scored EpisodeData
         self.results: dict[str, list] = {t.name: [] for t in self.tasks}
         # per-(episode, task) detail docs, results.json face
@@ -168,11 +171,6 @@ class BenchmarkSink:
         # per-episode structured termination docs (benchmark report)
         self._episode_terminations: list[dict] = []
         self._terminal_primary: list[Termination | None] = []
-        # rewind marking (Round B B1): per-env rewind records for the OPEN
-        # episode buffers (process-order interval intersection -- policy
-        # tick numbers repeat across a fork, so the open-buffer rule is
-        # the honest reading of "episode interval intersection"); parallel to ep_bufs
-        self._ep_rewinds: list[list[dict]] = [[] for _ in range(self.num_envs)]
 
     # ------------------------------------------------------------------ #
     # early stop predicate (passed to SyncRunner.run(stop_when=...))
@@ -200,8 +198,7 @@ class BenchmarkSink:
         eff_cmd = bundle["cmd"]
         if eff_cmd is not None:
             rec["command"] = eff_cmd
-        for ei in range(self.num_envs):
-            self.ep_bufs[ei].append(slice_step_for_env(rec, ei))
+        self.episode_buffer.append_step(rec)
         self.steps_total = t + 1
         self._stop = self.episodes_done()
 
@@ -217,8 +214,7 @@ class BenchmarkSink:
         attached to the open buffers and ride the assembled episodes as
         the ``rewound`` flag + per-episode rewind rows (directed family,
         benchmark_contract §4)."""
-        for buf in self._ep_rewinds:
-            buf.append(dict(info))
+        self.episode_buffer.mark_rewound(info)
         print(
             f"[rewind] episode buffers marked rewound at tick "
             f"{info.get('tick')} (restored to {info.get('restored_tick')})",
@@ -389,9 +385,9 @@ class BenchmarkSink:
         # exactly as it is omitted from the report)
         episode_results: dict[int, tuple[EpisodeResultView, ...]] = {}
         for ei in env_ids.tolist():
-            steps = self.ep_bufs[ei]
-            self.ep_bufs[ei] = []
-            rewinds, self._ep_rewinds[ei] = self._ep_rewinds[ei], []
+            taken = self.episode_buffer.take(int(ei))
+            steps = taken.steps
+            rewinds = taken.rewinds
             self.n_episodes += 1
             episode_results[int(ei)] = ()
             if not steps:
