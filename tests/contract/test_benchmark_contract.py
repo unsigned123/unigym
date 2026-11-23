@@ -15,6 +15,7 @@ from unigym.benchmarks.base import (
     Task,
     build_tasks,
 )
+from unigym.benchmarks import reporting as benchmark_reporting
 from unigym.benchmarks.episode import EpisodeLimits
 from unigym.benchmarks.termination import EpisodeOutcome, Termination
 from unigym.contacts.base import ContactGroupSpec
@@ -24,8 +25,11 @@ from unigym.runner.sinks import benchmark as benchmark_sink
 
 
 def test_report_and_results_have_stable_schemas():
-    assert benchmark_sink.REPORT_SCHEMA == "benchmark_report"
-    assert benchmark_sink.RESULTS_SCHEMA == "results"
+    assert benchmark_reporting.REPORT_SCHEMA == "benchmark_report"
+    assert benchmark_reporting.RESULTS_SCHEMA == "results"
+    # the sink module keeps the constants importable for existing consumers
+    assert benchmark_sink.REPORT_SCHEMA is benchmark_reporting.REPORT_SCHEMA
+    assert benchmark_sink.RESULTS_SCHEMA is benchmark_reporting.RESULTS_SCHEMA
 
 
 def test_episode_data_carries_contract_fields():

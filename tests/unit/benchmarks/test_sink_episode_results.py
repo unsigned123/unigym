@@ -143,7 +143,7 @@ def test_sink_episode_results_are_isolated_from_scored_metrics(tmp_path):
     sink.on_step(0, bundle)
     sink.on_episode_end(torch.tensor([0]), bundle)
 
-    result = sink.results["acme/good"][0]
+    result = sink.reporter.results["acme/good"][0]
     result.metrics["score"] = 99.0
 
     assert dict(bundle["episode_results"][0][0].metrics) == {"score": 1.5}
@@ -282,7 +282,7 @@ def test_sink_builds_a_per_env_live_context_and_closes_it(tmp_path):
 
     sink.on_episode_end(torch.tensor([1]), bundle)
 
-    result = sink.results["acme/context"][0]
+    result = sink.reporter.results["acme/context"][0]
     assert result.metrics == {"env_id": 1.0, "rows": 1.0, "query_backend": 1.0}
     assert env.query_reads == 1
     with pytest.raises(EvalViewStaleError):
@@ -311,7 +311,7 @@ def test_sink_scopes_the_observation_snapshot_to_the_due_env(tmp_path):
 
     sink.on_episode_end(torch.tensor([1]), bundle)
 
-    result = sink.results["acme/obs"][0]
+    result = sink.reporter.results["acme/obs"][0]
     assert result.metrics == {"obs_rows": 1.0, "obs_value": 3.0}
 
 
@@ -324,7 +324,7 @@ def test_sink_does_not_touch_the_query_for_a_context_ignoring_task(tmp_path):
 
     sink.on_episode_end(torch.tensor([0]), bundle)
 
-    assert sink.results["acme/pure"][0].metrics == {"score": 2.0}
+    assert sink.reporter.results["acme/pure"][0].metrics == {"score": 2.0}
     assert env.query_reads == 0
 
 
@@ -341,8 +341,8 @@ def test_record_only_context_has_no_query_and_isolates_query_callers(tmp_path):
 
     sink.on_episode_end(torch.tensor([0]), bundle)
 
-    assert sink.results["acme/has_query"][0].metrics == {"has_query": 0.0}
-    assert sink.results["acme/query_call"] == []
+    assert sink.reporter.results["acme/has_query"][0].metrics == {"has_query": 0.0}
+    assert sink.reporter.results["acme/query_call"] == []
     assert len(errors) == 1
     assert isinstance(errors[0], EvalQueryUnavailableError)
 
@@ -357,7 +357,7 @@ def test_per_env_query_rejects_another_env_and_isolates_the_task(tmp_path):
 
     sink.on_episode_end(torch.tensor([1]), bundle)
 
-    assert sink.results["acme/cross_env"] == []
+    assert sink.reporter.results["acme/cross_env"] == []
     assert env.query_reads == 1
     assert len(errors) == 1
     assert isinstance(errors[0], EvalViewError)
