@@ -6,11 +6,11 @@ Generic usage:
     python -m unigym.scripts.collect_cli --config path/to/run.yaml
 
 This script is a thin CLI: yaml parsing + builder wiring (robot profile /
-adapter / env backend / sampler / filters / terminations / recorder /
+adapter / env backend / sampler / terminations / recorder /
 language / writer / logger / sink / runner).  The rollout control flow lives
 in ``unigym.runner.sync.SyncRunner``; everything consumer-side
 lives in sinks -- ``runner.sinks.collect.CollectSink`` (recording,
-filtering, video, logging) and ``runner.sinks.benchmark.BenchmarkSink``
+video, logging) and ``runner.sinks.benchmark.BenchmarkSink``
 (episode scoring, docs/contracts/benchmark_contract.md) -- see docs/contracts/runner_contract.md.
 
 The yaml ``mode`` key selects the consumer wiring (default ``"collect"``):

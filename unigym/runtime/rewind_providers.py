@@ -1,6 +1,6 @@
 """Rewind state providers.
 
-The sink facilities whose open-episode state a restored timeline must
+The sink facilities whose forked-timeline state a restored timeline must
 agree with.
 
 A rewind that restores only the engine + adapter leaves the SINKS marching.
@@ -32,12 +32,11 @@ Providers (v1 coverage, design §1.3 table):
   abandoned branches stay in the append-only lists (labelled
   ``rewound`` where applicable) -- nothing is erased.
 * ``CollectSinkProvider`` (name ``episode_runner``) -- the collect
-  writer's episode slicing state (``ep_bufs``), same buffer mechanism;
-  its ``n_episodes`` fuse counter rides the fork for the same reason.
-  The undo-aware shard design puts the
-  SHARD RECORDING CURSOR on the same package (``shard_commit`` =
+  writer's SHARD RECORDING CURSOR (``shard_commit`` =
   ``{committed_shards, committed_rows}`` off the sink's
-  :class:`~unigym.io.writer.ShardWriter`).  The restore deletes the
+  :class:`~unigym.io.writer.ShardWriter`) plus its ``n_episodes`` fuse
+  counter, which rides the fork for the same reason.  A collect run keeps
+  no episode buffers.  The restore deletes the
   post-checkpoint shard files, truncates the boundary shard back to the
   checkpoint's rows and re-inflates the writer's row buffer from it --
   the shard directory stays the WINNING timeline (monotonic (episode,
@@ -47,12 +46,13 @@ Providers (v1 coverage, design §1.3 table):
   of those is a qualitative reference only (runtime_contract §4.2).
 
 Both providers also implement ``dump_attempt(dir, base)`` -- the §1.4
-sidecar: before a rewind applies, the CURRENT (abandoned-branch) buffer
-frames are written to ``<out_dir>/attempts/`` as npz (one key per env
-field, ``assemble_episode`` stacked) so no data is ever discarded.  The
-buffers are episode-scoped lists of per-step slice dicts (numpy/tensor
-free after ``slice_step_for_env`` -- cpu clones), so the round trip is a
-deep copy away from byte-exact.
+sidecar, run before a rewind applies.  ``BenchmarkSinkProvider`` writes
+the CURRENT (abandoned-branch) buffer frames to ``<out_dir>/attempts/``
+as npz (one key per env field, ``assemble_episode`` stacked) so no data is
+ever discarded.  ``CollectSinkProvider`` is buffer-less and writes
+nothing (an empty result).  A written buffer is an episode-scoped list of
+per-step slice dicts (numpy/tensor free after ``slice_step_for_env`` --
+cpu clones), so the round trip is a deep copy away from byte-exact.
 
 pre-flight:
 both providers implement ``validate_rewind_state(state)`` -- the SAME
@@ -125,7 +125,7 @@ class InitializerStateProvider:
 
 
 class _EpisodeBufferProvider:
-    """Shared machinery for the sink-buffer providers.
+    """Shared sink-state machinery (benchmark buffers; collect fuse/cursor).
 
     Subclasses name the facility and point ``_bufs``/``_marks`` at the
     sink's attributes.  The snapshot is a DEEP copy (fresh numpy arrays);
@@ -246,8 +246,8 @@ class _EpisodeBufferProvider:
         """Episode id of the open buffer's last frame (None otherwise).
 
         None when the buffer is empty -- episode boundaries carry no
-        frames -- or when the facility has no buffers at all: a plain
-        collect run's ``ep_bufs`` is None by construction.
+        frames -- or when the facility has no buffers at all: a collect
+        run keeps none.
         """
         if bufs is None:
             return None
@@ -260,15 +260,14 @@ class _EpisodeBufferProvider:
 
     # -- §1.4 sidecar ----------------------------------------------------- #
     def dump_attempt(self, out_dir: str, base: str) -> list[str]:
-        """The current (abandoned-branch) buffers -> one npz under *out_dir*.
+        """The current (abandoned-branch) buffer, when present -> one npz under *out_dir*.
 
         Returns the written paths (meta json is the controller's).  A
-        buffer-LESS facility (a plain collect run's ``ep_bufs`` is None
-        -- no filter chain, no open episode buffers) holds nothing to
-        dump: the honest empty result, never a TypeError (the undo
-        blocker -- the dump runs on EVERY rewind before the restore, so
-        the unguarded enumerate(None) blocked undo for every plain
-        collect run).
+        buffer-less facility (a collect run keeps no episode buffers)
+        holds nothing to dump: the honest empty result, never a TypeError
+        (the undo blocker -- the dump runs on EVERY rewind before the
+        restore, so the unguarded enumerate(None) blocked undo for every
+        plain collect run).
         """
         from unigym.runner.episodes import assemble_episode
 
@@ -317,19 +316,18 @@ class BenchmarkSinkProvider(_EpisodeBufferProvider):
 
 
 class CollectSinkProvider(_EpisodeBufferProvider):
-    """The collect writer's episode slicing state (name ``episode_runner``).
+    """The collect writer's shard cursor + fuse (name ``episode_runner``).
 
-    Same buffer machinery; its episode fuse counter rides the fork.
-    The undo-aware shard design puts the shard recording
-    cursor (``ShardWriter.commit_state``, two integers) on the same
-    package; its restore truncates the shard directory back to the
-    committed winning timeline.
+    A collect run keeps no episode buffers; the provider mounts for the
+    shard recording cursor (``ShardWriter.commit_state``, two integers)
+    and the ``n_episodes`` fuse counter.  Its restore truncates the shard
+    directory back to the committed winning timeline.
     """
 
     name = "episode_runner"
 
     def _bufs(self) -> EpisodeBuffers:
-        return getattr(self.sink, "ep_bufs", None)
+        return None
 
     def _marks(self) -> MarksState:
         return None
@@ -350,26 +348,17 @@ class CollectSinkProvider(_EpisodeBufferProvider):
         return w if callable(getattr(w, "commit_state", None)) else None
 
     def rewind_state(self) -> dict[str, SnapshotValue]:
-        """Base state + the shard recording cursor when a writer exists.
+        """The fuse counter + the shard recording cursor when a writer exists.
 
-        Buffer-less collect runs (no filter chain) carry only the fuse
-        counter + cursor -- the recursive provider walk made this shape
-        reachable in production: plain collect runs now mount the
-        provider too.
+        A collect run keeps no episode buffers, so the shard cursor and
+        the episode fuse are the whole state.
         """
-        if self._bufs() is None:
-            # non-filter collect run: no episode buffers exist -- the
-            # shard cursor is the whole state (the recursive provider
-            # walk made this shape reachable in production: plain
-            # collect runs now mount the provider too)
-            state: dict[str, SnapshotValue] = {
-                "bufs": None,
-                "marks": None,
-                "episode_stamp": None,
-                "fuse": self._fuse(),
-            }
-        else:
-            state = super().rewind_state()
+        state: dict[str, SnapshotValue] = {
+            "bufs": None,
+            "marks": None,
+            "episode_stamp": None,
+            "fuse": self._fuse(),
+        }
         w = self._writer()
         if w is not None:
             state["shard_commit"] = w.commit_state()
@@ -414,11 +403,13 @@ class CollectSinkProvider(_EpisodeBufferProvider):
                 ) from e
 
     def apply_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
-        """Restore the buffers (base) and then the shard cursor.
+        """Restore the episode fuse and then the shard cursor.
 
-        The shard cursor restore is plain file+cursor surgery -- a
-        failure there raises through and the controller's safety net
-        rolls the buffers back with the rest of the world.
+        A collect run keeps no episode buffers, so the fuse counter is
+        the whole sink state; a legacy snapshot that still carries
+        buffers is refused by the base shape guard.  The shard cursor
+        restore is plain file+cursor surgery -- a failure there raises
+        through to the controller's safety net.
         """
         if state.get("bufs") is None:
             # buffer-less shape: only the fuse counter rides the fork
@@ -427,11 +418,8 @@ class CollectSinkProvider(_EpisodeBufferProvider):
                 if hasattr(self.sink, k):
                     setattr(self.sink, k, v)
         else:
-            # buffers first (the cross-episode refusal fires before ANY
-            # mutation); the shard cursor restore is plain file+cursor
-            # surgery -- a failure there raises through and the
-            # controller's safety net rolls the buffers back with the
-            # rest of the world
+            # a legacy snapshot with buffers: the base shape guard refuses
+            # it against this buffer-less sink before any mutation
             super().apply_rewind_state(state)
         w = self._writer()
         commit = state.get("shard_commit")

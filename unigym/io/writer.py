@@ -72,34 +72,6 @@ class ShardWriter:
         if self._steps_in_shard >= self.shard_steps:
             self._flush()
 
-    def append_episode(self, episode_data: dict) -> None:
-        """Append a kept episode's step data (one env, already filtered).
-
-        Values are ``(T_i, D)`` arrays.  They are expanded to ``(T_i, 1, D)``
-        and then split into individual ``(1, D)`` step slices so that the
-        internal buffer stays consistent with :meth:`append` — ``_flush``
-        uses ``np.stack`` which requires uniform shapes.
-        """
-        T = None
-        prepared = {}
-        for k, v in episode_data.items():
-            arr = np.atleast_1d(self._to_numpy(v))
-            if T is None:
-                T = arr.shape[0] if arr.ndim > 0 else 1
-            if arr.dtype == object:
-                arr = arr.reshape(T, 1)
-            elif arr.ndim >= 1:
-                arr = np.expand_dims(arr, axis=1)  # (T, 1, D) or (T, 1)
-            prepared[k] = arr
-        if T is None:
-            return
-        for k, arr in prepared.items():
-            self._buf[k].extend(arr)  # adds T slices of shape (1, D)
-        self._steps_in_shard += T
-        self._total_steps += T
-        if self._steps_in_shard >= self.shard_steps:
-            self._flush()
-
     def _flush(self) -> None:
         if self._steps_in_shard == 0:
             return

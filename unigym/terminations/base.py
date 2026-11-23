@@ -14,7 +14,7 @@ reference -- there is no flat single-robot state and no primary binding.
 NOTE (design): in data-collection mode nothing actually resets when a
 termination fires — IsaaclabEnv episodes end by duration only.  The
 termination system is a *detection* layer consumed by progress logging
-(collect.py), summary stats (logger), and episode filtering (filters/).
+(collect.py) and summary stats (logger).
 """
 
 from __future__ import annotations

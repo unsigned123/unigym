@@ -13,9 +13,9 @@ unified termination check, then hands a *bundle* to the consumer-side sink:
         sampler.reset(due)                          #
     sink.on_step_end(t, bundle)                   # post-reset per-step metrics
     ... loop ...
-    sink.on_run_end() -> dict                     # final flush + summary
+    sink.on_run_end() -> dict                     # final summary
 
-The runner owns control flow only: recording, filtering, video, logging and
+The runner owns control flow only: recording, video, logging and
 statistics all live in the sink (docs/contracts/runner_contract.md).  terminated/alive
 are computed here (``TerminationState.from_extra`` + ``term_group.check``) —
 pure tensor ops, no RNG consumption, so moving them relative to collect.py's

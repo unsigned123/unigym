@@ -2,8 +2,8 @@
 
 A formula task is fully described by data -- a metrics list plus a success
 predicate tree -- so SIMPLE benchmark tables (metric formulas + threshold
-predicates) need no Python.  Third reuse of the framework's declarative-yaml
-pattern (events/terminations/filters before it).
+predicates) need no Python.  A reuse of the framework's declarative-yaml
+pattern (after events and terminations).
 
 yaml form (``benchmark.tasks`` section; ``class: formula`` routes here,
 sections without ``class`` keep using the named TASK_REGISTRY)::

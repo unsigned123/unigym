@@ -2,7 +2,7 @@
 
 Yaml usage (top-level ``terminations`` section, optional; entries are
 OR-combined — any term firing marks the env "terminated" for
-logging/filtering; nothing actually resets in collection mode)::
+logging; nothing actually resets in collection mode)::
 
     terminations:
       - name: fall

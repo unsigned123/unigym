@@ -184,7 +184,6 @@ tests/
 │   ├── runner/
 │   ├── contacts/
 │   ├── terminations/
-│   ├── filters/
 │   ├── robots/
 │   ├── assets/
 │   ├── adapters/
@@ -254,7 +253,6 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_runner` | `tests/unit/runner/**` |
 | `domain_contacts` | `tests/unit/contacts/**` (refs, inventory, mixed owners, first-party config smoke) |
 | `domain_terminations` | `tests/unit/terminations/**` |
-| `domain_filters` | `tests/unit/filters/**` |
 | `domain_robots` | `tests/unit/robots/**` |
 | `domain_adapters` | `tests/unit/adapters/**` |
 | `domain_assets` | `tests/unit/assets/**` |
