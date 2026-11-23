@@ -327,36 +327,69 @@ def _height_check(ctx: WatchContext, p: dict) -> WatchResult:
 def _limit_magnitude(limits):
     """Per-joint |limit| broadcastable against an (N, J) position row.
 
-    Accepts the EnvBackend-contract form (a (lower, upper) pair of
-    (N, J) tensors -- both real backends) and the (J, 2) [lo, hi]-pairs
-    tensor (offline fakes).  Anything else -> WatchError (fail-safe
-    domain; never a silent zero-margin pass).
+    ``EnvView.joint_pos_limits`` returns the articulation's ``(lower, upper)``
+    pair of ``(N, J)`` tensors in record/body-control policy order, or
+    ``None`` when the asset declares no limits.  Anything else is a broken
+    view fact -> WatchError (fail-safe domain; never a silent zero-margin
+    pass).
     """
     import numpy as np
 
-    if isinstance(limits, (tuple, list)) and len(limits) == 2:
-        lo = np.abs(_to_np(limits[0])).astype(float)
-        hi = np.abs(_to_np(limits[1])).astype(float)
-        return np.maximum(lo, hi)  # (N, J)
-    a = np.abs(_to_np(limits)).astype(float)
-    if a.ndim == 2 and a.shape[-1] == 2:
-        return a.max(axis=-1)  # (J,)
-    raise WatchError(
-        f"joint_limit: unsupported policy_joint_pos_limits layout "
-        f"({type(limits).__name__}, shape {getattr(a, 'shape', None)})"
+    if not isinstance(limits, (tuple, list)) or len(limits) != 2:
+        raise WatchError(
+            f"joint_limit: expected (lower, upper) limits from the view, "
+            f"got {type(limits).__name__}"
+        )
+    lo = np.abs(_to_np(limits[0])).astype(float)
+    hi = np.abs(_to_np(limits[1])).astype(float)
+    return np.maximum(lo, hi)  # (N, J)
+
+
+def _infer_joint_articulation(ctx: WatchContext) -> str:
+    """Resolve the single articulation exposing ``articulation/<name>/joint_pos``.
+
+    The legacy fixed ``record/joint_pos`` key no longer exists: each
+    articulation publishes its own joint positions.  Inference is only
+    unambiguous when exactly one articulation exposes the leaf.
+    """
+    names = sorted(
+        key[len("articulation/") : -len("/joint_pos")]
+        for key in ctx.record
+        if key.startswith("articulation/") and key.endswith("/joint_pos") and key.count("/") == 2
     )
+    if not names:
+        raise WatchError(
+            "joint_limit: no articulation given and no "
+            "record/articulation/<name>/joint_pos key in this tick; pass "
+            "articulation=<name>"
+        )
+    if len(names) > 1:
+        raise WatchError(
+            f"joint_limit: articulation is ambiguous ({names}); pass " f"articulation=<name>"
+        )
+    return names[0]
 
 
 def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     import numpy as np
 
-    limits = getattr(ctx.env, "policy_joint_pos_limits", None)
-    if limits is None:
+    articulation = p.get("articulation")
+    key = p.get("key")
+    if articulation is None and isinstance(key, str) and key.startswith("record/articulation/"):
+        articulation = key.split("/")[2]
+    if articulation is None:
+        articulation = _infer_joint_articulation(ctx)
+    view = ctx.view
+    if view is None:
         raise WatchError(
-            "joint_limit: env has no policy_joint_pos_limits (backend " "without declared limits)"
+            "joint_limit: no live evaluation view in this context "
+            "(offline watch contexts expose no articulation limits)"
         )
-    lim = _limit_magnitude(limits)  # (N, J) or (J,)
-    q = _to_np(ctx.key(p.get("key", "record/joint_pos"))).astype(float)
+    limits = view.joint_pos_limits(articulation)
+    if limits is None:
+        raise WatchError(f"joint_limit: articulation {articulation!r} declares no joint limits")
+    lim = _limit_magnitude(limits)  # (N, J)
+    q = _to_np(ctx.key(f"record/articulation/{articulation}/joint_pos")).astype(float)
     margin = float(p.get("margin", 0.1))
     band = lim - margin
     viol = np.abs(q) >= band
@@ -368,7 +401,12 @@ def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
         fired=True,
         level=Level.WARN,
         message=f"joint limit margin {margin}: envs {envs[:8]}" f"{'...' if len(envs) > 8 else ''}",
-        data={"envs": envs, "worst_over": round(worst, 4), "margin": margin},
+        data={
+            "articulation": articulation,
+            "envs": envs,
+            "worst_over": round(worst, 4),
+            "margin": margin,
+        },
     )
 
 
@@ -489,10 +527,35 @@ def _v_height(p, keys):
 
 def _v_joint_limit(p, keys):
     e: list[str] = []
+    art = p.get("articulation")
+    if art is not None and (not isinstance(art, str) or not art.strip()):
+        e.append(_err(p, "articulation", "a non-empty articulation name"))
     if "margin" in p:
         _req_num(p, "margin", e, nonneg=True)
-    if p.get("key") is not None:
-        _req_key(p, "key", e, keys)
+    key = p.get("key")
+    if key is not None:
+        if not isinstance(key, str) or not key:
+            e.append(_err(p, "key", "a trace-face key string"))
+        elif key == "record/joint_pos":
+            e.append(
+                "key: 'record/joint_pos' is retired; each articulation now "
+                "publishes record/articulation/<name>/joint_pos -- pass "
+                "articulation=<name> (or omit key)"
+            )
+        elif not (key.startswith("record/articulation/") and key.endswith("/joint_pos")):
+            e.append(
+                f"key: {key!r} must be record/articulation/<name>/joint_pos "
+                f"(or omit key and pass articulation=<name>)"
+            )
+        else:
+            if keys and key not in keys:
+                e.append(f"key: unknown key {key!r} (available: {keys})")
+            key_art = key.split("/")[2]
+            if isinstance(art, str) and art.strip() and key_art != art:
+                e.append(
+                    f"key: {key!r} selects articulation {key_art!r}, "
+                    f"not the declared articulation {art!r}"
+                )
     return e
 
 
@@ -563,7 +626,8 @@ TEMPLATE_REGISTRY: dict[str, dict] = {
         2,
         _v_joint_limit,
         _joint_limit_check,
-        "margin?<num>=0.1, key?<trace key>=record/joint_pos",
+        "articulation?<name> (inferred from "
+        "record/articulation/<name>/joint_pos when omitted), margin?<num>=0.1",
         {},
     ),
 }

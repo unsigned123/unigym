@@ -1,14 +1,20 @@
 """The read-only, boundary-scoped evaluation context.
 
-A live run owns one :class:`EnvView` per evaluation boundary (termination,
-benchmark scoring or a converged watcher) and closes it after the callback.
-The view is a facade over the existing env record/observation/query faces; it
-never exposes the backend, a mutable engine handle or a write operation.
+A live run owns one :class:`EnvView` per evaluation boundary; the lifetime is
+owner-defined.  Termination and benchmark scoring create a view per callback
+and close it after the callback.  The watcher engine retains the current
+vector-scoped view until the next tick replaces it, so add/test/dump and
+callable ``on_reset`` can read the live boundary between callbacks.  Closing a
+view never closes the environment or the run-shared query; it only invalidates
+the view's private references.  The view is a facade over the existing env
+record/observation/query faces; it never exposes the backend, a mutable engine
+handle or a write operation.
 
 Values returned by :meth:`EnvView.record` and :meth:`EnvView.obs` are borrowed
-from the boundary snapshot and must not be retained after the callback.  Query
-results are detached copies produced by the query layer and are safe to keep,
-but the :class:`~unigym.evaluation.query.EvalQuery` handle is bound to the view
+from the boundary snapshot and must not be retained past the owning boundary
+(the callback, or the watcher's current tick).  Query results are detached
+copies produced by the query layer and are safe to keep, but the
+:class:`~unigym.evaluation.query.EvalQuery` handle is bound to the view
 lifetime.
 """
 

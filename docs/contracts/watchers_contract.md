@@ -70,25 +70,55 @@ state.  On restore the engine re-creates the callable and forces
 context before `check()`.  Restoring `setup_done = True` without re-running
 setup is never valid.
 
-## Evaluation context (deferred)
+## Evaluation context
 
-Watcher convergence onto `unigym.evaluation` is deferred; this is the C4 gap
-recorded in the live-first plan, not a shipped property.
+Watchers consume the read-only evaluation boundary from `unigym.evaluation`
+(`EnvView`).  This is the C4 convergence recorded in the live-first plan; the
+watcher trigger/action engine, key face, signal publication, rewind provider
+and lifecycle are unchanged.
 
-- watchers keep their current `WatchContext` and do not use `EvalContext`,
-  `EnvView` or `EvalQuery`;
-- the expression/callable namespace still exposes `env` and `bundle`, so the
-  read-only/no-mutation guarantee of the evaluation contract does not yet apply
-  to watchers;
-- the `joint_limit` template's env-level limits
-  (`policy_joint_pos_limits` and `joint_pos_limits_by_articulation`) are
-  compatibility views derived from `ArticulationRuntime.joint_pos_limits`
-  (record/policy articulation order).  They remain until C4 moves the template
-  to `ctx.view.joint_pos_limits(articulation)`; termination code must not read
-  them.
+- `WatcherEngine.on_tick` builds exactly one vector-scoped `EnvView`
+  (`env_id is None`) per tick from `bundle["env"]` or the engine's wired env.
+  The view carries the step record and observation snapshot from the bundle,
+  `num_envs`, `device`, the backend label, a lazy query factory when the env
+  exposes `query`, and the articulation runtime facts.  The raw env is not
+  retained by the context;
+- `WatchContext.view: EnvView | None` is the read-only face.  `record`,
+  `obs` and `num_envs` read through the view when it is present; the
+  bundle-only fallback exists only for offline unit tests that construct a
+  context without a live env;
+- the view is retained across ticks so add/test/dump and callable `on_reset`
+  read the current tick's boundary between callbacks.  Replacing `_last_ctx`
+  on the next tick closes the previous view; it is not closed in the callback
+  epilogue.  Closing a view never closes the env or the run-shared query;
+- views are boundary handles, not checkpoint state.  The rewind payload is
+  unchanged (specs, trigger state, template windows); a view is rebuilt from
+  the live env after a rewind.
 
-A later C4 change that removes `env` from the expression namespace is a
-separate user-facing contract break and requires its own owner decision.
+### Expression / callable namespace
+
+The expr namespace and callable `check(ctx)` receive `view` as the read-only
+handle.  `env` is **removed** from the expression namespace (owner-approved
+watcher contract break): no raw env is reachable through `eval_namespace`.
+`bundle` remains bound for compatibility, but `bundle["env"]` is not a watcher
+API and must not be read by a predicate.  Watcher state reads go through
+`view`, `record`, `obs` or the key face.
+
+### `joint_limit` migration
+
+`joint_limit` reads per-articulation limits through the view:
+
+- `articulation` is the explicit selector; when omitted, the template infers
+  the single articulation exposing `record/articulation/<name>/joint_pos`
+  (multiple leaves require an explicit articulation);
+- limits come from `ctx.view.joint_pos_limits(articulation)` in
+  record/body-control policy order, the same order as the joint-position leaf;
+- the template no longer reads `ctx.env`, `policy_joint_pos_limits` or
+  `joint_pos_limits_by_articulation`;
+- the retired fixed `key: record/joint_pos` is rejected with a migration hint;
+  a namespaced `key: record/articulation/<name>/joint_pos` remains valid and
+  selects that articulation.
+
 
 ## Out of scope
 

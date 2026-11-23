@@ -24,6 +24,7 @@ view -- the thin-shell principle); events stream to events.jsonl (timeline).
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import time
 from collections import deque
@@ -31,6 +32,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..evaluation import EnvView
 from . import templates as _tpl
 from .base import (
     CAPTURE,
@@ -115,7 +117,9 @@ class WatcherEngine:
     Args:
         run_id: run id (events + store naming only).
         out_dir: run output dir (watchers.json, events.jsonl, captures).
-        env / adapter: run objects for the WatchContext.
+        env: live run env used to build the per-tick read-only view when the
+            step bundle carries no ``env``; never handed to a predicate.
+        adapter: passed through to the WatchContext.
         event_log: the shared timeline writer (None -> drop events).
         bridge: owning Bridge (pause/capture/dump/direct actions); may
             be None in offline tests.
@@ -383,17 +387,59 @@ class WatcherEngine:
     # ------------------------------------------------------------------ #
     # per-tick evaluation (the ONLY engine-loop touchpoint)
     # ------------------------------------------------------------------ #
+    def _build_view(self, env: Any, bundle: dict) -> EnvView:
+        """Build the tick's vector-scoped read-only view from the live env.
+
+        Record and observation snapshot come from the step bundle; the view
+        only adds read-only identity (num_envs/device/backend), the lazy query
+        factory and the articulation runtime facts.  Watchers reach state
+        through ``WatchContext``, ``view`` and the eval namespace -- none of
+        which carry a mutable backend handle.  The lazy ``_query_factory``
+        deliberately closes over ``env`` to hand out the run-shared query on
+        demand, and ``bundle["env"]`` remains a compatibility caveat that is
+        explicitly not watcher API.
+        """
+        record = bundle.get("record")
+        if record is None:
+            record = {}
+        query_factory = None
+        if inspect.getattr_static(env, "query", None) is not None:
+
+            def _query_factory():
+                return env.query
+
+            query_factory = _query_factory
+        return EnvView(
+            record=record,
+            obs=bundle.get("obs"),
+            env_id=None,
+            num_envs=int(getattr(env, "num_envs", 0) or 0),
+            device=getattr(env, "device", "cpu"),
+            backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
+            query_factory=query_factory,
+            articulations=getattr(env, "articulations", None) or {},
+        )
+
     def on_tick(self, t: int, bundle: dict) -> None:
         env = bundle.get("env")
+        if env is None:
+            env = self.env
+        view = self._build_view(env, bundle) if env is not None else None
+        previous = self._last_ctx
         self._last_bundle = bundle
         self._last_ctx = WatchContext(
             t=int(t),
             bundle=bundle,
-            env=env if env is not None else self.env,
+            view=view,
             adapter=self.adapter,
             sim_time=self._sim_time(bundle),
             episodes=self._episodes(),
         )
+        # The view outlives the callback it was built for: add/test/dump and
+        # on_reset read the current tick's view between ticks.  Replacing the
+        # context (never the callback epilogue) is the close point.
+        if previous is not None and previous.view is not None:
+            previous.view.close()
         t0 = time.perf_counter()
         for name in list(self._specs):
             spec, st = self._specs[name], self._states[name]

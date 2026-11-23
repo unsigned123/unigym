@@ -1,9 +1,8 @@
 # Evaluation context contract
 
 Status: `unigym.evaluation` defines the read-only, boundary-scoped context that
-live termination consumes; benchmark scoring and (later) watchers adopt the
-same boundary.  Termination is live-only: there is no recorded/offline state
-path.
+live termination consumes; benchmark scoring and watchers adopt the same
+boundary.  Termination is live-only: there is no recorded/offline state path.
 
 The context is a facade over the existing env `record` / observation / runtime
 query faces at one engine-thread boundary.  It is not a new backend lifecycle,
@@ -33,7 +32,10 @@ scoring argument; they are not duplicated on the context.
 ## 2. Lifetime
 
 - The owner creates exactly one view/context per callback boundary and closes
-  it in `finally` after the callback.
+  it in `finally` after the callback.  The watcher engine is the exception:
+  it retains one vector-scoped view per tick until the next tick replaces the
+  context (so add/test/dump and `on_reset` can read it between callbacks) and
+  closes the previous view at that replacement point.
 - `close()` is idempotent.
 - `close()` never closes the environment or the run-shared query handle.  The
   view only drops its private reference; the run/env still owns the query.
@@ -126,8 +128,12 @@ The boundaries are:
   old task signature is rejected by `build_tasks` at build time.  A sink wired
   without an env (direct unit use) builds an explicit record/obs-only context
   whose query is unavailable;
-- watcher: deferred; watchers keep their current `WatchContext` and `env`
-  expression surface until a separate owner decision.
+- watcher: one vector-scoped view (`env_id is None`) built by
+  `WatcherEngine.on_tick` from the step bundle/env, retained until the next
+  tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs` read
+  through it; the expression namespace exposes `view` but no raw `env`.
+  `bundle["env"]` is not a watcher API.  Views are not checkpointed; the
+  watcher rewind payload is unchanged.
 
 Evaluation order is contract for the consumers that adopt it, not a convention
 to reorder for convenience.

@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     import torch
 
+    from unigym.evaluation import EnvView
+
 __all__ = [
     "Level",
     "ACTIONS",
@@ -221,15 +223,24 @@ class WatchContext:
     the expr namespace and passed to callable ``check(ctx)``.  All
     accessors read the single data face (bundle + observation snapshot); nothing
     here mutates run state.
+
+    Live evaluation reads through :attr:`view`, the read-only, vector-scoped
+    :class:`~unigym.evaluation.EnvView` the engine builds once per tick and
+    retains until the next tick.  The bundle fallback exists only for offline
+    unit tests that construct a context without a live env.  ``env`` is not a
+    watcher API: the engine never populates it, it is absent from
+    :meth:`eval_namespace`, and ``bundle["env"]`` must not be read by watchers.
     """
 
     t: int
     bundle: dict
-    env: Any = None
     adapter: Any = None
     sim_time: float = 0.0
     episodes: int = 0
-    env_id: int | None = None  # scalar-eval context (expr tier)
+    env_id: int | None = None  # vector evaluation context (expr tier)
+    view: EnvView | None = None
+    #: Not a watcher API; retained only for legacy offline construction.
+    env: Any = None
     _np_cache: dict = field(default_factory=dict)  # per-tick arr memo
 
     @property
@@ -237,7 +248,9 @@ class WatchContext:
         return self.t
 
     @property
-    def record(self) -> dict:
+    def record(self) -> Mapping[str, object]:
+        if self.view is not None:
+            return self.view.record()
         rec = self.bundle.get("record")
         if isinstance(rec, dict):
             return rec
@@ -246,12 +259,17 @@ class WatchContext:
 
     @property
     def obs(self) -> dict:
-        snapshot = self.bundle.get("obs")
+        if self.view is not None:
+            snapshot = self.view.obs()
+        else:
+            snapshot = self.bundle.get("obs")
         values = getattr(snapshot, "values", None)
         return dict(values) if values is not None else {}
 
     @property
     def num_envs(self) -> int:
+        if self.view is not None:
+            return int(self.view.num_envs)
         return int(getattr(self.env, "num_envs", 0) or 0)
 
     # ------------------------------------------------------------------ #
@@ -473,10 +491,12 @@ class WatchContext:
     def eval_namespace(self) -> dict:
         """The documented expr binding (watchers_contract §4).
 
-        Console-eval names (np torch obs record bundle adapter env)
+        Console-eval names (np torch obs record bundle adapter view)
         plus watcher conveniences (t/step/sim_time/episode/env_id and
         key/action/contact/pose/dist).  Full builtins -- same
-        pass-through ruling as the inspector.
+        pass-through ruling as the inspector.  ``env`` is deliberately
+        absent: watchers read the read-only ``view`` (or ``bundle``),
+        never the raw environment.
         """
         import numpy as np
 
@@ -491,7 +511,7 @@ class WatchContext:
             "record": self.record,
             "bundle": self.bundle,
             "adapter": self.adapter,
-            "env": self.env,
+            "view": self.view,
             "t": self.t,
             "step": self.t,
             "sim_time": self.sim_time,
