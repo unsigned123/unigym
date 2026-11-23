@@ -9,13 +9,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .sink import SinkContext, SinkFactory, SinkSpec
 from .spec import RunSpec, build_spec
 
 if TYPE_CHECKING:
     from .build import build_instance
     from .instance import RunInstance
 
-__all__ = ["RunSpec", "RunInstance", "build_spec", "build_instance"]
+__all__ = [
+    "RunSpec",
+    "RunInstance",
+    "SinkContext",
+    "SinkFactory",
+    "SinkSpec",
+    "build_spec",
+    "build_instance",
+]
 
 
 def __getattr__(name: str):

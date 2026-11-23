@@ -24,14 +24,14 @@ import numpy as np
 from unigym.benchmarks.base import EpisodeData, EpisodeResult, Task, TickTrace
 from unigym.benchmarks.episode import EpisodeLimits, timeline_time_s
 from unigym.benchmarks.reporting import EpisodeEvaluation, TaskScore
-from unigym.benchmarks.termination import (
+from unigym.core.episode_result import EpisodeResultView
+from unigym.core.episode_termination import (
     EpisodeOutcome,
     EpisodeTermination,
     Termination,
     TerminationExtension,
     TerminationSource,
 )
-from unigym.core.episode_result import EpisodeResultView
 from unigym.evaluation import EnvView, EvalContext
 from unigym.query.facade import Query
 

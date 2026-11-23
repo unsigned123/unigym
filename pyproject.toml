@@ -103,7 +103,18 @@ ignore_imports = [
     "unigym.core.paths -> unigym",
     # Shared JSON/typing alias is a root-level leaf, not a higher layer.
     "unigym.core.paths -> unigym._typing",
+    # Same root-level JSON alias; the termination facts own no pack dependency.
+    "unigym.core.episode_termination -> unigym._typing",
 ]
+
+[[tool.importlinter.contracts]]
+name = "runner sync has no direct benchmark imports"
+type = "forbidden"
+# Direct-edge neutrality only: other core/CLI infrastructure may be reached
+# transitively, but SyncRunner itself must not name benchmark modules.
+allow_indirect_imports = true
+source_modules = ["unigym.runner.sync"]
+forbidden_modules = ["unigym.benchmarks", "unigym.benchmarks.**"]
 
 [[tool.importlinter.contracts]]
 name = "backends never expand placeholders or canonicalize asset paths"

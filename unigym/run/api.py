@@ -49,7 +49,7 @@ from argparse import Namespace
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from types import TracebackType
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 import yaml
 
@@ -61,6 +61,7 @@ from unigym._typing import (
 from unigym.backends.registry import Trait, backend_info
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from unigym.camera import CameraSet
+from unigym.run.sink import SinkSpec
 from unigym.run.spec import RunSpec, build_spec, require_backend, require_backend_name
 
 if TYPE_CHECKING:
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
     from unigym.env.native import NativeHandle
     from unigym.model.live import LiveModel
+    from unigym.run.sink import SinkContext
     from unigym.runtime.actions import NamedAction
     from unigym.runtime.controllers import (
         ControlRuntime,
@@ -80,7 +82,10 @@ if TYPE_CHECKING:
     from unigym.robots.base import RobotProfile
     from unigym.run.instance import RunInstance
     from unigym.runner.base import Runner, StepResult
+    from unigym.sink import Sink
     from unigym.world import World
+
+    SinkInput: TypeAlias = SinkSpec | str | Callable[[SinkContext], Sink] | None
 
 BenchmarkTask = str | dict[str, JsonValue]
 
@@ -102,6 +107,24 @@ class _FromConfigKwargs(TypedDict, total=False):
     inspect: bool
     pack_runtime: PackRuntime | None
     discover_runtime: bool
+    sink: SinkInput
+
+
+def _coerce_sink_spec(sink: SinkInput) -> SinkSpec | None:
+    """Normalize the ``Run(sink=...)`` input to one inert :class:`SinkSpec`.
+
+    A callable factory is kept as-is; a string is validated as a
+    ``module:callable`` path.  Neither form is imported or invoked here: the
+    builder resolves the factory after the spec boundary.
+    """
+    if sink is None or isinstance(sink, SinkSpec):
+        return sink
+    if isinstance(sink, str) or callable(sink):
+        return SinkSpec(factory=sink)
+    raise TypeError(
+        "Run(sink=...) accepts a SinkSpec, a 'module:callable' string or a "
+        f"callable factory, got {type(sink).__name__}"
+    )
 
 
 def _task_name(task: dict[str, JsonValue]) -> str | None:
@@ -708,6 +731,10 @@ class Run:
         discover_runtime: Allow ambient entry-point discovery when the config
             needs a runtime and none was injected (default ``True``).  The
             facade passes ``False`` so its owner boundary never discovers.
+        sink: An optional custom sink declaration: a
+            :class:`~unigym.run.SinkSpec`, a ``module:callable`` factory path,
+            or a callable factory.  It is recorded as construction data; the
+            factory is not imported or invoked by this facade.
         **overrides: Extra top-level config keys (existing schema only).
     """
 
@@ -740,11 +767,13 @@ class Run:
         inspect: bool = False,
         pack_runtime: PackRuntime | None = None,
         discover_runtime: bool = True,
+        sink: SinkInput = None,
         _config_path: str | None = None,
         **overrides: JsonValue,
     ) -> None:
         if cfg is not None and not isinstance(cfg, dict):
             raise TypeError(f"Run() config must be a mapping, got {type(cfg).__name__}")
+        self._sink_spec = _coerce_sink_spec(sink)
         if cfg is None and world is None and world_base is None:
             from unigym.errors import ConfigError
 
@@ -959,6 +988,7 @@ class Run:
         adapter_params: dict[str, JsonValue] | None = None,
         no_artifacts: bool = False,
         inspect: bool = False,
+        sink: SinkInput = None,
     ) -> Run:
         """Same as ``Run(**kwargs)``; a world/base and an explicit robot are required."""
         return cls(
@@ -985,6 +1015,7 @@ class Run:
             adapter_params=adapter_params,
             no_artifacts=no_artifacts,
             inspect=inspect,
+            sink=sink,
         )
 
     @classmethod
@@ -1006,6 +1037,7 @@ class Run:
         inspect: bool = False,
         pack_runtime: PackRuntime | None = None,
         discover_runtime: bool = True,
+        sink: SinkInput = None,
     ) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
@@ -1029,6 +1061,9 @@ class Run:
                 config needs a runtime and none was injected (default
                 ``True``).  ``False`` raises a teaching ``ConfigError``
                 naming ``pack_set=`` / ``pack_runtime=`` instead.
+            sink: An optional custom sink declaration (``SinkSpec``,
+                ``module:callable`` path or callable factory); it overrides a
+                ``sink:`` section already present in the loaded config.
 
         Returns:
             A lazy ``Run`` whose spec is built on first access.
@@ -1055,6 +1090,7 @@ class Run:
             inspect=inspect,
             pack_runtime=pack_runtime,
             discover_runtime=discover_runtime,
+            sink=sink,
             _config_path=os.path.abspath(os.fspath(path)),
         )
 
@@ -1159,7 +1195,10 @@ class Run:
         runtime: PackRuntime | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
-        if runtime is None and requires_pack_runtime(cfg):
+        custom_sink = self._sink_spec is not None
+        needs_runtime = requires_pack_runtime(cfg, custom_sink=custom_sink)
+
+        if runtime is None and needs_runtime:
             if not self._discover_runtime:
                 from unigym.errors import ConfigError
 
@@ -1174,7 +1213,7 @@ class Run:
             runtime = discover(entry_points=True)
             runtime.activate_all()
             self._pack_runtime = runtime
-        elif runtime is not None and requires_pack_runtime(cfg):
+        elif runtime is not None and needs_runtime:
             # An explicitly injected runtime is activated here too: a config
             # that needs a pack must not reach SPEC with an inert runtime.
             runtime.activate_all()
@@ -1196,6 +1235,8 @@ class Run:
                 spec = replace(spec, terrain=terrain)
             if static_shapes:
                 spec = replace(spec, static_shapes=static_shapes)
+        if self._sink_spec is not None:
+            spec = replace(spec, custom_sink=self._sink_spec)
         return spec
 
     def _prepare_inspect(self) -> None:

@@ -27,6 +27,30 @@ evaluation surface.  Termination and benchmark evaluation receive the read-only
 `unigym.evaluation` context; a sink or task must not read `bundle["env"]` to
 walk the backend.
 
+## Sink protocol
+
+The public contract is `unigym.sink.Sink`.  It is re-exported as `unigym.Sink`
+and `unigym.runner.Sink`; `unigym.run.instance.Sink` resolves to the same
+object.  It has exactly four required callbacks, driven only by `SyncRunner`:
+
+- `on_step(t, bundle)` — pre-reset data side.
+- `on_episode_end(env_ids, bundle)` — episode-end data side, before the reset
+  chain.
+- `on_step_end(t, bundle)` — post-reset metrics side.
+- `on_run_end() -> dict` — flush the run and return the sink summary.
+
+A sink may additionally implement an optional capability protocol:
+
+- `unigym.sink.RewindAwareSink` — `on_rewind(info)` receives one rewind/fork
+  mark.  It labels the abandoned branch; it is not state restoration.
+- `unigym.sink.StoppingSink` — `stop_when() -> bool` declares a sink-owned
+  early stop decision.  `SyncRunner.run` polls it at the top of every step;
+  stopping the run remains the runner's job.
+
+These protocols describe optional capabilities only; publishing them adds no
+new runner control flow.  `FanOutSink` composes sinks in construction order,
+forwards every callback to each child and structurally satisfies `Sink`.
+
 Lifecycle:
 
 1. `on_step(t, bundle)` — pre-reset data side.  Timeline columns are
@@ -40,6 +64,64 @@ Lifecycle:
 4. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
 5. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
+
+## Custom sinks
+
+A run may inject one custom sink by API
+(`Run(..., sink=SinkSpec(factory=...))`) or by the top-level config section:
+
+```yaml
+sink:
+  factory: acme_pack.sinks:make_benchmark_sink
+  options:
+    target_episodes: 10
+```
+
+A string factory is `module:callable`; a callable is API-only.  The factory is
+resolved before env construction and called exactly once as
+`factory(ctx: SinkContext) -> Sink`.  `SinkContext` carries construction
+metadata only: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
+`action_groups`, `run_identity` and `options`.  It deliberately contains no
+live env, writer, logger, bridge or signal bus; a sink receives runner-owned
+resources through the callback bundle, never at construction.  A factory
+result missing a required callback, declaring a non-callable optional callback
+or declaring an invalid rewind provider fails with a teaching `TypeError`
+before the run starts.
+
+Mode composition is fixed:
+
+| mode | no custom sink | custom sink |
+| --- | --- | --- |
+| `collect` | `CollectSink` | `FanOutSink(CollectSink, custom)` |
+| `benchmark` | `EvaluationSession` | `custom` |
+| `both` | `FanOutSink(CollectSink, EvaluationSession)` | `FanOutSink(CollectSink, custom)` |
+
+A custom sink replaces only the benchmark consumer; `CollectSink` recording
+stays first in `collect`/`both`.  Adapter `extra_sinks` stay prepended and the
+director/timeline/bridge tail remains appended.
+
+`stop_when` is optional and read-only.  `FanOutSink.stop_when` ORs its
+children.  Exactly one of the two predicates can be present per run:
+`build_instance` uses the custom sink's predicate when a custom sink is
+configured, otherwise the built-in `EvaluationSession.episodes_done` path.  The
+built-in predicate exists only when the built-in benchmark path actually built
+tasks, so a task-less benchmark run does not stop at `min_episodes`.  The CLI
+passes `instance.stop_when` to `runner.run`; a sink never stops a run itself.
+
+### Stateful sinks and rewind
+
+Rewind providers are discovered structurally, not by class name: a sink (or a
+node reached through `rewind_provider`/`sinks`) is a provider when it has a
+non-empty string `name` and callable `rewind_state` / `apply_rewind_state`;
+`validate_rewind_state` is optional.  Provider names are checkpoint payload
+keys, so duplicates fail at build time (and again in `RewindController`).
+Custom providers should namespace their name (for example `acme.pick`).
+`on_rewind(info)` only labels the abandoned branch; it does not restore state.
+
+A stateful custom sink that must survive a checkpoint must expose that provider
+shape or a `rewind_provider`.  Without one it is still valid, but its counters
+and buffers are process truth and are not restored across a rewind; core does
+not infer statefulness.
 
 Termination evaluation is a live post-step/pre-reset boundary:
 

@@ -57,6 +57,7 @@ from .scoring import build_env_view
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
+    from unigym.runtime.rewind_providers import EvaluationSessionProvider
 
     from .buffer import EpisodeBuffer
     from .scoring import EpisodeEvaluator
@@ -201,6 +202,16 @@ class EvaluationSession:
         # tasks disabled for the RUN by a per-tick contract failure; process
         # truth (never restored by a rewind) and never per-env partial
         self._disabled_tasks: set[str] = set()
+
+    # ------------------------------------------------------------------ #
+    # rewind provider (structural discovery; name stays ``benchmark``)
+    # ------------------------------------------------------------------ #
+    @property
+    def rewind_provider(self) -> EvaluationSessionProvider:
+        """The canonical benchmark provider wrapper for this session."""
+        from unigym.runtime.rewind_providers import EvaluationSessionProvider
+
+        return EvaluationSessionProvider(self)
 
     # ------------------------------------------------------------------ #
     # early stop predicate (passed to SyncRunner.run(stop_when=...))

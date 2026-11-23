@@ -22,16 +22,16 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 from unigym.core.episode_result import EpisodeResultView
-
-from .base import EpisodeData, EpisodeResult, Task
-from .episode import RunIdentity
-from .termination import (
+from unigym.core.episode_termination import (
     EpisodeTermination,
     Termination,
     code_counts,
     outcome_counts,
     source_counts,
 )
+
+from .base import EpisodeData, EpisodeResult, Task
+from .episode import RunIdentity
 
 __all__ = [
     "EpisodeEvaluation",

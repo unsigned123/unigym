@@ -23,6 +23,25 @@ slices, rewind marks and per-step tick samples and imports no benchmark type.
 observation; `BenchmarkReporter` is its benchmark implementation and owns
 `benchmark_report.json` / `results.json`.  There is no `BenchmarkSink`.
 
+## Custom benchmark sinks
+
+A top-level `sink:` declaration with `mode: benchmark` or `both` replaces the
+built-in `EvaluationSession`.  Core then does not build or validate benchmark
+tasks, does not construct `EpisodeBuffer` / `EpisodeEvaluator` /
+`BenchmarkReporter`, and writes no benchmark report for that run.  The custom
+sink owns its episode state machine, scoring, stop decision and report
+artifacts.
+
+Core still supplies the benchmark construction metadata the custom sink needs:
+`RunSpec.benchmark` (`tasks` / `min_episodes` / `max_steps`) is config data
+reachable through `SinkContext.spec`, `run_identity` is stamped on the env and
+the callback bundle, and `max_steps` plus `timeout_s` / `timeout_steps` keep
+capping the core horizon exactly as in the built-in path.  The mode alone does
+not require a pack runtime on the custom path because core builds no tasks; any
+other runtime need (a pack asset, scene preset or external adapter) still
+applies.  Core does not validate the custom sink's task names, scoring or report
+schema.
+
 ## Timeline
 
 Canonical integer tick axis:
@@ -55,7 +74,9 @@ enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
 
 ## Terminations
 
-`unigym.benchmarks.termination` defines the core-neutral fact object:
+`unigym.core.episode_termination` is the canonical owner of the core-neutral
+fact object.  `unigym.benchmarks.termination` remains a documented re-export
+shim for the historical import path and defines no facts of its own:
 
 - `EpisodeOutcome`: `success | failure | deadline | invalid_reset | engine | manual`
 - `TerminationSource`: `environment | initializer | runtime | custom`

@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
-from .termination import EpisodeTermination, Termination
+from unigym.core.episode_termination import EpisodeTermination, Termination
 
 if TYPE_CHECKING:
     import torch
