@@ -223,8 +223,16 @@ def _floor_world(tmp_path: Path) -> Path:
     return path
 
 
-def _run(tmp_path: Path, *, mode: str, sink: SinkSpec | None = None) -> Run:
+def _run(
+    tmp_path: Path,
+    *,
+    mode: str,
+    sink: SinkSpec | None = None,
+    benchmark: dict[str, object] | None = None,
+) -> Run:
     runtime = discover([]) if mode != "collect" else None
+    if benchmark is None:
+        benchmark = {"tasks": [], "min_episodes": 1, "max_steps": 10}
     return Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=_profile(),
@@ -236,7 +244,7 @@ def _run(tmp_path: Path, *, mode: str, sink: SinkSpec | None = None) -> Run:
         inspect=True,
         sink=sink,
         mode=mode,
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": 10, "timeout_steps": 5},
+        benchmark=benchmark,
         pack_runtime=runtime,
         discover_runtime=False,
     )
@@ -299,7 +307,7 @@ def test_build_benchmark_custom_sink_replaces_the_builtin_session(tmp_path: Path
         assert ctx.mode == "benchmark"
         assert ctx.run_identity is not None
         assert ctx.run_identity is getattr(instance.env, "run_identity", None)
-        assert getattr(instance.env, "timeout_steps", None) == 5
+        assert getattr(instance.env, "timeout_steps", None) is None
 
         assert _primary_sink(instance) is custom_sink
         assert instance.stop_when() is False
@@ -322,13 +330,28 @@ def test_build_both_custom_sink_keeps_collect_first(tmp_path: Path) -> None:
         ctx = contexts[0]
         assert ctx.mode == "both"
         assert ctx.run_identity is not None
-        assert getattr(instance.env, "timeout_steps", None) == 5
+        assert getattr(instance.env, "timeout_steps", None) is None
 
         primary = _primary_sink(instance)
         assert isinstance(primary, FanOutSink)
         assert isinstance(primary.sinks[0], CollectSink)
         assert primary.sinks[1] is custom_sink
         assert instance.stop_when() is True
+    finally:
+        run.close()
+
+
+def test_build_builtin_benchmark_keeps_the_timeout_annotation(tmp_path: Path) -> None:
+    """The built-in benchmark path still stamps its EpisodeLimits deadline."""
+    run = _run(
+        tmp_path,
+        mode="benchmark",
+        benchmark={"tasks": [], "min_episodes": 1, "max_steps": 10, "timeout_steps": 5},
+    )
+    try:
+        instance = run.build(inspect=True)
+        assert getattr(instance.env, "timeout_steps", None) == 5
+        assert getattr(instance.env, "run_identity", None) is not None
     finally:
         run.close()
 

@@ -1493,6 +1493,30 @@ def _run_identity(
     )
 
 
+def _reject_custom_sink_timeout(cfg: dict[str, JsonValue], mode: str) -> None:
+    """Reject benchmark deadlines on the custom-sink path.
+
+    A custom sink owns its episode lifecycle through sink terminals.  The core
+    episode clock (``StepResult.reset_env_ids``) is the only physical deadline
+    authority, so a benchmark ``timeout_*`` would be an unobservable second
+    clock.  Built-in benchmark runs keep ``EpisodeLimits`` as a scoring
+    annotation and are not affected.
+    """
+    bench_cfg = _config_dict(cfg.get("benchmark")) or {}
+    fields = [f"benchmark.{key}" for key in ("timeout_s", "timeout_steps") if key in bench_cfg]
+    if not fields:
+        return
+    from unigym.errors import ConfigError
+
+    named = " / ".join(fields)
+    raise ConfigError(
+        f"run mode {mode!r} with a custom sink does not accept {named}: the core "
+        "episode clock is the only physical deadline authority | remove the "
+        "benchmark timeout keys and end episodes through the sink's terminal "
+        "requests"
+    )
+
+
 def _episode_limits(bench_cfg: dict[str, JsonValue], policy_dt: float) -> EpisodeLimits | None:
     """Resolve the benchmark task deadline (integer authority)."""
     has_s = "timeout_s" in bench_cfg
@@ -1684,8 +1708,10 @@ def _build_sinks(
         # A custom sink owns benchmark control flow: do not build/resolve the
         # built-in tasks, buffer, evaluator, reporter or session.  The task
         # metadata is still computed for every benchmark/both run; only the
-        # runtime is exclusive to the built-in task path.  The core horizon
-        # still applies, so identity + deadline are stamped either way.
+        # runtime is exclusive to the built-in task path.  Identity is stamped
+        # for every benchmark/both run; the deadline annotation belongs to the
+        # built-in scorer only, while the custom path keeps the core episode
+        # clock as the one physical authority.
         if task_meta is None:
             raise RuntimeError("benchmark mode requires task metadata")
         bench_tasks = None
@@ -1704,8 +1730,12 @@ def _build_sinks(
         run_identity = _run_identity(spec, cfg, env, num_envs, seed, policy_dt)
         # the runner bundle carries the same identity (benchmark contract)
         env.run_identity = run_identity
-        limits = _episode_limits(bench_cfg, policy_dt)
-        env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
+        if custom_sink_factory is None:
+            limits = _episode_limits(bench_cfg, policy_dt)
+            env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
+        else:
+            limits = None
+            env.timeout_steps = None
         if bench_tasks is not None:
             from unigym.benchmarks.reporting import BenchmarkReporter
             from unigym.runner.evaluation.buffer import EpisodeBuffer
@@ -2014,6 +2044,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
         _materialize_pack_actuators(spec, info.name)
     mode = spec.mode
     pack_runtime = spec.pack_runtime
+    if mode in ("benchmark", "both") and spec.custom_sink is not None:
+        _reject_custom_sink_timeout(cfg, mode)
     # The built-in benchmark path resolves its tasks through the runtime
     # ``benchmarks`` face.  A custom sink owns benchmark control flow and gets
     # no built-in tasks, so the mode alone does not require a runtime.

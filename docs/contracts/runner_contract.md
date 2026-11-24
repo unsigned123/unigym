@@ -209,6 +209,12 @@ director/timeline/bridge tail remains appended.  `Director`, `Bridge`,
 `MetricsWriter` and adapter `extra_sinks` are internal privileged runtime hooks,
 not part of the public Sink surface or custom-Sink examples.
 
+A custom-sink `benchmark`/`both` run rejects `benchmark.timeout_s` and
+`benchmark.timeout_steps` with a teaching `ConfigError` before env or task
+construction.  Core therefore has one physical deadline authority, the core
+episode clock in `StepResult.reset_env_ids`; the custom sink ends episodes
+through its terminal requests and holds no `EpisodeLimits`.
+
 `CollectSink` is built from a read-only facts snapshot (the resolved control
 rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it
 derives policy controls from `bundle["view"]` and caches the resolved rows and

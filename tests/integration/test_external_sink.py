@@ -332,7 +332,7 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
         sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS, "timeout_steps": 2},
+        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS},
         pack_runtime=None,
         discover_runtime=False,
     )
@@ -340,7 +340,7 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         instance = run.build(inspect=True)
         assert instance.spec.pack_runtime is None
         assert instance.env.run_identity is not None
-        assert getattr(instance.env, "timeout_steps", None) == 2
+        assert getattr(instance.env, "timeout_steps", None) is None
         sink = _external_sink(instance)
 
         runner = run.runner("external", action_fn=_zero_actions)

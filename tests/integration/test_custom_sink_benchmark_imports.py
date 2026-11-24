@@ -11,8 +11,12 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from unigym.run.api import Run
 
 _TINY_ARM = Path(__file__).resolve().parents[1] / "_support" / "data" / "tiny_arm.xml"
 _FLOOR_XML = (
@@ -25,14 +29,14 @@ _STEPS = 20
 _EPISODE_LENGTH_S = 0.04
 
 
-def build_and_run_benchmark_custom_sink(world_dir: Path) -> None:
-    """Build and run one tiny-arm ``benchmark`` run driven by a custom sink."""
+def _benchmark_custom_sink_run(world_dir: Path, benchmark: dict[str, object]) -> Run:
+    """Build the tiny-arm custom-sink benchmark declaration without running it."""
     from unigym.actuators.ir import ActuationGroup
     from unigym.assets.asset_ref import AssetRef
     from unigym.robots.base import BodyBinding, RobotProfile
     from unigym.run.api import Run
     from unigym.run.sink import SinkSpec
-    from unigym.runtime.actions import NamedAction, OrderedActionSpec, PolicyBinding
+    from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
     from unigym.world import World
 
     from tests._support.fakes.external_sink import make_external_sink
@@ -69,7 +73,7 @@ def build_and_run_benchmark_custom_sink(world_dir: Path) -> None:
             }
         ]
     )
-    run = Run(
+    return Run(
         world=World.base(mjcf=world),
         robot=profile,
         backend="mujoco",
@@ -81,9 +85,18 @@ def build_and_run_benchmark_custom_sink(world_dir: Path) -> None:
         episode_length_s=_EPISODE_LENGTH_S,
         inspect=True,
         sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": _STEPS},
+        benchmark=benchmark,
         pack_runtime=None,
         discover_runtime=False,
+    )
+
+
+def build_and_run_benchmark_custom_sink(world_dir: Path) -> None:
+    """Build and run one tiny-arm ``benchmark`` run driven by a custom sink."""
+    from unigym.runtime.actions import NamedAction
+
+    run = _benchmark_custom_sink_run(
+        world_dir, {"tasks": [], "min_episodes": 1, "max_steps": _STEPS}
     )
 
     def zero_actions(_t: int) -> tuple[NamedAction, ...]:
@@ -97,6 +110,21 @@ def build_and_run_benchmark_custom_sink(world_dir: Path) -> None:
         run.close()
 
 
+def reject_benchmark_custom_sink_timeout(world_dir: Path) -> None:
+    """Prove a custom benchmark timeout fails before any built-in benchmark."""
+    from unigym.errors import ConfigError
+
+    run = _benchmark_custom_sink_run(
+        world_dir,
+        {"tasks": [], "min_episodes": 1, "max_steps": _STEPS, "timeout_s": 0.04},
+    )
+    try:
+        with pytest.raises(ConfigError, match=r"benchmark\.timeout_s.*core episode clock"):
+            run.build(inspect=True)
+    finally:
+        run.close()
+
+
 @pytest.mark.subprocess
 def test_custom_sink_benchmark_run_imports_no_benchmarks(tmp_path: Path) -> None:
     """A custom-sink benchmark run never imports an ``unigym.benchmarks`` module."""
@@ -106,6 +134,26 @@ def test_custom_sink_benchmark_run_imports_no_benchmarks(tmp_path: Path) -> None
         "from tests.integration.test_custom_sink_benchmark_imports import "
         "build_and_run_benchmark_custom_sink\n"
         "build_and_run_benchmark_custom_sink(Path(sys.argv[1]))\n"
+        "leaked = sorted(m for m in sys.modules if m.startswith('unigym.benchmarks'))\n"
+        "assert not leaked, leaked\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_custom_sink_benchmark_timeout_rejection_imports_no_benchmarks(tmp_path: Path) -> None:
+    """The custom-sink timeout rejection precedes every ``unigym.benchmarks`` import."""
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from tests.integration.test_custom_sink_benchmark_imports import "
+        "reject_benchmark_custom_sink_timeout\n"
+        "reject_benchmark_custom_sink_timeout(Path(sys.argv[1]))\n"
         "leaked = sorted(m for m in sys.modules if m.startswith('unigym.benchmarks'))\n"
         "assert not leaked, leaked\n"
     )
