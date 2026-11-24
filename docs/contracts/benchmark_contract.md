@@ -57,6 +57,12 @@ sink ends episodes through its terminal requests, so a second
 `EpisodeLimits` clock would be unobservable.  The custom path constructs no
 `EpisodeLimits` and leaves `env.timeout_steps` as `None`.
 
+The external benchmark pack uses this custom path exclusively: it has no
+`EpisodeLimits`, no core `Task` chain and no core report hook.  Core writes no
+`benchmark_report.json` / `results.json` for such a run and never builds a
+second deadline clock; a pack that needs a time or step budget ends episodes
+through its own terminals (see "Sink terminal requests").
+
 ## Sink terminal requests
 
 A custom sink may implement `unigym.sink.TerminalSink` and request per-env

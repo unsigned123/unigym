@@ -20,6 +20,10 @@ Producer tiers:
 - phase 2C: a custom sink publishes from its runner callbacks through the
   publish-only `SinkContext.signals` face.
 
+All tiers publish into the one run bus.  The sink's face is write-only, so a
+sink cannot read back a value it or a watcher published; reading is reserved
+for the sampler's `SignalView`.
+
 ## Surface
 
 ```python

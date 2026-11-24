@@ -1322,6 +1322,27 @@ class AcmeSink:
     def on_step_end(self, t, bundle) -> None: ...
     def on_run_end(self) -> dict: return {}
 ```
+- a custom sink may also implement `unigym.sink.TerminalSink` to request
+  per-env episode ends.  Each fact must use `TerminationSource.CUSTOM` and a
+  `custom.<name>` code; a missing `step_index` / `time_s` is stamped with the
+  env's episode-local value, never the global run tick:
+
+```python
+from unigym.core.episode_termination import EpisodeOutcome, Termination, TerminationSource
+
+
+class AcmeSink:
+    # four callbacks omitted
+
+    def drain_terminations(self) -> dict[int, Termination]:
+        due, self._pending = self._pending, {}
+        return {
+            env_id: Termination(
+                EpisodeOutcome.DEADLINE, "custom.budget", TerminationSource.CUSTOM
+            )
+            for env_id in due
+        }
+```
 - publication latency is two policy ticks: `on_step(t)` publishes after
   `env.step(t)`, the sampler's next read is `update(t+1)`, and the command that
   read produces is first used by `env.step(t+2)`.  Samplers bound through
@@ -1338,6 +1359,12 @@ class AcmeSink:
   namespaced name; see `contracts/runner_contract.md`.  Published signal values
   are already covered by the core `"signals"` provider, so the sink must not
   expose the bus again as a second provider.
+- core writes no benchmark report for a custom-sink `benchmark`/`both` run and
+  publishes no `bundle["episode_results"]`; the sink owns its scoring and report
+  artifacts.  A sink terminal is an episode-end fact, not an `EpisodeResultView`.
+- a custom-sink `benchmark`/`both` run rejects `benchmark.timeout_s` and
+  `benchmark.timeout_steps`; the sink terminals and the core episode clock are
+  the only episode-end path, so the build fails before env construction.
 
 ### Benchmark resources
 

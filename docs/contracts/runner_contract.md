@@ -9,11 +9,14 @@ record        per-env backend record (canonical keys + contact facts)
 terminated    (N,) bool, live term-group mask (never sink terminals)
 alive         (N,) bool, not terminated and finite policy observation
 term_metrics  per-group/total termination firing fractions
-reset_env_ids (N,) due ids, backend episode clock
+reset_state   {env_id: reset validity/reason state}
+              (the due ids are StepResult.reset_env_ids, not a bundle key)
 terminations  {env_id: EpisodeTermination}   # term group + core horizon
               plus the sink drain merged on this tick (see below)
-step_index    canonical tick (t+1)
-time_s        canonical time ((t+1) * policy_dt)
+step_index    (N,) int64 episode-local tick per env; each env advances once per
+              policy tick and a reset env returns to 0 (frame 0 is tick 1)
+time_s        (N,) float32 episode-local time (step_index * policy_dt), or None
+              when no policy period is known
 run_identity  RunIdentity (benchmark runs)
 reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
               present on on_episode_end for the ending episode
@@ -23,6 +26,10 @@ episode_results {env_id: (EpisodeResultView, ...)}
 view          the tick's one read-only boundary EnvView; valid at on_step /
               on_episode_end, None at on_step_end
 ```
+
+A custom-sink benchmark/both run replaces the built-in `EvaluationSession`, so
+it carries no `episode_results`; a sink terminal request ends envs but is not a
+benchmark `EpisodeResultView` (see `command_sampler_contract.md`).
 
 The bundle carries no live env.  Internal runtime hooks that need the engine
 receive it at construction: `WatcherEngine` builds its view from its own wired
@@ -110,8 +117,11 @@ before the bundle or due mask is mutated.
 
 Lifecycle:
 
-1. `on_step(t, bundle)` — pre-reset data side.  Timeline columns are
-   `step_index = t+1`, `time_s = (t+1) * policy_dt`.
+1. `on_step(t, bundle)` — pre-reset data side.  `bundle["step_index"]` and
+   `bundle["time_s"]` are per-env EPISODE-LOCAL arrays: each env's own tick
+   after this step (`1` on its first post-reset step), not the global run tick
+   `t+1`.  They equal `t+1` only for an env that has never reset; with per-env
+   resets, envs in one bundle can carry different episode-local ticks.
 2. `drain_terminations()` — only after `on_step` returns.  The validated sink
    facts merge into `bundle["terminations"]` with
    `EpisodeTermination.from_terminations`, so core facts are preserved and the
@@ -172,9 +182,9 @@ def on_step(self, t: int, bundle) -> None:
 Transport rules are exactly `signal_bus_contract.md` (non-empty name, leading
 dimension `num_envs`, bus device, detached/cloned).  Names are namespaced by the
 producer; there is no registry and the last publish wins.  Watchers publish
-later in the same tick because the watcher engine is the tail of the sink
-fan-out, so a sink and a watcher sharing a name would let the watcher overwrite
-the sink value.
+later in the same tick because `Bridge` is the sink fan-out tail and runs the
+watcher engine from its `on_step`, so a sink and a watcher sharing a name would
+let the watcher overwrite the sink value.
 
 The runner order is fixed and unchanged:
 
