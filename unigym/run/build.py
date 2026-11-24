@@ -1905,12 +1905,10 @@ def _build_bridge_and_wiring(
 
     watcher_engine = attach_watchers(
         bridge,
-        env=env,
         adapter=adapter,
         out_dir=runtime_dirs.watch_dir(bridge.run_id),
         event_log=event_log,
         specs=watch_specs,
-        signals=None,
     )
     # director: command handler on cmd 14 + live status feed
     if director is not None:

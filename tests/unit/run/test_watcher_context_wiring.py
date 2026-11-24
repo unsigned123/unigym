@@ -1,7 +1,8 @@
-"""Build wiring: the value store exists before watcher attach and is shared."""
+"""Build wiring: watchers attach with adapter only and no env/value transport."""
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from tests._support.fakes.command_sampler import RecordingSampler
@@ -10,6 +11,7 @@ from unigym.assets.asset_ref import AssetRef
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
+from unigym.watchers import attach as attach_watchers
 from unigym.world import World
 
 TINY_ARM = Path(__file__).resolve().parents[2] / "_support" / "data" / "tiny_arm.xml"
@@ -76,8 +78,15 @@ def _run(tmp_path: Path) -> Run:
     )
 
 
+def test_watcher_attach_takes_no_env_or_signal_transport():
+    """The public attach seam carries adapter/event_log/specs only."""
+    params = set(inspect.signature(attach_watchers).parameters)
+
+    assert params == {"bridge", "adapter", "out_dir", "event_log", "specs"}
+
+
 def test_watcher_engine_and_sampler_share_the_instance_store(tmp_path):
-    """The build attaches watchers without a signal transport and binds values."""
+    """The build attaches watchers without env or signal transport."""
     run = _run(tmp_path)
     try:
         instance = run.build(inspect=True)
@@ -87,7 +96,9 @@ def test_watcher_engine_and_sampler_share_the_instance_store(tmp_path):
         assert "signals" not in providers
         assert providers["values"] is instance.values
         watchers = providers["watchers"]
-        assert getattr(watchers, "signals") is None
+        assert watchers.adapter is instance.adapter
+        assert not hasattr(watchers, "signals")
+        assert not hasattr(watchers, "env")
 
         sampler = instance.sampler
         assert isinstance(sampler, RecordingSampler)

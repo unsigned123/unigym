@@ -26,17 +26,22 @@ engine.py).
 
 from __future__ import annotations
 
+import copy
 import enum
 import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     import torch
 
-    from unigym.evaluation import EnvView
+    from unigym.evaluation import EnvStepContext, EnvView
+    from unigym.values import ValueView
+
+WindowStore: TypeAlias = dict[tuple[str, int], dict[str, object]]
 
 __all__ = [
     "Level",
@@ -49,6 +54,7 @@ __all__ = [
     "DIRECT",
     "WatchResult",
     "WatchContext",
+    "WatchDebugSnapshot",
     "WatchError",
     "DEFAULT_ON",
 ]
@@ -101,10 +107,9 @@ class WatchResult:
     data:     json-safe dict (the evidence: values, env indexes...).
     actions:  non-empty -> overrides the spec's static ``on`` for THIS
               fire (declarative default + dynamic override).
-    signals:  user-defined per-env tensors published to the run's
-              ``SignalBus`` on every evaluated tick (level semantics).
-              Core transports names/dtypes/trailing shapes unchanged; a
-              leading axis of ``num_envs`` is the only rule.
+
+    Watchers are debug/instrumentation only: a result carries no value or
+    signal payload, so nothing here is published to the run.
     """
 
     fired: bool
@@ -112,7 +117,6 @@ class WatchResult:
     message: str = ""
     data: dict = field(default_factory=dict)
     actions: tuple = ()
-    signals: Mapping[str, torch.Tensor] = field(default_factory=dict)
 
     @classmethod
     def info(cls, message: str, data: dict | None = None) -> WatchResult:
@@ -134,21 +138,13 @@ class WatchResult:
         return cls(fired=bool(value))
 
     def as_dict(self) -> dict:
+        """JSON-safe event/dry-run shape (no value publication face)."""
         return {
             "fired": self.fired,
             "level": self.level.value,
             "message": self.message,
             "data": self.data,
             "actions": list(self.actions),
-            # event logs carry names/shapes only -- never raw tensors
-            "signals": (
-                {
-                    str(name): [int(size) for size in getattr(value, "shape", ())]
-                    for name, value in self.signals.items()
-                }
-                if isinstance(self.signals, Mapping)
-                else {}
-            ),
         }
 
 
@@ -215,22 +211,122 @@ def _to_numpy(val):
     return np.asarray(val)
 
 
+def _copy_snapshot_value(value: object) -> object:
+    """Private copy of one debug-snapshot value (never aliases the boundary)."""
+    import numpy as np
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return value.detach().clone()
+    if isinstance(value, np.ndarray):
+        return value.copy()
+    return copy.deepcopy(value)
+
+
+def _copy_debug_tensor(value: object, *, where: str) -> torch.Tensor:
+    """Copy one observation tensor, rejecting non-tensor debug inputs."""
+    import torch
+
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{where} must be a torch.Tensor, got {type(value).__name__}")
+    return value.detach().clone()
+
+
+def _is_camera_observation(key: str, schema: object) -> bool:
+    """True for camera/source-camera observation keys (never debug-copied)."""
+    if key.startswith("cam/"):
+        return True
+    entries = getattr(schema, "entries", None)
+    if isinstance(entries, Mapping):
+        spec = entries.get(key)
+        if getattr(spec, "source", None) == "camera":
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class WatchDebugSnapshot:
+    """Immutable between-tick debug snapshot taken from one step boundary.
+
+    Built once at the end of an evaluated tick from the step's borrowed view
+    record/observation snapshot and the step's immutable values snapshot.  The
+    synthetic ``view`` is a plain debug :class:`~unigym.evaluation.EnvView`
+    over private copies -- it is never a live runner view, so add/test between
+    ticks can read it after the runner closes its boundary view.
+    """
+
+    record: Mapping[str, object]
+    obs: Mapping[str, torch.Tensor]
+    values: Mapping[str, object]
+    view: EnvView
+
+    @property
+    def num_envs(self) -> int:
+        """The debug view's environment count."""
+        return int(self.view.num_envs)
+
+    @property
+    def device(self) -> str | torch.device:
+        """The debug view's device."""
+        return self.view.device
+
+    @classmethod
+    def from_step(cls, step: EnvStepContext) -> WatchDebugSnapshot:
+        """Copy one live step boundary into an immutable debug snapshot."""
+        from unigym.env.obs import ObsSnapshot
+        from unigym.evaluation import EnvView
+
+        source = step.view
+        record = {key: _copy_snapshot_value(value) for key, value in source.record().items()}
+        obs_source = source.obs()
+        if obs_source is None:
+            obs_values: dict[str, torch.Tensor] = {}
+            obs_snapshot = None
+        else:
+            obs_values = {
+                key: _copy_debug_tensor(value, where=f"observation {key!r}")
+                for key, value in obs_source.values.items()
+                if not _is_camera_observation(key, obs_source.schema)
+            }
+            obs_snapshot = ObsSnapshot(
+                obs_values,
+                schema=obs_source.schema,
+                num_envs=obs_source.num_envs,
+                device=obs_source.device,
+                t=obs_source.t,
+            )
+        view = EnvView(
+            record=record,
+            obs=obs_snapshot,
+            env_id=None,
+            num_envs=source.num_envs,
+            device=source.device,
+            backend="watcher debug snapshot",
+        )
+        values = {key: _copy_snapshot_value(value) for key, value in step.values.snapshot().items()}
+        return cls(
+            record=MappingProxyType(dict(record)),
+            obs=MappingProxyType(dict(obs_values)),
+            values=MappingProxyType(dict(values)),
+            view=view,
+        )
+
+
 @dataclass
 class WatchContext:
     """One evaluation's information interface (design §8.4).
 
     Built per tick by the engine; handed to template checks, bound into
     the expr namespace and passed to callable ``check(ctx)``.  All
-    accessors read the single data face (bundle + observation snapshot); nothing
-    here mutates run state.
+    accessors read the step boundary (or, between ticks, the engine's
+    immutable debug snapshot); nothing here mutates run state.
 
-    Live evaluation reads through :attr:`view`, the read-only, vector-scoped
-    :class:`~unigym.evaluation.EnvView` the engine builds once per tick from its
-    own env and retains until the next tick.  With no wired engine env the
-    engine leaves ``view`` as ``None`` and the record/obs accessors read the
-    bundle snapshot (offline unit tests).  ``env`` is not a watcher
-    API: the engine never passes its env to the context, it is absent from
-    :meth:`eval_namespace`, and the step bundle is not a view source.
+    Live evaluation carries the C10 ``EnvStepContext`` as :attr:`step` and
+    reads through its borrowed read-only :class:`~unigym.evaluation.EnvView`.
+    There is no env escape: ``env`` is not a field and the expression
+    namespace never exposes one.  Between ticks the engine replaces the live
+    context with a :class:`WatchDebugSnapshot` context, so add/test never read
+    a retained closed runner view.
     """
 
     t: int
@@ -239,39 +335,48 @@ class WatchContext:
     sim_time: float = 0.0
     episodes: int = 0
     env_id: int | None = None  # vector evaluation context (expr tier)
-    view: EnvView | None = None
-    #: Not a watcher API; retained only for legacy offline construction.
-    env: Any = None
+    step: EnvStepContext | None = None
+    debug: WatchDebugSnapshot | None = None
+    window_store: WindowStore = field(default_factory=dict)  # per-engine window owner
     _np_cache: dict = field(default_factory=dict)  # per-tick arr memo
 
     @property
-    def step(self) -> int:
-        return self.t
+    def view(self) -> EnvView | None:
+        """The read-only evaluation face (step view, else debug view)."""
+        if self.step is not None:
+            return self.step.view
+        if self.debug is not None:
+            return self.debug.view
+        return None
+
+    @property
+    def values(self) -> ValueView | Mapping[str, object]:
+        """Managed values: the step snapshot, else the debug mapping."""
+        if self.step is not None:
+            return self.step.values
+        if self.debug is not None:
+            return self.debug.values
+        return {}
 
     @property
     def record(self) -> Mapping[str, object]:
-        if self.view is not None:
-            return self.view.record()
+        view = self.view
+        if view is not None:
+            return view.record()
         rec = self.bundle.get("record")
-        if isinstance(rec, dict):
-            return rec
-        getter = getattr(self.env, "record", None)
-        return getter() if callable(getter) else {}
+        return rec if isinstance(rec, dict) else {}
 
     @property
     def obs(self) -> dict:
-        if self.view is not None:
-            snapshot = self.view.obs()
-        else:
-            snapshot = self.bundle.get("obs")
+        view = self.view
+        snapshot = view.obs() if view is not None else self.bundle.get("obs")
         values = getattr(snapshot, "values", None)
         return dict(values) if values is not None else {}
 
     @property
     def num_envs(self) -> int:
-        if self.view is not None:
-            return int(self.view.num_envs)
-        return int(getattr(self.env, "num_envs", 0) or 0)
+        view = self.view
+        return int(view.num_envs) if view is not None else 0
 
     # ------------------------------------------------------------------ #
     # the key face (trace contract §2 -- ONE table)
@@ -492,12 +597,13 @@ class WatchContext:
     def eval_namespace(self) -> dict:
         """The documented expr binding (watchers_contract §4).
 
-        Console-eval names (np torch obs record bundle adapter view)
+        Console-eval names (np torch obs record bundle adapter view values)
         plus watcher conveniences (t/step/sim_time/episode/env_id and
         key/action/contact/pose/dist).  Full builtins -- same
         pass-through ruling as the inspector.  ``env`` is deliberately
-        absent: watchers read the read-only ``view`` (or ``bundle``),
-        never the raw environment.
+        absent: watchers read the read-only ``view``/``values`` (or
+        ``bundle``), never the raw environment.  ``step`` is the tick
+        alias (``self.t``), not the step context.
         """
         import numpy as np
 
@@ -513,6 +619,7 @@ class WatchContext:
             "bundle": self.bundle,
             "adapter": self.adapter,
             "view": self.view,
+            "values": self.values,
             "t": self.t,
             "step": self.t,
             "sim_time": self.sim_time,

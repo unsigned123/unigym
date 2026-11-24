@@ -27,6 +27,7 @@ __all__ = [
     "WatchError",
     "WatchResult",
     "WatchContext",
+    "WatchDebugSnapshot",
     "Level",
     "EventLog",
     "TimelineSink",
@@ -36,7 +37,7 @@ __all__ = [
     "TEMPLATE_REGISTRY",
 ]
 
-from .base import Level, WatchContext, WatchError, WatchResult
+from .base import Level, WatchContext, WatchDebugSnapshot, WatchError, WatchResult
 from .engine import WatcherEngine
 from .spec import WatchSpec
 from .templates import TEMPLATE_REGISTRY
@@ -67,7 +68,7 @@ def load_watch_yaml(path) -> list[dict]:
     return doc
 
 
-def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=None, signals=None):
+def attach(bridge, adapter=None, out_dir=None, event_log=None, specs=None):
     """Mount the WatcherEngine on a live bridge (collect_cli wiring).
 
     * ``bridge._watchers`` -- the per-tick hook target (evaluated in
@@ -75,20 +76,20 @@ def attach(bridge, env=None, adapter=None, out_dir=None, event_log=None, specs=N
       the same tick).
     * command "watch" (cmd 15) -> ``engine.handle`` (add/list/clear/
       update/test from the CLI through the daemon).
-    * ``Bridge.on_episode_end`` -> callable ``on_reset`` hooks (§8.3).
-    * ``signals`` -- the run's ``SignalBus`` (optional; offline tests may
-      omit it).  Every evaluated result publishes its signal mapping there.
-      The returned engine also carries the ``"watchers"`` rewind provider.
+    * ``Bridge.on_episode_end`` -> callable ``on_reset`` hooks (§8.3),
+      carrying the still-open final step when available.
+
+    Watchers are debug/instrumentation only: the engine takes no env and no
+    signal transport.  The returned engine also carries the ``"watchers"``
+    rewind provider.
     """
     engine = WatcherEngine(
         run_id=bridge.run_id,
         out_dir=out_dir,
-        env=env,
         adapter=adapter,
         event_log=event_log,
         bridge=bridge,
         specs=specs,
-        signals=signals,
     )
     bridge._watchers = engine
     bridge.register_command("watch", engine.handle)

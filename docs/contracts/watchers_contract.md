@@ -1,13 +1,15 @@
-# Watchers contract: signals
+# Watchers contract: lifecycle and values
 
 - Status: active
 - Owner module: `unigym/watchers`
 
-This record defines the watcher-produced signal face.  Transport rules (names,
-dtypes, leading axis, isolation, validation) live in `signal_bus_contract.md`;
-core owns no phase/event vocabulary and performs no signal-to-command mapping.
+This record defines the watcher evaluation lifecycle and the read-only values a
+watcher can observe.  Watchers are debug/instrumentation only: they publish no
+signals and Core transports no watcher-produced values.  Transport rules for
+the run-scoped value store live in the values/runner contracts; this record only
+states how watchers read them.
 
-## `WatchResult.signals`
+## `WatchResult`
 
 ```python
 @dataclass
@@ -17,95 +19,58 @@ class WatchResult:
     message: str = ""
     data: dict = field(default_factory=dict)
     actions: tuple = ()
-    signals: Mapping[str, torch.Tensor] = field(default_factory=dict)
 ```
 
-- names are user-defined non-empty strings;
-- values are `torch.Tensor` objects whose leading dimension is `num_envs`;
-  dtype and trailing shape are arbitrary;
-- no name/dtype interpretation and no reserved names;
-- `as_dict()` (event/dry-run logs) records signal **names and shapes** only,
-  never raw tensors.
-
-## Producers and publication
-
-- callable and expression watchers may return a `WatchResult` carrying signals;
-- templates cannot emit signals in this slice;
-- every **evaluated** watcher tick publishes its `result.signals`, even when
-  `fired` is false (level semantics).  The trigger/action layer stays
-  independent: no signal writes a command and no `SIGNAL` action exists;
-- a missing name is absent, never a silent zero tensor;
-- values persist until overwritten; neither the engine nor the bus clears
-  signals automatically (the user owns lifetime and may publish on reset);
-- the whole mapping is validated before the first store, and a malformed
-  mapping/value is a watcher failure: the existing fail-safe records an error
-  event/strike and never crashes the engine loop.  No partial tick is stored;
-- with no bus (offline engines) publication is a no-op.
-
-## Rewind
-
-`WatcherEngine` implements `RewindStateProvider` with `name = "watchers"`:
-
-- the payload holds the serialized specs, each spec's trigger state
-  (`prev` / `hold` / `cooldown_until` / `strikes` / `fired` / `disabled` / ...)
-  and the framework-managed template window cache;
-- `validate_rewind_state()` rejects malformed payloads read-only;
-  `apply_rewind_state()` re-validates, re-compiles expr/guards, re-creates
-  callable instances and restores the payload in place;
-- specs ride the checkpoint, so a watcher hot-added or cleared after a snapshot
-  is reverted by a rewind;
-- the `SignalBus` provider (`name = "signals"`) restores the transported values;
-  the two providers together restore producer and transport state.
-
-## Stateless callable limitation
-
-A callable watcher that publishes signals must be stateless in this slice.  The
-rewind payload re-creates the instance from its spec; it cannot reproduce
-internal instance state.  Stateful signal-producing callables are explicitly
-unsupported (no silent restore promise).
-
-`setup()` is different: it is the framework lifecycle hook, not opaque callable
-state.  On restore the engine re-creates the callable and forces
-`setup_done = False`, so the next evaluated tick runs `setup()` against the live
-context before `check()`.  Restoring `setup_done = True` without re-running
-setup is never valid.
+- there is no `signals` field (and no value payload);
+- `as_dict()` (event/dry-run logs) emits exactly `fired`, `level`, `message`,
+  `data` and `actions`; it never emits a `signals` key;
+- a watcher result cannot publish, mutate or own a run value.
 
 ## Evaluation context
 
-Watchers consume the read-only evaluation boundary from `unigym.evaluation`
-(`EnvView`).  This is the C4 convergence recorded in the live-first plan; the
-watcher trigger/action engine, key face, signal publication, rewind provider
-and lifecycle are unchanged.
+Watchers consume the C10 step boundary from `unigym.evaluation`
+(`EnvStepContext`) and its borrowed read-only `EnvView`.
 
-- `WatcherEngine.on_tick` builds exactly one vector-scoped `EnvView`
-  (`env_id is None`) per tick from the engine's own wired env.  The engine env
-  is the only view source; the step bundle supplies the step record and
-  observation snapshot and carries no live env.  The view adds read-only
-  identity (`num_envs`, `device`, the backend label), a lazy query factory when
-  the env exposes `query`, and the articulation runtime facts.  The raw env is
-  not retained by the context;
-- `WatchContext.view: EnvView | None` is the read-only face.  `record`,
-  `obs` and `num_envs` read through the view when it is present.  An offline
-  engine with no wired env leaves `view` as `None`; `record` and `obs` then
-  read the bundle snapshot and `num_envs` is 0.  The bundle has no env, so
-  there is no bundle-env fallback;
-- the view is retained across ticks so add/test/dump and callable `on_reset`
-  read the current tick's boundary between callbacks.  Replacing `_last_ctx`
-  on the next tick closes the previous view; it is not closed in the callback
-  epilogue.  Closing a view never closes the env or the run-shared query;
-- views are boundary handles, not checkpoint state.  The rewind payload is
-  unchanged (specs, trigger state, template windows); a view is rebuilt from
-  the engine's wired env after a rewind.
+- `WatcherEngine.on_tick(t, bundle)` reads exactly `bundle["step"]` and requires
+  an `EnvStepContext`.  It evaluates with one live
+  `WatchContext(step=step, window_store=self.window_cache)`.  The engine builds
+  no second `EnvView`; the step's view is the only evaluation view.
+- The runner owns that boundary view.  The engine borrows it while the tick is
+  live and never closes it.
+- After evaluation (including fail-safe processing) the engine replaces its
+  retained context with a `WatchDebugSnapshot` context: private copies of the
+  step view's record plus non-camera observations and the step's immutable
+  values snapshot, wrapped in a synthetic debug `EnvView`.  Camera/source-camera
+  observation keys are excluded.  No live step or view is retained;
+  `add`/`test`/`dump` between ticks read the debug snapshot.
+- The debug snapshot intentionally carries record/obs/values but **no
+  articulation runtime facts** (and no query).  Articulation/query-dependent
+  templates (for example `joint_limit`) therefore require a live `step` context
+  between ticks and otherwise fail with the existing teaching `WatchError`.
+- `WatchContext.view` is a read-only property: `step.view` when `step` is
+  present, otherwise `debug.view` (or `None`).  `record`, `obs` and `num_envs`
+  read that view.  Only an explicitly constructed offline context with neither
+  `step` nor `debug` falls back to the bundle snapshot.
+- `WatchContext.values` returns `step.values` when the step is present,
+  otherwise the debug snapshot's value mapping (empty when absent).
+- `on_reset(env_ids, step=None, bundle=None)` receives the bridge's still-open
+  final step and the final episode-end bundle when available.  It builds a
+  temporary context over that step and bundle (so `ctx.bundle` carries
+  `reset_facts`/`episode_results`/terminations) for the callable `on_reset`
+  hooks and does not retain it; without a step it uses the debug context.  The
+  engine never retains a live view for the reset hook.
+- template window buffers are owned by the explicit context
+  `window_store` (the engine passes its own `window_cache`), so two engines have
+  isolated windows.
 
 ### Expression / callable namespace
 
-The expr namespace and callable `check(ctx)` receive `view` as the read-only
-handle.  `env` is **removed** from the expression namespace (owner-approved
-watcher contract break): no raw env is reachable through `eval_namespace`.
-`bundle` remains bound for the step-record and observation facts, but it
-carries no live env: there is no `bundle["env"]`, and no raw env is reachable
-through `eval_namespace`.  Watcher state reads go through `view`, `record`,
-`obs` or the key face.
+The expr namespace and callable `check(ctx)` receive `view`, `values` and the
+key face as read-only handles.  `env` is **absent** from the namespace and is
+not a `WatchContext` field: no raw env is reachable through
+`eval_namespace`.  `step` in the namespace remains the tick alias (`self.t`),
+not the step context.  `bundle` remains bound for step-record and observation
+facts, but it is not an env escape.
 
 ### `joint_limit` migration
 
@@ -122,12 +87,39 @@ through `eval_namespace`.  Watcher state reads go through `view`, `record`,
   a namespaced `key: record/articulation/<name>/joint_pos` remains valid and
   selects that articulation.
 
+## Rewind
+
+`WatcherEngine` implements `RewindStateProvider` with `name = "watchers"`:
+
+- the payload holds the serialized specs, each spec's trigger state
+  (`prev` / `hold` / `cooldown_until` / `strikes` / `fired` / `disabled` / ...)
+  and the framework-managed template window cache;
+- `validate_rewind_state()` rejects malformed payloads read-only;
+  `apply_rewind_state()` re-validates, re-compiles expr/guards, re-creates
+  callable instances and restores the payload in place;
+- specs ride the checkpoint, so a watcher hot-added or cleared after a snapshot
+  is reverted by a rewind;
+- views and debug snapshots are boundary handles, not checkpoint state; they
+  are not part of the watcher payload;
+- the watcher engine neither owns nor restores any signal transport.
+
+## Stateless callable limitation
+
+A callable watcher's rewind payload re-creates the instance from its spec; it
+cannot reproduce internal instance state.  Stateful callable watchers are
+explicitly unsupported (no silent restore promise).
+
+`setup()` is different: it is the framework lifecycle hook, not opaque callable
+state.  On restore the engine re-creates the callable and forces
+`setup_done = False`, so the next evaluated tick runs `setup()` against the live
+context before `check()`.  Restoring `setup_done = True` without re-running
+setup is never valid.
 
 ## Condition-backed templates
 
 `height`, `tilt` and `joint_limit` delegate their predicate to the canonical
 conditions in `unigym.conditions` while the watcher template keeps ownership of
-`level`, `message`, `data`, `actions` and signals.
+`level`, `message`, `data` and `actions`.
 
 - The condition returns a vector bool mask.  When the watcher declaration has no
   explicit `env` parameter, `WatchResult.fired = bool(mask.any())` (global any).
@@ -144,12 +136,12 @@ conditions in `unigym.conditions` while the watcher template keeps ownership of
   quaternion-degree form.  Missing keys, missing views and missing articulation
   limits remain data-shaped `WatchError`s, so the engine's degrade/strike
   fail-safe is unchanged.
-- Trigger edge/level/once/cooldown, action execution, signal publication and the
-  rewind payload remain `WatcherEngine`-owned and unchanged.
+- Trigger edge/level/once/cooldown, action execution and the rewind payload
+  remain `WatcherEngine`-owned and unchanged.
 
 ## Out of scope
 
-- template/expression signal authoring and a derived signal language;
+- template/expression value or signal authoring;
 - per-env vectorized edge/cooldown state;
 - core phase/event/TaskRuntime types;
 - benchmark online triggers;

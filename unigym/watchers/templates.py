@@ -28,7 +28,7 @@ live in the trigger layer (design §8.5 -- semantics decoupled).
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .base import Level, WatchContext, WatchError, WatchResult, finite
 
@@ -193,10 +193,14 @@ def _cmp(x: float, op: str, value: float) -> bool:
 
 
 def _window_store(ctx: WatchContext, key: str, win: int) -> dict:
-    """Per-(engine, key, window) deque lives on the engine via the ctx
-    hook (keyed by BOTH so concurrent watchers on one key with different
-    windows keep independent buffers instead of thrashing one entry)."""
-    store = _CURRENT_ENGINE.window_cache
+    """Per-(engine, key, window) deque owned by the explicit context store.
+
+    The engine passes its own ``window_store`` on every context, so two engines
+    never share a buffer.  The key includes BOTH the trace key and the window
+    size so concurrent watchers on one key with different windows keep
+    independent buffers instead of thrashing one entry.
+    """
+    store = ctx.window_store
     entry = store.get((key, int(win)))
     if entry is None:
         entry = {"win": int(win), "buf": deque(maxlen=int(win))}
@@ -429,6 +433,12 @@ def _joint_limit_check(ctx: WatchContext, p: dict) -> WatchResult:
     from unigym.conditions.joint_limit import JointLimitCondition
     from unigym.evaluation import EvalContext
 
+    if ctx.step is None:
+        raise WatchError(
+            "joint_limit: articulation runtime facts and limits require a live "
+            "step context; between-tick debug snapshots carry record/obs/values "
+            "only, so run the watch during a live tick"
+        )
     articulation = p.get("articulation")
     key = p.get("key")
     if articulation is None and isinstance(key, str) and key.startswith("record/articulation/"):
@@ -696,10 +706,6 @@ TEMPLATE_REGISTRY: dict[str, dict] = {
         {},
     ),
 }
-
-# engine hook: the active WatcherEngine instance (window deques live on
-# it -- expr/templates are stateless, framework-managed windows only)
-_CURRENT_ENGINE: Any = None
 
 
 def get_template(name: str) -> dict:

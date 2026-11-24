@@ -35,10 +35,9 @@ scoring argument; they are not duplicated on the context.
 ## 2. Lifetime
 
 - The owner creates exactly one view/context per callback boundary and closes
-  it in `finally` after the callback.  The watcher engine is the exception:
-  it retains one vector-scoped view per tick until the next tick replaces the
-  context (so add/test/dump and `on_reset` can read it between callbacks) and
-  closes the previous view at that replacement point.
+  it in `finally` after the callback.  The watcher engine borrows the runner's
+  `bundle["step"]` view for the live tick and retains only an immutable debug
+  snapshot between ticks; it never closes the runner view.
 - `close()` is idempotent.
 - `close()` never closes the environment or the run-shared query handle.  The
   view only drops its private reference; the run/env still owns the query.
@@ -187,12 +186,13 @@ The boundaries are:
   task exception is isolated and skipped; an old task signature is rejected by
   `build_tasks` at build time.  A bundle without `bundle["view"]` fails fast
   instead of scoring blind;
-- watcher: one vector-scoped view (`env_id is None`) built by
-  `WatcherEngine.on_tick` from the engine's own wired env, retained until the
-  next tick replaces it, then closed.  `WatchContext.record`/`obs`/`num_envs`
-  read through it; the expression namespace exposes `view` but no raw `env`.
-  The step bundle carries no live env.  Views are not checkpointed; the watcher
-  rewind payload is unchanged.
+- watcher: `WatcherEngine.on_tick` consumes exactly the runner's
+  vector-scoped `bundle["step"]` view (`env_id is None`); the engine builds no
+  second view and never closes the runner view.  `WatchContext.record`/`obs`/
+  `num_envs` read that step view during the tick and the piecewise debug
+  snapshot between ticks; the expression namespace exposes `view`/`values` but
+  no raw `env`.  The step bundle carries no live env.  Views and debug
+  snapshots are not checkpointed; the watcher rewind payload is unchanged.
 
 Evaluation order is contract for the consumers that adopt it, not a convention
 to reorder for convenience.
@@ -228,8 +228,8 @@ Condition.evaluate(ctx: EvalContext) -> (ctx.env.scope_size,) bool
   all-false mask; the watcher adapter still pre-validates limits to preserve its
   `WatchError`/fail-safe contract.
 - Domain ownership is unchanged: terminations own fail-fast masks and episode
-  facts; watchers own `WatchResult`, messages/data, signals, actions and the
-  trigger layer; benchmark tasks own `TickResult`/`TickTrace`.  A task may
+  facts; watchers own `WatchResult`, messages/data, actions and the trigger
+  layer; benchmark tasks own `TickResult`/`TickTrace`.  A task may
   compose a condition inside `on_tick(ctx)`; there is no core `Task.condition`
   API.
 

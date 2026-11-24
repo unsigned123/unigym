@@ -24,7 +24,7 @@ def test_watch_keys_use_the_authoring_projection():
     """A unique group name keeps the historical action/<group> key."""
     group = OrderedActionGroup("body", "arm", ("shoulder",), "position")
     values = torch.tensor([[1.0]])
-    ctx = WatchContext(t=0, bundle=_bundle((), (ActionGroupValue(group, values),)), env=None)
+    ctx = WatchContext(t=0, bundle=_bundle((), (ActionGroupValue(group, values),)))
 
     assert "action/body" in ctx.keys()
     assert "action/arm/shoulder" not in ctx.keys()
@@ -44,7 +44,6 @@ def test_watch_keys_disambiguate_a_shared_group_name():
                 ActionGroupValue(go2, torch.zeros(1, 1)),
             ),
         ),
-        env=None,
     )
 
     assert "action/go1/legs" in ctx.keys()
@@ -55,7 +54,7 @@ def test_watch_keys_disambiguate_a_shared_group_name():
 def test_watch_keys_fall_back_to_joint_addressed_entries():
     """Without a projection, one action/<articulation>/<joints> key per entry."""
     entry = _entry("arm", ("elbow", "shoulder"), torch.tensor([[2.0, 1.0]]))
-    ctx = WatchContext(t=0, bundle=_bundle((entry,)), env=None)
+    ctx = WatchContext(t=0, bundle=_bundle((entry,)))
 
     assert "action/arm/elbow,shoulder" in ctx.keys()
     assert ctx.key("action/arm/elbow,shoulder") is entry.values

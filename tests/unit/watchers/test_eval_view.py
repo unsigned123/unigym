@@ -1,4 +1,4 @@
-"""WatchContext converges on the read-only EnvView evaluation boundary."""
+"""Watchers evaluate the C10 step boundary and keep only a debug snapshot."""
 
 from __future__ import annotations
 
@@ -7,36 +7,18 @@ from pathlib import Path
 import pytest
 import torch
 
-from unigym.evaluation import EnvView, EvalViewStaleError
+from tests.unit.watchers._step_fixtures import (
+    debug_context,
+    live_context,
+    obs_snapshot,
+    step_context,
+    tick_bundle,
+)
+from unigym.evaluation import EvalViewStaleError
 from unigym.runtime.controllers import ArticulationRuntime
+from unigym.values import ValueStore
 from unigym.watchers import WatchContext, WatchError, WatchResult, WatcherEngine
 from unigym.watchers import templates as tpl
-
-
-class _Snapshot:
-    """Observation snapshot double carrying the published ``values`` face."""
-
-    def __init__(self, values: dict, num_envs: int) -> None:
-        self.values = values
-        self.num_envs = num_envs
-
-
-class _EnvBoundary:
-    """Minimal live-env input the engine turns into one EnvView."""
-
-    def __init__(
-        self,
-        *,
-        num_envs: int = 2,
-        articulations: dict | None = None,
-        query=None,
-    ) -> None:
-        self.num_envs = num_envs
-        self.device = "cpu"
-        self.articulations = articulations or {}
-        self._backend_label = "fake backend"
-        if query is not None:
-            self.query = query
 
 
 class _ContextCaptureWatcher:
@@ -48,20 +30,18 @@ class _ContextCaptureWatcher:
         return WatchResult(fired=ctx.view is not None)
 
 
-class _QuerySentinel:
-    """Stand-in run-shared query that records an unwanted close."""
+class _ResetWatcher:
+    """Callable double recording every on_reset context it receives."""
 
     def __init__(self) -> None:
-        self.closed = False
-        self.model = object()
-        self.state = object()
-        self.kinematics = object()
-        self.geometry = object()
-        self.contacts = object()
-        self.actuators = object()
+        self.contexts: list[WatchContext] = []
 
-    def close(self) -> None:
-        self.closed = True
+    def check(self, ctx):
+        del ctx
+        return WatchResult(fired=False)
+
+    def on_reset(self, ctx):
+        self.contexts.append(ctx)
 
 
 class _PauseBridge:
@@ -72,22 +52,6 @@ class _PauseBridge:
 
     def pause_for_watcher(self) -> None:
         self.paused = True
-
-
-def _bundle(
-    record: dict,
-    *,
-    num_envs: int,
-    env=None,
-    obs: dict | None = None,
-) -> dict:
-    bundle: dict = {
-        "record": record,
-        "obs": _Snapshot(obs if obs is not None else {}, num_envs),
-    }
-    if env is not None:
-        bundle["env"] = env
-    return bundle
 
 
 def _runtime(name: str, limits: tuple[torch.Tensor, torch.Tensor] | None) -> ArticulationRuntime:
@@ -107,190 +71,194 @@ def _arm_limits(lower: float = -1.5, upper: float = 1.5) -> tuple[torch.Tensor, 
 
 
 def _joint_ctx(record: dict, articulations: dict, *, num_envs: int = 2) -> WatchContext:
-    view = EnvView(
-        record=record,
-        obs=None,
-        env_id=None,
-        num_envs=num_envs,
-        device="cpu",
-        backend="fake backend",
-        articulations=articulations,
-    )
-    return WatchContext(t=0, bundle={"record": record}, view=view)
+    return live_context(record, num_envs=num_envs, articulations=articulations)
 
 
-def test_context_reads_record_obs_and_num_envs_through_the_view():
-    """The view, not the bundle snapshot, is the live read path."""
-    view = EnvView(
-        record={"x": torch.tensor([7.0, 8.0])},
-        obs=_Snapshot({"x": torch.tensor([3.0, 4.0])}, 2),
-        env_id=None,
-        num_envs=2,
-        device="cpu",
-        backend="fake backend",
-    )
-    bundle = _bundle(
-        {"x": torch.tensor([0.0, 0.0])},
-        num_envs=2,
-        obs={"x": torch.tensor([0.0, 0.0])},
-    )
-
-    ctx = WatchContext(t=0, bundle=bundle, view=view)
-
-    assert torch.equal(ctx.record["x"], torch.tensor([7.0, 8.0]))
-    assert torch.equal(ctx.obs["x"], torch.tensor([3.0, 4.0]))
-    assert ctx.num_envs == 2
-
-
-def test_expression_namespace_exposes_view_and_not_env():
-    """The expr face carries the read-only view and no raw env handle."""
-    view = EnvView(
-        record={},
-        obs=None,
-        env_id=None,
-        num_envs=1,
-        device="cpu",
-        backend="fake backend",
-    )
-    ctx = WatchContext(t=0, bundle={}, view=view)
-
-    namespace = ctx.eval_namespace()
-
-    assert namespace["view"] is view
-    assert "env" not in namespace
-
-
-def test_engine_builds_one_view_for_callable_and_expression_predicates():
-    """One vector-scoped view per tick, shared by callable and expression."""
-    env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
+def _capture_engine() -> WatcherEngine:
+    engine = WatcherEngine(run_id="r", out_dir=None)
     engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
+    return engine
+
+
+def test_on_tick_evaluates_exactly_the_bundle_step_view():
+    """One live context reads the runner's step view; no second view exists."""
+    engine = _capture_engine()
     engine.add(
         {
             "name": "expr",
             "expr": "WatchResult(fired=(view is bundle['_test_captured_view']))",
         }
     )
-    bundle = _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2)
-
-    engine.on_tick(0, bundle)
-
-    ctx = bundle["_test_captured_ctx"]
-    assert ctx.view is bundle["_test_captured_view"]
-    assert ctx.view.env_id is None
-    assert ctx.view.num_envs == 2
-    assert ctx.view.has_query is False
-    rows = {row["name"]: row for row in engine.list()}
-    assert rows["cap"]["fired"] == 1
-    assert rows["expr"]["fired"] == 1
-
-
-def test_bundle_without_env_uses_the_engine_env():
-    """A step bundle with no env still gets a view from the engine-owned env."""
-    env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    bundle = _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2)
-
-    engine.on_tick(0, bundle)
-
-    ctx = bundle["_test_captured_ctx"]
-    assert ctx.view is not None
-    assert ctx.view.num_envs == 2
-    assert ctx.num_envs == 2
-
-
-def test_engine_env_owns_the_view_and_ignores_a_bundle_env():
-    """A bundle-level env is never a view source once the engine has one."""
-    query = _QuerySentinel()
-    engine_env = _EnvBoundary(num_envs=3)
-    bundle_env = _EnvBoundary(num_envs=2, query=query)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=engine_env)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    bundle = {"record": {"x": torch.tensor([1.0, 2.0])}, "env": bundle_env}
-
-    engine.on_tick(0, bundle)
-
-    ctx = bundle["_test_captured_ctx"]
-    assert ctx.view is not None
-    assert ctx.view.num_envs == 3
-    assert ctx.view.has_query is False
-    assert query.closed is False
-
-
-def test_offline_engine_without_env_leaves_the_view_none():
-    """With no engine env the view is None and the bundle env is not a fallback."""
-    bundle_env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    bundle = _bundle(
-        {"x": torch.tensor([1.0, 2.0])},
-        num_envs=2,
-        env=bundle_env,
+    bundle, step = tick_bundle(
+        record={"x": torch.tensor([1.0, 2.0])},
         obs={"x": torch.tensor([3.0, 4.0])},
     )
 
     engine.on_tick(0, bundle)
 
     ctx = bundle["_test_captured_ctx"]
-    assert ctx.view is None
+    assert ctx.step is step
+    assert ctx.view is step.view
+    assert ctx.view is bundle["_test_captured_view"]
+    assert ctx.view.env_id is None
+    assert ctx.view.num_envs == 2
+    assert ctx.view.has_query is False
     assert torch.equal(ctx.record["x"], torch.tensor([1.0, 2.0]))
     assert torch.equal(ctx.obs["x"], torch.tensor([3.0, 4.0]))
-    assert ctx.num_envs == 0
+    rows = {row["name"]: row for row in engine.list()}
+    assert rows["cap"]["fired"] == 1
+    assert rows["expr"]["fired"] == 1
 
 
-def test_previous_tick_view_is_closed_when_the_next_tick_replaces_it():
-    """A retained context reads live state only while its tick is current."""
-    env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    first_bundle = _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2)
+def test_after_tick_the_live_context_becomes_a_debug_snapshot():
+    """The runner view stays open, but the retained context is a private copy."""
+    engine = _capture_engine()
+    bundle, step = tick_bundle(
+        record={"x": torch.tensor([1.0, 2.0])},
+        obs={"x": torch.tensor([3.0, 4.0])},
+    )
 
-    engine.on_tick(0, first_bundle)
-    first = first_bundle["_test_captured_ctx"]
-    assert torch.equal(first.record["x"], torch.tensor([1.0, 2.0]))
-
-    engine.on_tick(1, _bundle({"x": torch.tensor([3.0, 4.0])}, num_envs=2))
-
-    with pytest.raises(EvalViewStaleError):
-        _ = first.record
-
-
-def test_add_and_test_between_ticks_use_the_current_open_view():
-    """Hot add/test dry-runs read the retained view without closing it."""
-    env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    bundle = _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2)
     engine.on_tick(0, bundle)
-    current = bundle["_test_captured_ctx"]
 
-    added = engine.add({"name": "expr", "expr": "WatchResult(fired=(view is not None))"})
-    tested = engine.test({"name": "probe", "expr": "WatchResult(fired=(view is not None))"})
+    retained = engine._last_ctx
+    assert retained is not None
+    assert retained.step is None
+    assert retained.debug is not None
+    assert retained.view is retained.debug.view
+    assert retained.view is not step.view
+    assert "step" not in retained.bundle
+    assert "view" not in retained.bundle
+
+    step.view.close()
+    with pytest.raises(EvalViewStaleError):
+        step.view.record()
+
+    assert torch.equal(retained.record["x"], torch.tensor([1.0, 2.0]))
+    assert torch.equal(retained.obs["x"], torch.tensor([3.0, 4.0]))
+    assert retained.num_envs == 2
+
+
+def test_add_and_test_between_ticks_use_the_debug_snapshot():
+    """Hot add/test work after the runner closed the boundary view."""
+    engine = _capture_engine()
+    bundle, step = tick_bundle(
+        record={"x": torch.tensor([1.0, 2.0])},
+        obs={"x": torch.tensor([3.0, 4.0])},
+    )
+    engine.on_tick(0, bundle)
+    step.view.close()
+
+    added = engine.add(
+        {
+            "name": "probe",
+            "expr": "WatchResult(fired=(record['x'][0].item() == 1.0))",
+        }
+    )
+    tested = engine.test(
+        {
+            "name": "probe2",
+            "expr": "WatchResult(fired=(obs['x'][0].item() == 3.0))",
+        }
+    )
 
     assert added["dry_run"]["fired"] is True
     assert tested["dry_run"]["fired"] is True
-    assert torch.equal(current.record["x"], torch.tensor([1.0, 2.0]))
 
 
-def test_closing_a_view_does_not_close_the_run_shared_query():
-    """View invalidation never closes the env-owned query handle."""
-    query = _QuerySentinel()
-    env = _EnvBoundary(num_envs=2, query=query)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
-    engine.add({"name": "cap", "callable": f"{Path(__file__).resolve()}:_ContextCaptureWatcher"})
-    first_bundle = _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2)
+def test_context_exposes_values_and_never_an_env_escape():
+    """The expression namespace has values/view but no env attribute."""
+    store = ValueStore(num_envs=2, device="cpu")
+    store.publish("sink", "user/value", torch.tensor([5.0, 6.0]))
+    engine = _capture_engine()
+    bundle, step = tick_bundle(record={"x": torch.tensor([1.0, 2.0])}, values=store)
 
-    engine.on_tick(0, first_bundle)
-    first = first_bundle["_test_captured_ctx"]
-    assert first.view.has_query is True
-    assert first.view.query is not None
+    engine.on_tick(0, bundle)
 
-    engine.on_tick(1, _bundle({"x": torch.tensor([3.0, 4.0])}, num_envs=2))
+    ctx = bundle["_test_captured_ctx"]
+    assert not hasattr(ctx, "env")
+    namespace = ctx.eval_namespace()
+    assert "env" not in namespace
+    assert namespace["view"] is step.view
+    assert namespace["values"] is ctx.values
+    assert namespace["step"] == ctx.t == 0
+    assert ctx.values.get("user/value").tolist() == [5.0, 6.0]
 
-    with pytest.raises(EvalViewStaleError):
-        _ = first.view.query
-    assert query.closed is False
+    retained = engine._last_ctx
+    assert retained.values is retained.debug.values
+    assert torch.equal(retained.values["user/value"], torch.tensor([5.0, 6.0]))
+
+
+def test_offline_context_without_step_or_debug_keeps_the_bundle_fallback():
+    """Only an explicitly constructed offline context reads the bundle snapshot."""
+    ctx = WatchContext(
+        t=0,
+        bundle={
+            "record": {"x": torch.tensor([1.0, 2.0])},
+            "obs": obs_snapshot({"y": torch.tensor([3.0, 4.0])}),
+        },
+    )
+
+    assert ctx.view is None
+    assert len(ctx.values) == 0
+    assert torch.equal(ctx.record["x"], torch.tensor([1.0, 2.0]))
+    assert torch.equal(ctx.obs["y"], torch.tensor([3.0, 4.0]))
+    assert ctx.num_envs == 0
+
+
+def test_on_reset_with_the_final_step_uses_a_temporary_context():
+    """The final step is borrowed for the hook; the debug context is retained."""
+    engine = WatcherEngine(run_id="r", out_dir=None)
+    engine.add({"name": "reset", "callable": f"{Path(__file__).resolve()}:_ResetWatcher"})
+    instance = engine._states["reset"].instance
+    bundle, _step = tick_bundle(record={"x": torch.tensor([1.0, 2.0])})
+    engine.on_tick(0, bundle)
+    debug_ctx = engine._last_ctx
+    assert debug_ctx is not None
+    final_step = step_context(record={"x": torch.tensor([9.0, 9.0])}, t=0)
+    final_bundle = {
+        "t": 0,
+        "reset_facts": {0: {"reset_valid": True}},
+        "episode_results": {0: "done"},
+        "terminations": {0: "fall"},
+    }
+
+    engine.on_reset(torch.tensor([0]), final_step, final_bundle)
+
+    hook_ctx = instance.contexts[-1]
+    assert hook_ctx.view is final_step.view
+    assert hook_ctx.bundle is final_bundle
+    assert hook_ctx.bundle["reset_facts"] == {0: {"reset_valid": True}}
+    assert hook_ctx.bundle["episode_results"] == {0: "done"}
+    assert hook_ctx.bundle["terminations"] == {0: "fall"}
+    assert engine._last_ctx is debug_ctx
+    assert engine._last_ctx.view is not final_step.view
+
+    final_step.view.close()
+    engine.on_reset(torch.tensor([0]))
+
+    assert instance.contexts[-1] is engine._last_ctx
+    assert engine._last_ctx.view is engine._last_ctx.debug.view
+
+
+def test_debug_snapshot_excludes_camera_observations():
+    """Between-tick debug copies carry record/non-camera obs/values only."""
+    engine = _capture_engine()
+    bundle, _step = tick_bundle(
+        record={"x": torch.tensor([1.0, 2.0])},
+        obs={
+            "x": torch.tensor([3.0, 4.0]),
+            "cam/ego/rgb": torch.zeros(2, 2, 2, 3, dtype=torch.uint8),
+        },
+    )
+
+    engine.on_tick(0, bundle)
+
+    retained = engine._last_ctx
+    assert "x" in retained.obs
+    assert "cam/ego/rgb" not in retained.obs
+    assert "cam/ego/rgb" not in retained.debug.obs
+    assert "obs" not in retained.bundle
+    assert "raw" not in retained.bundle
 
 
 def test_joint_limit_accepts_an_explicit_articulation():
@@ -378,32 +346,60 @@ def test_joint_limit_without_declared_limits_is_a_data_failure():
 
 
 def test_joint_limit_without_a_view_reports_the_offline_gap():
-    """An offline context has no articulation limits to read."""
+    """An offline context needs a live step for articulation runtime facts."""
     record = {"articulation/arm/joint_pos": torch.tensor([[0.0], [2.0]])}
     ctx = WatchContext(t=0, bundle={"record": record})
 
-    with pytest.raises(WatchError, match="no live evaluation view"):
+    with pytest.raises(WatchError, match="live step context"):
         tpl.get_template("joint_limit")["check"](ctx, {"articulation": "arm"})
 
 
-def test_firing_actions_still_run_through_the_bridge():
-    """The trigger/action layer is unchanged by the view convergence."""
-    bridge = _PauseBridge()
-    env = _EnvBoundary(num_envs=1)
-    engine = WatcherEngine(run_id="r", out_dir=None, bridge=bridge, env=env)
-    engine.add({"name": "pause", "expr": "WatchResult(fired=True)", "on": ["pause"]})
+def test_joint_limit_debug_context_raises_a_teaching_watch_error():
+    """A debug snapshot fails like offline: runtime facts need a live step."""
+    record = {"articulation/arm/joint_pos": torch.tensor([[0.0], [2.0]])}
+    ctx = debug_context(record)
 
-    engine.on_tick(0, _bundle({}, num_envs=1))
+    with pytest.raises(WatchError, match="live step context"):
+        tpl.get_template("joint_limit")["check"](ctx, {"articulation": "arm"})
+
+
+def test_engine_test_surfaces_the_joint_limit_debug_error_as_watch_error():
+    """engine.test propagates the template's teaching WatchError unchanged."""
+    engine = WatcherEngine(run_id="r", out_dir=None)
+    bundle, _step = tick_bundle(
+        record={"articulation/arm/joint_pos": torch.tensor([[0.0, 2.0]])},
+        num_envs=1,
+    )
+    engine.on_tick(0, bundle)
+
+    with pytest.raises(WatchError, match="live step context"):
+        engine.test(
+            {
+                "name": "probe",
+                "template": "joint_limit",
+                "params": {"articulation": "arm"},
+            }
+        )
+
+
+def test_firing_actions_still_run_through_the_bridge():
+    """The trigger/action layer is unchanged by the debug-snapshot lifecycle."""
+    bridge = _PauseBridge()
+    engine = WatcherEngine(run_id="r", out_dir=None, bridge=bridge)
+    engine.add({"name": "pause", "expr": "WatchResult(fired=True)", "on": ["pause"]})
+    bundle, _step = tick_bundle(num_envs=1)
+
+    engine.on_tick(0, bundle)
 
     assert bridge.paused is True
     assert engine.list()[0]["fired"] == 1
 
 
-def test_rewind_payload_does_not_checkpoint_the_view():
-    """Views are boundary handles, never rewind state."""
-    env = _EnvBoundary(num_envs=2)
-    engine = WatcherEngine(run_id="r", out_dir=None, env=env)
-    engine.on_tick(0, _bundle({"x": torch.tensor([1.0, 2.0])}, num_envs=2))
+def test_rewind_payload_does_not_checkpoint_the_view_or_debug_snapshot():
+    """Views/snapshots are boundary handles, never rewind state."""
+    engine = WatcherEngine(run_id="r", out_dir=None)
+    bundle, _step = tick_bundle(record={"x": torch.tensor([1.0, 2.0])})
+    engine.on_tick(0, bundle)
 
     state = engine.rewind_state()
 

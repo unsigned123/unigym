@@ -7,16 +7,9 @@ from pathlib import Path
 import pytest
 import torch
 
+from tests.unit.watchers._step_fixtures import tick_bundle
 from unigym.runtime.rewind import RewindGateError, RewindStateProvider
-from unigym.signals import SignalBus
 from unigym.watchers import WatchResult, WatcherEngine
-
-
-class _ObsSnapshot:
-    """Minimal observation snapshot double (``values`` face)."""
-
-    def __init__(self, values: dict) -> None:
-        self.values = values
 
 
 class SetupWatcher:
@@ -33,19 +26,18 @@ class SetupWatcher:
         return WatchResult(fired=True, message="ready")
 
 
-def _bundle(x: float) -> dict:
-    return {"obs": _ObsSnapshot({"x": torch.tensor([x, x], dtype=torch.float32)})}
-
-
-def _engine() -> tuple[WatcherEngine, SignalBus]:
-    bus = SignalBus(num_envs=2, device="cpu")
-    engine = WatcherEngine(run_id="r", out_dir=None, signals=bus)
-    engine.add(
-        {
-            "name": "base",
-            "expr": ("WatchResult(fired=True, signals={'user/n': " "torch.tensor([1.0, 1.0])})"),
-        }
+def _bundle(x: float, *, t: int) -> dict:
+    bundle, _step = tick_bundle(
+        obs={"x": torch.tensor([x, x], dtype=torch.float32)},
+        num_envs=2,
+        t=t,
     )
+    return bundle
+
+
+def _engine() -> WatcherEngine:
+    engine = WatcherEngine(run_id="r", out_dir=None)
+    engine.add({"name": "base", "expr": "WatchResult(fired=True)"})
     engine.add(
         {
             "name": "win",
@@ -59,7 +51,7 @@ def _engine() -> tuple[WatcherEngine, SignalBus]:
             },
         }
     )
-    return engine, bus
+    return engine
 
 
 def test_engine_is_a_named_rewind_provider():
@@ -72,26 +64,23 @@ def test_engine_is_a_named_rewind_provider():
 
 def test_rewind_round_trip_restores_specs_trigger_state_and_windows():
     """A checkpoint reverts hot-add/clear and restores the producer state."""
-    engine, bus = _engine()
-    engine.on_tick(0, _bundle(2.0))
-    engine.on_tick(1, _bundle(4.0))
+    engine = _engine()
+    engine.on_tick(0, _bundle(2.0, t=0))
+    engine.on_tick(1, _bundle(4.0, t=1))
 
     state = engine.rewind_state()
-    bus_state = bus.rewind_state()
     assert [row["name"] for row in engine.list()] == ["base", "win"]
 
     # diverge: hot-add, mutate the window, clear a spec, disable the base
-    engine.on_tick(2, _bundle(8.0))
+    engine.on_tick(2, _bundle(8.0, t=2))
     engine.add({"name": "hot", "expr": "True"})
     engine.clear("win")
     engine.update("base", {"enabled": False})
-    bus.publish("user/n", torch.tensor([9.0, 9.0]))
     assert sorted(row["name"] for row in engine.list()) == ["base", "hot"]
     assert next(row for row in engine.list() if row["name"] == "base")["state"] == "disabled"
 
     engine.validate_rewind_state(state)
     engine.apply_rewind_state(state)
-    bus.apply_rewind_state(bus_state)
 
     rows = {row["name"]: row for row in engine.list()}
     assert sorted(rows) == ["base", "win"]
@@ -100,17 +89,16 @@ def test_rewind_round_trip_restores_specs_trigger_state_and_windows():
     assert rows["base"]["last_tick"] == 0
     window = engine.window_cache[("obs/x", 2)]
     assert list(window["buf"]) == [2.0, 4.0]
-    assert torch.equal(bus.get("user/n"), torch.tensor([1.0, 1.0]))
 
     # the restored edge state still suppresses the same firing edge
-    engine.on_tick(60, _bundle(8.0))
+    engine.on_tick(60, _bundle(8.0, t=60))
     assert next(row for row in engine.list() if row["name"] == "base")["fired"] == 1
 
 
 def test_malformed_state_is_refused_before_any_change():
     """A bad trigger-state field is a zero-change refusal."""
-    engine, _ = _engine()
-    engine.on_tick(0, _bundle(2.0))
+    engine = _engine()
+    engine.on_tick(0, _bundle(2.0, t=0))
     state = engine.rewind_state()
     before = engine.list()
     raw_states = state["states"]
@@ -129,8 +117,8 @@ def test_malformed_state_is_refused_before_any_change():
 
 def test_malformed_spec_payload_is_refused_before_any_change():
     """A spec that no longer parses is refused read-only."""
-    engine, _ = _engine()
-    engine.on_tick(0, _bundle(2.0))
+    engine = _engine()
+    engine.on_tick(0, _bundle(2.0, t=0))
     state = engine.rewind_state()
     before = engine.list()
     state["specs"] = [{"name": "broken"}]
@@ -152,7 +140,8 @@ def test_rewind_rearms_callable_setup_instead_of_trusting_setup_done():
             "callable": f"{Path(__file__).resolve()}:SetupWatcher",
         }
     )
-    engine.on_tick(0, {})
+    bundle, _step = tick_bundle(num_envs=2, t=0)
+    engine.on_tick(0, bundle)
     assert engine.list()[0]["fired"] == 1
 
     state = engine.rewind_state()
@@ -169,7 +158,8 @@ def test_rewind_rearms_callable_setup_instead_of_trusting_setup_done():
     assert isinstance(restored, dict)
     assert restored["setup"]["setup_done"] is False
 
-    engine.on_tick(5, {})
+    bundle, _step = tick_bundle(num_envs=2, t=5)
+    engine.on_tick(5, bundle)
     row = engine.list()[0]
     assert row["name"] == "setup"
     assert row["state"] == "armed"

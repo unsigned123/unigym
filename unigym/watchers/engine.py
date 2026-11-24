@@ -7,9 +7,13 @@ tick).  Every tick:
     for each enabled watch (budgeted):
         guard (tier-1, optional) -> skip when false
         result = predicate(ctx)          # template | expr | callable
-        publish result.signals           # level values, even fired=False
         fire = trigger(result.fired)     # edge/level/once/cooldown (§8.5)
         if fire: execute actions         # pause/capture/dump/mark/notify
+
+Watchers are debug/instrumentation only: evaluation publishes no values or
+signals.  The live context reads the runner-supplied ``bundle["step"]``
+(:class:`~unigym.evaluation.EnvStepContext`); after the tick it is replaced
+by an immutable debug snapshot so add/test never retain a closed live view.
 
 Fail-safe (§2.1): a raising predicate NEVER escapes into the engine
 loop -- error event + strike; 3 consecutive strikes auto-disable the
@@ -24,15 +28,14 @@ view -- the thin-shell principle); events stream to events.jsonl (timeline).
 from __future__ import annotations
 
 import copy
-import inspect
 import json
 import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any, cast
 
-from ..evaluation import EnvView
+from ..evaluation import EnvStepContext
 from . import templates as _tpl
 from .base import (
     CAPTURE,
@@ -41,18 +44,15 @@ from .base import (
     Level,
     PAUSE,
     WatchContext,
+    WatchDebugSnapshot,
     WatchError,
     WatchResult,
+    WindowStore,
     now_wall,
     _CAPTURE_BUDGET,
     _DUMP_BUDGET,
 )
 from .spec import TIER2_CAP, WatchSpec, check_callable_path, compile_expr, exec_block, load_callable
-
-if TYPE_CHECKING:  # pragma: no cover - typing-only
-    import torch
-
-    from unigym.signals import SignalBus
 
 __all__ = ["WatcherEngine", "WatchState"]
 
@@ -117,15 +117,15 @@ class WatcherEngine:
     Args:
         run_id: run id (events + store naming only).
         out_dir: run output dir (watchers.json, events.jsonl, captures).
-        env: live run env; the one source of the per-tick read-only view.
-            Never handed to a predicate.
         adapter: passed through to the WatchContext.
         event_log: the shared timeline writer (None -> drop events).
         bridge: owning Bridge (pause/capture/dump/direct actions); may
             be None in offline tests.
         specs: born-armed declarations (yaml entry point, §8.6).
-        signals: optional run ``SignalBus``; evaluated results publish
-            their signal mapping there (None -> no-op).
+
+    The engine owns no env and no signal transport.  It reads the runner's
+    ``bundle["step"]`` boundary while the tick is live and keeps only an
+    immutable debug snapshot between ticks.
     """
 
     name = "watchers"
@@ -134,36 +134,30 @@ class WatcherEngine:
         self,
         run_id: str,
         out_dir,
-        env=None,
         adapter=None,
         event_log=None,
         bridge=None,
         specs=None,
-        signals: SignalBus | None = None,
     ):
         self.run_id = run_id
         self.out_dir = Path(out_dir) if out_dir else None
-        self.env = env
         self.adapter = adapter
         self.event_log = event_log
         self.bridge = bridge
-        self.signals = signals
         self._specs: dict[str, WatchSpec] = {}
         self._states: dict[str, WatchState] = {}
         self._expr_code: dict[str, tuple] = {}  # name -> (code, is_exec)
         self._guard_code: dict[str, tuple] = {}
-        self.window_cache: dict = {}  # key_window deques
+        self.window_cache: WindowStore = {}  # key_window deques
         self.last_overhead_us = 0.0
         self.captures = 0
         self.dumps = 0
-        self._last_bundle: dict | None = None
         self._last_ctx: WatchContext | None = None
         if self.out_dir:
             (self.out_dir / "watch").mkdir(parents=True, exist_ok=True)
         for d in specs or []:
             self.add(d, persist=False)
         self._persist()
-        _tpl._CURRENT_ENGINE = self  # window store hook
 
     # ------------------------------------------------------------------ #
     # declaration management (add/list/clear/update/test -- §8.6)
@@ -387,92 +381,102 @@ class WatcherEngine:
     # ------------------------------------------------------------------ #
     # per-tick evaluation (the ONLY engine-loop touchpoint)
     # ------------------------------------------------------------------ #
-    def _build_view(self, bundle: dict) -> EnvView:
-        """Build the tick's vector-scoped read-only view from the engine env.
-
-        The engine owns the env that is the view source; the step bundle only
-        supplies the step record and observation snapshot.  The view adds
-        read-only identity (num_envs/device/backend), the lazy query factory
-        and the articulation runtime facts.  Watchers reach state through
-        ``WatchContext``, ``view`` and the eval namespace -- none of which
-        carry a mutable backend handle.  The lazy ``_query_factory``
-        deliberately closes over the engine env to hand out the run-shared
-        query on demand.
-        """
-        env = self.env
-        record = bundle.get("record")
-        if record is None:
-            record = {}
-        query_factory = None
-        if inspect.getattr_static(env, "query", None) is not None:
-
-            def _query_factory():
-                return env.query
-
-            query_factory = _query_factory
-        return EnvView(
-            record=record,
-            obs=bundle.get("obs"),
-            env_id=None,
-            num_envs=int(getattr(env, "num_envs", 0) or 0),
-            device=getattr(env, "device", "cpu"),
-            backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-            query_factory=query_factory,
-            articulations=getattr(env, "articulations", None) or {},
-        )
-
-    def on_tick(self, t: int, bundle: dict) -> None:
-        view = self._build_view(bundle) if self.env is not None else None
-        previous = self._last_ctx
-        self._last_bundle = bundle
-        self._last_ctx = WatchContext(
+    def _make_context(
+        self,
+        t: int,
+        bundle: dict,
+        *,
+        step: EnvStepContext | None = None,
+        debug: WatchDebugSnapshot | None = None,
+    ) -> WatchContext:
+        """One context over the live step or the between-tick debug snapshot."""
+        return WatchContext(
             t=int(t),
             bundle=bundle,
-            view=view,
             adapter=self.adapter,
             sim_time=self._sim_time(bundle),
             episodes=self._episodes(),
+            step=step,
+            debug=debug,
+            window_store=self.window_cache,
         )
-        # The view outlives the callback it was built for: add/test/dump and
-        # on_reset read the current tick's view between ticks.  Replacing the
-        # context (never the callback epilogue) is the close point.
-        if previous is not None and previous.view is not None:
-            previous.view.close()
-        t0 = time.perf_counter()
-        for name in list(self._specs):
-            spec, st = self._specs[name], self._states[name]
-            if st.disabled:
-                continue
-            if int(t) % max(1, spec.every or 1) != 0:
-                continue
-            if spec.guard and not self._eval_guard(spec, st):
-                continue
-            try:
-                result = self._evaluate(spec, st, dry=False)
-                # level semantics: the values publish on every evaluated
-                # tick, independent of the trigger/actions decision
-                self._publish_signals(result.signals)
-            except Exception as e:  # noqa: BLE001
-                self._fail_safe(name, spec, e, t)
-                continue
-            st.last_result = result
-            st.last_tick = int(t)
-            st.strikes = 0
-            if self._trigger(spec, st, bool(result.fired), int(t)):
-                self._fire(spec, st, result, int(t))
-        self.last_overhead_us = (time.perf_counter() - t0) * 1e6
 
-    def on_reset(self, env_ids) -> None:
+    def on_tick(self, t: int, bundle: dict) -> None:
+        """Evaluate one live tick against exactly ``bundle["step"]``.
+
+        The runner owns the boundary view: the engine borrows it for this
+        evaluation and never closes it.  After evaluation the retained context
+        is replaced by an immutable debug snapshot copied from the step, so
+        add/test/dump never read a closed live view.
+        """
+        step = bundle.get("step")
+        if not isinstance(step, EnvStepContext):
+            raise TypeError(
+                "WatcherEngine.on_tick requires bundle['step'] to be an "
+                f"EnvStepContext, got {type(step).__name__}"
+            )
+        self._last_ctx = self._make_context(t, bundle, step=step)
+        t0 = time.perf_counter()
+        try:
+            for name in list(self._specs):
+                spec, st = self._specs[name], self._states[name]
+                if st.disabled:
+                    continue
+                if int(t) % max(1, spec.every or 1) != 0:
+                    continue
+                if spec.guard and not self._eval_guard(spec, st):
+                    continue
+                try:
+                    result = self._evaluate(spec, st, dry=False)
+                except Exception as e:  # noqa: BLE001
+                    self._fail_safe(name, spec, e, t)
+                    continue
+                st.last_result = result
+                st.last_tick = int(t)
+                st.strikes = 0
+                if self._trigger(spec, st, bool(result.fired), int(t)):
+                    self._fire(spec, st, result, int(t))
+        finally:
+            self._last_ctx = self._make_context(
+                t,
+                self._debug_bundle(bundle),
+                debug=WatchDebugSnapshot.from_step(step),
+            )
+            self.last_overhead_us = (time.perf_counter() - t0) * 1e6
+
+    @staticmethod
+    def _debug_bundle(bundle: dict) -> dict:
+        """The between-tick bundle: live handles and heavy obs/raw are dropped."""
+        dropped = ("step", "view", "final_step", "obs", "obs_frame", "obs_collect", "raw")
+        return {key: value for key, value in bundle.items() if key not in dropped}
+
+    def on_reset(self, env_ids, step=None, bundle=None) -> None:
         """Episode boundary (via Bridge.on_episode_end): callable
-        on_reset hooks (§8.3); expr/template state is trigger-level."""
-        ctx = self._last_ctx
+        on_reset hooks (§8.3); expr/template state is trigger-level.
+
+        When the bridge still holds the final step, build a temporary context
+        over that step and the final episode-end bundle (so ``ctx.bundle``
+        carries ``reset_facts``/``episode_results``/terminations) for the
+        callable hooks, then drop it.  Otherwise the retained debug context is
+        used.  No live view or context is retained either way.
+        """
+        base = self._last_ctx
+        if step is not None:
+            episode_bundle = (
+                bundle if bundle is not None else (base.bundle if base is not None else {})
+            )
+            ctx = self._make_context(int(step.t), episode_bundle, step=step)
+        else:
+            ctx = base
+        if ctx is None:
+            return
         for name, spec in self._specs.items():
             inst = self._states[name].instance
             if inst is not None and hasattr(inst, "on_reset"):
                 try:
                     inst.on_reset(ctx)
                 except Exception as e:  # noqa: BLE001
-                    self._fail_safe(name, spec, e, ctx.t if ctx else -1)
+                    self._fail_safe(name, spec, e, ctx.t)
 
     def _evaluate(self, spec: WatchSpec, st: WatchState, dry: bool) -> WatchResult:
         ctx = self._last_ctx
@@ -503,48 +507,6 @@ class WatcherEngine:
                 f"{type(res).__name__}, expected WatchResult"
             )
         return res
-
-    def _publish_signals(self, signals: Mapping[str, torch.Tensor]) -> None:
-        """Publish one evaluated result's user signals (level semantics).
-
-        The whole mapping is preflighted before the first store so one bad
-        value cannot leave a partially published tick on the bus.  The bus
-        remains the transport authority; this preflight mirrors its
-        published contract only to make a failure atomic.
-        """
-        bus = self.signals
-        if bus is None:
-            return
-        if not isinstance(signals, Mapping):
-            raise ValueError(
-                "WatchResult.signals must be a mapping of names to tensors, "
-                f"got {type(signals).__name__}"
-            )
-        if not signals:
-            return
-        import torch
-
-        checked: list[tuple[str, torch.Tensor]] = []
-        for name, value in signals.items():
-            if not isinstance(name, str) or not name:
-                raise ValueError(f"signal name must be a non-empty str, got {name!r}")
-            if not isinstance(value, torch.Tensor):
-                raise ValueError(
-                    f"signal {name!r} value must be a torch.Tensor, got " f"{type(value).__name__}"
-                )
-            if value.ndim < 1 or int(value.shape[0]) != bus.num_envs:
-                raise ValueError(
-                    f"signal {name!r} value must have leading dimension "
-                    f"num_envs={bus.num_envs}, got shape {tuple(value.shape)}"
-                )
-            if value.device != bus.device:
-                raise ValueError(
-                    f"signal {name!r} value device {value.device} does not "
-                    f"match bus device {bus.device}"
-                )
-            checked.append((name, value))
-        for name, value in checked:
-            bus.publish(name, value)
 
     def _eval_guard(self, spec: WatchSpec, st: WatchState) -> bool:
         try:
@@ -740,13 +702,12 @@ class WatcherEngine:
     def rewind_state(self) -> dict[str, object]:
         """Capture specs, trigger state and template window buffers.
 
-        Callable watcher instances are not captured: a signal-producing
-        callable must be stateless in this slice, so re-creating it from
-        the spec is the whole state.  ``setup()`` is framework lifecycle,
-        not opaque internal state: restore re-creates the instance and
-        forces it to run setup again against the live context.
-        Stateful callable producers are explicitly unsupported by the
-        watcher contract.
+        Callable watcher instances are not captured: a callable watcher must
+        be stateless in this slice, so re-creating it from the spec is the
+        whole state.  ``setup()`` is framework lifecycle, not opaque internal
+        state: restore re-creates the instance and forces it to run setup
+        again against the live context.  Stateful callable watchers are
+        explicitly unsupported by the watcher contract.
         """
         return {
             "specs": [copy.deepcopy(self._specs[name].to_dict()) for name in sorted(self._specs)],
@@ -755,7 +716,10 @@ class WatcherEngine:
                 for name in sorted(self._states)
             },
             "window_cache": {
-                copy.deepcopy(key): {"win": int(entry["win"]), "buf": list(entry["buf"])}
+                copy.deepcopy(key): {
+                    "win": cast(int, entry["win"]),
+                    "buf": list(cast(Sequence[object], entry["buf"])),
+                }
                 for key, entry in self.window_cache.items()
             },
         }
@@ -809,7 +773,6 @@ class WatcherEngine:
         self._guard_code.update(guard_code)
         self.window_cache.clear()
         self.window_cache.update(windows)
-        _tpl._CURRENT_ENGINE = self
         self._persist()
 
     def _checked_state(

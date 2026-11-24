@@ -99,9 +99,10 @@ from signals must include that state in its own `rewind_state()`.
 ## Signal timing
 
 The runner order is `env.step(t) -> sampler.update(t) -> sink.on_step(t)`.  A
-custom sink or a watcher publishes after tick `t`'s physics and observation
-snapshot, so the sampler's first read of that value is `update(t+1)`.  The
-command returned by `update(t+1)` is written to `obs.command` at `t+1` and is
+custom sink publishes after tick `t`'s physics and observation snapshot, so the
+sampler's first read of that value is `update(t+1)`.  Watchers are debug-only
+and publish no signal values.  The command returned by `update(t+1)` is written
+to `obs.command` at `t+1` and is
 first used by `env.step(t+2)`: in-episode closed loop has two policy-tick
 latency from the observed view to the acting command.  This is the fixed
 sampler placement; a sink cannot shorten it from its callback.

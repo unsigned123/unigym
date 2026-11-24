@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from unigym.evaluation import EnvView
+from tests.unit.watchers._step_fixtures import debug_context, live_context, tick_bundle
 from unigym.runtime.controllers import ArticulationRuntime
-from unigym.watchers import WatchContext, WatchError
+from unigym.watchers import WatchContext, WatchError, WatcherEngine
 from unigym.watchers import templates as tpl
 
 
@@ -21,15 +21,7 @@ def _runtime(name: str, limits: tuple[torch.Tensor, torch.Tensor] | None) -> Art
 
 
 def _ctx(record: dict, *, articulations: dict | None = None, num_envs: int = 2) -> WatchContext:
-    view = EnvView(
-        record=record,
-        obs=None,
-        env_id=None,
-        num_envs=num_envs,
-        device="cpu",
-        articulations=articulations or {},
-    )
-    return WatchContext(t=0, bundle={"record": record}, view=view)
+    return live_context(record, num_envs=num_envs, articulations=articulations or {})
 
 
 def _height_context() -> WatchContext:
@@ -175,3 +167,54 @@ def test_joint_limit_missing_joint_position_is_a_watch_error():
 
     with pytest.raises(WatchError, match="joint_pos"):
         tpl.get_template("joint_limit")["check"](ctx, {"articulation": "arm"})
+
+
+def test_template_windows_are_isolated_per_context_store():
+    """Each context owns its window store; sibling contexts never share."""
+
+    def key_window_ctx(x: float) -> WatchContext:
+        return debug_context({"x": torch.tensor([x, x])})
+
+    ctx_a = key_window_ctx(1.0)
+    ctx_b = key_window_ctx(5.0)
+    params = {"key": "record/x", "op": "gt", "value": 0.0, "window": 2, "reduce": "mean"}
+    check = tpl.get_template("key_window")["check"]
+
+    check(ctx_a, params)
+    check(ctx_b, params)
+
+    assert ctx_a.window_store is not ctx_b.window_store
+    assert list(ctx_a.window_store[("record/x", 2)]["buf"]) == [1.0]
+    assert list(ctx_b.window_store[("record/x", 2)]["buf"]) == [5.0]
+
+
+def test_two_engines_have_isolated_window_stores():
+    """Two engines evaluating the same key/window keep independent buffers."""
+
+    def engine() -> WatcherEngine:
+        eng = WatcherEngine(run_id="r", out_dir=None)
+        eng.add(
+            {
+                "name": "win",
+                "template": "key_window",
+                "params": {
+                    "key": "record/x",
+                    "op": "gt",
+                    "value": 0.0,
+                    "window": 2,
+                    "reduce": "mean",
+                },
+            }
+        )
+        return eng
+
+    engine_a, engine_b = engine(), engine()
+    bundle_a, _ = tick_bundle(record={"x": torch.tensor([1.0, 1.0])})
+    bundle_b, _ = tick_bundle(record={"x": torch.tensor([5.0, 5.0])})
+
+    engine_a.on_tick(0, bundle_a)
+    engine_b.on_tick(0, bundle_b)
+
+    assert engine_a.window_cache is not engine_b.window_cache
+    assert list(engine_a.window_cache[("record/x", 2)]["buf"]) == [1.0]
+    assert list(engine_b.window_cache[("record/x", 2)]["buf"]) == [5.0]

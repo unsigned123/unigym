@@ -320,7 +320,12 @@ class WatcherFace(Protocol):
 
     def on_tick(self, t: int, bundle: Mapping[str, JsonValue]) -> None: ...
 
-    def on_reset(self, env_ids: object) -> None: ...
+    def on_reset(
+        self,
+        env_ids: object,
+        step: object | None = None,
+        bundle: object | None = None,
+    ) -> None: ...
 
     def status(self) -> dict[str, JsonValue]: ...
 
@@ -1117,7 +1122,7 @@ class Bridge:
         # watchers: callable on_reset lifecycle hooks (§8.3); never fatal
         if self._watchers is not None:
             try:
-                self._watchers.on_reset(env_ids)
+                self._watchers.on_reset(env_ids, bundle.get("final_step"), bundle)
             except Exception as e:  # noqa: BLE001
                 print(f"[watcher] on_reset hook skipped: {e}", flush=True)
 
