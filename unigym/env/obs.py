@@ -29,8 +29,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from unigym.values import ValuePublisher
 
 __all__ = [
     "CameraObs",
@@ -120,6 +124,7 @@ class ObservationConfig:
     site: tuple[str, ...] = ()
     command: bool = False
     prev_action: bool = False
+    values: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, value: object) -> ObservationConfig:
@@ -133,12 +138,10 @@ class ObservationConfig:
             return value
         if not isinstance(value, Mapping):
             raise ObsConfigError(f"observations must be a mapping, got {value!r}")
-        unknown = sorted(set(value) - set(_SECTIONS) - {"command", "prev_action"})
+        allowed = list(_SECTIONS) + ["command", "prev_action", "values"]
+        unknown = sorted(set(value) - set(allowed))
         if unknown:
-            raise ObsConfigError(
-                f"observations has unknown key(s) {unknown}; allowed: "
-                f"{list(_SECTIONS) + ['command', 'prev_action']}"
-            )
+            raise ObsConfigError(f"observations has unknown key(s) {unknown}; allowed: {allowed}")
         robot = _names(value.get("robot"), "robot")
         if not robot:
             raise ObsConfigError(
@@ -153,6 +156,7 @@ class ObservationConfig:
             site=_names(value.get("site"), "site"),
             command=_flag(value.get("command"), "command"),
             prev_action=_flag(value.get("prev_action"), "prev_action"),
+            values=_names(value.get("values"), "values"),
         )
 
     def to_mapping(self) -> dict:
@@ -165,6 +169,7 @@ class ObservationConfig:
             "site": list(self.site),
             "command": self.command,
             "prev_action": self.prev_action,
+            "values": list(self.values),
         }
 
     def validate(
@@ -924,6 +929,33 @@ class ObservationRegistry:
         self._values: dict[str, torch.Tensor] = {}
         self._details: dict[str, list[dict]] = {}
         self._detail_providers: dict[str, object] = {}
+        self._validate_selected_values()
+
+    def _validate_selected_values(self) -> None:
+        """Validate ``observations.values`` against the run's schema."""
+        known = sorted(self.schema.entries)
+        for key in self.config.values:
+            if not isinstance(key, str) or not key:
+                raise ObsConfigError(
+                    f"observations.values entries must be non-empty strings, got {key!r}"
+                )
+            spec = self.schema.entries.get(key)
+            if spec is None:
+                raise ObsConfigError(
+                    f"observations.values names unknown observation key {key!r}; "
+                    f"declared schema keys: {known}. Select canonical keys such as "
+                    "'articulation/<name>/joint_pos'."
+                )
+            if (
+                spec.source == "camera"
+                or key.startswith("cam/")
+                or key.endswith(("/rgb", "/depth"))
+            ):
+                raise ObsConfigError(
+                    f"observations.values cannot select camera/depth key {key!r}; "
+                    "selected values are small state only and cameras/depth are "
+                    "never published to the value store."
+                )
 
     # ---- publication ----------------------------------------------------- #
     def set(self, key: str, value: torch.Tensor) -> None:
@@ -970,6 +1002,16 @@ class ObservationRegistry:
     def set_prev_action(self, value: torch.Tensor | None) -> None:
         if value is not None:
             self.set("prev_action", value)
+
+    def publish_values(self, publisher: ValuePublisher) -> None:
+        """Publish only the explicitly selected observations under ``obs/``."""
+        for key in self.config.values:
+            name = f"obs/{key}"
+            value = self._values.get(key)
+            if value is None:
+                publisher.clear(name)
+            else:
+                publisher.publish(name, value)
 
     # ---- access ----------------------------------------------------------- #
     def _require_declared(self, prefix: str, name: str, what: str) -> None:

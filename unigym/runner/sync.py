@@ -755,6 +755,8 @@ class SyncRunner:
         if getattr(observations, "prev_action", False):
             env.obs.set_prev_action(raw)
         obs_snapshot = env.obs.snapshot()
+        if self.values is not None:
+            env.obs.publish_values(self.values.publisher("observation"))
         # 6) obs frame (embeds this step's action, rolling history)
         obs_frame = adapter.compute_obs(obs_snapshot, env)
         # dataset-facing frame (default returns obs_frame itself: the
