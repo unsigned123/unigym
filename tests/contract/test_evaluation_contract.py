@@ -12,6 +12,7 @@ import pytest
 import unigym.evaluation as evaluation
 import unigym.terminations as terminations
 from unigym.evaluation import EnvView, EvalContext, EvalQuery
+from unigym.runtime.controllers import ArticulationRuntime, ControlRuntime, ResolvedControl
 
 _FORBIDDEN_VIEW_ATTRS = frozenset(
     {
@@ -55,9 +56,13 @@ def test_env_view_exposes_no_mutable_or_raw_surface() -> None:
     assert not (public & _FORBIDDEN_VIEW_ATTRS)
     assert {
         "articulation",
+        "articulation_facts",
+        "articulation_names",
         "close",
+        "controls",
         "device",
         "env_id",
+        "for_env",
         "has_query",
         "joint_pos_limits",
         "num_envs",
@@ -65,7 +70,42 @@ def test_env_view_exposes_no_mutable_or_raw_surface() -> None:
         "query",
         "record",
         "scope_size",
+        "with_record",
     } <= public
+
+
+def test_env_view_exposes_only_frozen_control_facts_and_derivation() -> None:
+    """Controls project to ``ResolvedControl`` and derived views stay read-only."""
+    art = ArticulationRuntime(name="g1", root="fixed", joint_names=("j",), q0=(0.0,))
+    control = ControlRuntime(
+        name="legs",
+        adapter="manual",
+        articulation="g1",
+        joint_names=("j",),
+        q0=(0.0,),
+        role="body",
+    )
+    view = EnvView(
+        record={},
+        obs=None,
+        env_id=None,
+        num_envs=2,
+        articulations={"g1": art},
+        controls={("g1", "legs"): control},
+    )
+
+    row = view.controls[("g1", "legs")]
+    assert isinstance(row, ResolvedControl)
+    assert not isinstance(row, ControlRuntime)
+    assert view.articulation_names == ("g1",)
+    assert view.articulation_facts("g1")["action_group"] == "legs"
+
+    child = view.with_record({"x": 1})
+    per_env = view.for_env(1)
+    assert child.env_id is None
+    assert per_env.env_id == 1
+    assert isinstance(inspect.getattr_static(EnvView, "controls"), property)
+    assert isinstance(inspect.getattr_static(EnvView, "articulation_names"), property)
 
 
 def test_eval_query_has_no_scratch_or_close() -> None:

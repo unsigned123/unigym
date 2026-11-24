@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from unigym._typing import JsonValue
+from unigym.evaluation import EnvView
+from unigym.runtime.bridge import RewindBoundary
 
 if TYPE_CHECKING:
     from unigym.run.sink import SinkContext
@@ -38,6 +40,77 @@ class RecordingSink:
     def on_run_end(self) -> dict[str, object]:
         self.calls.append(("on_run_end",))
         return {"sink": type(self).__name__}
+
+
+class ViewProbeSink:
+    """Four-callback sink proving the runner's per-tick boundary-view lifetime.
+
+    Records the bundle of every callback.  While a view is present the probe
+    reads it, so a closed view fails the test at the callback that violated the
+    contract.  ``raise_at`` injects a failure from one named callback;
+    ``rewind_next`` raises ``RewindBoundary`` from ``on_step`` after recording.
+    The stored bundles are test evidence only; a production sink must not
+    retain the view past its callback.
+    """
+
+    _RAISE_POINTS = (None, "on_step", "on_episode_end")
+
+    def __init__(self, *, raise_at: str | None = None, rewind_next: int | None = None) -> None:
+        if raise_at not in self._RAISE_POINTS:
+            raise ValueError(f"raise_at must be one of {self._RAISE_POINTS}, got {raise_at!r}")
+        if rewind_next is not None and (
+            isinstance(rewind_next, bool) or not isinstance(rewind_next, int) or rewind_next < 0
+        ):
+            raise ValueError(f"rewind_next must be None or a non-negative int, got {rewind_next!r}")
+        self.raise_at = raise_at
+        self.rewind_next = rewind_next
+        self.step_bundles: list[dict[str, object]] = []
+        self.episode_end_bundles: list[dict[str, object]] = []
+        self.step_end_bundles: list[dict[str, object]] = []
+        self.step_views: list[EnvView | None] = []
+        self.episode_end_views: list[EnvView | None] = []
+        self.step_end_views: list[EnvView | None] = []
+        self.step_view_scopes: list[tuple[int | None, int]] = []
+        self.episode_end_view_scopes: list[tuple[int | None, int]] = []
+        self.rewinds: list[dict[str, object]] = []
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t
+        self.step_bundles.append(bundle)
+        view = bundle.get("view")
+        self.step_views.append(view if isinstance(view, EnvView) else None)
+        if view is not None:
+            assert isinstance(view, EnvView)
+            view.record()  # only legal while the runner keeps the view open
+            self.step_view_scopes.append((view.env_id, view.num_envs))
+        if self.rewind_next is not None:
+            raise RewindBoundary(self.rewind_next)
+        if self.raise_at == "on_step":
+            raise RuntimeError("view probe on_step failure")
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids
+        self.episode_end_bundles.append(bundle)
+        view = bundle.get("view")
+        self.episode_end_views.append(view if isinstance(view, EnvView) else None)
+        if view is not None:
+            assert isinstance(view, EnvView)
+            view.record()
+            self.episode_end_view_scopes.append((view.env_id, view.num_envs))
+        if self.raise_at == "on_episode_end":
+            raise RuntimeError("view probe on_episode_end failure")
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t
+        self.step_end_bundles.append(bundle)
+        view = bundle.get("view")
+        self.step_end_views.append(view if isinstance(view, EnvView) else None)
+
+    def on_run_end(self) -> dict[str, object]:
+        return {}
+
+    def on_rewind(self, info: dict[str, object]) -> None:
+        self.rewinds.append(info)
 
 
 class StopPollingSink:
@@ -261,12 +334,17 @@ class ExternalSink:
         self.stop_polls = 0
         self.episode_env_ids: list[tuple[int, ...]] = []
         self.last_episode_end_tick: int | None = None
+        self.view_seen = False
+        self.env_key_seen = False
+        self.step_end_view_none = True
 
     def on_step(self, t: int, bundle: dict[str, object]) -> None:
-        del t, bundle
+        del t
+        self._observe_boundary(bundle)
         self.step_calls += 1
 
     def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        self._observe_boundary(bundle)
         self.episode_end_calls += 1
         ids = _episode_env_ids(env_ids)
         self.episodes_completed += len(ids)
@@ -276,8 +354,18 @@ class ExternalSink:
             self.last_episode_end_tick = tick
 
     def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
-        del t, bundle
+        del t
+        if bundle.get("view") is not None:
+            self.step_end_view_none = False
         self.step_end_calls += 1
+
+    def _observe_boundary(self, bundle: dict[str, object]) -> None:
+        """Read the public boundary view and record the retired env key."""
+        self.env_key_seen = self.env_key_seen or "env" in bundle
+        view = bundle.get("view")
+        if isinstance(view, EnvView):
+            view.record()
+            self.view_seen = True
 
     def on_run_end(self) -> dict[str, object]:
         self.run_end_calls += 1

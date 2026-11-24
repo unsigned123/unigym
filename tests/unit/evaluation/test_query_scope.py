@@ -259,3 +259,15 @@ def test_eval_query_is_stale_after_the_view_closes() -> None:
         query.state.body_pose("torso")
     with pytest.raises(EvalViewStaleError):
         query.contacts.scan()
+
+
+def test_for_env_child_query_uses_the_child_scope() -> None:
+    """A derived per-env child enforces its own scope, not the parent's."""
+    parent, fake = _view(env_id=None)
+
+    child = parent.for_env(2)
+    child.query.state.body_pose("torso")
+
+    assert fake.state.body_pose_calls == [("torso", None, 2)]
+    with pytest.raises(EvalViewError, match=r"outside.*env_id=2"):
+        child.query.state.joint_position("g1", env=0)

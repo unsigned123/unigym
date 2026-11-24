@@ -28,9 +28,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
+from .._typing import JsonValue
 from ..env.obs import ObsSnapshot
 from ..query.facade import Query
-from ..runtime.controllers import ArticulationRuntime
+from ..runtime.controllers import (
+    ArticulationRuntime,
+    ControlKey,
+    ControlRuntime,
+    ResolvedControl,
+    articulation_facts as _runtime_articulation_facts,
+    build_control_plan,
+)
 
 if TYPE_CHECKING:
     from .query import EvalQuery
@@ -89,17 +97,24 @@ class EnvView:
 
     The constructor is internal wiring: callers pass the boundary record, the
     already-published observation snapshot, the read-only articulation runtime
-    facts and an optional lazy query factory.  No backend object is retained.
+    facts, the runtime control rows and an optional lazy query factory.  The
+    control rows are projected to frozen
+    :class:`~unigym.runtime.controllers.ResolvedControl` values; no mutable
+    runtime control or backend object is retained on the public surface.
     """
 
     __slots__ = (
+        "_art_names",
         "_articulations",
         "_backend",
         "_closed",
+        "_controls",
+        "_controls_runtime",
         "_device",
         "_env_id",
         "_num_envs",
         "_obs",
+        "_parent",
         "_query",
         "_query_factory",
         "_record",
@@ -116,6 +131,7 @@ class EnvView:
         backend: str = "unknown",
         query_factory: Callable[[], Query] | None = None,
         articulations: Mapping[str, ArticulationRuntime] | None = None,
+        controls: Mapping[ControlKey, ControlRuntime] | None = None,
     ) -> None:
         if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
             raise EvalViewError(f"num_envs must be a positive int, got {num_envs!r}")
@@ -134,6 +150,24 @@ class EnvView:
             )
         if query_factory is not None and not callable(query_factory):
             raise EvalViewError("query_factory must be callable or None")
+        if controls is not None and not isinstance(controls, Mapping):
+            raise EvalViewError(
+                f"controls must be a mapping or None, got {type(controls).__name__}"
+            )
+
+        runtime_controls: dict[ControlKey, ControlRuntime] = {}
+        for key, control in (controls or {}).items():
+            if not isinstance(control, ControlRuntime):
+                raise EvalViewError(
+                    f"controls[{key!r}] must be a ControlRuntime, got " f"{type(control).__name__}"
+                )
+            expected = (control.articulation, control.name)
+            if key != expected:
+                raise EvalViewError(
+                    f"controls key {key!r} does not match "
+                    f"(control.articulation, control.name)={expected!r}"
+                )
+            runtime_controls[key] = control
 
         self._record = MappingProxyType(dict(record))
         self._obs = obs
@@ -143,6 +177,15 @@ class EnvView:
         self._backend = backend
         self._query_factory = query_factory
         self._articulations = MappingProxyType(dict(articulations or {}))
+        self._controls_runtime = MappingProxyType(runtime_controls)
+        self._controls = MappingProxyType(
+            {
+                (row.articulation, row.name): row
+                for row in build_control_plan(tuple(runtime_controls.values()))
+            }
+        )
+        self._art_names = tuple(sorted(self._articulations))
+        self._parent: EnvView | None = None
         self._query: EvalQuery | None = None
         self._closed = False
 
@@ -154,11 +197,43 @@ class EnvView:
                 f"evaluation view ({scope}) is closed; values are only valid "
                 f"inside the owning callback"
             )
+        parent = self._parent
+        if parent is not None:
+            parent._ensure_open()
 
     def close(self) -> None:
-        """Invalidate this view (idempotent); never closes the env or query."""
+        """Invalidate this view (idempotent); never closes the env or query.
+
+        Closing a parent invalidates every derived child through the parent
+        chain.  Closing a child never closes its parent.
+        """
         self._closed = True
         self._query = None
+
+    def _derive(self, record: Mapping[str, object], env_id: int | None) -> EnvView:
+        """Build a child view sharing this view's data and facts.
+
+        The child shares record references, the observation snapshot, the lazy
+        query factory and the articulation/control facts; it copies no arrays
+        and opens no data.  It is linked to this view as its parent so closing
+        this view invalidates the child.
+        """
+        child = object.__new__(EnvView)
+        child._record = record
+        child._obs = self._obs
+        child._env_id = env_id
+        child._num_envs = self._num_envs
+        child._device = self._device
+        child._backend = self._backend
+        child._query_factory = self._query_factory
+        child._articulations = self._articulations
+        child._controls_runtime = self._controls_runtime
+        child._controls = self._controls
+        child._art_names = self._art_names
+        child._parent = self
+        child._query = None
+        child._closed = False
+        return child
 
     # ---- identity ------------------------------------------------------- #
     @property
@@ -184,6 +259,23 @@ class EnvView:
         """The boundary device reported by the live backend."""
         self._ensure_open()
         return self._device
+
+    @property
+    def controls(self) -> Mapping[ControlKey, ResolvedControl]:
+        """The build-time control rows, keyed by ``(articulation, name)``.
+
+        The mapping is read-only and every value is a frozen
+        :class:`~unigym.runtime.controllers.ResolvedControl`; no mutable
+        runtime control or backend address is exposed.
+        """
+        self._ensure_open()
+        return self._controls
+
+    @property
+    def articulation_names(self) -> tuple[str, ...]:
+        """The declared articulation names carried by this view, sorted."""
+        self._ensure_open()
+        return self._art_names
 
     # ---- query ---------------------------------------------------------- #
     @property
@@ -282,6 +374,65 @@ class EnvView:
             )
         return MappingProxyType(leaves)
 
+    def articulation_facts(self, name: str, control: str | None = None) -> Mapping[str, JsonValue]:
+        """The neutral per-articulation facts for one ``(articulation, control)``.
+
+        Reuses the existing ``runtime.controllers.articulation_facts`` shape
+        (joint names, base body, foot bodies, body sets, contacts, action
+        group).  ``control=None`` requires exactly one body-role control for
+        *name*; zero or multiple fails with :class:`EvalViewError`.  An
+        explicit *control* name selects that row.  The returned top-level
+        mapping is read-only.
+        """
+        self._ensure_open()
+        if not isinstance(name, str) or not name:
+            raise EvalViewError(f"articulation name must be a non-empty str, got {name!r}")
+        art = self._articulations.get(name)
+        if art is None:
+            available = ", ".join(self._art_names) or "<none>"
+            raise EvalViewError(
+                f"articulation {name!r} has no runtime facts in this view; "
+                f"available: {available}"
+            )
+        runtime_control = self._fact_control(name, control)
+        return MappingProxyType(dict(_runtime_articulation_facts(art, runtime_control)))
+
+    def _fact_control(self, name: str, control: str | None) -> ControlRuntime:
+        """Resolve the runtime control row for :meth:`articulation_facts`."""
+        available = (
+            ", ".join(sorted(key[1] for key in self._controls_runtime if key[0] == name))
+            or "<none>"
+        )
+        if control is not None:
+            if not isinstance(control, str) or not control:
+                raise EvalViewError(
+                    f"control name must be a non-empty str or None, got {control!r}"
+                )
+            runtime = self._controls_runtime.get((name, control))
+            if runtime is None:
+                raise EvalViewError(
+                    f"articulation {name!r} has no control {control!r} in this view; "
+                    f"available controls: {available}"
+                )
+            return runtime
+        body = [
+            runtime
+            for runtime in self._controls_runtime.values()
+            if runtime.articulation == name and runtime.role == "body"
+        ]
+        if len(body) == 1:
+            return body[0]
+        if not body:
+            raise EvalViewError(
+                f"articulation {name!r} has no body-role control in this view; "
+                f"pass control= explicitly (available controls: {available})"
+            )
+        names = ", ".join(sorted(runtime.name for runtime in body))
+        raise EvalViewError(
+            f"articulation {name!r} has multiple body-role controls ({names}); "
+            f"pass control= explicitly (available controls: {available})"
+        )
+
     def joint_pos_limits(self, articulation: str) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Per-env lower/upper limits aligned with the articulation joint order.
 
@@ -310,6 +461,38 @@ class EnvView:
             _select_tensor(lower, rows, self._num_envs),
             _select_tensor(upper, rows, self._num_envs),
         )
+
+    # ---- derivation ----------------------------------------------------- #
+    def with_record(self, record: Record) -> EnvView:
+        """A child view over *record* with this view's scope and facts.
+
+        Only the record is substituted; scope, observation snapshot, query
+        factory and articulation/control facts are shared.  The child is
+        independent to close, but closing this view invalidates it.
+        """
+        self._ensure_open()
+        if not isinstance(record, Mapping):
+            raise EvalViewError(f"record must be a mapping, got {type(record).__name__}")
+        return self._derive(MappingProxyType(dict(record)), self._env_id)
+
+    def for_env(self, env_id: int) -> EnvView:
+        """A per-env child of this vector view scoped to *env_id*.
+
+        Raises:
+            EvalViewError: This view is already per-env, or *env_id* is not a
+                valid env id.
+        """
+        self._ensure_open()
+        if self._env_id is not None:
+            raise EvalViewError(
+                f"for_env is only valid on a vector view; this view is scoped to "
+                f"env {self._env_id}"
+            )
+        if isinstance(env_id, bool) or not isinstance(env_id, int):
+            raise EvalViewError(f"env_id must be an int, got {env_id!r}")
+        if env_id < 0 or env_id >= self._num_envs:
+            raise EvalViewError(f"env_id {env_id} is outside [0, num_envs={self._num_envs})")
+        return self._derive(self._record, env_id)
 
     def _articulation_names(self) -> list[str]:
         names: set[str] = set()

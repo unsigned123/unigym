@@ -360,7 +360,9 @@ def test_build_keeps_the_collect_sink_when_no_custom_sink_is_configured(
     run = _run(tmp_path, mode="collect")
     try:
         instance = run.build(inspect=True)
-        assert isinstance(_primary_sink(instance), CollectSink)
+        collect = _primary_sink(instance)
+        assert isinstance(collect, CollectSink)
+        assert not hasattr(collect, "env")
         assert instance.stop_when() is False
     finally:
         run.close()

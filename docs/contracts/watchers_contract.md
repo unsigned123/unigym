@@ -78,31 +78,34 @@ watcher trigger/action engine, key face, signal publication, rewind provider
 and lifecycle are unchanged.
 
 - `WatcherEngine.on_tick` builds exactly one vector-scoped `EnvView`
-  (`env_id is None`) per tick from `bundle["env"]` or the engine's wired env.
-  The view carries the step record and observation snapshot from the bundle,
-  `num_envs`, `device`, the backend label, a lazy query factory when the env
-  exposes `query`, and the articulation runtime facts.  The raw env is not
-  retained by the context;
+  (`env_id is None`) per tick from the engine's own wired env.  The engine env
+  is the only view source; the step bundle supplies the step record and
+  observation snapshot and carries no live env.  The view adds read-only
+  identity (`num_envs`, `device`, the backend label), a lazy query factory when
+  the env exposes `query`, and the articulation runtime facts.  The raw env is
+  not retained by the context;
 - `WatchContext.view: EnvView | None` is the read-only face.  `record`,
-  `obs` and `num_envs` read through the view when it is present; the
-  bundle-only fallback exists only for offline unit tests that construct a
-  context without a live env;
+  `obs` and `num_envs` read through the view when it is present.  An offline
+  engine with no wired env leaves `view` as `None`; `record` and `obs` then
+  read the bundle snapshot and `num_envs` is 0.  The bundle has no env, so
+  there is no bundle-env fallback;
 - the view is retained across ticks so add/test/dump and callable `on_reset`
   read the current tick's boundary between callbacks.  Replacing `_last_ctx`
   on the next tick closes the previous view; it is not closed in the callback
   epilogue.  Closing a view never closes the env or the run-shared query;
 - views are boundary handles, not checkpoint state.  The rewind payload is
   unchanged (specs, trigger state, template windows); a view is rebuilt from
-  the live env after a rewind.
+  the engine's wired env after a rewind.
 
 ### Expression / callable namespace
 
 The expr namespace and callable `check(ctx)` receive `view` as the read-only
 handle.  `env` is **removed** from the expression namespace (owner-approved
 watcher contract break): no raw env is reachable through `eval_namespace`.
-`bundle` remains bound for compatibility, but `bundle["env"]` is not a watcher
-API and must not be read by a predicate.  Watcher state reads go through
-`view`, `record`, `obs` or the key face.
+`bundle` remains bound for the step-record and observation facts, but it
+carries no live env: there is no `bundle["env"]`, and no raw env is reachable
+through `eval_namespace`.  Watcher state reads go through `view`, `record`,
+`obs` or the key face.
 
 ### `joint_limit` migration
 

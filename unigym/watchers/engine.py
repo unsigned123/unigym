@@ -117,8 +117,8 @@ class WatcherEngine:
     Args:
         run_id: run id (events + store naming only).
         out_dir: run output dir (watchers.json, events.jsonl, captures).
-        env: live run env used to build the per-tick read-only view when the
-            step bundle carries no ``env``; never handed to a predicate.
+        env: live run env; the one source of the per-tick read-only view.
+            Never handed to a predicate.
         adapter: passed through to the WatchContext.
         event_log: the shared timeline writer (None -> drop events).
         bridge: owning Bridge (pause/capture/dump/direct actions); may
@@ -387,18 +387,19 @@ class WatcherEngine:
     # ------------------------------------------------------------------ #
     # per-tick evaluation (the ONLY engine-loop touchpoint)
     # ------------------------------------------------------------------ #
-    def _build_view(self, env: Any, bundle: dict) -> EnvView:
-        """Build the tick's vector-scoped read-only view from the live env.
+    def _build_view(self, bundle: dict) -> EnvView:
+        """Build the tick's vector-scoped read-only view from the engine env.
 
-        Record and observation snapshot come from the step bundle; the view
-        only adds read-only identity (num_envs/device/backend), the lazy query
-        factory and the articulation runtime facts.  Watchers reach state
-        through ``WatchContext``, ``view`` and the eval namespace -- none of
-        which carry a mutable backend handle.  The lazy ``_query_factory``
-        deliberately closes over ``env`` to hand out the run-shared query on
-        demand, and ``bundle["env"]`` remains a compatibility caveat that is
-        explicitly not watcher API.
+        The engine owns the env that is the view source; the step bundle only
+        supplies the step record and observation snapshot.  The view adds
+        read-only identity (num_envs/device/backend), the lazy query factory
+        and the articulation runtime facts.  Watchers reach state through
+        ``WatchContext``, ``view`` and the eval namespace -- none of which
+        carry a mutable backend handle.  The lazy ``_query_factory``
+        deliberately closes over the engine env to hand out the run-shared
+        query on demand.
         """
+        env = self.env
         record = bundle.get("record")
         if record is None:
             record = {}
@@ -421,10 +422,7 @@ class WatcherEngine:
         )
 
     def on_tick(self, t: int, bundle: dict) -> None:
-        env = bundle.get("env")
-        if env is None:
-            env = self.env
-        view = self._build_view(env, bundle) if env is not None else None
+        view = self._build_view(bundle) if self.env is not None else None
         previous = self._last_ctx
         self._last_bundle = bundle
         self._last_ctx = WatchContext(

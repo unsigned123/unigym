@@ -18,10 +18,18 @@ marks; it owns neither a scoring formula nor the report schema.
 `EpisodeBuffer` (`unigym.runner.evaluation.buffer`) owns the open-episode step
 slices, rewind marks and per-step tick samples and imports no benchmark type.
 `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) assembles the
-`EpisodeData`, creates the per-env context and invokes the tasks.
+`EpisodeData`, derives the per-env context and invokes the tasks.
 `EpisodeReporter` (protocol, `unigym.benchmarks.reporting`) owns run-level
 observation; `BenchmarkReporter` is its benchmark implementation and owns
 `benchmark_report.json` / `results.json`.  There is no `BenchmarkSink`.
+
+Neither runtime collaborator holds a live env.  Both observe the runner-owned
+boundary view: `EvaluationSession` derives its per-tick vector context with
+`bundle["view"].with_record(normalized_record)` and `EpisodeEvaluator` derives
+one per-env child with `bundle["view"].for_env(ep.env_id)`.  Each owner closes
+only the child it derived, in `finally`; the vector parent belongs to the
+runner and is never closed by the session or the evaluator.  A bundle without
+`view` fails fast.
 
 ## Custom benchmark sinks
 
@@ -111,10 +119,11 @@ class Task:
 (default: the class attribute) and validated at build time.  `episode` (the
 default) calls only `score`.  `both` additionally calls `on_tick` once per
 policy tick with one VECTOR-scoped context (`ctx.env.env_id is None`,
-`ctx.t == tick`); it still calls `score` at episode end.  There is no
-`tick`-only trigger.  A `both` task must override the default no-op `on_tick`
-with exactly `on_tick(self, ctx)`; `FormulaTask` cannot satisfy `both` and is
-rejected at build.
+`ctx.t == tick`), derived by the session from the runner-owned
+`bundle["view"].with_record(normalized_record)` child; it still calls `score`
+at episode end.  There is no `tick`-only trigger.  A `both` task must override
+the default no-op `on_tick` with exactly `on_tick(self, ctx)`; `FormulaTask`
+cannot satisfy `both` and is rejected at build.
 
 `on_tick` returns `TickResult(metrics: Mapping[str, torch.Tensor], fired:
 torch.Tensor | None)`; every metric has a leading env axis `(num_envs, ...)`
@@ -155,16 +164,17 @@ schema is unchanged.
 `EpisodeData` remains the episode history/timeline/metrics payload.  `ctx` is
 the read-only, per-env `unigym.evaluation` context created by
 `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) at episode end, before
-reset, scoped to `ep.env_id`.  Tasks may read
+reset, derived as `bundle["view"].for_env(ep.env_id)`.  Tasks may read
 `ctx.env.record()`, `ctx.env.obs()` and, when the backend exposes a runtime
 query, `ctx.env.query`; they cannot mutate, step or reset the env or read
 another env.  Values from `record()`/`obs()` are borrowed for the callback.
 
-The evaluator builds one context per due env and closes it in `finally` after
-every task for that env.  A task exception is isolated and skipped (the task is
-omitted from the report and result views).  Signature errors are different: an
-old `score(ep)` or a legacy `score_detail(..., retain_frames)` fails at build
-time with a teaching error, so a broken task can never be silently omitted.
+The evaluator derives one context per due env and closes that child in
+`finally` after every task for that env; it never closes the shared vector
+parent.  A task exception is isolated and skipped (the task is omitted from the
+report and result views).  Signature errors are different: an old `score(ep)`
+or a legacy `score_detail(..., retain_frames)` fails at build time with a
+teaching error, so a broken task can never be silently omitted.
 
 `unigym.benchmarks.reporting` defines the evaluator/reporter handoff types:
 `TaskScore` (one successful task result plus declaration detail),

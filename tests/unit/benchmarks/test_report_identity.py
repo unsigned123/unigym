@@ -17,6 +17,7 @@ from unigym.benchmarks.termination import (
     TerminationSource,
 )
 from unigym.benchmarks.reporting import BenchmarkReporter
+from unigym.evaluation import EnvView
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 from unigym.runner.evaluation.session import EvaluationSession
@@ -166,14 +167,22 @@ def test_task_termination_within_episode_axis_is_accepted(tmp_path, step_index):
 
 
 def _step_bundle():
+    record = {
+        "episode_id": torch.tensor([0]),
+        "time_in_episode": torch.tensor([0.02]),
+    }
     return {
-        "record": {
-            "episode_id": torch.tensor([0]),
-            "time_in_episode": torch.tensor([0.02]),
-        },
+        "record": record,
         "raw": None,
         "cmd": None,
         "targets": [],
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            backend="record-only",
+        ),
     }
 
 

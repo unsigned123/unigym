@@ -225,11 +225,12 @@ class WatchContext:
     here mutates run state.
 
     Live evaluation reads through :attr:`view`, the read-only, vector-scoped
-    :class:`~unigym.evaluation.EnvView` the engine builds once per tick and
-    retains until the next tick.  The bundle fallback exists only for offline
-    unit tests that construct a context without a live env.  ``env`` is not a
-    watcher API: the engine never populates it, it is absent from
-    :meth:`eval_namespace`, and ``bundle["env"]`` must not be read by watchers.
+    :class:`~unigym.evaluation.EnvView` the engine builds once per tick from its
+    own env and retains until the next tick.  With no wired engine env the
+    engine leaves ``view`` as ``None`` and the record/obs accessors read the
+    bundle snapshot (offline unit tests).  ``env`` is not a watcher
+    API: the engine never passes its env to the context, it is absent from
+    :meth:`eval_namespace`, and the step bundle is not a view source.
     """
 
     t: int

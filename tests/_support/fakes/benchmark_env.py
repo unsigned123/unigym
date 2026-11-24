@@ -1,12 +1,14 @@
 """Typed evaluation-session doubles for the live per-env evaluation boundary.
 
-``FakeBenchmarkEnv`` exposes the run-layer facts ``EvaluationSession`` reads
-when it builds a per-env ``EvalContext``: ``num_envs``, ``device``, the backend
-label, the articulation map and a lazy runtime-query property.  The query
-subfaces are intentionally minimal: only ``state.root_pose`` is meaningful
-(it records the env selection so a test can prove per-env scoping).  The
-query handle still exposes the full protocol shape at runtime so the session's
-``isinstance(..., Query)`` availability check succeeds.
+``FakeBenchmarkEnv`` exposes the run-layer facts a runner needs to derive the
+boundary ``EnvView`` that ``EvaluationSession`` and ``EpisodeEvaluator`` read:
+``num_envs``, ``device``, the backend label, the articulation map and a lazy
+runtime-query property.  :meth:`FakeBenchmarkEnv.view` builds that view so a
+test can hand the same object to ``on_step``/``on_episode_end`` exactly as the
+runner does.  The query subfaces are intentionally minimal: only
+``state.root_pose`` is meaningful (it records the env selection so a test can
+prove per-env scoping).  The query handle still exposes the full protocol shape
+at runtime so ``EnvView.query`` can wrap it.
 
 Limitations: no physics, no state writes, no scratch world, no contact or
 camera data.  ``scratch()`` raises instead of inventing a world.
@@ -14,13 +16,16 @@ camera data.  ``scratch()`` raises instead of inventing a world.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 
 import torch
 
+from unigym.env.obs import ObsSnapshot
+from unigym.evaluation import EnvView
 from unigym.query.base import EnvSelection, Pose
+from unigym.query.facade import Query, ScratchWorld
 from unigym.runtime.controllers import ArticulationRuntime
-from unigym.query.facade import ScratchWorld
 
 __all__ = ["FakeBenchmarkEnv", "FakeBenchmarkQuery", "FakeQueryState"]
 
@@ -85,3 +90,32 @@ class FakeBenchmarkEnv:
         """Return the query handle and count the access."""
         self.query_reads += 1
         return self._query
+
+    def view(
+        self,
+        record: Mapping[str, object],
+        *,
+        obs: ObsSnapshot | None = None,
+        env_id: int | None = None,
+    ) -> EnvView:
+        """Build the read-only boundary view a runner derives from this env.
+
+        The view carries the fake's device/label/articulations and a lazy
+        query factory: reaching ``ctx.env.query`` opens the fake query and
+        increments ``query_reads``.  Tests own and close the view like a
+        runner does.
+        """
+
+        def _query_factory() -> Query:
+            return self.query
+
+        return EnvView(
+            record=record,
+            obs=obs,
+            env_id=env_id,
+            num_envs=self.num_envs,
+            device=self.device,
+            backend=self._backend_label,
+            query_factory=_query_factory,
+            articulations=self.articulations,
+        )

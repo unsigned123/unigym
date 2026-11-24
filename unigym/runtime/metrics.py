@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from unigym._typing import JsonValue
 from unigym.runtime.bridge import (
@@ -60,6 +60,19 @@ RING_CAP = 50  # bounded episode rings (red line §1.3)
 
 #: EMA weight of the newest fps sample (a light low-pass over step periods)
 _FPS_EMA_A = 0.9
+
+
+@runtime_checkable
+class StepClock(Protocol):
+    """The narrow per-step clock the metrics writer reads.
+
+    The writer never walks the engine: it only needs the policy step period
+    to derive sim time and episode step counts.  ``decimation`` stays a
+    tolerant ``getattr`` (telemetry only) because the backends spell the
+    attribute differently.
+    """
+
+    step_dt: float
 
 
 class MetricsRing:
@@ -114,7 +127,7 @@ class MetricsWriter:
         self.last: dict[str, JsonValue] | None = None
 
     # -- run-side update points (existing sink hooks; runner_contract §3) --
-    def note_tick(self, t: int, env: object | None = None) -> None:
+    def note_tick(self, t: int, env: StepClock | None = None) -> None:
         """Timing scalars only (tick-level cost budget: microseconds)."""
         now = time.time()
         prev = self._last_tick_wall
@@ -145,9 +158,11 @@ class MetricsWriter:
         env_ids: torch.Tensor,
         bundle: Mapping[str, JsonValue],
         source: MetricsSource | None = None,
+        *,
+        env: StepClock | None = None,
     ) -> None:
         """Episode-level update (the engine's on_episode_end hook)."""
-        steps = self._episode_steps(env_ids, bundle)
+        steps = self._episode_steps(env_ids, bundle, env)
         scored: list[Mapping[str, JsonValue]] = []
         if source is not None:
             try:
@@ -255,11 +270,12 @@ class MetricsWriter:
         _f64(buf, METRICS_OFF + M_TS, time.time())
 
     @staticmethod
-    def _episode_steps(env_ids: torch.Tensor, bundle: Mapping[str, JsonValue]) -> list[int]:
+    def _episode_steps(
+        env_ids: torch.Tensor, bundle: Mapping[str, JsonValue], env: StepClock | None
+    ) -> list[int]:
         """Per-ended-env policy step count (time_in_episode / step_dt)."""
         record = bundle.get("record")
         times = record.get("time_in_episode") if isinstance(record, Mapping) else None
-        env = bundle.get("env")
         step_dt = getattr(env, "step_dt", None)
         if times is None or not isinstance(step_dt, (int, float)) or step_dt <= 0:
             return []

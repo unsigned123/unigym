@@ -30,21 +30,24 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
+from unigym._typing import JsonValue
 from unigym.runtime.actions import (
     ActionGroupValue,
     NamedAction,
     OrderedActionGroup,
     OrderedActionSpec,
 )
-from unigym.runtime.controllers import articulation_facts
+from unigym.runtime.controllers import ControlKey, ResolvedControl
 
 if TYPE_CHECKING:
+    from unigym.evaluation import EnvView
     from unigym.runtime.rewind_providers import CollectSinkProvider
 
 # extra key -> standardized shard-column key (for the writer).  The
@@ -148,18 +151,24 @@ def action_group_contract(groups: Sequence[OrderedActionGroup]) -> list:
     return out
 
 
-def _policy_runtimes(env) -> list:
-    """Every body control runtime (declaration order, no primary)."""
-    return [
-        c
-        for c in (getattr(env, "controls", {}) or {}).values()
-        if getattr(c, "role", None) == "body"
-    ]
+def _control_table(
+    controls: Mapping[ControlKey, ResolvedControl] | Sequence[ResolvedControl],
+) -> dict[ControlKey, ResolvedControl]:
+    """Index the build-time control rows by their ``(articulation, name)``."""
+    rows = controls.values() if isinstance(controls, Mapping) else controls
+    return {(row.articulation, row.name): row for row in rows}
 
 
-def _policy_runtime(env):
-    """The unique policy runtime (a cardinality fact, not a primary)."""
-    runtimes = _policy_runtimes(env)
+def _policy_runtimes(
+    controls: Mapping[ControlKey, ResolvedControl],
+) -> list[ResolvedControl]:
+    """Every body control row (declaration order, no primary)."""
+    return [control for control in controls.values() if control.role == "body"]
+
+
+def _policy_runtime(controls: Mapping[ControlKey, ResolvedControl]) -> ResolvedControl:
+    """The unique policy row (a cardinality fact, not a primary)."""
+    runtimes = _policy_runtimes(controls)
     if len(runtimes) != 1:
         raise NotImplementedError(
             f"this consumer needs exactly one policy articulation, found "
@@ -168,7 +177,7 @@ def _policy_runtime(env):
     return runtimes[0]
 
 
-def _state_key(rt, leaf: str) -> str:
+def _state_key(rt: ResolvedControl, leaf: str) -> str:
     """Recorded per-articulation state key (``articulation/<articulation>/<leaf>``).
 
     The namespace is the articulation, never the control-runtime (action-group)
@@ -189,7 +198,8 @@ class CollectSink:
         lang_interval,
         recorder,
         adapter,
-        env,
+        controls: Mapping[ControlKey, ResolvedControl] | Sequence[ResolvedControl],
+        articulation_facts: Mapping[str, Mapping[str, JsonValue]],
         num_envs,
         total_steps,
         device,
@@ -208,7 +218,16 @@ class CollectSink:
         self.lang_interval = int(lang_interval)
         self.recorder = recorder
         self.adapter = adapter
-        self.env = env
+        # Build-time static facts: a zero-tick run still writes an honest
+        # summary, and the live per-step view is adopted on top of them.
+        self._controls = MappingProxyType(_control_table(controls))
+        self._build_articulation_facts = MappingProxyType(
+            {name: MappingProxyType(dict(facts)) for name, facts in articulation_facts.items()}
+        )
+        self._articulation_facts: Mapping[str, Mapping[str, JsonValue]] = (
+            self._build_articulation_facts
+        )
+        self._view_facts_cached = False
         self.num_envs = int(num_envs)
         self.total_steps = int(total_steps)
         self.device = device
@@ -246,6 +265,27 @@ class CollectSink:
 
         return CollectSinkProvider(self)
 
+    def _adopt_view(self, view: EnvView | None) -> None:
+        """Cache control rows and body-control facts from the first live view.
+
+        The build snapshot is the fallback; once a view carries controls it is
+        the authority for ``on_step_end`` and ``on_run_end``.  Multiple body
+        controls of one articulation keep the historical last-write-wins shape.
+        """
+        if view is None or self._view_facts_cached:
+            return
+        controls = view.controls
+        if not controls:
+            return
+        facts: dict[str, Mapping[str, JsonValue]] = {}
+        for control in _policy_runtimes(controls):
+            facts[control.articulation] = view.articulation_facts(
+                control.articulation, control.name
+            )
+        self._controls = controls
+        self._articulation_facts = MappingProxyType(facts)
+        self._view_facts_cached = True
+
     # ------------------------------------------------------------------ #
     # per-step recording (pre-reset data side)
     # ------------------------------------------------------------------ #
@@ -280,6 +320,9 @@ class CollectSink:
         obs_collect = bundle["obs_collect"]
         record = bundle["record"]
         eff_cmd = bundle["cmd"]
+        view = bundle.get("view")
+        self._adopt_view(view)
+        controls = self._controls if view is None or not view.controls else view.controls
         # record (data invariant: record before reset)
         rec = {}
         for k, v in record.items():
@@ -337,7 +380,7 @@ class CollectSink:
         # language generation (every step, cached for lang_interval > 1)
         if self.language_gen is not None:
             if t % self.lang_interval == 0 or t == self.total_steps - 1:
-                rt = _policy_runtime(self.env)
+                rt = _policy_runtime(controls)
                 lin = record[_state_key(rt, "base_lin_vel_b")]
                 ang = record[_state_key(rt, "base_ang_vel_b")]
                 pos = record[_state_key(rt, "base_pos_w")]
@@ -401,7 +444,7 @@ class CollectSink:
     def on_step_end(self, t: int, bundle: dict) -> None:
         record = bundle["record"]
         alive = bundle["alive"]
-        runtimes = _policy_runtimes(self.env)
+        runtimes = _policy_runtimes(self._controls)
         step_metrics = {
             "alive": float(alive.float().mean()),
             **bundle["term_metrics"],
@@ -444,8 +487,7 @@ class CollectSink:
             "episode_length_range": (None if self.dur_lo is None else [self.dur_lo, self.dur_hi]),
             # per-articulation neutral facts (v5; no flat primary order)
             "articulations": {
-                rt.articulation: articulation_facts(self.env.articulations[rt.articulation], rt)
-                for rt in _policy_runtimes(self.env)
+                name: dict(facts) for name, facts in self._articulation_facts.items()
             },
             "command_dim": self.command_dim,
             "language_generator": (

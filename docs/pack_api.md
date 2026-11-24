@@ -1305,6 +1305,20 @@ def make_benchmark_sink(ctx: SinkContext) -> Sink: ...
 - `SinkContext` carries `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`,
   `seed`, `action_groups`, `run_identity` and `options`.  It carries no live
   env, writer, logger, bridge or signals.
+- a sink observes each tick through the read-only boundary view in
+  `bundle["view"]`; the bundle carries no live env.  The view is valid during
+  `on_step` / `on_episode_end` and is `None` at `on_step_end`:
+
+```python
+class AcmeSink:
+    def on_step(self, t: int, bundle) -> None:
+        view = bundle["view"]          # read-only EnvView
+        record = view.record()
+
+    def on_episode_end(self, env_ids, bundle) -> None: ...
+    def on_step_end(self, t, bundle) -> None: ...
+    def on_run_end(self) -> dict: return {}
+```
 - a custom sink replaces only the benchmark consumer:
   `collect` -> `FanOutSink(CollectSink, custom)`, `benchmark` -> `custom`,
   `both` -> `FanOutSink(CollectSink, custom)`.

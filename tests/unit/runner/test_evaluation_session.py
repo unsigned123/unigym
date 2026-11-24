@@ -9,6 +9,7 @@ import torch
 
 from unigym.benchmarks.base import EpisodeResult, Task
 from unigym.benchmarks.reporting import BenchmarkReporter, EpisodeReporter
+from unigym.evaluation import EnvView
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 from unigym.runner.evaluation.session import EvaluationSession
@@ -74,11 +75,11 @@ def _meta(num_envs: int = 1) -> dict:
     return {"run_name": "r", "num_envs": num_envs, "policy_dt": 0.02, "seed": 7}
 
 
-def _collaborators(tasks, *, num_envs=1, reporter=None, env=None, retain_frames=False):
+def _collaborators(tasks, *, num_envs=1, reporter=None, retain_frames=False):
     meta = _meta(num_envs)
     return (
         EpisodeBuffer(num_envs),
-        EpisodeEvaluator(tasks=tasks, meta=meta, env=env, retain_frames=retain_frames),
+        EpisodeEvaluator(tasks=tasks, meta=meta, retain_frames=retain_frames),
         reporter,
         meta,
     )
@@ -92,7 +93,6 @@ def _session(
     min_episodes: int = 1,
     num_envs: int = 1,
     reporter=None,
-    env=None,
 ) -> EvaluationSession:
     if reporter is None:
         reporter = BenchmarkReporter(
@@ -101,7 +101,7 @@ def _session(
             report_path=str(tmp_path / "benchmark_report.json"),
         )
     buffer, evaluator, reporter, meta = _collaborators(
-        list(tasks), num_envs=num_envs, reporter=reporter, env=env
+        list(tasks), num_envs=num_envs, reporter=reporter
     )
     return EvaluationSession(
         tasks=list(tasks),
@@ -116,14 +116,26 @@ def _session(
     )
 
 
+def _view(record: dict, *, num_envs: int = 1) -> EnvView:
+    return EnvView(
+        record=record,
+        obs=None,
+        env_id=None,
+        num_envs=num_envs,
+        backend="record-only",
+    )
+
+
 def _step_bundle(episode_id: int = 0) -> dict:
+    record = {
+        "episode_id": torch.tensor([episode_id], dtype=torch.int64),
+        "time_in_episode": torch.tensor([0.02]),
+    }
     return {
-        "record": {
-            "episode_id": torch.tensor([episode_id], dtype=torch.int64),
-            "time_in_episode": torch.tensor([0.02]),
-        },
+        "record": record,
         "raw": None,
         "cmd": None,
+        "view": _view(record),
     }
 
 

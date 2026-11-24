@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import pytest
 import torch
 
 from tests._support.fakes.backend import ARTICULATION_NAME, FakeBackend
@@ -72,22 +73,22 @@ class _AlwaysTermination(Termination):
 
 
 class _CaptureSink:
-    """Capture the bundle and prove the context is already closed."""
+    """Capture the bundle and prove the termination view reaches the sink."""
 
     def __init__(self, term: _RecordTermination) -> None:
         self.term = term
         self.bundle: dict | None = None
-        self.context_closed = False
+        self.view = None
 
     def on_step(self, t: int, bundle: dict) -> None:
         del t
         self.bundle = bundle
+        self.view = bundle["view"]
         ctx = self.term.seen
         assert ctx is not None
-        try:
-            ctx.env.record()
-        except EvalViewStaleError:
-            self.context_closed = True
+        # the one termination view is also the sink's boundary view, still open
+        assert self.view is ctx.env
+        self.view.record()
 
     def on_episode_end(self, env_ids, bundle: dict) -> None:
         del env_ids, bundle
@@ -99,8 +100,8 @@ class _CaptureSink:
         return {}
 
 
-def test_runner_evaluates_one_live_detail_pass_and_closes_before_sink():
-    """A non-empty group derives all facts from one detail pass and no state object."""
+def test_runner_evaluates_one_live_detail_pass_and_reuses_its_view_for_the_sink():
+    """One detail pass derives the facts and its view is the sink boundary view."""
     env = FakeBackend()
     record_term = _RecordTermination()
     always_term = _AlwaysTermination()
@@ -124,7 +125,14 @@ def test_runner_evaluates_one_live_detail_pass_and_closes_before_sink():
     assert always_term.calls == 1
     assert sink.bundle is not None
     assert "term_state" not in sink.bundle
-    assert sink.context_closed is True
+    # after the tick the boundary view is closed for both the sink and the term
+    assert sink.bundle["view"] is None
+    assert sink.view is not None
+    with pytest.raises(EvalViewStaleError):
+        sink.view.record()
+    assert record_term.seen is not None
+    with pytest.raises(EvalViewStaleError):
+        record_term.seen.env.record()
     assert isinstance(result.terminated, torch.Tensor)
     assert tuple(result.terminated.shape) == (env.num_envs,)
     assert result.terminated.dtype == torch.bool

@@ -30,6 +30,7 @@ from unigym.benchmarks.termination import (
     Termination,
     TerminationSource,
 )
+from unigym.evaluation import EnvView
 from unigym.runner.evaluation.buffer import EpisodeBuffer
 from unigym.runner.evaluation.scoring import EpisodeEvaluator
 from unigym.runner.evaluation.session import EvaluationSession
@@ -167,14 +168,22 @@ def _sink(
 
 
 def _step_bundle(episode_id: int) -> dict:
+    record = {
+        "episode_id": torch.tensor([episode_id], dtype=torch.int64),
+        "time_in_episode": torch.tensor([0.02]),
+    }
     return {
-        "record": {
-            "episode_id": torch.tensor([episode_id], dtype=torch.int64),
-            "time_in_episode": torch.tensor([0.02]),
-        },
+        "record": record,
         "raw": None,
         "cmd": None,
         "targets": [],
+        "view": EnvView(
+            record=record,
+            obs=None,
+            env_id=None,
+            num_envs=1,
+            backend="record-only",
+        ),
     }
 
 
