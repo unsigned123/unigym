@@ -14,7 +14,23 @@ from typing import Protocol
 
 import torch
 
-__all__ = ["SignalBus", "SignalView"]
+__all__ = ["SignalBus", "SignalPublisher", "SignalView"]
+
+
+class SignalPublisher(Protocol):
+    """Write-only signal face handed to a custom sink at construction.
+
+    A publisher is the closed-loop seam: a sink stores it and calls
+    :meth:`publish` from its runner callbacks.  It deliberately exposes no read
+    method; reading belongs to a sampler bound through
+    :class:`~unigym.signals.SignalView`.  :class:`SignalBus` satisfies this
+    protocol structurally, so the run's single bus is the one object behind the
+    sink publisher, the sampler view and the rewind provider.
+    """
+
+    def publish(self, name: str, value: torch.Tensor) -> None:
+        """Store *value* under *name* (transport rules are the bus's)."""
+        ...
 
 
 class SignalView(Protocol):

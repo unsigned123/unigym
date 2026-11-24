@@ -1604,6 +1604,7 @@ def _build_sinks(
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
     pack_runtime: PackRuntime | None,
+    signals: SignalBus,
     action_groups: Sequence[OrderedActionGroup] = (),
     custom_sink_factory: SinkFactory | None = None,
 ) -> _SinkBundle:
@@ -1761,6 +1762,7 @@ def _build_sinks(
             action_groups=tuple(action_groups),
             run_identity=run_identity,
             options=declaration.options,
+            signals=signals,
         )
         custom_sink = build_custom_sink(custom_sink_factory, ctx)
 
@@ -2266,6 +2268,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
     print(f"[collect] output dir: {built['out_dir']}", flush=True)
 
+    # The run's one SignalBus exists BEFORE the sink build: a custom sink
+    # receives it as its publish-only construction context, and it predates the
+    # bridge/wiring seam so the watcher engine can publish into it and join the
+    # rewind providers at attach.  Constructing it after either would leave a
+    # producer with no transport.
+    signals = SignalBus(num_envs, device)
     sinks = _build_sinks(
         spec,
         cfg,
@@ -2291,14 +2299,10 @@ def build_instance(spec: RunSpec) -> RunInstance:
         task_meta,
         sensing["contact_manager"],
         pack_runtime,
+        signals,
         effective_groups,
         custom_sink_factory,
     )
-    # The run's one SignalBus exists BEFORE the bridge/wiring seam: the
-    # watcher engine publishes into it and joins the rewind providers at
-    # attach; constructing it after watcher attach would leave the engine
-    # with no transport.
-    signals = SignalBus(num_envs, device)
     wiring = _build_bridge_and_wiring(
         spec,
         cfg,

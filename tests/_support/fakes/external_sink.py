@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+import torch
+
 from unigym._typing import JsonValue
 from unigym.core.episode_termination import EpisodeOutcome, Termination, TerminationSource
 from unigym.evaluation import EnvView
@@ -19,6 +21,7 @@ from unigym.runtime.bridge import RewindBoundary
 
 if TYPE_CHECKING:
     from unigym.run.sink import SinkContext
+    from unigym.signals import SignalPublisher
     from unigym.sink import Sink
 
 
@@ -537,6 +540,82 @@ def make_external_sink(ctx: SinkContext) -> Sink:
     if not isinstance(label, str):
         raise TypeError(f"sink.options.label must be a string, got {label!r}")
     return ExternalSink(target_episodes=target, label=label)
+
+
+class SignalPublishingSink:
+    """Stateful custom sink that publishes one level signal per tick.
+
+    It stores the publisher handed over by :class:`SinkContext` (never the read
+    face) and publishes ``(num_envs, 1)`` CPU value ``t + 1`` under
+    ``signal``.  The publication log is one row per ``on_step``.  The sink is
+    also its own namespaced rewind provider so the build seam can discover the
+    exact instance behind ``SinkContext.signals``; its state restores the
+    publication log, not the bus (the bus is a separate core provider).
+    """
+
+    name = "acme.signals"
+
+    def __init__(
+        self,
+        publisher: SignalPublisher,
+        num_envs: int,
+        *,
+        signal: str = "acme/probe",
+    ) -> None:
+        if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
+            raise ValueError(f"num_envs must be a positive int, got {num_envs!r}")
+        if not isinstance(signal, str) or not signal:
+            raise ValueError(f"signal must be a non-empty str, got {signal!r}")
+        self.publisher = publisher
+        self.num_envs = num_envs
+        self.signal = signal
+        self.published: list[tuple[int, float]] = []
+        self.step_calls = 0
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del bundle
+        self.step_calls += 1
+        value = float(t + 1)
+        self.publisher.publish(
+            self.signal,
+            torch.full((self.num_envs, 1), value, dtype=torch.float32),
+        )
+        self.published.append((t, value))
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {"sink": type(self).__name__, "published": len(self.published)}
+
+    def rewind_state(self) -> dict[str, object]:
+        return {"published": [list(row) for row in self.published]}
+
+    def apply_rewind_state(self, state: Mapping[str, object]) -> None:
+        rows = state.get("published")
+        self.published = (
+            [
+                (int(row[0]), float(row[1]))
+                for row in rows
+                if isinstance(row, (list, tuple)) and len(row) == 2
+            ]
+            if isinstance(rows, list)
+            else []
+        )
+
+
+def make_signal_publishing_sink(ctx: SinkContext) -> Sink:
+    """Build one :class:`SignalPublishingSink` from the public context.
+
+    A closed-loop sink cannot work without the publisher, so an absent
+    ``ctx.signals`` fails fast instead of silently degrading.
+    """
+    if ctx.signals is None:
+        raise RuntimeError("SignalPublishingSink requires SinkContext.signals")
+    return SignalPublishingSink(ctx.signals, ctx.num_envs)
 
 
 class TerminalRequestSink:

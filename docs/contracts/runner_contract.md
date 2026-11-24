@@ -149,13 +149,51 @@ sink:
 A string factory is `module:callable`; a callable is API-only.  The factory is
 resolved before env construction and called exactly once as
 `factory(ctx: SinkContext) -> Sink`.  `SinkContext` carries construction
-metadata only: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
-`action_groups`, `run_identity` and `options`.  It deliberately contains no
-live env, writer, logger, bridge or signal bus; a sink receives runner-owned
-resources through the callback bundle, never at construction.  A factory
-result missing a required callback, declaring a non-callable optional callback
-(`on_rewind`, `stop_when`, `drain_terminations`) or declaring an invalid rewind
-provider fails with a teaching `TypeError` before the run starts.
+metadata: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
+`action_groups`, `run_identity`, `options` and the run's publish-only `signals`
+face.  It deliberately contains no live env, writer, logger or bridge; a sink
+receives runner-owned resources through the callback bundle, never at
+construction.  `signals` is a `unigym.signals.SignalPublisher` (never the read
+view); `None` means the build provided no publisher, so a sink that needs closed
+loop must fail fast rather than fall back.  A factory result missing a required
+callback, declaring a non-callable optional callback (`on_rewind`, `stop_when`,
+`drain_terminations`) or declaring an invalid rewind provider fails with a
+teaching `TypeError` before the run starts.
+
+### Sink signal publication and closed-loop latency
+
+A custom sink stores `ctx.signals` and publishes level values from `on_step`:
+
+```python
+def on_step(self, t: int, bundle) -> None:
+    self.signals.publish("acme/probe", value)  # (num_envs, ...) tensor
+```
+
+Transport rules are exactly `signal_bus_contract.md` (non-empty name, leading
+dimension `num_envs`, bus device, detached/cloned).  Names are namespaced by the
+producer; there is no registry and the last publish wins.  Watchers publish
+later in the same tick because the watcher engine is the tail of the sink
+fan-out, so a sink and a watcher sharing a name would let the watcher overwrite
+the sink value.
+
+The runner order is fixed and unchanged:
+
+```text
+env.step(t) -> sampler.update(t) -> sink.on_step(t)
+```
+
+Therefore in-episode closed loop has **two policy-tick latency**:
+
+1. a sink publishes in `on_step(t)`, after that tick's physics and observation
+   snapshot;
+2. the `CommandSampler.update` for tick `t+1` is the next read, because it runs
+   after `env.step(t+1)`;
+3. the command returned by `update(t+1)` is written to `obs.command` at `t+1`
+   and is first used by `env.step(t+2)`.
+
+This is the existing sampler placement, not a sink-seam bug.  Deterministic
+direct-read tests must assert this two-tick latency, not an aspirational
+one-tick loop.
 
 Mode composition is fixed:
 
@@ -259,18 +297,20 @@ still receives the mark exactly once.  A tick-contract failure disables the task
 for the run; that disabled set is process truth and a rewind never re-enables
 it.
 
-`build_instance` creates the run's one `SignalBus` **before**
-`_build_bridge_and_wiring`, hands it to the watcher attach seam, calls
-`sampler.bind_env(env)` and then `sampler.bind_signals(signals)` at the
-live-instance construction seam, before any runner exists.  `SyncRunner` never
-binds, so multiple runners over one cached `RunInstance` cannot rebind.  The bus
-is stored as `RunInstance.signals` and joins `rewind_providers` as the
-`"signals"` provider; the watcher engine joins as `"watchers"` (specs, trigger
-state and template windows) so a checkpoint restores producer and transport
-together.  The command-sampler lifecycle is documented in
-`command_sampler_contract.md`; the transport is documented in
-`signal_bus_contract.md`; watcher signal semantics are documented in
-`watchers_contract.md`.
+`build_instance` creates the run's one `SignalBus` **before** `_build_sinks`
+and before `_build_bridge_and_wiring`.  `_build_sinks` hands that same object to
+`SinkContext.signals`, the run build stores it as `RunInstance.signals`, and the
+bus is then handed to the watcher attach seam; `sampler.bind_env(env)` and
+`sampler.bind_signals(signals)` run at the live-instance construction seam,
+before any runner exists.  `SyncRunner` never binds, so multiple runners over
+one cached `RunInstance` cannot rebind.  The bus is stored as
+`RunInstance.signals` and joins `rewind_providers` as the `"signals"` provider
+exactly once; a custom sink must not expose the bus as a second provider.  The
+watcher engine joins as `"watchers"` (specs, trigger state and template
+windows), so a checkpoint restores producer and transport together.  The
+command-sampler lifecycle is documented in `command_sampler_contract.md`; the
+transport is documented in `signal_bus_contract.md`; watcher signal semantics
+are documented in `watchers_contract.md`.
 
 Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
 `terminated/truncated` vocabulary.  The task layer maps core outcomes later.

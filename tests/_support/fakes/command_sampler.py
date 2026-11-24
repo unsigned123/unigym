@@ -58,6 +58,54 @@ def make_sampler(*, dim: int, device: str, num_envs: int, **params) -> CommandSa
     return RecordingSampler(dim, device, num_envs, **params)
 
 
+class ClosedLoopSampler(CommandSampler):
+    """Sampler double that turns one published signal into the next command.
+
+    It records, per ``update`` call, the signal value observed through the bound
+    :class:`~unigym.signals.SignalView` and the command the runner passed in
+    (the value the tick's ``env.step`` used).  ``None`` means the signal was
+    absent or the runner had no command yet.  Values are kept as isolated
+    clones; the double declares no rewind capability.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        device: str,
+        num_envs: int,
+        *,
+        signal: str = "acme/probe",
+    ) -> None:
+        super().__init__(dim, device, num_envs)
+        self.signal = signal
+        self.signal_views: list[SignalView] = []
+        self.observations: list[torch.Tensor | None] = []
+        self.used_commands: list[torch.Tensor | None] = []
+
+    def bind_signals(self, signals: SignalView) -> None:
+        self.signal_views.append(signals)
+
+    def reset(self, env_ids=None) -> torch.Tensor:
+        self.cmd[self._resolve_ids(env_ids)] = 0.0
+        return self.cmd
+
+    def update(self, step_dt: float, cmd: torch.Tensor) -> torch.Tensor:
+        del step_dt
+        if not self.signal_views:
+            raise RuntimeError("ClosedLoopSampler.update ran before bind_signals")
+        observed = self.signal_views[0].get(self.signal)
+        self.observations.append(None if observed is None else observed.detach().clone())
+        self.used_commands.append(None if cmd is None else cmd.detach().clone())
+        if observed is None:
+            self.cmd = torch.zeros(self.num_envs, self.dim, dtype=torch.float32, device=self.device)
+        else:
+            self.cmd = observed.to(device=self.device, dtype=torch.float32).reshape(
+                self.num_envs, self.dim
+            )
+            self.cmd = self.cmd.clone()
+        return self.cmd
+
+
 def make_not_a_sampler(*, dim: int, device: str, num_envs: int, **params) -> object:
     """A factory that violates the CommandSampler return contract."""
     del dim, device, num_envs, params
