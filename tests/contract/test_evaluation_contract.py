@@ -32,6 +32,7 @@ _FORBIDDEN_VIEW_ATTRS = frozenset(
 def test_public_names_are_stable() -> None:
     """The new public module exports exactly the documented names."""
     assert set(evaluation.__all__) == {
+        "EnvStepContext",
         "EnvView",
         "EvalContext",
         "EvalQuery",

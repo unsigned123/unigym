@@ -22,8 +22,10 @@ from .context import (
     EvalViewStaleError,
 )
 from .query import EvalQuery
+from .step import EnvStepContext
 
 __all__ = [
+    "EnvStepContext",
     "EnvView",
     "EvalContext",
     "EvalQuery",
