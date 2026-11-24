@@ -7,6 +7,8 @@ import json
 import pytest
 import torch
 
+import unigym.benchmarks.episode as episode_module
+import unigym.core.identity as core_identity
 from unigym.benchmarks.base import EpisodeResult, Task
 from unigym.benchmarks.episode import EpisodeLimits, RobotIdentity, RunIdentity
 from unigym.benchmarks.termination import (
@@ -60,6 +62,13 @@ class _DummyTask(Task):
                 },
             ),
         )
+
+
+def test_identity_symbols_are_owned_by_core():
+    """The benchmark episode path re-exports the core-owned identity objects."""
+    assert episode_module.RunIdentity is core_identity.RunIdentity
+    assert episode_module.RobotIdentity is core_identity.RobotIdentity
+    assert episode_module.RUN_IDENTITY_SCHEMA_VERSION == core_identity.RUN_IDENTITY_SCHEMA_VERSION
 
 
 def test_run_identity_json_roundtrip():

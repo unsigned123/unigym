@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 
 from unigym.actuators.ir import ActuationGroup
@@ -21,7 +22,12 @@ from unigym.run.api import Run
 from unigym.run.sink import SinkSpec
 from unigym.runtime.actions import NamedAction, OrderedActionSpec, PolicyBinding
 from unigym.world import World
-from tests._support.fakes.external_sink import ExternalSink, make_external_sink
+from tests._support.fakes.external_sink import (
+    ExternalSink,
+    TerminalRequestSink,
+    make_external_sink,
+    make_terminal_request_sink,
+)
 
 if TYPE_CHECKING:
     from unigym.run.instance import RunInstance
@@ -140,6 +146,19 @@ def _external_sink(instance: RunInstance) -> ExternalSink:
     return sink
 
 
+def _terminal_request_sink(instance: RunInstance) -> TerminalRequestSink:
+    """The custom sink is its own provider, so discovery proves it was mounted."""
+    providers = [
+        provider
+        for provider in instance.rewind_providers
+        if getattr(provider, "name", None) == TerminalRequestSink.name
+    ]
+    assert len(providers) == 1, [getattr(p, "name", None) for p in instance.rewind_providers]
+    sink = providers[0]
+    assert isinstance(sink, TerminalRequestSink)
+    return sink
+
+
 def _assert_lifecycle(sink: ExternalSink, runner: Runner) -> None:
     assert sink.step_calls > 0
     assert sink.step_end_calls == sink.step_calls
@@ -253,6 +272,52 @@ def test_collect_custom_sink_config_factory_runs_the_full_lifecycle(
         run.close()
 
 
+def test_custom_sink_terminal_ends_env_and_resets(tmp_path: Path) -> None:
+    """A real tiny-arm run ends env 0 from the sink, then resets it normally."""
+    run = Run(
+        world=World.base(mjcf=_floor_world(tmp_path)),
+        robot=_profile(),
+        backend="mujoco",
+        observations={"robot": ["tiny"]},
+        action_spec=ACTION_SPEC,
+        policies=POLICIES,
+        mode="benchmark",
+        steps=STEPS,
+        episode_length_s=10.0,
+        inspect=True,
+        sink=SinkSpec(
+            factory=make_terminal_request_sink,
+            options={"terminal_after_steps": 1, "env_id": 0},
+        ),
+        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS},
+        pack_runtime=None,
+        discover_runtime=False,
+    )
+    try:
+        instance = run.build(inspect=True)
+        sink = _terminal_request_sink(instance)
+
+        runner = run.runner("external", action_fn=_zero_actions)
+        first = runner.step(_zero_actions(0))
+
+        assert sink.drain_calls == 1
+        assert sink.episode_end_calls == 1
+        assert sink.episode_env_ids == [(0,)]
+        assert first.reset_env_ids.tolist() == [0]
+        assert sink.step_times[0] > 0.0
+        first_episode_id = sink.step_episode_ids[0]
+
+        # The reset chain ran: the row's next tick is a fresh episode, while the
+        # sink has no second terminal pending.
+        runner.step(_zero_actions(1))
+        assert sink.drain_calls == 2
+        assert sink.episode_end_calls == 1
+        assert sink.step_episode_ids[1] == first_episode_id + 1
+        assert sink.step_times[1] == pytest.approx(sink.step_times[0])
+    finally:
+        run.close()
+
+
 def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> None:
     """A custom benchmark sink owns tasks, so the mode needs no pack runtime."""
     run = Run(
@@ -267,7 +332,7 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
         sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS, "timeout_steps": 2},
+        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS},
         pack_runtime=None,
         discover_runtime=False,
     )
@@ -275,7 +340,7 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         instance = run.build(inspect=True)
         assert instance.spec.pack_runtime is None
         assert instance.env.run_identity is not None
-        assert getattr(instance.env, "timeout_steps", None) == 2
+        assert getattr(instance.env, "timeout_steps", None) is None
         sink = _external_sink(instance)
 
         runner = run.runner("external", action_fn=_zero_actions)

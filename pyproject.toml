@@ -105,6 +105,9 @@ ignore_imports = [
     "unigym.core.paths -> unigym._typing",
     # Same root-level JSON alias; the termination facts own no pack dependency.
     "unigym.core.episode_termination -> unigym._typing",
+    # Same root-level JSON alias; the run identity facts own no benchmark/run
+    # dependency.
+    "unigym.core.identity -> unigym._typing",
 ]
 
 [[tool.importlinter.contracts]]

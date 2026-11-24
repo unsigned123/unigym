@@ -33,6 +33,7 @@ from unigym.core.episode_termination import (
     TerminationExtension,
     TerminationSource,
 )
+from unigym.core.identity import RobotIdentity, RunIdentity
 
 from . import termination as termination
 from .base import (
@@ -47,8 +48,6 @@ from .base import (
 )
 from .episode import (
     EpisodeLimits,
-    RobotIdentity,
-    RunIdentity,
     timeline_step_index,
     timeline_time_s,
 )

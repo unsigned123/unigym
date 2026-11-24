@@ -27,7 +27,10 @@ the reset chain and ``on_step_end``.
 
 from __future__ import annotations
 
+import math
+import operator
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from types import MappingProxyType
 
 import numpy as np
@@ -554,6 +557,97 @@ class SyncRunner:
             ei: EpisodeTermination.from_terminations(terms) for ei, terms in by_env.items() if terms
         }
 
+    def _drain_sink_terminations(self) -> dict[int, Termination]:
+        """Validate and stamp this tick's sink terminal facts.
+
+        A :class:`~unigym.sink.TerminalSink` requests per-env episode ends
+        through ``drain_terminations`` after ``on_step`` returns.  The runner
+        owns the boundary: it rejects malformed returns, non-custom provenance
+        and any stamp that does not match the episode-local clock before the
+        bundle or the due mask is touched.  Sink terminals are core
+        ``Termination`` facts stamped like the core termination facts (frame 0
+        is tick 1), never the global run tick.  The canonical ``time_s`` is the
+        tick's float32 ``step_index * policy_dt`` (the same value as
+        ``bundle["time_s"]``); the tolerance only absorbs float32 rounding.
+        """
+        drain = getattr(self.sink, "drain_terminations", None)
+        if not callable(drain):
+            return {}
+        drained = drain()
+        if not isinstance(drained, Mapping):
+            raise TypeError(
+                f"sink.drain_terminations returned {type(drained).__name__}, "
+                f"expected a Mapping[int, Termination]"
+            )
+        stamped: dict[int, Termination] = {}
+        for raw_env_id, termination in drained.items():
+            if isinstance(raw_env_id, bool):
+                raise TypeError(
+                    f"sink.drain_terminations env id {raw_env_id!r} is a bool; "
+                    f"expected an integer in [0, {self._num_envs})"
+                )
+            try:
+                env_id = operator.index(raw_env_id)
+            except TypeError as err:
+                raise TypeError(
+                    f"sink.drain_terminations env id {raw_env_id!r} is not an "
+                    f"integer; expected a key in [0, {self._num_envs})"
+                ) from err
+            if env_id < 0 or env_id >= self._num_envs:
+                raise ValueError(
+                    f"sink.drain_terminations env id {env_id!r} is outside "
+                    f"[0, {self._num_envs})"
+                )
+            if not isinstance(termination, Termination):
+                raise TypeError(
+                    f"sink.drain_terminations[{env_id}] is "
+                    f"{type(termination).__name__}, expected a Termination"
+                )
+            if termination.source is not TerminationSource.CUSTOM:
+                raise ValueError(
+                    f"sink.drain_terminations[{env_id}] source is "
+                    f"{termination.source.value!r}; a sink terminal must use "
+                    f"TerminationSource.CUSTOM"
+                )
+            if not termination.code.startswith("custom."):
+                raise ValueError(
+                    f"sink.drain_terminations[{env_id}] code "
+                    f"{termination.code!r} must be namespaced 'custom.<name>'"
+                )
+            canonical_index = int(self._episode_step[env_id])
+            if termination.step_index is None:
+                step_index = canonical_index
+            elif termination.step_index != canonical_index:
+                raise ValueError(
+                    f"sink.drain_terminations[{env_id}] step_index "
+                    f"{termination.step_index!r} is not the episode-local step "
+                    f"{canonical_index}; a sink terminal is stamped with the "
+                    f"episode step, never the global run tick"
+                )
+            else:
+                step_index = termination.step_index
+            canonical_time = (
+                None
+                if self.control_dt is None
+                else float(
+                    torch.tensor(canonical_index, dtype=torch.float32) * float(self.control_dt)
+                )
+            )
+            if termination.time_s is None:
+                time_s = canonical_time
+            elif canonical_time is None:
+                time_s = termination.time_s
+            elif not math.isclose(termination.time_s, canonical_time, rel_tol=1e-6, abs_tol=1e-6):
+                raise ValueError(
+                    f"sink.drain_terminations[{env_id}] time_s "
+                    f"{termination.time_s!r} is not the episode-local time "
+                    f"{canonical_time!r}"
+                )
+            else:
+                time_s = termination.time_s
+            stamped[env_id] = replace(termination, step_index=step_index, time_s=time_s)
+        return stamped
+
     @property
     def ticks_done(self) -> int:
         """Policy ticks completed so far (rewind jumps included)."""
@@ -751,6 +845,26 @@ class SyncRunner:
                     reset_env_ids=torch.zeros(0, dtype=torch.int64, device=device),
                     terminated=terminated,
                 )
+            # sink terminal drain: only after on_step returned (a RewindBoundary
+            # or any other on_step failure owns the abandoned branch and never
+            # drains).  Validation/stamping happens before runner state changes.
+            sink_terminations = self._drain_sink_terminations()
+            if sink_terminations and not self.auto_reset:
+                raise RuntimeError(
+                    f"sink.drain_terminations requested terminal env ids "
+                    f"{sorted(sink_terminations)} but this runner has "
+                    f"auto_reset=False; a sink terminal end requires the reset "
+                    f"chain. Enable auto_reset or do not terminate envs."
+                )
+            if sink_terminations:
+                merged = dict(bundle["terminations"])
+                for env_id, termination in sink_terminations.items():
+                    existing = merged.get(env_id)
+                    terms = (termination,) if existing is None else (*existing.all, termination)
+                    merged[env_id] = EpisodeTermination.from_terminations(terms)
+                bundle["terminations"] = merged
+                sink_due = torch.tensor(sorted(sink_terminations), dtype=torch.int64, device=device)
+                due = torch.unique(torch.cat([due.to(torch.int64), sink_due]))
             self._tick = t + 1
             # reset policy: episode clock due | (terminated | custom mask)
             added = None

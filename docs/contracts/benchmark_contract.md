@@ -43,12 +43,50 @@ artifacts.
 Core still supplies the benchmark construction metadata the custom sink needs:
 `RunSpec.benchmark` (`tasks` / `min_episodes` / `max_steps`) is config data
 reachable through `SinkContext.spec`, `run_identity` is stamped on the env and
-the callback bundle, and `max_steps` plus `timeout_s` / `timeout_steps` keep
-capping the core horizon exactly as in the built-in path.  The mode alone does
-not require a pack runtime on the custom path because core builds no tasks; any
-other runtime need (a pack asset, scene preset or external adapter) still
-applies.  Core does not validate the custom sink's task names, scoring or report
-schema.
+the callback bundle, and `max_steps` keeps capping the core horizon exactly as
+in the built-in path.  The mode alone does not require a pack runtime on the
+custom path because core builds no tasks; any other runtime need (a pack asset,
+scene preset or external adapter) still applies.  Core does not validate the
+custom sink's task names, scoring or report schema.
+
+A custom-sink benchmark/both run rejects `benchmark.timeout_s` and
+`benchmark.timeout_steps` with a teaching `ConfigError` before any env or
+benchmark task is built.  The core episode clock
+(`StepResult.reset_env_ids`) is the one physical deadline authority; a custom
+sink ends episodes through its terminal requests, so a second
+`EpisodeLimits` clock would be unobservable.  The custom path constructs no
+`EpisodeLimits` and leaves `env.timeout_steps` as `None`.
+
+The external benchmark pack uses this custom path exclusively: it has no
+`EpisodeLimits`, no core `Task` chain and no core report hook.  Core writes no
+`benchmark_report.json` / `results.json` for such a run and never builds a
+second deadline clock; a pack that needs a time or step budget ends episodes
+through its own terminals (see "Sink terminal requests").
+
+## Sink terminal requests
+
+A custom sink may implement `unigym.sink.TerminalSink` and request per-env
+episode ends through `drain_terminations() -> Mapping[int, Termination]`.  The
+runner drains once after `on_step` returns and treats every fact as an
+episode-end request: the env joins the due mask, `on_episode_end` runs with the
+normal bundle, and the reset chain follows when `auto_reset` is true.
+
+A sink terminal is **not** a core termination-group hit.  The
+`TerminationGroup` never sees it, `bundle["terminated"]` remains the core
+term-group mask, and `StepResult.terminated` is unchanged.  The sink fact is
+merged into `bundle["terminations"]` with
+`EpisodeTermination.from_terminations`, so core facts are preserved and the
+core outcome precedence still chooses the primary.  `StepResult.reset_env_ids`
+is the final due set (core episode clock plus sink terminal ids plus any reset
+policy).
+
+Each sink terminal uses `TerminationSource.CUSTOM` and a `custom.<name>` code;
+a missing `step_index` / `time_s` is stamped with the episode-local value (the
+tick's own `bundle["time_s"]`), never a global run tick.  Invalid ids, values,
+provenance, codes or stamps are rejected before the bundle or due mask is
+mutated.  With `auto_reset: false`, a non-empty drain raises a teaching
+`RuntimeError` before due mutation: a terminal end without the reset chain is
+inconsistent.
 
 ## Timeline
 
@@ -73,12 +111,19 @@ it from recorder frame 0.
 
 ## Deadline
 
-`EpisodeLimits(timeout_s, timeout_steps)` has ONE integer authority.
+The core episode clock (`StepResult.reset_env_ids`, driven by the runner and
+the termination groups) is the one physical deadline authority.  On the
+built-in benchmark/both path, `EpisodeLimits(timeout_s, timeout_steps)` is a
+scoring annotation over that clock, not a second physical truncation.
 `timeout_steps = floor(timeout_s / policy_dt + eps)`; declaring both requires
-agreement, otherwise construction fails.  In `termination_mode: external`
-the core `episode_length_s` is `None` and the task/benchmark
-`timeout_steps` is the only deadline.  The core engine horizon (when
-enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
+agreement, otherwise construction fails.  In `termination_mode: external` the
+core `episode_length_s` is `None`, so the built-in benchmark
+`timeout_steps` annotation is what scores the deadline.  The core engine
+horizon (when enabled) is recorded as `DEADLINE` / `runtime.episode_horizon`.
+
+A custom-sink benchmark/both run has no `EpisodeLimits`; it rejects
+`benchmark.timeout_s` / `benchmark.timeout_steps` at construction so the sink
+terminals and the core episode clock remain the only episode-end path.
 
 ## Terminations
 

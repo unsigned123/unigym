@@ -6,15 +6,19 @@ benchmark state, scoring, reporting).  A sink never owns a second physics loop
 or mutates the backend.
 
 The optional capability protocols (:class:`RewindAwareSink`,
-:class:`StoppingSink`) name extra behavior a sink may implement; they add no
-new control-flow concepts to the four-callback contract.
+:class:`StoppingSink`, :class:`TerminalSink`) name extra behavior a sink may
+implement; they add no new control-flow concepts to the four-callback contract.
 """
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-__all__ = ["RewindAwareSink", "Sink", "StoppingSink"]
+if TYPE_CHECKING:
+    from unigym.core.episode_termination import Termination
+
+__all__ = ["RewindAwareSink", "Sink", "StoppingSink", "TerminalSink"]
 
 
 @runtime_checkable
@@ -58,4 +62,19 @@ class StoppingSink(Protocol):
 
     def stop_when(self) -> bool:
         """Return True when the run should stop; read-only and cheap."""
+        ...
+
+
+@runtime_checkable
+class TerminalSink(Protocol):
+    """Optional capability: a sink that requests per-env episode ends.
+
+    A terminal sink is still a four-callback :class:`Sink`; this adds one
+    optional capability, not a fifth required callback.  ``drain_terminations``
+    is a one-shot drain: after it returns, the sink holds no pending terminal
+    for those envs.
+    """
+
+    def drain_terminations(self) -> Mapping[int, Termination]:
+        """Return and clear the pending ``env_id -> Termination`` facts."""
         ...

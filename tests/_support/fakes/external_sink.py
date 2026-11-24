@@ -12,12 +12,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+import torch
+
 from unigym._typing import JsonValue
+from unigym.core.episode_termination import EpisodeOutcome, Termination, TerminationSource
 from unigym.evaluation import EnvView
 from unigym.runtime.bridge import RewindBoundary
 
 if TYPE_CHECKING:
     from unigym.run.sink import SinkContext
+    from unigym.signals import SignalPublisher
     from unigym.sink import Sink
 
 
@@ -195,6 +199,106 @@ class NonCallableRewindSink:
     """Four-callback sink whose declared ``on_rewind`` is not callable."""
 
     on_rewind: object = None
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {}
+
+
+class TerminalDrainSink:
+    """Four-callback sink exposing ``drain_terminations`` with a fixed payload.
+
+    ``payload`` is returned verbatim on every drain, so a test can supply a
+    mapping, ``None`` or a non-mapping and prove the fan-out boundary.  A real
+    terminal sink is one-shot; this double only records how often it was
+    drained.
+    """
+
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+        self.drain_calls = 0
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {"sink": type(self).__name__}
+
+    def drain_terminations(self) -> object:
+        self.drain_calls += 1
+        return self.payload
+
+
+class ScriptedTerminalSink:
+    """Four-callback sink that drains one queued terminal mapping per tick.
+
+    ``pending`` is returned by the next ``drain_terminations`` call and then
+    cleared, so the double keeps the one-shot drain contract.  A test may set
+    it to ``None``, a non-mapping or a malformed ``env_id -> value`` payload to
+    prove the runner's boundary validation.  ``rewind_next`` raises a
+    ``RewindBoundary`` from ``on_step`` after recording, so the runner never
+    reaches the drain.  The stored bundles are test evidence only.
+    """
+
+    def __init__(self, *, rewind_next: int | None = None) -> None:
+        if rewind_next is not None and (
+            isinstance(rewind_next, bool) or not isinstance(rewind_next, int) or rewind_next < 0
+        ):
+            raise ValueError(f"rewind_next must be None or a non-negative int, got {rewind_next!r}")
+        self.rewind_next = rewind_next
+        self.pending: object = {}
+        self.drain_calls = 0
+        self.step_calls = 0
+        self.step_end_calls = 0
+        self.step_bundles: list[dict[str, object]] = []
+        self.episode_end_calls: list[tuple[object, dict[str, object]]] = []
+        self.rewinds: list[dict[str, object]] = []
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t
+        self.step_calls += 1
+        self.step_bundles.append(bundle)
+        if self.rewind_next is not None:
+            raise RewindBoundary(self.rewind_next)
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        self.episode_end_calls.append((env_ids, bundle))
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+        self.step_end_calls += 1
+
+    def on_run_end(self) -> dict[str, object]:
+        return {"sink": type(self).__name__}
+
+    def drain_terminations(self) -> object:
+        self.drain_calls += 1
+        payload = self.pending
+        self.pending = {}
+        return payload
+
+    def on_rewind(self, info: dict[str, object]) -> None:
+        self.rewinds.append(info)
+
+
+class NonCallableDrainSink:
+    """Four-callback sink whose declared ``drain_terminations`` is not callable."""
+
+    drain_terminations: object = None
 
     def on_step(self, t: int, bundle: dict[str, object]) -> None:
         del t, bundle
@@ -436,3 +540,193 @@ def make_external_sink(ctx: SinkContext) -> Sink:
     if not isinstance(label, str):
         raise TypeError(f"sink.options.label must be a string, got {label!r}")
     return ExternalSink(target_episodes=target, label=label)
+
+
+class SignalPublishingSink:
+    """Stateful custom sink that publishes one level signal per tick.
+
+    It stores the publisher handed over by :class:`SinkContext` (never the read
+    face) and publishes ``(num_envs, 1)`` CPU value ``t + 1`` under
+    ``signal``.  The publication log is one row per ``on_step``.  The sink is
+    also its own namespaced rewind provider so the build seam can discover the
+    exact instance behind ``SinkContext.signals``; its state restores the
+    publication log, not the bus (the bus is a separate core provider).
+    """
+
+    name = "acme.signals"
+
+    def __init__(
+        self,
+        publisher: SignalPublisher,
+        num_envs: int,
+        *,
+        signal: str = "acme/probe",
+    ) -> None:
+        if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
+            raise ValueError(f"num_envs must be a positive int, got {num_envs!r}")
+        if not isinstance(signal, str) or not signal:
+            raise ValueError(f"signal must be a non-empty str, got {signal!r}")
+        self.publisher = publisher
+        self.num_envs = num_envs
+        self.signal = signal
+        self.published: list[tuple[int, float]] = []
+        self.step_calls = 0
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del bundle
+        self.step_calls += 1
+        value = float(t + 1)
+        self.publisher.publish(
+            self.signal,
+            torch.full((self.num_envs, 1), value, dtype=torch.float32),
+        )
+        self.published.append((t, value))
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {"sink": type(self).__name__, "published": len(self.published)}
+
+    def rewind_state(self) -> dict[str, object]:
+        return {"published": [list(row) for row in self.published]}
+
+    def apply_rewind_state(self, state: Mapping[str, object]) -> None:
+        rows = state.get("published")
+        self.published = (
+            [
+                (int(row[0]), float(row[1]))
+                for row in rows
+                if isinstance(row, (list, tuple)) and len(row) == 2
+            ]
+            if isinstance(rows, list)
+            else []
+        )
+
+
+def make_signal_publishing_sink(ctx: SinkContext) -> Sink:
+    """Build one :class:`SignalPublishingSink` from the public context.
+
+    A closed-loop sink cannot work without the publisher, so an absent
+    ``ctx.signals`` fails fast instead of silently degrading.
+    """
+    if ctx.signals is None:
+        raise RuntimeError("SignalPublishingSink requires SinkContext.signals")
+    return SignalPublishingSink(ctx.signals, ctx.num_envs)
+
+
+class TerminalRequestSink:
+    """Stateful custom sink that requests one per-env terminal on a chosen tick.
+
+    Records the per-tick ``time_in_episode`` / ``episode_id`` of ``env_id`` so an
+    integration test can prove the real runner reset the row, plus the
+    episode-end callback stream and drain count.  It is its own rewind provider
+    (``name`` + state callbacks) so the composite sink chain can expose it; a
+    pending drain is deliberately not restored -- this double proves integration
+    wiring, not rewind state.
+    """
+
+    name = "acme.terminal_request"
+
+    def __init__(
+        self,
+        *,
+        terminal_after_steps: int = 1,
+        env_id: int = 0,
+        code: str = "custom.sink_terminal",
+    ) -> None:
+        if (
+            isinstance(terminal_after_steps, bool)
+            or not isinstance(terminal_after_steps, int)
+            or terminal_after_steps < 1
+        ):
+            raise ValueError(
+                f"terminal_after_steps must be a positive int, got {terminal_after_steps!r}"
+            )
+        if isinstance(env_id, bool) or not isinstance(env_id, int) or env_id < 0:
+            raise ValueError(f"env_id must be a non-negative int, got {env_id!r}")
+        if not isinstance(code, str) or not code.startswith("custom."):
+            raise ValueError(f"code must be a 'custom.*' string, got {code!r}")
+        self.terminal_after_steps = terminal_after_steps
+        self.env_id = env_id
+        self.code = code
+        self.pending: dict[int, Termination] = {}
+        self._requested = False
+        self.step_calls = 0
+        self.drain_calls = 0
+        self.episode_end_calls = 0
+        self.run_end_calls = 0
+        self.episode_env_ids: list[tuple[int, ...]] = []
+        self.step_times: list[float] = []
+        self.step_episode_ids: list[int] = []
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t
+        self.step_calls += 1
+        record = bundle["record"]
+        self.step_times.append(float(record["time_in_episode"][self.env_id]))
+        self.step_episode_ids.append(int(record["episode_id"][self.env_id]))
+        if not self._requested and self.step_calls >= self.terminal_after_steps:
+            self.pending = {
+                self.env_id: Termination(
+                    EpisodeOutcome.FAILURE, self.code, TerminationSource.CUSTOM
+                )
+            }
+            self._requested = True
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del bundle
+        self.episode_end_calls += 1
+        self.episode_env_ids.append(tuple(int(raw) for raw in env_ids.tolist()))
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        self.run_end_calls += 1
+        return {"sink": type(self).__name__, "episodes": self.episode_end_calls}
+
+    def drain_terminations(self) -> dict[int, Termination]:
+        self.drain_calls += 1
+        drained = self.pending
+        self.pending = {}
+        return drained
+
+    def rewind_state(self) -> dict[str, object]:
+        return {
+            "requested": self._requested,
+            "step_calls": self.step_calls,
+            "drain_calls": self.drain_calls,
+            "episode_end_calls": self.episode_end_calls,
+            "run_end_calls": self.run_end_calls,
+            "episode_env_ids": [list(ids) for ids in self.episode_env_ids],
+            "step_times": list(self.step_times),
+            "step_episode_ids": list(self.step_episode_ids),
+        }
+
+    def apply_rewind_state(self, state: Mapping[str, object]) -> None:
+        for attribute in ("step_calls", "drain_calls", "episode_end_calls", "run_end_calls"):
+            value = state.get(attribute)
+            if isinstance(value, int) and not isinstance(value, bool):
+                setattr(self, attribute, value)
+        requested = state.get("requested")
+        if isinstance(requested, bool):
+            self._requested = requested
+        self.pending = {}
+
+
+def make_terminal_request_sink(ctx: SinkContext) -> Sink:
+    """Build one :class:`TerminalRequestSink` from the public context."""
+    after = ctx.options.get("terminal_after_steps", 1)
+    if isinstance(after, bool) or not isinstance(after, int):
+        raise TypeError(f"sink.options.terminal_after_steps must be an int, got {after!r}")
+    env_id = ctx.options.get("env_id", 0)
+    if isinstance(env_id, bool) or not isinstance(env_id, int):
+        raise TypeError(f"sink.options.env_id must be an int, got {env_id!r}")
+    code = ctx.options.get("code", "custom.sink_terminal")
+    if not isinstance(code, str):
+        raise TypeError(f"sink.options.code must be a string, got {code!r}")
+    return TerminalRequestSink(terminal_after_steps=after, env_id=env_id, code=code)

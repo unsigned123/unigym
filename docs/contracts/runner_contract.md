@@ -6,13 +6,17 @@ The `SyncRunner` callback stream is the single source of episode facts.  The
 ```text
 t             policy tick counter
 record        per-env backend record (canonical keys + contact facts)
-terminated    (N,) bool, live termination group
+terminated    (N,) bool, live term-group mask (never sink terminals)
 alive         (N,) bool, not terminated and finite policy observation
 term_metrics  per-group/total termination firing fractions
-reset_env_ids (N,) due ids, backend episode clock
+reset_state   {env_id: reset validity/reason state}
+              (the due ids are StepResult.reset_env_ids, not a bundle key)
 terminations  {env_id: EpisodeTermination}   # term group + core horizon
-step_index    canonical tick (t+1)
-time_s        canonical time ((t+1) * policy_dt)
+              plus the sink drain merged on this tick (see below)
+step_index    (N,) int64 episode-local tick per env; each env advances once per
+              policy tick and a reset env returns to 0 (frame 0 is tick 1)
+time_s        (N,) float32 episode-local time (step_index * policy_dt), or None
+              when no policy period is known
 run_identity  RunIdentity (benchmark runs)
 reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
               present on on_episode_end for the ending episode
@@ -22,6 +26,10 @@ episode_results {env_id: (EpisodeResultView, ...)}
 view          the tick's one read-only boundary EnvView; valid at on_step /
               on_episode_end, None at on_step_end
 ```
+
+A custom-sink benchmark/both run replaces the built-in `EvaluationSession`, so
+it carries no `episode_results`; a sink terminal request ends envs but is not a
+benchmark `EpisodeResultView` (see `command_sampler_contract.md`).
 
 The bundle carries no live env.  Internal runtime hooks that need the engine
 receive it at construction: `WatcherEngine` builds its view from its own wired
@@ -71,24 +79,70 @@ A sink may additionally implement an optional capability protocol:
 - `unigym.sink.StoppingSink` — `stop_when() -> bool` declares a sink-owned
   early stop decision.  `SyncRunner.run` polls it at the top of every step;
   stopping the run remains the runner's job.
+- `unigym.sink.TerminalSink` — `drain_terminations() -> Mapping[int,
+  Termination]` declares one-shot per-env terminal facts.  A terminal sink is
+  still a four-callback `Sink`; the drain is an optional capability, not a
+  fifth required callback.  `Termination` is
+  `unigym.core.episode_termination.Termination`.
 
 These protocols describe optional capabilities only; publishing them adds no
 new runner control flow.  `FanOutSink` composes sinks in construction order,
-forwards every callback to each child and structurally satisfies `Sink`.
+forwards every callback to each child and structurally satisfies `Sink`.  It
+always exposes `drain_terminations` and merges the children that declare the
+capability: a child that returns `None` or a non-mapping is a `TypeError`, and
+the same env id returned by two children is a `ValueError` naming both
+sources.  `on_run_end` keys summaries by sink class name; two children of the
+same class collide and fail instead of silently overwriting.
+
+After a successful `on_step`, the runner calls `drain_terminations()` exactly
+once when the sink declares it.  The drain is a one-shot per-env episode-end
+request; when `on_step` raises (including `RewindBoundary`) the runner never
+drains, never calls `on_episode_end` and never resets.  The returned
+`Mapping[int, Termination]` is validated before any runner state changes:
+
+- keys are integer env ids in `[0, num_envs)`; `bool` keys are rejected;
+- values are `unigym.core.episode_termination.Termination`, not an
+  `EpisodeTermination` or a mapping;
+- `source` is `TerminationSource.CUSTOM` and `code` starts with `custom.`;
+- a missing `step_index` is stamped with the episode-local step (frame 0 is
+  tick 1), never the global run tick; a provided value must equal it;
+- a missing `time_s` is stamped with the tick's float32
+  `episode_step * policy_dt` (the same value as `bundle["time_s"]`) when the
+  period is known; a provided value must agree with that canonical value within
+  float32 tolerance.
+
+A malformed return (not a `Mapping`, a bad id, a non-`Termination`, a
+non-custom source/code or a mismatched stamp) fails with a teaching error
+before the bundle or due mask is mutated.
 
 Lifecycle:
 
-1. `on_step(t, bundle)` — pre-reset data side.  Timeline columns are
-   `step_index = t+1`, `time_s = (t+1) * policy_dt`.
-2. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `reset_facts`
-   describe the episode's START (captured at its reset, tick 0); the
-   termination facts are the final tick's.
-3. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
+1. `on_step(t, bundle)` — pre-reset data side.  `bundle["step_index"]` and
+   `bundle["time_s"]` are per-env EPISODE-LOCAL arrays: each env's own tick
+   after this step (`1` on its first post-reset step), not the global run tick
+   `t+1`.  They equal `t+1` only for an env that has never reset; with per-env
+   resets, envs in one bundle can carry different episode-local ticks.
+2. `drain_terminations()` — only after `on_step` returns.  The validated sink
+   facts merge into `bundle["terminations"]` with
+   `EpisodeTermination.from_terminations`, so core facts are preserved and the
+   core outcome precedence still chooses the primary.  The sink env ids union
+   into the due mask before reset-policy evaluation.  When `auto_reset` is
+   false and the drain is non-empty, the tick raises a teaching `RuntimeError`
+   before any due mutation: a sink terminal end requires the reset chain.
+3. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `due` is
+   `unique(core episode clock ∪ sink terminal ids ∪ reset policy)`;
+   `reset_facts` describe the episode's START (captured at its reset, tick 0);
+   the termination facts are the final tick's.
+4. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
    the sinks (they publish the views) and BEFORE `sampler.reset`.  Runs even
    when `auto_reset` is false.
-4. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
-5. The runner captures the NEXT episode's pre-policy-step sample from
+5. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
+6. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
+
+`StepResult.reset_env_ids` is the final due set (core clock ∪ sink terminals ∪
+reset policy).  `StepResult.terminated` remains the core term-group mask and
+never includes sink terminal env ids.
 
 ## Custom sinks
 
@@ -105,13 +159,51 @@ sink:
 A string factory is `module:callable`; a callable is API-only.  The factory is
 resolved before env construction and called exactly once as
 `factory(ctx: SinkContext) -> Sink`.  `SinkContext` carries construction
-metadata only: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
-`action_groups`, `run_identity` and `options`.  It deliberately contains no
-live env, writer, logger, bridge or signal bus; a sink receives runner-owned
-resources through the callback bundle, never at construction.  A factory
-result missing a required callback, declaring a non-callable optional callback
-or declaring an invalid rewind provider fails with a teaching `TypeError`
-before the run starts.
+metadata: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
+`action_groups`, `run_identity`, `options` and the run's publish-only `signals`
+face.  It deliberately contains no live env, writer, logger or bridge; a sink
+receives runner-owned resources through the callback bundle, never at
+construction.  `signals` is a `unigym.signals.SignalPublisher` (never the read
+view); `None` means the build provided no publisher, so a sink that needs closed
+loop must fail fast rather than fall back.  A factory result missing a required
+callback, declaring a non-callable optional callback (`on_rewind`, `stop_when`,
+`drain_terminations`) or declaring an invalid rewind provider fails with a
+teaching `TypeError` before the run starts.
+
+### Sink signal publication and closed-loop latency
+
+A custom sink stores `ctx.signals` and publishes level values from `on_step`:
+
+```python
+def on_step(self, t: int, bundle) -> None:
+    self.signals.publish("acme/probe", value)  # (num_envs, ...) tensor
+```
+
+Transport rules are exactly `signal_bus_contract.md` (non-empty name, leading
+dimension `num_envs`, bus device, detached/cloned).  Names are namespaced by the
+producer; there is no registry and the last publish wins.  Watchers publish
+later in the same tick because `Bridge` is the sink fan-out tail and runs the
+watcher engine from its `on_step`, so a sink and a watcher sharing a name would
+let the watcher overwrite the sink value.
+
+The runner order is fixed and unchanged:
+
+```text
+env.step(t) -> sampler.update(t) -> sink.on_step(t)
+```
+
+Therefore in-episode closed loop has **two policy-tick latency**:
+
+1. a sink publishes in `on_step(t)`, after that tick's physics and observation
+   snapshot;
+2. the `CommandSampler.update` for tick `t+1` is the next read, because it runs
+   after `env.step(t+1)`;
+3. the command returned by `update(t+1)` is written to `obs.command` at `t+1`
+   and is first used by `env.step(t+2)`.
+
+This is the existing sampler placement, not a sink-seam bug.  Deterministic
+direct-read tests must assert this two-tick latency, not an aspirational
+one-tick loop.
 
 Mode composition is fixed:
 
@@ -126,6 +218,12 @@ stays first in `collect`/`both`.  Adapter `extra_sinks` stay prepended and the
 director/timeline/bridge tail remains appended.  `Director`, `Bridge`,
 `MetricsWriter` and adapter `extra_sinks` are internal privileged runtime hooks,
 not part of the public Sink surface or custom-Sink examples.
+
+A custom-sink `benchmark`/`both` run rejects `benchmark.timeout_s` and
+`benchmark.timeout_steps` with a teaching `ConfigError` before env or task
+construction.  Core therefore has one physical deadline authority, the core
+episode clock in `StepResult.reset_env_ids`; the custom sink ends episodes
+through its terminal requests and holds no `EpisodeLimits`.
 
 `CollectSink` is built from a read-only facts snapshot (the resolved control
 rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it
@@ -215,18 +313,20 @@ still receives the mark exactly once.  A tick-contract failure disables the task
 for the run; that disabled set is process truth and a rewind never re-enables
 it.
 
-`build_instance` creates the run's one `SignalBus` **before**
-`_build_bridge_and_wiring`, hands it to the watcher attach seam, calls
-`sampler.bind_env(env)` and then `sampler.bind_signals(signals)` at the
-live-instance construction seam, before any runner exists.  `SyncRunner` never
-binds, so multiple runners over one cached `RunInstance` cannot rebind.  The bus
-is stored as `RunInstance.signals` and joins `rewind_providers` as the
-`"signals"` provider; the watcher engine joins as `"watchers"` (specs, trigger
-state and template windows) so a checkpoint restores producer and transport
-together.  The command-sampler lifecycle is documented in
-`command_sampler_contract.md`; the transport is documented in
-`signal_bus_contract.md`; watcher signal semantics are documented in
-`watchers_contract.md`.
+`build_instance` creates the run's one `SignalBus` **before** `_build_sinks`
+and before `_build_bridge_and_wiring`.  `_build_sinks` hands that same object to
+`SinkContext.signals`, the run build stores it as `RunInstance.signals`, and the
+bus is then handed to the watcher attach seam; `sampler.bind_env(env)` and
+`sampler.bind_signals(signals)` run at the live-instance construction seam,
+before any runner exists.  `SyncRunner` never binds, so multiple runners over
+one cached `RunInstance` cannot rebind.  The bus is stored as
+`RunInstance.signals` and joins `rewind_providers` as the `"signals"` provider
+exactly once; a custom sink must not expose the bus as a second provider.  The
+watcher engine joins as `"watchers"` (specs, trigger state and template
+windows), so a checkpoint restores producer and transport together.  The
+command-sampler lifecycle is documented in `command_sampler_contract.md`; the
+transport is documented in `signal_bus_contract.md`; watcher signal semantics
+are documented in `watchers_contract.md`.
 
 Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
 `terminated/truncated` vocabulary.  The task layer maps core outcomes later.

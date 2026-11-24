@@ -53,6 +53,15 @@ class CommandSampler(ABC):
 - Both hooks default to no-ops; built-in samplers keep their behavior.
 - A raising `on_episode_end` is run-critical and propagates.
 
+## Episode results versus sink terminals
+
+Core itself publishes no episode results on a custom-sink benchmark/both run:
+the built-in `EvaluationSession` is replaced, so the runner-provided mapping is
+`{}` unless the custom sink writes `bundle["episode_results"]`.  A sink terminal
+from `TerminalSink.drain_terminations()` is an episode-end fact, not an
+`EpisodeResultView`.  A pack that needs sink-driven feedback must carry it in
+its own shared pack state or explicitly publish the documented result mapping.
+
 ## Authoring
 
 ```yaml
@@ -86,6 +95,16 @@ A sampler may read the run's generic signal channel through the bound
 only: names, dtypes, shapes and meaning belong to the user.  There is no
 automatic signal-to-command mapping, and a sampler that keeps state derived
 from signals must include that state in its own `rewind_state()`.
+
+## Signal timing
+
+The runner order is `env.step(t) -> sampler.update(t) -> sink.on_step(t)`.  A
+custom sink or a watcher publishes after tick `t`'s physics and observation
+snapshot, so the sampler's first read of that value is `update(t+1)`.  The
+command returned by `update(t+1)` is written to `obs.command` at `t+1` and is
+first used by `env.step(t+2)`: in-episode closed loop has two policy-tick
+latency from the observed view to the acting command.  This is the fixed
+sampler placement; a sink cannot shorten it from its callback.
 
 ## Rewind
 
