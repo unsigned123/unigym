@@ -42,9 +42,9 @@ if TYPE_CHECKING:
         ResolvedControlPlan,
     )
     from unigym.runtime.rewind_providers import RewindStateProvider
-    from unigym.signals import SignalBus
     from unigym.terminations.composite import TerminationGroup
     from unigym.trace.replay import TraceReplay
+    from unigym.values import ValueStore
 
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ class RunInstance:
     env: RunEnv
     bridge: Bridge
     plan: ResolvedControlPlan | None = None
-    signals: SignalBus | None = None
+    values: ValueStore | None = None
     action_groups: tuple[OrderedActionGroup, ...] = ()
     camera_manager: CameraManager | None = None
     prop_manager: PropManager | None = None

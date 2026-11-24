@@ -18,7 +18,7 @@ from unigym.run.api import Run, load
 from unigym.run.sink import build_custom_sink, resolve_sink_factory
 from unigym.run.spec import build_spec
 from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
-from unigym.signals import SignalBus
+from unigym.values import ValueStore
 from unigym.sink import Sink
 from unigym.world import World
 from tests._support.fakes.external_sink import (
@@ -91,7 +91,7 @@ def test_sink_spec_copies_options_into_an_immutable_mapping() -> None:
 
 
 def test_sink_context_carries_construction_metadata_and_the_publisher() -> None:
-    """The context fields are exactly the accepted plan surface; signals is publish-only."""
+    """The context fields are exactly the accepted plan surface; values is write-only."""
     run_spec = build_spec(_cfg(), _args())
     options: dict[str, JsonValue] = {"report_name": "acme.json"}
     context = SinkContext(
@@ -111,7 +111,7 @@ def test_sink_context_carries_construction_metadata_and_the_publisher() -> None:
     assert (context.policy_dt, context.seed, context.action_groups) == (0.02, 0, ())
     assert context.run_identity is None
     assert context.options is options
-    assert context.signals is None
+    assert context.values is None
     assert tuple(field.name for field in fields(SinkContext)) == (
         "spec",
         "mode",
@@ -122,13 +122,14 @@ def test_sink_context_carries_construction_metadata_and_the_publisher() -> None:
         "action_groups",
         "run_identity",
         "options",
-        "signals",
+        "values",
     )
     for live_field in ("env", "writer", "logger", "bridge"):
         assert not hasattr(context, live_field)
 
-    bus = SignalBus(num_envs=1, device="cpu")
-    assert replace(context, signals=bus).signals is bus
+    store = ValueStore(num_envs=1, device="cpu")
+    publisher = store.publisher("sink")
+    assert replace(context, values=publisher).values is publisher
 
 
 def test_resolve_sink_factory_returns_the_callable_unchanged() -> None:

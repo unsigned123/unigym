@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from unigym.core.identity import RunIdentity
     from unigym.run.spec import RunSpec
     from unigym.runtime.actions import OrderedActionGroup
-    from unigym.signals import SignalPublisher
+    from unigym.values import ValuePublisher
 
 __all__ = [
     "SinkContext",
@@ -111,12 +111,13 @@ class SinkSpec:
 class SinkContext:
     """Build-time context handed to a custom sink factory.
 
-    It carries run metadata plus the run's publish-only signal face.  There is
-    deliberately no live env, writer, logger or bridge here: those are
-    runner-owned resources a sink receives through its callback bundle, never
-    through construction.  ``signals`` is the one closed-loop publisher face; it
-    is not a read view, and ``None`` means the build provided no publisher (a
-    sink that needs closed loop must fail fast rather than fall back).
+    It carries run metadata plus the run's write-only value publisher face.
+    There is deliberately no live env, writer, logger or bridge here: those
+    are runner-owned resources a sink receives through its callback bundle,
+    never through construction.  ``values`` is the one closed-loop publisher
+    face; it is not a read view, and ``None`` means the build provided no
+    publisher (a sink that needs closed loop must fail fast rather than fall
+    back).
     """
 
     spec: RunSpec
@@ -128,7 +129,7 @@ class SinkContext:
     action_groups: tuple[OrderedActionGroup, ...]
     run_identity: RunIdentity | None
     options: Mapping[str, JsonValue]
-    signals: SignalPublisher | None = None
+    values: ValuePublisher | None = None
 
 
 #: The one factory shape: build a sink from its construction context.

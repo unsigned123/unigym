@@ -80,8 +80,8 @@ if TYPE_CHECKING:
         ContactSensorInventory,
     )
     from unigym.scenes.terrain import Terrain
-    from unigym.signals import SignalBus
     from unigym.trace.replay import TraceReplay
+    from unigym.values import ValuePublisher
     from unigym.watchers.timeline import EventLog, TimelineSink
 
     from .instance import RunEnv
@@ -1628,7 +1628,7 @@ def _build_sinks(
     task_meta: _TaskMeta | None,
     contact_manager: ContactManager | None,
     pack_runtime: PackRuntime | None,
-    signals: SignalBus,
+    values: ValuePublisher,
     action_groups: Sequence[OrderedActionGroup] = (),
     custom_sink_factory: SinkFactory | None = None,
 ) -> _SinkBundle:
@@ -1792,7 +1792,7 @@ def _build_sinks(
             action_groups=tuple(action_groups),
             run_identity=run_identity,
             options=declaration.options,
-            signals=signals,
+            values=values,
         )
         custom_sink = build_custom_sink(custom_sink_factory, ctx)
 
@@ -1841,7 +1841,6 @@ def _build_bridge_and_wiring(
     watch_specs: list[dict[str, JsonValue]] | None,
     stop_when: Callable[[], bool] | None,
     num_envs: int,
-    signals: SignalBus,
 ) -> _WiringBundle:
     """Step 6: replay + bridge + runtime attach + rewind providers."""
     from unigym.runner.sinks import FanOutSink
@@ -1911,7 +1910,7 @@ def _build_bridge_and_wiring(
         out_dir=runtime_dirs.watch_dir(bridge.run_id),
         event_log=event_log,
         specs=watch_specs,
-        signals=signals,
+        signals=None,
     )
     # director: command handler on cmd 14 + live status feed
     if director is not None:
@@ -2066,7 +2065,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     seed = spec.seed
     import torch
 
-    from unigym.signals import SignalBus
+    from unigym.values import ValueStore
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -2300,12 +2299,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     )
     print(f"[collect] output dir: {built['out_dir']}", flush=True)
 
-    # The run's one SignalBus exists BEFORE the sink build: a custom sink
-    # receives it as its publish-only construction context, and it predates the
-    # bridge/wiring seam so the watcher engine can publish into it and join the
-    # rewind providers at attach.  Constructing it after either would leave a
-    # producer with no transport.
-    signals = SignalBus(num_envs, device)
+    # The run's one value store exists BEFORE the sink build: a custom sink
+    # receives its publisher as the write-only construction context, and the
+    # store predates the bridge/wiring seam so it joins the rewind providers
+    # exactly once.  Constructing it after either would leave a producer with
+    # no transport.
+    values = ValueStore(num_envs, device)
     sinks = _build_sinks(
         spec,
         cfg,
@@ -2331,7 +2330,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         task_meta,
         sensing["contact_manager"],
         pack_runtime,
-        signals,
+        values.publisher("sink"),
         effective_groups,
         custom_sink_factory,
     )
@@ -2351,26 +2350,25 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sinks["watch_specs"],
         sinks["stop_when"],
         num_envs,
-        signals=signals,
     )
 
     seal_runtime()
     # Command-sampler lifecycle: this is the one live-instance construction
-    # seam, so bind the env and the run's signal view here exactly once per
+    # seam, so bind the env and the run's value store here exactly once per
     # built run -- before any runner exists.  Run.runner("sync") / run.gym()
     # reuse the cached RunInstance and must not rebind.
     if sampler is not None:
         sampler.bind_env(env)
-        sampler.bind_signals(signals)
-    # the bus joins the checkpoint payload once (instance-owned provider);
+        sampler.bind_values(values)
+    # the store joins the checkpoint payload once (instance-owned provider);
     # its values persist until overwritten -- no automatic clear/reset.
-    wiring["rewind_providers"].append(signals)
+    wiring["rewind_providers"].append(values)
     return RunInstance(
         spec=spec,
         profile=profile,
         adapter=adapter,
         sampler=sampler,
-        signals=signals,
+        values=values,
         term_group=term_group,
         env=env,
         plan=control_plan,

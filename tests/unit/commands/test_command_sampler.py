@@ -10,7 +10,7 @@ import torch
 
 from unigym.commands.base import CommandSampler
 from unigym.core.episode_result import EpisodeResultView
-from unigym.signals import SignalBus, SignalView
+from unigym.values import ValueStore, ValueView
 
 
 class _ConstantSampler(CommandSampler):
@@ -27,11 +27,11 @@ class _ConstantSampler(CommandSampler):
         return self.cmd
 
 
-class _SignalReadingSampler(_ConstantSampler):
-    """Custom sampler that stores the view and interprets a signal itself."""
+class _ValueReadingSampler(_ConstantSampler):
+    """Custom sampler that stores the view and interprets a value itself."""
 
-    def bind_signals(self, signals: SignalView) -> None:
-        self.signals = signals
+    def bind_values(self, values: ValueView) -> None:
+        self.values = values
 
 
 def test_command_sampler_defaults_declare_no_rewind_capability():
@@ -61,23 +61,23 @@ def test_command_sampler_rewind_defaults_name_the_capability_rule(method_name):
         method(*arguments)
 
 
-def test_command_sampler_bind_signals_defaults_to_noop():
+def test_command_sampler_bind_values_defaults_to_noop():
     """The base class does not store the view; built-in samplers stay inert."""
     sampler = _ConstantSampler()
 
-    assert sampler.bind_signals(SignalBus(num_envs=1, device="cpu")) is None
-    assert not hasattr(sampler, "signals")
+    assert sampler.bind_values(ValueStore(num_envs=1, device="cpu")) is None
+    assert not hasattr(sampler, "values")
 
 
-def test_custom_sampler_reads_a_user_signal_without_core_interpretation():
+def test_custom_sampler_reads_a_user_value_without_core_interpretation():
     """A custom sampler owns the name/dtype meaning; core only transports."""
-    sampler = _SignalReadingSampler()
-    bus = SignalBus(num_envs=2, device="cpu")
-    bus.publish("user/ready", torch.tensor([True, False]))
+    sampler = _ValueReadingSampler()
+    store = ValueStore(num_envs=2, device="cpu")
+    store.publish("user", "user/ready", torch.tensor([True, False]))
 
-    sampler.bind_signals(bus)
+    sampler.bind_values(store)
 
-    ready = sampler.signals.get("user/ready")
+    ready = sampler.values.get("user/ready")
     assert ready is not None
     assert ready.tolist() == [True, False]
 

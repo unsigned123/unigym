@@ -1,25 +1,25 @@
-"""Sink-published signals reach the sampler one update later (two-tick command latency)."""
+"""Sink-published values reach the sampler one update later (two-tick command latency)."""
 
 from __future__ import annotations
 
 import torch
 
 from tests._support.fakes.backend import ARTICULATION_NAME, JOINT_NAME, FakeBackend
-from tests._support.fakes.command_sampler import ClosedLoopSampler
-from tests._support.fakes.external_sink import SignalPublishingSink
+from tests._support.fakes.command_sampler import ClosedLoopValueSampler
+from tests._support.fakes.external_sink import ValuePublishingSink
 from unigym.adapters.manual import ManualAdapter
 from unigym.runner.sync import SyncRunner
 from unigym.runtime.actions import NamedAction
-from unigym.signals import SignalBus
 from unigym.terminations import TerminationGroup
+from unigym.values import ValueStore
 
 
-def _drive(ticks: int) -> tuple[SignalBus, ClosedLoopSampler, SignalPublishingSink]:
-    """Run *ticks* real SyncRunner ticks over the fake backend and one bus."""
-    bus = SignalBus(num_envs=1, device="cpu")
-    sampler = ClosedLoopSampler(dim=1, device="cpu", num_envs=1)
-    sampler.bind_signals(bus)
-    sink = SignalPublishingSink(bus, num_envs=1, signal=sampler.signal)
+def _drive(ticks: int) -> tuple[ValueStore, ClosedLoopValueSampler, ValuePublishingSink]:
+    """Run *ticks* real SyncRunner ticks over the fake backend and one store."""
+    store = ValueStore(num_envs=1, device="cpu")
+    sampler = ClosedLoopValueSampler(dim=1, device="cpu", num_envs=1)
+    sampler.bind_values(store)
+    sink = ValuePublishingSink(store.publisher("sink"), num_envs=1, value=sampler.value)
     env = FakeBackend()
     runner = SyncRunner(
         cfg={"collect": {"steps": ticks}},
@@ -30,6 +30,7 @@ def _drive(ticks: int) -> tuple[SignalBus, ClosedLoopSampler, SignalPublishingSi
         env=env,
         sink=sink,
         control_dt=0.02,
+        values=store,
     )
     actions = (NamedAction.zeros(1, ARTICULATION_NAME, (JOINT_NAME,), "position"),)
     try:
@@ -37,7 +38,7 @@ def _drive(ticks: int) -> tuple[SignalBus, ClosedLoopSampler, SignalPublishingSi
             runner.tick(actions_override=actions)
     finally:
         env.close()
-    return bus, sampler, sink
+    return store, sampler, sink
 
 
 def _values(values: list[torch.Tensor | None]) -> list[float | None]:
@@ -46,16 +47,16 @@ def _values(values: list[torch.Tensor | None]) -> list[float | None]:
 
 def test_sink_publishes_once_per_tick_and_sampler_reads_the_next_update() -> None:
     """A value published at ``on_step(t)`` is visible to ``update(t+1)`` only."""
-    bus, sampler, sink = _drive(3)
+    store, sampler, sink = _drive(3)
 
     assert sink.published == [(0, 1.0), (1, 2.0), (2, 3.0)]
     assert _values(sampler.observations) == [None, 1.0, 2.0]
-    snapshot = bus.snapshot()
-    assert list(snapshot) == [sink.signal]
-    assert float(snapshot[sink.signal][0, 0]) == 3.0
+    snapshot = store.snapshot()
+    assert list(snapshot) == [sink.value]
+    assert float(snapshot[sink.value][0, 0]) == 3.0
 
 
-def test_signal_published_at_tick_t_acts_at_tick_t_plus_two() -> None:
+def test_value_published_at_tick_t_acts_at_tick_t_plus_two() -> None:
     """The two-tick latency is real: publish t -> update t+1 -> env.step t+2."""
     _, sampler, sink = _drive(3)
 

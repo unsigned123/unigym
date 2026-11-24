@@ -15,7 +15,7 @@ import torch
 from unigym.commands.base import CommandSampler
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
-    from unigym.signals import SignalView
+    from unigym.values import ValueView
 
 
 class RecordingSampler(CommandSampler):
@@ -32,14 +32,14 @@ class RecordingSampler(CommandSampler):
         super().__init__(dim, device, num_envs)
         self.seats = seats
         self.bound_envs: list = []
-        self.signal_views: list[SignalView] = []
+        self.value_views: list[ValueView] = []
         self.episode_calls: list = []
 
     def bind_env(self, env) -> None:
         self.bound_envs.append(env)
 
-    def bind_signals(self, signals: SignalView) -> None:
-        self.signal_views.append(signals)
+    def bind_values(self, values: ValueView) -> None:
+        self.value_views.append(values)
 
     def on_episode_end(self, env_ids, results) -> None:
         self.episode_calls.append((env_ids.tolist(), results))
@@ -58,12 +58,12 @@ def make_sampler(*, dim: int, device: str, num_envs: int, **params) -> CommandSa
     return RecordingSampler(dim, device, num_envs, **params)
 
 
-class ClosedLoopSampler(CommandSampler):
-    """Sampler double that turns one published signal into the next command.
+class ClosedLoopValueSampler(CommandSampler):
+    """Sampler double that turns one published value into the next command.
 
-    It records, per ``update`` call, the signal value observed through the bound
-    :class:`~unigym.signals.SignalView` and the command the runner passed in
-    (the value the tick's ``env.step`` used).  ``None`` means the signal was
+    It records, per ``update`` call, the value observed through the bound
+    :class:`~unigym.values.ValueView` and the command the runner passed in
+    (the value the tick's ``env.step`` used).  ``None`` means the value was
     absent or the runner had no command yet.  Values are kept as isolated
     clones; the double declares no rewind capability.
     """
@@ -74,16 +74,16 @@ class ClosedLoopSampler(CommandSampler):
         device: str,
         num_envs: int,
         *,
-        signal: str = "acme/probe",
+        value: str = "acme/probe",
     ) -> None:
         super().__init__(dim, device, num_envs)
-        self.signal = signal
-        self.signal_views: list[SignalView] = []
+        self.value = value
+        self.value_views: list[ValueView] = []
         self.observations: list[torch.Tensor | None] = []
         self.used_commands: list[torch.Tensor | None] = []
 
-    def bind_signals(self, signals: SignalView) -> None:
-        self.signal_views.append(signals)
+    def bind_values(self, values: ValueView) -> None:
+        self.value_views.append(values)
 
     def reset(self, env_ids=None) -> torch.Tensor:
         self.cmd[self._resolve_ids(env_ids)] = 0.0
@@ -91,9 +91,9 @@ class ClosedLoopSampler(CommandSampler):
 
     def update(self, step_dt: float, cmd: torch.Tensor) -> torch.Tensor:
         del step_dt
-        if not self.signal_views:
-            raise RuntimeError("ClosedLoopSampler.update ran before bind_signals")
-        observed = self.signal_views[0].get(self.signal)
+        if not self.value_views:
+            raise RuntimeError("ClosedLoopValueSampler.update ran before bind_values")
+        observed = self.value_views[0].get(self.value)
         self.observations.append(None if observed is None else observed.detach().clone())
         self.used_commands.append(None if cmd is None else cmd.detach().clone())
         if observed is None:

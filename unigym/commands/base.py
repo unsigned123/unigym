@@ -13,7 +13,7 @@ from unigym.core.episode_result import EpisodeResultView
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.env.backends.base import EnvBackend
-    from unigym.signals import SignalView
+    from unigym.values import ValueView
 
 
 class CommandSampler(ABC):
@@ -23,7 +23,7 @@ class CommandSampler(ABC):
     the given envs; ``update`` is called once per policy step with the step
     dt and may resample envs whose timer expired.
 
-    Lifecycle hooks: :meth:`bind_env` and :meth:`bind_signals` run exactly
+    Lifecycle hooks: :meth:`bind_env` and :meth:`bind_values` run exactly
     once at the live-instance build seam (before any runner exists);
     :meth:`on_episode_end` runs at every due episode boundary, after the
     sinks are notified and before ``reset``.  All default to no-ops so
@@ -64,16 +64,15 @@ class CommandSampler(ABC):
         """
         return None
 
-    def bind_signals(self, signals: SignalView) -> None:
-        """Bind the run's read-only signal view once (default: no-op).
+    def bind_values(self, values: ValueView) -> None:
+        """Bind the run's live value store once (default: no-op).
 
         ``build_instance`` calls this exactly once per live run instance,
         immediately after :meth:`bind_env` and before any runner exists.
-        A sampler that consumes signals stores the view (for example
-        ``self.signals = signals``) and interprets names/dtypes itself;
-        core performs no signal-to-command mapping.  It is not replayed on
-        restore, so a restored sampler must not depend on having been
-        rebound.
+        A sampler that consumes values stores the read view (for example
+        ``self.values = values``) and interprets names/dtypes itself; core
+        performs no value-to-command mapping.  It is not replayed on restore,
+        so a restored sampler must not depend on having been rebound.
         """
         return None
 

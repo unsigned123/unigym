@@ -1,4 +1,4 @@
-"""Build wiring: the signal bus exists before watcher attach and is shared."""
+"""Build wiring: the value store exists before watcher attach and is shared."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from unigym.assets.asset_ref import AssetRef
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
-from unigym.signals import SignalBus
 from unigym.world import World
 
 TINY_ARM = Path(__file__).resolve().parents[2] / "_support" / "data" / "tiny_arm.xml"
@@ -77,21 +76,21 @@ def _run(tmp_path: Path) -> Run:
     )
 
 
-def test_watcher_engine_and_sampler_share_the_instance_bus(tmp_path):
-    """The bus predates watcher attach, so the engine carries the same bus."""
+def test_watcher_engine_and_sampler_share_the_instance_store(tmp_path):
+    """The build attaches watchers without a signal transport and binds values."""
     run = _run(tmp_path)
     try:
         instance = run.build(inspect=True)
 
-        assert isinstance(instance.signals, SignalBus)
+        assert not hasattr(instance, "signals")
         providers = {provider.name: provider for provider in instance.rewind_providers}
-        assert set(providers) >= {"signals", "watchers"}
+        assert "signals" not in providers
+        assert providers["values"] is instance.values
         watchers = providers["watchers"]
-        assert getattr(watchers, "signals") is instance.signals
-        assert providers["signals"] is instance.signals
+        assert getattr(watchers, "signals") is None
 
         sampler = instance.sampler
         assert isinstance(sampler, RecordingSampler)
-        assert sampler.signal_views == [instance.signals]
+        assert sampler.value_views == [instance.values]
     finally:
         run.close()

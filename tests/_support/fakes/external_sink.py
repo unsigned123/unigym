@@ -20,9 +20,10 @@ from unigym.evaluation import EnvView
 from unigym.runtime.bridge import RewindBoundary
 
 if TYPE_CHECKING:
+    from unigym.evaluation import EnvStepContext
     from unigym.run.sink import SinkContext
-    from unigym.signals import SignalPublisher
     from unigym.sink import Sink
+    from unigym.values import ValuePublisher
 
 
 class RecordingSink:
@@ -76,11 +77,16 @@ class ViewProbeSink:
         self.step_end_views: list[EnvView | None] = []
         self.step_view_scopes: list[tuple[int | None, int]] = []
         self.episode_end_view_scopes: list[tuple[int | None, int]] = []
+        self.step_contexts: list[EnvStepContext | None] = []
+        self.final_step_contexts: list[EnvStepContext | None] = []
+        self.step_end_contexts: list[EnvStepContext | None] = []
         self.rewinds: list[dict[str, object]] = []
 
     def on_step(self, t: int, bundle: dict[str, object]) -> None:
         del t
         self.step_bundles.append(bundle)
+        context = bundle.get("step")
+        self.step_contexts.append(context if context is not None else None)
         view = bundle.get("view")
         self.step_views.append(view if isinstance(view, EnvView) else None)
         if view is not None:
@@ -95,6 +101,8 @@ class ViewProbeSink:
     def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
         del env_ids
         self.episode_end_bundles.append(bundle)
+        context = bundle.get("final_step")
+        self.final_step_contexts.append(context if context is not None else None)
         view = bundle.get("view")
         self.episode_end_views.append(view if isinstance(view, EnvView) else None)
         if view is not None:
@@ -107,6 +115,8 @@ class ViewProbeSink:
     def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
         del t
         self.step_end_bundles.append(bundle)
+        context = bundle.get("step")
+        self.step_end_contexts.append(context if context is not None else None)
         view = bundle.get("view")
         self.step_end_views.append(view if isinstance(view, EnvView) else None)
 
@@ -542,33 +552,33 @@ def make_external_sink(ctx: SinkContext) -> Sink:
     return ExternalSink(target_episodes=target, label=label)
 
 
-class SignalPublishingSink:
-    """Stateful custom sink that publishes one level signal per tick.
+class ValuePublishingSink:
+    """Stateful custom sink that publishes one level value per tick.
 
-    It stores the publisher handed over by :class:`SinkContext` (never the read
-    face) and publishes ``(num_envs, 1)`` CPU value ``t + 1`` under
-    ``signal``.  The publication log is one row per ``on_step``.  The sink is
-    also its own namespaced rewind provider so the build seam can discover the
-    exact instance behind ``SinkContext.signals``; its state restores the
-    publication log, not the bus (the bus is a separate core provider).
+    It stores the write-only publisher handed over by :class:`SinkContext`
+    (never a read face) and publishes ``(num_envs, 1)`` CPU value ``t + 1``
+    under ``value``.  The publication log is one row per ``on_step``.  The sink
+    is also its own namespaced rewind provider so the build seam can discover
+    the exact instance behind ``SinkContext.values``; its state restores the
+    publication log, not the store (the store is a separate core provider).
     """
 
-    name = "acme.signals"
+    name = "acme.values"
 
     def __init__(
         self,
-        publisher: SignalPublisher,
+        publisher: ValuePublisher,
         num_envs: int,
         *,
-        signal: str = "acme/probe",
+        value: str = "acme/probe",
     ) -> None:
         if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
             raise ValueError(f"num_envs must be a positive int, got {num_envs!r}")
-        if not isinstance(signal, str) or not signal:
-            raise ValueError(f"signal must be a non-empty str, got {signal!r}")
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"value must be a non-empty str, got {value!r}")
         self.publisher = publisher
         self.num_envs = num_envs
-        self.signal = signal
+        self.value = value
         self.published: list[tuple[int, float]] = []
         self.step_calls = 0
 
@@ -577,7 +587,7 @@ class SignalPublishingSink:
         self.step_calls += 1
         value = float(t + 1)
         self.publisher.publish(
-            self.signal,
+            self.value,
             torch.full((self.num_envs, 1), value, dtype=torch.float32),
         )
         self.published.append((t, value))
@@ -607,15 +617,15 @@ class SignalPublishingSink:
         )
 
 
-def make_signal_publishing_sink(ctx: SinkContext) -> Sink:
-    """Build one :class:`SignalPublishingSink` from the public context.
+def make_value_publishing_sink(ctx: SinkContext) -> Sink:
+    """Build one :class:`ValuePublishingSink` from the public context.
 
     A closed-loop sink cannot work without the publisher, so an absent
-    ``ctx.signals`` fails fast instead of silently degrading.
+    ``ctx.values`` fails fast instead of silently degrading.
     """
-    if ctx.signals is None:
-        raise RuntimeError("SignalPublishingSink requires SinkContext.signals")
-    return SignalPublishingSink(ctx.signals, ctx.num_envs)
+    if ctx.values is None:
+        raise RuntimeError("ValuePublishingSink requires SinkContext.values")
+    return ValuePublishingSink(ctx.values, ctx.num_envs)
 
 
 class TerminalRequestSink:

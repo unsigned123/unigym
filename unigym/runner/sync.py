@@ -32,6 +32,7 @@ import operator
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from types import MappingProxyType
+from typing import cast
 
 import numpy as np
 import torch
@@ -42,7 +43,7 @@ from unigym.core.episode_termination import (
     Termination,
     TerminationSource,
 )
-from unigym.evaluation import EnvView, EvalContext
+from unigym.evaluation import EnvStepContext, EnvView, EvalContext
 from unigym.runner.base import StepResult
 from unigym.runtime.actions import (
     LEGAL_ACTION_KINDS,
@@ -52,6 +53,24 @@ from unigym.runtime.actions import (
     resolve_control_dt,
 )
 from unigym.runtime.bridge import RewindBoundary
+from unigym.values import StepValues, ValueStore, ValueView
+
+
+def _value_snapshot(store: ValueStore | None) -> ValueView:
+    """Return this tick's immutable value view, empty without a store.
+
+    ``ValueStore`` and ``StepValues`` both satisfy ``ValueView`` at runtime.
+    ``EnvStepContext`` re-validates the protocol at construction; the explicit
+    structural check here keeps the boundary honest before the static cast.
+    The cast only bridges the static ``Mapping.get`` overload set, which
+    pyright cannot match against the protocol's single read method.
+    """
+    snapshot = store.snapshot() if store is not None else StepValues({})
+    if not all(
+        callable(getattr(snapshot, member, None)) for member in ("get", "snapshot", "__contains__")
+    ):
+        raise TypeError(f"value snapshot must satisfy ValueView, got {type(snapshot).__name__}")
+    return cast(ValueView, snapshot)
 
 
 def _joint_target(
@@ -282,6 +301,11 @@ class SyncRunner:
             backend-declared prop groups).  When present, every tick exposes
             ``bundle["action_group_values"]`` for sinks/watchers/trace; it is
             consumer metadata, never an action identity or routing input.
+        values: optional run-scoped :class:`~unigym.values.ValueStore`.  Each
+            tick snapshots it into ``bundle["step"].values``; an episode-end
+            tick snapshots it again into ``bundle["final_step"].values`` after
+            ``on_step`` publications.  ``None`` yields an empty
+            :class:`~unigym.values.StepValues` and creates no store.
 
     Rewind seam (Round B B1): ``_tick`` is the
     loop counter as INSTANCE state.  The rewind controller sets it back to
@@ -331,6 +355,7 @@ class SyncRunner:
             adapter_joint_targets=_adapter_joint_targets(instance),
             action_groups=_instance_action_groups(instance),
             control_dt=_instance_control_dt(instance),
+            values=instance.values,
         )
 
     def __init__(
@@ -349,6 +374,7 @@ class SyncRunner:
         adapter_joint_targets: Mapping[tuple[str, str], str] | None = None,
         action_groups: Sequence[OrderedActionGroup] | None = None,
         control_dt: float | None = None,
+        values: ValueStore | None = None,
     ):
         self.cfg = cfg
         self.profile = profile
@@ -360,6 +386,7 @@ class SyncRunner:
         self.reset_on_termination = bool(reset_on_termination)
         self.reset_mask_fn = reset_mask_fn
         self.replay = replay
+        self.values = values
         self.auto_reset = bool(auto_reset)
         self.adapter_name = getattr(adapter, "_unigym_name", None) or type(adapter).__name__
         resolved_dt = control_dt if control_dt is not None else getattr(adapter, "control_dt", None)
@@ -793,6 +820,25 @@ class SyncRunner:
                 if self.control_dt is None
                 else step_index.to(torch.float32) * float(self.control_dt)
             )
+            reset_state = {
+                int(ei): {
+                    "reset_index": 0,
+                    "reset_valid": self._reset_valid[ei],
+                    "reset_reason": self._reset_reason[ei],
+                }
+                for ei in range(self._num_envs)
+            }
+            # the tick context is a boundary snapshot: sink publications during
+            # on_step are deliberately absent from it and present in final_step.
+            step_ctx = EnvStepContext(
+                view=view,
+                values=_value_snapshot(self.values),
+                t=t,
+                step_index=step_index,
+                time_s=time_s,
+                cmd=eff_cmd,
+                reset_state=reset_state,
+            )
             bundle = {
                 "t": t,
                 "raw": raw,
@@ -809,16 +855,10 @@ class SyncRunner:
                 "terminations": terminations,
                 "step_index": step_index,
                 "time_s": time_s,
-                "reset_state": {
-                    int(ei): {
-                        "reset_index": 0,
-                        "reset_valid": self._reset_valid[ei],
-                        "reset_reason": self._reset_reason[ei],
-                    }
-                    for ei in range(self._num_envs)
-                },
+                "reset_state": reset_state,
                 "run_identity": self.run_identity,
                 "view": view,
+                "step": step_ctx,
             }
             try:
                 self.sink.on_step(t, bundle)
@@ -880,6 +920,17 @@ class SyncRunner:
                 # the episode's START facts (reset sample/legality) ride the
                 # episode-end bundle; they were captured at this episode's reset.
                 bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
+                # final context: the post-on_step values include sink
+                # publications; it never feeds back into the due mask.
+                bundle["final_step"] = EnvStepContext(
+                    view=view,
+                    values=_value_snapshot(self.values),
+                    t=t,
+                    step_index=step_index,
+                    time_s=time_s,
+                    cmd=eff_cmd,
+                    reset_state=reset_state,
+                )
                 # record-before-reset: episode-end data side happens BEFORE
                 # the reset chain (sink flushes episodes/videos/counts here)
                 self.sink.on_episode_end(due, bundle)
@@ -899,6 +950,10 @@ class SyncRunner:
             view.close()
             if "view" in bundle:
                 bundle["view"] = None
+            if "step" in bundle:
+                bundle["step"] = None
+            if "final_step" in bundle:
+                bundle["final_step"] = None
 
         if due.numel() > 0 and self.auto_reset:
             env.reset_envs(due)
