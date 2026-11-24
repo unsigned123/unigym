@@ -8,6 +8,12 @@ helpers: :func:`resolve_sink_factory` imports a configured path once without
 calling it, and :func:`build_custom_sink` invokes the resolved factory with a
 :class:`SinkContext` and validates the returned sink's callback shape.
 
+A custom sink stays a four-callback :class:`unigym.sink.Sink`.  Optional
+capabilities (``on_rewind``, ``stop_when``, ``drain_terminations``) may be
+declared but add no required callback; a declared capability that is not
+callable fails at construction.  ``drain_terminations`` is the
+:class:`unigym.sink.TerminalSink` capability, not a fifth callback.
+
 The module stays import-light: it depends on the public sink protocol, the
 shared JSON typing alias and the config error type, plus the standard library.
 Construction-time types (``RunSpec``, ``RunIdentity``, ``OrderedActionGroup``)
@@ -46,7 +52,7 @@ _FACTORY_PATH = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A
 #: The four non-optional runner callbacks every custom sink must implement.
 _REQUIRED_CALLBACKS = ("on_step", "on_episode_end", "on_step_end", "on_run_end")
 #: Optional capabilities: absent is fine, present must be callable.
-_OPTIONAL_CALLBACKS = ("on_rewind", "stop_when")
+_OPTIONAL_CALLBACKS = ("on_rewind", "stop_when", "drain_terminations")
 #: A ``rewind_provider`` (or direct provider) payload-key + state callbacks.
 _PROVIDER_CALLBACKS = ("rewind_state", "apply_rewind_state")
 
@@ -166,9 +172,9 @@ def build_custom_sink(factory: SinkFactory, ctx: SinkContext) -> Sink:
     The factory receives the construction-time :class:`SinkContext` and owns
     building its sink.  The returned object is validated structurally: the four
     required callbacks must exist and be callable; ``on_rewind`` / ``stop_when``
-    are optional but must be callable when present; a declared
-    ``rewind_provider`` must be a callable supplier or an already valid
-    provider shape.  Validation never calls the callbacks.
+    / ``drain_terminations`` are optional capabilities but must be callable when
+    present; a declared ``rewind_provider`` must be a callable supplier or an
+    already valid provider shape.  Validation never calls the callbacks.
     """
     sink = factory(ctx)
     missing = [name for name in _REQUIRED_CALLBACKS if not callable(getattr(sink, name, None))]

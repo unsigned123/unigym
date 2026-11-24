@@ -8,12 +8,24 @@ bundle objects, so recording and scoring cannot diverge.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from unigym.core.episode_termination import Termination
+
 
 class FanOutSink:
     """Compose sinks behind one object satisfying the sink contract.
 
     ``on_run_end`` returns ``{sink_class_name: summary_dict}``; with the
     standard pair that is ``{"CollectSink": ..., "EvaluationSession": ...}``.
+    Two children of the same class collide on that key and fail rather than
+    silently overwriting.
+
+    ``drain_terminations`` merges the children that expose the terminal
+    capability.  The method is always present, so its presence alone does not
+    mean the composite has a pending terminal.
     """
 
     def __init__(self, *sinks):
@@ -38,7 +50,44 @@ class FanOutSink:
             sink.on_step_end(t, bundle)
 
     def on_run_end(self) -> dict:
-        return {type(sink).__name__: sink.on_run_end() for sink in self.sinks}
+        summaries: dict = {}
+        sources: dict[str, str] = {}
+        for index, sink in enumerate(self.sinks):
+            name = type(sink).__name__
+            source = f"child {index} ({name})"
+            if name in summaries:
+                raise ValueError(
+                    f"FanOutSink.on_run_end: duplicate summary key {name!r} from "
+                    f"{sources[name]} and {source}"
+                )
+            summaries[name] = sink.on_run_end()
+            sources[name] = source
+        return summaries
+
+    def drain_terminations(self) -> dict[int, Termination]:
+        """Merge the per-env terminal facts of every child that exposes them."""
+        merged: dict[int, Termination] = {}
+        sources: dict[int, str] = {}
+        for index, sink in enumerate(self.sinks):
+            fn = getattr(sink, "drain_terminations", None)
+            if not callable(fn):
+                continue
+            drained = fn()
+            source = f"child {index} ({type(sink).__name__})"
+            if not isinstance(drained, Mapping):
+                raise TypeError(
+                    f"FanOutSink.drain_terminations: {source} returned "
+                    f"{type(drained).__name__}, expected a Mapping"
+                )
+            for env_id, termination in drained.items():
+                if env_id in merged:
+                    raise ValueError(
+                        f"FanOutSink.drain_terminations: duplicate env id {env_id!r} "
+                        f"from {sources[env_id]} and {source}"
+                    )
+                merged[env_id] = termination
+                sources[env_id] = source
+        return merged
 
     def stop_when(self) -> bool:
         """OR every child that declares ``stop_when``; read-only and cheap.

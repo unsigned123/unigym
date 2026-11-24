@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from unigym.sink import RewindAwareSink, Sink, StoppingSink
+from unigym.sink import RewindAwareSink, Sink, StoppingSink, TerminalSink
 
 from .base import Runner, StepResult
 from .external import ExternalRunner
@@ -74,5 +74,6 @@ __all__ = [
     "StepResult",
     "StoppingSink",
     "SyncRunner",
+    "TerminalSink",
     "make_runner",
 ]

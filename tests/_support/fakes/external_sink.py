@@ -209,6 +209,54 @@ class NonCallableRewindSink:
         return {}
 
 
+class TerminalDrainSink:
+    """Four-callback sink exposing ``drain_terminations`` with a fixed payload.
+
+    ``payload`` is returned verbatim on every drain, so a test can supply a
+    mapping, ``None`` or a non-mapping and prove the fan-out boundary.  A real
+    terminal sink is one-shot; this double only records how often it was
+    drained.
+    """
+
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+        self.drain_calls = 0
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {"sink": type(self).__name__}
+
+    def drain_terminations(self) -> object:
+        self.drain_calls += 1
+        return self.payload
+
+
+class NonCallableDrainSink:
+    """Four-callback sink whose declared ``drain_terminations`` is not callable."""
+
+    drain_terminations: object = None
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        del env_ids, bundle
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        del t, bundle
+
+    def on_run_end(self) -> dict[str, object]:
+        return {}
+
+
 class NonCallableMetricsSink:
     """Four-callback sink with one non-callable metrics-feed member."""
 

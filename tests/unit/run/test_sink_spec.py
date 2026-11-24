@@ -24,6 +24,7 @@ from tests._support.fakes.external_sink import (
     DirectProviderSink,
     IncompleteRewindProvider,
     NamelessRewindProvider,
+    NonCallableDrainSink,
     NonCallableRewindSink,
     NonCallableStopSink,
     PartialSink,
@@ -457,8 +458,12 @@ def test_build_custom_sink_reports_missing_required_callbacks() -> None:
 
 @pytest.mark.parametrize(
     ("sink", "field"),
-    [(NonCallableStopSink(), "stop_when"), (NonCallableRewindSink(), "on_rewind")],
-    ids=["stop-when", "on-rewind"],
+    [
+        (NonCallableStopSink(), "stop_when"),
+        (NonCallableRewindSink(), "on_rewind"),
+        (NonCallableDrainSink(), "drain_terminations"),
+    ],
+    ids=["stop-when", "on-rewind", "drain-terminations"],
 )
 def test_build_custom_sink_requires_callable_optional_capabilities(sink, field) -> None:
     def factory(ctx: SinkContext) -> object:

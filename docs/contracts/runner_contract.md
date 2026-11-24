@@ -71,10 +71,20 @@ A sink may additionally implement an optional capability protocol:
 - `unigym.sink.StoppingSink` — `stop_when() -> bool` declares a sink-owned
   early stop decision.  `SyncRunner.run` polls it at the top of every step;
   stopping the run remains the runner's job.
+- `unigym.sink.TerminalSink` — `drain_terminations() -> Mapping[int,
+  Termination]` declares one-shot per-env terminal facts.  A terminal sink is
+  still a four-callback `Sink`; the drain is an optional capability, not a
+  fifth required callback.  `Termination` is
+  `unigym.core.episode_termination.Termination`.
 
 These protocols describe optional capabilities only; publishing them adds no
 new runner control flow.  `FanOutSink` composes sinks in construction order,
-forwards every callback to each child and structurally satisfies `Sink`.
+forwards every callback to each child and structurally satisfies `Sink`.  It
+always exposes `drain_terminations` and merges the children that declare the
+capability: a child that returns `None` or a non-mapping is a `TypeError`, and
+the same env id returned by two children is a `ValueError` naming both
+sources.  `on_run_end` keys summaries by sink class name; two children of the
+same class collide and fail instead of silently overwriting.
 
 Lifecycle:
 
@@ -110,8 +120,8 @@ metadata only: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
 live env, writer, logger, bridge or signal bus; a sink receives runner-owned
 resources through the callback bundle, never at construction.  A factory
 result missing a required callback, declaring a non-callable optional callback
-or declaring an invalid rewind provider fails with a teaching `TypeError`
-before the run starts.
+(`on_rewind`, `stop_when`, `drain_terminations`) or declaring an invalid rewind
+provider fails with a teaching `TypeError` before the run starts.
 
 Mode composition is fixed:
 
