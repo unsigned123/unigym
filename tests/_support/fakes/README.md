@@ -7,12 +7,12 @@ objects. This directory is not collected and contains no tests.
 
 | Module | Protocol / boundary | Reset semantics |
 | --- | --- | --- |
-| `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row |
+| `backend.py` | `unigym.env.backends.base.EnvBackend` — the simulator step/reset boundary | resets only the selected rows to spawn state (`q0`, zero `prev_action`, zero episode clock) and increments only their `episode_id`; `reset_all()` selects every row; `due_rows` reports a configured episode-clock due mask without resetting during `step` |
 | `closing.py` | close-only manager/prop boundary for lifecycle fault injection | stateful counters; `RecordingClose` counts successful close calls, `FailingClose` raises on every close call |
 | `command_sampler.py` | `unigym.commands.base.CommandSampler` — the custom sampler factory seam | `RecordingSampler` stores its factory parameters, records `bind_env` / `on_episode_end` calls verbatim and declares no rewind capability |
 | `runner.py` | the single-tick runner boundary (`step`/`tick`/`reset`/`close`/`ticks_done`) | `FakeRunner` owns one `FakeBackend`; `reset` selects the rows and never advances ticks, `reset_t` overrides only the result tick, `last_actions` records the lowered action mapping of the last tick, `terminated_rows` / `due_rows` set the step result's `(N,)` termination mask and episode-clock due ids (reported only, never reset during `step`), `close` is idempotent, `fail_next_tick` raises once after advancing the clock |
 | `benchmark_env.py` | the live evaluation-context env/query boundary (`num_envs` / `device` / backend label / articulations / lazy `query`) | `FakeBenchmarkEnv` counts query accesses; `FakeBenchmarkQuery` exposes the read-only protocol shape, records the env selection of `state.root_pose`, and raises from `scratch()` instead of inventing a world; no reset or physics state |
-| `external_sink.py` | public `unigym.sink.Sink` plus the `SinkSpec` factory/context boundary (four callbacks, optional `stop_when` / `on_rewind` / terminal `drain_terminations`, rewind-provider shape, bridge metrics feed); `ExternalSink` / `make_external_sink` are the stateful real-run double and its importable factory; `ViewProbeSink` records the per-tick bundle and can inject a callback/`RewindBoundary` failure to prove boundary-view lifetime; `TerminalDrainSink` returns a fixed drain payload and `NonCallableDrainSink` declares a non-callable terminal capability | construct one fresh instance per test; `RecordingSink.calls`, `StopPollingSink.polls`, `ProviderSink.supplier_calls`, `TerminalDrainSink.drain_calls`, `ViewProbeSink` bundles and `ExternalSink` counters are the only state; no reset method and no shared state |
+| `external_sink.py` | public `unigym.sink.Sink` plus the `SinkSpec` factory/context boundary (four callbacks, optional `stop_when` / `on_rewind` / terminal `drain_terminations`, rewind-provider shape, bridge metrics feed); `ExternalSink` / `make_external_sink` are the stateful real-run double and its importable factory; `ViewProbeSink` records the per-tick bundle and can inject a callback/`RewindBoundary` failure to prove boundary-view lifetime; `TerminalDrainSink` returns a fixed drain payload, `ScriptedTerminalSink` drains one queued payload per tick and records the episode-end stream, `TerminalRequestSink` / `make_terminal_request_sink` request one real-run terminal on a configured tick and record per-tick episode facts, and `NonCallableDrainSink` declares a non-callable terminal capability | construct one fresh instance per test; `RecordingSink.calls`, `StopPollingSink.polls`, `ProviderSink.supplier_calls`, `TerminalDrainSink.drain_calls`, `ScriptedTerminalSink` queues/counters/bundles, `TerminalRequestSink` counters/lists, `ViewProbeSink` bundles and `ExternalSink` counters are the only state; no reset method and no shared state |
 | `step_clock.py` | the bridge/metrics step-clock capability (`step_dt` plus optional `decimation`) | stateless; `StepClockEnv` carries only the configured period/decimation, never physics or observation state |
 
 Every Python module in this directory (except the package marker) must appear
@@ -55,8 +55,8 @@ Reset semantics:
 Limitations (deliberate, no production seam is added for them):
 
 - no physics, integration, contacts, feet or termination logic;
-- no automatic reset (`reset_env_ids` is always empty, `should_reset` is
-  always `False`);
+- no automatic reset (`reset_env_ids` is empty unless `due_rows` is configured;
+  `step` never resets a due row itself);
 - no cameras, depth, props, events, recorder, contacts, snapshots or actuator
   seam; no optional capability is advertised or silently faked;
 - one articulation, CPU only, fixed identity joint order (the joint list is

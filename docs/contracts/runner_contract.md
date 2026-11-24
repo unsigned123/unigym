@@ -6,11 +6,12 @@ The `SyncRunner` callback stream is the single source of episode facts.  The
 ```text
 t             policy tick counter
 record        per-env backend record (canonical keys + contact facts)
-terminated    (N,) bool, live termination group
+terminated    (N,) bool, live term-group mask (never sink terminals)
 alive         (N,) bool, not terminated and finite policy observation
 term_metrics  per-group/total termination firing fractions
 reset_env_ids (N,) due ids, backend episode clock
 terminations  {env_id: EpisodeTermination}   # term group + core horizon
+              plus the sink drain merged on this tick (see below)
 step_index    canonical tick (t+1)
 time_s        canonical time ((t+1) * policy_dt)
 run_identity  RunIdentity (benchmark runs)
@@ -86,19 +87,52 @@ the same env id returned by two children is a `ValueError` naming both
 sources.  `on_run_end` keys summaries by sink class name; two children of the
 same class collide and fail instead of silently overwriting.
 
+After a successful `on_step`, the runner calls `drain_terminations()` exactly
+once when the sink declares it.  The drain is a one-shot per-env episode-end
+request; when `on_step` raises (including `RewindBoundary`) the runner never
+drains, never calls `on_episode_end` and never resets.  The returned
+`Mapping[int, Termination]` is validated before any runner state changes:
+
+- keys are integer env ids in `[0, num_envs)`; `bool` keys are rejected;
+- values are `unigym.core.episode_termination.Termination`, not an
+  `EpisodeTermination` or a mapping;
+- `source` is `TerminationSource.CUSTOM` and `code` starts with `custom.`;
+- a missing `step_index` is stamped with the episode-local step (frame 0 is
+  tick 1), never the global run tick; a provided value must equal it;
+- a missing `time_s` is stamped with the tick's float32
+  `episode_step * policy_dt` (the same value as `bundle["time_s"]`) when the
+  period is known; a provided value must agree with that canonical value within
+  float32 tolerance.
+
+A malformed return (not a `Mapping`, a bad id, a non-`Termination`, a
+non-custom source/code or a mismatched stamp) fails with a teaching error
+before the bundle or due mask is mutated.
+
 Lifecycle:
 
 1. `on_step(t, bundle)` — pre-reset data side.  Timeline columns are
    `step_index = t+1`, `time_s = (t+1) * policy_dt`.
-2. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `reset_facts`
-   describe the episode's START (captured at its reset, tick 0); the
-   termination facts are the final tick's.
-3. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
+2. `drain_terminations()` — only after `on_step` returns.  The validated sink
+   facts merge into `bundle["terminations"]` with
+   `EpisodeTermination.from_terminations`, so core facts are preserved and the
+   core outcome precedence still chooses the primary.  The sink env ids union
+   into the due mask before reset-policy evaluation.  When `auto_reset` is
+   false and the drain is non-empty, the tick raises a teaching `RuntimeError`
+   before any due mutation: a sink terminal end requires the reset chain.
+3. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `due` is
+   `unique(core episode clock ∪ sink terminal ids ∪ reset policy)`;
+   `reset_facts` describe the episode's START (captured at its reset, tick 0);
+   the termination facts are the final tick's.
+4. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
    the sinks (they publish the views) and BEFORE `sampler.reset`.  Runs even
    when `auto_reset` is false.
-4. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
-5. The runner captures the NEXT episode's pre-policy-step sample from
+5. reset chain (`env.reset_envs` / `adapter.on_reset` / `sampler.reset`).
+6. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
+
+`StepResult.reset_env_ids` is the final due set (core clock ∪ sink terminals ∪
+reset policy).  `StepResult.terminated` remains the core term-group mask and
+never includes sink terminal env ids.
 
 ## Custom sinks
 

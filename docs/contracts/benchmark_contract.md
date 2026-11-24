@@ -50,6 +50,31 @@ other runtime need (a pack asset, scene preset or external adapter) still
 applies.  Core does not validate the custom sink's task names, scoring or report
 schema.
 
+## Sink terminal requests
+
+A custom sink may implement `unigym.sink.TerminalSink` and request per-env
+episode ends through `drain_terminations() -> Mapping[int, Termination]`.  The
+runner drains once after `on_step` returns and treats every fact as an
+episode-end request: the env joins the due mask, `on_episode_end` runs with the
+normal bundle, and the reset chain follows when `auto_reset` is true.
+
+A sink terminal is **not** a core termination-group hit.  The
+`TerminationGroup` never sees it, `bundle["terminated"]` remains the core
+term-group mask, and `StepResult.terminated` is unchanged.  The sink fact is
+merged into `bundle["terminations"]` with
+`EpisodeTermination.from_terminations`, so core facts are preserved and the
+core outcome precedence still chooses the primary.  `StepResult.reset_env_ids`
+is the final due set (core episode clock plus sink terminal ids plus any reset
+policy).
+
+Each sink terminal uses `TerminationSource.CUSTOM` and a `custom.<name>` code;
+a missing `step_index` / `time_s` is stamped with the episode-local value (the
+tick's own `bundle["time_s"]`), never a global run tick.  Invalid ids, values,
+provenance, codes or stamps are rejected before the bundle or due mask is
+mutated.  With `auto_reset: false`, a non-empty drain raises a teaching
+`RuntimeError` before due mutation: a terminal end without the reset chain is
+inconsistent.
+
 ## Timeline
 
 Canonical integer tick axis:

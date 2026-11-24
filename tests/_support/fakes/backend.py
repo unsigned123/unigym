@@ -36,6 +36,8 @@ class FakeBackend(EnvBackend):
     second.  There is no physics, contact, camera, prop or event model.
     ``joint_names`` defaults to the one-joint contract fixture; a caller that
     needs a multi-joint action group may declare more names (identity order).
+    ``due_rows`` reports a non-empty episode-clock due mask on every step; it
+    never resets a row inside ``step``.
     """
 
     def __init__(
@@ -43,6 +45,8 @@ class FakeBackend(EnvBackend):
         num_envs: int = 1,
         device: str = "cpu",
         joint_names: Sequence[str] = (JOINT_NAME,),
+        *,
+        due_rows: Sequence[int] = (),
     ) -> None:
         if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
             raise ValueError(f"num_envs must be a positive int, got {num_envs!r}")
@@ -54,10 +58,18 @@ class FakeBackend(EnvBackend):
             raise ValueError(f"joint_names must be non-empty strings, got {joint_names!r}")
         if len(set(names)) != len(names):
             raise ValueError(f"joint_names must be unique, got {joint_names!r}")
+        due = tuple(due_rows)
+        if any(isinstance(row, bool) or not isinstance(row, int) for row in due):
+            raise ValueError(f"due_rows must be ints, got {due!r}")
+        if any(row < 0 or row >= num_envs for row in due):
+            raise ValueError(f"due_rows must be in [0, {num_envs}), got {due!r}")
+        if len(set(due)) != len(due):
+            raise ValueError(f"due_rows must be unique, got {due!r}")
 
         self.num_envs = num_envs
         self.device = "cpu"
         self.joint_names = names
+        self.due_rows = due
         self._closed = False
         self._joint_pos = torch.zeros(num_envs, len(names), dtype=torch.float32, device=self.device)
         self._prev_action = torch.zeros_like(self._joint_pos)
@@ -139,12 +151,13 @@ class FakeBackend(EnvBackend):
             self._command = cmd.to(device=self.device).clone()
         self._time_in_episode += 1.0
         self._refresh_obs(raw_action, cmd)
+        due = torch.tensor(self.due_rows, dtype=torch.int64, device=self.device)
         step = EnvStep(
             t=int(self._t),
             obs=self.obs.snapshot(),
             record=self.record(),
-            reset_env_ids=torch.empty(0, dtype=torch.int64, device=self.device),
-            should_reset=False,
+            reset_env_ids=due,
+            should_reset=bool(due.numel()),
         )
         self._t += 1
         return step
