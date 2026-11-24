@@ -35,11 +35,8 @@ from unigym.actuators.ir import (
 )
 from unigym.backends.registry import BackendInfo, backend_info, select_backend
 from unigym.benchmarks import build_tasks
-from unigym.benchmarks.episode import (
-    EpisodeLimits,
-    RobotIdentity,
-    RunIdentity,
-)
+from unigym.benchmarks.episode import EpisodeLimits
+from unigym.core.identity import RobotIdentity, RunIdentity
 from unigym.env.backends import build_env_backend
 from unigym.logger import DataCollectLogger
 from unigym.recorder import build_recorder

@@ -29,9 +29,9 @@ from unigym.core.episode_termination import (
     outcome_counts,
     source_counts,
 )
+from unigym.core.identity import RunIdentity
 
 from .base import EpisodeData, EpisodeResult, Task
-from .episode import RunIdentity
 
 __all__ = [
     "EpisodeEvaluation",

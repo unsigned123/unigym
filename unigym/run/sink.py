@@ -28,7 +28,7 @@ from unigym.errors import ConfigError
 from unigym.sink import Sink
 
 if TYPE_CHECKING:
-    from unigym.benchmarks.episode import RunIdentity
+    from unigym.core.identity import RunIdentity
     from unigym.run.spec import RunSpec
     from unigym.runtime.actions import OrderedActionGroup
 
