@@ -27,6 +27,10 @@ Process documents:
   including rewind fan-out and the `benchmark` rewind provider.
 - [Command sampler contract](contracts/command_sampler_contract.md) - sampler
   lifecycle hooks, custom factory authoring and rewind participation.
+- [Value store contract](contracts/value_store_contract.md) - the run-scoped
+  `ValueStore`, `ValueView`/`ValuePublisher`/`StepValues` boundary, tensor and
+  JSON transport, writer ownership, checkpoint payload and observation
+  publication.
 - [Report templates](templates/) - design brief, completion, review and blocked
   reports.
 

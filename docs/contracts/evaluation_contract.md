@@ -32,6 +32,35 @@ control=None)`, `joint_pos_limits(name)`, `controls`, `with_record(record)`,
 snapshot and episode payload are reached through `ctx.env` and the existing
 scoring argument; they are not duplicated on the context.
 
+### 1.1 Step boundary context (`EnvStepContext`)
+
+```text
+EnvStepContext(view, values, t, step_index, time_s, cmd, reset_state)
+```
+
+`EnvStepContext` is core's read-only step boundary data object, not a second
+`EvalContext`.  It owns no events, terminals, watcher state or benchmark/pack
+vocabulary.
+
+- `view` is the runner-owned `EnvView`, borrowed by the context.  Constructing
+  the context never closes it; the runner closes it after `on_episode_end`.
+- `values` is an immutable `unigym.values.StepValues` snapshot, never the live
+  `ValueStore`.  Retaining the context never aliases mutable store state, and
+  every read returns an isolated copy.
+- `step_index`, `time_s`, `cmd` and `reset_state` are validated per-env boundary
+  facts; `reset_state` is a read-only JSON mapping.
+- `bundle["step"]` carries the pre-`on_step` snapshot; `bundle["final_step"]`
+  (due tick only) carries the post-`on_step` snapshot.  `bundle["step"]` is set
+  to `None` at `on_step_end`, and a built `final_step` is cleared there too; a
+  rewind never builds a final context.
+- Watchers read `bundle["step"]` during the tick and retain only a
+  `WatchDebugSnapshot` between ticks: private copies of the step view's record,
+  non-camera observations and the immutable values snapshot, wrapped in a
+  synthetic debug `EnvView`.  The debug snapshot intentionally carries no
+  articulation runtime facts and no query.
+- The context publishes nothing: it has no value publisher and no watcher
+  value transport.
+
 ## 2. Lifetime
 
 - The owner creates exactly one view/context per callback boundary and closes
@@ -191,7 +220,8 @@ The boundaries are:
   second view and never closes the runner view.  `WatchContext.record`/`obs`/
   `num_envs` read that step view during the tick and the piecewise debug
   snapshot between ticks; the expression namespace exposes `view`/`values` but
-  no raw `env`.  The step bundle carries no live env.  Views and debug
+  no raw `env`.  The step bundle carries no live env.  Watchers publish no
+  values and core transports no watcher-produced value.  Views and debug
   snapshots are not checkpointed; the watcher rewind payload is unchanged.
 
 Evaluation order is contract for the consumers that adopt it, not a convention

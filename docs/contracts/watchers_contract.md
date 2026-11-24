@@ -5,8 +5,8 @@
 
 This record defines the watcher evaluation lifecycle and the read-only values a
 watcher can observe.  Watchers are debug/instrumentation only: they publish no
-signals and Core transports no watcher-produced values.  Transport rules for
-the run-scoped value store live in the values/runner contracts; this record only
+values and Core transports no watcher-produced value.  Transport rules for the
+run-scoped value store live in `value_store_contract.md`; this record only
 states how watchers read them.
 
 ## `WatchResult`
@@ -21,9 +21,9 @@ class WatchResult:
     actions: tuple = ()
 ```
 
-- there is no `signals` field (and no value payload);
+- there is no value-payload field (the retired `signals` key is absent);
 - `as_dict()` (event/dry-run logs) emits exactly `fired`, `level`, `message`,
-  `data` and `actions`; it never emits a `signals` key;
+  `data` and `actions`; it never emits a value or signal key;
 - a watcher result cannot publish, mutate or own a run value.
 
 ## Evaluation context
@@ -101,7 +101,7 @@ facts, but it is not an env escape.
   is reverted by a rewind;
 - views and debug snapshots are boundary handles, not checkpoint state; they
   are not part of the watcher payload;
-- the watcher engine neither owns nor restores any signal transport.
+- the watcher engine neither owns nor restores any value transport.
 
 ## Stateless callable limitation
 
@@ -141,8 +141,8 @@ conditions in `unigym.conditions` while the watcher template keeps ownership of
 
 ## Out of scope
 
-- template/expression value or signal authoring;
+- template/expression value authoring;
 - per-env vectorized edge/cooldown state;
 - core phase/event/TaskRuntime types;
 - benchmark online triggers;
-- `SIGNAL` actions or any command write.
+- value-writing actions or any command write.

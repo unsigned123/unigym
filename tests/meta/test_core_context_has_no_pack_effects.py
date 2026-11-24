@@ -14,6 +14,7 @@ def test_evaluation_import_has_no_benchmark_or_pack_effects() -> None:
     code = (
         "import sys\n"
         "import unigym.evaluation\n"
+        "import unigym.evaluation.step\n"
         "bench = sorted(m for m in sys.modules if m == 'unigym.benchmarks' "
         "or m.startswith('unigym.benchmarks.'))\n"
         "assert not bench, bench\n"

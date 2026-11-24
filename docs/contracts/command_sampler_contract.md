@@ -19,7 +19,7 @@ class CommandSampler(ABC):
     def reset(self, env_ids=None) -> torch.Tensor: ...
     def update(self, step_dt: float, cmd: torch.Tensor) -> torch.Tensor: ...
     def bind_env(self, env: EnvBackend) -> None: ...
-    def bind_signals(self, signals: SignalView) -> None: ...
+    def bind_values(self, values: ValueView) -> None: ...
     def on_episode_end(self, env_ids, results) -> None: ...
     def rewind_state(self) -> dict[str, JsonValue]: ...
     def apply_rewind_state(self, state: dict[str, JsonValue]) -> None: ...
@@ -35,13 +35,12 @@ class CommandSampler(ABC):
   `run.gym()` reusing the cached `RunInstance` cannot rebind.  It is never
   serialized.  The env is a read-only view (`env.obs`, `env.num_envs`,
   `env.device`).
-- `bind_signals(signals)` is called exactly once immediately after
-  `bind_env`, at the same build seam and before any runner exists.  The
-  argument is the run's read-only `SignalView`
-  (`docs/contracts/signal_bus_contract.md`).  The default is a no-op; a
-  sampler that consumes signals stores the view and interprets names and
-  dtypes itself.  Core never maps a signal to a command.  It is never
-  serialized or replayed on restore.
+- `bind_values(values)` is called exactly once immediately after `bind_env`, at
+  the same build seam and before any runner exists.  The argument is the run's
+  live read-only `ValueView` (`docs/contracts/value_store_contract.md`).  The
+  default is a no-op; a sampler that consumes values stores the view and
+  interprets names and dtypes itself.  Core never maps a value to a command.
+  It is never serialized or replayed on restore.
 - `on_episode_end(env_ids, results)` is called at every due episode boundary,
   after `sink.on_episode_end` and before `sampler.reset`, so prior-episode
   results can choose the next episode's command.  It also runs when
@@ -88,24 +87,28 @@ command:
 - a target that is not callable, or a return value that is not a
   `CommandSampler`, fails at build with a teaching error.
 
-## Signals
+## Values
 
-A sampler may read the run's generic signal channel through the bound
-`SignalView` (`signals.get(name)` / `signals.snapshot()`).  Core owns transport
-only: names, dtypes, shapes and meaning belong to the user.  There is no
-automatic signal-to-command mapping, and a sampler that keeps state derived
-from signals must include that state in its own `rewind_state()`.
+A sampler may read the run's managed values through the bound live `ValueView`
+(`values.get(name)` / `values.snapshot()`).  Core owns transport only: names,
+dtypes, shapes and meaning belong to the user.  There is no automatic
+value-to-command mapping, and a sampler that keeps state derived from values
+must include that state in its own `rewind_state()`.
 
-## Signal timing
+Selected observation values are ordinary managed values published by the build
+under `obs/<key>` (owner `"observation"`); a sampler reads them through the same
+view.  The selected keys come from `observations.values`; cameras and depth are
+never published.
+
+## Value timing
 
 The runner order is `env.step(t) -> sampler.update(t) -> sink.on_step(t)`.  A
 custom sink publishes after tick `t`'s physics and observation snapshot, so the
 sampler's first read of that value is `update(t+1)`.  Watchers are debug-only
-and publish no signal values.  The command returned by `update(t+1)` is written
-to `obs.command` at `t+1` and is
-first used by `env.step(t+2)`: in-episode closed loop has two policy-tick
-latency from the observed view to the acting command.  This is the fixed
-sampler placement; a sink cannot shorten it from its callback.
+and publish no values.  The command returned by `update(t+1)` is written to
+`obs.command` at `t+1` and is first used by `env.step(t+2)`: in-episode closed
+loop has two policy-tick latency from the observed view to the acting command.
+This is the fixed sampler placement; a sink cannot shorten it from its callback.
 
 ## Rewind
 
@@ -123,8 +126,8 @@ The rewind gate accepts a sampler only when it declares `rewind_inert = True`
   objects or live tensors;
 - `bind_env` is not replayed on restore: a restored sampler must not depend on
   having been rebound.
-- `bind_signals` is not replayed on restore either; signal values themselves
-  ride the `SignalBus` rewind provider.
+- `bind_values` is not replayed on restore either; the values themselves ride
+  the `ValueStore` `"values"` rewind provider.
 
 Benchmark feedback the sampler relies on must be folded into its own state in
 `on_episode_end`; the runner does not snapshot `episode_results` separately.

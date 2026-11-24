@@ -25,6 +25,12 @@ episode_results {env_id: (EpisodeResultView, ...)}
               episode; per-env, task declaration order, read-only
 view          the tick's one read-only boundary EnvView; valid at on_step /
               on_episode_end, None at on_step_end
+step          EnvStepContext for this tick: the borrowed view plus the
+              pre-on_step value snapshot; valid at on_step / on_episode_end,
+              None at on_step_end
+final_step    EnvStepContext for a due episode-end tick: same view plus the
+              post-on_step value snapshot (sink publications included); built
+              only on a due tick, never on rewind, None at on_step_end
 ```
 
 A custom-sink benchmark/both run replaces the built-in `EvaluationSession`, so
@@ -60,6 +66,29 @@ exception, sink exception, `on_episode_end` exception, reset-mask exception,
 reset-chain failure and `RewindBoundary`.  A termination-check exception closes
 the view and invokes no sink callback.  A rewind closes the view first and the
 abandoned branch runs no `on_episode_end`, reset chain or `on_step_end`.
+
+## Step value contexts
+
+Each tick builds an `unigym.evaluation.EnvStepContext` (`bundle["step"]`) from
+the runner-owned boundary view and an immutable `StepValues` snapshot of the
+run's `ValueStore` taken **before** `sink.on_step`.  On a due episode-end tick,
+after `on_step` returns (and after any sink publications) and before
+`on_episode_end`, the runner builds a second context as `bundle["final_step"]`
+with a fresh post-`on_step` snapshot.  The timing is fixed:
+
+- `step.values` is the pre-`on_step` snapshot; sink publications during
+  `on_step` are deliberately absent from it;
+- `final_step.values` is the post-`on_step` snapshot and includes sink
+  publications;
+- `final_step` exists only on a due tick (`reset_env_ids` non-empty); a
+  non-due tick has no `final_step` key;
+- a rewind abandons the branch before the due block, so a rewind tick never
+  builds `final_step`;
+- the runner closes the boundary view, then sets `bundle["view"]`,
+  `bundle["step"]` and (when present) `bundle["final_step"]` to `None` before
+  the reset chain and `on_step_end`;
+- the watcher engine reads exactly `bundle["step"]` during the tick and retains
+  only its immutable debug snapshot between ticks.
 
 ## Sink protocol
 
@@ -161,29 +190,30 @@ A string factory is `module:callable`; a callable is API-only.  The factory is
 resolved before env construction and called exactly once as
 `factory(ctx: SinkContext) -> Sink`.  `SinkContext` carries construction
 metadata: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
-`action_groups`, `run_identity`, `options` and the run's publish-only `signals`
+`action_groups`, `run_identity`, `options` and the run's write-only `values`
 face.  It deliberately contains no live env, writer, logger or bridge; a sink
 receives runner-owned resources through the callback bundle, never at
-construction.  `signals` is a `unigym.signals.SignalPublisher` (never the read
+construction.  `values` is a `unigym.values.ValuePublisher` (never the read
 view); `None` means the build provided no publisher, so a sink that needs closed
 loop must fail fast rather than fall back.  A factory result missing a required
 callback, declaring a non-callable optional callback (`on_rewind`, `stop_when`,
 `drain_terminations`) or declaring an invalid rewind provider fails with a
 teaching `TypeError` before the run starts.
 
-### Sink signal publication and closed-loop latency
+### Sink value publication and closed-loop latency
 
-A custom sink stores `ctx.signals` and publishes level values from `on_step`:
+A custom sink stores `ctx.values` and publishes level values from `on_step`:
 
 ```python
 def on_step(self, t: int, bundle) -> None:
-    self.signals.publish("acme/probe", value)  # (num_envs, ...) tensor
+    self.values.publish("acme/probe", value)  # (num_envs, ...) tensor or JSON
 ```
 
-Transport rules are exactly `signal_bus_contract.md` (non-empty name, leading
-dimension `num_envs`, bus device, detached/cloned).  Names are namespaced by the
-producer; there is no registry and the last publish wins.  Watchers are
-debug-only, publish no signal values and never overwrite a sink value.
+Transport rules are exactly `value_store_contract.md` (non-empty name, dense
+tensor with leading dimension `num_envs` or JSON-safe tree, store device,
+detached/deep-copied, first-writer-wins ownership).  Names are namespaced by the
+producer; there is no registry and the last publish by the same owner wins.
+Watchers are debug-only, publish no values and never overwrite a sink value.
 
 The runner order is fixed and unchanged:
 
@@ -312,20 +342,20 @@ still receives the mark exactly once.  A tick-contract failure disables the task
 for the run; that disabled set is process truth and a rewind never re-enables
 it.
 
-`build_instance` creates the run's one `SignalBus` **before** `_build_sinks`
-and before `_build_bridge_and_wiring`.  `_build_sinks` hands that same object to
-`SinkContext.signals`, and the run build stores it as `RunInstance.signals`;
-`sampler.bind_env(env)` and `sampler.bind_signals(signals)` run at the
-live-instance construction seam, before any runner exists.  `SyncRunner` never
-binds, so multiple runners over one cached `RunInstance` cannot rebind.  The bus
-is stored as `RunInstance.signals` and joins `rewind_providers` as the
-`"signals"` provider exactly once; a custom sink must not expose the bus as a
-second provider.  Watchers are debug-only: they receive no signal bus and the
-watcher engine joins as `"watchers"` for specs, trigger state and template
-windows only.  The command-sampler lifecycle is documented in
-`command_sampler_contract.md`; the transport is documented in
-`signal_bus_contract.md`; watcher lifecycle/values are documented in
-`watchers_contract.md`.
+`build_instance` creates the run's one `ValueStore` **before** `_build_sinks`
+and before `_build_bridge_and_wiring`.  `_build_sinks` hands
+`values.publisher("sink")` to `SinkContext.values`, and the run build stores the
+store as `RunInstance.values`; `sampler.bind_env(env)` and
+`sampler.bind_values(values)` run at the live-instance construction seam,
+before any runner exists.  `SyncRunner` never binds, so multiple runners over
+one cached `RunInstance` cannot rebind.  The store is stored as
+`RunInstance.values` and joins `rewind_providers` as the `"values"` provider
+exactly once; a custom sink must not expose the store as a second provider.
+Watchers are debug-only: they receive no value publisher and the watcher engine
+joins as `"watchers"` for specs, trigger state and template windows only.  The
+command-sampler lifecycle is documented in `command_sampler_contract.md`; the
+transport is documented in `value_store_contract.md`; watcher lifecycle/values
+are documented in `watchers_contract.md`.
 
 Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
 `terminated/truncated` vocabulary.  The task layer maps core outcomes later.

@@ -1303,9 +1303,9 @@ def make_benchmark_sink(ctx: SinkContext) -> Sink: ...
 ```
 
 - `SinkContext` carries `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`,
-  `seed`, `action_groups`, `run_identity`, `options` and `signals`.  It carries
-  no live env, writer, logger or bridge.  `signals` is the run's publish-only
-  `unigym.signals.SignalPublisher`; it is never a read view, and `None` means no
+  `seed`, `action_groups`, `run_identity`, `options` and `values`.  It carries
+  no live env, writer, logger or bridge.  `values` is the run's write-only
+  `unigym.values.ValuePublisher`; it is never a read view, and `None` means no
   publisher was provided, so a sink that needs closed loop must fail fast.
 - a sink observes each tick through the read-only boundary view in
   `bundle["view"]`; the bundle carries no live env.  The view is valid during
@@ -1316,12 +1316,13 @@ class AcmeSink:
     def on_step(self, t: int, bundle) -> None:
         view = bundle["view"]          # read-only EnvView
         record = view.record()
-        self.signals.publish("acme/probe", value)  # written to the run bus
+        self.values.publish("acme/probe", value)  # written to the run store
 
     def on_episode_end(self, env_ids, bundle) -> None: ...
     def on_step_end(self, t, bundle) -> None: ...
     def on_run_end(self) -> dict: return {}
 ```
+- `bundle["step"]` and `bundle["final_step"]` carry `unigym.evaluation.EnvStepContext` value snapshots; see `contracts/runner_contract.md` for their exact timing.
 - a custom sink may also implement `unigym.sink.TerminalSink` to request
   per-env episode ends.  Each fact must use `TerminationSource.CUSTOM` and a
   `custom.<name>` code; a missing `step_index` / `time_s` is stamped with the
@@ -1346,9 +1347,10 @@ class AcmeSink:
 - publication latency is two policy ticks: `on_step(t)` publishes after
   `env.step(t)`, the sampler's next read is `update(t+1)`, and the command that
   read produces is first used by `env.step(t+2)`.  Samplers bound through
-  `command.module` read the bus through `SignalView`; names must be namespaced
-  (`<monitor>/<signal>`, `scenario/*`) because the transport has no registry and
-  last publish wins.
+  `command.module` read the run's live store through `ValueView`; names must be
+  namespaced (`<monitor>/<value>`, `scenario/*`) because the transport has no
+  registry and the last publish by one owner wins.  Watchers are debug-only and
+  publish no values.
 - a custom sink replaces only the benchmark consumer:
   `collect` -> `FanOutSink(CollectSink, custom)`, `benchmark` -> `custom`,
   `both` -> `FanOutSink(CollectSink, custom)`.
@@ -1356,9 +1358,9 @@ class AcmeSink:
   built-in tasks for it (see `contracts/benchmark_contract.md`).
 - a stateful sink that must survive a checkpoint exposes a rewind provider
   (`name` + `rewind_state` / `apply_rewind_state`, or `rewind_provider`) with a
-  namespaced name; see `contracts/runner_contract.md`.  Published signal values
-  are already covered by the core `"signals"` provider, so the sink must not
-  expose the bus again as a second provider.
+  namespaced name; see `contracts/runner_contract.md`.  Published values are
+  already covered by the core `"values"` provider, so the sink must not expose
+  the store again as a second provider.
 - core writes no benchmark report for a custom-sink `benchmark`/`both` run and
   publishes no `bundle["episode_results"]`; the sink owns its scoring and report
   artifacts.  A sink terminal is an episode-end fact, not an `EpisodeResultView`.

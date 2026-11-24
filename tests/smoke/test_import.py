@@ -34,6 +34,7 @@ def test_evaluation_public_names_resolve():
     import unigym.evaluation as evaluation
 
     assert set(evaluation.__all__) == {
+        "EnvStepContext",
         "EnvView",
         "EvalContext",
         "EvalQuery",
