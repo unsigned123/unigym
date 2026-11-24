@@ -34,8 +34,6 @@ from unigym.actuators.ir import (
     validate_drive_law_matrix,
 )
 from unigym.backends.registry import BackendInfo, backend_info, select_backend
-from unigym.benchmarks import build_tasks
-from unigym.benchmarks.episode import EpisodeLimits
 from unigym.core.identity import RobotIdentity, RunIdentity
 from unigym.env.backends import build_env_backend
 from unigym.logger import DataCollectLogger
@@ -61,6 +59,7 @@ from .spec import ReplaySpec, RunSpec
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
     from unigym.assets.plan import AssetPlan
+    from unigym.benchmarks.episode import EpisodeLimits
     from unigym.cameras.manager import CameraManager
     from unigym.commands.base import CommandSampler
     from unigym.contacts.manager import ContactManager
@@ -1500,6 +1499,8 @@ def _episode_limits(bench_cfg: dict[str, JsonValue], policy_dt: float) -> Episod
     has_steps = "timeout_steps" in bench_cfg
     if not has_s and not has_steps:
         return None
+    from unigym.benchmarks.episode import EpisodeLimits
+
     limits = EpisodeLimits(
         timeout_s=(float(bench_cfg["timeout_s"]) if has_s else None),
         timeout_steps=(int(bench_cfg["timeout_steps"]) if has_steps else None),
@@ -1607,10 +1608,6 @@ def _build_sinks(
     custom_sink_factory: SinkFactory | None = None,
 ) -> _SinkBundle:
     """Step 5: director + timeline + mode-aware sink composition."""
-    from unigym.benchmarks.reporting import BenchmarkReporter
-    from unigym.runner.evaluation.buffer import EpisodeBuffer
-    from unigym.runner.evaluation.scoring import EpisodeEvaluator
-    from unigym.runner.evaluation.session import EvaluationSession
     from unigym.runner.sinks import CollectSink, FanOutSink
 
     # director (before the sinks so EvaluationSession can label
@@ -1694,6 +1691,8 @@ def _build_sinks(
         if custom_sink_factory is None:
             if pack_runtime is None:
                 raise RuntimeError("benchmark mode requires a pack runtime")
+            from unigym.benchmarks import build_tasks
+
             # benchmark tasks resolve through the runtime ``benchmarks``
             # catalog face (no run-config pack list, no repository scan)
             bench_tasks = build_tasks(
@@ -1707,6 +1706,11 @@ def _build_sinks(
         limits = _episode_limits(bench_cfg, policy_dt)
         env.timeout_steps = None if limits is None else limits.validate_against(policy_dt)
         if bench_tasks is not None:
+            from unigym.benchmarks.reporting import BenchmarkReporter
+            from unigym.runner.evaluation.buffer import EpisodeBuffer
+            from unigym.runner.evaluation.scoring import EpisodeEvaluator
+            from unigym.runner.evaluation.session import EvaluationSession
+
             report_meta = dict(task_meta)
             report_meta["sim_dt"] = run_identity.sim_dt
             if contact_manager is not None:
