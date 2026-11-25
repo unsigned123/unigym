@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.108.0
+
+Breaking release: core no longer ships a built-in benchmark or evaluation loop.
+The external `unigym-bench` package is the replacement.
+
+- Removed the `unigym.benchmarks` package, the `unigym.runner.evaluation`
+  package (`EvaluationSession`, `EpisodeBuffer`, `EpisodeEvaluator`), the
+  benchmark task providers and their catalog, the built-in benchmark reporter,
+  and the `benchmarks` CLI.  There is no compatibility shim.
+- Removed the run `mode` (`collect` / `benchmark` / `both`).  A run now always
+  uses the explicit sink selection (`sinks:`, the one-custom-sink `sink:`
+  shorthand, or the built-in `CollectSink` default) and the run never selects a
+  benchmark or evaluation sink.
+- Removed `episode_length_s` and the episode clock/horizon they fed: the env
+  key, the `Run(...)` argument, the `EnvSpec` field, the duration range and the
+  benchmark `timeout_s` / `timeout_steps` deadline.  Core derives no due mask of
+  its own; an episode ends through a backend-owned due mask, a sink terminal or
+  an explicit `runner.terminate(...)` boundary.
+- Removed the top-level `benchmark:` config section and the core
+  `benchmark_report.json` / `results.json` artifacts.  A custom sink owns its
+  scoring and report files.
+- `meta.json` and `summary.json` no longer emit `episode_length_s` or
+  `episode_length_range`.  The data schema version is unchanged because the
+  remaining fields keep their meaning; consumers that read the removed keys
+  must stop doing so.
+
 ## 0.107.0
 
 Breaking release: the run-scoped channel is now the managed value store.

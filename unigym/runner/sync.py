@@ -5,7 +5,7 @@ Extracted from collect.py's main loop.  Per policy step the runner runs
 unified termination check, then hands a *bundle* to the consumer-side sink:
 
     sink.on_step(t, bundle)                       # record (pre-reset data side)
-    [due mask = clock | reset policy]             #
+    [due mask = backend due | sink terminals | reset policy]  #
     sink.on_episode_end(due, bundle)              # BEFORE env.reset_envs
     sampler.on_episode_end(due, episode_results)  # AFTER sinks, BEFORE reset
     if auto_reset:                                # Gym Env sets this False

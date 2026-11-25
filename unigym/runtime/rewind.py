@@ -591,7 +591,7 @@ class RewindController:
             raise
         del safety
         # torch RNG: the abandoned branch's consumption must not leak into
-        # the restored timeline (episode-duration sampling is the consumer)
+        # the restored timeline (any RNG consumer must see the restored state)
         _set_torch_rng(payload["torch_rng"])
         # adapter resync hook AFTER the internal restore (it may consult
         # the restored state); in-flight skill drop -> hold lives here

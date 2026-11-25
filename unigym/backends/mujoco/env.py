@@ -60,9 +60,8 @@ Mapping highlights (evaluation doc §1, XML-verified 2026-09-12 on
 * No keyframe exists in the XML (verified): reset writes q0 explicitly
   (base z = spawn height, identity quat, q0 joints, zero velocity,
   zero ctrl) and runs ``mj_forward``.
-* Determinism: mj_step is deterministic; the only RNG is the episode
-  duration sampling (torch, same as the isaaclab backend), so same-seed
-  runs are bit-comparable.
+* Determinism: mj_step is deterministic and core samples no episode
+  duration, so same-seed runs are bit-comparable.
 """
 
 from __future__ import annotations

@@ -1891,7 +1891,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     col_cfg: dict[str, JsonValue] = col_value if isinstance(col_value, dict) else {}
     num_envs = _config_int(env_cfg["num_envs"])
     total_steps = _config_int(col_cfg["steps"])
-    # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
+    # reset policy (docs/contracts/runner_contract.md §5): no clock due exists;
     # reset_on_termination merges terminated rows.  runner.reset_mask_fn is
     # a reserved key (not deserialized here; inject via SyncRunner).
     reset_on_termination = bool(spec.runner.get("reset_on_termination", False))

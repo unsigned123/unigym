@@ -11,7 +11,7 @@ alive         (N,) bool, not terminated and finite policy observation
 term_metrics  per-group/total termination firing fractions
 reset_state   {env_id: reset validity/reason state}
               (the due ids are StepResult.reset_env_ids, not a bundle key)
-terminations  {env_id: EpisodeTermination}   # term group + core horizon
+terminations  {env_id: EpisodeTermination}   # term group
               plus the sink drain merged on this tick (see below)
 step_index    (N,) int64 episode-local tick per env; each env advances once per
               policy tick and a reset env returns to 0 (frame 0 is tick 1)
