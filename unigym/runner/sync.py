@@ -426,6 +426,9 @@ class SyncRunner:
         # per-env EPISODE-LOCAL policy step counter: frame 0 is tick 1 and the
         # tick resets to 0 on that env's reset (never the global run step).
         self._episode_step = [0] * self._num_envs
+        # per-env open/closed lifecycle: an env is open until an explicit
+        # terminate(reset=False); only reset(env_ids) reopens it.
+        self._closed = [False] * self._num_envs
         self._reset_samples: list[dict[str, np.ndarray] | None] = [None] * self._num_envs
         self._reset_valid: list[bool | None] = [None] * self._num_envs
         self._reset_reason: list[str | None] = [None] * self._num_envs
@@ -625,55 +628,265 @@ class SyncRunner:
                     f"sink.drain_terminations env id {env_id!r} is outside "
                     f"[0, {self._num_envs})"
                 )
-            if not isinstance(termination, Termination):
-                raise TypeError(
-                    f"sink.drain_terminations[{env_id}] is "
-                    f"{type(termination).__name__}, expected a Termination"
-                )
-            if termination.source is not TerminationSource.CUSTOM:
-                raise ValueError(
-                    f"sink.drain_terminations[{env_id}] source is "
-                    f"{termination.source.value!r}; a sink terminal must use "
-                    f"TerminationSource.CUSTOM"
-                )
-            if not termination.code.startswith("custom."):
-                raise ValueError(
-                    f"sink.drain_terminations[{env_id}] code "
-                    f"{termination.code!r} must be namespaced 'custom.<name>'"
-                )
-            canonical_index = int(self._episode_step[env_id])
-            if termination.step_index is None:
-                step_index = canonical_index
-            elif termination.step_index != canonical_index:
-                raise ValueError(
-                    f"sink.drain_terminations[{env_id}] step_index "
-                    f"{termination.step_index!r} is not the episode-local step "
-                    f"{canonical_index}; a sink terminal is stamped with the "
-                    f"episode step, never the global run tick"
-                )
-            else:
-                step_index = termination.step_index
-            canonical_time = (
-                None
-                if self.control_dt is None
-                else float(
-                    torch.tensor(canonical_index, dtype=torch.float32) * float(self.control_dt)
-                )
+            stamped[env_id] = self._stamp_custom_termination(
+                env_id, termination, what="sink.drain_terminations"
             )
-            if termination.time_s is None:
-                time_s = canonical_time
-            elif canonical_time is None:
-                time_s = termination.time_s
-            elif not math.isclose(termination.time_s, canonical_time, rel_tol=1e-6, abs_tol=1e-6):
-                raise ValueError(
-                    f"sink.drain_terminations[{env_id}] time_s "
-                    f"{termination.time_s!r} is not the episode-local time "
-                    f"{canonical_time!r}"
-                )
-            else:
-                time_s = termination.time_s
-            stamped[env_id] = replace(termination, step_index=step_index, time_s=time_s)
         return stamped
+
+    def _stamp_custom_termination(
+        self, env_id: int, termination: object, *, what: str
+    ) -> Termination:
+        """Validate one custom fact and stamp its canonical episode-local clock.
+
+        ``what`` names the boundary in every error (the sink drain and the
+        explicit ``terminate`` mapping share this single judgment).
+        """
+        if not isinstance(termination, Termination):
+            raise TypeError(
+                f"{what}[{env_id}] is " f"{type(termination).__name__}, expected a Termination"
+            )
+        if termination.source is not TerminationSource.CUSTOM:
+            raise ValueError(
+                f"{what}[{env_id}] source is "
+                f"{termination.source.value!r}; a sink terminal must use "
+                f"TerminationSource.CUSTOM"
+            )
+        if not termination.code.startswith("custom."):
+            raise ValueError(
+                f"{what}[{env_id}] code " f"{termination.code!r} must be namespaced 'custom.<name>'"
+            )
+        canonical_index = int(self._episode_step[env_id])
+        if termination.step_index is None:
+            step_index = canonical_index
+        elif termination.step_index != canonical_index:
+            raise ValueError(
+                f"{what}[{env_id}] step_index "
+                f"{termination.step_index!r} is not the episode-local step "
+                f"{canonical_index}; a sink terminal is stamped with the "
+                f"episode step, never the global run tick"
+            )
+        else:
+            step_index = termination.step_index
+        canonical_time = (
+            None
+            if self.control_dt is None
+            else float(torch.tensor(canonical_index, dtype=torch.float32) * float(self.control_dt))
+        )
+        if termination.time_s is None:
+            time_s = canonical_time
+        elif canonical_time is None:
+            time_s = termination.time_s
+        elif not math.isclose(termination.time_s, canonical_time, rel_tol=1e-6, abs_tol=1e-6):
+            raise ValueError(
+                f"{what}[{env_id}] time_s "
+                f"{termination.time_s!r} is not the episode-local time "
+                f"{canonical_time!r}"
+            )
+        else:
+            time_s = termination.time_s
+        return replace(termination, step_index=step_index, time_s=time_s)
+
+    # ------------------------------------------------------------------ #
+    # explicit lifecycle: terminate / reset / reset notification
+    # ------------------------------------------------------------------ #
+    def _normalize_env_ids(self, env_ids, *, what: str, allow_empty: bool) -> list[int]:
+        """Normalize one explicit env-id argument to sorted unique ints.
+
+        Rejects bools, non-integers, duplicate ids and ids outside
+        ``[0, num_envs)`` before any state changes.
+        """
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.ndim != 1:
+                raise TypeError(
+                    f"{what} must be a 1-D int tensor, got shape {tuple(env_ids.shape)}"
+                )
+            raw = env_ids.tolist()
+        elif isinstance(env_ids, bool):
+            raise TypeError(f"{what} must be an int or a 1-D sequence of ints, got a bool")
+        elif isinstance(env_ids, int):
+            raw = [env_ids]
+        elif isinstance(env_ids, Sequence) and not isinstance(env_ids, (str, bytes)):
+            raw = list(env_ids)
+        else:
+            raise TypeError(
+                f"{what} must be an int or a 1-D sequence of ints, " f"got {type(env_ids).__name__}"
+            )
+        ids: list[int] = []
+        for raw_id in raw:
+            if isinstance(raw_id, bool):
+                raise TypeError(f"{what} contains a bool id {raw_id!r}; expected ints")
+            try:
+                env_id = operator.index(raw_id)
+            except TypeError as err:
+                raise TypeError(
+                    f"{what} id {raw_id!r} is not an integer; expected a key in "
+                    f"[0, {self._num_envs})"
+                ) from err
+            if env_id < 0 or env_id >= self._num_envs:
+                raise ValueError(f"{what} id {env_id!r} is outside [0, {self._num_envs})")
+            ids.append(env_id)
+        if not allow_empty and not ids:
+            raise ValueError(f"{what} must name at least one env")
+        duplicates = sorted({env_id for env_id in ids if ids.count(env_id) > 1})
+        if duplicates:
+            raise ValueError(
+                f"{what} contains duplicate env ids {duplicates}; each env is named once"
+            )
+        return sorted(ids)
+
+    def _normalize_terminations(
+        self, terminations: object, env_ids: Sequence[int]
+    ) -> dict[int, Termination]:
+        """Validate the exact ``env_id -> Termination`` mapping of a terminate."""
+        if not isinstance(terminations, Mapping):
+            raise TypeError(
+                f"terminate terminations must be a Mapping[int, Termination], "
+                f"got {type(terminations).__name__}"
+            )
+        facts: dict[int, Termination] = {}
+        for raw_env_id, termination in terminations.items():
+            if isinstance(raw_env_id, bool):
+                raise TypeError(
+                    f"terminate terminations env id {raw_env_id!r} is a bool; "
+                    f"expected an integer in [0, {self._num_envs})"
+                )
+            try:
+                env_id = operator.index(raw_env_id)
+            except TypeError as err:
+                raise TypeError(
+                    f"terminate terminations env id {raw_env_id!r} is not an "
+                    f"integer; expected a key in [0, {self._num_envs})"
+                ) from err
+            if env_id < 0 or env_id >= self._num_envs:
+                raise ValueError(
+                    f"terminate terminations env id {env_id!r} is outside " f"[0, {self._num_envs})"
+                )
+            facts[env_id] = self._stamp_custom_termination(
+                env_id, termination, what="terminate terminations"
+            )
+        requested = set(env_ids)
+        missing = sorted(requested - set(facts))
+        extra = sorted(set(facts) - requested)
+        if missing or extra:
+            raise ValueError(
+                f"terminate terminations keys must match env_ids exactly: "
+                f"missing {missing}, unexpected {extra}"
+            )
+        return facts
+
+    def _reset_aware(self) -> bool:
+        """True when the bound sink accepts the reset notification."""
+        declared = getattr(self.sink, "reset_aware", None)
+        if isinstance(declared, bool):
+            return declared
+        return callable(getattr(self.sink, "on_reset", None))
+
+    def _notify_reset(self, due: torch.Tensor) -> None:
+        """Call ``ResetAwareSink.on_reset`` after a real reset chain."""
+        fn = getattr(self.sink, "on_reset", None)
+        if callable(fn):
+            fn(due.tolist())
+
+    def _make_view(self, record, obs_snapshot) -> EnvView:
+        """Build the tick's one read-only boundary view for these facts."""
+        env = self.env
+
+        def _query_factory():
+            try:
+                return env.query
+            except AttributeError as exc:
+                raise NotImplementedError(
+                    f"backend {type(env).__name__!r} has no runtime query"
+                ) from exc
+
+        return EnvView(
+            record=record,
+            obs=obs_snapshot,
+            env_id=None,
+            num_envs=self._num_envs,
+            device=env.device,
+            backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
+            query_factory=_query_factory,
+            articulations=getattr(env, "articulations", None) or {},
+            controls=getattr(env, "controls", None) or {},
+        )
+
+    def _reset_chain(self, due: torch.Tensor, *, reset_sampler: bool = True) -> None:
+        """Run the fixed reset chain, reopen the ids and notify the sink."""
+        env = self.env
+        env.reset_envs(due)
+        self.adapter.on_reset(due)
+        if self.sampler is not None and reset_sampler:
+            self._cmd = self.sampler.reset(due)
+        observations = getattr(env, "observations", None)
+        if getattr(observations, "command", False):
+            env.obs.set_command(self._cmd)
+        if getattr(observations, "prev_action", False):
+            env.obs.set_prev_action(None)
+        for raw in due.tolist():
+            env_id = int(raw)
+            self._episode_step[env_id] = 0
+            self._closed[env_id] = False
+        self._record_reset_facts(due.tolist())
+        self._notify_reset(due)
+
+    def _effective_command(self, cmd):
+        """The archived command: sampler output or the adapter's self-command."""
+        if cmd is None and bool(getattr(self.adapter, "generates_command", False)):
+            return self.adapter.last_command
+        return cmd
+
+    def _close_boundary(self, view: EnvView, bundle: dict) -> None:
+        """Close the tick's one boundary view and clear its bundle visibility."""
+        view.close()
+        if "view" in bundle:
+            bundle["view"] = None
+        if "step" in bundle:
+            bundle["step"] = None
+        if "final_step" in bundle:
+            bundle["final_step"] = None
+
+    def _end_episodes(
+        self,
+        due: torch.Tensor,
+        bundle: dict,
+        *,
+        reset: bool,
+        mark_closed: bool,
+    ) -> None:
+        """The one episode-end boundary shared by ``tick`` and ``terminate``.
+
+        Records the ending episode facts, builds the final context, runs the
+        sink/sampler episode-end callbacks, then either closes the boundary
+        view and runs the reset chain (``reset=True``) or, for an explicit
+        closed end, marks the ids closed.  ``on_episode_end`` sees the live
+        view; ``env.reset_envs`` never runs with an open view.  ``tick`` with
+        ``auto_reset=False`` keeps the historical open state.
+        """
+        if due.numel() == 0:
+            return
+        bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
+        bundle["final_step"] = EnvStepContext(
+            view=bundle["view"],
+            values=_value_snapshot(self.values),
+            t=bundle["t"],
+            step_index=bundle["step_index"],
+            time_s=bundle["time_s"],
+            cmd=bundle["cmd"],
+            reset_state=bundle["reset_state"],
+        )
+        self.sink.on_episode_end(due, bundle)
+        if self.sampler is not None:
+            on_episode_end = getattr(self.sampler, "on_episode_end", None)
+            if callable(on_episode_end):
+                results = bundle.get("episode_results") or {}
+                on_episode_end(due, MappingProxyType(dict(results)))
+        if reset:
+            self._close_boundary(bundle["view"], bundle)
+            self._reset_chain(due)
+        elif mark_closed:
+            for raw in due.tolist():
+                self._closed[int(raw)] = True
 
     @property
     def ticks_done(self) -> int:
@@ -692,10 +905,15 @@ class SyncRunner:
         """
         if not self._started:
             self._start()
+        closed_ids = [env_id for env_id, closed in enumerate(self._closed) if closed]
+        if closed_ids:
+            raise RuntimeError(
+                f"cannot tick: env ids {closed_ids} are closed; call "
+                f"reset({closed_ids}) to start a new episode before stepping"
+            )
         adapter, sampler, env = self.adapter, self.sampler, self.env
         device = env.device
         policy_dt = self.control_dt
-        generates_command = bool(getattr(adapter, "generates_command", False))
         cmd = self._cmd
         obs_frame = self._obs_frame
 
@@ -765,35 +983,16 @@ class SyncRunner:
         obs_collect = adapter.compute_obs_collect(obs_frame, obs_snapshot, env)
         # effective recorded/language command: sampler output, or the
         # adapter's self-generated cascade command (available after act)
-        eff_cmd = cmd
-        if eff_cmd is None and generates_command:
-            eff_cmd = adapter.last_command
+        eff_cmd = self._effective_command(cmd)
         # unified live termination boundary (post-step/pre-reset; pure tensor
         # ops, no RNG consumption).  The runner builds ONE read-only boundary
         # view per tick, uses it for the termination check and hands that same
         # view to the sink.  It stays valid through on_step/on_episode_end; the
-        # finally below closes it before the reset chain and on_step_end.
+        # shared end helper closes it before the reset chain, and the finally
+        # closes any non-reset path before on_step_end.
         record = step.record
 
-        def _query_factory():
-            try:
-                return env.query
-            except AttributeError as exc:
-                raise NotImplementedError(
-                    f"backend {type(env).__name__!r} has no runtime query"
-                ) from exc
-
-        view = EnvView(
-            record=record,
-            obs=obs_snapshot,
-            env_id=None,
-            num_envs=self._num_envs,
-            device=device,
-            backend=str(getattr(env, "_backend_label", None) or type(env).__name__),
-            query_factory=_query_factory,
-            articulations=getattr(env, "articulations", None) or {},
-            controls=getattr(env, "controls", None) or {},
-        )
+        view = self._make_view(record, obs_snapshot)
         due = step.reset_env_ids
         bundle: dict = {}
         try:
@@ -918,58 +1117,19 @@ class SyncRunner:
                 added = torch.nonzero(terminated).squeeze(-1).to(torch.int64)
             if added is not None and added.numel() > 0:
                 due = torch.unique(torch.cat([due.to(torch.int64), added]))
-            if due.numel() > 0:
-                # the episode's START facts (reset sample/legality) ride the
-                # episode-end bundle; they were captured at this episode's reset.
-                bundle["reset_facts"] = {int(ei): self._reset_fact(int(ei)) for ei in due.tolist()}
-                # final context: the post-on_step values include sink
-                # publications; it never feeds back into the due mask.
-                bundle["final_step"] = EnvStepContext(
-                    view=view,
-                    values=_value_snapshot(self.values),
-                    t=t,
-                    step_index=step_index,
-                    time_s=time_s,
-                    cmd=eff_cmd,
-                    reset_state=reset_state,
-                )
-                # record-before-reset: episode-end data side happens BEFORE
-                # the reset chain (sink flushes episodes/videos/counts here)
-                self.sink.on_episode_end(due, bundle)
-                # sampler feedback rides the same boundary: AFTER the sinks (they
-                # populate bundle["episode_results"]) and BEFORE sampler.reset, so
-                # prior-episode results can shape the next command.  Runs even when
-                # auto_reset=False (only the reset chain below is skipped).  The
-                # mapping is wrapped read-only: the sampler observes, never edits.
-                if sampler is not None:
-                    on_episode_end = getattr(sampler, "on_episode_end", None)
-                    if callable(on_episode_end):
-                        results = bundle.get("episode_results") or {}
-                        on_episode_end(due, MappingProxyType(dict(results)))
+            self._end_episodes(
+                due,
+                bundle,
+                reset=self.auto_reset,
+                mark_closed=False,
+            )
+            if due.numel() > 0 and self.auto_reset:
+                cmd = self._cmd
         finally:
             # the tick's ONE boundary view: valid through on_step and
             # on_episode_end, closed before the reset chain and on_step_end.
-            view.close()
-            if "view" in bundle:
-                bundle["view"] = None
-            if "step" in bundle:
-                bundle["step"] = None
-            if "final_step" in bundle:
-                bundle["final_step"] = None
+            self._close_boundary(view, bundle)
 
-        if due.numel() > 0 and self.auto_reset:
-            env.reset_envs(due)
-            adapter.on_reset(due)
-            if sampler is not None:
-                cmd = sampler.reset(due)
-            if getattr(observations, "command", False):
-                env.obs.set_command(cmd)
-            if getattr(observations, "prev_action", False):
-                env.obs.set_prev_action(None)
-            for raw in due.tolist():
-                self._episode_step[int(raw)] = 0
-            # capture the NEXT episode's pre-policy-step reset sample
-            self._record_reset_facts(due.tolist())
         self.sink.on_step_end(t, bundle)
         self._obs_frame = obs_frame
         self._cmd = cmd
@@ -1003,36 +1163,147 @@ class SyncRunner:
 
         return self.sink.on_run_end()
 
+    def terminate(
+        self,
+        env_ids: int | Sequence[int] | torch.Tensor,
+        terminations: Mapping[int, Termination],
+        *,
+        reset: bool,
+    ) -> StepResult:
+        """End the named open episodes through the tick's episode-end boundary.
+
+        Args:
+            env_ids: One integer or a 1-D sequence/tensor of open env ids.
+            terminations: Exactly one core ``Termination`` per requested env.
+                Every fact must use ``TerminationSource.CUSTOM``, a
+                ``custom.*`` code and either no stamp or the canonical
+                episode-local stamp.
+            reset: Required.  ``True`` runs the existing reset chain, reopens
+                the ids and notifies a reset-aware sink.  ``False`` leaves the
+                ids closed until an explicit ``reset(env_ids)``; it requires a
+                sink with ``on_reset`` and never silently starts a new episode.
+
+        Returns:
+            The boundary ``StepResult`` for the ended episodes.  No policy
+            tick is consumed and ``ticks_done`` does not advance.
+        """
+        if not isinstance(reset, bool):
+            raise TypeError(f"terminate reset must be a bool, got {reset!r}")
+        if not reset and not self._reset_aware():
+            sink_name = type(self.sink).__name__ if self.sink is not None else "None"
+            raise RuntimeError(
+                f"terminate(..., reset=False) requires a ResetAwareSink with a "
+                f"callable on_reset; sink {sink_name} does not declare it | "
+                f"hint: implement on_reset or call terminate(..., reset=True)"
+            )
+        ids = self._normalize_env_ids(env_ids, what="terminate env_ids", allow_empty=False)
+        facts = self._normalize_terminations(terminations, ids)
+        closed_ids = [env_id for env_id in ids if self._closed[env_id]]
+        if closed_ids:
+            raise ValueError(
+                f"terminate env ids {closed_ids} are already closed; "
+                f"call reset({closed_ids}) before terminating them again"
+            )
+        if not self._started:
+            self._start()
+        env = self.env
+        device = env.device
+        due = torch.tensor(ids, dtype=torch.int64, device=device)
+        record = env.record()
+        obs_snapshot = env.obs.snapshot()
+        view = self._make_view(record, obs_snapshot)
+        step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
+        time_s = (
+            None
+            if self.control_dt is None
+            else step_index.to(torch.float32) * float(self.control_dt)
+        )
+        reset_state = {
+            env_id: {
+                "reset_index": 0,
+                "reset_valid": self._reset_valid[env_id],
+                "reset_reason": self._reset_reason[env_id],
+            }
+            for env_id in range(self._num_envs)
+        }
+        terminated = torch.zeros(self._num_envs, dtype=torch.bool, device=device)
+        terminated[due] = True
+        terminations_bundle = {
+            env_id: EpisodeTermination.from_terminations((facts[env_id],)) for env_id in ids
+        }
+        t = max(int(self._tick) - 1, 0)
+        eff_cmd = self._effective_command(self._cmd)
+        bundle: dict = {
+            "t": t,
+            "raw": None,
+            "targets": None,
+            "obs": obs_snapshot,
+            "obs_frame": self._obs_frame,
+            "obs_collect": None,
+            "record": record,
+            "cmd": eff_cmd,
+            "action_group_values": None,
+            "terminated": terminated,
+            "alive": ~terminated,
+            "term_metrics": {
+                "terminated": float(terminated.float().mean()),
+                "fallen": float(terminated.float().mean()),
+            },
+            "terminations": terminations_bundle,
+            "step_index": step_index,
+            "time_s": time_s,
+            "reset_state": reset_state,
+            "run_identity": self.run_identity,
+            "view": view,
+            "step": EnvStepContext(
+                view=view,
+                values=_value_snapshot(self.values),
+                t=t,
+                step_index=step_index,
+                time_s=time_s,
+                cmd=eff_cmd,
+                reset_state=reset_state,
+            ),
+        }
+        try:
+            self._end_episodes(
+                due,
+                bundle,
+                reset=reset,
+                mark_closed=not reset,
+            )
+        finally:
+            self._close_boundary(view, bundle)
+        return StepResult(
+            t=t,
+            obs=obs_snapshot,
+            record=record,
+            reset_env_ids=due,
+            terminated=terminated,
+        )
+
     def reset(self, env_ids=None) -> StepResult:
-        """Explicit driver reset through the same fixed reset chain.
+        """Explicitly reset the named/all envs and start fresh episodes.
 
         ``env_ids=None`` resets every env.  This is the protocol's external
-        reset entry point (R3 drivers); the collect loop never calls it and
-        the tick-order/RNG path is untouched.  The returned StepResult has
-        empty observation/record because no policy tick was stepped.
+        reset entry point; the collect loop never calls it.  A pre-start reset
+        is the initial start.  Resetting is legal for an open or a closed env:
+        it runs the same reset chain, reopens the ids and records the new
+        episode facts.  It never finalizes an episode; the returned StepResult
+        has the post-reset observation/record because no policy tick ran.
         """
         env = self.env
         fresh = not self._started
+        if env_ids is None:
+            ids = list(range(int(env.num_envs)))
+        else:
+            ids = self._normalize_env_ids(env_ids, what="reset env_ids", allow_empty=True)
         if fresh:
             self._start()
         device = env.device
-        if env_ids is None:
-            due = torch.arange(env.num_envs, dtype=torch.int64, device=device)
-        else:
-            due = torch.as_tensor(env_ids, dtype=torch.int64, device=device)
+        due = torch.tensor(ids, dtype=torch.int64, device=device)
         if due.numel() > 0:
-            env.reset_envs(due)
-            self.adapter.on_reset(due)
-            if self.sampler is not None and not (fresh and env_ids is None):
-                self._cmd = self.sampler.reset(due)
-            observations = getattr(env, "observations", None)
-            if getattr(observations, "command", False):
-                env.obs.set_command(self._cmd)
-            if getattr(observations, "prev_action", False):
-                env.obs.set_prev_action(None)
-            for raw in due.tolist():
-                self._episode_step[int(raw)] = 0
-            self._record_reset_facts(due.tolist())
+            self._reset_chain(due, reset_sampler=not (fresh and env_ids is None))
         return StepResult(
             t=int(self._tick),
             obs=env.obs.snapshot(),

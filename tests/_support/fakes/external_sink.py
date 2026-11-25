@@ -127,6 +127,63 @@ class ViewProbeSink:
         self.rewinds.append(info)
 
 
+class _LifecycleProbeBase:
+    """Shared callback recording for the reset-lifecycle doubles."""
+
+    def __init__(self, order: list[tuple[object, ...]] | None = None) -> None:
+        self.order = [] if order is None else order
+        self.step_calls = 0
+        self.step_bundles: list[dict[str, object]] = []
+        self.episode_end_calls: list[tuple[tuple[int, ...], dict[str, object]]] = []
+        self.episode_end_views: list[object] = []
+        self.final_step_contexts: list[object] = []
+        self.step_end_bundles: list[dict[str, object]] = []
+        self.step_end_calls = 0
+        self.run_end_calls = 0
+
+    def on_step(self, t: int, bundle: dict[str, object]) -> None:
+        self.step_calls += 1
+        self.step_bundles.append(bundle)
+        self.order.append(("on_step", t))
+
+    def on_episode_end(self, env_ids: object, bundle: dict[str, object]) -> None:
+        ids = _episode_env_ids(env_ids)
+        self.episode_end_calls.append((ids, bundle))
+        self.episode_end_views.append(bundle.get("view"))
+        self.final_step_contexts.append(bundle.get("final_step"))
+        self.order.append(("on_episode_end", ids))
+
+    def on_step_end(self, t: int, bundle: dict[str, object]) -> None:
+        self.step_end_calls += 1
+        self.step_end_bundles.append(bundle)
+        self.order.append(("on_step_end", t))
+
+    def on_run_end(self) -> dict[str, object]:
+        self.run_end_calls += 1
+        self.order.append(("on_run_end",))
+        return {"sink": type(self).__name__}
+
+
+class LifecycleProbeSink(_LifecycleProbeBase):
+    """Four-callback sink without the reset notification capability."""
+
+
+class ResetAwareLifecycleSink(_LifecycleProbeBase):
+    """Four-callback sink that also records ``on_reset``."""
+
+    def __init__(self, order: list[tuple[object, ...]] | None = None) -> None:
+        super().__init__(order)
+        self.reset_calls: list[list[int]] = []
+
+    def on_reset(self, env_ids: object) -> None:
+        if isinstance(env_ids, (list, tuple)):
+            ids = [int(value) for value in env_ids]
+        else:
+            ids = [int(value) for value in _episode_env_ids(env_ids)]
+        self.reset_calls.append(ids)
+        self.order.append(("on_reset", tuple(ids)))
+
+
 class StopPollingSink:
     """Four-callback sink whose ``stop_when`` records how often it is polled."""
 
@@ -447,6 +504,7 @@ class ExternalSink:
         self.episodes_completed = 0
         self.stop_polls = 0
         self.episode_env_ids: list[tuple[int, ...]] = []
+        self.reset_calls: list[list[int]] = []
         self.last_episode_end_tick: int | None = None
         self.view_seen = False
         self.env_key_seen = False
@@ -472,6 +530,12 @@ class ExternalSink:
         if bundle.get("view") is not None:
             self.step_end_view_none = False
         self.step_end_calls += 1
+
+    def on_reset(self, env_ids: object) -> None:
+        if isinstance(env_ids, (list, tuple)):
+            self.reset_calls.append([int(value) for value in env_ids])
+        else:
+            self.reset_calls.append([int(value) for value in _episode_env_ids(env_ids)])
 
     def _observe_boundary(self, bundle: dict[str, object]) -> None:
         """Read the public boundary view and record the retired env key."""

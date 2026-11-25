@@ -84,6 +84,7 @@ __all__ = [
     "EvaluationSessionProvider",
     "CollectSinkProvider",
     "InitializerStateProvider",
+    "RunnerLifecycleProvider",
     "build_rewind_providers",
 ]
 
@@ -119,6 +120,129 @@ class _ShardWriterFace(Protocol):
     def commit_state(self) -> SnapshotValue: ...
 
     def restore_commit(self, state: SnapshotValue) -> None: ...
+
+
+class _RunnerLifecycleFace(Protocol):
+    """The runner-local lifecycle face the lifecycle provider restores.
+
+    The runner owns this state; the provider is the checkpoint owner for it.
+    ``_tick`` / ``_cmd`` / ``_obs_frame`` and the engine stay with the rewind
+    controller.
+    """
+
+    _closed: list[bool]
+    _episode_step: list[int]
+    _reset_samples: list[dict[str, np.ndarray] | None]
+    _reset_valid: list[bool | None]
+    _reset_reason: list[str | None]
+    _started: bool
+
+
+class RunnerLifecycleProvider:
+    """The runner's per-env open/closed lifecycle in the rewind package.
+
+    Restores only runner-local lifecycle: the closed mask, episode-local step
+    counters, reset samples/validity/reason and the started flag.  It never
+    replays ``on_reset``; sink/pack state is restored by its own provider.
+    """
+
+    name = "runner_lifecycle"
+
+    def __init__(self, runner: _RunnerLifecycleFace):
+        self.runner = runner
+
+    def rewind_state(self) -> dict[str, SnapshotValue]:
+        """Return private copies of the full runner-local lifecycle state."""
+        runner = self.runner
+        return {
+            "closed": list(runner._closed),
+            "episode_step": list(runner._episode_step),
+            "reset_samples": _copy_reset_samples(runner._reset_samples),
+            "reset_valid": list(runner._reset_valid),
+            "reset_reason": list(runner._reset_reason),
+            "started": bool(runner._started),
+        }
+
+    def validate_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
+        """Refuse a malformed lifecycle payload before changing any state."""
+        self._guard_state(state)
+
+    def apply_rewind_state(self, state: dict[str, SnapshotValue]) -> None:
+        """Write the snapshot back in place (list identity preserved)."""
+        self._guard_state(state)
+        runner = self.runner
+        runner._closed[:] = [bool(value) for value in state["closed"]]
+        runner._episode_step[:] = [int(value) for value in state["episode_step"]]
+        runner._reset_samples[:] = _copy_reset_samples(state["reset_samples"])
+        runner._reset_valid[:] = [
+            None if value is None else bool(value) for value in state["reset_valid"]
+        ]
+        runner._reset_reason[:] = [
+            None if value is None else str(value) for value in state["reset_reason"]
+        ]
+        runner._started = bool(state["started"])
+
+    def _guard_state(self, state: object) -> None:
+        """The shared refusal judgment for validate and apply."""
+        if not isinstance(state, Mapping):
+            raise RewindGateError(
+                f"rewind provider '{self.name}': expected a lifecycle mapping, "
+                f"got {type(state).__name__}"
+            )
+        expected = {
+            "closed",
+            "episode_step",
+            "reset_samples",
+            "reset_valid",
+            "reset_reason",
+            "started",
+        }
+        missing = sorted(expected - set(state))
+        if missing:
+            raise RewindGateError(
+                f"rewind provider '{self.name}': missing lifecycle keys {missing}"
+            )
+        num_envs = len(self.runner._episode_step)
+        closed = state["closed"]
+        episode_step = state["episode_step"]
+        reset_samples = state["reset_samples"]
+        reset_valid = state["reset_valid"]
+        reset_reason = state["reset_reason"]
+        for key in ("closed", "episode_step", "reset_samples", "reset_valid", "reset_reason"):
+            value = state[key]
+            if not isinstance(value, list | tuple):
+                raise RewindGateError(
+                    f"rewind provider '{self.name}': {key} must be a sequence, "
+                    f"got {type(value).__name__}"
+                )
+            if len(value) != num_envs:
+                raise RewindGateError(
+                    f"rewind provider '{self.name}': {key} length {len(value)} "
+                    f"!= runner num_envs {num_envs}"
+                )
+        if any(not isinstance(value, bool) for value in closed):
+            raise RewindGateError(f"rewind provider '{self.name}': closed mask values must be bool")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in episode_step
+        ):
+            raise RewindGateError(
+                f"rewind provider '{self.name}': episode_step values must be " f"non-negative ints"
+            )
+        if any(value is not None and not isinstance(value, bool) for value in reset_valid):
+            raise RewindGateError(
+                f"rewind provider '{self.name}': reset_valid values must be bool or None"
+            )
+        if any(value is not None and not isinstance(value, str) for value in reset_reason):
+            raise RewindGateError(
+                f"rewind provider '{self.name}': reset_reason values must be str or None"
+            )
+        if any(value is not None and not isinstance(value, Mapping) for value in reset_samples):
+            raise RewindGateError(
+                f"rewind provider '{self.name}': reset_samples values must be " f"mappings or None"
+            )
+        if not isinstance(state["started"], bool):
+            raise RewindGateError(f"rewind provider '{self.name}': started must be a bool")
 
 
 class InitializerStateProvider:
@@ -557,6 +681,18 @@ def build_rewind_providers(
             "checkpoint payload keys and must be unique"
         )
     return out
+
+
+def _copy_reset_samples(
+    samples: list[dict[str, np.ndarray] | None],
+) -> list[dict[str, np.ndarray] | None]:
+    """Deep-copy per-env reset samples so the checkpoint never aliases live state."""
+    return [
+        None
+        if sample is None
+        else {str(key): copy.deepcopy(value) for key, value in sample.items()}
+        for sample in samples
+    ]
 
 
 def _copy_slice(s: dict[str, SnapshotValue]) -> dict[str, SnapshotValue]:

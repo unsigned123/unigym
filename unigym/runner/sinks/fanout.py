@@ -14,6 +14,14 @@ if TYPE_CHECKING:
     from unigym.core.episode_termination import Termination
 
 
+def _node_reset_aware(node: object) -> bool:
+    """One child's reset-notification capability (composites answer recursively)."""
+    declared = getattr(node, "reset_aware", None)
+    if isinstance(declared, bool):
+        return declared
+    return callable(getattr(node, "on_reset", None))
+
+
 class FanOutSink:
     """Compose sinks behind one object satisfying the sink contract.
 
@@ -75,6 +83,22 @@ class FanOutSink:
             fn = getattr(sink, "on_rewind", None)
             if callable(fn):
                 fn(info)
+
+    def on_reset(self, env_ids) -> None:
+        for sink in self.sinks:
+            fn = getattr(sink, "on_reset", None)
+            if callable(fn):
+                fn(env_ids)
+
+    @property
+    def reset_aware(self) -> bool:
+        """True only when at least one child accepts the reset notification.
+
+        ``on_reset`` is always callable (the composite forwards), so the
+        runner uses this declared capability to refuse ``terminate(...,
+        reset=False)`` when no child could observe the reopen.
+        """
+        return any(_node_reset_aware(sink) for sink in self.sinks)
 
     def on_episode_end(self, env_ids, bundle) -> None:
         for sink in self.sinks:

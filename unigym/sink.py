@@ -6,19 +6,26 @@ benchmark state, scoring, reporting).  A sink never owns a second physics loop
 or mutates the backend.
 
 The optional capability protocols (:class:`RewindAwareSink`,
-:class:`StoppingSink`, :class:`TerminalSink`) name extra behavior a sink may
-implement; they add no new control-flow concepts to the four-callback contract.
+:class:`ResetAwareSink`, :class:`StoppingSink`, :class:`TerminalSink`) name
+extra behavior a sink may implement; they add no new control-flow concepts to
+the four-callback contract.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from unigym.core.episode_termination import Termination
 
-__all__ = ["RewindAwareSink", "Sink", "StoppingSink", "TerminalSink"]
+__all__ = [
+    "ResetAwareSink",
+    "RewindAwareSink",
+    "Sink",
+    "StoppingSink",
+    "TerminalSink",
+]
 
 
 @runtime_checkable
@@ -53,6 +60,24 @@ class RewindAwareSink(Protocol):
 
     def on_rewind(self, info: dict[str, object]) -> None:
         """Receive one rewind/fork mark."""
+        ...
+
+
+@runtime_checkable
+class ResetAwareSink(Protocol):
+    """Optional capability: a sink notified after every real reset chain.
+
+    The runner calls ``on_reset`` after it resets the named envs (tick
+    auto-reset, explicit ``reset`` and ``terminate(..., reset=True)``).  The
+    callback is never a substitute for the reset chain and is not replayed on
+    rewind; a sink whose state must survive a checkpoint exposes a rewind
+    provider.  A sink without this capability still supports ``reset=True``;
+    ``terminate(..., reset=False)`` requires it because the closed env is not
+    reopened until an explicit reset.
+    """
+
+    def on_reset(self, env_ids: Sequence[int]) -> None:
+        """Receive the ids that just completed the reset chain."""
         ...
 
 

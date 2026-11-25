@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from unigym.sink import RewindAwareSink, Sink, StoppingSink, TerminalSink
+from unigym.sink import ResetAwareSink, RewindAwareSink, Sink, StoppingSink, TerminalSink
 
 from .base import Runner, StepResult
 from .external import ExternalRunner
@@ -55,11 +55,23 @@ def make_runner(
         known = ", ".join(sorted(_RUNNER_KINDS))
         raise ValueError(f"unknown runner kind {kind!r} (known: {known})") from None
     if kind in ("external", "gym", "gym_vector"):
-        return factory.from_instance(instance, **kwargs)
-    if kwargs:
+        runner = factory.from_instance(instance, **kwargs)
+    elif kwargs:
         unknown = ", ".join(sorted(kwargs))
         raise TypeError(f"runner kind {kind!r} takes no options (got: {unknown})")
-    return factory.from_instance(instance)
+    else:
+        runner = factory.from_instance(instance)
+    providers = getattr(instance, "rewind_providers", None)
+    if isinstance(providers, list):
+        from unigym.runtime.rewind_providers import RunnerLifecycleProvider
+
+        providers[:] = [
+            provider
+            for provider in providers
+            if getattr(provider, "name", None) != RunnerLifecycleProvider.name
+        ]
+        providers.append(RunnerLifecycleProvider(runner))
+    return runner
 
 
 __all__ = [
@@ -68,6 +80,7 @@ __all__ = [
     "GymEnvRunner",
     "GymRunner",
     "GymVectorRunner",
+    "ResetAwareSink",
     "RewindAwareSink",
     "Runner",
     "Sink",

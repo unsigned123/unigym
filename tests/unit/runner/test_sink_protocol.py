@@ -13,7 +13,7 @@ from tests._support.fakes.external_sink import TerminalDrainSink
 from unigym.core.episode_termination import EpisodeOutcome, Termination, TerminationSource
 from unigym.run.instance import Sink as InstanceSink
 from unigym.runner.sinks import FanOutSink
-from unigym.sink import RewindAwareSink, Sink, StoppingSink, TerminalSink
+from unigym.sink import ResetAwareSink, RewindAwareSink, Sink, StoppingSink, TerminalSink
 
 
 def _termination(code: str) -> Termination:
@@ -55,9 +55,11 @@ def test_root_runner_and_instance_reexport_the_canonical_sink():
 
 def test_runner_reexports_the_capability_protocols():
     """Runner re-exports the optional capability protocols by identity."""
+    assert unigym.runner.ResetAwareSink is ResetAwareSink
     assert unigym.runner.RewindAwareSink is RewindAwareSink
     assert unigym.runner.StoppingSink is StoppingSink
     assert unigym.runner.TerminalSink is TerminalSink
+    assert "ResetAwareSink" in unigym.sink.__all__
     assert "TerminalSink" in unigym.sink.__all__
     assert "TerminalSink" in unigym.runner.__all__
 
@@ -86,6 +88,7 @@ def test_sink_required_callback_shape(name, parameters):
 @pytest.mark.parametrize(
     ("protocol", "name", "parameters"),
     [
+        (ResetAwareSink, "on_reset", ["self", "env_ids"]),
         (RewindAwareSink, "on_rewind", ["self", "info"]),
         (StoppingSink, "stop_when", ["self"]),
         (TerminalSink, "drain_terminations", ["self"]),

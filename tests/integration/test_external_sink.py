@@ -16,6 +16,7 @@ import yaml
 
 from unigym.actuators.ir import ActuationGroup
 from unigym.assets.asset_ref import AssetRef
+from unigym.core.episode_termination import EpisodeOutcome, Termination, TerminationSource
 from unigym.pack_api import discover
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
@@ -314,6 +315,49 @@ def test_custom_sink_terminal_ends_env_and_resets(tmp_path: Path) -> None:
         assert sink.episode_end_calls == 1
         assert sink.step_episode_ids[1] == first_episode_id + 1
         assert sink.step_times[1] == pytest.approx(sink.step_times[0])
+    finally:
+        run.close()
+
+
+def test_external_runner_manual_terminate_and_reset(tmp_path: Path) -> None:
+    """A manual terminate closes the row until an explicit reset reopens it."""
+    run = Run(
+        world=World.base(mjcf=_floor_world(tmp_path)),
+        robot=_profile(),
+        backend="mujoco",
+        observations={"robot": ["tiny"]},
+        action_spec=ACTION_SPEC,
+        policies=POLICIES,
+        mode="collect",
+        steps=STEPS,
+        episode_length_s=10.0,
+        inspect=True,
+        sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 5}),
+    )
+    try:
+        instance = run.build(inspect=True)
+        sink = _external_sink(instance)
+        runner = run.runner("external", action_fn=_zero_actions)
+
+        first = runner.step(_zero_actions(0))
+        assert first.reset_env_ids.numel() == 0
+        terminated = Termination(
+            EpisodeOutcome.MANUAL, "custom.manual_stop", TerminationSource.CUSTOM
+        )
+        ended = runner.terminate([0], {0: terminated}, reset=False)
+
+        assert ended.reset_env_ids.tolist() == [0]
+        assert sink.episode_end_calls == 1
+        assert sink.reset_calls == []
+        assert runner.ticks_done == 1
+        with pytest.raises(RuntimeError, match="closed"):
+            runner.step(_zero_actions(1))
+
+        reopened = runner.reset([0])
+        assert reopened.reset_env_ids.tolist() == [0]
+        assert sink.reset_calls == [[0]]
+        runner.step(_zero_actions(1))
+        assert runner.ticks_done == 2
     finally:
         run.close()
 

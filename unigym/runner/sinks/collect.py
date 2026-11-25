@@ -439,6 +439,12 @@ class CollectSink:
         self.n_episodes += env_ids.numel()
 
     # ------------------------------------------------------------------ #
+    # reset notification (optional capability; collect keeps no state)
+    # ------------------------------------------------------------------ #
+    def on_reset(self, env_ids) -> None:
+        """Accept the reset notification; the collect recorder holds no state."""
+
+    # ------------------------------------------------------------------ #
     # per-step metrics (kept after the reset chain, like the original loop)
     # ------------------------------------------------------------------ #
     def on_step_end(self, t: int, bundle: dict) -> None:
