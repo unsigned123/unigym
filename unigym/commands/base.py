@@ -71,8 +71,16 @@ class CommandSampler(ABC):
         immediately after :meth:`bind_env` and before any runner exists.
         A sampler that consumes values stores the read view (for example
         ``self.values = values``) and interprets names/dtypes itself; core
-        performs no value-to-command mapping.  It is not replayed on restore,
-        so a restored sampler must not depend on having been rebound.
+        performs no value-to-command mapping.  The declared parameter is the
+        read-only :class:`~unigym.values.ValueView`, which does not expose
+        ``subscribe``; the live object is the concrete
+        :class:`~unigym.values.ValueStore`, so a sampler that must react in the
+        same publication boundary must treat it as a ``ValueStore`` (for
+        example an ``isinstance`` check) before calling
+        ``values.subscribe(callback, names=...)`` and keeping the returned
+        unsubscribe callable.  Subscribing is optional and core keeps no
+        callback state for the sampler.  It is not replayed on restore, so a
+        restored sampler must not depend on having been rebound.
         """
         return None
 

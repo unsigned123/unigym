@@ -1337,9 +1337,17 @@ class AcmeSink:
             for env_id in due
         }
 ```
-- publication latency is two policy ticks: `on_step(t)` publishes after
-  `env.step(t)`, the sampler's next read is `update(t+1)`, and the command that
-  read produces is first used by `env.step(t+2)`.  Samplers bound through
+- publication latency depends on how the consumer reads the value.  The
+  polling path (`ValueView` reads) stays two policy ticks: `on_step(t)` publishes
+  after `env.step(t)`, the sampler's next read is `update(t+1)`, and the command
+  that read produces is first used by `env.step(t+2)`.  A sampler bound to the
+  concrete `ValueStore` may instead subscribe at `bind_values`: a callback fired
+  during `on_step(t)` that mutates the live command buffer in place is acted on
+  by `env.step(t+1)` (one policy tick).  That path requires updating the same
+  buffer the runner holds (the tensor returned by the current `update`, normally
+  `self.cmd`); reassigning a fresh tensor in the callback or returning a
+  detached copy from `update` does not propagate, so the change waits for the
+  next `update` return and the two-tick polling latency.  Samplers bound through
   `command.module` read the run's live store through `ValueView`; names must be
   namespaced (`<monitor>/<value>`, `scenario/*`) because the transport has no
   registry and the last publish by one owner wins.  Watchers are debug-only and

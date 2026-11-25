@@ -15,12 +15,18 @@ detached clones; JSON values are deep copies.  A missing name is absent
 
 The store is instance-owned and single-threaded: publish, read, clear and
 rewind all run on the owning thread (the engine thread in a live run).
+
+A store may also carry run-scoped synchronous subscriptions.  A callback runs
+in registration order immediately after a successful publish (or after a clear
+that actually removed a value, with ``None``).  Callbacks receive isolated
+copies, must stay small and must not raise, and must not mutate the store:
+a re-entrant publish/clear/restore raises ``RuntimeError`` instead of recursing.
 """
 
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Protocol, TypeAlias, runtime_checkable
 
 import torch
@@ -101,6 +107,20 @@ def _copy_value(value: Value) -> Value:
     return copy.deepcopy(value)
 
 
+class _Subscription:
+    """One synchronous value-change subscription."""
+
+    __slots__ = ("callback", "names")
+
+    def __init__(
+        self,
+        callback: Callable[[str, Value | None], None],
+        names: frozenset[str] | None,
+    ) -> None:
+        self.callback = callback
+        self.names = names
+
+
 class StepValues(Mapping[str, Value]):
     """Immutable snapshot of a :class:`ValueStore` at one step boundary.
 
@@ -168,21 +188,76 @@ class ValueStore:
         self.device = torch.device(device)
         self._values: dict[str, Value] = {}
         self._writers: dict[str, str] = {}
+        self._subscriptions: list[_Subscription] = []
+        self._notifying = False
 
     def publisher(self, owner: str) -> ValuePublisher:
         """Return a write-only publisher bound to *owner*."""
         self._require_owner(owner)
         return _BoundValuePublisher(self, owner)
 
+    def subscribe(
+        self,
+        callback: Callable[[str, Value | None], None],
+        *,
+        names: frozenset[str] | None = None,
+    ) -> Callable[[], None]:
+        """Register a synchronous value-change *callback* for this store.
+
+        The callback runs in registration order immediately after a successful
+        :meth:`publish` (``(name, value)``) and after a :meth:`clear` that
+        actually removed a value (``(name, None)``).  It never runs for reads,
+        snapshots, refused publishes or a rewind restore.  Each callback gets
+        its own isolated copy of the value and must be small and non-throwing:
+        a raising callback propagates out of the publish/clear that fired it.
+        ``clear(owner)`` removes every owned value before notifying, so a
+        raising callback stops the remaining notifications but leaves the
+        removal complete.
+
+        With ``names=None`` every name is delivered; otherwise only the exact
+        listed names are delivered (there is no wildcard or pattern syntax).
+        Unsubscribing is idempotent.  Like the rest of the store, subscribing
+        and notifying are single-threaded on the owning thread.
+
+        Args:
+            callback: Callable taking ``(name, value_or_none)``.
+            names: Optional exact-name filter as a frozenset.
+
+        Returns:
+            An idempotent callable that removes this subscription.
+
+        Raises:
+            TypeError: *callback* is not callable or *names* is not a
+                frozenset.
+            ValueError: *names* contains a non-string or empty name.
+        """
+        if not callable(callback):
+            raise TypeError(f"subscription callback must be callable, got {callback!r}")
+        selected = self._subscription_names(names)
+        subscription = _Subscription(callback, selected)
+        self._subscriptions.append(subscription)
+
+        def unsubscribe() -> None:
+            for index, existing in enumerate(self._subscriptions):
+                if existing is subscription:
+                    del self._subscriptions[index]
+                    return
+
+        return unsubscribe
+
     def publish(self, owner: str, name: str, value: Value) -> None:
         """Store *value* under *name* on behalf of *owner* (last write wins).
 
+        Subscribers are notified after the value is stored.
+
         Raises:
+            RuntimeError: called re-entrantly from a subscription callback.
             ValueOwnershipError: *name* is already claimed by another owner.
             ValueError: *owner*/*name* is not a non-empty string, or *value*
                 violates the tensor/JSON transport contract.
             TypeError: *value* is not JSON-safe.
         """
+        self._require_not_notifying()
         self._require_owner(owner)
         self._require_name(name)
         writer = self._writers.get(name)
@@ -191,6 +266,7 @@ class ValueStore:
         stored = self._checked_value(name, value)
         self._writers[name] = owner
         self._values[name] = stored
+        self._notify(name, stored)
 
     def get(self, name: str) -> Value | None:
         """Return an isolated copy of *name*, or ``None`` when absent."""
@@ -208,23 +284,33 @@ class ValueStore:
         """Remove *owner*'s values while retaining ownership claims.
 
         With *name*, remove that one value; with ``None``, remove every value
-        currently owned by *owner*.  Claims are never released.
+        currently owned by *owner*.  Claims are never released.  A clear
+        notifies subscribers once per value it actually removed, with
+        ``None``; clearing an absent name is a silent no-op.  With ``None`` the
+        removal completes before notification starts, so a raising callback
+        stops the remaining notifications but the values stay removed.
 
         Raises:
+            RuntimeError: called re-entrantly from a subscription callback.
             ValueOwnershipError: *name* is claimed by another owner.
             ValueError: *owner*/*name* is not a non-empty string.
         """
+        self._require_not_notifying()
         self._require_owner(owner)
         if name is None:
             owned = [key for key in self._values if self._writers.get(key) == owner]
             for key in owned:
                 del self._values[key]
+            for key in owned:
+                self._notify(key, None)
             return
         self._require_name(name)
         writer = self._writers.get(name)
         if writer is not None and writer != owner:
             raise ValueOwnershipError(name, owner, writer)
-        self._values.pop(name, None)
+        if name in self._values:
+            del self._values[name]
+            self._notify(name, None)
 
     # ------------------------------------------------------------------ #
     # RewindStateProvider shape (name = "values")
@@ -250,8 +336,14 @@ class ValueStore:
         """Replace values and writers atomically from a checkpoint payload.
 
         The payload is validated fully first; a refused restore leaves every
-        value and ownership claim unchanged.
+        value and ownership claim unchanged.  A restore never notifies
+        subscribers.
+
+        Raises:
+            RuntimeError: called re-entrantly from a subscription callback.
+            RewindGateError: *state* is not a valid schema-2 payload.
         """
+        self._require_not_notifying()
         values, writers = self._checked_payload(state)
         self._values = values
         self._writers = writers
@@ -341,6 +433,46 @@ class ValueStore:
                 )
             return value.detach().clone()
         return ensure_json_value(value, where=f"value {name!r}")
+
+    @staticmethod
+    def _subscription_names(names: object) -> frozenset[str] | None:
+        """Validate and return the exact-name subscription filter."""
+        if names is None:
+            return None
+        if not isinstance(names, frozenset):
+            raise TypeError(
+                "subscription names must be a frozenset of non-empty str or "
+                f"None, got {type(names).__name__}"
+            )
+        for name in names:
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"subscription name must be a non-empty str, got {name!r}")
+        return names
+
+    def _notify(self, name: str, value: Value | None) -> None:
+        """Deliver one change to matching subscribers in registration order."""
+        if not self._subscriptions:
+            return
+        targets = tuple(self._subscriptions)
+        self._notifying = True
+        try:
+            for subscription in targets:
+                if subscription.names is not None and name not in subscription.names:
+                    continue
+                if subscription not in self._subscriptions:
+                    continue
+                subscription.callback(name, None if value is None else _copy_value(value))
+        finally:
+            self._notifying = False
+
+    def _require_not_notifying(self) -> None:
+        """Refuse a store mutation that a callback issued re-entrantly."""
+        if self._notifying:
+            raise RuntimeError(
+                "cannot publish, clear or restore a value store during a "
+                "subscription notification; callbacks must not mutate the store "
+                "(defer the mutation until publish/clear returns)"
+            )
 
     @staticmethod
     def _require_owner(owner: object) -> None:

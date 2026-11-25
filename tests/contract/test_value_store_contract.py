@@ -106,3 +106,26 @@ def test_rewind_payload_has_the_documented_schema_shape():
     assert set(state) == {"schema", "values", "writers"}
     assert state["schema"] == VALUE_REWIND_SCHEMA
     assert state["writers"] == {"x": "alice"}
+
+
+def test_only_the_store_exposes_subscribe():
+    """Subscriptions belong to the store; the view and publisher do not."""
+    store = ValueStore(num_envs=2, device="cpu")
+    snapshot = store.snapshot()
+    publisher = store.publisher("alice")
+
+    assert callable(store.subscribe)
+    assert not hasattr(snapshot, "subscribe")
+    assert not hasattr(publisher, "subscribe")
+    assert not hasattr(ValueView, "subscribe")
+
+
+def test_subscribe_returns_an_idempotent_unsubscribe_callable():
+    """subscribe returns a callable that removes the registration repeatedly."""
+    store = ValueStore(num_envs=2, device="cpu")
+
+    unsubscribe = store.subscribe(lambda name, value: None)
+
+    assert callable(unsubscribe)
+    assert unsubscribe() is None
+    assert unsubscribe() is None

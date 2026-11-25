@@ -162,6 +162,39 @@ def test_apply_replaces_writers_instead_of_merging():
     assert torch.equal(store.get("a"), torch.ones(2))
 
 
+def test_apply_rewind_state_is_refused_reentrantly_from_a_callback():
+    """A callback cannot restore a checkpoint during a notification."""
+    store = _store()
+    store.publish("alice", "a", torch.zeros(2))
+    state = store.rewind_state()
+
+    def callback(name, value):
+        store.apply_rewind_state(state)
+
+    store.subscribe(callback)
+
+    with pytest.raises(RuntimeError, match="during a subscription notification"):
+        store.publish("alice", "b", torch.ones(2))
+
+    assert torch.equal(store.get("b"), torch.ones(2))
+
+
+def test_rewind_restore_and_validation_do_not_notify_subscribers():
+    """A restore replaces values silently; subscribers fire only on publish/clear."""
+    store = _store()
+    store.publish("alice", "a", torch.tensor([1.0, 2.0]))
+    state = store.rewind_state()
+    store.publish("alice", "a", torch.tensor([9.0, 9.0]))
+    seen = []
+    store.subscribe(lambda name, value: seen.append(name))
+
+    store.validate_rewind_state(state)
+    store.apply_rewind_state(state)
+
+    assert seen == []
+    assert torch.equal(store.get("a"), torch.tensor([1.0, 2.0]))
+
+
 def test_cleared_claim_survives_a_rewind_round_trip():
     """A cleared name keeps its owner across capture and restore."""
     store = _store()

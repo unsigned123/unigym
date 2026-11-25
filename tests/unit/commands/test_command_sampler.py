@@ -34,6 +34,19 @@ class _ValueReadingSampler(_ConstantSampler):
         self.values = values
 
 
+class _SubscribingSampler(_ConstantSampler):
+    """Custom sampler that reacts at the value publication boundary."""
+
+    def bind_values(self, values: ValueView) -> None:
+        assert isinstance(values, ValueStore)
+        self.values = values
+        self._unsubscribe = values.subscribe(self._on_phase, names=frozenset({"user/phase"}))
+
+    def _on_phase(self, name: str, value) -> None:
+        if isinstance(value, torch.Tensor):
+            self.cmd.copy_(value)
+
+
 def test_command_sampler_defaults_declare_no_rewind_capability():
     """A plain sampler is neither rewind-inert nor rewind-capable."""
     sampler = _ConstantSampler()
@@ -80,6 +93,20 @@ def test_custom_sampler_reads_a_user_value_without_core_interpretation():
     ready = sampler.values.get("user/ready")
     assert ready is not None
     assert ready.tolist() == [True, False]
+
+
+def test_a_sampler_can_subscribe_to_react_at_the_publication_boundary():
+    """A subscribing sampler updates its pending command before the next update."""
+    sampler = _SubscribingSampler(dim=2, num_envs=2)
+    store = ValueStore(num_envs=2, device="cpu")
+    sampler.bind_values(store)
+    assert torch.equal(sampler.update(0.1, sampler.cmd), torch.zeros(2, 2))
+
+    store.publish("alice", "user/phase", torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+
+    expected = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    assert torch.equal(sampler.cmd, expected)
+    assert torch.equal(sampler.update(0.1, sampler.cmd), expected)
 
 
 def test_episode_result_view_copies_metrics_and_fixes_its_fields():

@@ -41,6 +41,12 @@ class ValueStore:
     def publish(self, owner: str, name: str, value: Value) -> None: ...
     def get(self, name: str) -> Value | None: ...
     def snapshot(self) -> StepValues: ...
+    def subscribe(
+        self,
+        callback: Callable[[str, Value | None], None],
+        *,
+        names: frozenset[str] | None = None,
+    ) -> Callable[[], None]: ...
     def clear(self, owner: str, name: str | None = None) -> None: ...
     def rewind_state(self) -> Mapping[str, object]: ...
     def validate_rewind_state(self, state: Mapping[str, object]) -> None: ...
@@ -97,6 +103,42 @@ unchanged.  Clear never releases a claim.  A rewind restores the checkpoint's
 writer map exactly (it does not merge), so names claimed after the checkpoint
 are released and names present in the checkpoint keep their owner.  No
 operation transfers a live claim to a different owner.
+
+## Subscriptions
+
+`subscribe(callback, *, names=None)` registers one synchronous value-change
+callback and returns an idempotent unsubscribe callable.  Subscriptions are
+run-scoped and instance-owned: they live on one store, are not module globals,
+and are not part of the rewind payload.
+
+- `names=None` delivers every name; otherwise only the exact listed names are
+  delivered.  The filter is a `frozenset[str]` of non-empty names with no
+  wildcard, pattern or DSL syntax.
+- Callbacks run in registration order.  Unsubscribing removes that one
+  subscription and is safe to call more than once.
+- A successful `publish` notifies matching callbacks with `(name, value)`
+  after the value is stored.  A `clear` that actually removes a value notifies
+  once per removed value with `(name, None)`; clearing an absent name is
+  silent.  `clear(owner)` notifies once for each value it removed.
+- There is no notification for a refused publish, a read, `snapshot`, a
+  `clear` that removed nothing, or a rewind restore.
+- Callbacks receive isolated copies with the same semantics as `get` and
+  `snapshot`; mutating a delivered value cannot change the store or another
+  callback's copy.
+- A callback exception propagates out of the `publish`/`clear` that fired it;
+  the store mutation has already happened.  For `clear(owner)` every owned value
+  is removed before notification starts, so a raising callback stops the
+  remaining notifications but leaves the removal complete.  Callbacks must stay
+  small and non-throwing.
+- A callback must not mutate the store.  A re-entrant `publish`, `clear` or
+  `apply_rewind_state` from a callback raises a teaching `RuntimeError` (store
+  mutation during notification) instead of recursing or deadlocking.
+- Subscribing and notifying are single-threaded on the owning thread, like
+  every other store operation.
+
+`StepValues` stays immutable and is not subscribable; `publisher(owner)` is
+write-only and exposes no `subscribe`.  Only the store itself owns
+subscriptions.
 
 ## Rewind
 
@@ -155,16 +197,27 @@ payload.  Cameras and depth are never published.
 
 The runner order is `env.step(t) -> sampler.update(t) -> sink.on_step(t)`.  A
 custom sink therefore publishes a value after tick `t`'s physics and observation
-snapshot, and the sampler's next read is `update(t+1)`.  The command returned by
-that update is written to `obs.command` at `t+1` and is first used by
-`env.step(t+2)`: in-episode closed loop has two policy-tick latency from the
-observed view to the acting command.  Publishing more than once per tick is
-allowed; last publish by the same owner wins.  Producers must namespace names
-(`<producer>/<value>`); the transport has no registry.
+snapshot, and the sampler's next **polling** read is `update(t+1)`.  The command
+returned by that update is written to `obs.command` at `t+1` and is first used
+by `env.step(t+2)`: the polling in-episode closed loop has two policy-tick
+latency from the observed view to the acting command.  Publishing more than once
+per tick is allowed; last publish by the same owner wins.  Producers must
+namespace names (`<producer>/<value>`); the transport has no registry.
+
+A **subscription** callback runs synchronously inside that publish, still in
+`on_step(t)`.  A control consumer can therefore mutate its live command buffer
+in place and be acted on by `env.step(t+1)`: one policy-tick latency.  This
+holds only when the callback updates the same buffer the runner holds for tick
+`t` (the tensor returned by the current `update`, normally `self.cmd`) and that
+`update` returns the owned buffer rather than a copy.  Reassigning a fresh
+tensor in the callback does not propagate to the runner; the new value then
+waits for the next `update` return and the polling path's two-tick latency.
 
 ## Out of scope
 
 - automatic value-to-command or value-to-observation mapping;
 - watcher value publication;
 - phase/task/event vocabulary, typed value schemas or value registries;
-- per-env vectorized watcher triggers.
+- per-env vectorized watcher triggers;
+- an event bus, asynchronous delivery, delivery history, persisted
+  subscriptions or wildcard/pattern name matching.

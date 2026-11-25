@@ -103,11 +103,23 @@ never published.
 
 The runner order is `env.step(t) -> sampler.update(t) -> sink.on_step(t)`.  A
 custom sink publishes after tick `t`'s physics and observation snapshot, so the
-sampler's first read of that value is `update(t+1)`.  Watchers are debug-only
-and publish no values.  The command returned by `update(t+1)` is written to
-`obs.command` at `t+1` and is first used by `env.step(t+2)`: in-episode closed
-loop has two policy-tick latency from the observed view to the acting command.
-This is the fixed sampler placement; a sink cannot shorten it from its callback.
+sampler's first polling read of that value is `update(t+1)`.  Watchers are
+debug-only and publish no values.  The command returned by `update(t+1)` is
+written to `obs.command` at `t+1` and is first used by `env.step(t+2)`:
+in-episode polling closed loop has two policy-tick latency from the observed
+view to the acting command.  This is the fixed sampler placement; a sink
+cannot shorten the polling path from its callback.
+
+A sampler may instead subscribe through the concrete `ValueStore` at
+`bind_values` (the `ValueView` parameter does not expose `subscribe`).  A
+subscriber callback fired by a sink publish during `on_step(t)` can mutate the
+sampler's live command buffer **in place**, and `env.step(t+1)` then uses the
+new command: the subscription path has one policy-tick latency.  This works
+only when the callback updates the same buffer the runner currently holds —
+the tensor returned by the current tick's `update` (normally `self.cmd`).
+Reassigning a fresh tensor in the callback does not propagate to the runner, and
+neither does an `update` that returns a detached copy instead of the owned
+buffer.  Pin that alias in tests.
 
 ## Rewind
 

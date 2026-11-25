@@ -220,7 +220,7 @@ The runner order is fixed and unchanged:
 env.step(t) -> sampler.update(t) -> sink.on_step(t)
 ```
 
-Therefore in-episode closed loop has **two policy-tick latency**:
+Therefore the **polling path** has **two policy-tick latency**:
 
 1. a sink publishes in `on_step(t)`, after that tick's physics and observation
    snapshot;
@@ -232,6 +232,17 @@ Therefore in-episode closed loop has **two policy-tick latency**:
 This is the existing sampler placement, not a sink-seam bug.  Deterministic
 direct-read tests must assert this two-tick latency, not an aspirational
 one-tick loop.
+
+The **subscription path** is separate and adds no runner phase.  A sampler that
+subscribed to the concrete `ValueStore` at `bind_values` may mutate its live
+command buffer in place from the callback fired by a publish in `on_step(t)`;
+the runner already holds that tensor as tick `t`'s command, so `env.step(t+1)`
+acts on the new value: one policy-tick latency from publication to action.
+This depends on the alias: the callback must update the same buffer the runner
+holds (the tensor `update(t)` returned, normally `self.cmd`), and `update` must
+return that owned buffer.  Reassigning a new tensor in the callback, or
+returning a detached copy from `update`, does not propagate to the runner; the
+change then waits for the next `update` return (the polling path).
 
 Sink selection is explicit and mode-free:
 
