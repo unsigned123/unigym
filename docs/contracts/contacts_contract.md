@@ -116,7 +116,7 @@ contact    (N, B) bool    (N, B, F) bool
 ```
 
 `contact/<name>` is the sensor/record key. `contact/<name>/force` and
-`contact/<name>/active_bodies` are the benchmark force facts; `aggregation:
+`contact/<name>/active_bodies` are the force facts; `aggregation:
 net | sum_magnitudes` keeps the existing math. Group metadata
 (`meta["contacts"][<name>]`) carries the derived owner/owners, mode, frame,
 unit and the explicit sensor/filter refs.

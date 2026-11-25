@@ -1,7 +1,7 @@
 """Pluggable Actuator seam top-level package: registry + built-in laws.
 
 Semantics: the backend Actuator seam; a first-class package, sibling of
-adapters/benchmarks.  The backend's per-substep ctrl write face converges onto
+adapters.  The backend's per-substep ctrl write face converges onto
 pluggable control laws; the action-group semantics are untouched (NamedAction
 carries the control's declared target kind, routing stays with the backend).
 The built-ins:

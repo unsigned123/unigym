@@ -18,9 +18,9 @@ Public surface:
   and per-ref resolution with duplicate/ambiguous/unknown failures.
 
 Record channel: the env backends merge ``manager.read()`` into ``extra`` so
-the keys flow through CollectSink/EvaluationSession into npz / episode buffers
-(L2 loop).  Obs path: adapters may request ``contact/<name>`` keys
-(decoupled from recording).  Contract docs: ``docs/contracts/contacts_contract.md``.
+the keys flow through a recording sink into npz / episode buffers (L2 loop).
+Obs path: adapters may request ``contact/<name>`` keys (decoupled from
+recording).  Contract docs: ``docs/contracts/contacts_contract.md``.
 
 The package is numpy/torch-only at import time; backend imports are lazy
 (inside ``build_contact_manager``), mirroring the ``cameras/`` convention.

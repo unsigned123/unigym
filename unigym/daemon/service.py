@@ -11,8 +11,8 @@ Owns five pieces:
                         SHM + registries, §3)
 * spawn scheduling     (/api/start spawns with alloc -> setsid, §1(2):
                         detached sessions, the daemon can never take a
-                        benchmark down) + the run.json ledger (output_dir
-                        spec at spawn, exit+results at reap)
+                        run down) + the run.json ledger (output_dir
+                        spec at spawn, exit at reap)
 
 Supervision is REPORT-ONLY (§1(5)): a dead run is logged and the view
 marks it; no restart policy is enabled by default.  (The submit
@@ -144,8 +144,6 @@ class DaemonService:
         # against each fresh view so they never grow with history)
         self.events = EventBus()
         self._phase_snap: dict[str, str | None] = {}
-        self._draft_ep: dict[str, int] = {}
-        self._draft_ts: dict[str, float] = {}
         self._tl_off: dict[str, int] = {}
 
         # -- media gateway (auth single point; media.py is self-contained) --
@@ -416,9 +414,6 @@ class DaemonService:
                     "signal": d.get("signal"),
                     "reason": d.get("reason"),
                 }
-        # task face per row (additive key, meta.json-backed;
-        # contract daemon_api_contract.md §1.2/§1.20 -- old runs -> null)
-        queries.attach_task_face(view)
         self._fill_unknown_from_ledger(view)
         self._backfill_run_ids(view)
         with self._view_lock:
@@ -504,7 +499,7 @@ class DaemonService:
         if not raw:
             return
         # registry output_dir is worker-cwd-relative when output_root is
-        # -- normalize against the repo (task_face_for/query_events rule)
+        # -- normalize against the repo (the query_events rule)
         p = Path(raw)
         home = str(p) if p.is_absolute() else str(queries.REPO_ROOT / p)
         if home == meta.get("out_dir"):
@@ -599,10 +594,10 @@ class DaemonService:
     # -- rebuild-loop event edges (contract §1.22) ------------------- #
     #
     # The bus lives in the daemon; the run-side state changes behind the
-    # bench draft and the watcher timeline surface here as registry/file
-    # observations (runs are zero-port SHM workers -- there is no
-    # run->daemon channel and the design adds none).  Events are
-    # NOTIFICATIONS: payloads stay light, clients pull for details.
+    # watcher timeline surface here as registry/file observations (runs are
+    # zero-port SHM workers -- there is no run->daemon channel and the design
+    # adds none).  Events are NOTIFICATIONS: payloads stay light, clients pull
+    # for details.
     @staticmethod
     def _edge_key(r: dict) -> str:
         return str(r.get("run_id") or f"pid:{r.get('pid')}")
@@ -613,7 +608,6 @@ class DaemonService:
             key = self._edge_key(r)
             seen.add(key)
             self._phase_edge(key, r)
-            self._draft_edge(key, r)
             self._watcher_tail(key, r)
         for key in list(self._phase_snap):
             if key not in seen:
@@ -625,7 +619,7 @@ class DaemonService:
                         run_id=None if key.startswith("pid:") else key,
                         data={"state": "DEAD", "alive": False},
                     )
-        for cache in (self._draft_ep, self._draft_ts, self._tl_off):
+        for cache in (self._tl_off,):
             for key in list(cache):
                 if key not in seen:
                     cache.pop(key, None)
@@ -644,53 +638,6 @@ class DaemonService:
                 run_id=r.get("run_id"),
                 data={"state": ph, "alive": bool(r.get("alive"))},
             )
-
-    def _draft_edge(self, key: str, r: dict) -> None:
-        """bench.draft edge (the EvaluationSession per-episode update).
-
-        The daemon-side face: the registry's episodes counter -- fetch
-        the live draft once per edge, throttled to >=1s per run.
-        """
-        if not r.get("alive") or not r.get("run_id"):
-            return
-        if (r.get("task_face") or {}).get("mode") not in ("benchmark", "both"):
-            return
-        ep = int(r.get("episodes") or 0)
-        prev = self._draft_ep.get(key)
-        self._draft_ep[key] = ep
-        if prev is None or ep <= prev:
-            return
-        now = time.monotonic()
-        if now - self._draft_ts.get(key, 0.0) < 1.0:
-            return  # ≥1s throttle per run (design §2)
-        self._draft_ts[key] = now
-        draft = self._query_report(r["run_id"])
-        if not draft:
-            return
-        self.events.publish(
-            "bench.draft",
-            run_id=r["run_id"],
-            data={
-                "episodes_total": draft.get("episodes_total"),
-                "tasks": {
-                    name: (t or {}).get("success_rate")
-                    for name, t in (draft.get("tasks") or {}).items()
-                },
-            },
-        )
-
-    def _query_report(self, run_id: str) -> dict | None:
-        """The live benchmark draft (SHM typed query).
-
-        Best effort: a notification must never kill the rebuild loop.
-        """
-        try:
-            from unigym.core.session import attach
-
-            with attach(run_id, timeout_s=5.0) as s:
-                return s.query("report", timeout_s=5.0)
-        except Exception:  # noqa: BLE001
-            return None
 
     def _watcher_tail(self, key: str, r: dict) -> None:
         """watcher.fired edge (the watchers timeline append).
@@ -750,8 +697,8 @@ class DaemonService:
         of the daemon (run spawns) would otherwise linger as zombies
         and keep pid-liveness checks ambiguous.  A non-zero exit of a
         child WE spawned raises a death record (exit code + log tail);
-        every reaped child completes its run.json ledger (exit +
-        results) -- the reap point IS the ledger's terminal writer.
+        every reaped child completes its run.json ledger (exit) -- the
+        reap point IS the ledger's terminal writer.
         """
         while True:
             try:
@@ -785,7 +732,6 @@ class DaemonService:
                             "code": None if signal_num else int(exit_code or 0),
                             "reason": (f"killed by signal {signal_num}" if signal_num else ""),
                         },
-                        "results": d.get("results") or {},
                     },
                 )
             if meta is not None and (exit_code or signal_num):
@@ -804,8 +750,7 @@ class DaemonService:
     ) -> dict | None:
         """run.json terminal write at reap.
 
-        Exit segment + the light results summary + the task face
-        backfill (meta.json exists by run end).  A ledger missing at
+        Exit segment.  A ledger missing at
         the spawn-time path (pre-registration death after a
         collect_cli rotation) is located by pid; a ledger that cannot
         be found at all is logged, never raised -- reaping must not
@@ -847,9 +792,7 @@ class DaemonService:
                 signal_num=signal_num,
                 wall_time_s=finished - float(meta.get("spawned_ts") or finished),
                 finished_ts=finished,
-                results=runrec.results_from_report(out_dir),
                 log_tail=tail,
-                task_face=queries.task_face_for(out_dir),
             )
             if doc is None:
                 _log(f"run ledger missing at reap: {out_dir} " f"(spec write failed at spawn?)")
@@ -907,10 +850,9 @@ class DaemonService:
             + (f" gpu={gpu_note}" if gpu_note is not None else "")
             + f" config={handle.config}"
         )
-        # output_dir is the ledger -- write the spec segment at
-        # spawn (task_face reads meta.json, which the worker flushes at
-        # its first shard, so it backfills at reap; run_id backfills
-        # from the first view row naming the pid).  Bookkeeping must
+        # output_dir is the ledger -- write the spec segment at spawn
+        # (run_id backfills from the first view row naming the pid).
+        # Bookkeeping must
         # never break a spawn: failures are logged, not raised.
         overrides = runrec.overrides_from_passthrough(spec.passthrough)
         run_id = None
@@ -927,7 +869,6 @@ class DaemonService:
                 direct=bool(spec.direct),
                 started_ts=time.time(),
                 pid=handle.pid,
-                task_face=queries.task_face_for(handle.out_dir),
                 adapter_params=(spec.adapter_params or None),
             )
         except OSError as e:

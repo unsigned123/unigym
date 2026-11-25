@@ -132,7 +132,7 @@ class RewindStateProvider(Protocol):
 
     The checkpoint ring snapshots the ENGINE + ADAPTER state; every other
     facility that accumulates state a restored timeline must agree with
-    (the benchmark sink's open episode buffers, the collect sink's) joins
+    (the collect sink's shard cursor and episode fuse) joins
     through a provider: ``rewind_state()`` is captured into the SAME
     checkpoint payload as the engine snapshot (one freeze point, one
     package -- cross-facility consistency by construction), and
@@ -147,7 +147,7 @@ class RewindStateProvider(Protocol):
     rewinds.
     """
 
-    name: str  # "benchmark" / "episode_runner" (payload key)
+    name: str  # provider payload key (e.g. "episode_runner")
 
     def rewind_state(self) -> SnapshotValue:
         """The facility's necessary state at the freeze point."""

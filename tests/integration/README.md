@@ -54,8 +54,8 @@ by API (`SinkSpec(factory=...)`) and by a temporary YAML `sink.factory` path.  I
 drives the full `runner.run(stop_when=instance.stop_when)` loop, proves the sink
 saw all four lifecycle callbacks and stopped after two episodes, and checks the
 stateful sink's namespaced rewind provider is in `instance.rewind_providers`.
-The benchmark case proves a custom sink builds and runs without the built-in
-benchmark tasks or a pack runtime.
+The sink-selection case proves the default collect, explicit collect, custom
+`sinks=` and `sink:` shorthand paths build and run without a pack runtime.
 
 ## Run explicitly
 

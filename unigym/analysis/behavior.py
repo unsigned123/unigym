@@ -297,15 +297,8 @@ def analyze_run(
     env: int = 0,
     max_ticks: int | None = None,
     charts: bool = True,
-    gate: bool = True,
 ) -> dict:
-    """Full behavior report (doc dict + md/png artifacts on disk).
-
-    ``gate`` (default on): attach the declaration-driven gate
-    section (unigym/analysis/gate.py).  Purely additive: every existing doc
-    key and md section keeps its exact values; old runs without
-    results.json degrade to the missing-results ``na`` status.
-    """
+    """Full behavior report (doc dict + md/png artifacts on disk)."""
     loaded = load_run(run_dir, env=env, max_ticks=max_ticks)
     data, meta = loaded["data"], loaded["meta"]
     run = loaded["dir"]
@@ -438,24 +431,6 @@ def analyze_run(
         if (meta.get("num_envs") or 1) > 1
         else ["entities are shard-visible only (robot/base + prop/<name>)"],
     }
-    if gate:
-        from . import gate as _gate
-
-        try:
-            doc["gate"] = _gate.gate_doc(run)
-        except _gate.GateError as e:
-            doc["gate"] = {
-                "available": False,
-                "status": "na(results 残缺)",
-                "columns": [],
-                "rows": [],
-                "episodes": [],
-                "summary": None,
-                "gate": None,
-                "error": str(e),
-                "hint": e.hint,
-            }
-
     pngs: list[str] = []
     if charts:
         for p in pairs:
@@ -531,10 +506,6 @@ def render_md(doc: dict) -> str:
             f"successes are fixture validations, not policy "
             f"capability**"
         )
-    if doc.get("gate") is not None:
-        from .gate import render_gate_md
-
-        L += render_gate_md(doc["gate"])
     L.append(
         f"fall axis: base_z < {fa['threshold']:.2f} "
         f"({fa['source']}); episodes fell = {fa['episodes_fell']}"

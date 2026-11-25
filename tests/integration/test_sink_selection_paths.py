@@ -1,10 +1,9 @@
-"""Selected-sink runs leave the retired benchmark/evaluation modules unimported.
+"""Every selected-sink path builds and runs a tiny-arm real backend run.
 
-Core no longer selects a built-in benchmark/evaluation sink, so every new sink
-path (the absent-selection collect default, ``sinks=`` and the ``sink:``
-shorthand) must build without importing ``unigym.benchmarks`` or
-``unigym.runner.evaluation``.  The run happens in a subprocess so an earlier
-test cannot pollute ``sys.modules``; no code pack is activated.
+A run whose selection is absent, the built-in collect selection, a custom
+``sinks=`` selection and the ``sink:`` shorthand must all build and step a
+real MuJoCo env.  Each case runs in a subprocess so the backend lifecycle
+cannot leak between parametrized cases; no code pack is activated.
 """
 
 from __future__ import annotations
@@ -148,18 +147,13 @@ def build_and_run_custom_shorthand(world_dir: Path) -> None:
     )
 
 
-def _assert_no_retired_modules_imported(helper: str, world_dir: Path) -> None:
+def _run_helper(helper: str, world_dir: Path) -> None:
     code = (
         "import sys\n"
         "from pathlib import Path\n"
-        "from tests.integration.test_custom_sink_benchmark_imports import "
+        "from tests.integration.test_sink_selection_paths import "
         f"{helper}\n"
         f"{helper}(Path(sys.argv[1]))\n"
-        "leaked = sorted(\n"
-        "    m for m in sys.modules\n"
-        "    if m.startswith('unigym.benchmarks') or m.startswith('unigym.runner.evaluation')\n"
-        ")\n"
-        "assert not leaked, leaked\n"
     )
 
     result = subprocess.run(
@@ -180,6 +174,6 @@ def _assert_no_retired_modules_imported(helper: str, world_dir: Path) -> None:
     ],
     ids=["default", "collect", "custom", "shorthand"],
 )
-def test_selected_sinks_import_no_retired_benchmark_modules(tmp_path: Path, helper: str) -> None:
-    """Every new sink path builds/runs without the retired core modules."""
-    _assert_no_retired_modules_imported(helper, tmp_path)
+def test_selected_sink_paths_build_and_run(tmp_path: Path, helper: str) -> None:
+    """Every selection path builds and steps the tiny-arm run."""
+    _run_helper(helper, tmp_path)

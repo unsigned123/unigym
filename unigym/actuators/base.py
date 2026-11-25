@@ -1,6 +1,6 @@
 """Pluggable Actuator seam: the ctrl-write protocol + registry.
 
-One first-class package (sibling of adapters/benchmarks) --
+One first-class package (sibling of adapters) --
 the "absolute position target -> per-substep torque/servo ctrl write" law
 retires out of backend hardcode into pluggable actuators.  The action-group
 semantics are

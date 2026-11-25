@@ -26,9 +26,6 @@ Subcommands:
     probe NAME [--backend ...] [probe args...]   -> probe_<name> module
     bash  -> interactive container (same mounts)
     pytest [args...] -> host venv pytest at repo root
-Benchmark packs (docs/contracts/benchmark_contract.md §10):
-    benchmarks list [--pack X] -> tasks grouped by pack namespace
-    benchmarks validate <dir>  -> aggregated pack validation (exit 0/1)
 Contact groups (docs/contracts/contacts_contract.md):
     yaml `contacts:` -> contact/<name> record keys (both backends; probe_contacts)
 Object state (slimmed): every prop records
@@ -127,12 +124,7 @@ _COMMANDS: dict[str, tuple[str, str, str]] = {
     "probe": (
         "unigym.scripts.probe_cli",
         "add_probe_subparser",
-        "one-command e2e probe: launch -> wait -> gate scorecard; " "spawn via the daemon run face",
-    ),
-    "benchmarks": (
-        "unigym.scripts.benchmarks_cli",
-        "add_benchmarks_subparser",
-        "list / validate benchmark packs",
+        "one-command e2e probe: launch -> wait; " "spawn via the daemon run face",
     ),
     "submit": (_SELF, "_register_status", "REMOVED: use `unigym run CONFIG... --bg`"),
     "status": (_SELF, "_register_status", "live SHM runs + deaths (submit queue removed)"),
@@ -395,8 +387,8 @@ def _register_status(sub) -> None:
         "run",
         nargs="?",
         default=None,
-        help="run id (or 'latest'): with --metrics/--config/"
-        "--report, answer that run's typed query ("
+        help="run id (or 'latest'): with --metrics/--config, "
+        "answer that run's typed query ("
         "same API face as the webui)",
     )
     st.add_argument("--json", action="store_true", help="machine-readable output")
@@ -405,17 +397,10 @@ def _register_status(sub) -> None:
         "--metrics",
         action="store_true",
         dest="metrics",
-        help="with `run`: typed metrics query (step/fps/"
-        "episodes/reward rings/benchmark progress)",
+        help="with `run`: typed metrics query (step/fps/" "episodes/reward rings)",
     )
     st.add_argument(
         "--config", action="store_true", dest="config", help="with `run`: effective config snapshot"
-    )
-    st.add_argument(
-        "--report",
-        action="store_true",
-        dest="report",
-        help="with `run`: benchmark report draft (null when " "the run has no benchmark)",
     )
     st.set_defaults(fn=lambda a, pt: cli.cmd_status(a, pt))
 

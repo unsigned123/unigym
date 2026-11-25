@@ -90,17 +90,6 @@ main { padding: 18px; max-width: 1400px; margin: 0 auto; }
                letter-spacing: .6px; }
 .stat .value { font-family: var(--mono); font-size: 20px; margin-top: 2px; }
 
-/* benchmark report card: per-task verdict rows */
-.bench-row { display: flex; align-items: baseline; gap: 10px;
-             padding: 4px 0; border-bottom: 1px solid var(--line); }
-.bench-row:last-child { border-bottom: none; }
-.bench-name { font-family: var(--mono); flex: 1; word-break: break-all; }
-.bench-rate { font-family: var(--mono); font-size: 20px; font-weight: 600; }
-.bench-rate.good { color: var(--ok); }
-.bench-rate.mid  { color: var(--warn); }
-.bench-rate.bad  { color: var(--danger); }
-.bench-rate.na   { color: var(--muted); font-size: 14px; font-weight: 400; }
-
 /* ---- pills / badges ---------------------------------------------------------- */
 .pill {
   display: inline-block;
@@ -116,8 +105,6 @@ main { padding: 18px; max-width: 1400px; margin: 0 auto; }
 .pill.unknown { color: var(--muted); border-color: var(--muted); } /* UNKNOWN */
 .pill.bad    { color: var(--danger); border-color: var(--danger); }
 .pill.gpu    { font-family: var(--mono); }
-.pill.bench  { color: var(--ok); border-color: var(--ok); }   /* task face */
-.pill.collect { color: var(--muted); }                        /* task face */
 
 /* ---- typography helpers ------------------------------------------------------- */
 .muted { color: var(--muted); }

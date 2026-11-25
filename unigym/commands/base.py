@@ -81,12 +81,13 @@ class CommandSampler(ABC):
         env_ids: torch.Tensor,
         results: Mapping[int, tuple[EpisodeResultView, ...]],
     ) -> None:
-        """Observe completed-episode benchmark results (default: no-op).
+        """Observe completed-episode results (default: no-op).
 
         ``env_ids`` are the due envs; ``results[env_id]`` is a read-only tuple
-        in task declaration order.  Called after the sinks' ``on_episode_end``
+        in result declaration order.  Called after the sinks' ``on_episode_end``
         and before ``reset``, so a sampler can fold prior-episode results into
-        the next episode's command.  Collect-only runs pass an empty mapping.
+        the next episode's command.  A run whose sink publishes no results
+        passes an empty mapping.
         """
         return None
 

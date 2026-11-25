@@ -3,7 +3,7 @@
 The run publishes a FIXED-SIZE metrics block in its SHM segment (layout
 constants live in ``bridge.py`` next to the other blocks; the wire contract
 is docs/contracts/runtime_contract.md §2) so the daemon can answer typed
-control queries (command ids 10-12) without any run-side state of its own:
+control queries (command ids 10-11) without any run-side state of its own:
 
 * tick level   -- timing scalars only (fps EMA / sim_time), one seqlock
                  cycle per step, microseconds (the budget holds);
@@ -14,8 +14,7 @@ control queries (command ids 10-12) without any run-side state of its own:
 * queries      -- ``metrics`` composes the document + live status counters;
                  ``config`` returns the effective-config snapshot captured
                  ONCE at startup (oversize = fail-fast there, not at query
-                 time); ``report`` mirrors the benchmark draft report via
-                 the duck-typed metrics source (None without a benchmark).
+                 time).
 
 Everything here is stdlib-only and offline-testable; the seqlock primitives
 are the bridge module's own (single-sourcing discipline, runtime_contract §3).

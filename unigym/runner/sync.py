@@ -261,8 +261,7 @@ class SyncRunner:
     Args:
         cfg: full run config dict (``collect.steps`` supplies the rollout
             length).
-        profile: robot profile; unused by the collect loop itself, reserved
-            for task-layer extensions (benchmarks, B1+).
+        profile: robot profile; unused by the collect loop itself.
         adapter: Adapter (act / postprocess_action / compute_obs /
             on_reset; ``generates_command``/``last_command`` honoured).
         sampler: command sampler or None (self-commanding adapters).
@@ -289,8 +288,7 @@ class SyncRunner:
             but skips the ``env.reset_envs``/``adapter.on_reset``/
             ``sampler.reset`` chain -- the classic single-env ``gym.Env``
             leaves the terminal state in place until the caller resets.
-            Default True keeps the three collect/benchmark/both modes
-            bit-identical.
+            Default True keeps the historical collect loop bit-identical.
         control_dt: the effective policy period (s) used to advance the
             command clock.  When set it is authoritative over
             ``adapter.control_dt``; ``None`` falls back to the adapter's own
@@ -418,10 +416,10 @@ class SyncRunner:
         self._started = False
         self._cmd = None
         self._obs_frame = None
-        # benchmark contract episode facts: per-env reset sample/legality and the
-        # run identity (stamped on the env by the run build).
-        # test doubles may carry no env surface at all; benchmark facts then
-        # stay empty while the historical runner behavior is untouched.
+        # episode facts: per-env reset sample/legality and the run identity
+        # (stamped on the env by the run build).  Test doubles may carry no
+        # env surface at all; those facts then stay empty while the
+        # historical runner behavior is untouched.
         self._num_envs = int(getattr(env, "num_envs", 0) or 0)
         # per-env EPISODE-LOCAL policy step counter: frame 0 is tick 1 and the
         # tick resets to 0 on that env's reset (never the global run step).
@@ -516,7 +514,7 @@ class SyncRunner:
         self._record_reset_facts(all_ids.tolist())
 
     # ------------------------------------------------------------------ #
-    # benchmark contract episode facts (reset / termination / timeline)
+    # episode facts (reset / termination / timeline)
     # ------------------------------------------------------------------ #
     def _record_reset_facts(self, env_ids) -> None:
         """Capture the post-reset/pre-policy-step sample + legality per env."""
@@ -552,7 +550,7 @@ class SyncRunner:
         """Per-env core terminations for this tick (term group + deadline).
 
         Every stamped ``step_index``/``time_s`` is EPISODE-LOCAL (frame 0 is
-        tick 1), so it lines up with ``EpisodeData.step_index``.
+        tick 1), so it lines up with ``bundle["step_index"]``.
         """
         by_env: dict[int, list[Termination]] = {}
 
@@ -1011,9 +1009,9 @@ class SyncRunner:
             if len(self.term_group) > 1:
                 for k, m in detail.items():
                     term_metrics[f"term_{k}"] = float(m.float().mean())
-            # benchmark contract: structured per-env terminations for this tick
-            # (term-group reasons + the core engine horizon).  Core-neutral
-            # outcome/source vocabulary; no Task/Gym language here.
+            # structured per-env terminations for this tick (term-group
+            # reasons + the core engine horizon).  Core-neutral
+            # outcome/source vocabulary; no Gym language here.
             terminations = self._termination_facts(detail, step.reset_env_ids)
             step_index = torch.tensor(self._episode_step, dtype=torch.int64, device=device)
             time_s = (
@@ -1143,7 +1141,7 @@ class SyncRunner:
         Args:
             stop_when: optional predicate checked at the top of every step;
                 when True the loop ends early and the normal ``on_run_end``
-                teardown runs (B1: EvaluationSession's min_episodes gate).
+                teardown runs (a sink-owned early-stop decision).
                 Default None reproduces the fixed-length rollout bitwise.
         """
         self._start()

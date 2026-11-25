@@ -8,9 +8,8 @@
  * Talks ONLY to api.js.
  */
 
-import {api, artifactUrl, errMsg, events} from "./api.js";
-import {debounce, el, fmtAge, phasePill, poll, showError, taskFacePills}
-    from "./app.js";
+import {api, errMsg, events} from "./api.js";
+import {debounce, el, fmtAge, phasePill, poll, showError} from "./app.js";
 
 /* ---- live run cards ---------------------------------------------------------- */
 function errorBlock(err) {
@@ -38,14 +37,11 @@ function runCard(r) {
   }}, "terminate");
   return el("div", {class: "card"},
       el("h2", {}, phasePill(r.phase, r.stale), " ",
-          taskFacePills(r.task_face), " ",
           el("span", {class: "pill gpu"}, `gpu ${r.gpu ?? "-"}`), " ",
           el("span", {class: "muted num"}, fmtAge(r.start_ts))),
       el("div", {class: "run-link"}, r.run_id),
       el("div", {class: "muted", style: "margin:6px 0"},
-          `camera ${r.camera || "-"} · ${cams.length} cam`
-          + (r.task_face?.tasks?.length
-              ? ` · tasks ${r.task_face.tasks.join(", ")}` : "")),
+          `camera ${r.camera || "-"} · ${cams.length} cam`),
       r.phase === "UNKNOWN" ? errorBlock(r.error) : null,
       el("div", {class: "bar"}, view, kill,
           el("span", {class: "muted"},
@@ -291,10 +287,9 @@ function spawnWizard() {
 }
 
 /* ---- recent runs (ledger card, design §3): the output_dir
- * book -- history (run.json) and live runs in ONE card.  Badge = task
- * face, verdict = exit code + wall time, direct artifact links via the
- * run= whitelist face (post-mortem: the ledger keeps output_dir
- * resolvable after the run leaves the live view).  Display name =
+ * book -- history (run.json) and live runs in ONE card.  Verdict = exit
+ * code + wall time; the ledger keeps output_dir resolvable after the run
+ * leaves the live view.  Display name =
  * label || run_name || run_id (the label is display metadata written by
  * the run process into its own ledger; run_id never disappears -- it
  * degrades to the sub-line). ---------------------------------------- */
@@ -343,23 +338,11 @@ async function runsCard() {
         .toLocaleString(undefined,
             {month: "2-digit", day: "2-digit", hour: "2-digit",
              minute: "2-digit", second: "2-digit"});
-    // results: per-task success rates (the light run.json summary),
-    // linked to the full benchmark_report.json artifact
-    const results = [];
-    for (const [task, t] of Object.entries(r.results || {})) {
-      const rate = (t.success_rate === null || t.success_rate === undefined)
-          ? "n/a" : `${Math.round(t.success_rate * 100)}%`;
-      results.push(el("div", {},
-          el("a", {href: r.run_id
-              ? artifactUrl({run: r.run_id, name: "benchmark_report.json"})
-              : "#", title: "benchmark_report.json"},
-              `${task} ${rate}`)));
-    }
     const view = r.run_id
         ? el("a", {href: `/view/${encodeURIComponent(r.run_id)}${
             location.search}`}, "view") : null;
     rows.push(el("tr", {},
-        el("td", {}, pill, " ", ...taskFacePills(r.task_face)),
+        el("td", {}, pill),
         el("td", {}, el("span", {class: "run-link", title: r.label
                    ? `label: ${r.label}` : undefined}, name),
            idLine, r.paused
@@ -374,7 +357,6 @@ async function runsCard() {
                 ? el("details", {class: "logtail"},
                      el("summary", {}, `log tail (${ex.log_tail.length})`),
                      el("pre", {}, ex.log_tail.join("\n"))) : null),
-        el("td", {}, results.length ? results : "-"),
         el("td", {class: "num"}, startedTxt),
         el("td", {}, view || "-"),
         el("td", {}, el("button", {class: "danger",
@@ -394,7 +376,7 @@ async function runsCard() {
   const body = rows.length
       ? el("table", {}, el("tr", {}, el("th", {}, "state"),
           el("th", {}, "run"), el("th", {}, "exit"),
-          el("th", {}, "results"), el("th", {}, "started"),
+          el("th", {}, "started"),
           el("th", {}, ""), el("th", {}, "")), rows)
       : el("p", {class: "muted"},
           "no runs in the ledger yet -- every run records itself in its "
@@ -451,7 +433,7 @@ export function mount() {
       return;
     }
     bump();
-  }, {types: ["run", "bench"], onState: setLamp});
+  }, {types: ["run"], onState: setLamp});
 }
 
 async function refresh() {

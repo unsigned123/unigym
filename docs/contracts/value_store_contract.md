@@ -167,4 +167,4 @@ allowed; last publish by the same owner wins.  Producers must namespace names
 - automatic value-to-command or value-to-observation mapping;
 - watcher value publication;
 - phase/task/event vocabulary, typed value schemas or value registries;
-- per-env vectorized watcher triggers and online benchmark triggers.
+- per-env vectorized watcher triggers.

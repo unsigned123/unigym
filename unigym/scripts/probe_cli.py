@@ -1,7 +1,7 @@
-"""`unigym probe` -- one-command e2e probe: launch -> wait -> scorecard.
+"""`unigym probe` -- one-command e2e probe: launch -> wait -> run dir.
 
-The campaign burned ~30 calls per probe on the launch->poll->glob->numpy
-manual chain; this composes the existing faces instead of adding paths:
+The campaign burned ~30 calls per probe on the launch->poll->glob manual
+chain; this composes the existing faces instead of adding paths:
 
     spawn     daemon /api/start (the ONE run face; no new engine path)
     preflight --gpu-preflight: orphan collect_cli abort + VRAM report
@@ -10,12 +10,9 @@ manual chain; this composes the existing faces instead of adding paths:
               surfaces the A4 death record (exit code + log tail), no dumb
               polling past a corpse
     run_dir   from the spawn handle (NEVER `ls -td` glob guessing)
-    scorecard = B2 gate rendering embedded (unigym/analysis/gate.py --
-              probe computes nothing itself; launch+wait+analyze sugar)
 
-`--rm` deletes the run dir after the report (default: keep -- probe
-artifacts are evidence).  `--json` is the machine face; its `episodes`
-key is byte-identical to `unigym analyze <run> --json` gate episodes.
+`--rm` deletes the run dir after the probe (default: keep -- probe
+artifacts are evidence).  `--json` is the machine face.
 """
 
 from __future__ import annotations
@@ -195,8 +192,6 @@ def cmd_probe(a: argparse.Namespace, extra: list[str]) -> int:
     passthrough: list[str] = []
     if a.steps is not None:
         passthrough += ["--steps", str(int(a.steps))]
-    if a.episodes is not None:
-        passthrough += ["-s", f"benchmark.min_episodes={int(a.episodes)}"]
     for item in a.set or []:
         passthrough += ["-s", str(item)]
     passthrough += list(extra)
@@ -261,13 +256,6 @@ def cmd_probe(a: argparse.Namespace, extra: list[str]) -> int:
     real_dir = _resolve_output_dir(pid) or real_dir
     renamed = real_dir is not None and real_dir != run_dir
     run_dir = real_dir or run_dir
-    # ---- scorecard = B2 gate rendering (zero re-computation here) ----
-    from unigym.analysis import gate
-
-    try:
-        gdoc = gate.gate_doc(run_dir)
-    except gate.GateError as e:
-        return _fail(a, f"scorecard failed: {e}", hint=e.hint, phase="analyze", handle=h)
     seconds = time.time() - t0
     if a.json:
         print(
@@ -281,8 +269,6 @@ def cmd_probe(a: argparse.Namespace, extra: list[str]) -> int:
                     "run_dir": run_dir,
                     "run_dir_predicted": handle_out,
                     "seconds": round(seconds, 1),
-                    "gate": gdoc,
-                    "episodes": gdoc["episodes"],
                 }
             )
         )
@@ -291,27 +277,12 @@ def cmd_probe(a: argparse.Namespace, extra: list[str]) -> int:
             f"[unigym probe] DONE in {seconds:.0f}s -> {run_dir}"
             + ("  (redirected by -s run_name)" if renamed else "")
         )
-        if gdoc.get("available"):
-            print(f"  gate: {gdoc['summary']}")
-            for row in gdoc["rows"]:
-                cells = "  ".join(_cell(v) for v in row["values"])
-                print(f"  {row['label']:<44} {cells}")
-        else:
-            print(f"  gate: {gdoc['status']}")
         print(f"  log: {log}")
     if a.rm:
         shutil.rmtree(run_dir, ignore_errors=True)
         if not a.json:
             print(f"[unigym probe] --rm: removed {run_dir}")
     return 0
-
-
-def _cell(v):
-    if v is None:
-        return "-"
-    if isinstance(v, bool):
-        return "T" if v else "F"
-    return f"{v:.4g}"
 
 
 def _fail(
@@ -340,11 +311,8 @@ def add_probe_subparser(sub) -> None:
     """Wire the B1 `unigym probe` into the launcher (launch.py)."""
     p = sub.add_parser(
         "probe",
-        help="one-command e2e probe: launch -> "
-        "wait -> gate scorecard; "
-        "spawn via the daemon run face)",
-        description="probe = launch + wait-for-DONE + gate "
-        "scorecard.  Born-paused spawn "
+        help="one-command e2e probe: launch -> wait; " "spawn via the daemon run face)",
+        description="probe = launch + wait-for-DONE.  Born-paused spawn "
         "(--serve_pause / `unigym run --pause`) "
         "is REJECTED here on purpose: probe "
         "waits for completion, so a run parked "
@@ -366,9 +334,6 @@ def add_probe_subparser(sub) -> None:
     )
     p.add_argument(
         "--steps", type=int, default=None, help="passthrough --steps (collect.steps override)"
-    )
-    p.add_argument(
-        "--episodes", type=int, default=None, help="benchmark.min_episodes override (rides -s, B4)"
     )
     p.add_argument(
         "--wait-timeout",

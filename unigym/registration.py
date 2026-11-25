@@ -74,7 +74,6 @@ class PackFace(Enum):
     RUN_CONFIG = "run_config"
     SCENE_PRESET = "scene_preset"
     ASSET = "asset"
-    BENCHMARK_PACK = "benchmark_pack"
     SELECTION = "selection"
     SCENE_PROVIDER = "scene_provider"
     SCENE_PROVIDER_INLINE = "scene_provider_inline"
@@ -83,7 +82,6 @@ class PackFace(Enum):
     ROBOT = "robot"
     ADAPTER = "adapter"
     TERMINATION = "termination"
-    TASK_PROVIDER = "task_provider"
     INITIALIZER = "initializer"
     EXECUTOR = "executor"
     ACTUATOR_LAW = "actuator_law"
@@ -163,9 +161,6 @@ FACE_WINDOWS: Mapping[PackFace, PhaseWindow] = MappingProxyType(
         PackFace.RUN_CONFIG: PhaseWindow(RegistrationPhase.MANIFEST, RegistrationPhase.MANIFEST),
         PackFace.SCENE_PRESET: PhaseWindow(RegistrationPhase.MANIFEST, RegistrationPhase.SPEC),
         PackFace.ASSET: PhaseWindow(RegistrationPhase.MANIFEST, RegistrationPhase.SPEC),
-        PackFace.BENCHMARK_PACK: PhaseWindow(
-            RegistrationPhase.MANIFEST, RegistrationPhase.ASSEMBLE
-        ),
         PackFace.SELECTION: PhaseWindow(RegistrationPhase.MANIFEST, RegistrationPhase.MANIFEST),
         PackFace.SCENE_PROVIDER: PhaseWindow(
             RegistrationPhase.ACTIVATE, RegistrationPhase.ACTIVATE
@@ -178,7 +173,6 @@ FACE_WINDOWS: Mapping[PackFace, PhaseWindow] = MappingProxyType(
         PackFace.ROBOT: PhaseWindow(RegistrationPhase.ACTIVATE, RegistrationPhase.ACTIVATE),
         PackFace.ADAPTER: PhaseWindow(RegistrationPhase.ACTIVATE, RegistrationPhase.ACTIVATE),
         PackFace.TERMINATION: PhaseWindow(RegistrationPhase.ACTIVATE, RegistrationPhase.ACTIVATE),
-        PackFace.TASK_PROVIDER: PhaseWindow(RegistrationPhase.ACTIVATE, RegistrationPhase.ACTIVATE),
         PackFace.INITIALIZER: PhaseWindow(
             RegistrationPhase.ACTIVATE, RegistrationPhase.BACKEND_BUILD
         ),

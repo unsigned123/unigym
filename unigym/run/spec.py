@@ -917,7 +917,7 @@ def build_spec(
         print(f"[collect] {line}", flush=True)
     # spawn adapter params (most specific layer of the adapter section:
     # defaults < config yaml < spawn adapter_params).  The overlay merges
-    # into cfg["adapter"] ONLY -- env/benchmark/cameras are structurally
+    # into cfg["adapter"] ONLY -- env/cameras are structurally
     # out of its reach.
     from unigym.adapters import AdapterParamsError, apply_spawn_params
 

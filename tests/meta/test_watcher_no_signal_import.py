@@ -18,9 +18,7 @@ _SCRIPT = (
     "import unigym.watchers.engine;"
     "import unigym.watchers.templates as t;"
     "assert 'unigym.signals' not in sys.modules, sorted(sys.modules);"
-    "assert not hasattr(t, '_CURRENT_ENGINE');"
-    "assert 'unigym.benchmarks' not in sys.modules, sorted(sys.modules);"
-    "assert 'unigym_bench' not in sys.modules, sorted(sys.modules)"
+    "assert not hasattr(t, '_CURRENT_ENGINE')"
 )
 
 

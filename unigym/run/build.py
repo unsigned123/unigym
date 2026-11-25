@@ -1441,7 +1441,7 @@ def _metrics_source_for(sink: Sink | None) -> MetricsSource | None:
     """Return the sink's bridge telemetry feed when it structurally declares one."""
     if sink is None:
         return None
-    required = ("metrics_drain", "metrics_task", "metrics_progress", "metrics_report")
+    required = ("metrics_drain", "metrics_task", "metrics_progress")
     if not all(callable(getattr(sink, member, None)) for member in required):
         return None
     from unigym.runtime.bridge import MetricsSource
@@ -1713,8 +1713,8 @@ def _build_bridge_and_wiring(
         paused=_config_bool(spec.bridges["serve_pause"]),
         log_path=_config_str(spec.bridges["run_log"]),
         # typed queries: effective config snapshot (startup
-        # fail-fast on oversize) + sink telemetry feed (report draft,
-        # episode rings; None when no sink declares a feed)
+        # fail-fast on oversize) + sink telemetry feed (episode rings;
+        # None when no sink declares a feed)
         config_doc=cfg,
         metrics_source=metrics_source,
         env=step_clock,

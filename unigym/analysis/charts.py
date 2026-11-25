@@ -36,8 +36,8 @@ def line_chart(
 ) -> Path:
     """series = [(label, ys), ...]; one PNG polyline chart (y from data).
 
-    ``hlines`` (the --metric face): [(value, label), ...] predicate
-    threshold lines drawn in red over the data range.
+    ``hlines``: [(value, label), ...] horizontal reference lines drawn in
+    red over the data range.
     """
     img = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(img)

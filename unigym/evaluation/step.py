@@ -3,8 +3,7 @@
 An :class:`EnvStepContext` carries the read-only :class:`EnvView`, an immutable
 :class:`~unigym.values.ValueView` snapshot of the run's managed values, tick and
 episode position, and reset bookkeeping.  It is a data boundary only: it owns
-no events, terminals, termination state, watcher state or benchmark/pack
-vocabulary.  Benchmark packs subclass it to add their own defaulted fields.
+no events, terminals, termination state, watcher state or pack vocabulary.
 
 The view is borrowed: constructing a context never closes it, and the owner
 keeps managing its lifetime.  The values are a boundary snapshot, not a live

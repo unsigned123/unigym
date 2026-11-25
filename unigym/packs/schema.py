@@ -34,9 +34,7 @@ SCHEMA_ID = "unigym.pack/1"
 FACE_NAMES = (
     "runs",
     "scene_presets",
-    "tasks",
     "assets",
-    "benchmarks",
     "props",
     "terminations",
     "providers",

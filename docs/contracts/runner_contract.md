@@ -1,4 +1,4 @@
-# Runner contract (benchmark facts)
+# Runner contract (episode facts)
 
 The `SyncRunner` callback stream is the single source of episode facts.  The
 `bundle` handed to sinks carries:
@@ -17,12 +17,12 @@ step_index    (N,) int64 episode-local tick per env; each env advances once per
               policy tick and a reset env returns to 0 (frame 0 is tick 1)
 time_s        (N,) float32 episode-local time (step_index * policy_dt), or None
               when no policy period is known
-run_identity  RunIdentity (benchmark runs)
+run_identity  RunIdentity (every run)
 reset_facts   {env_id: {reset_index, reset_sample, reset_valid, reset_reason}}
               present on on_episode_end for the ending episode
 episode_results {env_id: (EpisodeResultView, ...)}
-              present on on_episode_end when an EvaluationSession scored the
-              episode; per-env, task declaration order, read-only
+              present on on_episode_end when a sink published results for the
+              episode; per-env, declaration order, read-only
 view          the tick's one read-only boundary EnvView; valid at on_step /
               on_episode_end, None at on_step_end
 step          EnvStepContext for this tick: the borrowed view plus the
@@ -33,18 +33,17 @@ final_step    EnvStepContext for a due episode-end tick: same view plus the
               only on a due tick, never on rewind, None at on_step_end
 ```
 
-Core composes no built-in `EvaluationSession`, so a run carries no
+Core composes no built-in scoring sink, so a run carries no
 `episode_results` unless a custom sink writes them; a sink terminal request
-ends envs but is not a benchmark `EpisodeResultView` (see
+ends envs but is not an `EpisodeResultView` (see
 `command_sampler_contract.md`).
 
 The bundle carries no live env.  Internal runtime hooks that need the engine
 receive it at construction: `WatcherEngine.on_tick` reads exactly
 `bundle["step"]` and retains only a debug snapshot between ticks, while
 `Bridge`/`MetricsWriter` receive the step-clock capability at construction.
-Termination and benchmark evaluation receive the read-only
-`unigym.evaluation` context; a sink or task reads `bundle["view"]` rather than
-walking a live backend.  The built-in `CollectSink` keeps no live env: it is
+Termination and a sink receive the read-only `unigym.evaluation` context; a
+sink reads `bundle["view"]` rather than walking a live backend.  The built-in `CollectSink` keeps no live env: it is
 constructed with a read-only build-time facts snapshot.
 
 ## Boundary view lifetime
@@ -182,7 +181,7 @@ A run may inject one custom sink by API
 
 ```yaml
 sink:
-  factory: acme_pack.sinks:make_benchmark_sink
+  factory: acme_pack.sinks:make_acme_sink
   options:
     target_episodes: 10
 ```
@@ -304,43 +303,6 @@ live-only and never reads the env-level joint-limit compatibility views; joint
 limits are owned by `ArticulationRuntime.joint_pos_limits` in record/policy
 joint order.
 
-The retained evaluation package is a second live boundary when an external sink/pack composes it:
-
-```text
-on_episode_end (before env.reset_envs)
-         -> EpisodeBuffer.take(env_id)
-         -> EpisodeEvaluator.evaluate(taken, bundle, env_id)
-              -> assemble EpisodeData + core terminations
-              -> one per-env EvalContext scoped to ep.env_id
-              -> Task.score/episode incl. score_detail, declaration order
-              -> ctx.close() in finally
-              -> merge task terminations + validate the episode axis
-         -> EvaluationSession forwards the EpisodeEvaluation
-         -> publish episode_results for the sampler
-```
-
-`EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) owns the episode facts,
-the task invocation and the final termination merge.  `EvaluationSession`
-(`unigym.runner.evaluation.session`) publishes `bundle["episode_results"]` and
-delegates run-level accumulation and report writing to the injected
-`EpisodeReporter` (for example `BenchmarkReporter` inside a composed evaluation session).
-
-A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
-`ctx.env.query`; it cannot step, reset, write or read another env.  The bundle
-has no live env field; `ctx.env` is the read-only task view.
-
-Open-episode history is owned by `EpisodeBuffer`
-(`unigym.runner.evaluation.buffer`): `EvaluationSession.on_step` appends the
-normalized per-step record, `on_rewind` attaches a rewind mark to every open
-buffer, and `on_episode_end` removes one env's steps and marks with `take`.
-The rewind provider (`EvaluationSessionProvider`) snapshots/restores that buffer
-(steps, marks, tick traces, episode stamp and the episode fuse) under the
-`"benchmark"` provider name.  `FanOutSink.on_rewind` forwards to every child
-recursively, so an evaluation session nested below director or adapter fan-outs
-still receives the mark exactly once.  A tick-contract failure disables the task
-for the run; that disabled set is process truth and a rewind never re-enables
-it.
-
 `build_instance` creates the run's one `ValueStore` **before** `_build_sinks`
 and before `_build_bridge_and_wiring`.  `_build_sinks` hands
 `values.publisher("sink")` to `SinkContext.values`, and the run build stores the
@@ -356,5 +318,6 @@ command-sampler lifecycle is documented in `command_sampler_contract.md`; the
 transport is documented in `value_store_contract.md`; watcher lifecycle/values
 are documented in `watchers_contract.md`.
 
-Core-neutral rule: the runner and core sinks never use `Task` or Gymnasium
-`terminated/truncated` vocabulary.  The task layer maps core outcomes later.
+Core-neutral rule: the runner and core sinks never use Gymnasium
+`terminated/truncated` vocabulary.  An upper task layer maps core outcomes
+later.

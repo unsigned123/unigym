@@ -1,7 +1,7 @@
 """Runner layer: SyncRunner + external/gym drivers + sinks (consumers).
 
 The runner owns the rollout control flow; sinks own everything
-consumer-side (collection recording today, benchmark scoring in B1+).
+consumer-side (collection recording, scoring, reporting).
 See docs/contracts/runner_contract.md.
 """
 

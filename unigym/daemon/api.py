@@ -111,7 +111,7 @@ def api_get(svc, path: str, qs: dict) -> tuple[int, dict]:
             404,
             hint="typed queries: "
             "/api/runs/<id>/{status,events,metrics,config,"
-            "report,scene,log}",
+            "scene,snapshots,log}",
         )
     if route.startswith("/api/op/"):
         # rewind face read side (Round B B1): GET /api/op/<run>/snapshots

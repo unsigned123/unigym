@@ -11,8 +11,7 @@ The legacy `unigym.packs` mount, manifest, resolve and load modules are
 deleted; there is no dual-read period, compatibility shim or implicit
 repository mount. Scene presets resolve only through the runtime `scene_presets`
 face; run config references resolve only as absolute file paths or exact
-runtime `runs` catalog ids; benchmark pack discovery reads only resource-backed
-entries of the runtime `benchmarks` face. Asset references resolve once at the
+runtime `runs` catalog ids. Asset references resolve once at the
 composition/domain boundary into an `unigym.assets.plan.AssetPlan`: prop
 templates, generated `AssetDefinition` files, scene assets and MJCF documents
 reach backend code with absolute paths only. `UNIGYM_ASSET_ROOT` /
@@ -32,7 +31,6 @@ planning repository (`plans/drafts/unigym-pack-api.md`,
 `plans/drafts/pack-api-phase5-runtime-parity.md`,
 `plans/drafts/pack-api-phase6a-scene-cutover.md`,
 `plans/drafts/pack-api-phase6b-run-cutover.md`,
-`plans/drafts/pack-api-phase7a-benchmark-cutover.md`,
 `plans/drafts/pack-api-phase7b-asset-cutover.md`,
 `plans/drafts/pack-api-phase9-retire-asset-root.md`,
 `plans/drafts/legacy-loader-cutover.md`).
@@ -133,9 +131,6 @@ provides:
   runs:
     - id: acme.demo
       resource: runs/demo.yaml
-  tasks:
-    - id: acme.pick
-      resource: tasks/pick.yaml
   assets:
     - id: acme.cup
       resource: assets/cup/asset.yaml
@@ -187,7 +182,7 @@ resolution belongs to a later loader phase and is not part of the runtime.
 The face vocabulary is explicit:
 
 ```text
-runs  scene_presets  tasks  assets  benchmarks  props  terminations  providers  selection
+runs  scene_presets  assets  props  terminations  providers  selection
 ```
 
 Each item is a mapping with:
@@ -1227,9 +1222,7 @@ The daemon owns one explicit `pack_runtime` built at `DaemonService`
 construction. `GET /api/configs` enumerates `runtime.catalog.entries("runs")`:
 resource-backed items carry `{id, path, relative: <id>, ...summary}`;
 entrypoint-only run items are reported in `unsupported` instead of being
-listed or silently dropped. `benchmark_packs` is listed with
-`discover_packs(runtime)`, so the daemon reports the same runtime `benchmarks`
-resources the run uses. `POST /api/start` calls the same
+listed or silently dropped. `POST /api/start` calls the same
 shared `resolve_run_config` with the daemon runtime, so it accepts an absolute
 path or an exact `runs` catalog id and rejects relative paths and globs.
 
@@ -1267,8 +1260,8 @@ command:
   with a teaching error.
 
 The custom sampler receives the live env once through `bind_env` and
-completed-episode benchmark results through `on_episode_end`; both hooks and
-the rewind contract are documented in `contracts/command_sampler_contract.md`.
+completed-episode results through `on_episode_end`; both hooks and the rewind
+contract are documented in `contracts/command_sampler_contract.md`.
 
 ### Custom sink authoring
 
@@ -1280,8 +1273,8 @@ with custom factories:
 run_name: acme_pick
 sinks:
   - kind: collect
-  - name: bench
-    factory: "acme_pack.sinks:make_benchmark_sink"
+  - name: acme
+    factory: "acme_pack.sinks:make_acme_sink"
     options:
       target_episodes: 10
 ```
@@ -1299,7 +1292,7 @@ sinks:
 from unigym.run.sink import SinkContext
 from unigym.sink import Sink
 
-def make_benchmark_sink(ctx: SinkContext) -> Sink: ...
+def make_acme_sink(ctx: SinkContext) -> Sink: ...
 ```
 
 - `SinkContext` carries `spec`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
@@ -1354,70 +1347,21 @@ class AcmeSink:
 - sink composition is explicit: an absent selection keeps one `CollectSink`,
   the `sink:` shorthand selects that custom sink as the sole sink, and
   `sinks:` builds the declared ordered list (mixing collect and custom).
-- a custom benchmark sink owns task validation and reporting; core builds no
-  built-in tasks and selects no built-in benchmark sink (see
-  `contracts/benchmark_contract.md`).
+- a custom scoring sink owns its own task validation and reporting; core
+  builds no tasks and selects no built-in scoring sink.
 - a stateful sink that must survive a checkpoint exposes a rewind provider
   (`name` + `rewind_state` / `apply_rewind_state`, or `rewind_provider`) with a
   namespaced name; see `contracts/runner_contract.md`.  Published values are
   already covered by the core `"values"` provider, so the sink must not expose
   the store again as a second provider.
-- core writes no benchmark report and publishes no `bundle["episode_results"]`;
+- core writes no report artifacts and publishes no `bundle["episode_results"]`;
   the sink owns its scoring and report artifacts.  A sink terminal is an
   episode-end fact, not an `EpisodeResultView`.
 - the removed `mode:` / `benchmark:` keys (including the old timeout fields)
   are rejected at config parse; the sink terminals and the core episode clock
   are the only episode-end path.
 
-### Benchmark resources
-
-A benchmark pack is the existing directory (`pack.yaml`, `tasks/`,
-`references/`, optional `templates/`) declared as one runtime resource:
-
-```yaml
-provides:
-  benchmarks:
-    - id: acme.bench
-      resource: benchmarks/acme
-```
-
-Discovery is `builtin` first, then every resource-backed `benchmarks` catalog
-entry in catalog order:
-
-```text
-PackRuntime.catalog.entries("benchmarks")
-  -> runtime.resource_for("benchmarks", <id>)
-  -> load_pack(<resource directory>)      # unchanged domain parser
-  -> PackIndex(builtin + catalog packs)
-```
-
-`unigym.benchmarks.packs.discover_packs(runtime)` requires the runtime and never
-scans the repository, dependencies or `benchmark_packs/` directories. The
-resource must be a benchmark-pack directory: an entrypoint-only item, a file
-resource or a missing resource fails with a `PackError` naming the catalog id.
-Duplicate pack names still fail in `PackIndex`.
-
-`unigym.benchmarks.base.build_tasks(sections, meta, runtime)` requires the
-runtime; `<pack>/<task>` resolution, unique-bare names and `<pack>/*` wildcard
-expansion are unchanged. `RunSpec.pack_runtime` carries the runtime to
-`build_instance` and is never serialized into the config or ledger.  `Run`
-builds `discover(entry_points=True)` when the config declares a `scene_preset`,
-a `pack:`/asset reference or another runtime need; sink selection never creates
-a runtime need.  `collect_cli` and `describe_cli` discover unconditionally by
-design.
-
-A top-level `benchmark:` section in a run config (including the old
-`benchmark.packs`) is rejected with a teaching `ConfigError`; packs are
-declared on the runtime `benchmarks` face.  `benchmark.tasks` resolution and
-wildcards remain the retained module contract.
-
-Analysis follows the same runtime: `analysis.gate.resolve_task_specs(config,
-runtime)` requires it, `gate_doc` builds the configured runtime at its analysis
-boundary when none is supplied, and `analyze --metric` does the same.
-`unigym benchmarks list` builds the runtime; `unigym benchmarks validate <dir>`
-keeps loading one explicit directory through `load_pack`.
-
-### Live evaluation migration (external terminations and tasks)
+### Live evaluation migration (external terminations)
 
 The live-first evaluation contract is a deliberate pack-API break.  There is no
 compatibility shim and no dual-signature period.
@@ -1429,27 +1373,10 @@ compatibility shim and no dual-signature period.
   `build_terminations` inspects each instantiated term and rejects a legacy
   `check(self, state)` at build time, so a stale pack cannot fail lazily on the
   first tick.
-- A benchmark plugin task must implement `score(self, ep, ctx)` and, when it
-  overrides the detail face, `score_detail(self, ep, ctx, *,
-  retain_frames=False)`.  `build_tasks` validates both signatures at build time
-  and rejects a legacy `score(ep)` before the evaluation session's exception
-  isolation can turn it into a silently missing report task.  `EpisodeData`
-  remains the episode history payload; a report is a live run observation and
-  is not guaranteed to be reproduced from stored episode data.
-- The public `BenchmarkSink` is removed; use `EvaluationSession`
-  (`unigym.runner.evaluation.session`) with the injected `EpisodeBuffer`,
-  `EpisodeEvaluator` and `BenchmarkReporter`.  There is no compatibility alias.
-  The `Task` authoring API is unchanged (`score`, `score_detail`, `aggregate`);
-  `trigger: both` plus `on_tick(self, ctx)` are additive opt-in surface.
 - The episode filter subsystem is removed.  A run config that declares an
   episode-filter section fails at spec construction with a migration hint;
   there is no filter chain and no reconstruction of terminated episodes from
   history.
-
-Pack faces (`terminations`, `benchmarks`, `tasks`) keep their manifest names and
-locators; only the in-process callable signatures change.  See
-[`contracts/evaluation_contract.md`](contracts/evaluation_contract.md) and
-[`contracts/benchmark_contract.md`](contracts/benchmark_contract.md).
 
 ### Pack context
 
@@ -1873,5 +1800,5 @@ The current phases deliberately do not implement:
 - requirement or `requires` resolution;
 - provider registration orchestration beyond manifest-declared `kind: adapter`
   and `kind: robot` items; other provider kinds stay catalog metadata;
-- changes to benchmark, scene, asset or task domain parsers;
+- changes to scene or asset domain parsers;
 - a sandbox for trusted code packs.

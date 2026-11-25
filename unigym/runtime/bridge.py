@@ -20,7 +20,7 @@ the world -- is the SHM segment:
   layout and publish-pointer protocol unchanged.
 * command-slot req-ack (pause/resume/set_props/get_view/shutdown/set_camera/
   step/inspect/save_npz -- the daemon media gateway and the CLI perform
-  every operation through this; plus the typed queries metrics/config/report)
+  every operation through this; plus the typed queries metrics/config)
 * run registry ({run_id, pid, shm, output_dir, log_path, start_ts,
   cameras[], ...}; the old-generation port/auth/webui_url/curl_base/
   tunnel_hint keys are retired -- a run has neither port nor token)
@@ -165,7 +165,6 @@ CMD_INSPECT = 8  # console: summary/obs/extra/eval
 CMD_SAVE_NPZ = 9  # console: npz dump
 CMD_METRICS = 10  # typed query: metrics document
 CMD_CONFIG = 11  # typed query: effective config
-CMD_REPORT = 12  # typed query: benchmark draft
 CMD_GET_POSE = 13  # freecam: world-pose readback
 CMD_DIRECT = 14  # director: direct.* op family
 CMD_WATCH = 15  # watchers: add/list/clear/update/test
@@ -185,7 +184,6 @@ CMD_NAMES = {
     CMD_SAVE_NPZ: "save_npz",
     CMD_METRICS: "metrics",
     CMD_CONFIG: "config",
-    CMD_REPORT: "report",
     CMD_GET_POSE: "get_world_pose",
     CMD_DIRECT: "direct",
     CMD_WATCH: "watch",
@@ -290,15 +288,13 @@ CommandHandler: TypeAlias = Callable[[int, dict[str, JsonValue]], AckResult]
 
 @runtime_checkable
 class MetricsSource(Protocol):
-    """The duck-typed benchmark telemetry feed (EvaluationSession is ref impl)."""
+    """The duck-typed run telemetry feed a scored sink may expose."""
 
     def metrics_drain(self) -> Sequence[Mapping[str, JsonValue]]: ...
 
     def metrics_task(self) -> Mapping[str, JsonValue] | None: ...
 
     def metrics_progress(self) -> Mapping[str, JsonValue] | None: ...
-
-    def metrics_report(self) -> JsonValue: ...
 
 
 @runtime_checkable
@@ -902,11 +898,10 @@ class Bridge:
             once into the ``config`` typed query (cmd 11) as a JSON-safe
             snapshot; oversize fails fast HERE (startup assert), not at
             query time (design §2).
-        metrics_source: optional duck-typed benchmark telemetry feed
-            (EvaluationSession is the reference impl; runner_contract §3.1):
-            metrics_drain() / metrics_task() / metrics_progress() /
-            metrics_report().  Feeds the metrics block at episode end and
-            the ``report`` query; None = collect-only run (null report).
+        metrics_source: optional duck-typed run telemetry feed a scored
+            sink may expose (runner_contract §3.1): metrics_drain() /
+            metrics_task() / metrics_progress().  Feeds the metrics block at
+            episode end; None = the sink publishes no scored telemetry.
         env: optional step-clock capability (the policy step period) used
             for the metrics block's sim-time/fps and episode step counts.
             It is captured at construction; the step bundle is never read
@@ -1050,7 +1045,7 @@ class Bridge:
 
         # ---- metrics block (runtime_contract §2) -----------------
         # bounded structured telemetry: timing scalars per tick, typed
-        # document at episode end, typed queries (cmd 10-12) for the daemon.
+        # document at episode end, typed queries (cmd 10-11) for the daemon.
         from .metrics import MetricsWriter
 
         self._metrics = MetricsWriter(buf)
@@ -1116,7 +1111,7 @@ class Bridge:
         """Sink hook: episode counters + metrics document + watchers."""
         self._episodes += int(env_ids.numel())
         # metrics feed: bounded rings + document (existing sink
-        # hook -- no new engine plumbing; benchmark facts come from the
+        # hook -- no new engine plumbing; episode facts come from the
         # duck-typed source scored BEFORE this callback in the fan-out).
         self._metrics.note_episode(env_ids, bundle, source=self._metrics_source, env=self._env)
         # watchers: callable on_reset lifecycle hooks (§8.3); never fatal
@@ -1550,10 +1545,6 @@ class Bridge:
             elif cmd == CMD_CONFIG:
                 # typed query: effective config (startup snapshot)
                 result = {"config": self._config_doc}
-            elif cmd == CMD_REPORT:
-                # typed query: benchmark draft (None w/o benchmark)
-                src = self._metrics_source
-                result = {"report": src.metrics_report() if src is not None else None}
             else:
                 if cmd in _CONSOLE_CMDS:
                     raise BridgeError(

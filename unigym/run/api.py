@@ -92,8 +92,6 @@ if TYPE_CHECKING:
 
     SinkInput: TypeAlias = SinkSpec | str | Callable[[SinkContext], Sink] | None
 
-BenchmarkTask = str | dict[str, JsonValue]
-
 
 class _FromConfigKwargs(TypedDict, total=False):
     """Override knobs shared by :meth:`Run.from_config` and :func:`load`."""
@@ -164,12 +162,6 @@ def _coerce_sink_specs(
     return declarations
 
 
-def _task_name(task: dict[str, JsonValue]) -> str | None:
-    """The declared ``name`` of a benchmark task mapping (when a string)."""
-    name = task.get("name")
-    return name if isinstance(name, str) else None
-
-
 def _json_list(values: Iterable[JsonValue]) -> list[JsonValue]:
     """Materialize an iterable as a JSON list (the recursive alias's form)."""
     return list(values)
@@ -232,76 +224,6 @@ _LOG = logging.getLogger(__name__)
 
 _DEFAULT_STEPS = 10
 _DEFAULT_EPISODE_LENGTH_S = 10.0
-
-
-class BenchmarkSet:
-    """The declared benchmark task list with a pre-build ``add``.
-
-    ``add(name)`` accepts a registered task name only.  A callable task
-    would need a live task object in the config schema (the benchmark
-    section is data), so it is deferred with the exact reason.
-    """
-
-    def __init__(
-        self,
-        tasks: Iterable[BenchmarkTask] = (),
-        *,
-        locked: bool = False,
-        on_add: Callable[[str], None] | None = None,
-    ) -> None:
-        self._tasks: list[BenchmarkTask] = list(tasks or ())
-        self._locked = bool(locked)
-        self._on_add = on_add
-
-    def add(self, task: str) -> None:
-        """Declare one benchmark task by name (pre-build only)."""
-        if self._locked:
-            raise RuntimeError(
-                "BenchmarkSet.add: the run is already built; benchmarks are "
-                "declared pre-build only"
-            )
-        if callable(task):
-            raise NotImplementedError(
-                "BenchmarkSet.add(callable) is not representable in the "
-                "current schema: benchmark.tasks is data (name / class+"
-                "metrics dict) and a live callable has no serialized form; "
-                "pass a registered task name, or register the callable as a "
-                "benchmark provider and add its name"
-            )
-        if not isinstance(task, str) or not task:
-            raise TypeError(f"BenchmarkSet.add expects a task name string, " f"got {task!r}")
-        self._tasks.append(task)
-        if self._on_add is not None:
-            self._on_add(task)
-
-    def lock(self) -> BenchmarkSet:
-        """Freeze the declared list after build."""
-        self._locked = True
-        return self
-
-    def names(self) -> list[str | None]:
-        """Declared task names (string entries or dict ``name`` fields)."""
-        return [task if isinstance(task, str) else _task_name(task) for task in self._tasks]
-
-    def to_list(self) -> list[BenchmarkTask]:
-        """Config-ready copies of the declared task entries."""
-        return copy.deepcopy(self._tasks)
-
-    def __iter__(self) -> Iterator[str | None]:
-        return iter(self.names())
-
-    def __len__(self) -> int:
-        return len(self._tasks)
-
-    def __contains__(self, item: object) -> bool:
-        return item in self.names()
-
-    def __getitem__(self, index: int) -> str | None:
-        return self.names()[index]
-
-    def __repr__(self) -> str:
-        state = "locked" if self._locked else "open"
-        return f"BenchmarkSet({self.names()!r}, {state})"
 
 
 def _runner_kwargs(
@@ -927,9 +849,6 @@ class Run:
         self._adapter_params = adapter_params
         self._no_artifacts = bool(no_artifacts)
         self._camera_set = CameraSet(raw.get("cameras") or [])
-        self._benchmark_set = BenchmarkSet(
-            self._benchmark_tasks(raw), on_add=self._on_benchmark_add
-        )
         self._spec: RunSpec | None = None
         self._pack_runtime: PackRuntime | None = pack_runtime
         profile = _robot_profile(robot)
@@ -1192,15 +1111,12 @@ class Run:
 
         at_least_phase(RegistrationPhase.MANIFEST)
         cfg = self._raw_cfg
-        # Pre-build CameraSet/BenchmarkSet edits are declarations too:
-        # fold them into the config at the single normalization point so an
-        # add() made after a spec read still reaches build_spec.
+        # Pre-build CameraSet edits are declarations too: fold them into
+        # the config at the single normalization point so an add() made
+        # after a spec read still reaches build_spec.
         if len(self._camera_set):
             cfg = copy.deepcopy(cfg)
             cfg["cameras"] = _json_list(self._camera_set.to_list())
-        if len(self._benchmark_set):
-            cfg = copy.deepcopy(cfg)
-            _section(cfg, "benchmark")["tasks"] = _json_list(self._benchmark_set.to_list())
         if self._backend is not None:
             cfg = copy.deepcopy(cfg)
             _section(cfg, "env")["backend"] = self._backend
@@ -1327,7 +1243,6 @@ class Run:
         else:
             self._instance = self._build_now()
         self._camera_set.lock()
-        self._benchmark_set.lock()
         if self._world is not None:
             self._world._mark_built()
         return self._instance
@@ -1603,30 +1518,6 @@ class Run:
     def cameras(self) -> CameraSet:
         """The DECLARED camera set (``run.model.cameras`` = compiled table)."""
         return self._camera_set
-
-    @staticmethod
-    def _benchmark_tasks(
-        cfg: dict[str, JsonValue],
-    ) -> list[BenchmarkTask]:
-        """The declared benchmark task list from a config mapping."""
-        tasks = _existing_section(cfg, "benchmark").get("tasks")
-        if not isinstance(tasks, list):
-            return []
-        out: list[BenchmarkTask] = []
-        for task in tasks:
-            if isinstance(task, str) or isinstance(task, dict):
-                out.append(task)
-        return out
-
-    def _on_benchmark_add(self, task: str) -> None:
-        """Mirror a pre-build ``benchmarks.add`` into the raw config."""
-        bench = _section(self._raw_cfg, "benchmark")
-        _list_section(bench, "tasks").append(task)
-
-    @property
-    def benchmarks(self) -> BenchmarkSet:
-        """The declared benchmark set (``.add(name)`` is pre-build only)."""
-        return self._benchmark_set
 
     @property
     def adapter(self) -> Adapter:

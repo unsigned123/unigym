@@ -2,7 +2,7 @@
 
 ONE implementation shared by the control API (8670) and the portal (8600
 -- the browser's single source, design §4/§7d): the structured run
-queries (metrics / config / report / log), the pack-runtime run config
+queries (metrics / config / log), the pack-runtime run config
 listing, and the run config reference resolution.  Both HTTP faces stay
 thin route tables; the business logic lives here (and in unigym.core
 below it).  Every function returns ``(code, doc)``; errors keep the
@@ -10,12 +10,11 @@ API-wide ``{"ok": false, "error": ..., "hint": ...}`` shape.
 
 Query path (design §2/§3): the daemon attaches ONCE per request via
 ``unigym.core.session`` and speaks the SHM command slot's typed queries
-(cmd 10-12) -- no run-side HTTP, no new channel, same-host promise.
+(cmd 10-11) -- no run-side HTTP, no new channel, same-host promise.
 """
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import os
 import shutil
@@ -79,13 +78,9 @@ def delete_run(svc, body) -> tuple[int, dict]:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-KINDS = ("metrics", "config", "report", "scene", "snapshots")
+KINDS = ("metrics", "config", "scene", "snapshots")
 
 DEFAULT_LOG_TAIL = 4000  # characters (spawn_spec.log_tail semantic)
-
-# task_face (contract §1.20): the config-snapshot modes collect_cli
-# implements; anything else keeps the field honest at null
-TASK_FACE_MODES = ("collect", "benchmark", "both")
 
 
 def _err(msg: str, code: int = 400, hint: str | None = None) -> tuple[int, dict]:
@@ -96,7 +91,7 @@ def _err(msg: str, code: int = 400, hint: str | None = None) -> tuple[int, dict]
 
 
 # --------------------------------------------------------------------------- #
-# typed run queries: GET /api/runs/<id>/{metrics,config,report,log}
+# typed run queries: GET /api/runs/<id>/{metrics,config,scene,snapshots,log}
 # --------------------------------------------------------------------------- #
 def media_section(svc, run_id: str) -> dict | None:
     """Frame telemetry for one run (design §3).
@@ -126,7 +121,7 @@ def query_run(
     """One typed query against a live run (command slot, req-ack).
 
     ``params`` rides the command payload (scene ``full`` escape hatch
-    today; the metrics/config/report queries take none).
+    today; the metrics/config queries take none).
     """
     if kind not in KINDS:
         return _err(f"unknown query kind: {kind}", hint=" | ".join(KINDS))
@@ -203,20 +198,6 @@ def query_status(svc, run_id: str) -> tuple[int, dict]:
             st["watchers"] = brief
     finally:
         gw.release(run_id)
-    # task face (§1.20): registry output_dir -> meta.json read
-    # (pure file side, no reader involvement).  read_entry first (the
-    # registry file), then the daemon's cached view row: bridge.close()
-    # unlinks the serve-state BEFORE the process exits, so a dying run
-    # still has a view row while read_entry already comes back empty --
-    # both faces must agree through that window.
-    entry = core_registry.read_entry(run_id)
-    od = entry.get("output_dir")
-    if not od:
-        for r in svc.view():
-            if r.get("run_id") == run_id:
-                od = r.get("output_dir")
-                break
-    st["task_face"] = task_face_for(od)
     return 200, {"ok": True, **st}
 
 
@@ -277,7 +258,7 @@ def query_log(svc, run_id: str, tail: int = DEFAULT_LOG_TAIL) -> tuple[int, dict
 # --------------------------------------------------------------------------- #
 def _config_summary(path: Path) -> dict:
     """Parse one config for the wizard summary (guarded; errors are data)."""
-    summary: dict = {"backend": None, "mode": None, "benchmark_tasks": [], "cameras": []}
+    summary: dict = {"backend": None, "cameras": []}
     try:
         mtime = path.stat().st_mtime
         hit = _SUMMARY_CACHE.get(str(path))
@@ -287,16 +268,11 @@ def _config_summary(path: Path) -> dict:
     except (OSError, ValueError) as e:
         return dict(summary, error=f"unreadable: {e}")
     summary["backend"] = (cfg.get("env") or {}).get("backend")
-    summary["mode"] = cfg.get("mode")
     summary["adapter"] = (cfg.get("adapter") or {}).get("name")
     # the wizard's label-input placeholder shows the run_name this
     # config will produce (yaml run_name, else the file stem -- the
     # same resolution runrec.run_name_of applies at spawn)
     summary["run_name"] = str(cfg.get("run_name")) if cfg.get("run_name") else path.stem
-    bench = cfg.get("benchmark") or {}
-    summary["benchmark_tasks"] = [
-        t.get("name") for t in bench.get("tasks") or [] if isinstance(t, dict) and t.get("name")
-    ]
     cams = cfg.get("cameras") or []
     summary["cameras"] = [c.get("name") for c in cams if isinstance(c, dict) and c.get("name")]
     _SUMMARY_CACHE[str(path)] = (mtime, summary)
@@ -306,10 +282,9 @@ def _config_summary(path: Path) -> dict:
 def list_configs(svc) -> tuple[int, dict]:
     """Catalog run spawn choices + summaries (contract §1.8).
 
-    The ``runs`` catalog of the daemon's explicit pack runtime, plus the
-    benchmark packs discovered from the same runtime's ``benchmarks`` face.
-    Catalog ids are unique by construction, so there is no ``run_name``
-    shadowing or duplicate resolution here.
+    The ``runs`` catalog of the daemon's explicit pack runtime.  Catalog ids
+    are unique by construction, so there is no ``run_name`` shadowing or
+    duplicate resolution here.
 
     Only resource-backed run items that resolve to a file are listable.
     An entrypoint-only item or a directory resource has no config file to
@@ -347,24 +322,9 @@ def list_configs(svc) -> tuple[int, dict]:
                 **_config_summary(path),
             }
         )
-    packs = []
-    from unigym.benchmarks.packs import discover_packs
-
-    for name, pack in discover_packs(runtime).packs.items():
-        if pack.root is None:  # builtin namespace, not a discovered pack dir
-            continue
-        packs.append(
-            {
-                "name": name,
-                "version": pack.version,
-                "relative": pack.root.name,
-                "tasks": sorted(pack.tasks),
-            }
-        )
     return 200, {
         "ok": True,
         "configs": configs,
-        "benchmark_packs": packs,
         "unsupported": unsupported,
     }
 
@@ -511,72 +471,6 @@ def _wait_debug(svc, body, handle, doc) -> tuple[int, dict]:
 
 
 # --------------------------------------------------------------------------- #
-# task face (contract §1.20): badge + benchmark-card data source
-# --------------------------------------------------------------------------- #
-_TASK_FACE_CACHE: dict[str, tuple[int, dict | None]] = {}
-
-
-def task_face_for(output_dir: str | None) -> dict | None:
-    """One run's task face from its output dir's ``meta.json`` (or None).
-
-    ``{"mode": "collect|benchmark|both", "tasks": [names...]}`` -- read
-    from the config snapshot ShardWriter flushes alongside the first
-    shard (``config.mode`` absent = the "collect" default; ``tasks`` =
-    ``benchmark.tasks[].name``, nameless entries skipped).  ONLY the
-    meta.json speaks: old runs, collect runs smaller than one shard and
-    benchmark-only runs (no CollectSink -> no flush) have no meta.json --
-    those answer None instead of a guess (contract §1.20 null face).
-    ``mode`` outside the trio keeps the field honest at None too.
-    """
-    if not output_dir:
-        return None
-    root = Path(output_dir)
-    if not root.is_absolute():
-        root = REPO_ROOT / root
-    meta_path = root / "meta.json"
-    try:
-        mtime = meta_path.stat().st_mtime_ns
-    except OSError:
-        return None
-    key = str(root)
-    cached = _TASK_FACE_CACHE.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-    doc: dict | None = None
-    try:
-        raw = json.loads(meta_path.read_text())
-        cfg = raw.get("config") if isinstance(raw, dict) else None
-        if isinstance(cfg, dict):
-            mode = cfg.get("mode", "collect")
-            bench = cfg.get("benchmark")
-            tasks = [
-                t.get("name")
-                for t in (bench or {}).get("tasks") or []
-                if isinstance(t, dict) and t.get("name")
-            ]
-            if mode in TASK_FACE_MODES:
-                doc = {"mode": mode, "tasks": tasks}
-    except (OSError, ValueError):
-        doc = None
-    # cache SUCCESSFUL reads only: meta.json is a plain json.dump (no
-    # tmp+rename), so a read racing the one-shot write parses garbage --
-    # caching that None would pin it forever (the mtime never changes
-    # again); a None answer is one cheap stat+read to redo next poll
-    if doc is not None:
-        if len(_TASK_FACE_CACHE) > 512:  # bound the cache (dirs churn)
-            _TASK_FACE_CACHE.clear()
-        _TASK_FACE_CACHE[key] = (mtime, doc)
-    return doc
-
-
-def attach_task_face(rows: list[dict]) -> list[dict]:
-    """Additive ``task_face`` key on the /api/runs view rows (§1.2)."""
-    for r in rows:
-        r["task_face"] = task_face_for(r.get("output_dir"))
-    return rows
-
-
-# --------------------------------------------------------------------------- #
 # run history face (contract §1.21): the ledger scan + live merge
 # --------------------------------------------------------------------------- #
 DEFAULT_HISTORY_LIMIT = 50
@@ -633,16 +527,10 @@ def _history_row(rec: dict, live: dict | None) -> dict:
     """
     row = runrec.row_of(rec)
     if live is None:
-        # the scan face recomputes the task face from meta.json -- the
-        # ledger's spawn-time copy is usually null (flush happens later)
-        row["task_face"] = (
-            task_face_for(rec.get("output_dir")) if row["task_face"] is None else row["task_face"]
-        )
         row["error"] = None
         return row
     row["state"] = live.get("phase") or row["state"]
     row["stale"] = live.get("phase") in ("RUNNING", "PAUSED") and not live.get("alive")
-    row["task_face"] = live.get("task_face") or row["task_face"]
     row["pid"] = live.get("pid") or row["pid"]
     row["started_ts"] = float(live.get("start_ts") or row["started_ts"])
     # an UNKNOWN live row carries its read-failure text
@@ -668,9 +556,7 @@ def _live_history_row(live: dict) -> dict:
         "paused": False,
         "started_ts": float(live.get("start_ts") or 0.0),
         "pid": live.get("pid"),
-        "task_face": live.get("task_face"),
         "exit": None,
-        "results": None,
         "state": live.get("phase") or "RUNNING",
         "stale": (live.get("phase") in ("RUNNING", "PAUSED") and not live.get("alive")),
         "error": live.get("error") or None,
@@ -766,7 +652,7 @@ def _known_output_dir(svc, run: str, job: str) -> str | None:
 
 # positive ledger lookups only (run_id -> output_dir); a record never
 # moves once written, so the cache cannot go stale -- same bound-and-
-# clear pattern as _TASK_FACE_CACHE
+# clear pattern as _SUMMARY_CACHE
 _PM_CACHE: dict[str, str] = {}
 
 

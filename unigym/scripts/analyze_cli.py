@@ -5,10 +5,8 @@ Thin argparse-command layer over :mod:`unigym.analysis.behavior`
 DIR directly or a run name resolved under the output root
 (``data_out/<name>*``: exact hit else latest timestamped match).
 
-``--series/--op`` (the L2 escape hatch -- generic ops over any
-shard key), ``--metric`` (retained per-frame metric + predicate
-threshold lines), ``--no-gate``.  Report rows are declaration-driven
-(gate.py); the CLI carries zero task vocabulary.
+``--series/--op`` (the L2 escape hatch -- generic ops over any shard key).
+The CLI carries zero task vocabulary.
 """
 
 from __future__ import annotations
@@ -41,7 +39,7 @@ def resolve_run_dir(name_or_dir: str) -> Path:
 
 def _series_face(a: argparse.Namespace, run_dir: Path) -> int:
     """`--series KEY [--op T] [--axis N] [--ep N]`: the L2 escape hatch."""
-    from unigym.analysis import behavior, gate
+    from unigym.analysis import behavior, series
 
     try:
         loaded = behavior.load_run(run_dir, env=a.env, max_ticks=a.max_ticks, extra_keys={a.series})
@@ -81,8 +79,8 @@ def _series_face(a: argparse.Namespace, run_dir: Path) -> int:
             return 1
         x = x[..., a.axis]
     try:
-        value, aux = gate.apply_op(x, a.op, a.value)
-    except gate.GateError as e:
+        value, aux = series.apply_op(x, a.op, a.value)
+    except series.SeriesError as e:
         print(f"[unigym analyze] FAILED: {e}\n  hint: {e.hint}", file=sys.stderr)
         return 1
     doc = {
@@ -110,43 +108,6 @@ def _series_face(a: argparse.Namespace, run_dir: Path) -> int:
         f"[{f'axis={a.axis}' if a.axis is not None else 'all'}] "
         f"op={a.op} {ep_note} -> {shown}{extra}"
     )
-    return 0
-
-
-def _metric_chart(a: argparse.Namespace, run_dir: Path, out: Path) -> int:
-    """`--metric ID`: retained per-frame series + predicate threshold lines
-    (back-queried from the declared predicate trees; analyze_contract §6)."""
-    from unigym.analysis import gate
-    from unigym.analysis.charts import line_chart
-
-    frames = gate.metric_frames(run_dir, a.metric)
-    if not frames:
-        print(
-            f"[unigym analyze] no retained frames for metric "
-            f"{a.metric!r} (metrics.npz absent or metric not declared) "
-            "-- benchmark.retain_metric_frames: true records them",
-            file=sys.stderr,
-        )
-        return 1
-    try:
-        meta = json.loads((run_dir / "meta.json").read_text())
-    except (OSError, ValueError):
-        meta = {}
-    from unigym.pack_api import discover
-
-    runtime = discover(entry_points=True)
-    thresholds: list[dict] = []
-    for _name, spec in gate.resolve_task_specs(meta.get("config"), runtime):
-        thresholds += gate.thresholds_for(spec, a.metric)
-    series = [(k, v) for k, v in sorted(frames.items())]
-    hlines = [(t["value"], t["label"]) for t in thresholds]
-    f = line_chart(
-        out / f"metric__{a.metric.replace('/', '_')}.png",
-        f"gate metric: {a.metric} (thresholds from predicates)",
-        series,
-        hlines=hlines,
-    )
-    print(f"[unigym analyze] metric chart: {f} " f"(threshold lines: {len(hlines)})")
     return 0
 
 
@@ -178,7 +139,6 @@ def cmd_analyze(a: argparse.Namespace, extra: list[str]) -> int:
             env=a.env,
             max_ticks=a.max_ticks,
             charts=not a.no_charts,
-            gate=not a.no_gate,
         )
     except (FileNotFoundError, AnalyzeError) as e:
         hint = getattr(e, "hint", "pass a collect run dir " "(meta.json + shard_*.npz)")
@@ -187,22 +147,13 @@ def cmd_analyze(a: argparse.Namespace, extra: list[str]) -> int:
         else:
             print(f"[unigym analyze] FAILED: {e}\n  hint: {hint}", file=sys.stderr)
         return 1
-    if a.metric:
-        out_dir = Path(a.out) if a.out else run_dir
-        _metric_chart(a, run_dir, out_dir)
     if a.json:
         print(json.dumps({"ok": True, "report": doc}))
         return 0
     r = doc["run"]
-    g = doc.get("gate") or {}
-    head = (
-        f"; gate: {g['summary']}"
-        if g.get("available")
-        else (f"; gate: {g.get('status')}" if g.get("status") else "")
-    )
     print(
         f"[unigym analyze] {r['name'] or r['dir']}: "
-        f"{r['ticks']} ticks, {len(doc['episodes'])} episodes{head}"
+        f"{r['ticks']} ticks, {len(doc['episodes'])} episodes"
     )
     for row in doc["episodes"][:8]:
         md = "; ".join(
@@ -244,14 +195,6 @@ def add_analyze_subparser(sub) -> None:
     an.add_argument("--max-ticks", type=int, default=None, help="cap ticks read (prefix analysis)")
     an.add_argument("--no-charts", action="store_true", help="skip PNG curves")
     an.add_argument(
-        "--no-gate",
-        action="store_true",
-        dest="no_gate",
-        help="skip the declaration-driven gate section "
-        "default renders it when the run "
-        "carries results.json)",
-    )
-    an.add_argument(
         "--series",
         default=None,
         help="L2 escape hatch: any shard key "
@@ -282,12 +225,5 @@ def add_analyze_subparser(sub) -> None:
         help="threshold for first_gt/first_lt/first_ge/" "first_le",
     )
     an.add_argument("--ep", type=int, default=None, help="restrict the series to episode N")
-    an.add_argument(
-        "--metric",
-        default=None,
-        dest="metric",
-        help="draw a retained gate metric's per-frame series "
-        "(metrics.npz) + predicate threshold lines",
-    )
     an.add_argument("--json", action="store_true", help="single JSON document on stdout")
     an.set_defaults(fn=cmd_analyze)

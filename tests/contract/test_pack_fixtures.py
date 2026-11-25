@@ -207,7 +207,7 @@ def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
         "acme_code.dynamic_assets",
         "acme_code.table_top",
     ]
-    assert catalog.entries(face="tasks") == ()
+    assert catalog.entries(face="terminations") == ()
 
 
 def test_catalog_fixture_entries_are_unique_by_face_and_id() -> None:

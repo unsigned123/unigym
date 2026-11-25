@@ -5,7 +5,7 @@ launch.py `cmd_run`'s body (and the
 ALWAYS spawns a detached session (subprocess.Popen(start_new_session=
 True) via SpawnSpec.spawn; no PDEATHSIG anywhere) -- the daemon calls
 this for /api/start, and a daemon restart/upgrade can never take a
-benchmark down (§1(1)/(2)).  The old foreground exec is gone by
+run down (§1(1)/(2)).  The old foreground exec is gone by
 design (§9.7): the CLI has zero local process operations.
 """
 

@@ -66,7 +66,6 @@ export const api = {
   runStatus: (id) => GET(`/api/runs/${encodeURIComponent(id)}/status`),
   metrics: (id) => GET(`/api/runs/${encodeURIComponent(id)}/metrics`),
   config: (id) => GET(`/api/runs/${encodeURIComponent(id)}/config`),
-  report: (id) => GET(`/api/runs/${encodeURIComponent(id)}/report`),
   scene: (id, full) =>
       GET(`/api/runs/${encodeURIComponent(id)}/scene`
           + (full ? "?full=1" : "")),
@@ -120,7 +119,7 @@ export function events(onEvent, {types, runId, onState} = {}) {
   const es = new EventSource(`/api/events?${q.toString()}`);
   let up = null;
   const mark = (v) => { if (v !== up) { up = v; if (onState) onState(v); } };
-  for (const t of ["run.spawned", "run.phase", "run.exit", "bench.draft",
+  for (const t of ["run.spawned", "run.phase", "run.exit",
                    "watcher.fired", "dropped", "reset"]) {
     es.addEventListener(t, (e) => {
       mark(true);

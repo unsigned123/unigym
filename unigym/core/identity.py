@@ -1,12 +1,9 @@
-"""Core-neutral run identity (benchmark report meta + results).
+"""Core-neutral run identity facts.
 
 ``RunIdentity`` is a CORE fact object: the complete, JSON-safe description of a
-run that a benchmark report records.  It deliberately knows nothing about
-tasks, the runtime, or a concrete backend, so it imports only the standard
-library and the shared JSON alias.  This module is numpy/torch-free.
-
-``unigym.benchmarks.episode`` re-exports these names for the historical import
-path; new code imports them from here.
+run.  It deliberately knows nothing about tasks, the runtime, or a concrete
+backend, so it imports only the standard library and the shared JSON alias.
+This module is numpy/torch-free.
 """
 
 from __future__ import annotations
@@ -49,7 +46,7 @@ class RobotIdentity:
 
 @dataclass(frozen=True)
 class RunIdentity:
-    """Complete run identity written into benchmark report meta + results."""
+    """Complete run identity facts."""
 
     backend: str
     device: str
@@ -92,7 +89,7 @@ class RunIdentity:
                 raise ValueError(f"run identity {name} must be an int >= 0, got {value!r}")
 
     def to_json(self) -> dict[str, JsonValue]:
-        """Complete JSON-safe run identity (report meta + results)."""
+        """Complete JSON-safe run identity facts."""
         return {
             "schema_version": int(self.schema_version),
             "backend": self.backend,
@@ -110,7 +107,7 @@ class RunIdentity:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> RunIdentity:
-        """Build from a report/meta dict (round-trip helper; JSON only)."""
+        """Build from a JSON/meta dict (round-trip helper; JSON only)."""
         arts = value.get("articulations") or []
         if not isinstance(arts, Sequence):
             raise TypeError("articulations must be a sequence")

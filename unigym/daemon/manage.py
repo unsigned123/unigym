@@ -4,7 +4,7 @@ The CLI's ONLY local process operations (design §1(6)/§4): start spawns
 the daemon detached (setsid, own log), stop TERM-then-KILLs it via the
 state-file pid, status reports identity + a live health probe.  The
 daemon itself never owns run instances (they are setsid-detached one
-further layer down), so a daemon restart can never take a benchmark
+further layer down), so a daemon restart can never take a run
 down.
 """
 

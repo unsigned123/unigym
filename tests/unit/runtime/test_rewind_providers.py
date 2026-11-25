@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
-import torch
 
-from unigym.benchmarks.reporting import BenchmarkReporter
-from unigym.evaluation import EnvView
 from unigym.initializers.base import InitializerBase
-from unigym.runner.evaluation.buffer import EpisodeBuffer
-from unigym.runner.evaluation.scoring import EpisodeEvaluator
-from unigym.runner.evaluation.session import EvaluationSession
+from unigym.io.writer import ShardWriter
 from unigym.runner.sinks.fanout import FanOutSink
 from unigym.runtime.rewind import RewindGateError
 from unigym.runtime.rewind_providers import (
-    EvaluationSessionProvider,
+    CollectSinkProvider,
     InitializerStateProvider,
     build_rewind_providers,
 )
@@ -22,43 +18,6 @@ from unigym.runtime.rewind_providers import (
 
 def _initializer(seed: int = 0) -> InitializerBase:
     return InitializerBase({"seed": seed}, None, None)
-
-
-def _session(tmp_path, *, num_envs: int = 1) -> EvaluationSession:
-    tasks: list = []
-    meta = {"num_envs": num_envs, "policy_dt": 0.02}
-    return EvaluationSession(
-        tasks=tasks,
-        buffer=EpisodeBuffer(num_envs),
-        evaluator=EpisodeEvaluator(tasks=tasks, meta=meta),
-        reporter=BenchmarkReporter(
-            tasks=tasks,
-            meta=meta,
-            report_path=str(tmp_path / "benchmark_report.json"),
-        ),
-        meta=meta,
-        num_envs=num_envs,
-        min_episodes=5,
-        max_steps=10,
-    )
-
-
-def _step_bundle(*, episode_id: int = 0, num_envs: int = 1) -> dict:
-    record = {
-        "episode_id": torch.full((num_envs,), episode_id, dtype=torch.int64),
-        "time_in_episode": torch.zeros(num_envs),
-    }
-    return {
-        "record": record,
-        "cmd": None,
-        "view": EnvView(
-            record=record,
-            obs=None,
-            env_id=None,
-            num_envs=num_envs,
-            backend="record-only",
-        ),
-    }
 
 
 def test_build_rewind_providers_mounts_only_capable_initializer():
@@ -111,75 +70,6 @@ def test_initializer_provider_validate_rejects_unrestorable_state(initializer, s
         provider.validate_rewind_state(state)
 
 
-def test_evaluation_session_provider_mounts_on_episode_buffer(tmp_path):
-    """A session exposing an episode_buffer mounts the benchmark provider."""
-    sink = _session(tmp_path)
-
-    providers = build_rewind_providers(sink)
-
-    assert [provider.name for provider in providers] == ["benchmark"]
-    assert isinstance(providers[0], EvaluationSessionProvider)
-
-
-def test_evaluation_session_rewind_provider_is_the_canonical_wrapper(tmp_path):
-    """The session exposes its benchmark provider without moving provider logic."""
-    sink = _session(tmp_path)
-
-    provider = sink.rewind_provider
-
-    assert isinstance(provider, EvaluationSessionProvider)
-    assert provider.name == "benchmark"
-
-
-def test_evaluation_session_provider_restore_returns_open_steps_and_clears_marks(tmp_path):
-    """Restoring the snapshot drops the abandoned branch's step and rewind mark."""
-    sink = _session(tmp_path)
-    sink.on_step(0, _step_bundle(episode_id=0))
-    provider = build_rewind_providers(sink)[0]
-    state = provider.rewind_state()
-
-    sink.on_step(1, _step_bundle(episode_id=0))
-    sink.on_rewind({"tick": 5, "restored_tick": 2, "snap_id": 1})
-    assert len(sink.episode_buffer.bufs[0]) == 2
-    assert len(sink.episode_buffer.rewinds[0]) == 1
-
-    provider.apply_rewind_state(state)
-
-    assert len(sink.episode_buffer.bufs[0]) == 1
-    assert sink.episode_buffer.rewinds[0] == []
-    assert provider.rewind_state()["episode_stamp"] == 0
-
-
-def test_evaluation_session_provider_restores_episode_fuse(tmp_path):
-    """n_episodes and the derived _stop latch ride the fork back."""
-    sink = _session(tmp_path)
-    sink.n_episodes = 2
-    sink._stop = True
-    provider = build_rewind_providers(sink)[0]
-    state = provider.rewind_state()
-
-    sink.n_episodes = 9
-    sink._stop = False
-    provider.apply_rewind_state(state)
-
-    assert sink.n_episodes == 2
-    assert sink._stop is True
-
-
-def test_evaluation_session_provider_refuses_cross_episode_rewind(tmp_path):
-    """A checkpoint from another episode is refused by both rewind phases."""
-    sink = _session(tmp_path)
-    sink.on_step(0, _step_bundle(episode_id=0))
-    provider = build_rewind_providers(sink)[0]
-    state = provider.rewind_state()
-    sink.on_step(1, _step_bundle(episode_id=1))
-
-    with pytest.raises(RewindGateError, match="cross-episode"):
-        provider.validate_rewind_state(state)
-    with pytest.raises(RewindGateError, match="cross-episode"):
-        provider.apply_rewind_state(state)
-
-
 class _RewindRecorder:
     def __init__(self):
         self.marks: list[dict] = []
@@ -201,16 +91,6 @@ def test_nested_fanout_forwards_on_rewind_once_per_child():
     assert third.marks == [info]
 
 
-def test_nested_fanout_marks_a_real_benchmark_buffer_once(tmp_path):
-    """An evaluation session below a nested fan-out receives the rewind mark."""
-    sink = _session(tmp_path)
-    sink.on_step(0, _step_bundle(episode_id=0))
-
-    FanOutSink(FanOutSink(sink)).on_rewind({"tick": 1, "restored_tick": 0, "snap_id": 2})
-
-    assert len(sink.episode_buffer.rewinds[0]) == 1
-
-
 def test_nested_fanout_skips_children_without_on_rewind():
     """A sink without on_rewind does not break the fan-out notification."""
     recorder = _RewindRecorder()
@@ -219,3 +99,58 @@ def test_nested_fanout_skips_children_without_on_rewind():
     fan.on_rewind({"tick": 1})
 
     assert recorder.marks == [{"tick": 1}]
+
+
+class _WriterSink:
+    """The minimal collect-sink face the provider reads: a fuse plus a writer."""
+
+    def __init__(self, writer: ShardWriter):
+        self.writer = writer
+        self.n_episodes = 0
+
+
+def _append_shard(writer: ShardWriter) -> None:
+    """Append exactly one full shard (two rows at ``shard_steps=2``)."""
+    writer.append({"x": np.zeros((1, 1), dtype=np.float32)})
+    writer.append({"x": np.zeros((1, 1), dtype=np.float32)})
+
+
+def test_collect_sink_provider_round_trips_fuse_and_shard_cursor(tmp_path):
+    """The collect provider snapshots and restores both fuse and shard cursor."""
+    writer = ShardWriter(str(tmp_path), shard_steps=2)
+    _append_shard(writer)
+    sink = _WriterSink(writer)
+    sink.n_episodes = 2
+    provider = CollectSinkProvider(sink)
+
+    state = provider.rewind_state()
+
+    assert set(state) == {"fuse", "shard_commit"}
+    assert state["fuse"] == {"n_episodes": 2}
+    assert state["shard_commit"] == {"committed_shards": 1, "committed_rows": 2}
+
+    _append_shard(writer)
+    sink.n_episodes = 9
+    provider.validate_rewind_state(state)
+    provider.apply_rewind_state(state)
+
+    assert sink.n_episodes == 2
+    assert writer.commit_state() == {"committed_shards": 1, "committed_rows": 2}
+    assert provider.dump_attempt(str(tmp_path), "attempt") == []
+
+
+def test_collect_sink_provider_rejects_malformed_state(tmp_path):
+    """A malformed fuse or shard commit state is refused before mutation."""
+    writer = ShardWriter(str(tmp_path), shard_steps=2)
+    sink = _WriterSink(writer)
+    provider = CollectSinkProvider(sink)
+
+    with pytest.raises(RewindGateError, match="fuse must be a mapping"):
+        provider.validate_rewind_state({"fuse": []})
+
+    bad_commit = {
+        "fuse": {"n_episodes": 0},
+        "shard_commit": {"committed_shards": 0, "committed_rows": 5},
+    }
+    with pytest.raises(RewindGateError, match="shard commit state corrupt"):
+        provider.validate_rewind_state(bad_commit)

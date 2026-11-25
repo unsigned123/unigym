@@ -62,7 +62,7 @@ def apply_overrides(
     mutated in place ONLY when overrides exist -- an empty list returns
     the same object untouched (BITWISE: no --set -> config bitwise-identical).
     Unknown INTERMEDIATE paths are created as dicts (a missing
-    ``benchmark.min_episodes`` is a legitimate new leaf); descending
+    ``collect.steps_extra`` is a legitimate new leaf); descending
     through a NON-dict is a hard error (typo guard, fail-fast).
     """
     if not overrides:

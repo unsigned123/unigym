@@ -1116,7 +1116,7 @@ class IsaaclabEnv(ManagerBasedEnv):
             for key, value in contacts.items():
                 if key in schema:
                     self.obs.set_contact(key[len("contact/") :], value)
-            # benchmark contract: force/active-body facts ride the record mapping
+            # episode facts: force/active-body facts ride the record mapping
             # (the one raw read above already produced them).
             self._last_contact_facts = {
                 key: value
@@ -1452,7 +1452,7 @@ class IsaaclabEnv(ManagerBasedEnv):
         """No structured reset outcomes: isaaclab2 has no initializer face.
 
         The public runner-facing contract is still present (empty mapping) so
-        benchmark facts stay uniform across backends.
+        episode facts stay uniform across backends.
         """
         return {}
 

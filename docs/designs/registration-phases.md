@@ -90,8 +90,8 @@ Rules:
 
 Pack activation snapshots and restores every registry it can mutate: adapters,
 robots, scene providers, content fillers, prop templates, terminations,
-actuator laws, initializers and task providers.  Values and origins are
-restored together through `RegistrySnapshot`.
+actuator laws and initializers.  Values and origins are restored together
+through `RegistrySnapshot`.
 
 ## Non-goals
 

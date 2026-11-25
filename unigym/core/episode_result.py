@@ -1,11 +1,11 @@
-"""Read-only benchmark result view handed to command samplers.
+"""Read-only episode result view handed to command samplers.
 
-The runner's episode boundary exposes completed-episode benchmark results to a
-:class:`~unigym.commands.base.CommandSampler` so user-owned multi-stage command
-logic can react to the previous episode.  This module owns that view: a pure,
-frozen snapshot of one ``Task`` outcome with no task object, no ``EpisodeData``
-and no numpy arrays.  It deliberately lives in ``unigym.core`` so the command
-layer never depends on the benchmark layer.
+The runner's episode boundary exposes completed-episode results published by a
+sink to a :class:`~unigym.commands.base.CommandSampler`, so user-owned
+multi-stage command logic can react to the previous episode.  This module owns
+that view: a pure, frozen snapshot of one result with no task object, no
+episode history and no numpy arrays.  It deliberately lives in ``unigym.core``
+so the command layer never depends on a sink implementation.
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ from types import MappingProxyType
 
 @dataclass(frozen=True)
 class EpisodeResultView:
-    """One task's result for one completed episode.
+    """One result for one completed episode.
 
     Attributes:
-        task: the task's configured name (``<pack>/<task>`` or bare).
-        success: the task-judged verdict, or ``None`` when the task defines no
-            success criterion.  Never inferred from the engine termination.
-        metrics: the task's flat scalar metrics, copied into a read-only
+        task: the result's configured name (``<pack>/<name>`` or bare).
+        success: the judged verdict, or ``None`` when no success criterion is
+            defined.  Never inferred from the engine termination.
+        metrics: the result's flat scalar metrics, copied into a read-only
             mapping at construction.
     """
 

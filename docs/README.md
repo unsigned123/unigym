@@ -16,15 +16,10 @@ Process documents:
   `run.model_edit()` body/geom transaction, field matrix and backend limits.
 - [Evaluation context contract](contracts/evaluation_contract.md) - the
   read-only, boundary-scoped `EvalContext`/`EnvView`, scoped `EvalQuery`, and
-  the live termination/benchmark boundaries.
-- [Benchmark contract](contracts/benchmark_contract.md) - canonical
-  episode timeline, deadline authority, the `EvaluationSession` /
-  `EpisodeBuffer` / `EpisodeEvaluator` / `BenchmarkReporter` ownership split,
-  live task signatures (including opt-in `trigger: both` ticks) and report
-  schema.
+  the live termination/watcher boundaries.
 - [Runner contract](contracts/runner_contract.md) - the sink callback bundle
-  (timeline/reset/termination facts) and the live evaluation boundaries,
-  including rewind fan-out and the `benchmark` rewind provider.
+  (timeline/reset/termination facts), sink selection, custom sinks and rewind
+  participation.
 - [Command sampler contract](contracts/command_sampler_contract.md) - sampler
   lifecycle hooks, custom factory authoring and rewind participation.
 - [Value store contract](contracts/value_store_contract.md) - the run-scoped

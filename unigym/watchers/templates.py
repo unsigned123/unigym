@@ -2,10 +2,10 @@
 
 Design docs/designs/watchers.md §8.1: system templates
 are the FIRST-CLASS predicate tier -- typed parameters + a contract
-entry + validation, FormulaTask-style (benchmarks/formula.py: validate
+entry + validation (validate
 returns a list of field-naming errors, check is strict).  Adding a
-template = a framework extension (same review flow as FormulaTask
-terms): register here + document the entry in
+template = a framework extension (the same review flow as the other
+built-in registries): register here + document the entry in
 docs/contracts/watchers_contract.md §5.
 
 Every template:

@@ -37,7 +37,6 @@ from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
     from unigym.actuator_law import ActuatorLawSnapshot
-    from unigym.benchmarks.task_providers import TaskProviderRegistrySnapshot
     from unigym.initializers.base import InitializerRegistrySnapshot
     from unigym.props.templates import PropTemplateRegistrySnapshot
     from unigym.robots import RobotProfile
@@ -524,27 +523,6 @@ def _attribute_pack_code_initializers(
         attribute_initializer(name, origin)
 
 
-def _attribute_pack_code_task_providers(
-    manifest: PackManifestV1,
-    runtime: PackRuntime,
-    before: TaskProviderRegistrySnapshot,
-) -> None:
-    """Label task providers the pack registered itself during activation."""
-    from unigym.benchmarks.task_providers import (
-        PROVIDERS,
-        attribute_task_provider,
-        task_provider_origin,
-    )
-
-    origin = _pack_code_origin(manifest, runtime)
-    for name in sorted(PROVIDERS):
-        if name in before.entries:
-            continue
-        if task_provider_origin(name).kind != "unknown":
-            continue
-        attribute_task_provider(name, origin)
-
-
 def _attribute_pack_code_terminations(
     manifest: PackManifestV1,
     runtime: PackRuntime,
@@ -1012,7 +990,6 @@ class PackRuntime:
         terminations_before: TerminationRegistrySnapshot | None = None
         laws_before: ActuatorLawSnapshot | None = None
         initializers_before: InitializerRegistrySnapshot | None = None
-        task_providers_before: TaskProviderRegistrySnapshot | None = None
         if activation_surface:
             if imports_pack_code:
                 from unigym.adapters import snapshot_adapter_registry
@@ -1025,7 +1002,6 @@ class PackRuntime:
             from unigym.terminations import snapshot_termination_registry
 
             from unigym.actuator_law import snapshot_actuator_laws
-            from unigym.benchmarks.task_providers import snapshot_task_providers
             from unigym.initializers.base import snapshot_initializers
 
             robots_before = snapshot_robot_registry()
@@ -1035,7 +1011,6 @@ class PackRuntime:
             terminations_before = snapshot_termination_registry()
             laws_before = snapshot_actuator_laws()
             initializers_before = snapshot_initializers()
-            task_providers_before = snapshot_task_providers()
 
         def rollback_adapters() -> None:
             """Restore the adapter classes and origins a failed activation changed."""
@@ -1101,14 +1076,6 @@ class PackRuntime:
 
             restore_initializers(initializers_before)
 
-        def rollback_task_providers() -> None:
-            """Restore task-provider registrations/origins a failed activation changed."""
-            if task_providers_before is None:
-                return
-            from unigym.benchmarks.task_providers import restore_task_providers
-
-            restore_task_providers(task_providers_before)
-
         try:
             if entrypoint is not None:
                 context = PackContext(pack=pack, root=manifest.root, runtime=self)
@@ -1150,8 +1117,6 @@ class PackRuntime:
                 _attribute_pack_code_terminations(manifest, self, terminations_before)
             if initializers_before is not None:
                 _attribute_pack_code_initializers(manifest, self, initializers_before)
-            if task_providers_before is not None:
-                _attribute_pack_code_task_providers(manifest, self, task_providers_before)
         except PackError:
             rollback_adapters()
             rollback_robots()
@@ -1161,7 +1126,6 @@ class PackRuntime:
             rollback_terminations()
             rollback_actuator_laws()
             rollback_initializers()
-            rollback_task_providers()
             raise
         except Exception as err:
             rollback_adapters()
@@ -1172,7 +1136,6 @@ class PackRuntime:
             rollback_terminations()
             rollback_actuator_laws()
             rollback_initializers()
-            rollback_task_providers()
             if entrypoint is None:
                 raise PackError(f"pack {pack!r} provider activation failed: {err}") from err
             raise PackError(

@@ -20,15 +20,6 @@ def test_public_names_resolve():
         assert getattr(unigym, name) is not None
 
 
-def test_benchmark_public_names_resolve():
-    """The benchmark facade exports its documented task and tick types."""
-    import unigym.benchmarks as benchmarks
-
-    for name in ("EpisodeData", "Task", "TickResult", "TickTrace"):
-        assert name in benchmarks.__all__, name
-        assert getattr(benchmarks, name) is not None, name
-
-
 def test_evaluation_public_names_resolve():
     """The evaluation context facade exports exactly its advertised names."""
     import unigym.evaluation as evaluation

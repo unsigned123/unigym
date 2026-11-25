@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from unigym.adapters import ADAPTER_REGISTRY, register_adapter
-from unigym.benchmarks.task_providers import PROVIDERS, register as register_task_provider
 from unigym.initializers.base import INITIALIZER_REGISTRY, register as register_initializer
 from unigym.props.templates import register_prop_template
 from unigym.registration import (
@@ -25,27 +24,21 @@ from unigym.terminations import TERMINATION_REGISTRY, register_termination
 
 @pytest.fixture(autouse=True)
 def _isolate_extra_registries():
-    """Restore law/implementation/initializer/task-provider registries per test."""
+    """Restore law/implementation/initializer registries per test."""
     from unigym.actuator_law import restore_actuator_laws, snapshot_actuator_laws
     from unigym.actuators.implementations import (
         restore_actuator_implementations,
         snapshot_actuator_implementations,
-    )
-    from unigym.benchmarks.task_providers import (
-        restore_task_providers,
-        snapshot_task_providers,
     )
     from unigym.initializers.base import restore_initializers, snapshot_initializers
 
     laws = snapshot_actuator_laws()
     implementations = snapshot_actuator_implementations()
     initializers = snapshot_initializers()
-    task_providers = snapshot_task_providers()
     yield
     restore_actuator_laws(laws)
     restore_actuator_implementations(implementations)
     restore_initializers(initializers)
-    restore_task_providers(task_providers)
 
 
 class _DummyAdapter:
@@ -138,18 +131,6 @@ def test_initializer_is_legal_until_backend_build() -> None:
     enter_phase(RegistrationPhase.RUNTIME)
     with pytest.raises(RegistrationSealedError):
         register_initializer(_Init)
-
-
-def test_task_provider_wrong_phase() -> None:
-    enter_phase(RegistrationPhase.SPEC)
-    with pytest.raises(RegistrationError, match="task_provider"):
-
-        @register_task_provider("acme.task")
-        def _provider(slots, tables):
-            """Provider fixture."""
-            return {}
-
-    assert "acme.task" not in PROVIDERS
 
 
 def test_actuator_law_and_implementation_windows() -> None:

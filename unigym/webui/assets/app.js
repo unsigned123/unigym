@@ -59,22 +59,6 @@ export const phasePill = (phase, stale) => {
   return el("span", {class: `pill ${cls}`}, phase || "?");
 };
 
-/* task-face badges (contract §1.20): benchmark = green, collect =
- * gray; mode "both" shows both.  tf = a /api/runs row's `task_face`
- * ({mode, tasks} | null) -- old runs without a meta.json carry null and
- * render no badge at all. */
-export const taskFacePills = (tf) => {
-  if (!tf) return [];
-  const pills = [];
-  if (tf.mode === "benchmark" || tf.mode === "both")
-    pills.push(el("span", {class: "pill bench", title: "benchmark run"},
-        "bench"));
-  if (tf.mode === "collect" || tf.mode === "both")
-    pills.push(el("span", {class: "pill collect", title: "collect run"},
-        "collect"));
-  return pills;
-};
-
 /* ---- THE unified error area (§9): stacked, deduped, dismissable -----------
  * identical messages collapse into one row with an xN counter;
  * rows auto-drop after 8 s and carry a manual x.  The poller's good-cycle

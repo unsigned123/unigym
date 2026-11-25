@@ -46,17 +46,16 @@ class CommandSampler(ABC):
   results can choose the next episode's command.  It also runs when
   `auto_reset` is false; only the reset chain is skipped.
 - `results` is a read-only `Mapping[int, tuple[EpisodeResultView, ...]]`: one
-  tuple per due env in task declaration order, containing only completed
-  benchmark tasks.  A collect-only run passes `{}`.  There is no step-level
-  benchmark trigger.
+  tuple per due env in declaration order, containing the completed-episode
+  results a sink published.  A sink that publishes none passes `{}`.
 - Both hooks default to no-ops; built-in samplers keep their behavior.
 - A raising `on_episode_end` is run-critical and propagates.
 
 ## Episode results versus sink terminals
 
-Core itself publishes no episode results: it selects no built-in
-`EvaluationSession`, so the runner-provided mapping is `{}` unless a custom sink
-writes `bundle["episode_results"]`.  A sink terminal
+Core itself publishes no episode results: it selects no scoring sink, so the
+runner-provided mapping is `{}` unless a custom sink writes
+`bundle["episode_results"]`.  A sink terminal
 from `TerminalSink.drain_terminations()` is an episode-end fact, not an
 `EpisodeResultView`.  A pack that needs sink-driven feedback must carry it in
 its own shared pack state or explicitly publish the documented result mapping.
@@ -129,5 +128,5 @@ The rewind gate accepts a sampler only when it declares `rewind_inert = True`
 - `bind_values` is not replayed on restore either; the values themselves ride
   the `ValueStore` `"values"` rewind provider.
 
-Benchmark feedback the sampler relies on must be folded into its own state in
+Episode feedback the sampler relies on must be folded into its own state in
 `on_episode_end`; the runner does not snapshot `episode_results` separately.

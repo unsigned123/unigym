@@ -9,13 +9,12 @@
  */
 
 import {api, events, media, errMsg} from "./api.js";
-import {debounce, el, fail, phasePill, poll, showError, taskFacePills}
-    from "./app.js";
+import {debounce, el, fail, phasePill, poll, showError} from "./app.js";
 import {startTelemetry} from "./telemetry.js";
 import {mountFreeCam} from "./freecam.js";
 import {mountStageView} from "./stageview.js";
 import {consoleCard} from "./consolecard.js";
-import {analysisCard, benchmarkCard, logCard, metricsCard} from "./runpanels.js";
+import {analysisCard, logCard, metricsCard} from "./runpanels.js";
 import {sceneCard} from "./scenecard.js";
 import {watchCard} from "./watchcard.js";
 import {inspectCard} from "./inspectcard.js";
@@ -61,25 +60,6 @@ export function mount(id) {
   }}, "terminate");
   const back = el("a", {href: "/" + location.search}, "← portal");
 
-  const face = el("span", {id: "taskface"});
-  document.querySelector("header h1").after(face,
-      el("span", {class: "muted"}, runId));
-  // task-face badge: ONE GET /api/runs/<id> -- the task face is a
-  // start-time constant, so this is a one-shot, not a second status poll.
-  // a finished run misses the live face -> the ledger row
-  // (/api/runs?history=1) still carries its task_face (post-mortem).
-  api.run(runId).then((res) => {
-    const tf = res.doc?.run?.task_face;
-    if (tf) face.replaceChildren(...taskFacePills(tf), " ");
-    else return api.runsHistory(200);
-  }).then((res) => {                   // ledger fallback (gone runs)
-    if (!res) return;
-    const row = (res.doc?.runs || [])
-        .find((r) => r.run_id === runId);
-    if (row && row.task_face)
-      face.replaceChildren(...taskFacePills(row.task_face), " ");
-  }).catch(() => {});                  // gone/dead run: no badge, not an error
-  const benchCard = benchmarkCard(runId);
   const inspect = inspectCard(runId);
   document.getElementById("app").replaceChildren(
       el("div", {class: "bar"},
@@ -91,7 +71,6 @@ export function mount(id) {
           el("div", {}, stage.card, tel, consoleCard(runId)),
       el("div", {},
           metricsCard(runId),
-          benchCard,
           inspect.card,
           sceneCard(runId),
           watchCard(runId),
@@ -102,15 +81,13 @@ export function mount(id) {
   stage.firstBind().catch(fail);       // dead-run notice / first MJPEG bind
   mountFreeCam(id);
   // SSE nudge for THIS run (server-side run_id filter; contract
-  // §1.22): run.* bumps the status line, bench.draft bumps the benchmark
-  // card, reset re-pulls both.  Same discipline as the portal: the
-  // pollers above are the correctness floor and never go away.
+  // §1.22): run.* bumps the status line and reset re-pulls it.  Same
+  // discipline as the portal: the pollers above are the correctness
+  // floor and never go away.
   const bumpStatus = debounce(
       () => { refreshStatus().catch(() => {}); }, 500);
-  const bumpBench = debounce(() => { benchCard.refresh?.(); }, 500);
   events((ev) => {
-    if (ev.type === "reset") { bumpStatus(); bumpBench(); return; }
-    if (ev.type === "bench.draft") bumpBench();
-    else if (ev.type.startsWith("run.")) bumpStatus();
-  }, {types: ["run", "bench"], runId});
+    if (ev.type === "reset") { bumpStatus(); return; }
+    if (ev.type.startsWith("run.")) bumpStatus();
+  }, {types: ["run"], runId});
 }

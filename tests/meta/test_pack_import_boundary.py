@@ -218,37 +218,6 @@ def test_condition_package_import_is_torch_free() -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.subprocess
-def test_benchmark_package_import_stays_torch_free() -> None:
-    """The benchmark package imports without pulling torch at module load."""
-    code = (
-        "import sys\n"
-        "import unigym.benchmarks\n"
-        "assert 'torch' not in sys.modules, 'torch imported'\n"
-    )
-
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.subprocess
-def test_benchmark_episode_import_stays_torch_and_run_free() -> None:
-    """The benchmark episode module imports no torch and no unigym.run layer."""
-    code = (
-        "import sys\n"
-        "import unigym.benchmarks.episode\n"
-        "assert 'torch' not in sys.modules, 'torch imported'\n"
-        "loaded = sorted(m for m in sys.modules "
-        "if m == 'unigym.run' or m.startswith('unigym.run.'))\n"
-        "assert not loaded, loaded\n"
-    )
-
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.mark.parametrize("name", _LEGACY_NAMES)
 def test_public_facades_advertise_no_legacy_scene_names(name: str) -> None:
     """The repository's public facades expose no removed scene vocabulary."""

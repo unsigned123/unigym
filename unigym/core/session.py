@@ -173,11 +173,10 @@ class Session:
         return self._send("inspect", payload, timeout_s=timeout_s)
 
     def query(self, kind: str, timeout_s: float | None = None, params: dict | None = None):
-        """Typed structured query (runtime_contract §4 cmd 10-12,16).
+        """Typed structured query (runtime_contract §4 cmd 10-11,16).
 
         ``metrics`` -> the typed document itself; ``config`` -> the
-        effective-config snapshot (or None); ``report`` -> the benchmark
-        draft (or None without a benchmark); ``scene`` -> the curated
+        effective-config snapshot (or None); ``scene`` -> the curated
         scene face (``params={"full": True}`` = the raw escape hatch).
         """
         res = self._send(kind, params, timeout_s=timeout_s)

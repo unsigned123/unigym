@@ -249,6 +249,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_model` | `tests/unit/model/**` |
 | `domain_scene` | `tests/unit/scenes/**` |
 | `domain_runtime` | `tests/unit/runtime/**` |
+| `domain_analysis` | `tests/unit/analysis/**` |
 | `domain_run` | `tests/unit/run/**` |
 | `domain_runner` | `tests/unit/runner/**` |
 | `domain_contacts` | `tests/unit/contacts/**` (refs, inventory, mixed owners, first-party config smoke) |

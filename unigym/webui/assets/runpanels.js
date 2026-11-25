@@ -35,11 +35,7 @@ export function metricsCard(runId) {
             tile("last reward", fmtNum(ep.last?.reward)),
             tile("last steps", String(ep.last?.steps ?? "-"))),
         el("div", {class: "muted", style: "margin:10px 0 2px"},
-            `rewards (last ${ep.rewards?.length ?? 0})` +
-            (m.task ? ` · task ${m.task.pack ? m.task.pack + "/" : ""}` +
-                m.task.name : "") +
-            (m.progress ? ` · progress ${m.progress.episodes}/` +
-                `${m.progress.min_episodes}` : "")),
+            `rewards (last ${ep.rewards?.length ?? 0})`),
         sparkline(ep.rewards || []));
   }, 2000);
   return el("div", {class: "card"}, el("h2", {}, "metrics"), box);
@@ -89,95 +85,4 @@ export function analysisCard(runId) {
   })();
   return el("div", {class: "card", style: "margin-top:14px"},
       el("h2", {}, "behavior report"), box);
-}
-
-/* benchmark report card (contract §1.20): per-task verdicts from
- * TWO faces of the same document.  While the run is alive the typed
- * report query (§1.6) returns EvaluationSession's LIVE DRAFT (updated per
- * episode); the artifact face serves the FINAL benchmark_report.json
- * (EvaluationSession lands it at run END -- a millisecond window before the
- * run leaves the live view, so it wins when caught).  A collect-only
- * run (draft null + no benchmark tasks) says so explicitly -- that
- * fallback is information, NOT an error, so it never touches the shared
- * error banner. */
-export function benchmarkCard(runId) {
-  const box = el("div", {id: "benchmark"},
-      el("span", {class: "muted"}, "loading..."));
-  let face = null;                     // one-shot task_face (start-time)
-  let settled = false;                 // final artifact rendered
-  api.run(runId).then((res) => {
-    face = res.doc?.run?.task_face || null;
-  }).catch(() => {});
-  const rateClass = (rate) =>
-      (rate === null || rate === undefined) ? "na"
-          : rate >= 0.999 ? "good" : rate <= 0 ? "bad" : "mid";
-  const rateText = (rate) =>
-      (rate === null || rate === undefined) ? "n/a"
-          : `${Math.round(rate * 100)}%`;
-  const taskRow = ([name, t]) => el("div", {class: "bench-row"},
-      el("span", {class: "bench-name"}, name),
-      el("span", {class: "muted num"}, `n=${t.n_episodes ?? "-"}`),
-      el("span", {class: `bench-rate ${rateClass(t.success_rate)}`},
-          rateText(t.success_rate)));
-  const render = (doc, live) => {
-    const bits = [`episodes ${doc.episodes_total ?? "-"}`,
-                  `steps ${doc.steps_total ?? "-"}`];
-    if (typeof doc.wall_time_s === "number")
-      bits.push(`${doc.wall_time_s.toFixed(1)}s`);
-    if (doc.directed) bits.push("directed");
-    const rows = Object.entries(doc.tasks || {}).map(taskRow);
-    // replaceChildren takes nodes, not arrays/nullables -- build the kid
-    // list explicitly (an array argument stringifies to [object ...])
-    const kids = [el("div", {class: "muted", style: "margin-bottom:6px"},
-        bits.join(" · ") + (live ? " · live (judged per episode)" : ""))];
-    if (rows.length) kids.push(...rows);
-    else kids.push(el("span", {class: "muted"}, "no episodes scored yet"));
-    if (!live) {
-      kids.push(el("div", {style: "margin-top:8px"},
-          el("a", {href: artifactUrl({run: runId,
-              name: "benchmark_report.json"})}, "benchmark_report.json")));
-    }
-    box.replaceChildren(...kids);
-  };
-  const pending = () => {
-    if (face && face.mode === "collect")     // no benchmark tasks at all
-      return el("span", {class: "muted"},
-          "collect-only run -- no benchmark tasks, nothing to judge");
-    const tasks = face?.tasks?.length ? ` (tasks: ${face.tasks.join(", ")})`
-        : "";
-    return el("span", {class: "muted"},
-        `collect-only / judged at end${tasks} -- benchmark_report.json `
-        + "lands when the run finishes");
-  };
-  const tick = async () => {
-    if (!settled) {                          // final artifact face first
-      try {
-        const res = await fetch(artifactUrl(
-            {run: runId, name: "benchmark_report.json"}));
-        if (res.status === 200) {
-          const doc = await res.json().catch(() => null);
-          if (doc) {
-            settled = true;
-            return render(doc, false);
-          }                                  // torn read: retry next cycle
-        }
-      } catch { /* network blip: the poller owns the surface */ }
-    }
-    // live draft face (contract §1.6): same document, updated per episode
-    try {
-      const res = await api.report(runId);
-      const rep = res.doc?.report;
-      if (res.status === 200 && rep && !settled) return render(rep, true);
-      if (res.status === 200 && !settled && !box.dataset.pending) {
-        box.dataset.pending = "1";           // collect-only / no episodes yet
-        box.replaceChildren(pending());
-      }
-    } catch {                                // gone/wedged: keep last content
-    }
-  };
-  poll(tick, 2000);
-  const card = el("div", {class: "card", style: "margin-top:14px"},
-      el("h2", {}, "benchmark report"), box);
-  card.refresh = tick;         // SSE nudge entry (bench.draft/reset)
-  return card;
 }

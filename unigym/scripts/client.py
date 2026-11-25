@@ -1367,14 +1367,14 @@ def cmd_submit(a, extra: list[str]) -> int:
 
 
 def _cmd_run_query(a) -> int:
-    """`unigym status <run> --metrics|--config|--report`.
+    """`unigym status <run> --metrics|--config`.
 
     The CLI mirror of the webui run page: same daemon API face
     (POST /api/op/<run>/<kind>), same payloads -- zero core imports.
     """
-    kind = "metrics" if a.metrics else "config" if a.config else "report" if a.report else None
+    kind = "metrics" if a.metrics else "config" if a.config else None
     if not kind:
-        print("a run query needs one of: --metrics | --config | --report", file=sys.stderr)
+        print("a run query needs one of: --metrics | --config", file=sys.stderr)
         return 2
     doc = _op(a.run, kind, {}, timeout=15.0)
     payload = {"run_id": doc.get("run_id"), kind: doc.get(kind)}
@@ -1388,7 +1388,7 @@ def _cmd_run_query(a) -> int:
 
 
 def cmd_status(a, extra: list[str]) -> int:
-    # `status <run> --metrics|--config|--report` -> typed query
+    # `status <run> --metrics|--config` -> typed query
     # (the world view below stays byte-identical when no run is given).
     if getattr(a, "run", None):
         return _cmd_run_query(a)

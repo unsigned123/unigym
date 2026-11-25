@@ -201,7 +201,7 @@ class BoxProp(GenericProp):
 
         The half extents are orientation-independent (axis-aligned boxes stay
         axis-aligned under the prop's yaw placement only when yaw == 0; for
-        yawed props use the conservative bounding variant -- the benchmark
+        yawed props use the conservative bounding variant -- the sample
         configs place containers yaw-free).
         """
         pose = self.get_world_pose(env)

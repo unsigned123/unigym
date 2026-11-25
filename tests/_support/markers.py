@@ -29,6 +29,7 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "model": "domain_model",
     "scenes": "domain_scene",
     "runtime": "domain_runtime",
+    "analysis": "domain_analysis",
     "run": "domain_run",
     "watchers": "domain_watchers",
     "runner": "domain_runner",
@@ -41,7 +42,6 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "backends": "domain_backends",
     "sim": "domain_sim",
     "initializers": "domain_initializers",
-    "benchmarks": "domain_benchmarks",
     "query": "domain_query",
     "evaluation": "domain_evaluation",
 }

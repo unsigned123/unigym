@@ -233,9 +233,6 @@ class MetricsFeedSink:
     def metrics_progress(self) -> dict[str, JsonValue] | None:
         return None
 
-    def metrics_report(self) -> JsonValue:
-        return None
-
 
 class PartialSink:
     """Sink-shaped object missing three of the four required callbacks."""
@@ -401,9 +398,6 @@ class NonCallableMetricsSink:
         return None
 
     def metrics_progress(self) -> dict[str, JsonValue] | None:
-        return None
-
-    def metrics_report(self) -> JsonValue:
         return None
 
 

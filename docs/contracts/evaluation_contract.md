@@ -1,8 +1,8 @@
 # Evaluation context contract
 
 Status: `unigym.evaluation` defines the read-only, boundary-scoped context that
-live termination consumes; benchmark scoring and watchers adopt the same
-boundary.  Termination is live-only: there is no recorded/offline state path.
+live termination consumes; watchers adopt the same boundary.  Termination is
+live-only: there is no recorded/offline state path.
 
 The context is a facade over the existing env `record` / observation / runtime
 query faces at one engine-thread boundary.  It is not a new backend lifecycle,
@@ -39,8 +39,7 @@ EnvStepContext(view, values, t, step_index, time_s, cmd, reset_state)
 ```
 
 `EnvStepContext` is core's read-only step boundary data object, not a second
-`EvalContext`.  It owns no events, terminals, watcher state or benchmark/pack
-vocabulary.
+`EvalContext`.  It owns no events, terminals, watcher state or pack vocabulary.
 
 - `view` is the runner-owned `EnvView`, borrowed by the context.  Constructing
   the context never closes it; the runner closes it after `on_episode_end`.
@@ -80,17 +79,6 @@ vocabulary.
 - If the run/env closes while a view is open, record/obs remain boundary data;
   query access raises the query layer's stale error.  The view owner still
   closes the view.
-
-### 2.1 Per-tick benchmark contexts
-
-A `trigger: both` benchmark task receives one VECTOR-scoped context per policy
-tick (`env_id is None`, `t` = the policy tick), derived by `EvaluationSession`
-from the runner-owned boundary view (`bundle["view"].with_record(normalized
-record)`) and closed inside its own callback.  It is a child of the runner's
-boundary view (`bundle["view"]`, closed after `on_episode_end`), never the
-parent itself; the parent is not closed by the session.  It is separate from
-the per-env episode-end context derived by `EpisodeEvaluator`.  A task cannot
-reach a raw env through it.
 
 ## 3. Scope
 
@@ -206,15 +194,6 @@ The boundaries are:
   `build_terminations` inspects each instantiated term and rejects any `check`
   that is not exactly `check(self, ctx)`, so a legacy `check(self, state)` term
   fails at build;
-- benchmark: per-env view inside `EvaluationSession.on_episode_end`, before reset,
-  derived by `EpisodeEvaluator` (`unigym.runner.evaluation.scoring`) as
-  `bundle["view"].for_env(ep.env_id)`.
-  `Task.score(ep, ctx)` and `Task.score_detail(ep, ctx, *, retain_frames=False)`
-  receive one context scoped to `ep.env_id`; the evaluator closes that child in
-  `finally` after all tasks for that env and never closes the vector parent.  A
-  task exception is isolated and skipped; an old task signature is rejected by
-  `build_tasks` at build time.  A bundle without `bundle["view"]` fails fast
-  instead of scoring blind;
 - watcher: `WatcherEngine.on_tick` consumes exactly the runner's
   vector-scoped `bundle["step"]` view (`env_id is None`); the engine builds no
   second view and never closes the runner view.  `WatchContext.record`/`obs`/
@@ -240,12 +219,11 @@ Condition.evaluate(ctx: EvalContext) -> (ctx.env.scope_size,) bool
   structural `Condition` protocol and `ConditionError` from
   `unigym.conditions.base`.  Concrete modules
   (`unigym.conditions.height`, `.tilt`, `.joint_limit`) may import torch.
-- Domain packages (`unigym.terminations`, `unigym.benchmarks`) must import
-  concrete conditions locally at use time, never at their package import time.
+- Domain packages (`unigym.terminations`) must import concrete conditions
+  locally at use time, never at their package import time.
 - A condition is live, read-only, effect-free and stateless.  It accepts only an
   `EvalContext`; it never receives a raw env, backend handle or mutable state,
-  and it never produces a termination fact, `WatchResult`, `TickResult` or
-  report field.
+  and it never produces a termination fact, `WatchResult` or report field.
 - `HeightCondition` reads an articulation `base_pos_w` leaf or an explicit
   record key and supports the termination threshold form and the watcher
   threshold/op or band forms.
@@ -259,14 +237,12 @@ Condition.evaluate(ctx: EvalContext) -> (ctx.env.scope_size,) bool
   `WatchError`/fail-safe contract.
 - Domain ownership is unchanged: terminations own fail-fast masks and episode
   facts; watchers own `WatchResult`, messages/data, actions and the trigger
-  layer; benchmark tasks own `TickResult`/`TickTrace`.  A task may
-  compose a condition inside `on_tick(ctx)`; there is no core `Task.condition`
-  API.
+  layer.
 
 ## 10. Non-goals
 
 - No deterministic replay or offline re-scoring guarantee.
-- No removal of `EpisodeData`, reports or history.
+- No removal of step-boundary facts or recorded history.
 - No writable/scratch/native evaluation surface.
 - No cross-env read from a per-env view.
 - No recorded/offline termination state or reconstruction from stored episode
@@ -278,5 +254,5 @@ The episode filter subsystem is removed in this release.  There is no offline
 filter chain, no generic recorded-termination filter and no compatibility shim;
 a run config that declares an episode-filter section is rejected fail-fast at
 spec construction with a migration hint.  Reintroducing filters later is a new,
-data-only feature over `EpisodeData`, never a revival of the recorded
+data-only feature over recorded episode data, never a revival of the recorded
 termination state path this contract deletes.

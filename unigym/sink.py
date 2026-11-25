@@ -2,7 +2,7 @@
 
 ``SyncRunner`` drives the four required callbacks in a fixed order; a sink
 consumes that callback stream and owns everything consumer-side (recording,
-benchmark state, scoring, reporting).  A sink never owns a second physics loop
+scoring, reporting).  A sink never owns a second physics loop
 or mutates the backend.
 
 The optional capability protocols (:class:`RewindAwareSink`,

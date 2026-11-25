@@ -319,11 +319,10 @@ def test_manifest_rejects_non_canonical_implementation_backend(tmp_path: Path) -
             load_manifest_v1(root)
 
 
-def test_rollback_restores_law_initializer_and_task_provider_origins(
+def test_rollback_restores_law_and_initializer_origins(
     tmp_path: Path,
 ) -> None:
     from unigym.actuator_law import actuator_law_origin
-    from unigym.benchmarks.task_providers import PROVIDERS, task_provider_origin
     from unigym.initializers.base import INITIALIZER_REGISTRY, initializer_origin
     from unigym.packs import PackError
 
@@ -347,15 +346,10 @@ def test_rollback_restores_law_initializer_and_task_provider_origins(
     (package / "__init__.py").write_text(
         "from unigym.pack_api import ActuatorLawDescriptor, register_actuator_law\n"
         "from unigym.initializers.base import InitializerBase, register as register_init\n"
-        "from unigym.benchmarks.task_providers import register as register_task\n\n"
         "class RollbackInit(InitializerBase):\n"
         "    name = 'rollback.init'\n\n"
         "def register(context):\n"
         "    register_init(RollbackInit)\n\n"
-        "    @register_task('rollback_task')\n"
-        "    def provider(slots, tables):\n"
-        "        '''Rollback fixture provider.'''\n"
-        "        return {}\n\n"
         "    register_actuator_law(ActuatorLawDescriptor(name='rollback.law'))\n"
         "    raise RuntimeError('boom')\n",
         encoding="utf-8",
@@ -367,10 +361,8 @@ def test_rollback_restores_law_initializer_and_task_provider_origins(
 
     assert "rollback.law" not in ACTUATOR_LAW_REGISTRY
     assert "rollback.init" not in INITIALIZER_REGISTRY
-    assert "rollback_task" not in PROVIDERS
     assert actuator_law_origin("rollback.law").kind == "unknown"
     assert initializer_origin("rollback.init").kind == "unknown"
-    assert task_provider_origin("rollback_task").kind == "unknown"
 
 
 def test_materialization_rejects_non_canonical_backend_without_schema() -> None:

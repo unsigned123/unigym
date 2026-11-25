@@ -1,8 +1,8 @@
 """Core-neutral episode termination facts.
 
 ``Termination`` is a CORE fact object.  It deliberately knows nothing about
-``Task`` or Gymnasium's ``terminated`` / ``truncated`` vocabulary -- the RL
-task layer maps outcomes onto that layer later.  Core owns:
+Gymnasium's ``terminated`` / ``truncated`` vocabulary -- the RL task layer maps
+outcomes onto that layer later.  Core owns:
 
 * the outcome/source vocabulary (``EpisodeOutcome`` / ``TerminationSource``);
 * namespaced, stable ``code`` strings (``env.force_limit``,

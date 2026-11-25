@@ -144,5 +144,4 @@ conditions in `unigym.conditions` while the watcher template keeps ownership of
 - template/expression value authoring;
 - per-env vectorized edge/cooldown state;
 - core phase/event/TaskRuntime types;
-- benchmark online triggers;
 - value-writing actions or any command write.

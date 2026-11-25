@@ -399,7 +399,7 @@ def is_complete(log: Path, out_dir: Path) -> bool:
     art = (
         out_dir.exists()
         and (out_dir / "meta.json").exists()
-        and ((out_dir / "summary.json").exists() or (out_dir / "benchmark_report.json").exists())
+        and (out_dir / "summary.json").exists()
     )
     return marker and art
 

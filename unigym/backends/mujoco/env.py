@@ -1,8 +1,8 @@
-"""MuJoCo backend (flat-ground benchmark; cameras; ``num_envs >= 1``).
+"""MuJoCo backend (flat-ground; cameras; ``num_envs >= 1``).
 
 Implements the EnvBackend contract (``env/backends/base.py``) on one shared
 MuJoCo ``MjModel`` and one independent ``MjData`` per env, for flat-ground
-benchmark runs on the host ``.venv_sim`` (no isaaclab, no kit).
+runs on the host ``.venv_sim`` (no isaaclab, no kit).
 ``num_envs >= 1`` is supported natively (per-env ``reset_envs`` and
 snapshot/restore); only the model-global features (camera rigs, director,
 anchored articulation props) are N=1-scoped.  Depth-encoder obs, DR events
@@ -729,7 +729,7 @@ class MujocoEnv:
         # right after apply() (shared stream -- determinism red line).
         # See unigym/backends/shared/mjfamily/props/reset_face.py.
         self._initializer = wire_reset_face(self, params, robot_profile)
-        # structured per-env reset outcomes (benchmark contract): the last
+        # structured per-env reset outcomes (episode facts): the last
         # ``initializer.apply_outcome()`` legality/sample record per env.
         self._last_reset_outcomes: dict[int, object] = {}
 
@@ -1150,7 +1150,7 @@ class MujocoEnv:
         record: dict[str, object] = dict(self.obs.record())
         record["time_in_episode"] = self._time_in_episode.clone()
         record["episode_id"] = self._episode_id.clone()
-        # benchmark contract contact force/active-body facts (read once per step
+        # episode facts: contact force/active-body facts (read once per step
         # by the manager; published here as record columns).
         record.update(getattr(self, "_last_contact_facts", None) or {})
         return record
@@ -1281,7 +1281,7 @@ class MujocoEnv:
 
     @property
     def last_reset_outcomes(self) -> dict[int, object]:
-        """Latest structured ``ResetOutcome`` per env (benchmark contract).
+        """Latest structured ``ResetOutcome`` per env (episode facts).
 
         Public read face for the runner; an env that was never reset through
         an initializer has no entry.

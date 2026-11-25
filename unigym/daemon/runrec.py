@@ -2,7 +2,7 @@
 
 output_dir IS the ledger: every run
 records itself in its own output dir -- the daemon writes the spec
-segment at spawn, completes exit+results at reap.  No central registry,
+segment at spawn, completes exit at reap.  No central registry,
 no unlink decisions: retention = the user's everyday data_out hygiene,
 the filesystem is the database.
 
@@ -12,10 +12,8 @@ Schema ``run.v1`` (contract daemon_api_contract.md §1.21)::
      "run_name": str, "label": str|absent,         # worker-written display tag
      "output_dir": str, "config": str, "backend": str,
      "overrides": {...}, "paused": bool, "started_ts": float, "pid": int,
-     "task_face": {...}|null,                       # backfilled at reap
      "exit": {"code": int|null, "reason": str, "wall_time_s": float,
-              "finished_ts": float}|absent,         # absent = not reaped
-     "results": {task: {"success_rate": x, "n_episodes": n}}|absent}
+              "finished_ts": float}|absent}         # absent = not reaped
 
 Lifecycle of the FILE (the adoption protocol, dogfood-proven):
 
@@ -96,7 +94,6 @@ def write_spec(
     paused: bool,
     started_ts: float,
     pid: int,
-    task_face: dict | None,
     run_id: str | None = None,
     direct: bool = False,
     adapter_params: dict | None = None,
@@ -122,7 +119,6 @@ def write_spec(
         "direct": bool(direct),
         "started_ts": float(started_ts),
         "pid": int(pid),
-        "task_face": task_face,
     }
     if adapter_params:
         doc["adapter_params"] = dict(adapter_params)
@@ -238,11 +234,9 @@ def mark_exit(
     signal_num: int | None = None,
     wall_time_s: float | None,
     finished_ts: float | None = None,
-    results: dict | None = None,
-    task_face: dict | None = None,
     log_tail: list[str] | None = None,
 ) -> dict | None:
-    """Reap-side completion: exit + results (+task_face backfill).
+    """Reap-side completion: the exit segment.
 
     ``code`` is the process exit status; a signal death carries
     code=null + a ``reason`` (the ledger stays honest about WHO ended
@@ -268,10 +262,6 @@ def mark_exit(
         }
         if log_tail:
             d["exit"]["log_tail"] = log_tail
-        if results is not None:
-            d["results"] = results
-        if task_face is not None:
-            d["task_face"] = task_face
 
     return _mutate(record_path(output_dir, pid), fn)
 
@@ -287,26 +277,6 @@ def set_output_dir(output_dir: str | Path, pid: int, actual: str | Path) -> dict
         d["output_dir"] = str(actual)
 
     return _mutate(record_path(output_dir, pid), fn)
-
-
-def results_from_report(output_dir: str | Path) -> dict:
-    """Lightweight results summary off benchmark_report.json.
-
-    Per task: ``{"success_rate": x, "n_episodes": n}`` -- the heavy
-    document stays in place, the ledger carries only the verdicts.
-    Missing/corrupt report (collect-only run, torn read) -> {} (§1
-    tolerance: results are a bonus, never a run's identity).
-    """
-    try:
-        rep = json.loads((Path(output_dir) / "benchmark_report.json").read_text())
-        tasks = rep.get("tasks") or {}
-        return {
-            name: {"success_rate": t.get("success_rate"), "n_episodes": t.get("n_episodes")}
-            for name, t in tasks.items()
-            if isinstance(t, dict)
-        }
-    except (OSError, ValueError, AttributeError):
-        return {}
 
 
 # --------------------------------------------------------------------------- #
@@ -453,9 +423,7 @@ def row_of(rec: dict) -> dict:
         "paused": bool(rec.get("paused")),
         "started_ts": float(rec.get("started_ts") or 0.0),
         "pid": rec.get("pid"),
-        "task_face": rec.get("task_face"),
         "exit": exit_seg if isinstance(exit_seg, dict) else None,
-        "results": rec.get("results") if isinstance(rec.get("results"), dict) else None,
         "state": state,
         "stale": stale,
     }

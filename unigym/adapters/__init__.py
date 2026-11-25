@@ -211,7 +211,7 @@ _SCALARS = (bool, int, float, str)
 _SPAWN_EXAMPLE = {"name": "manual", "control_dt": 0.02}
 _SPAWN_HINT = (
     "spawn params overlay ONLY the yaml 'adapter:' section "
-    "(never env/benchmark/cameras); values are scalars or "
+    "(never env/cameras); values are scalars or "
     "scalar lists"
 )
 
@@ -298,7 +298,7 @@ def apply_spawn_params(
 
     Priority chain: defaults < config yaml < spawn adapter_params (the
     most specific, per-spawn layer).  SCOPE LOCK: the overlay merges into
-    the adapter SECTION ONLY -- env/benchmark/cameras/fuse-schedule are
+    the adapter SECTION ONLY -- env/cameras/fuse-schedule are
     architecturally unreachable from here (the caller hands in one
     section, not the config tree).
 

@@ -105,19 +105,9 @@ ignore_imports = [
     "unigym.core.paths -> unigym._typing",
     # Same root-level JSON alias; the termination facts own no pack dependency.
     "unigym.core.episode_termination -> unigym._typing",
-    # Same root-level JSON alias; the run identity facts own no benchmark/run
-    # dependency.
+    # Same root-level JSON alias; the run identity facts own no run dependency.
     "unigym.core.identity -> unigym._typing",
 ]
-
-[[tool.importlinter.contracts]]
-name = "runner sync has no direct benchmark imports"
-type = "forbidden"
-# Direct-edge neutrality only: other core/CLI infrastructure may be reached
-# transitively, but SyncRunner itself must not name benchmark modules.
-allow_indirect_imports = true
-source_modules = ["unigym.runner.sync"]
-forbidden_modules = ["unigym.benchmarks", "unigym.benchmarks.**"]
 
 [[tool.importlinter.contracts]]
 name = "backends never expand placeholders or canonicalize asset paths"
@@ -125,12 +115,6 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["unigym.backends"]
 forbidden_modules = ["unigym.core.paths", "unigym.assets.refs"]
-
-[[tool.importlinter.contracts]]
-name = "task providers import nothing above themselves (pure spec-builders)"
-type = "forbidden"
-source_modules = ["unigym.benchmarks.task_providers"]
-forbidden_modules = ["unigym.*"]
 
 [[tool.importlinter.contracts]]
 name = "props neutral zone never imports backends (design §12.2)"
@@ -346,6 +330,7 @@ markers = [
     "domain_model: model domain tests",
     "domain_scene: scene domain tests",
     "domain_runtime: runtime domain tests",
+    "domain_analysis: analysis series operation tests",
     "domain_run: run domain tests",
     "domain_watchers: watcher domain tests",
     "domain_runner: runner domain tests",
@@ -358,7 +343,6 @@ markers = [
     "domain_backends: framework-level backend registry tests",
     "domain_sim: simulation facade declaration tests",
     "domain_initializers: reset initializer and primitive tests",
-    "domain_benchmarks: benchmark episode scoring and report contract tests",
     "domain_query: runtime-query contract and facade tests",
     "domain_evaluation: read-only live evaluation-context tests",
     "backend_agnostic: tests that do not target one specific backend",
@@ -406,11 +390,6 @@ convention = "google"
 "unigym/adapters/params.py" = ["D205", "D209", "D415"]
 "unigym/analysis/behavior.py" = ["D101", "D403"]
 "unigym/analysis/charts.py" = ["D403"]
-"unigym/analysis/gate.py" = ["D101", "D205", "D209", "D415"]
-"unigym/benchmarks/formula.py" = ["D102", "D205", "D209", "D415"]
-"unigym/benchmarks/packs.py" = ["D102", "D205", "D209", "D415"]
-"unigym/benchmarks/tasks.py" = ["D102"]
-"unigym/benchmarks/terms.py" = ["D205", "D209", "D415"]
 "unigym/cameras/appearance.py" = ["D205", "D209", "D415", "D417"]
 "unigym/cameras/base.py" = ["D102", "D205", "D415"]
 "unigym/cameras/decor/__init__.py" = ["D102", "D103", "D205", "D209", "D415"]
@@ -461,7 +440,6 @@ convention = "google"
 "unigym/runner/sinks/collect.py" = ["D102"]
 "unigym/runner/sinks/fanout.py" = ["D102"]
 "unigym/scripts/analyze_cli.py" = ["D103", "D205", "D209", "D415"]
-"unigym/scripts/benchmarks_cli.py" = ["D103"]
 "unigym/scripts/client.py" = ["D103", "D205", "D209", "D415"]
 "unigym/scripts/collect_cli.py" = ["D103", "D205", "D209", "D415"]
 "unigym/scripts/doctor_cli.py" = ["D103", "D205", "D209", "D403", "D415"]

@@ -9,19 +9,13 @@ This script is a thin CLI: yaml parsing + builder wiring (robot profile /
 adapter / env backend / sampler / terminations / recorder /
 language / writer / logger / sink / runner).  The rollout control flow lives
 in ``unigym.runner.sync.SyncRunner``; everything consumer-side
-lives in sinks -- ``runner.sinks.collect.CollectSink`` (recording,
-video, logging) and ``runner.evaluation.session.EvaluationSession``
-(episode scoring, docs/contracts/benchmark_contract.md) -- see docs/contracts/runner_contract.md.
+lives in the selected sinks -- the built-in
+``runner.sinks.collect.CollectSink`` (recording, video, logging) and any
+custom sink declared by the run config; see docs/contracts/runner_contract.md.
 
-The yaml ``mode`` key selects the consumer wiring (default ``"collect"``):
-
-* ``collect``   -- CollectSink only (the original behavior, bit-exact).
-* ``benchmark`` -- EvaluationSession only: tasks score completed episodes,
-  ``benchmark_report.json`` lands in the output dir, the loop stops early
-  once ``benchmark.min_episodes`` episodes completed (and never exceeds
-  ``benchmark.max_steps``).
-* ``both``      -- CollectSink + EvaluationSession behind a FanOutSink; the
-  collect side stays bit-exact while episodes are scored in parallel.
+Sink selection is explicit: the yaml ``sink:`` / ``sinks:`` section (or the
+``Run`` API) decides the consumer wiring; an absent selection keeps the one
+built-in collect sink.
 
 Rollout order per policy step (engine):
     act -> postprocess -> env.step -> sampler.update -> compute_obs ->
@@ -265,9 +259,9 @@ parser.add_argument(
     action="store_true",
     help="mount the director (direct.* command family): "
     "teleport/setvel/contact-override/attach/virtual "
-    "gripper.  Benchmark-integrity guard: runs started "
-    "WITHOUT --direct reject director commands and "
-    "directed episodes are marked in the report",
+    "gripper.  Integrity guard: runs started WITHOUT "
+    "--direct reject director commands and "
+    "directed episodes are labelled in the run facts",
 )
 # watchers (docs/contracts/watchers_contract.md): born-armed
 # predicate pack -- every run also streams events.jsonl regardless.
@@ -450,7 +444,7 @@ def main():
         cfg = yaml.safe_load(f)
     # Code packs activate through the explicit runtime at this composition
     # boundary; build_spec receives the same runtime (no module global).  A
-    # daemon-spawned worker is a fresh process, so scenes, benchmarks and asset
+    # daemon-spawned worker is a fresh process, so scenes and asset
     # resources must be discovered here before spec construction.
     from unigym.pack_api import discover
 

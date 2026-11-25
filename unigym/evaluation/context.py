@@ -1,8 +1,8 @@
 """The read-only, boundary-scoped evaluation context.
 
 A live run owns one :class:`EnvView` per evaluation boundary; the lifetime is
-owner-defined.  Termination and benchmark scoring create a view per callback
-and close it after the callback.  The watcher engine retains the current
+owner-defined.  Termination creates a view per callback and closes it after
+the callback.  The watcher engine retains the current
 vector-scoped view until the next tick replaces it, so add/test/dump and
 callable ``on_reset`` can read the live boundary between callbacks.  Closing a
 view never closes the environment or the run-shared query; it only invalidates
@@ -90,7 +90,7 @@ class EnvView:
     """Read-only, boundary-scoped view of one live environment.
 
     ``env_id is None`` selects the whole vector environment (termination and
-    watcher scope).  ``env_id is int`` selects exactly one env (benchmark
+    watcher scope).  ``env_id is int`` selects exactly one env (per-env
     episode scope); scoped reads keep a leading axis of one so tensor code
     stays ``(N, ...)``.  A per-env view rejects every query selection outside
     that env.

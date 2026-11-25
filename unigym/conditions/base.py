@@ -2,8 +2,7 @@
 
 A condition is a live, read-only, vector-scoped boolean predicate over an
 :class:`~unigym.evaluation.EvalContext`.  It owns no result, effect, message or
-per-env state; domain adapters own termination facts, watcher results and task
-tick traces.
+per-env state; domain adapters own termination facts and watcher results.
 """
 
 from __future__ import annotations
