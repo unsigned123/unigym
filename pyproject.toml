@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unigym"
-version = "0.108.0"
+version = "0.109.0"
 description = "Multi-backend robot simulation and evaluation framework"
 readme = "README.md"
 license = {text = "MIT"}

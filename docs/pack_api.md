@@ -122,7 +122,7 @@ trust: code
 entrypoint: acme_unigym:register
 
 requires:
-  unigym: ">=0.107,<0.108"
+  unigym: ">=0.109,<0.110"
 
 provides:
   scene_presets:

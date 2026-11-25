@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.108.0
+## 0.109.0
 
-Breaking release: core no longer ships a built-in benchmark or evaluation loop.
-The external `unigym-bench` package is the replacement.
+Additive release: the run-scoped `ValueStore` gains a synchronous
+value-change subscription face.  There is no other semantic change and no
+benchmark or evaluation behavior is restored.
 
 - Added the additive run-scoped `ValueStore.subscribe(callback, *, names=None)`
   surface: synchronous value-change callbacks after a successful publish or a
@@ -12,6 +13,18 @@ The external `unigym-bench` package is the replacement.
   publication boundary with one-tick latency; polling `ValueView` reads remain
   two-tick.  `StepValues` and `ValuePublisher` stay non-subscribable; there is
   no event bus, asynchronous delivery or history.
+- Subscription filters are exact declared names (`names=None` means every
+  name): there is no wildcard/pattern grammar, no event history and no rewind
+  notification.  A callback must not mutate the store; a re-entrant publish,
+  clear or rewind from a callback is a contract error.
+- `ValueStore.subscribe` is the only new public surface.  Subsystem schemas and
+  the 0.108 benchmark-removal contract are unchanged.
+
+## 0.108.0
+
+Breaking release: core no longer ships a built-in benchmark or evaluation loop.
+The external `unigym-bench` package is the replacement.
+
 - Removed the `unigym.benchmarks` package, the `unigym.runner.evaluation`
   package (`EvaluationSession`, `EpisodeBuffer`, `EpisodeEvaluator`), the
   benchmark task providers and their catalog, the built-in benchmark reporter,
