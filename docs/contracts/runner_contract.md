@@ -33,9 +33,10 @@ final_step    EnvStepContext for a due episode-end tick: same view plus the
               only on a due tick, never on rewind, None at on_step_end
 ```
 
-A custom-sink benchmark/both run replaces the built-in `EvaluationSession`, so
-it carries no `episode_results`; a sink terminal request ends envs but is not a
-benchmark `EpisodeResultView` (see `command_sampler_contract.md`).
+Core composes no built-in `EvaluationSession`, so a run carries no
+`episode_results` unless a custom sink writes them; a sink terminal request
+ends envs but is not a benchmark `EpisodeResultView` (see
+`command_sampler_contract.md`).
 
 The bundle carries no live env.  Internal runtime hooks that need the engine
 receive it at construction: `WatcherEngine.on_tick` reads exactly
@@ -189,9 +190,8 @@ sink:
 A string factory is `module:callable`; a callable is API-only.  The factory is
 resolved before env construction and called exactly once as
 `factory(ctx: SinkContext) -> Sink`.  `SinkContext` carries construction
-metadata: `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
-`action_groups`, `run_identity`, `options` and the run's write-only `values`
-face.  It deliberately contains no live env, writer, logger or bridge; a sink
+metadata: `spec`, `out_dir`, `num_envs`, `policy_dt`, `seed`, `action_groups`,
+`run_identity`, `options` and the run's write-only `values` face.  It deliberately contains no live env, writer, logger or bridge; a sink
 receives runner-owned resources through the callback bundle, never at
 construction.  `values` is a `unigym.values.ValuePublisher` (never the read
 view); `None` means the build provided no publisher, so a sink that needs closed
@@ -234,25 +234,26 @@ This is the existing sampler placement, not a sink-seam bug.  Deterministic
 direct-read tests must assert this two-tick latency, not an aspirational
 one-tick loop.
 
-Mode composition is fixed:
+Sink selection is explicit and mode-free:
 
-| mode | no custom sink | custom sink |
-| --- | --- | --- |
-| `collect` | `CollectSink` | `FanOutSink(CollectSink, custom)` |
-| `benchmark` | `EvaluationSession` | `custom` |
-| `both` | `FanOutSink(CollectSink, EvaluationSession)` | `FanOutSink(CollectSink, custom)` |
+- an explicit `sinks:` list (or `Run(sinks=...)`) is the ordered composition:
+  each entry is the built-in `kind: collect` sink or a custom `factory:` sink;
+- an absent selection keeps the historical default: one built-in
+  `CollectSink`;
+- the one-custom-sink `sink:` shorthand (or `Run(sink=...)`) selects that
+  custom sink as the sole sink.
 
-A custom sink replaces only the benchmark consumer; `CollectSink` recording
-stays first in `collect`/`both`.  Adapter `extra_sinks` stay prepended and the
-director/timeline/bridge tail remains appended.  `Director`, `Bridge`,
-`MetricsWriter` and adapter `extra_sinks` are internal privileged runtime hooks,
-not part of the public Sink surface or custom-Sink examples.
+A custom sink therefore never silently gains or loses a `CollectSink`; declare
+both entries in `sinks:` when both are wanted.  Adapter `extra_sinks` stay
+prepended and the director/timeline/bridge tail remains appended.  `Director`,
+`Bridge`, `MetricsWriter` and adapter `extra_sinks` are internal privileged
+runtime hooks, not part of the public Sink surface or custom-Sink examples.
 
-A custom-sink `benchmark`/`both` run rejects `benchmark.timeout_s` and
-`benchmark.timeout_steps` with a teaching `ConfigError` before env or task
-construction.  Core therefore has one physical deadline authority, the core
-episode clock in `StepResult.reset_env_ids`; the custom sink ends episodes
-through its terminal requests and holds no `EpisodeLimits`.
+The removed `mode:` and top-level `benchmark:` config keys fail with teaching
+`ConfigError`s: there is no compatibility alias and no built-in
+benchmark/evaluation sink is selected by core.  Core has one physical deadline
+authority, the core episode clock in `StepResult.reset_env_ids`; a custom sink
+that needs a time or step budget ends episodes through its terminal requests.
 
 `CollectSink` is built from a read-only facts snapshot (the resolved control
 rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it
@@ -264,12 +265,10 @@ controls of one articulation keep the historical last-write-wins row.  A
 zero-tick run has no view, so it still writes the build-time summary.
 
 `stop_when` is optional and read-only.  `FanOutSink.stop_when` ORs its
-children.  Exactly one of the two predicates can be present per run:
-`build_instance` uses the custom sink's predicate when a custom sink is
-configured, otherwise the built-in `EvaluationSession.episodes_done` path.  The
-built-in predicate exists only when the built-in benchmark path actually built
-tasks, so a task-less benchmark run does not stop at `min_episodes`.  The CLI
-passes `instance.stop_when` to `runner.run`; a sink never stops a run itself.
+children.  `build_instance` combines every selected sink's predicate (the
+built-in `CollectSink` contributes none), so a selected custom sink owns the
+early-stop decision.  The CLI passes `instance.stop_when` to `runner.run`; a
+sink never stops a run itself.
 
 ### Stateful sinks and rewind
 
@@ -305,7 +304,7 @@ live-only and never reads the env-level joint-limit compatibility views; joint
 limits are owned by `ArticulationRuntime.joint_pos_limits` in record/policy
 joint order.
 
-Benchmark evaluation is the second live boundary:
+The retained evaluation package is a second live boundary when an external sink/pack composes it:
 
 ```text
 on_episode_end (before env.reset_envs)
@@ -324,7 +323,7 @@ on_episode_end (before env.reset_envs)
 the task invocation and the final termination merge.  `EvaluationSession`
 (`unigym.runner.evaluation.session`) publishes `bundle["episode_results"]` and
 delegates run-level accumulation and report writing to the injected
-`EpisodeReporter` (`BenchmarkReporter` in benchmark runs).
+`EpisodeReporter` (for example `BenchmarkReporter` inside a composed evaluation session).
 
 A benchmark task may read `ctx.env.record()`, `ctx.env.obs()` and the scoped
 `ctx.env.query`; it cannot step, reset, write or read another env.  The bundle

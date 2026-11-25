@@ -466,8 +466,7 @@ Rules:
 - `build_spec(..., runtime=...)` builds an `AssetContext` and passes it to
   `expand_placeholders`; `Run`, `collect_cli` and `describe_cli` build
   `discover(entry_points=True)` at their composition boundary when the config
-  declares a scene, runs in `benchmark`/`both` mode, or carries any `pack:` /
-  asset-reference string;
+  declares a scene or carries any `pack:` / asset-reference string;
 - `unigym.core.paths.expand_placeholders(obj, context=None)` keeps
   `${UNIGYM_REPO}` and `${UNIGYM_DEPS_ROOT}`; `${UNIGYM_ASSET_ROOT}` and
   `${UNIGYM_ASSET_PACK}` are teaching `PlaceholderError`s, and a `pack:`
@@ -1128,8 +1127,8 @@ The runtime is required at the boundary:
 runtime=...)` and `World.from_config(source, *, runtime=...)` follow the same
 boundary. `Run`, `collect_cli` and `describe_cli` build
 `discover(entry_points=True)` at their composition boundary when the config
-declares a catalog `scene_preset`, an unregistered inline provider, mode
-`benchmark`/`both`, or a `pack:`/asset reference string; there is no
+declares a catalog `scene_preset`, an unregistered inline provider, or a
+`pack:`/asset reference string; there is no
 module-level default runtime or cache.
 
 #### Initializer reset probes
@@ -1273,23 +1272,24 @@ the rewind contract are documented in `contracts/command_sampler_contract.md`.
 
 ### Custom sink authoring
 
-A run config may replace the built-in benchmark consumer with one custom sink:
+A run config selects its sinks explicitly.  One custom sink may use the
+`sink:` shorthand; an ordered `sinks:` list can mix the built-in collect sink
+with custom factories:
 
 ```yaml
 run_name: acme_pick
-mode: benchmark
-sink:
-  factory: "acme_pack.sinks:make_benchmark_sink"
-  options:
-    target_episodes: 10
-benchmark:
-  tasks: [acme/pick]
-  min_episodes: 10
-  max_steps: 20000
+sinks:
+  - kind: collect
+  - name: bench
+    factory: "acme_pack.sinks:make_benchmark_sink"
+    options:
+      target_episodes: 10
 ```
 
-- `sink:` is top-level and mode-independent; `benchmark.sink:` is rejected with
-  a teaching `ConfigError`.
+- `sinks:` is the explicit ordered selection; `sink:` is the one-custom-sink
+  shorthand (the two keys are mutually exclusive).
+- the removed `mode:` and top-level `benchmark:` keys are rejected with
+  teaching `ConfigError`s; there is no compatibility alias.
 - `factory` is a `pkg.mod:callable` path in config (a callable is API-only); it
   is resolved once before env construction and called with exactly one
   `SinkContext`.
@@ -1302,8 +1302,8 @@ from unigym.sink import Sink
 def make_benchmark_sink(ctx: SinkContext) -> Sink: ...
 ```
 
-- `SinkContext` carries `spec`, `mode`, `out_dir`, `num_envs`, `policy_dt`,
-  `seed`, `action_groups`, `run_identity`, `options` and `values`.  It carries
+- `SinkContext` carries `spec`, `out_dir`, `num_envs`, `policy_dt`, `seed`,
+  `action_groups`, `run_identity`, `options` and `values`.  It carries
   no live env, writer, logger or bridge.  `values` is the run's write-only
   `unigym.values.ValuePublisher`; it is never a read view, and `None` means no
   publisher was provided, so a sink that needs closed loop must fail fast.
@@ -1351,22 +1351,23 @@ class AcmeSink:
   namespaced (`<monitor>/<value>`, `scenario/*`) because the transport has no
   registry and the last publish by one owner wins.  Watchers are debug-only and
   publish no values.
-- a custom sink replaces only the benchmark consumer:
-  `collect` -> `FanOutSink(CollectSink, custom)`, `benchmark` -> `custom`,
-  `both` -> `FanOutSink(CollectSink, custom)`.
+- sink composition is explicit: an absent selection keeps one `CollectSink`,
+  the `sink:` shorthand selects that custom sink as the sole sink, and
+  `sinks:` builds the declared ordered list (mixing collect and custom).
 - a custom benchmark sink owns task validation and reporting; core builds no
-  built-in tasks for it (see `contracts/benchmark_contract.md`).
+  built-in tasks and selects no built-in benchmark sink (see
+  `contracts/benchmark_contract.md`).
 - a stateful sink that must survive a checkpoint exposes a rewind provider
   (`name` + `rewind_state` / `apply_rewind_state`, or `rewind_provider`) with a
   namespaced name; see `contracts/runner_contract.md`.  Published values are
   already covered by the core `"values"` provider, so the sink must not expose
   the store again as a second provider.
-- core writes no benchmark report for a custom-sink `benchmark`/`both` run and
-  publishes no `bundle["episode_results"]`; the sink owns its scoring and report
-  artifacts.  A sink terminal is an episode-end fact, not an `EpisodeResultView`.
-- a custom-sink `benchmark`/`both` run rejects `benchmark.timeout_s` and
-  `benchmark.timeout_steps`; the sink terminals and the core episode clock are
-  the only episode-end path, so the build fails before env construction.
+- core writes no benchmark report and publishes no `bundle["episode_results"]`;
+  the sink owns its scoring and report artifacts.  A sink terminal is an
+  episode-end fact, not an `EpisodeResultView`.
+- the removed `mode:` / `benchmark:` keys (including the old timeout fields)
+  are rejected at config parse; the sink terminals and the core episode clock
+  are the only episode-end path.
 
 ### Benchmark resources
 
@@ -1399,17 +1400,16 @@ Duplicate pack names still fail in `PackIndex`.
 `unigym.benchmarks.base.build_tasks(sections, meta, runtime)` requires the
 runtime; `<pack>/<task>` resolution, unique-bare names and `<pack>/*` wildcard
 expansion are unchanged. `RunSpec.pack_runtime` carries the runtime to
-`build_instance` and is never serialized into the config or ledger.  A
-benchmark/both run that builds the built-in tasks without a runtime fails at
-build.  `Run` builds `discover(entry_points=True)` when the config declares a
-`scene_preset`, a `pack:`/asset reference or another runtime need; the
-`benchmark`/`both` mode alone also needs one only when no custom `sink:` is
-declared, because a custom sink owns the tasks and core builds none for it.
-`collect_cli` and `describe_cli` discover unconditionally by design.
+`build_instance` and is never serialized into the config or ledger.  `Run`
+builds `discover(entry_points=True)` when the config declares a `scene_preset`,
+a `pack:`/asset reference or another runtime need; sink selection never creates
+a runtime need.  `collect_cli` and `describe_cli` discover unconditionally by
+design.
 
-`benchmark.packs` in a run config is rejected with a teaching `ConfigError`:
-packs are declared on the runtime `benchmarks` face. `benchmark.tasks`
-resolution and wildcards are unchanged.
+A top-level `benchmark:` section in a run config (including the old
+`benchmark.packs`) is rejected with a teaching `ConfigError`; packs are
+declared on the runtime `benchmarks` face.  `benchmark.tasks` resolution and
+wildcards remain the retained module contract.
 
 Analysis follows the same runtime: `analysis.gate.resolve_task_specs(config,
 runtime)` requires it, `gate_doc` builds the configured runtime at its analysis

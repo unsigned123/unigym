@@ -53,7 +53,6 @@ def _clock_cfg(mjcf: Path, control_dt: float | None) -> dict:
     return {
         "run_name": "clock",
         "seed": 0,
-        "mode": "collect",
         "env": {
             "backend": "mujoco",
             "num_envs": 1,

@@ -59,7 +59,7 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
     assert cfg["run_name"] == "simulation"
     assert cfg["output_root"] == "data_out"
     assert cfg["seed"] == 0
-    assert cfg["mode"] == "collect"
+    assert "mode" not in cfg
     assert cfg["adapter"] == {"name": "manual"}
     assert cfg["command"] == {"name": "fixed", "dim": 0, "values": []}
     assert cfg["collect"] == {"steps": 1000, "shard_steps": 1000}

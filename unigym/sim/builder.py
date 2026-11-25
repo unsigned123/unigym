@@ -485,7 +485,6 @@ class SimulationBuilder:
             "run_name": self._name,
             "output_root": "data_out",
             "seed": self._seed,
-            "mode": "collect",
             "adapter": {"name": "manual"},
             "env": {
                 "backend": self._backend,

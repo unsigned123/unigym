@@ -189,7 +189,6 @@ def test_collect_custom_sink_api_runs_the_full_lifecycle(tmp_path: Path) -> None
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
-        mode="collect",
         steps=STEPS,
         episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
@@ -221,7 +220,6 @@ def test_collect_custom_sink_config_factory_runs_the_full_lifecycle(
     config = {
         "run_name": "external_sink_config",
         "seed": 0,
-        "mode": "collect",
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
@@ -282,7 +280,6 @@ def test_custom_sink_terminal_ends_env_and_resets(tmp_path: Path) -> None:
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
-        mode="benchmark",
         steps=STEPS,
         episode_length_s=10.0,
         inspect=True,
@@ -290,8 +287,6 @@ def test_custom_sink_terminal_ends_env_and_resets(tmp_path: Path) -> None:
             factory=make_terminal_request_sink,
             options={"terminal_after_steps": 1, "env_id": 0},
         ),
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS},
-        pack_runtime=None,
         discover_runtime=False,
     )
     try:
@@ -328,7 +323,6 @@ def test_external_runner_manual_terminate_and_reset(tmp_path: Path) -> None:
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
-        mode="collect",
         steps=STEPS,
         episode_length_s=10.0,
         inspect=True,
@@ -362,8 +356,8 @@ def test_external_runner_manual_terminate_and_reset(tmp_path: Path) -> None:
         run.close()
 
 
-def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> None:
-    """A custom benchmark sink owns tasks, so the mode needs no pack runtime."""
+def test_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> None:
+    """A custom sink owns its control flow and needs no pack runtime."""
     run = Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=_profile(),
@@ -371,12 +365,10 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         observations={"robot": ["tiny"]},
         action_spec=ACTION_SPEC,
         policies=POLICIES,
-        mode="benchmark",
         steps=STEPS,
         episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
         sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": STEPS},
         pack_runtime=None,
         discover_runtime=False,
     )
@@ -384,7 +376,6 @@ def test_benchmark_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> 
         instance = run.build(inspect=True)
         assert instance.spec.pack_runtime is None
         assert instance.env.run_identity is not None
-        assert getattr(instance.env, "timeout_steps", None) is None
         sink = _external_sink(instance)
 
         runner = run.runner("external", action_fn=_zero_actions)

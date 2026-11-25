@@ -246,7 +246,7 @@ def test_unconfigured_benchmark_directory_is_not_discovered(tmp_path: Path) -> N
 
 
 def test_build_spec_rejects_benchmark_packs(tmp_path: Path) -> None:
-    """``benchmark.packs`` is a teaching error, not a second discovery source."""
+    """The whole ``benchmark:`` section is a teaching error, not a second source."""
     cfg = {
         "run_name": "r",
         "env": {"backend": "isaaclab2", "num_envs": 1},
@@ -258,5 +258,5 @@ def test_build_spec_rejects_benchmark_packs(tmp_path: Path) -> None:
         build_spec(cfg, Namespace(config="run.yaml"))
 
     message = str(info.value)
-    assert "benchmark.packs" in message
-    assert "benchmarks" in message
+    assert "top-level `benchmark:` was removed" in message
+    assert "no compatibility alias" in message

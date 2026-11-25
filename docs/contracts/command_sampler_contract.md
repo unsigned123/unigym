@@ -54,9 +54,9 @@ class CommandSampler(ABC):
 
 ## Episode results versus sink terminals
 
-Core itself publishes no episode results on a custom-sink benchmark/both run:
-the built-in `EvaluationSession` is replaced, so the runner-provided mapping is
-`{}` unless the custom sink writes `bundle["episode_results"]`.  A sink terminal
+Core itself publishes no episode results: it selects no built-in
+`EvaluationSession`, so the runner-provided mapping is `{}` unless a custom sink
+writes `bundle["episode_results"]`.  A sink terminal
 from `TerminalSink.drain_terminations()` is an episode-end fact, not an
 `EpisodeResultView`.  A pack that needs sink-driven feedback must carry it in
 its own shared pack state or explicitly publish the documented result mapping.

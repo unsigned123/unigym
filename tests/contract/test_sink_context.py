@@ -40,7 +40,6 @@ def _context() -> SinkContext:
     spec = build_spec(_cfg(), Namespace(config="run.yaml"))
     return SinkContext(
         spec=spec,
-        mode=spec.mode,
         out_dir="data_out/r",
         num_envs=1,
         policy_dt=0.02,
@@ -55,7 +54,6 @@ def test_sink_context_field_order_keeps_values_last() -> None:
     """The published boundary is the exact field sequence with values last."""
     assert [field.name for field in fields(SinkContext)] == [
         "spec",
-        "mode",
         "out_dir",
         "num_envs",
         "policy_dt",

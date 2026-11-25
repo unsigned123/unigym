@@ -598,7 +598,6 @@ def _minimal_cfg(
         "run_name": run_name,
         "output_root": "data_out",
         "seed": int(seed),
-        "mode": "collect",
         "adapter": copy.deepcopy(adapter),
         "articulations": _json_list(copy.deepcopy(articulations)),
         "action_spec": _action_spec_payload(copy.deepcopy(action_spec)),
@@ -822,13 +821,6 @@ class Run:
             raise ConfigError(
                 "Run(...) accepts either sink= (one custom sink shorthand) or "
                 "sinks= (an explicit list), not both"
-            )
-        if sinks is not None and ("mode" in overrides or (isinstance(cfg, dict) and "mode" in cfg)):
-            from unigym.errors import ConfigError
-
-            raise ConfigError(
-                "Run(...) cannot combine mode with sinks=; declare the sink "
-                "selection with sinks= only (mode is the legacy selector)"
             )
         self._sink_spec = _coerce_sink_spec(sink)
         self._sink_specs = _coerce_sink_specs(sinks)
@@ -1261,8 +1253,7 @@ class Run:
         runtime: PackRuntime | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
-        declared_sink = self._sink_spec is not None or self._sink_specs is not None
-        needs_runtime = requires_pack_runtime(cfg, custom_sink=declared_sink)
+        needs_runtime = requires_pack_runtime(cfg)
 
         if runtime is None and needs_runtime:
             if not self._discover_runtime:

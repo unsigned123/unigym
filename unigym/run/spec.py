@@ -109,7 +109,6 @@ class RunSpec:
     config_path: str
     run_name: str
     seed: int
-    mode: str
     backend: str
     backend_params: dict[str, JsonValue]
     #: backend-private options selected from ``env.backend_options.<backend>``
@@ -139,7 +138,6 @@ class RunSpec:
     director: dict[str, JsonValue] | None
     recorder: dict[str, JsonValue]
     bridges: dict[str, JsonValue]
-    benchmark: dict[str, JsonValue]
     terminations: JsonValue
     #: termination ownership mode: ``core`` (default; the ``terminations:``
     #: section above is the source) or ``external`` (core builds an empty
@@ -148,7 +146,8 @@ class RunSpec:
     runner: dict[str, JsonValue]
     output: OutputSpec
     #: the explicit ``sinks:`` selection (ordered).  ``None`` means the key was
-    #: absent, so the legacy ``mode`` selection still owns sink composition.
+    #: absent: the builder falls back to a single built-in collect sink unless
+    #: a custom ``sink:`` shorthand supplied ``custom_sink``.
     sinks: tuple[SinkDeclaration, ...] | None
     overrides: tuple[dict[str, JsonValue], ...]
     label: str | None
@@ -166,8 +165,8 @@ class RunSpec:
     #: isaaclab backend maps to native static colliders; empty for
     #: config-backed runs.  Not serialized into the yaml config today.
     static_shapes: tuple[JsonValue, ...] = ()
-    #: the caller's pack runtime (non-serialized): benchmark pack discovery
-    #: reads its ``benchmarks`` catalog face.  Never written to cfg/ledger.
+    #: the caller's pack runtime (non-serialized): scene/asset catalogs and
+    #: robot profile resolution read through it.  Never written to cfg/ledger.
     pack_runtime: PackRuntime | None = None
     #: complete RobotProfile objects injected by the programmatic profile
     #: path, keyed by articulation name.  Non-serialized: these bypass the
@@ -490,30 +489,19 @@ def _needs_actuator_law_runtime(cfg: dict[str, JsonValue]) -> bool:
     return any(law not in ACTUATOR_LAW_REGISTRY for law in laws)
 
 
-def requires_pack_runtime(
-    cfg: dict[str, JsonValue],
-    mode: str | None = None,
-    *,
-    custom_sink: bool = False,
-) -> bool:
+def requires_pack_runtime(cfg: dict[str, JsonValue]) -> bool:
     """True when a run config needs an explicit runtime at its boundary.
 
-    A catalog ``scene_preset`` (or an unregistered inline provider), a
-    benchmark/both run that builds the built-in tasks, an adapter other than
-    the built-in ``manual``, a ``pack:`` reference (or asset placeholder
-    token), or a prop-template selection needs the runtime.  A custom sink owns
-    benchmark control flow, so a benchmark/both run with ``custom_sink=True``
-    does not need a runtime for the mode alone (its other declarations still
-    count).  A ``release:`` reference does not: it is resolved by the
-    ``unigym.asset_release`` provider or the ``unigym_robots`` fallback.  The
-    helper is the one composition-boundary decision shared by ``Run``,
-    ``collect_cli`` and ``describe_cli``; it does not build or cache a runtime.
+    A catalog ``scene_preset`` (or an unregistered inline provider), an adapter
+    other than the built-in ``manual``, a ``pack:`` reference (or asset
+    placeholder token), or a prop-template selection needs the runtime.  A
+    ``release:`` reference does not: it is resolved by the
+    ``unigym.asset_release`` provider or the ``unigym_robots`` fallback.  Sink
+    selection is composition data and never requires a runtime.  The helper is
+    the one composition-boundary decision shared by ``Run``, ``collect_cli`` and
+    ``describe_cli``; it does not build or cache a runtime.
     """
     if "scene_preset" in cfg and _scene_preset_needs_runtime(cfg.get("scene_preset")):
-        return True
-    run_mode = cfg.get("mode", "collect") if mode is None else mode
-    declared_sink = custom_sink or cfg.get("sink") is not None or cfg.get("sinks") is not None
-    if run_mode in ("benchmark", "both") and not declared_sink:
         return True
     adapter_name = _declared_adapter_name(cfg)
     if adapter_name is not None and adapter_name != "manual":
@@ -718,8 +706,9 @@ def _parse_sink_section(sink_value: object, config_path: str) -> SinkSpec | None
     """Normalize the optional top-level ``sink:`` declaration.
 
     The shape is closed: exactly ``factory`` (required) and ``options``
-    (optional).  A custom sink is mode-independent data at this boundary; the
-    builder decides how it composes with the mode-selected built-in sinks.
+    (optional).  A custom sink is construction data at this boundary; the
+    builder uses it as the sole sink when no explicit ``sinks:`` list is
+    declared.
     """
     from unigym.errors import ConfigError
 
@@ -854,9 +843,10 @@ def build_spec(
     selected (its ``BackendBinding`` drives world-format and backend-param
     selection).  A ``pack:`` / asset reference expands through an
     :class:`~unigym.packs.runtime.AssetContext` built from the same runtime.
-    A ``benchmark`` / ``both`` run stores *runtime* on the spec for benchmark
-    pack discovery.  A legacy ``benchmark.packs`` list is rejected: packs are
-    declared on the runtime ``benchmarks`` face.
+    The removed ``mode`` / ``benchmark`` config keys are rejected with teaching
+    errors: sink selection is ``sinks:`` (or the one-custom-sink ``sink:``
+    shorthand), and the built-in benchmark/evaluation path no longer lives in
+    core.
     """
     from unigym.errors import ConfigError
     from unigym.registration import RegistrationPhase, at_least_phase
@@ -864,6 +854,20 @@ def build_spec(
     at_least_phase(RegistrationPhase.SPEC)
     raw_cfg = copy.deepcopy(cfg)
     reject_legacy_scene_keys(raw_cfg, source=args.config)
+    if "mode" in raw_cfg:
+        raise ConfigError(
+            f"{args.config}: top-level `mode:` was removed; sink selection is "
+            "declared explicitly with `sinks:` (an ordered list of built-in "
+            "`kind: collect` and/or custom `factory:` entries) or the one-custom-"
+            "sink `sink:` shorthand -- there is no compatibility alias"
+        )
+    if "benchmark" in raw_cfg:
+        raise ConfigError(
+            f"{args.config}: top-level `benchmark:` was removed with the built-in "
+            "benchmark/evaluation path; declare the run's sinks with `sinks:` (or "
+            "the `sink:` shorthand) and own task scoring/reporting in the sink -- "
+            "there is no compatibility alias"
+        )
     # The content key surface ('objects:') normalizes onto the internal name
     # BEFORE preset resolution; an ``objects.provider`` rejection is a config
     # error at this boundary.
@@ -943,13 +947,6 @@ def build_spec(
         adapter_params = _require_config(raw_params, "adapter params")
         if adapter_overrides:
             print(f"[collect] adapter params override: " f"{adapter_overrides}", flush=True)
-    mode_value = cfg.get("mode", "collect")
-    if not isinstance(mode_value, str) or mode_value not in ("collect", "benchmark", "both"):
-        raise ValueError(
-            f"mode '{mode_value}' is not implemented " "(one of: collect | benchmark | both)"
-        )
-    mode = mode_value
-    benchmark_cfg = _require_config(cfg.get("benchmark") or {}, "benchmark")
     if "camera_depth" in cfg:
         raise ConfigError(
             f"{args.config}: top-level `camera_depth:` was removed; depth is "
@@ -957,27 +954,10 @@ def build_spec(
             "'depth' (declare the camera geometry explicitly -- the classic "
             "depth-encoder recipe lives in docs/pack_api.md)"
         )
-    if "packs" in benchmark_cfg:
-        raise ConfigError(
-            f"{args.config}: benchmark.packs is removed; benchmark packs are "
-            "declared on the PackRuntime 'benchmarks' face "
-            "(provides: benchmarks: [{id: <id>, resource: <pack dir>}]) "
-            "-- build the runtime and pass it to build_spec instead"
-        )
-    if "sink" in benchmark_cfg:
-        raise ConfigError(
-            f"{args.config}: benchmark.sink is not supported; use the top-level "
-            "sink: section (a custom sink is mode-independent)"
-        )
     if "sink" in cfg and "sinks" in cfg:
         raise ConfigError(
             f"{args.config}: declare either 'sink:' (one custom sink shorthand) or "
             "'sinks:' (an explicit list), not both"
-        )
-    if "sinks" in cfg and "mode" in cfg:
-        raise ConfigError(
-            f"{args.config}: 'mode:' and 'sinks:' cannot be combined; declare the "
-            "sink selection with 'sinks:' only (mode is the legacy selector)"
         )
     custom_sink = _parse_sink_section(cfg.get("sink"), args.config)
     sinks = _parse_sinks_section(cfg.get("sinks"), args.config) if "sinks" in cfg else None
@@ -1055,7 +1035,6 @@ def build_spec(
         config_path=args.config,
         run_name=run_name,
         seed=seed,
-        mode=mode,
         backend=backend_label,
         backend_params=_require_config(env_cfg.get("params") or {}, "env.params"),
         backend_options=backend_options,
@@ -1080,7 +1059,6 @@ def build_spec(
             "run_log": getattr(args, "run_log", None),
             "serve_pause": bool(getattr(args, "serve_pause", False)),
         },
-        benchmark=benchmark_cfg,
         terminations=cfg.get("terminations"),
         termination_mode=termination_mode,
         runner=runner_cfg,

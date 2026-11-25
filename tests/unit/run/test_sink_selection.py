@@ -1,4 +1,4 @@
-"""Mode-aware sink composition and stop-predicate wiring for custom sinks."""
+"""Explicit sink selection composition and stop-predicate wiring."""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ import pytest
 from unigym.actuators.ir import ActuationGroup
 from unigym.assets.asset_ref import AssetRef
 from unigym.errors import ConfigError
-from unigym.packs.runtime import discover
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.run.api import Run
 from unigym.run.build import (
     _combine_stop,
-    _compose_primary_sink,
     _metrics_source_for,
     _sink_stop_when,
 )
@@ -43,60 +41,6 @@ ACTION_SPEC = OrderedActionSpec.from_mapping(
     ]
 )
 POLICIES = (PolicyBinding.from_mapping({"adapter": "manual", "groups": [["tiny", "tiny"]]}),)
-
-
-@pytest.mark.parametrize(
-    ("mode", "use_custom", "first", "second"),
-    [
-        ("collect", False, "collect", None),
-        ("collect", True, "collect", "custom"),
-        ("benchmark", False, "session", None),
-        ("benchmark", True, "custom", None),
-        ("both", False, "collect", "session"),
-        ("both", True, "collect", "custom"),
-    ],
-    ids=[
-        "collect/default",
-        "collect/custom",
-        "benchmark/default",
-        "benchmark/custom",
-        "both/default",
-        "both/custom",
-    ],
-)
-def test_primary_sink_selection_matrix(
-    mode: str, use_custom: bool, first: str, second: str | None
-) -> None:
-    """The 3x2 mode/custom matrix composes exactly the planned sinks."""
-    parts = {
-        "collect": RecordingSink("collect"),
-        "session": RecordingSink("session"),
-        "custom": RecordingSink("custom"),
-    }
-    custom_sink = parts["custom"] if use_custom else None
-
-    primary = _compose_primary_sink(
-        mode,
-        collect_sink=parts["collect"],
-        eval_session=parts["session"],
-        custom_sink=custom_sink,
-    )
-
-    if second is None:
-        assert primary is parts[first]
-    else:
-        assert isinstance(primary, FanOutSink)
-        assert primary.sinks == [parts[first], parts[second]]
-
-
-def test_primary_sink_selection_rejects_unknown_modes() -> None:
-    with pytest.raises(ValueError, match="unsupported run mode"):
-        _compose_primary_sink(
-            "unknown",
-            collect_sink=RecordingSink("collect"),
-            eval_session=None,
-            custom_sink=None,
-        )
 
 
 def test_fanout_stop_when_ors_children_and_ignores_plain_sinks() -> None:
@@ -226,16 +170,9 @@ def _floor_world(tmp_path: Path) -> Path:
 def _run(
     tmp_path: Path,
     *,
-    mode: str,
     sink: SinkSpec | None = None,
     sinks: tuple[CollectSinkSpec | SinkSpec, ...] | None = None,
-    benchmark: dict[str, object] | None = None,
 ) -> Run:
-    runtime = discover([]) if mode != "collect" else None
-    if benchmark is None:
-        benchmark = {"tasks": [], "min_episodes": 1, "max_steps": 10}
-    # An explicit ``sinks=`` selection may not be combined with legacy mode.
-    selection_kwargs = {} if sinks is not None else {"mode": mode}
     return Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=_profile(),
@@ -247,10 +184,7 @@ def _run(
         inspect=True,
         sink=sink,
         sinks=sinks,
-        benchmark=benchmark,
-        pack_runtime=runtime,
         discover_runtime=False,
-        **selection_kwargs,
     )
 
 
@@ -263,7 +197,26 @@ def _primary_sink(instance) -> object:
     return timeline_chain.sinks[0]
 
 
-def test_build_injects_a_custom_sink_after_collect(tmp_path: Path) -> None:
+def test_build_defaults_to_one_collect_sink_and_stamps_run_identity(
+    tmp_path: Path,
+) -> None:
+    """An absent selection keeps the built-in collect sink and the identity."""
+    run = _run(tmp_path)
+    try:
+        instance = run.build(inspect=True)
+        collect = _primary_sink(instance)
+        assert isinstance(collect, CollectSink)
+        assert not hasattr(collect, "env")
+        assert instance.stop_when() is False
+        assert instance.spec.sinks is None
+        assert instance.spec.custom_sink is None
+        assert getattr(instance.env, "run_identity", None) is not None
+    finally:
+        run.close()
+
+
+def test_build_custom_sink_shorthand_is_the_sole_sink(tmp_path: Path) -> None:
+    """A ``sink:`` shorthand replaces the default collect selection."""
     contexts = []
     custom_sink = StopPollingSink(True, label="custom")
 
@@ -273,7 +226,6 @@ def test_build_injects_a_custom_sink_after_collect(tmp_path: Path) -> None:
 
     run = _run(
         tmp_path,
-        mode="collect",
         sink=SinkSpec(factory=factory, options={"target_episodes": 2}),
     )
     try:
@@ -282,80 +234,12 @@ def test_build_injects_a_custom_sink_after_collect(tmp_path: Path) -> None:
         assert len(contexts) == 1
         ctx = contexts[0]
         assert ctx.spec is spec
-        assert ctx.mode == "collect"
         assert ctx.options == {"target_episodes": 2}
-        assert ctx.run_identity is None
-
-        primary = _primary_sink(instance)
-        assert isinstance(primary, FanOutSink)
-        assert isinstance(primary.sinks[0], CollectSink)
-        assert primary.sinks[1] is custom_sink
-        assert instance.stop_when() is True
-    finally:
-        run.close()
-
-
-def test_build_benchmark_custom_sink_replaces_the_builtin_session(tmp_path: Path) -> None:
-    contexts = []
-    custom_sink = StopPollingSink(False, label="custom")
-
-    def factory(ctx):
-        contexts.append(ctx)
-        return custom_sink
-
-    run = _run(tmp_path, mode="benchmark", sink=SinkSpec(factory=factory))
-    try:
-        instance = run.build(inspect=True)
-        assert len(contexts) == 1
-        ctx = contexts[0]
-        assert ctx.mode == "benchmark"
         assert ctx.run_identity is not None
         assert ctx.run_identity is getattr(instance.env, "run_identity", None)
-        assert getattr(instance.env, "timeout_steps", None) is None
 
         assert _primary_sink(instance) is custom_sink
-        assert instance.stop_when() is False
-    finally:
-        run.close()
-
-
-def test_build_both_custom_sink_keeps_collect_first(tmp_path: Path) -> None:
-    contexts = []
-    custom_sink = StopPollingSink(True, label="custom")
-
-    def factory(ctx):
-        contexts.append(ctx)
-        return custom_sink
-
-    run = _run(tmp_path, mode="both", sink=SinkSpec(factory=factory))
-    try:
-        instance = run.build(inspect=True)
-        assert len(contexts) == 1
-        ctx = contexts[0]
-        assert ctx.mode == "both"
-        assert ctx.run_identity is not None
-        assert getattr(instance.env, "timeout_steps", None) is None
-
-        primary = _primary_sink(instance)
-        assert isinstance(primary, FanOutSink)
-        assert isinstance(primary.sinks[0], CollectSink)
-        assert primary.sinks[1] is custom_sink
         assert instance.stop_when() is True
-    finally:
-        run.close()
-
-
-def test_build_builtin_benchmark_keeps_the_timeout_annotation(tmp_path: Path) -> None:
-    """The built-in benchmark path still stamps its EpisodeLimits deadline."""
-    run = _run(
-        tmp_path,
-        mode="benchmark",
-        benchmark={"tasks": [], "min_episodes": 1, "max_steps": 10, "timeout_steps": 5},
-    )
-    try:
-        instance = run.build(inspect=True)
-        assert getattr(instance.env, "timeout_steps", None) == 5
-        assert getattr(instance.env, "run_identity", None) is not None
     finally:
         run.close()
 
@@ -381,25 +265,11 @@ def test_build_rejects_an_invalid_factory_before_constructing_the_env(tmp_path: 
         run.close()
 
 
-def test_build_keeps_the_collect_sink_when_no_custom_sink_is_configured(
-    tmp_path: Path,
-) -> None:
-    run = _run(tmp_path, mode="collect")
-    try:
-        instance = run.build(inspect=True)
-        collect = _primary_sink(instance)
-        assert isinstance(collect, CollectSink)
-        assert not hasattr(collect, "env")
-        assert instance.stop_when() is False
-    finally:
-        run.close()
-
-
 def test_build_explicit_collect_selection_builds_the_builtin_collect_sink(
     tmp_path: Path,
 ) -> None:
     """``sinks=[CollectSinkSpec()]`` resolves through the build-owned collect."""
-    run = _run(tmp_path, mode="collect", sinks=(CollectSinkSpec(),))
+    run = _run(tmp_path, sinks=(CollectSinkSpec(),))
     try:
         instance = run.build(inspect=True)
         primary = _primary_sink(instance)
@@ -421,7 +291,6 @@ def test_build_explicit_custom_selection_uses_the_factory(tmp_path: Path) -> Non
 
     run = _run(
         tmp_path,
-        mode="collect",
         sinks=(SinkSpec(factory=factory, options={"target_episodes": 2}),),
     )
     try:
@@ -473,10 +342,10 @@ def _stable_summary(summary: dict) -> dict:
 def test_default_collect_summary_matches_an_explicit_collect_selection(
     tmp_path: Path,
 ) -> None:
-    """The legacy default and ``sinks=[CollectSinkSpec()]`` are observable-equal."""
-    default_collect = _find_collect_summary(_run_zero_actions(_run(tmp_path, mode="collect")))
+    """The absent-selection default and ``sinks=[CollectSinkSpec()]`` agree."""
+    default_collect = _find_collect_summary(_run_zero_actions(_run(tmp_path)))
     selected_collect = _find_collect_summary(
-        _run_zero_actions(_run(tmp_path, mode="collect", sinks=(CollectSinkSpec(),)))
+        _run_zero_actions(_run(tmp_path, sinks=(CollectSinkSpec(),)))
     )
 
     assert default_collect is not None
@@ -495,7 +364,6 @@ def test_build_explicit_multi_selection_fans_out_in_declaration_order(
 
     run = _run(
         tmp_path,
-        mode="collect",
         sinks=(
             CollectSinkSpec(),
             SinkSpec(factory=factory, name="bench"),

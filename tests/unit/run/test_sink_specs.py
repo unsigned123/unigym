@@ -41,11 +41,11 @@ def _args() -> Namespace:
     return Namespace(config="run.yaml")
 
 
-def test_absent_sinks_keeps_the_legacy_mode_path() -> None:
+def test_absent_sinks_leaves_the_default_collect_selection_to_the_builder() -> None:
     spec = build_spec(_cfg(), _args())
 
     assert spec.sinks is None
-    assert spec.mode == "collect"
+    assert spec.custom_sink is None
 
 
 def test_config_sinks_parse_to_an_ordered_tuple_of_declarations() -> None:
@@ -106,19 +106,19 @@ def test_declaring_both_sink_and_sinks_is_an_error(sink: JsonValue) -> None:
         build_spec(_cfg(sink=sink, sinks=[{"kind": "collect"}]), _args())
 
 
-def test_config_mode_and_sinks_are_an_error() -> None:
-    with pytest.raises(ConfigError, match="cannot be combined"):
+def test_config_mode_and_sinks_rejects_the_removed_mode() -> None:
+    with pytest.raises(ConfigError, match="top-level `mode:` was removed"):
         build_spec(_cfg(mode="collect", sinks=[{"kind": "collect"}]), _args())
 
 
-def test_api_mode_and_sinks_are_an_error() -> None:
-    with pytest.raises(ConfigError, match="cannot combine mode with sinks"):
-        Run(_cfg(), mode="collect", sinks=[CollectSinkSpec()])
+def test_api_mode_and_sinks_rejects_the_removed_mode() -> None:
+    with pytest.raises(ConfigError, match="top-level `mode:` was removed"):
+        Run(_cfg(), mode="collect", sinks=[CollectSinkSpec()]).spec
 
 
-def test_api_sinks_with_a_config_mode_is_an_error() -> None:
-    with pytest.raises(ConfigError, match="cannot combine mode with sinks"):
-        Run(_cfg(mode="collect"), sinks=[CollectSinkSpec()])
+def test_api_sinks_with_a_config_mode_rejects_the_removed_mode() -> None:
+    with pytest.raises(ConfigError, match="top-level `mode:` was removed"):
+        Run(_cfg(mode="collect"), sinks=[CollectSinkSpec()]).spec
 
 
 def test_only_one_builtin_collect_entry_is_allowed() -> None:

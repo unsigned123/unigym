@@ -8,6 +8,7 @@ from argparse import Namespace
 import pytest
 
 from unigym.errors import ConfigError
+from unigym.run.api import Run
 from unigym.run.spec import build_spec, requires_pack_runtime
 
 
@@ -45,7 +46,6 @@ def test_build_spec_normalizes_minimal_run_config():
     spec = build_spec(_cfg(), _args())
 
     assert spec.backend == "isaaclab2"
-    assert spec.mode == "collect"
     assert spec.sinks is None
     assert spec.custom_sink is None
     assert (spec.num_envs, spec.total_steps, spec.seed) == (2, 100, 7)
@@ -88,11 +88,23 @@ def test_build_spec_scene_preset_without_runtime_fails_fast():
         build_spec(cfg, _args())
 
 
-@pytest.mark.parametrize("mode", ["train", "", 1], ids=["unknown", "empty", "integer"])
-def test_build_spec_rejects_unsupported_mode(mode):
-    """Only collect / benchmark / both are implemented run modes."""
-    with pytest.raises(ValueError, match="is not implemented"):
+@pytest.mark.parametrize(
+    "mode",
+    ["collect", "benchmark", "both", 1],
+    ids=["collect", "benchmark", "both", "integer"],
+)
+def test_build_spec_rejects_the_removed_mode_key(mode):
+    """The old ``mode`` selector is rejected with a sink-selection teaching error."""
+    with pytest.raises(ConfigError, match="top-level `mode:` was removed") as info:
         build_spec(_cfg(mode=mode), _args())
+
+    assert "sinks:" in str(info.value)
+
+
+def test_run_api_rejects_the_removed_mode_key():
+    """The API override reaches the same config boundary and teaching error."""
+    with pytest.raises(ConfigError, match="top-level `mode:` was removed"):
+        Run(_cfg(), mode="collect").spec
 
 
 @pytest.mark.parametrize("action_spec", [None, []], ids=["absent", "empty"])
@@ -312,17 +324,22 @@ def test_build_spec_rejects_non_positive_collect_steps(value):
         build_spec(cfg, _args())
 
 
-def test_build_spec_rejects_benchmark_packs():
-    """benchmark.packs is removed; packs come from the runtime benchmarks face."""
+def test_build_spec_rejects_the_removed_benchmark_section():
+    """The top-level ``benchmark:`` section is rejected, not silently ignored."""
     cfg = _cfg(benchmark={"packs": ["benchmark_packs/acme"]})
 
-    with pytest.raises(ConfigError) as info:
+    with pytest.raises(ConfigError, match="top-level `benchmark:` was removed") as info:
         build_spec(cfg, _args())
 
     message = str(info.value)
-    assert "benchmark.packs" in message
-    assert "benchmarks" in message
-    assert "runtime" in message
+    assert "sinks:" in message
+    assert "no compatibility alias" in message
+
+
+def test_run_api_rejects_the_removed_benchmark_section():
+    """An API ``benchmark=`` override is config data and fails at the same boundary."""
+    with pytest.raises(ConfigError, match="top-level `benchmark:` was removed"):
+        Run(_cfg(), benchmark={"tasks": []}).spec
 
 
 @pytest.mark.parametrize(
@@ -330,8 +347,6 @@ def test_build_spec_rejects_benchmark_packs():
     [
         ({}, False),
         ({"scene_preset": "acme.tabletop"}, True),
-        ({"mode": "benchmark"}, True),
-        ({"mode": "both"}, True),
         ({"props": {"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]}}, True),
         ({"props": {"types": [{"name": "cup", "asset": "${UNIGYM_ASSET_PACK}/cup.urdf"}]}}, True),
         ({"objects": {"types": [{"name": "cup", "template": "acme.cup"}]}}, True),
@@ -342,8 +357,6 @@ def test_build_spec_rejects_benchmark_packs():
     ids=[
         "plain",
         "scene_preset",
-        "benchmark",
-        "both",
         "pack",
         "removed-anchor",
         "template",
@@ -353,7 +366,7 @@ def test_build_spec_rejects_benchmark_packs():
     ],
 )
 def test_requires_pack_runtime_boundary_decision(overrides, expected):
-    """The helper detects scenes, benchmark modes, asset refs and external adapters."""
+    """The helper detects scenes, asset refs and external adapters."""
     assert requires_pack_runtime(_cfg(**overrides)) is expected
 
 
@@ -392,19 +405,18 @@ def test_requires_pack_runtime_detects_a_world_provider_fragment():
     assert requires_pack_runtime(cfg) is True
 
 
-def test_requires_pack_runtime_skips_the_mode_clause_for_a_custom_sink():
-    """A custom sink owns benchmark tasks, so the mode alone needs no runtime."""
-    assert requires_pack_runtime(_cfg(mode="benchmark")) is True
-    assert (
-        requires_pack_runtime(_cfg(mode="benchmark", sink={"factory": "acme.sinks:make_benchmark"}))
-        is False
-    )
-    assert requires_pack_runtime(_cfg(mode="benchmark"), custom_sink=True) is False
-    # A custom sink must not mask a separate runtime need (e.g. a pack asset).
+def test_requires_pack_runtime_ignores_sink_selection():
+    """Sink declarations are composition data, never a pack-runtime requirement."""
+    for overrides in (
+        {"sink": {"factory": "acme.sinks:make_benchmark"}},
+        {"sinks": [{"kind": "collect"}]},
+    ):
+        assert requires_pack_runtime(_cfg(**overrides)) is False
+
+    # A sink must not mask a separate runtime need (e.g. a pack asset).
     assert (
         requires_pack_runtime(
             _cfg(
-                mode="benchmark",
                 sink={"factory": "acme.sinks:make_benchmark"},
                 props={"types": [{"name": "cup", "asset": "pack:acme/cup.urdf"}]},
             )

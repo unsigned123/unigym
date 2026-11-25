@@ -96,7 +96,6 @@ def test_sink_context_carries_construction_metadata_and_the_publisher() -> None:
     options: dict[str, JsonValue] = {"report_name": "acme.json"}
     context = SinkContext(
         spec=run_spec,
-        mode=run_spec.mode,
         out_dir="data_out/r",
         num_envs=1,
         policy_dt=0.02,
@@ -107,14 +106,13 @@ def test_sink_context_carries_construction_metadata_and_the_publisher() -> None:
     )
 
     assert context.spec is run_spec
-    assert (context.mode, context.out_dir, context.num_envs) == ("collect", "data_out/r", 1)
+    assert (context.out_dir, context.num_envs) == ("data_out/r", 1)
     assert (context.policy_dt, context.seed, context.action_groups) == (0.02, 0, ())
     assert context.run_identity is None
     assert context.options is options
     assert context.values is None
     assert tuple(field.name for field in fields(SinkContext)) == (
         "spec",
-        "mode",
         "out_dir",
         "num_envs",
         "policy_dt",
@@ -147,9 +145,8 @@ def test_resolve_sink_factory_imports_a_dotted_attribute() -> None:
 
 
 def test_build_spec_parses_a_top_level_sink_declaration() -> None:
-    """``sink:`` is parsed into construction data; ``sink`` still mirrors mode."""
+    """``sink:`` is parsed into construction data without a mode selector."""
     cfg = _cfg(
-        mode="benchmark",
         sink={"factory": "acme.sinks:make_sink", "options": {"target_episodes": 2}},
     )
 
@@ -162,12 +159,11 @@ def test_build_spec_parses_a_top_level_sink_declaration() -> None:
 
 
 def test_build_spec_keeps_no_custom_sink_paths_unchanged() -> None:
-    """Without ``sink:`` the spec stays inert and ``sinks`` mirrors ``mode``."""
-    spec = build_spec(_cfg(mode="both"), _args())
+    """Without ``sink:`` the spec stays inert and the builder keeps collect."""
+    spec = build_spec(_cfg(), _args())
 
     assert spec.custom_sink is None
     assert spec.sinks is None
-    assert spec.mode == "both"
 
 
 def test_run_api_accepts_a_sink_spec_string_or_callable() -> None:
@@ -373,16 +369,15 @@ def test_build_spec_rejects_non_string_sink_keys() -> None:
 
 
 def test_build_spec_rejects_benchmark_sink_with_a_hint() -> None:
-    """A custom sink is mode-independent; ``benchmark.sink`` has one home."""
+    """The whole ``benchmark:`` section is gone; sinks have one top-level home."""
     cfg = _cfg(benchmark={"sink": {"factory": "acme.sinks:make_sink"}})
 
-    with pytest.raises(ConfigError) as info:
+    with pytest.raises(ConfigError, match="top-level `benchmark:` was removed") as info:
         build_spec(cfg, _args())
 
     message = str(info.value)
     assert "run.yaml" in message
-    assert "benchmark.sink is not supported" in message
-    assert "top-level sink:" in message
+    assert "sink:" in message
 
 
 @pytest.mark.parametrize(
@@ -425,7 +420,6 @@ def _context() -> SinkContext:
     spec = build_spec(_cfg(), _args())
     return SinkContext(
         spec=spec,
-        mode=spec.mode,
         out_dir="data_out/r",
         num_envs=1,
         policy_dt=0.02,

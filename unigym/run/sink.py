@@ -207,7 +207,6 @@ class SinkContext:
     """
 
     spec: RunSpec
-    mode: str
     out_dir: str
     num_envs: int
     policy_dt: float
