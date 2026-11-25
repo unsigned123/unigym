@@ -54,6 +54,7 @@ from unigym.terminations import (
 )
 
 from .instance import RunInstance, Sink
+from .sink import CollectSinkSpec, SinkSpec, effective_sink_name
 from .spec import ReplaySpec, RunSpec
 
 if TYPE_CHECKING:
@@ -1603,6 +1604,72 @@ def _metrics_source_for(sink: Sink | None) -> MetricsSource | None:
     return None
 
 
+def _build_collect_sink(
+    *,
+    env: RunEnv,
+    writer: ShardWriter,
+    logger: DataCollectLogger,
+    language_gen: LanguageGenerator | None,
+    lang_interval: int,
+    recorder: Recorder,
+    adapter: Adapter,
+    num_envs: int,
+    total_steps: int,
+    device: str,
+    policy_dt: float,
+    out_dir: str,
+    seed: int,
+    episode_length_s: JsonValue,
+    dur_lo: float | None,
+    dur_hi: float | None,
+    command_dim: int,
+    action_groups: Sequence[OrderedActionGroup] = (),
+) -> Sink:
+    """Construct the build-owned :class:`CollectSink` from existing resources.
+
+    This is the one resolver target for ``kind: collect``.  The collect-only
+    resources stay here in the build and never enter :class:`SinkContext`.
+    """
+    from unigym.runner.sinks import CollectSink
+
+    # Read-only build-time facts: the collect sink keeps no live env, and a
+    # zero-tick run still writes an honest per-articulation summary.  Body
+    # controls key their facts by articulation; the historical last-write-wins
+    # behavior for multiple body controls is preserved.
+    control_snapshot = tuple(build_control_plan(_control_rows(env.controls)))
+    articulation_snapshot = {
+        control.articulation: articulation_facts(env.articulations[control.articulation], control)
+        for control in _body_controls(env)
+    }
+    return CollectSink(
+        writer=writer,
+        logger=logger,
+        language_gen=language_gen,
+        lang_interval=lang_interval,
+        recorder=recorder,
+        adapter=adapter,
+        controls=control_snapshot,
+        articulation_facts=articulation_snapshot,
+        num_envs=num_envs,
+        total_steps=total_steps,
+        device=device,
+        policy_dt=policy_dt,
+        out_dir=out_dir,
+        seed=seed,
+        episode_length_s=episode_length_s,
+        dur_lo=dur_lo,
+        dur_hi=dur_hi,
+        command_dim=command_dim,
+        action_groups=action_groups,
+    )
+
+
+#: Small build-side resolver table for core built-in sink kinds.  This is
+#: deliberately not another ``mode`` branch: an entry here owns construction
+#: with the build-private collect resources.
+_BUILTIN_SINK_RESOLVERS: dict[str, Callable[..., Sink]] = {"collect": _build_collect_sink}
+
+
 def _build_sinks(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
@@ -1631,9 +1698,10 @@ def _build_sinks(
     values: ValuePublisher,
     action_groups: Sequence[OrderedActionGroup] = (),
     custom_sink_factory: SinkFactory | None = None,
+    selected_sink_factories: Sequence[SinkFactory | None] = (),
 ) -> _SinkBundle:
-    """Step 5: director + timeline + mode-aware sink composition."""
-    from unigym.runner.sinks import CollectSink, FanOutSink
+    """Step 5: director + timeline + selected/mode-aware sink composition."""
+    from unigym.runner.sinks import FanOutSink
 
     # director (before the sinks so EvaluationSession can label
     # episodes directed): status_fn wires in after the bridge exists
@@ -1666,29 +1734,100 @@ def _build_sinks(
         event_log, contact_keys=(contact_manager.keys() if contact_manager is not None else [])
     )
 
-    # sink selection by yaml ``mode`` (collect = unchanged default path)
-    collect_sink: CollectSink | None = None
-    if mode != "benchmark":
-        # Read-only build-time facts: the collect sink keeps no live env, and a
-        # zero-tick run still writes an honest per-articulation summary.  Body
-        # controls key their facts by articulation; the historical
-        # last-write-wins behavior for multiple body controls is preserved.
-        control_snapshot = tuple(build_control_plan(_control_rows(env.controls)))
-        articulation_snapshot = {
-            control.articulation: articulation_facts(
-                env.articulations[control.articulation], control
-            )
-            for control in _body_controls(env)
+    # explicit ``sinks:`` selection (additive): build the selected chain and
+    # return without touching the legacy ``mode`` matrix below.
+    selections = spec.sinks
+    if selections is not None:
+        from .sink import SinkContext, build_custom_sink
+
+        run_identity = _run_identity(spec, cfg, env, num_envs, seed, policy_dt)
+        setattr(env, "run_identity", run_identity)
+        collect_kwargs: dict[str, object] = {
+            "env": env,
+            "writer": writer,
+            "logger": logger,
+            "language_gen": language_gen,
+            "lang_interval": lang_interval,
+            "recorder": recorder,
+            "adapter": adapter,
+            "num_envs": num_envs,
+            "total_steps": total_steps,
+            "device": device,
+            "policy_dt": policy_dt,
+            "out_dir": out_dir,
+            "seed": seed,
+            "episode_length_s": episode_length_s,
+            "dur_lo": dur_lo,
+            "dur_hi": dur_hi,
+            "command_dim": command_dim,
+            "action_groups": tuple(action_groups),
         }
-        collect_sink = CollectSink(
+        built_sinks: list[Sink] = []
+        for declaration, factory in zip(selections, selected_sink_factories, strict=True):
+            if isinstance(declaration, CollectSinkSpec):
+                resolver = _BUILTIN_SINK_RESOLVERS.get(declaration.kind)
+                if resolver is None:
+                    raise RuntimeError(f"no build resolver for core sink kind {declaration.kind!r}")
+                built_sinks.append(resolver(**collect_kwargs))
+                continue
+            if factory is None:
+                raise RuntimeError("custom sink factory resolved without a declaration")
+            ctx = SinkContext(
+                spec=spec,
+                mode=mode,
+                out_dir=out_dir,
+                num_envs=num_envs,
+                policy_dt=policy_dt,
+                seed=seed,
+                action_groups=tuple(action_groups),
+                run_identity=run_identity,
+                options=declaration.options,
+                values=values,
+            )
+            built_sinks.append(build_custom_sink(factory, ctx))
+        primary_sink: Sink
+        if len(built_sinks) == 1:
+            primary_sink = built_sinks[0]
+        else:
+            names: list[str] = []
+            for declaration in selections:
+                name = effective_sink_name(declaration)
+                if name is None:
+                    raise RuntimeError(
+                        "a multi-sink selection needs an explicit name for every declaration"
+                    )
+                names.append(name)
+            primary_sink = FanOutSink(named=tuple(zip(names, built_sinks, strict=True)))
+        stop_when: Callable[[], bool] | None = None
+        for child in built_sinks:
+            stop_when = _combine_stop(stop_when, _sink_stop_when(child))
+        sink = primary_sink
+        for extra_sink in adapter.extra_sinks(env, out_dir):
+            sink = FanOutSink(extra_sink, sink)
+        return {
+            "director": director,
+            "sink": sink,
+            "timeline": timeline,
+            "event_log": event_log,
+            "metrics_source": next(
+                (feed for child in built_sinks if (feed := _metrics_source_for(child)) is not None),
+                None,
+            ),
+            "stop_when": stop_when,
+            "watch_specs": watch_specs,
+        }
+
+    # sink selection by yaml ``mode`` (collect = unchanged default path)
+    collect_sink: Sink | None = None
+    if mode != "benchmark":
+        collect_sink = _build_collect_sink(
+            env=env,
             writer=writer,
             logger=logger,
             language_gen=language_gen,
             lang_interval=lang_interval,
             recorder=recorder,
             adapter=adapter,
-            controls=control_snapshot,
-            articulation_facts=articulation_snapshot,
             num_envs=num_envs,
             total_steps=total_steps,
             device=device,
@@ -2041,25 +2180,38 @@ def build_instance(spec: RunSpec) -> RunInstance:
         _materialize_pack_actuators(spec, info.name)
     mode = spec.mode
     pack_runtime = spec.pack_runtime
-    if mode in ("benchmark", "both") and spec.custom_sink is not None:
-        _reject_custom_sink_timeout(cfg, mode)
-    # The built-in benchmark path resolves its tasks through the runtime
-    # ``benchmarks`` face.  A custom sink owns benchmark control flow and gets
-    # no built-in tasks, so the mode alone does not require a runtime.
-    if mode in ("benchmark", "both") and spec.custom_sink is None and pack_runtime is None:
-        raise ValueError(
-            f"run mode {mode!r} requires a pack runtime: benchmark packs are "
-            "declared on the PackRuntime 'benchmarks' face | hint: build "
-            "discover(entry_points=True) at the composition boundary and "
-            "pass it to build_spec"
-        )
-    # Resolve a configured custom sink factory BEFORE any engine allocation:
-    # a bad import path must fail here, never after a half-built backend.
+    # Resolve configured sink factories BEFORE any engine allocation: a bad
+    # import path must fail here, never after a half-built backend.
     custom_sink_factory: SinkFactory | None = None
-    if spec.custom_sink is not None:
+    selected_sink_factories: tuple[SinkFactory | None, ...] = ()
+    if spec.sinks is not None:
         from .sink import resolve_sink_factory
 
-        custom_sink_factory = resolve_sink_factory(spec.custom_sink, spec.config_path)
+        selected_sink_factories = tuple(
+            (
+                resolve_sink_factory(declaration, spec.config_path)
+                if isinstance(declaration, SinkSpec)
+                else None
+            )
+            for declaration in spec.sinks
+        )
+    else:
+        if mode in ("benchmark", "both") and spec.custom_sink is not None:
+            _reject_custom_sink_timeout(cfg, mode)
+        # The built-in benchmark path resolves its tasks through the runtime
+        # ``benchmarks`` face.  A custom sink owns benchmark control flow and
+        # gets no built-in tasks, so the mode alone does not require a runtime.
+        if mode in ("benchmark", "both") and spec.custom_sink is None and pack_runtime is None:
+            raise ValueError(
+                f"run mode {mode!r} requires a pack runtime: benchmark packs are "
+                "declared on the PackRuntime 'benchmarks' face | hint: build "
+                "discover(entry_points=True) at the composition boundary and "
+                "pass it to build_spec"
+            )
+        if spec.custom_sink is not None:
+            from .sink import resolve_sink_factory
+
+            custom_sink_factory = resolve_sink_factory(spec.custom_sink, spec.config_path)
     seed = spec.seed
     import torch
 
@@ -2331,6 +2483,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         values.publisher("sink"),
         effective_groups,
         custom_sink_factory,
+        selected_sink_factories,
     )
     wiring = _build_bridge_and_wiring(
         spec,

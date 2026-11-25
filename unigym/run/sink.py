@@ -1,12 +1,18 @@
-"""Construction-side contract for a custom sink.
+"""Construction-side contract for run sinks.
 
-A run may declare one custom :class:`unigym.sink.Sink` by config
-(``sink: {factory: ..., options: ...}``) or by API
-(``Run(..., sink=SinkSpec(...))``).  This module owns the inert declaration and
-its boundary validation (no eager factory import), plus the resolved-factory
-helpers: :func:`resolve_sink_factory` imports a configured path once without
-calling it, and :func:`build_custom_sink` invokes the resolved factory with a
+A run selects sinks explicitly with ``sinks:`` (config) or ``Run(sinks=...)``
+(API): an ordered list of :class:`CollectSinkSpec` (the core built-in
+``collect`` kind) and/or :class:`SinkSpec` (a custom factory).  The singular
+``sink:`` declaration and ``Run(sink=...)`` remain the one-custom-sink
+shorthand.  This module owns the inert declarations and their boundary
+validation (no eager factory import), plus the resolved-factory helpers:
+:func:`resolve_sink_factory` imports a configured path once without calling it,
+and :func:`build_custom_sink` invokes the resolved factory with a
 :class:`SinkContext` and validates the returned sink's callback shape.
+
+``CollectSinkSpec`` carries no construction resources: the run build owns the
+built-in :class:`unigym.runner.sinks.CollectSink` and its writer/logger/
+recorder/control facts.  Those never enter :class:`SinkContext`.
 
 A custom sink stays a four-callback :class:`unigym.sink.Sink`.  Optional
 capabilities (``on_rewind``, ``stop_when``, ``drain_terminations``) may be
@@ -24,7 +30,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias, cast
@@ -40,11 +46,15 @@ if TYPE_CHECKING:
     from unigym.values import ValuePublisher
 
 __all__ = [
+    "CollectSinkSpec",
     "SinkContext",
+    "SinkDeclaration",
     "SinkFactory",
     "SinkSpec",
     "build_custom_sink",
+    "effective_sink_name",
     "resolve_sink_factory",
+    "validate_sink_declarations",
 ]
 
 #: ``module:attribute`` where both sides are dotted Python identifiers.
@@ -73,11 +83,13 @@ class SinkSpec:
     API) or a callable (API only).  ``options`` travels unchanged to
     :attr:`SinkContext.options`; it is copied into a read-only mapping so a
     caller mutating its declaration after handing it over cannot change the
-    run's intent.
+    run's intent.  ``name`` is the optional stable identity used by a
+    multi-sink fan-out; it is required when more than one sink is declared.
     """
 
     factory: str | Callable[[SinkContext], Sink]
     options: Mapping[str, JsonValue] = field(default_factory=_empty_options)
+    name: str | None = None
 
     def __post_init__(self) -> None:
         factory = self.factory
@@ -96,6 +108,8 @@ class SinkSpec:
                 f"sink.factory={factory!r} must be a non-empty 'module:callable' "
                 "string or a callable"
             )
+        if self.name is not None and (not isinstance(self.name, str) or not self.name):
+            raise ConfigError(f"sink.name={self.name!r} must be a non-empty string when declared")
         options = self.options
         if not isinstance(options, Mapping):
             raise ConfigError(
@@ -105,6 +119,78 @@ class SinkSpec:
             if not isinstance(key, str):
                 raise ConfigError(f"sink.options must be a string-keyed mapping, got key {key!r}")
         object.__setattr__(self, "options", MappingProxyType(dict(options)))
+
+
+@dataclass(frozen=True)
+class CollectSinkSpec:
+    """The core built-in ``collect`` sink selection.
+
+    Inert declaration data: it names the build-owned :class:`CollectSink`
+    kind, not a user factory, so it carries no options.  The build owns the
+    actual construction with its private resources (writer/logger/recorder,
+    language generator, control facts); none of those enter
+    :class:`SinkContext`.
+    """
+
+    kind: str = "collect"
+    name: str = "collect"
+
+    def __post_init__(self) -> None:
+        if self.kind != "collect":
+            raise ConfigError(
+                f"sink kind={self.kind!r} is not supported (the only core built-in "
+                "kind is 'collect')"
+            )
+        if not isinstance(self.name, str) or not self.name:
+            raise ConfigError("collect sink.name must be a non-empty string")
+
+
+#: A parsed sink selection: a core built-in kind or a custom factory.
+SinkDeclaration: TypeAlias = CollectSinkSpec | SinkSpec
+
+
+def effective_sink_name(declaration: SinkDeclaration) -> str | None:
+    """The declared name a fan-out uses for this entry (custom may be nameless)."""
+    return declaration.name
+
+
+def validate_sink_declarations(declarations: Sequence[SinkDeclaration], source: str) -> None:
+    """Enforce the naming and built-in-cardinality rules on a parsed selection.
+
+    A single entry may omit its name: the build returns that sink directly and
+    its own summary shape is unchanged.  Two or more entries need a unique,
+    explicit effective name so ``FanOutSink`` summaries are stable.  The core
+    built-in ``collect`` kind may appear at most once: two collect sinks would
+    share one writer/logger/recorder and corrupt the recorded output.
+    """
+    collect_indices = [
+        index
+        for index, declaration in enumerate(declarations)
+        if isinstance(declaration, CollectSinkSpec)
+    ]
+    if len(collect_indices) > 1:
+        first, second = collect_indices[0], collect_indices[1]
+        raise ConfigError(
+            f"{source}: sinks[{first}] and sinks[{second}] both select the core "
+            "built-in 'collect' sink; only one collect entry is allowed"
+        )
+    if len(declarations) <= 1:
+        return
+    seen: dict[str, int] = {}
+    for index, declaration in enumerate(declarations):
+        name = effective_sink_name(declaration)
+        if name is None:
+            raise ConfigError(
+                f"{source}: sinks[{index}] needs an explicit name when more than "
+                "one sink is declared"
+            )
+        previous = seen.get(name)
+        if previous is not None:
+            raise ConfigError(
+                f"{source}: sinks[{previous}] and sinks[{index}] share the name "
+                f"{name!r}; sink names must be unique"
+            )
+        seen[name] = index
 
 
 @dataclass(frozen=True)

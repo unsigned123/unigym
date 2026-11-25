@@ -1,14 +1,13 @@
 """FanOutSink: dispatch the engine callback stream to multiple sinks.
 
-Used for ``mode: both`` (collect + benchmark in one rollout).  Sinks are
-called synchronously in construction order -- CollectSink first, then
-EvaluationSession -- and each sees the identical
-bundle objects, so recording and scoring cannot diverge.
+The generic composition primitive for explicit ``sinks:`` selection.  Child
+sinks are called synchronously in construction order and each sees the
+identical bundle objects, so independent recording/scoring cannot diverge.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,18 +17,54 @@ if TYPE_CHECKING:
 class FanOutSink:
     """Compose sinks behind one object satisfying the sink contract.
 
-    ``on_run_end`` returns ``{sink_class_name: summary_dict}``; with the
-    standard pair that is ``{"CollectSink": ..., "EvaluationSession": ...}``.
-    Two children of the same class collide on that key and fail rather than
-    silently overwriting.
+    Two construction forms are supported:
+
+    * ``FanOutSink(sink_a, sink_b, ...)`` keeps the historical unnamed form:
+      ``on_run_end`` returns ``{sink_class_name: summary_dict}`` and two
+      children of the same class collide rather than silently overwriting.
+    * ``FanOutSink(named=(("collect", sink_a), ("bench", sink_b)))`` gives
+      every child an explicit stable name; ``on_run_end`` returns
+      ``{name: summary_dict}`` and duplicate names fail at construction.
 
     ``drain_terminations`` merges the children that expose the terminal
     capability.  The method is always present, so its presence alone does not
     mean the composite has a pending terminal.
     """
 
-    def __init__(self, *sinks):
-        self.sinks = list(sinks)
+    def __init__(self, *sinks, named: Iterable[tuple[str, object]] | None = None):
+        if named is not None:
+            if sinks:
+                raise TypeError(
+                    "FanOutSink accepts either positional sinks or named=(...) "
+                    "children, not both"
+                )
+            children: list = []
+            names: list[str] = []
+            for entry in named:
+                try:
+                    name, sink = entry
+                except (TypeError, ValueError) as err:
+                    raise TypeError(
+                        "FanOutSink(named=...) entries must be (name, sink) pairs"
+                    ) from err
+                if not isinstance(name, str) or not name:
+                    raise ValueError(
+                        f"FanOutSink child names must be non-empty strings, got {name!r}"
+                    )
+                if name in names:
+                    raise ValueError(f"FanOutSink: duplicate child name {name!r}")
+                names.append(name)
+                children.append(sink)
+            self.sinks = children
+            self._names: tuple[str, ...] | None = tuple(names)
+        else:
+            self.sinks = list(sinks)
+            self._names = None
+
+    def _source(self, index: int, sink: object) -> str:
+        """A stable diagnostic label for one child (declared name or class)."""
+        label = type(sink).__name__ if self._names is None else self._names[index]
+        return f"child {index} ({label})"
 
     def on_step(self, t, bundle) -> None:
         for sink in self.sinks:
@@ -53,8 +88,8 @@ class FanOutSink:
         summaries: dict = {}
         sources: dict[str, str] = {}
         for index, sink in enumerate(self.sinks):
-            name = type(sink).__name__
-            source = f"child {index} ({name})"
+            name = type(sink).__name__ if self._names is None else self._names[index]
+            source = self._source(index, sink)
             if name in summaries:
                 raise ValueError(
                     f"FanOutSink.on_run_end: duplicate summary key {name!r} from "
@@ -73,7 +108,7 @@ class FanOutSink:
             if not callable(fn):
                 continue
             drained = fn()
-            source = f"child {index} ({type(sink).__name__})"
+            source = self._source(index, sink)
             if not isinstance(drained, Mapping):
                 raise TypeError(
                     f"FanOutSink.drain_terminations: {source} returned "

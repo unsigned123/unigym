@@ -158,7 +158,7 @@ def test_build_spec_parses_a_top_level_sink_declaration() -> None:
     assert spec.custom_sink is not None
     assert spec.custom_sink.factory == "acme.sinks:make_sink"
     assert spec.custom_sink.options == {"target_episodes": 2}
-    assert spec.sinks == spec.mode == "benchmark"
+    assert spec.sinks is None
 
 
 def test_build_spec_keeps_no_custom_sink_paths_unchanged() -> None:
@@ -166,7 +166,8 @@ def test_build_spec_keeps_no_custom_sink_paths_unchanged() -> None:
     spec = build_spec(_cfg(mode="both"), _args())
 
     assert spec.custom_sink is None
-    assert spec.sinks == spec.mode == "both"
+    assert spec.sinks is None
+    assert spec.mode == "both"
 
 
 def test_run_api_accepts_a_sink_spec_string_or_callable() -> None:

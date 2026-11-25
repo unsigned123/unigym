@@ -18,9 +18,9 @@ from unigym.run.build import (
     _metrics_source_for,
     _sink_stop_when,
 )
-from unigym.run.sink import SinkSpec
+from unigym.run.sink import CollectSinkSpec, SinkSpec
 from unigym.runner.sinks import CollectSink, FanOutSink
-from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
+from unigym.runtime.actions import NamedAction, OrderedActionSpec, PolicyBinding
 from unigym.world import World
 from tests._support.fakes.external_sink import (
     MetricsFeedSink,
@@ -228,11 +228,14 @@ def _run(
     *,
     mode: str,
     sink: SinkSpec | None = None,
+    sinks: tuple[CollectSinkSpec | SinkSpec, ...] | None = None,
     benchmark: dict[str, object] | None = None,
 ) -> Run:
     runtime = discover([]) if mode != "collect" else None
     if benchmark is None:
         benchmark = {"tasks": [], "min_episodes": 1, "max_steps": 10}
+    # An explicit ``sinks=`` selection may not be combined with legacy mode.
+    selection_kwargs = {} if sinks is not None else {"mode": mode}
     return Run(
         world=World.base(mjcf=_floor_world(tmp_path)),
         robot=_profile(),
@@ -243,10 +246,11 @@ def _run(
         steps=1,
         inspect=True,
         sink=sink,
-        mode=mode,
+        sinks=sinks,
         benchmark=benchmark,
         pack_runtime=runtime,
         discover_runtime=False,
+        **selection_kwargs,
     )
 
 
@@ -387,5 +391,123 @@ def test_build_keeps_the_collect_sink_when_no_custom_sink_is_configured(
         assert isinstance(collect, CollectSink)
         assert not hasattr(collect, "env")
         assert instance.stop_when() is False
+    finally:
+        run.close()
+
+
+def test_build_explicit_collect_selection_builds_the_builtin_collect_sink(
+    tmp_path: Path,
+) -> None:
+    """``sinks=[CollectSinkSpec()]`` resolves through the build-owned collect."""
+    run = _run(tmp_path, mode="collect", sinks=(CollectSinkSpec(),))
+    try:
+        instance = run.build(inspect=True)
+        primary = _primary_sink(instance)
+        assert isinstance(primary, CollectSink)
+        assert not hasattr(primary, "env")
+        assert instance.stop_when() is False
+        assert getattr(instance.env, "run_identity", None) is not None
+    finally:
+        run.close()
+
+
+def test_build_explicit_custom_selection_uses_the_factory(tmp_path: Path) -> None:
+    contexts = []
+    custom_sink = StopPollingSink(True, label="custom")
+
+    def factory(ctx):
+        contexts.append(ctx)
+        return custom_sink
+
+    run = _run(
+        tmp_path,
+        mode="collect",
+        sinks=(SinkSpec(factory=factory, options={"target_episodes": 2}),),
+    )
+    try:
+        instance = run.build(inspect=True)
+        assert len(contexts) == 1
+        ctx = contexts[0]
+        assert ctx.options == {"target_episodes": 2}
+        assert ctx.run_identity is not None
+        assert ctx.run_identity is getattr(instance.env, "run_identity", None)
+        assert _primary_sink(instance) is custom_sink
+        assert instance.stop_when() is True
+    finally:
+        run.close()
+
+
+def _run_zero_actions(run: Run) -> dict:
+    """Run one tiny-arm rollout and return the sink summary dict."""
+
+    def zero_actions(_t: int) -> tuple[NamedAction, ...]:
+        return (NamedAction.zeros(1, "tiny", JOINTS, "position"),)
+
+    try:
+        instance = run.build(inspect=True)
+        runner = run.runner("external", action_fn=zero_actions)
+        return runner.run(stop_when=instance.stop_when)
+    finally:
+        run.close()
+
+
+def _find_collect_summary(summary: dict) -> dict | None:
+    """Locate the nested CollectSink summary inside the outer sink chain."""
+    child = summary.get("CollectSink")
+    if isinstance(child, dict):
+        return child
+    for value in summary.values():
+        if isinstance(value, dict):
+            found = _find_collect_summary(value)
+            if found is not None:
+                return found
+    return None
+
+
+def _stable_summary(summary: dict) -> dict:
+    """Drop the wall-clock fields that differ between two identical rollouts."""
+    unstable = {"created", "wall_time_s", "steps_per_sec", "env_steps_per_sec"}
+    return {key: value for key, value in summary.items() if key not in unstable}
+
+
+def test_default_collect_summary_matches_an_explicit_collect_selection(
+    tmp_path: Path,
+) -> None:
+    """The legacy default and ``sinks=[CollectSinkSpec()]`` are observable-equal."""
+    default_collect = _find_collect_summary(_run_zero_actions(_run(tmp_path, mode="collect")))
+    selected_collect = _find_collect_summary(
+        _run_zero_actions(_run(tmp_path, mode="collect", sinks=(CollectSinkSpec(),)))
+    )
+
+    assert default_collect is not None
+    assert selected_collect is not None
+    assert _stable_summary(selected_collect) == _stable_summary(default_collect)
+
+
+def test_build_explicit_multi_selection_fans_out_in_declaration_order(
+    tmp_path: Path,
+) -> None:
+    custom_sink = StopPollingSink(False, label="custom")
+
+    def factory(ctx):
+        del ctx
+        return custom_sink
+
+    run = _run(
+        tmp_path,
+        mode="collect",
+        sinks=(
+            CollectSinkSpec(),
+            SinkSpec(factory=factory, name="bench"),
+        ),
+    )
+    try:
+        instance = run.build(inspect=True)
+        primary = _primary_sink(instance)
+        assert isinstance(primary, FanOutSink)
+        assert len(primary.sinks) == 2
+        assert isinstance(primary.sinks[0], CollectSink)
+        assert primary.sinks[1] is custom_sink
+        assert primary.on_run_end().keys() == {"collect", "bench"}
     finally:
         run.close()

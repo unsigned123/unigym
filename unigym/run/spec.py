@@ -37,7 +37,12 @@ from unigym.backends.registry import (
 )
 from unigym.core.paths import expand_placeholders
 from unigym.env.obs import ObservationConfig, ObsConfigError
-from unigym.run.sink import SinkSpec
+from unigym.run.sink import (
+    CollectSinkSpec,
+    SinkDeclaration,
+    SinkSpec,
+    validate_sink_declarations,
+)
 from unigym.runtime.actions import (
     OrderedActionSpec,
     PolicyBinding,
@@ -142,7 +147,9 @@ class RunSpec:
     termination_mode: str
     runner: dict[str, JsonValue]
     output: OutputSpec
-    sinks: str
+    #: the explicit ``sinks:`` selection (ordered).  ``None`` means the key was
+    #: absent, so the legacy ``mode`` selection still owns sink composition.
+    sinks: tuple[SinkDeclaration, ...] | None
     overrides: tuple[dict[str, JsonValue], ...]
     label: str | None
     direct: bool
@@ -505,7 +512,7 @@ def requires_pack_runtime(
     if "scene_preset" in cfg and _scene_preset_needs_runtime(cfg.get("scene_preset")):
         return True
     run_mode = cfg.get("mode", "collect") if mode is None else mode
-    declared_sink = custom_sink or cfg.get("sink") is not None
+    declared_sink = custom_sink or cfg.get("sink") is not None or cfg.get("sinks") is not None
     if run_mode in ("benchmark", "both") and not declared_sink:
         return True
     adapter_name = _declared_adapter_name(cfg)
@@ -751,6 +758,89 @@ def _parse_sink_section(sink_value: object, config_path: str) -> SinkSpec | None
         raise ConfigError(f"{config_path}: {exc}") from exc
 
 
+def _parse_sink_entry(entry: object, index: int, config_path: str) -> SinkDeclaration:
+    """Normalize one ``sinks[i]`` entry into inert declaration data.
+
+    The shape is closed: exactly one of ``kind: collect`` (core built-in, no
+    options) or ``factory: module:callable`` (custom).  ``name`` is optional
+    per entry; :func:`validate_sink_declarations` enforces it for multi-sink
+    runs.
+    """
+    from unigym.errors import ConfigError
+
+    where = f"{config_path}: sinks[{index}]"
+    if not is_json_object(entry):
+        raise ConfigError(f"{where} must be a mapping")
+    for key in entry:
+        if not isinstance(key, str):
+            raise ConfigError(f"{where} keys must be strings, got {key!r}")
+
+    has_kind = "kind" in entry
+    has_factory = "factory" in entry
+    if has_kind and has_factory:
+        raise ConfigError(
+            f"{where} declares both 'kind' and 'factory'; use exactly one "
+            "(kind: collect or factory: module:callable)"
+        )
+    if not has_kind and not has_factory:
+        raise ConfigError(f"{where} needs one of 'kind: collect' or 'factory: module:callable'")
+
+    name_value = entry.get("name")
+    if name_value is not None and (not isinstance(name_value, str) or not name_value):
+        raise ConfigError(f"{where}.name must be a non-empty string")
+
+    if has_kind:
+        unknown = sorted(key for key in entry if key not in ("kind", "name"))
+        if unknown:
+            raise ConfigError(
+                f"{where}.{unknown[0]} is not supported (allowed keys with kind: kind, name)"
+            )
+        kind = entry["kind"]
+        if kind != "collect":
+            raise ConfigError(
+                f"{where}.kind={kind!r} is not supported (the only core built-in "
+                "kind is 'collect')"
+            )
+        return CollectSinkSpec(kind="collect", name="collect" if name_value is None else name_value)
+
+    unknown = sorted(key for key in entry if key not in ("factory", "options", "name"))
+    if unknown:
+        raise ConfigError(
+            f"{where}.{unknown[0]} is not supported "
+            "(allowed for a custom sink: factory, options, name)"
+        )
+    factory = entry["factory"]
+    if not isinstance(factory, str):
+        raise ConfigError(
+            f"{where}.factory={factory!r} must be a non-empty 'module:callable' string"
+        )
+    options = entry.get("options", {})
+    if not is_json_object(options):
+        raise ConfigError(f"{where}.options must be a string-keyed mapping")
+    try:
+        return SinkSpec(factory=factory, options=options, name=name_value)
+    except ConfigError as exc:
+        raise ConfigError(f"{where}: {exc}") from exc
+
+
+def _parse_sinks_section(value: object, config_path: str) -> tuple[SinkDeclaration, ...]:
+    """Normalize the top-level ``sinks:`` list into ordered declarations."""
+    from unigym.errors import ConfigError
+
+    if not is_json_list(value):
+        raise ConfigError(
+            f"{config_path}: sinks must be a list of entries "
+            "(e.g. [{kind: collect}, {name: bench, factory: pkg.mod:make_sink}])"
+        )
+    if not value:
+        raise ConfigError(f"{config_path}: sinks must declare at least one entry")
+    declarations = tuple(
+        _parse_sink_entry(entry, index, config_path) for index, entry in enumerate(value)
+    )
+    validate_sink_declarations(declarations, config_path)
+    return declarations
+
+
 def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
@@ -879,7 +969,18 @@ def build_spec(
             f"{args.config}: benchmark.sink is not supported; use the top-level "
             "sink: section (a custom sink is mode-independent)"
         )
+    if "sink" in cfg and "sinks" in cfg:
+        raise ConfigError(
+            f"{args.config}: declare either 'sink:' (one custom sink shorthand) or "
+            "'sinks:' (an explicit list), not both"
+        )
+    if "sinks" in cfg and "mode" in cfg:
+        raise ConfigError(
+            f"{args.config}: 'mode:' and 'sinks:' cannot be combined; declare the "
+            "sink selection with 'sinks:' only (mode is the legacy selector)"
+        )
     custom_sink = _parse_sink_section(cfg.get("sink"), args.config)
+    sinks = _parse_sinks_section(cfg.get("sinks"), args.config) if "sinks" in cfg else None
     if "filters" in cfg:
         raise ConfigError(
             f"{args.config}: top-level `filters:` is no longer supported; "
@@ -989,7 +1090,7 @@ def build_spec(
             output_root=output_root,
             artifacts=not bool(getattr(args, "no_artifacts", False)),
         ),
-        sinks=mode,
+        sinks=sinks,
         overrides=tuple(override_diffs),
         label=getattr(args, "label", None),
         direct=bool(getattr(args, "direct", False)),

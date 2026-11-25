@@ -106,3 +106,19 @@ def test_sink_context_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         context.values = None  # type: ignore[misc]
+
+
+def test_collect_sink_spec_is_inert_immutable_data() -> None:
+    """The built-in collect selection carries no options or live resources."""
+    from dataclasses import fields
+
+    from unigym.run import CollectSinkSpec
+
+    declaration = CollectSinkSpec()
+
+    assert (declaration.kind, declaration.name) == ("collect", "collect")
+    assert [field.name for field in fields(CollectSinkSpec)] == ["kind", "name"]
+    with pytest.raises(FrozenInstanceError):
+        declaration.name = "other"  # type: ignore[misc]
+    for live_field in ("options", "factory", "env", "writer", "logger"):
+        assert not hasattr(declaration, live_field)

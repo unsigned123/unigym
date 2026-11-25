@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .sink import SinkContext, SinkFactory, SinkSpec
+from .sink import CollectSinkSpec, SinkContext, SinkDeclaration, SinkFactory, SinkSpec
 from .spec import RunSpec, build_spec
 
 if TYPE_CHECKING:
@@ -17,9 +17,11 @@ if TYPE_CHECKING:
     from .instance import RunInstance
 
 __all__ = [
+    "CollectSinkSpec",
     "RunSpec",
     "RunInstance",
     "SinkContext",
+    "SinkDeclaration",
     "SinkFactory",
     "SinkSpec",
     "build_spec",

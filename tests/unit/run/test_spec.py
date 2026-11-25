@@ -45,7 +45,8 @@ def test_build_spec_normalizes_minimal_run_config():
     spec = build_spec(_cfg(), _args())
 
     assert spec.backend == "isaaclab2"
-    assert spec.mode == spec.sinks == "collect"
+    assert spec.mode == "collect"
+    assert spec.sinks is None
     assert spec.custom_sink is None
     assert (spec.num_envs, spec.total_steps, spec.seed) == (2, 100, 7)
     assert [articulation.name for articulation in spec.articulations] == ["arm"]

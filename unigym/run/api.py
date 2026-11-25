@@ -61,7 +61,12 @@ from unigym._typing import (
 from unigym.backends.registry import Trait, backend_info
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from unigym.camera import CameraSet
-from unigym.run.sink import SinkSpec
+from unigym.run.sink import (
+    CollectSinkSpec,
+    SinkDeclaration,
+    SinkSpec,
+    validate_sink_declarations,
+)
 from unigym.run.spec import RunSpec, build_spec, require_backend, require_backend_name
 
 if TYPE_CHECKING:
@@ -108,6 +113,7 @@ class _FromConfigKwargs(TypedDict, total=False):
     pack_runtime: PackRuntime | None
     discover_runtime: bool
     sink: SinkInput
+    sinks: Sequence[CollectSinkSpec | SinkSpec] | None
 
 
 def _coerce_sink_spec(sink: SinkInput) -> SinkSpec | None:
@@ -125,6 +131,37 @@ def _coerce_sink_spec(sink: SinkInput) -> SinkSpec | None:
         "Run(sink=...) accepts a SinkSpec, a 'module:callable' string or a "
         f"callable factory, got {type(sink).__name__}"
     )
+
+
+def _coerce_sink_specs(
+    sinks: Sequence[CollectSinkSpec | SinkSpec] | None,
+) -> tuple[SinkDeclaration, ...] | None:
+    """Normalize the explicit ``Run(sinks=...)`` sequence to inert declarations.
+
+    Only declaration data is accepted: a live sink, a live factory callable or
+    a bare string belongs to the ``sink=`` single shorthand.  Names and the
+    multi-entry uniqueness rule are checked at the same boundary as config.
+    """
+    from unigym.errors import ConfigError
+
+    if sinks is None:
+        return None
+    if isinstance(sinks, (str, bytes)) or not isinstance(sinks, Sequence):
+        raise TypeError(
+            "Run(sinks=...) accepts a sequence of CollectSinkSpec / SinkSpec, "
+            f"got {type(sinks).__name__}"
+        )
+    declarations = tuple(sinks)
+    if not declarations:
+        raise ConfigError("Run(sinks=...) requires at least one sink declaration")
+    for index, declaration in enumerate(declarations):
+        if not isinstance(declaration, (CollectSinkSpec, SinkSpec)):
+            raise TypeError(
+                f"Run(sinks=...)[{index}] must be a CollectSinkSpec or SinkSpec, "
+                f"got {type(declaration).__name__}"
+            )
+    validate_sink_declarations(declarations, "Run(sinks=...)")
+    return declarations
 
 
 def _task_name(task: dict[str, JsonValue]) -> str | None:
@@ -735,6 +772,11 @@ class Run:
             :class:`~unigym.run.SinkSpec`, a ``module:callable`` factory path,
             or a callable factory.  It is recorded as construction data; the
             factory is not imported or invoked by this facade.
+        sinks: An explicit ordered sink selection: a sequence of
+            :class:`~unigym.run.CollectSinkSpec` (core built-in ``collect``)
+            and/or :class:`~unigym.run.SinkSpec` (custom factory) declarations.
+            It overrides any ``sink:`` / ``sinks:`` section in *cfg*.  It is
+            mutually exclusive with ``sink=``.
         **overrides: Extra top-level config keys (existing schema only).
     """
 
@@ -768,12 +810,28 @@ class Run:
         pack_runtime: PackRuntime | None = None,
         discover_runtime: bool = True,
         sink: SinkInput = None,
+        sinks: Sequence[CollectSinkSpec | SinkSpec] | None = None,
         _config_path: str | None = None,
         **overrides: JsonValue,
     ) -> None:
         if cfg is not None and not isinstance(cfg, dict):
             raise TypeError(f"Run() config must be a mapping, got {type(cfg).__name__}")
+        if sink is not None and sinks is not None:
+            from unigym.errors import ConfigError
+
+            raise ConfigError(
+                "Run(...) accepts either sink= (one custom sink shorthand) or "
+                "sinks= (an explicit list), not both"
+            )
+        if sinks is not None and ("mode" in overrides or (isinstance(cfg, dict) and "mode" in cfg)):
+            from unigym.errors import ConfigError
+
+            raise ConfigError(
+                "Run(...) cannot combine mode with sinks=; declare the sink "
+                "selection with sinks= only (mode is the legacy selector)"
+            )
         self._sink_spec = _coerce_sink_spec(sink)
+        self._sink_specs = _coerce_sink_specs(sinks)
         if cfg is None and world is None and world_base is None:
             from unigym.errors import ConfigError
 
@@ -989,6 +1047,7 @@ class Run:
         no_artifacts: bool = False,
         inspect: bool = False,
         sink: SinkInput = None,
+        sinks: Sequence[CollectSinkSpec | SinkSpec] | None = None,
     ) -> Run:
         """Same as ``Run(**kwargs)``; a world/base and an explicit robot are required."""
         return cls(
@@ -1016,6 +1075,7 @@ class Run:
             no_artifacts=no_artifacts,
             inspect=inspect,
             sink=sink,
+            sinks=sinks,
         )
 
     @classmethod
@@ -1038,6 +1098,7 @@ class Run:
         pack_runtime: PackRuntime | None = None,
         discover_runtime: bool = True,
         sink: SinkInput = None,
+        sinks: Sequence[CollectSinkSpec | SinkSpec] | None = None,
     ) -> Run:
         """Load a run yaml and return a lazy :class:`Run` for it.
 
@@ -1064,6 +1125,10 @@ class Run:
             sink: An optional custom sink declaration (``SinkSpec``,
                 ``module:callable`` path or callable factory); it overrides a
                 ``sink:`` section already present in the loaded config.
+            sinks: An explicit ordered sink selection (``CollectSinkSpec`` /
+                ``SinkSpec`` declarations); it overrides a ``sink:`` or
+                ``sinks:`` section already present in the loaded config and is
+                mutually exclusive with ``sink=``.
 
         Returns:
             A lazy ``Run`` whose spec is built on first access.
@@ -1091,6 +1156,7 @@ class Run:
             pack_runtime=pack_runtime,
             discover_runtime=discover_runtime,
             sink=sink,
+            sinks=sinks,
             _config_path=os.path.abspath(os.fspath(path)),
         )
 
@@ -1195,8 +1261,8 @@ class Run:
         runtime: PackRuntime | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
-        custom_sink = self._sink_spec is not None
-        needs_runtime = requires_pack_runtime(cfg, custom_sink=custom_sink)
+        declared_sink = self._sink_spec is not None or self._sink_specs is not None
+        needs_runtime = requires_pack_runtime(cfg, custom_sink=declared_sink)
 
         if runtime is None and needs_runtime:
             if not self._discover_runtime:
@@ -1235,8 +1301,10 @@ class Run:
                 spec = replace(spec, terrain=terrain)
             if static_shapes:
                 spec = replace(spec, static_shapes=static_shapes)
-        if self._sink_spec is not None:
-            spec = replace(spec, custom_sink=self._sink_spec)
+        if self._sink_specs is not None:
+            spec = replace(spec, sinks=self._sink_specs, custom_sink=None)
+        elif self._sink_spec is not None:
+            spec = replace(spec, custom_sink=self._sink_spec, sinks=None)
         return spec
 
     def _prepare_inspect(self) -> None:

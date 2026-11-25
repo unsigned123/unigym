@@ -1,8 +1,8 @@
 """Sinks: consumers of the SyncRunner callback stream.
 
-The benchmark sink is ``unigym.runner.evaluation.session.EvaluationSession``;
-it lives with its buffer/evaluator rather than under this package and is not
-re-exported here.  These exports stay the collect/fan-out composition helpers.
+These exports are the core collect/fan-out composition helpers.  A custom
+sink selected through ``sinks:`` is built by its own factory, not re-exported
+here.
 """
 
 from __future__ import annotations
