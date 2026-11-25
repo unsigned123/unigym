@@ -48,7 +48,6 @@ ACTION_SPEC = OrderedActionSpec.from_mapping(
     ]
 )
 POLICIES = (PolicyBinding.from_mapping({"adapter": "manual", "groups": [["tiny", "tiny"]]}),)
-EPISODE_LENGTH_S = 0.04
 STEPS = 20
 
 
@@ -190,9 +189,11 @@ def test_collect_custom_sink_api_runs_the_full_lifecycle(tmp_path: Path) -> None
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=STEPS,
-        episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
-        sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
+        sink=SinkSpec(
+            factory=make_external_sink,
+            options={"target_episodes": 2, "terminal_after_steps": 2},
+        ),
     )
     try:
         instance = run.build(inspect=True)
@@ -223,7 +224,6 @@ def test_collect_custom_sink_config_factory_runs_the_full_lifecycle(
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": EPISODE_LENGTH_S,
             "decimation": 4,
             "sim_dt": 0.005,
         },
@@ -245,7 +245,7 @@ def test_collect_custom_sink_config_factory_runs_the_full_lifecycle(
         "observations": {"robot": ["tiny"]},
         "sink": {
             "factory": "tests._support.fakes.external_sink:make_external_sink",
-            "options": {"target_episodes": 2},
+            "options": {"target_episodes": 2, "terminal_after_steps": 2},
         },
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -281,7 +281,6 @@ def test_custom_sink_terminal_ends_env_and_resets(tmp_path: Path) -> None:
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=STEPS,
-        episode_length_s=10.0,
         inspect=True,
         sink=SinkSpec(
             factory=make_terminal_request_sink,
@@ -324,7 +323,6 @@ def test_external_runner_manual_terminate_and_reset(tmp_path: Path) -> None:
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=STEPS,
-        episode_length_s=10.0,
         inspect=True,
         sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 5}),
     )
@@ -366,9 +364,11 @@ def test_custom_sink_builds_without_a_pack_runtime(tmp_path: Path) -> None:
         action_spec=ACTION_SPEC,
         policies=POLICIES,
         steps=STEPS,
-        episode_length_s=EPISODE_LENGTH_S,
         inspect=True,
-        sink=SinkSpec(factory=make_external_sink, options={"target_episodes": 2}),
+        sink=SinkSpec(
+            factory=make_external_sink,
+            options={"target_episodes": 2, "terminal_after_steps": 2},
+        ),
         pack_runtime=None,
         discover_runtime=False,
     )

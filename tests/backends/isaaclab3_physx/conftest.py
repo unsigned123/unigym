@@ -136,7 +136,6 @@ def _build_env(
         adapter=ManualAdapter(),
         terrain_cfg=terrain_cfg,
         num_envs=num_envs,
-        episode_length_s=100.0,
         decimation=4,
         sim_dt=0.005,
         events_cfg=events_cfg,

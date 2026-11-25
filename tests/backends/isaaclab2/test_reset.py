@@ -20,7 +20,7 @@ def _zero_action(env):
 
 
 def test_reset_envs_resets_only_the_requested_row(two_env):
-    """A single-env reset returns that id and restarts only its episode clock."""
+    """A single-env reset returns that id and restarts only its step counter."""
     first = two_env.step(_zero_action(two_env))
     first_time = first.record["time_in_episode"].tolist()
     first_episode = first.record["episode_id"].tolist()
@@ -37,7 +37,7 @@ def test_reset_envs_resets_only_the_requested_row(two_env):
 
 
 def test_reset_envs_with_no_ids_is_a_noop(two_env):
-    """An empty reset list returns no ids and leaves both episode clocks advancing."""
+    """An empty reset list returns no ids and leaves both step counters advancing."""
     first = two_env.step(_zero_action(two_env))
     first_time = first.record["time_in_episode"].tolist()
     first_episode = first.record["episode_id"].tolist()

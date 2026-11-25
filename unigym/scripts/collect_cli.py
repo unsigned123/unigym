@@ -19,7 +19,7 @@ built-in collect sink.
 
 Rollout order per policy step (engine):
     act -> postprocess -> env.step -> sampler.update -> compute_obs ->
-    termination check -> sink.on_step -> [episode clock/reset policy] ->
+    termination check -> sink.on_step -> [backend due/reset policy] ->
     sink.on_episode_end -> env.reset_envs -> adapter.on_reset ->
     sampler.reset -> sink.on_step_end
 unless the adapter declares otherwise (see the adapter contract for the
@@ -67,14 +67,6 @@ parser.add_argument(
     help="override env.num_envs",
 )
 parser.add_argument("--steps", type=int, default=None, help="override collect.steps")
-parser.add_argument(
-    "--episode_length_s",
-    "--episode-length-s",
-    dest="episode_length_s",
-    type=float,
-    default=None,
-    help="override env.episode_length_s (long-single-episode video runs)",
-)
 parser.add_argument(
     "--output_dir",
     "--output-dir",

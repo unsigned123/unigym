@@ -67,7 +67,6 @@ def test_to_cfg_emits_the_base_config_keys(tmp_path: Path) -> None:
     assert cfg["env"] == {
         "backend": "mujoco",
         "num_envs": 1,
-        "episode_length_s": 20.0,
         "decimation": 4,
         "sim_dt": 0.005,
         "params": {},

@@ -1,11 +1,11 @@
 """IsaaclabEnv: ManagerBasedEnv wrapper for policy rollout data collection.
 
 No reward/termination (pure kinematic/dynamic logging). Episode handling is
-**per-env**: each env carries its own episode clock and (possibly randomized)
-duration; ``step()`` returns ``extra["reset_env_ids"]`` listing envs whose
-episode just ended. The caller records the final step first (data invariant:
-record-before-reset) and then calls :meth:`reset_envs with those ids, which
-replays the parent-class reset chain for the subset:
+**per-env**: core owns no clock, so ``step()`` reports no due row; an episode
+ends only through an explicit runner terminate or a sink terminal. The caller
+records the final step first (data invariant: record-before-reset) and then
+calls :meth:`reset_envs with the ended ids, which replays the parent-class
+reset chain for the subset:
 ``_reset_idx`` (scene teleport + mode="reset" DR events + manager resets)
 -> ``write_data_to_sim`` -> ``sim.forward`` -> bookkeeping + obs refresh.
 
@@ -44,7 +44,6 @@ from unigym.backends.isaaclab2.robots import articulation_cfg
 from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
 from unigym.core import quat
 
-from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.native import NativeHandle
 from .init_pose import build_init_pose_cfg, sample_init_pose
 from .terrains.native import NativeTerrainPreset
@@ -457,7 +456,6 @@ class _IsaaclabObsCfg:
 @configclass
 class _IsaaclabEnvCfg(ManagerBasedEnvCfg):
     decimation = 4
-    episode_length_s = 10000.0
     scene: _IsaaclabSceneCfg = _IsaaclabSceneCfg()
     actions: _IsaaclabActionsCfg = _IsaaclabActionsCfg()
     observations: _IsaaclabObsCfg = _IsaaclabObsCfg()
@@ -481,7 +479,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         adapter,
         terrain_cfg,
         num_envs: int,
-        episode_length_s: float | None,
         env_spacing: float = 4.0,
         decimation: int = 4,
         sim_dt: float = 0.005,
@@ -517,9 +514,6 @@ class IsaaclabEnv(ManagerBasedEnv):
                 ``wants_reset_render`` opt-in only).
             num_envs: parallel env count (>1 requires the multi_env
                 capability; gated in build_env_backend).
-            episode_length_s: sampled episode duration (s; scalar or
-                ``[lo, hi]`` pair parsed by ``parse_episode_length``), or
-                ``None`` to disable the core clock in external mode.
             env_spacing: scene grid spacing between cloned envs (m).
             decimation: sim steps per policy step (policy dt = decimation *
                 ``sim_dt``).
@@ -612,9 +606,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._query_handle: Query | None = None
         self._asset_scene: ComposedAssetScene | None = None
         self.artifact_paths: dict[str, str] = {}
-        self._dur_lo, self._dur_hi = (
-            (None, None) if episode_length_s is None else parse_episode_length(episode_length_s)
-        )
         self._init_pose = build_init_pose_cfg(init_pose)
         self.observations = observations
         self._articulation_specs = tuple(articulations or ())
@@ -628,10 +619,8 @@ class IsaaclabEnv(ManagerBasedEnv):
 
         cfg = _IsaaclabEnvCfg()
         cfg.decimation = decimation
-        # internal resets are driven by our own counter.  A disabled core clock
-        # still needs a finite value for IsaacLab's own config; the wrapper
-        # forces the due mask empty instead of passing infinity.
-        cfg.episode_length_s = 1e9 if self._dur_hi is None else max(self._dur_hi, 1e6)
+        # ManagerBasedEnv (non-RL) has no episode-horizon schedule; this
+        # wrapper never derives a due mask from the engine.
         cfg.sim.device = device
         cfg.sim.dt = sim_dt
         cfg.sim.render_interval = decimation
@@ -832,13 +821,10 @@ class IsaaclabEnv(ManagerBasedEnv):
         self._t = 0
 
         # ---- episode bookkeeping (per-env) ----
+        # Core owns no clock: these are honest per-env counters, not a due
+        # source.  ``step()`` reports no backend-owned due.
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur: torch.Tensor | None = (
-            None
-            if self._dur_lo is None
-            else sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
-        )
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -875,11 +861,6 @@ class IsaaclabEnv(ManagerBasedEnv):
 
         self._episode_id = torch.zeros(num_envs, dtype=torch.int64, device=self.device)
         self._time_in_episode = torch.zeros(num_envs, device=self.device)
-        self._episode_dur = (
-            None
-            if self._dur_lo is None
-            else sample_durations(self._dur_lo, self._dur_hi, num_envs, self.device)
-        )
 
         adapter.bind_env(self)
         ids = torch.arange(num_envs, device=self.device)
@@ -1238,24 +1219,18 @@ class IsaaclabEnv(ManagerBasedEnv):
             cmd: current command tensor -> the command slot.
 
         Returns:
-            an ``EnvStep``. ``step.reset_env_ids`` lists the
-            envs whose episode clock reached its duration (caller records this
-            step first, then calls :meth:`reset_envs with the same ids).
-            ``extra["should_reset"]`` (bool) part of the stable extra face.
+            an ``EnvStep``. ``step.reset_env_ids`` is always empty: core owns
+            no episode clock, so an episode ends only through an explicit
+            terminate or a sink terminal. ``extra["should_reset"]`` (bool) is
+            part of the stable extra face.
         """
         # also applies mode="interval" DR events (pushes)
         self._raise_if_closed()
         super().step(self._route_named_actions(actions))
         self._time_in_episode += self.step_dt
         self._refresh_obs(raw_action, cmd)
-        if self._episode_dur is None:
-            # external termination mode: the task owns every reset decision.
-            reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
-            should_reset = False
-        else:
-            due = self._time_in_episode >= self._episode_dur
-            reset_ids = torch.nonzero(due).squeeze(-1).to(torch.int64)
-            should_reset = bool(due.any())
+        reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
+        should_reset = False
         if self.camera_manager is not None:
             # step-tail posing: the render inside the NEXT step's sim.step
             # captures this pose (the classic re-pose semantics,
@@ -1529,10 +1504,6 @@ class IsaaclabEnv(ManagerBasedEnv):
         self.sim.forward()
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
-        if self._episode_dur is not None:
-            self._episode_dur[env_ids] = sample_durations(
-                self._dur_lo, self._dur_hi, env_ids.numel(), self.device
-            )
         if self.camera_manager is not None:
             # re-pose body/chase rigs to the spawn state (the reference chain
             # called _sync_depth_camera_pose at this exact point)

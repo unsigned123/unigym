@@ -18,7 +18,7 @@ The pending-state rules are the facade contract:
   rows the runner resets (``None`` resets every row).  A reset never advances
   the policy tick.
 * ``step`` never resets a row: the producing ``StepResult`` reports the
-  episode-clock due rows and the termination mask, and the caller decides
+  backend-owned due rows and the termination mask, and the caller decides
   which rows to reset next.
 * an engine exception is fatal for the live simulation: the pending table is
   cleared, the simulation is marked faulted and the exception propagates.
@@ -742,7 +742,7 @@ class Simulation:
         ``StepResult`` never leaves a partial adoption.
 
         A step performs no reset, so ``reset_env_ids`` is empty and
-        ``reset_due_env_ids`` carries the producing tick's episode-clock due
+        ``reset_due_env_ids`` carries the producing tick's backend-owned due
         rows: they are what the caller should reset next, not what this tick
         reset.
         """

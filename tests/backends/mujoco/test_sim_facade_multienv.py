@@ -55,7 +55,6 @@ def _build_sim(
     tiny_mjcf: Path,
     *,
     num_envs: int,
-    episode_length_s: float = 20.0,
 ) -> tuple[Simulation, ArticulationHandle]:
     """One real multi-env facade build over the shared tiny MJCF asset."""
     pack_set, ref = _facade_pack()
@@ -64,7 +63,6 @@ def _build_sim(
         dt=0.02,
         physics_dt=0.005,
         num_envs=num_envs,
-        episode_length_s=episode_length_s,
         pack_set=pack_set,
     )
     builder.world = World.base(mjcf=str(tiny_mjcf))
@@ -153,11 +151,11 @@ def test_reset_subset_restores_only_the_named_row(tiny_mjcf: Path) -> None:
         sim.close()
 
 
-def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
+def test_step_never_reports_due_and_explicit_reset_clears_the_counter(
     tiny_mjcf: Path,
 ) -> None:
-    """episode_length_s=0.04 makes both rows due on tick 2, reported not applied."""
-    sim, handle = _build_sim(tiny_mjcf, num_envs=2, episode_length_s=0.04)
+    """No core clock: stepping reports no due row; an explicit reset clears it."""
+    sim, handle = _build_sim(tiny_mjcf, num_envs=2)
     binding = handle.action_groups["body"]
     try:
         sim.act(binding, _targets(2))
@@ -171,22 +169,20 @@ def test_due_tick_reports_without_resetting_then_explicit_reset_clears(
         sim.act(binding, _targets(2))
         second = sim.step()
 
-        assert second.reset_due_env_ids.tolist() == [0, 1]
+        assert second.reset_due_env_ids.tolist() == []
         assert second.reset_env_ids.tolist() == []
-        due_clock = second.record["time_in_episode"]
-        assert isinstance(due_clock, torch.Tensor)
-        assert torch.allclose(
-            due_clock, torch.full((2,), 0.04)
-        ), "a due row must keep stepping until the caller resets it"
+        stepped = second.record["time_in_episode"]
+        assert isinstance(stepped, torch.Tensor)
+        assert torch.allclose(stepped, torch.full((2,), 0.04))
 
         cleared = sim.reset(env_ids=[0, 1])
 
         assert cleared.reset_env_ids.tolist() == [0, 1]
         assert cleared.reset_due_env_ids.tolist() == []
         assert cleared.terminated is None
-        cleared_clock = cleared.record["time_in_episode"]
-        assert isinstance(cleared_clock, torch.Tensor)
-        assert cleared_clock.tolist() == [0.0, 0.0]
+        cleared_counter = cleared.record["time_in_episode"]
+        assert isinstance(cleared_counter, torch.Tensor)
+        assert cleared_counter.tolist() == [0.0, 0.0]
     finally:
         sim.close()
 

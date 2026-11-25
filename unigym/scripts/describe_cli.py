@@ -32,7 +32,6 @@ _TABLES = ("bodies", "joints", "geoms", "sites", "cameras", "actuators", "materi
 _SPEC_DEFAULTS = dict(
     num_envs=None,
     steps=None,
-    episode_length_s=None,
     no_artifacts=True,
     ckpt_dir=None,
     instruction=None,

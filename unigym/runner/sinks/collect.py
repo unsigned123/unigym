@@ -206,9 +206,6 @@ class CollectSink:
         policy_dt,
         out_dir,
         seed,
-        episode_length_s,
-        dur_lo,
-        dur_hi,
         command_dim,
         action_groups: Sequence[OrderedActionGroup] | None = None,
     ):
@@ -234,8 +231,6 @@ class CollectSink:
         self.policy_dt = policy_dt
         self.out_dir = out_dir
         self.seed = seed
-        self.episode_length_s = episode_length_s
-        self.dur_lo, self.dur_hi = dur_lo, dur_hi
         self.command_dim = command_dim
         # playback: the spec+prop-derived action contract, fixed at
         # construction.  ``None`` keeps the direct-construction fallback for
@@ -489,8 +484,6 @@ class CollectSink:
             "num_episodes": self.n_episodes,
             "seed": self.seed,
             "policy_dt": self.policy_dt,
-            "episode_length_s": self.episode_length_s,
-            "episode_length_range": (None if self.dur_lo is None else [self.dur_lo, self.dur_hi]),
             # per-articulation neutral facts (v5; no flat primary order)
             "articulations": {
                 name: dict(facts) for name, facts in self._articulation_facts.items()

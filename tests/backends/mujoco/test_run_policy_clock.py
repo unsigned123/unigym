@@ -56,7 +56,6 @@ def _clock_cfg(mjcf: Path, control_dt: float | None) -> dict:
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 1.0,
             "decimation": 4,
             "sim_dt": 0.005,
         },

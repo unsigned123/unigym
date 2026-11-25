@@ -13,7 +13,7 @@ declared env count, never inferred from one field, so a state with a wrong row
 count fails as an :class:`~unigym.sim.errors.ObservationError` before any
 field is returned.  The two id masks are distinct: ``reset_env_ids`` names the
 rows the producing operation reset, ``reset_due_env_ids`` names the
-episode-clock due rows at the producing tick.
+backend-owned due rows at the producing tick.
 
 Typed camera and command/prev_action values come from the observation
 snapshot; only tensors are accepted for those projected slots.
@@ -56,7 +56,7 @@ class Observation:
             ``cam/<name>/rgb`` or ``cam/<name>/depth`` key is in the cache).
         contacts: ``contact/`` record tensors carried by the live state.
         reset_env_ids: the env rows this operation reset (empty after a step).
-        reset_due_env_ids: the episode-clock due rows at the producing tick
+        reset_due_env_ids: the backend-owned due rows at the producing tick
             (empty after a reset).
         terminated: the producing tick's termination mask, or ``None`` when
             the tick was a spawn/reset read.
@@ -323,7 +323,7 @@ def build_observation(
         handles: the declared articulation handles, in declaration order.
         cameras: the declared camera handles, in declaration order.
         reset_env_ids: the env rows this operation reset.
-        reset_due_env_ids: the episode-clock due rows at the producing tick.
+        reset_due_env_ids: the backend-owned due rows at the producing tick.
         terminated: the producing tick's termination mask, or ``None``.
 
     Raises:

@@ -377,18 +377,18 @@ def test_step_rejects_a_mapping_action_payload(tiny_env):
 
 
 @pytest.mark.parametrize("num_envs", [1, 2], ids=["single", "multi"])
-def test_null_clock_snapshot_and_restore_keep_the_clock_disabled(tiny_env_factory, num_envs):
-    """Snapshotting a null-clock env stores ``None`` and restores it without a crash."""
-    env = tiny_env_factory(num_envs=num_envs, episode_length_s=None)
+def test_snapshot_and_restore_without_a_clock_keep_stepping(tiny_env_factory, num_envs):
+    """Snapshotting carries no duration; restore keeps the step counter honest."""
+    env = tiny_env_factory(num_envs=num_envs)
     action = _action(env, [[0.0, 0.0]] * num_envs)
 
     snapshot = env.snapshot()
 
-    assert snapshot["extra"]["episode_dur"] is None
+    assert "episode_dur" not in snapshot["extra"]
     step = env.step(action)
     assert step.reset_env_ids.tolist() == []
     assert env.restore(snapshot) == 0
-    assert env.snapshot()["extra"]["episode_dur"] is None
+    assert "episode_dur" not in env.snapshot()["extra"]
     step = env.step(action)
     assert step.reset_env_ids.tolist() == []
     assert step.should_reset is False

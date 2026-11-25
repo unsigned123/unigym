@@ -63,7 +63,6 @@ def _control() -> ControlSpec:
         ({"num_envs": 1.5}, "num_envs"),
         ({"num_envs": "2"}, "num_envs"),
         ({"steps": 0}, "steps"),
-        ({"episode_length_s": 0.0}, "episode_length_s"),
         ({"name": "  "}, "name"),
         ({"seed": -1}, "seed"),
         ({"device": ""}, "device"),
@@ -78,6 +77,14 @@ def test_constructor_validation_table(
 
     with pytest.raises(SimulationConfigError, match=match):
         _builder(pack_set, **overrides)
+
+
+def test_constructor_rejects_the_removed_episode_length_keyword(tmp_path: Path) -> None:
+    """There is no clock argument left on the builder (no compatibility alias)."""
+    pack_set, _ = write_sim_pack(tmp_path)
+
+    with pytest.raises(TypeError, match="episode_length_s"):
+        _builder(pack_set, episode_length_s=20.0)
 
 
 def test_constructor_derives_substeps_from_physics_dt(tmp_path: Path) -> None:
@@ -122,7 +129,6 @@ def _write_config(tmp_path: Path, runner_lines: tuple[str, ...]) -> Path:
                 "env:",
                 "  backend: mujoco",
                 "  num_envs: 1",
-                "  episode_length_s: 10.0",
                 "  decimation: 4",
                 "  sim_dt: 0.005",
                 "world_base: {mjcf: world.xml}",

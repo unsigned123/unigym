@@ -32,11 +32,11 @@ class FakeBackend(EnvBackend):
 
     Every step replaces the scalar joint position with the named action's
     position target, publishes ``joint_pos``/``prev_action`` in the observation
-    registry and the full record set, and advances the episode clock by one
-    second.  There is no physics, contact, camera, prop or event model.
+    registry and the full record set, and advances the per-env step counter by
+    one second.  There is no physics, contact, camera, prop or event model.
     ``joint_names`` defaults to the one-joint contract fixture; a caller that
     needs a multi-joint action group may declare more names (identity order).
-    ``due_rows`` reports a non-empty episode-clock due mask on every step; it
+    ``due_rows`` reports a configured backend-owned due mask on every step; it
     never resets a row inside ``step``.
     """
 

@@ -255,7 +255,6 @@ def test_pack_profiles_cover_every_articulation_sharing_a_selector(
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 20.0,
             "decimation": 4,
             "sim_dt": 0.005,
         },
@@ -328,7 +327,6 @@ def test_config_mode_composes_the_selected_profile_asset(
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 20.0,
             "decimation": 4,
             "sim_dt": 0.005,
         },

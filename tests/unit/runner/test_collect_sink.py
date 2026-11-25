@@ -51,9 +51,6 @@ def _sink(
         policy_dt=0.02,
         out_dir=".",
         seed=0,
-        episode_length_s=1.0,
-        dur_lo=1.0,
-        dur_hi=1.0,
         command_dim=0,
         action_groups=action_groups,
     )

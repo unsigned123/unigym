@@ -1,9 +1,8 @@
 """yaml ``init_pose`` section parsing + random initial-pose sampling.
 
-Torch-only and unit-testable.  Same style as :mod:`unigym.env.episode`: the
-parsing/sampling logic is pure
-torch functions, consumed by the shared IsaacLab 3 env base on the server side
-inside the reset chain, unit-testable locally without an IsaacLab environment.
+Torch-only and unit-testable: the parsing/sampling logic is pure torch
+functions, consumed by the shared IsaacLab 3 env base on the server side inside
+the reset chain, unit-testable locally without an IsaacLab environment.
 
 ``torch`` is imported lazily inside the sampling functions so importing this
 module never pulls the engine stack; callers still get pure-torch wxyz values.

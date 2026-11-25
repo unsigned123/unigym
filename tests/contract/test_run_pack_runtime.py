@@ -27,7 +27,6 @@ def _runtime_cfg() -> dict[str, JsonValue]:
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 10.0,
             "decimation": 4,
             "sim_dt": 0.005,
             "params": {},
@@ -45,7 +44,6 @@ def _plain_cfg() -> dict[str, JsonValue]:
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 10.0,
             "decimation": 4,
             "sim_dt": 0.005,
             "params": {},
@@ -132,7 +130,7 @@ def _write_runtime_config(tmp_path: Path) -> Path:
             [
                 "run_name: r",
                 "seed: 0",
-                "env: {backend: mujoco, num_envs: 1, episode_length_s: 10.0,",
+                "env: {backend: mujoco, num_envs: 1,",
                 "      decimation: 4, sim_dt: 0.005, params: {}}",
                 "collect: {steps: 1}",
                 "scene_preset: missing.preset",

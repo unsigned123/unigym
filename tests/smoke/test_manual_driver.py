@@ -127,7 +127,6 @@ def _make_env(tmp_path):
         robot_profile=profile,
         adapter=adapter,
         num_envs=1,
-        episode_length_s=100.0,
         decimation=4,
         sim_dt=0.005,
         world_base={"mjcf": str(mjcf)},

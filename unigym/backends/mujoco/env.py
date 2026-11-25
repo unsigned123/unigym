@@ -111,7 +111,6 @@ else:
         _MUJOCO_IMPORT_ERROR = _e
 
 from unigym.env.backends.base import EnvStep
-from unigym.env.episode import parse_episode_length, sample_durations
 from unigym.env.native import NativeHandle
 from unigym.env.obs import ObservationConfig, ObservationRegistry
 from unigym.query.errors import QueryStaleError
@@ -251,9 +250,6 @@ class MujocoEnv:
         num_envs: env count (``>= 1``); ``N > 1`` builds one independent
             ``MjData`` per env.  Model-global features (cameras, director,
             anchored props) are refused at ``N > 1``.
-        episode_length_s: scalar, [lo, hi], or ``None`` (``env.episode_length_s``).
-            ``None`` disables the core clock (external termination mode); the
-            backend then never reports a time-due row.
         decimation / sim_dt: policy/sim rate chain (4 x 0.005 -> 50 Hz).
             The XML default timestep (0.002) is overridden to ``sim_dt``.
         world_base: the run-level world declaration from the config's
@@ -395,7 +391,6 @@ class MujocoEnv:
         robot_profile,
         adapter,
         num_envs: int = 1,
-        episode_length_s: float | None = 10.0,
         decimation: int = 4,
         sim_dt: float = 0.005,
         backend_params: Optional[dict] = None,
@@ -765,14 +760,8 @@ class MujocoEnv:
         self._t = 0
 
         # ---- episode bookkeeping (per-env) ----
-        # ``None`` = no core clock.  Keep infinity out of the duration tensor:
-        # the due mask is simply forced empty instead.
-        if episode_length_s is None:
-            self._dur_lo = self._dur_hi = None
-            self._episode_dur: torch.Tensor | None = None
-        else:
-            self._dur_lo, self._dur_hi = parse_episode_length(episode_length_s)
-            self._episode_dur = sample_durations(self._dur_lo, self._dur_hi, n, self.device)
+        # Core owns no clock: these are honest per-env counters, not a due
+        # source.  ``step()`` reports no backend-owned due.
         self._episode_id = torch.zeros(n, dtype=torch.int64)
         self._time_in_episode = torch.zeros(n)
 
@@ -1379,14 +1368,10 @@ class MujocoEnv:
                     mujoco.mj_step(self._model, d)
             self._time_in_episode[e] += self.step_dt
         self._refresh_obs(raw_action, cmd)
-        if self._episode_dur is None:
-            # external termination mode: the task owns every reset decision.
-            reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
-            should_reset = False
-        else:
-            due = self._time_in_episode >= self._episode_dur
-            reset_ids = torch.nonzero(due).squeeze(-1).to(torch.int64)
-            should_reset = bool(due.any())
+        # Core owns no clock: the backend reports no due row.  An episode ends
+        # only through an explicit terminate or a sink terminal.
+        reset_ids = torch.empty(0, dtype=torch.int64, device=self.device)
+        should_reset = False
         if self.camera_manager is not None:
             # step-tail posing (tick-read contract): the NEXT render (inside
             # the next obs refresh) captures this pose
@@ -1455,10 +1440,6 @@ class MujocoEnv:
             self._prop_targets[rows, cols] = 0.0
         self._episode_id[env_ids] += 1
         self._time_in_episode[env_ids] = 0.0
-        if self._episode_dur is not None:
-            self._episode_dur[env_ids] = sample_durations(
-                self._dur_lo, self._dur_hi, env_ids.numel(), self.device
-            )
         if self.camera_manager is not None:
             # re-pose the rigs to the spawn state BEFORE the refresh, so the
             # post-reset render/read sees the spawn view (pose first, read after)
@@ -1526,16 +1507,13 @@ class MujocoEnv:
                     "mj_time": float(d.time),
                     "model_revision": int(self._model_revision),
                 },
-                # backend bookkeeping OUTSIDE mjSTATE: the episode clock
-                # and the sampled episode duration are sim truth and roll
-                # back with the rewind (episode_id is process truth and
-                # deliberately stays out -- counter dichotomy)
+                # backend bookkeeping OUTSIDE mjSTATE: the per-episode step
+                # counter is sim truth and rolls back with the rewind
+                # (episode_id is process truth and deliberately stays out --
+                # counter dichotomy)
                 "extra": {
                     "obs_t": int(self._t),
                     "time_in_episode": self._time_in_episode.clone(),
-                    "episode_dur": (
-                        None if self._episode_dur is None else self._episode_dur.clone()
-                    ),
                 },
             }
         bufs = []
@@ -1556,7 +1534,6 @@ class MujocoEnv:
             "extra": {
                 "obs_t": int(self._t),
                 "time_in_episode": self._time_in_episode.clone(),
-                "episode_dur": None if self._episode_dur is None else self._episode_dur.clone(),
             },
         }
 
@@ -1570,7 +1547,7 @@ class MujocoEnv:
         ``mj_forward`` runs the constraint solver and mutates
         ``qacc_warmstart``, and the next ``mj_step`` must seed the solver
         from the SNAPSHOT value (exactly as the reference timeline does)
-        or the trajectories diverge.  The episode bookkeeping rides the
+        or the trajectories diverge.  The step-counter bookkeeping rides the
         payload's ``extra`` (sim truth) -- ``episode_id`` never rewinds.
         """
         m = self._model
@@ -1623,9 +1600,6 @@ class MujocoEnv:
             self._t = int(extra["obs_t"])
         if "time_in_episode" in extra:
             self._time_in_episode = extra["time_in_episode"].clone()
-        if "episode_dur" in extra:
-            dur = extra["episode_dur"]
-            self._episode_dur = None if dur is None else dur.clone()
         return 0
 
     # ------------------------------------------------------------------ #

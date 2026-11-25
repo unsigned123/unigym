@@ -206,7 +206,6 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         adapter=ManualAdapter(),
         terrain_cfg=terrain_cfg,
         num_envs=1,
-        episode_length_s=100.0,
         decimation=4,
         sim_dt=0.005,
         device="cuda:0",

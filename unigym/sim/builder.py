@@ -109,9 +109,6 @@ class SimulationBuilder:
             profile declarations need no pack lookup.
         name: the run label.
         steps: the collect budget (>= 1).
-        episode_length_s: the episode duration in seconds (> 0), or ``None``
-            to disable the core clock.  ``None`` is only valid with
-            ``termination_mode: external``; the task then owns truncation.
         artifacts: whether to write run artifacts.
         device: the backend device string.
         observations: an explicit ``observations:`` config mapping override.
@@ -134,7 +131,6 @@ class SimulationBuilder:
         pack_set: PackSet | None = None,
         name: str = "simulation",
         steps: int = 1000,
-        episode_length_s: float = 20.0,
         artifacts: bool = False,
         device: str = "cpu",
         observations: Mapping[str, JsonValue] | None = None,
@@ -204,9 +200,6 @@ class SimulationBuilder:
         self._pack_set: PackSet | None = pack_set
         self._name = name
         self._steps = _positive_int(steps, "SimulationBuilder steps")
-        self._episode_length_s = _positive_float(
-            episode_length_s, "SimulationBuilder episode_length_s"
-        )
         self._artifacts = artifacts
         self._device = device
         self._observations = None if observations is None else copy.deepcopy(dict(observations))
@@ -287,12 +280,6 @@ class SimulationBuilder:
         physics_dt = _positive_float(env_cfg.get("sim_dt"), "run config env.sim_dt")
         decimation = _positive_int(env_cfg.get("decimation"), "run config env.decimation")
         dt = _positive_float(physics_dt * decimation, "run config env.sim_dt * env.decimation")
-        raw_episode_length_s = env_cfg.get("episode_length_s")
-        episode_length_s = (
-            None
-            if raw_episode_length_s is None and spec.termination_mode == "external"
-            else _positive_float(raw_episode_length_s, "run config env.episode_length_s")
-        )
         builder = cls.__new__(cls)
         builder._backend = spec.backend
         builder._dt = dt
@@ -304,7 +291,6 @@ class SimulationBuilder:
         builder._pack_runtime = runtime
         builder._name = spec.run_name
         builder._steps = spec.total_steps
-        builder._episode_length_s = episode_length_s
         builder._artifacts = spec.output.artifacts
         builder._device = spec.device
         builder._world = None
@@ -489,7 +475,6 @@ class SimulationBuilder:
             "env": {
                 "backend": self._backend,
                 "num_envs": self._num_envs,
-                "episode_length_s": self._episode_length_s,
                 "decimation": decimation,
                 "sim_dt": sim_dt,
                 "params": {},

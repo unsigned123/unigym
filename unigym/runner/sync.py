@@ -271,7 +271,9 @@ class SyncRunner:
         sink: consumer object (see runner/sinks/ and docs/contracts/runner_contract.md).
         reset_on_termination: when True, envs whose termination fired are
             merged into the due mask and reset the same step.  Default False
-            reproduces collection mode (episodes end by duration only).
+            keeps collection mode (episodes end only through explicit
+            boundaries: a core termination, a backend-owned due, or a sink
+            terminal).
         reset_mask_fn: optional callable ``bundle -> LongTensor(env_ids)``
             fully replacing the terminated-rows term of the reset policy
             (future reset strategies, e.g. graded failure).  Default None.
@@ -570,7 +572,7 @@ class SyncRunner:
                         **stamp(int(ei)),
                     )
                 )
-        # core engine horizon: the backend's own episode clock fired.
+        # core engine horizon: a backend-owned due mask fired.
         due = getattr(clock_due, "tolist", lambda: [])()
         for ei in due:
             by_env.setdefault(int(ei), []).append(
@@ -1105,7 +1107,7 @@ class SyncRunner:
                 sink_due = torch.tensor(sorted(sink_terminations), dtype=torch.int64, device=device)
                 due = torch.unique(torch.cat([due.to(torch.int64), sink_due]))
             self._tick = t + 1
-            # reset policy: episode clock due | (terminated | custom mask)
+            # reset policy: backend due | (terminated | custom mask)
             added = None
             if self.reset_mask_fn is not None:
                 added = torch.as_tensor(

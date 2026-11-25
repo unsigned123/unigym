@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from unigym._typing import JsonValue
+from unigym.errors import ConfigError
 from unigym.pack_api import discover
 from unigym.run.api import Run, load
 
@@ -81,3 +84,9 @@ def test_from_config_and_load_accept_the_keyword(tmp_path: Path) -> None:
 
     assert from_config.cfg["run_name"] == "r"
     assert loaded.cfg["run_name"] == "r"
+
+
+def test_constructor_rejects_the_removed_episode_length_keyword() -> None:
+    """The old clock keyword is a teaching error, never an ignored override."""
+    with pytest.raises(ConfigError, match=r"episode_length_s=.*was removed"):
+        Run(_cfg(), episode_length_s=10.0)

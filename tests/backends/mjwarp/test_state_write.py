@@ -357,7 +357,7 @@ def test_set_joint_state_rejects_unknown_names_and_bad_selections(tiny_env):
 
 
 def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_factory, tiny_mjcf):
-    """settle runs mjw.forward + mirror sync without touching the episode clock."""
+    """settle runs mjw.forward + mirror sync without touching the step counter."""
     from unigym.contacts.manager import build_contact_manager
 
     manager = build_contact_manager(

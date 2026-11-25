@@ -25,7 +25,7 @@ class _EmptyObs:
 
 
 class _ScriptedEnv:
-    """One-env backend double with a fixed episode length."""
+    """One-env backend double with a fixed backend-owned due cadence."""
 
     def __init__(self, length: int = 2) -> None:
         self.num_envs = 1

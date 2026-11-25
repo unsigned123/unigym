@@ -85,7 +85,8 @@ Ordering (all backends):
 2. Re-pose camera rigs through the existing reset hook (`on_reset(env_ids)`).
 3. Refresh the typed observation registry (`env.obs`).
 
-`settle` does not change the episode clock, episode id, or action targets.
+`settle` does not change the `time_in_episode` counter, episode id, or action
+targets.
 Without a settle, the raw engine state is written but derived quantities and
 cached observations may be stale.
 

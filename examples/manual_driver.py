@@ -99,7 +99,6 @@ def make_env():
         robot_profile=profile,
         adapter=ManualAdapter(),
         num_envs=1,
-        episode_length_s=100.0,
         decimation=4,
         sim_dt=0.005,
         world_base={"mjcf": str(MJCF)},

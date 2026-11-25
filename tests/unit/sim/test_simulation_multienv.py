@@ -154,8 +154,8 @@ def test_step_reports_due_and_terminated_without_resetting_rows() -> None:
     assert time_in_episode.tolist() == [1.0, 1.0]
 
 
-def test_reset_after_a_due_tick_clears_due_and_episode_clock() -> None:
-    """The caller's reset clears the due mask and the per-row episode clock."""
+def test_reset_after_a_due_tick_clears_due_and_step_counter() -> None:
+    """The caller's reset clears the due mask and the per-row step counter."""
     runner = FakeRunner(num_envs=2, due_rows=(0, 1))
     sim = _sim(runner=runner)
     sim.act(_group(sim), _values())

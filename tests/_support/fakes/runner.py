@@ -43,7 +43,7 @@ class FakeRunner:
     exact mapping of the most recent ``step``/``tick`` call (the lowered
 
     ``terminated_rows`` and ``due_rows`` make the step result's termination
-    mask and episode-clock due mask configurable.  They are reported only: the
+    mask and backend-owned due mask configurable.  They are reported only: the
     fake never resets a due row during ``step`` (the facade's
     ``runner.auto_reset: false`` policy), so the backend state still proves
     that a due tick does not clear the row.

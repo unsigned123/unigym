@@ -101,7 +101,6 @@ class _FromConfigKwargs(TypedDict, total=False):
     backend: str | None
     device: str | None
     steps: int | None
-    episode_length_s: float | None
     output_dir: str | None
     label: str | None
     set: Sequence[str]
@@ -223,7 +222,6 @@ __all__ = ["Run", "load", "make"]
 _LOG = logging.getLogger(__name__)
 
 _DEFAULT_STEPS = 10
-_DEFAULT_EPISODE_LENGTH_S = 10.0
 
 
 def _runner_kwargs(
@@ -498,18 +496,16 @@ def _minimal_cfg(
     num_envs: int,
     adapter: dict[str, JsonValue],
     steps: int,
-    episode_length_s: float | None,
 ) -> dict[str, JsonValue]:
     """The programmatic base config (existing schema only; no YAML).
 
     The world asset is NOT injected here: callers pass it explicitly via
-    ``world_base`` / a :class:`~unigym.world.World` declaration.  A ``None``
-    duration is preserved as the external-mode "no core clock" spelling.
+    ``world_base`` / a :class:`~unigym.world.World` declaration.  Core owns no
+    episode clock, so the env section carries no duration.
     """
     env_section: dict[str, JsonValue] = {
         "backend": backend,
         "num_envs": int(num_envs),
-        "episode_length_s": (None if episode_length_s is None else float(episode_length_s)),
         "decimation": 4,
         "sim_dt": 0.005,
         "params": {},
@@ -721,7 +717,6 @@ class Run:
         seed: int | None = None,
         device: str | None = None,
         steps: int | None = None,
-        episode_length_s: float | None = None,
         output_dir: str | None = None,
         label: str | None = None,
         set: Sequence[str] = (),
@@ -737,6 +732,15 @@ class Run:
     ) -> None:
         if cfg is not None and not isinstance(cfg, dict):
             raise TypeError(f"Run() config must be a mapping, got {type(cfg).__name__}")
+        if "episode_length_s" in overrides:
+            from unigym.errors import ConfigError
+
+            raise ConfigError(
+                "Run(episode_length_s=...) was removed: core no longer owns an "
+                "episode clock. End episodes with runner.terminate(), a sink "
+                "terminal, or a backend-owned due mask | hint: delete the "
+                "episode_length_s argument"
+            )
         if sink is not None and sinks is not None:
             from unigym.errors import ConfigError
 
@@ -785,8 +789,6 @@ class Run:
                 num_envs=num_envs,
                 seed=seed,
                 steps=steps,
-                episode_length_s=episode_length_s,
-                termination_mode=overrides.get("termination_mode"),
             )
             if world_base is not None:
                 raw["world_base"] = _world_base_section(world_base)
@@ -842,7 +844,6 @@ class Run:
         self._backend = backend
         self._device = device
         self._steps = steps
-        self._episode_length_s = episode_length_s
         self._output_dir = output_dir
         self._label = label
         self._set = tuple(set or ())
@@ -883,15 +884,8 @@ class Run:
         num_envs: int | None,
         seed: int | None,
         steps: int | None,
-        episode_length_s: float | None,
-        termination_mode: str | None = None,
     ) -> dict[str, JsonValue]:
-        """The programmatic base config (existing schema; no world asset).
-
-        ``episode_length_s=None`` means the caller wants the core clock off
-        when ``termination_mode`` is ``external``; otherwise it keeps the
-        legacy 10 s default.
-        """
+        """The programmatic base config (existing schema; no world asset)."""
         articulation_entry = _articulation_entry(robot, spawn)
         adapter_section = _adapter_section(adapter)
         backend_label = require_backend_name(backend, "<memory>", key="backend")
@@ -913,15 +907,6 @@ class Run:
             num_envs=1 if num_envs is None else int(num_envs),
             adapter=adapter_section,
             steps=_DEFAULT_STEPS if steps is None else int(steps),
-            episode_length_s=(
-                None
-                if episode_length_s is None and termination_mode == "external"
-                else (
-                    _DEFAULT_EPISODE_LENGTH_S
-                    if episode_length_s is None
-                    else float(episode_length_s)
-                )
-            ),
         )
         if world is not None:
             world.apply(raw)
@@ -950,7 +935,6 @@ class Run:
         seed: int | None = None,
         device: str | None = None,
         steps: int | None = None,
-        episode_length_s: float | None = None,
         output_dir: str | None = None,
         label: str | None = None,
         set: Sequence[str] = (),
@@ -978,7 +962,6 @@ class Run:
             seed=seed,
             device=device,
             steps=steps,
-            episode_length_s=episode_length_s,
             output_dir=output_dir,
             label=label,
             set=set,
@@ -999,7 +982,6 @@ class Run:
         backend: str | None = None,
         device: str | None = None,
         steps: int | None = None,
-        episode_length_s: float | None = None,
         output_dir: str | None = None,
         label: str | None = None,
         set: Sequence[str] = (),
@@ -1020,7 +1002,6 @@ class Run:
             backend: Override ``env.backend``.
             device: Torch device label (default ``cpu``).
             steps: Override ``collect.steps``.
-            episode_length_s: Override ``env.episode_length_s``.
             output_dir: Override the run output directory.
             label: Display-only run label.
             set: ``key=value`` config overrides (collector ``-s``).
@@ -1057,7 +1038,6 @@ class Run:
             backend=backend,
             device=device,
             steps=steps,
-            episode_length_s=episode_length_s,
             output_dir=output_dir,
             label=label,
             set=set,
@@ -1080,7 +1060,6 @@ class Run:
             config=self._config_path,
             num_envs=self._num_envs,
             steps=self._steps,
-            episode_length_s=self._episode_length_s,
             output_dir=self._output_dir,
             no_artifacts=self._no_artifacts,
             ckpt_dir=None,

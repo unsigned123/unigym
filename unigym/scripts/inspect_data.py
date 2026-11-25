@@ -201,7 +201,7 @@ def main():
     if meta:
         print(
             f"meta    : num_envs={meta.get('num_envs')} steps={meta.get('steps')} "
-            f"policy_dt={meta.get('policy_dt')} episode_len={meta.get('episode_length_s')}s "
+            f"policy_dt={meta.get('policy_dt')} "
             f"schema_version={meta.get('schema_version')}"
         )
         names = sorted(set(orders) | set(state_keys))

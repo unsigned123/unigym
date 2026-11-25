@@ -16,7 +16,7 @@ gate:
 
 ``step`` semantics: one step = one full policy
 iteration (act -> env.step -> obs -> record -> reset chain) driven by the
-engine itself, so recording and episode clocks behave exactly like a
+engine itself, so recording and episode boundaries behave exactly like a
 running rollout.  The physics-step concept is DELETED -- the wire contract
 has no unit field (not NotImplemented: the field simply does not exist).
 

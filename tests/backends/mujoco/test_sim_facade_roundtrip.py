@@ -36,7 +36,6 @@ def _write_config(tmp_path: Path, tiny_mjcf: Path) -> tuple[Path, str]:
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 20.0,
             "decimation": 4,
             "sim_dt": 0.005,
         },

@@ -1,8 +1,7 @@
 """yaml ``init_pose`` section parsing + random initial-pose sampling.
 
-Torch-only and unit-testable.  Same style as :mod:`unigym.env.episode`: the
-parsing/sampling logic is pure
-torch functions, consumed by isaaclab2/env.py on the server side inside the reset
+Torch-only and unit-testable: the parsing/sampling logic is pure torch
+functions, consumed by isaaclab2/env.py on the server side inside the reset
 chain, unit-testable locally without an isaaclab environment.
 
 yaml form::

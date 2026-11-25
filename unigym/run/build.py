@@ -179,7 +179,6 @@ class _SensingBundle(TypedDict):
     director_cfg: dict[str, JsonValue] | None
     events_cfg: object | None
     """Backend-built DR events object; opaque to the run layer."""
-    episode_length_s: JsonValue
     recorder: Recorder
 
 
@@ -222,8 +221,6 @@ class _RunMeta(TypedDict, total=False):
     num_envs: int
     steps: int
     policy_dt: float | None
-    episode_length_s: JsonValue
-    episode_length_range: list[float] | None
     schema_version: int
     articulations: dict[str, dict[str, JsonValue]]
     command_dim: int
@@ -1190,14 +1187,6 @@ def _build_sensing(
         if not isinstance(events_factory, _EventsBuilder):
             raise TypeError("backend events factory is not callable")
         events_cfg = events_factory(events_section)
-    # ``external`` mode owns truncation, so an omitted episode_length_s means
-    # no core clock; core mode keeps the legacy 10 s default.
-    if "episode_length_s" in env_section:
-        episode_length_s = env_section["episode_length_s"]
-    elif getattr(spec, "termination_mode", "core") == "external":
-        episode_length_s = None
-    else:
-        episode_length_s = 10.0
     # the recorder binds an explicitly declared in-scene camera
     # only (recorder.camera_ref REQUIRED; no self-built camera path).  The
     # camera_manager MUST be built before this call (above).
@@ -1215,7 +1204,6 @@ def _build_sensing(
         "effective_lighting": effective_lighting,
         "director_cfg": director_cfg,
         "events_cfg": events_cfg,
-        "episode_length_s": episode_length_s,
         "recorder": recorder,
     }
 
@@ -1237,7 +1225,6 @@ def _build_env_and_sampler(
     director_cfg: dict[str, JsonValue] | None,
     events_cfg: object | None,
     recorder: Recorder,
-    episode_length_s: JsonValue,
     policy_dt: float | None = None,
     controls: Sequence[ControlRuntime] | None = None,
     profiles: Mapping[str, RobotProfile] | None = None,
@@ -1291,7 +1278,6 @@ def _build_env_and_sampler(
         adapter=adapter,
         terrain_cfg=terrain,
         num_envs=num_envs,
-        episode_length_s=episode_length_s,
         env_spacing=_config_float(env_cfg.get("env_spacing", 4.0)),
         decimation=_config_int(env_cfg.get("decimation", 4)),
         sim_dt=_config_float(env_cfg.get("sim_dt", 0.005)),
@@ -1466,9 +1452,6 @@ def _build_collect_sink(
     policy_dt: float,
     out_dir: str,
     seed: int,
-    episode_length_s: JsonValue,
-    dur_lo: float | None,
-    dur_hi: float | None,
     command_dim: int,
     action_groups: Sequence[OrderedActionGroup] = (),
 ) -> Sink:
@@ -1503,9 +1486,6 @@ def _build_collect_sink(
         policy_dt=policy_dt,
         out_dir=out_dir,
         seed=seed,
-        episode_length_s=episode_length_s,
-        dur_lo=dur_lo,
-        dur_hi=dur_hi,
         command_dim=command_dim,
         action_groups=action_groups,
     )
@@ -1533,9 +1513,6 @@ def _build_sinks(
     policy_dt: float,
     out_dir: str,
     seed: int,
-    episode_length_s: JsonValue,
-    dur_lo: float | None,
-    dur_hi: float | None,
     command_dim: int,
     contact_manager: ContactManager | None,
     values: ValuePublisher,
@@ -1601,9 +1578,6 @@ def _build_sinks(
         "policy_dt": policy_dt,
         "out_dir": out_dir,
         "seed": seed,
-        "episode_length_s": episode_length_s,
-        "dur_lo": dur_lo,
-        "dur_hi": dur_hi,
         "command_dim": command_dim,
         "action_groups": tuple(action_groups),
     }
@@ -1989,7 +1963,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sensing["director_cfg"],
         sensing["events_cfg"],
         sensing["recorder"],
-        sensing["episode_length_s"],
         policy_dt=policy_dt,
         controls=control_runtimes,
         profiles=profiles,
@@ -2020,11 +1993,12 @@ def build_instance(spec: RunSpec) -> RunInstance:
     sampler = built["sampler"]
     policy_dt = built["policy_dt"]
 
-    # unified termination checks (detection-only; episodes still end by
-    # duration).  In ``core`` mode the ``terminations:`` section is the
-    # explicit source and no default fall group is synthesised when it is
-    # omitted.  In ``termination_mode: external`` the core group is empty and
-    # never fires: the RL task layer owns terminated/truncated masks.
+    # unified termination checks (detection-only; a core termination or a
+    # backend-owned due mask ends an episode).  In ``core`` mode the
+    # ``terminations:`` section is the explicit source and no default fall
+    # group is synthesised when it is omitted.  In ``termination_mode:
+    # external`` the core group is empty and never fires: the RL task layer
+    # owns terminated/truncated masks.
     term_group = _core_termination_group(spec, cfg)
     print(f"[collect] terminations: {term_group.names} " f"(mode={term_group.mode})", flush=True)
 
@@ -2036,15 +2010,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         from unigym.daemon import runrec as _runrec
 
         _runrec.set_label(built["out_dir"], os.getpid(), spec.label)
-    episode_length_s = sensing["episode_length_s"]
     from unigym.adapters.base import Adapter
-    from unigym.env.episode import parse_episode_length
-
-    if episode_length_s is None:
-        # external-mode null: no core clock, so there is no sampled range.
-        dur_lo = dur_hi = None
-    else:
-        dur_lo, dur_hi = parse_episode_length(episode_length_s)
 
     meta: _RunMeta = {
         "framework": "unigym",
@@ -2057,8 +2023,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         "steps": total_steps,
         "policy_dt": policy_dt,
         "sim_dt": _config_float(env_cfg.get("sim_dt", 0.005)),
-        "episode_length_s": episode_length_s,
-        "episode_length_range": None if dur_lo is None else [dur_lo, dur_hi],
         # v5 data schema: neutral per-articulation body/contact facts
         # (no body_parts, no foot_names, no foot-derived records).
         "schema_version": DATA_SCHEMA_VERSION,
@@ -2148,9 +2112,6 @@ def build_instance(spec: RunSpec) -> RunInstance:
         policy_dt,
         built["out_dir"],
         seed,
-        episode_length_s,
-        dur_lo,
-        dur_hi,
         built["command_dim"],
         sensing["contact_manager"],
         values.publisher("sink"),

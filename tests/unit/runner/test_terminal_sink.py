@@ -189,8 +189,8 @@ def test_sink_stamp_is_episode_local_after_a_prior_reset():
     assert primary.time_s == pytest.approx(0.02)
 
 
-def test_core_clock_due_and_sink_terminal_merge_on_one_env():
-    """A core episode-clock due env and a sink terminal compose one fact set."""
+def test_backend_due_and_sink_terminal_merge_on_one_env():
+    """A backend-owned due env and a sink terminal compose one fact set."""
     env = FakeBackend(num_envs=2, due_rows=(0,))
     sink = ScriptedTerminalSink()
     sink.pending = {0: _termination("custom.grasp_lost")}

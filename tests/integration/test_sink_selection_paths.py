@@ -28,7 +28,6 @@ _FLOOR_XML = (
 )
 _JOINTS = ("shoulder", "elbow")
 _STEPS = 20
-_EPISODE_LENGTH_S = 0.04
 
 
 def _run_declaration(
@@ -85,7 +84,6 @@ def _run_declaration(
         action_spec=action_spec,
         policies=(PolicyBinding.from_mapping({"adapter": "manual", "groups": [["tiny", "tiny"]]}),),
         steps=_STEPS,
-        episode_length_s=_EPISODE_LENGTH_S,
         inspect=True,
         sink=sink,
         sinks=sinks,

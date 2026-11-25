@@ -482,14 +482,34 @@ class ExternalSink:
     stops after ``target_episodes``.  The sink is also its own namespaced rewind
     provider (``name`` + ``rewind_state`` / ``apply_rewind_state``), so a
     checkpoint captures its counters without a second wrapper object.
+
+    Core owns no episode clock, so a test that needs completed episodes makes
+    this double request them: ``terminal_after_steps`` asks for one env-0
+    terminal every N steps through ``drain_terminations``.  ``None`` keeps it a
+    passive observer.
     """
 
     name = "acme.external"
 
-    def __init__(self, *, target_episodes: int = 2, label: str = "external") -> None:
+    def __init__(
+        self,
+        *,
+        target_episodes: int = 2,
+        label: str = "external",
+        terminal_after_steps: int | None = None,
+    ) -> None:
         if isinstance(target_episodes, bool) or target_episodes < 1:
             raise ValueError("target_episodes must be a positive int, got " f"{target_episodes!r}")
+        if terminal_after_steps is not None and (
+            isinstance(terminal_after_steps, bool)
+            or not isinstance(terminal_after_steps, int)
+            or terminal_after_steps < 1
+        ):
+            raise ValueError(
+                f"terminal_after_steps must be None or a positive int, got {terminal_after_steps!r}"
+            )
         self.target_episodes = int(target_episodes)
+        self.terminal_after_steps = terminal_after_steps
         self.label = label
         self.step_calls = 0
         self.episode_end_calls = 0
@@ -524,6 +544,25 @@ class ExternalSink:
         if bundle.get("view") is not None:
             self.step_end_view_none = False
         self.step_end_calls += 1
+
+    def drain_terminations(self) -> dict[int, Termination]:
+        """Request an env-0 end every ``terminal_after_steps`` ticks.
+
+        ``None`` keeps the double passive; the requirement count is
+        ``target_episodes``, so the drain stops asking once it is reached.
+        """
+        every = self.terminal_after_steps
+        if every is None or self.episodes_completed >= self.target_episodes:
+            return {}
+        if self.step_calls % every != 0:
+            return {}
+        return {
+            0: Termination(
+                EpisodeOutcome.FAILURE,
+                "custom.external_episode",
+                TerminationSource.CUSTOM,
+            )
+        }
 
     def on_reset(self, env_ids: object) -> None:
         if isinstance(env_ids, (list, tuple)):
@@ -607,7 +646,16 @@ def make_external_sink(ctx: SinkContext) -> Sink:
     label = ctx.options.get("label", "external")
     if not isinstance(label, str):
         raise TypeError(f"sink.options.label must be a string, got {label!r}")
-    return ExternalSink(target_episodes=target, label=label)
+    every = ctx.options.get("terminal_after_steps")
+    if every is not None and (isinstance(every, bool) or not isinstance(every, int) or every < 1):
+        raise TypeError(
+            "sink.options.terminal_after_steps must be None or a positive int, " f"got {every!r}"
+        )
+    return ExternalSink(
+        target_episodes=target,
+        label=label,
+        terminal_after_steps=every,
+    )
 
 
 class ValuePublishingSink:

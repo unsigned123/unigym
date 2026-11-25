@@ -19,7 +19,7 @@ from tests._support.sim_fixtures import write_sim_pack
 
 def _config_text(*, include_timing: bool = True) -> str:
     """A minimal valid run config; timing keys are omitted on request."""
-    env = "env: {backend: mujoco, num_envs: 1, episode_length_s: 20.0"
+    env = "env: {backend: mujoco, num_envs: 1"
     if include_timing:
         env += ", decimation: 4, sim_dt: 0.005"
     env += "}"

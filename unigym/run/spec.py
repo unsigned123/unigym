@@ -667,38 +667,26 @@ def _parse_termination_mode(
     return value
 
 
-def _validate_episode_clock(
+def _reject_removed_episode_clock(
     env_cfg: dict[str, JsonValue],
-    termination_mode: str,
     config_path: str,
 ) -> None:
-    """Reject ambiguous episode-clock ownership.
+    """Reject the removed ``env.episode_length_s`` key.
 
-    ``episode_length_s: null`` disables the core clock and is only meaningful
-    when the task layer owns time-based truncation.  A numeric duration in
-    external mode would create two independent clocks, so it is rejected
-    rather than silently competing with the task's ``max_steps``.
+    Core no longer owns an episode clock, so a config that still declares one
+    is a stale contract rather than a tunable.  The env section has no closed
+    schema, so this explicit check is the fail-fast boundary (otherwise the
+    key would be silently ignored).
     """
     from unigym.errors import ConfigError
 
-    value = env_cfg.get("episode_length_s")
-    if termination_mode == "core":
-        if "episode_length_s" in env_cfg and value is None:
-            raise ConfigError(
-                f"{config_path}: episode_length_s: null disables the core "
-                "episode clock, so it requires termination_mode: external | "
-                "hint: give a positive numeric duration for core mode, or "
-                "switch to termination_mode: external and let the task's "
-                "max_steps own truncation"
-            )
-        return
-    if value is not None:
+    if "episode_length_s" in env_cfg:
         raise ConfigError(
-            f"{config_path}: termination_mode: external with a numeric "
-            f"episode_length_s={value!r} would create two independent clocks "
-            "(core duration and the task's own budget) | hint: set "
-            "episode_length_s: null and let the task max_steps own "
-            "truncation, or use termination_mode: core"
+            f"{config_path}: env.episode_length_s was removed; core no longer "
+            "owns an episode clock. Episode boundaries come only from an "
+            "explicit runner.terminate(), a sink terminal, or a backend-owned "
+            "due mask | hint: delete env.episode_length_s and end episodes "
+            "explicitly"
         )
 
 
@@ -976,8 +964,6 @@ def build_spec(
         env_cfg["num_envs"] = args.num_envs
     if getattr(args, "steps", None) is not None:
         col_cfg["steps"] = args.steps
-    if getattr(args, "episode_length_s", None) is not None:
-        env_cfg["episode_length_s"] = args.episode_length_s
     if getattr(args, "ckpt_dir", None) is not None:
         adapter_cfg["ckpt_dir"] = args.ckpt_dir
         cfg["adapter"] = adapter_cfg
@@ -1014,12 +1000,13 @@ def build_spec(
     action_spec, policies = _normalize_action_authoring(cfg, articulations, args.config)
     num_envs = _as_positive_int(env_cfg.get("num_envs"), "env.num_envs")
     total_steps = _as_positive_int(col_cfg.get("steps"), "collect.steps")
-    # reset policy (docs/contracts/runner_contract.md §5): clock due by default;
-    # reset_on_termination merges terminated rows.  runner.reset_mask_fn is
-    # a reserved key (not deserialized here; inject via SyncRunner).
+    # reset policy (docs/contracts/runner_contract.md §5): a backend-owned due
+    # mask drives the reset; reset_on_termination merges terminated rows.
+    # runner.reset_mask_fn is a reserved key (not deserialized here; inject via
+    # SyncRunner).
     runner_cfg = _require_config(cfg.get("runner") or {}, "runner")
     termination_mode = _parse_termination_mode(cfg, runner_cfg, args.config)
-    _validate_episode_clock(env_cfg, termination_mode, args.config)
+    _reject_removed_episode_clock(env_cfg, args.config)
     output_root_value = cfg.get("output_root", "data_out")
     output_root = output_root_value if isinstance(output_root_value, str) else "data_out"
     run_name = _require_str(cfg.get("run_name"), "run_name")

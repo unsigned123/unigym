@@ -1357,9 +1357,10 @@ class AcmeSink:
 - core writes no report artifacts and publishes no `bundle["episode_results"]`;
   the sink owns its scoring and report artifacts.  A sink terminal is an
   episode-end fact, not an `EpisodeResultView`.
-- the removed `mode:` / `benchmark:` keys (including the old timeout fields)
-  are rejected at config parse; the sink terminals and the core episode clock
-  are the only episode-end path.
+- the removed `mode:` / `benchmark:` / `env.episode_length_s` keys (including
+  the old timeout fields) are rejected at config parse; core owns no episode
+  clock, so an episode ends only through a sink terminal, an explicit
+  `terminate`, or a backend-owned due mask.
 
 ### Live evaluation migration (external terminations)
 

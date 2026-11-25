@@ -18,7 +18,6 @@ _CONFIG = {
     "env": {
         "backend": "mujoco",
         "num_envs": 1,
-        "episode_length_s": 20.0,
         "decimation": 4,
         "sim_dt": 0.005,
     },
@@ -55,7 +54,6 @@ def test_from_config_without_pack_set_refuses_discovery(
         "env": {
             "backend": "mujoco",
             "num_envs": 1,
-            "episode_length_s": 10.0,
             "decimation": 4,
             "sim_dt": 0.005,
         },
@@ -91,3 +89,14 @@ def test_from_config_uses_the_explicit_pack_set(tmp_path: Path) -> None:
     builder = SimulationBuilder.from_config(path, pack_set=pack_set)
 
     assert builder.pack_runtime is pack_set.to_runtime()
+
+
+def test_from_config_rejects_the_removed_episode_clock_key(tmp_path: Path) -> None:
+    """A config that still declares env.episode_length_s fails at the spec."""
+    cfg = dict(_CONFIG)
+    cfg["env"] = {**cfg["env"], "episode_length_s": 20.0}
+    path = tmp_path / "clock.yaml"
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="env.episode_length_s was removed"):
+        SimulationBuilder.from_config(path)

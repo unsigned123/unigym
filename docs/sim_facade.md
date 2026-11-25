@@ -100,7 +100,6 @@ SimulationBuilder(
     pack_set: PackSet,
     name: str = "simulation",
     steps: int = 1000,
-    episode_length_s: float = 20.0,
     artifacts: bool = False,
     device: str = "cpu",
 )
@@ -249,7 +248,7 @@ sim.act(robot, {"shoulder": torch.full((N,), 0.1), "elbow": torch.zeros(N)})
   unique; a subset reset does not touch the other rows.
 - `step()` never resets a row. It advances all rows one tick and reports:
   `obs.reset_env_ids` is empty, `obs.reset_due_env_ids` names the
-  episode-clock due rows, and `obs.terminated` is the `(N,)` termination mask
+  backend-owned due rows, and `obs.terminated` is the `(N,)` termination mask
   (`None` at spawn and after `reset()`). A due or terminated row keeps
   stepping until the caller resets it:
 
@@ -281,7 +280,7 @@ the first `step()` also returns `t == 0`, and after `N` steps `t == N - 1`.
 | `cameras` | `Mapping[CameraHandle, CameraFrame]` for published frames only. |
 | `contacts` | `contact/...` tensors present in the live state (no backend parity claim). |
 | `reset_env_ids` | The env rows **this operation performed** a reset on; empty after a step. |
-| `reset_due_env_ids` | The episode-clock **due** rows at the producing tick; empty after a reset. |
+| `reset_due_env_ids` | The backend-owned **due** rows at the producing tick; empty after a reset. |
 | `terminated` | The producing tick's `(N,)` termination mask; `None` at spawn/reset. |
 | `record` | The step record mapping (canonical artifact keys + bookkeeping). |
 | `obs` | The producing typed `ObsSnapshot` (`robot`/`contact`/`object`/`camera`/`site`/command slots). |
@@ -428,7 +427,6 @@ Deferred (exact follow-up, not open questions):
 | Subset `joints=` action groups | Full-group values only in this spike. |
 | Same-asset cross-backend run | No dual-format (MJCF + USD/URDF) test pack in both lanes. |
 | Per-env action masks | No consumer yet. |
-| Per-env `episode_length_s` | The builder accepts one float for all rows; per-row episode clocks are read-only in `record`. `None` disables the core clock and is only valid with `termination_mode: external` (an omitted value is `None` there, since the task owns truncation). |
 
 ## Honest residuals
 

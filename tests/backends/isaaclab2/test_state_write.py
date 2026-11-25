@@ -77,7 +77,7 @@ def test_set_root_state_rejects_the_fixed_cartpole_root(cartpole_env):
 
 
 def test_settle_returns_the_selected_ids_and_keeps_the_clock(cartpole_env):
-    """settle flushes/forwards the view without advancing the episode clock."""
+    """settle flushes/forwards the view without advancing the step counter."""
     before = cartpole_env._time_in_episode.clone()
 
     returned = cartpole_env.settle([0])

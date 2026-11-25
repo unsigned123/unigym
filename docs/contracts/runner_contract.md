@@ -160,7 +160,7 @@ Lifecycle:
    false and the drain is non-empty, the tick raises a teaching `RuntimeError`
    before any due mutation: a sink terminal end requires the reset chain.
 3. `on_episode_end(due, bundle)` — BEFORE `env.reset_envs`.  `due` is
-   `unique(core episode clock ∪ sink terminal ids ∪ reset policy)`;
+   `unique(backend due ∪ sink terminal ids ∪ reset policy)`;
    `reset_facts` describe the episode's START (captured at its reset, tick 0);
    the termination facts are the final tick's.
 4. `sampler.on_episode_end(due, bundle.get("episode_results") or {})` — AFTER
@@ -170,7 +170,7 @@ Lifecycle:
 6. The runner captures the NEXT episode's pre-policy-step sample from
    `env.obs.snapshot()` and the backend's `ResetOutcome`.
 
-`StepResult.reset_env_ids` is the final due set (core clock ∪ sink terminals ∪
+`StepResult.reset_env_ids` is the final due set (backend due ∪ sink terminals ∪
 reset policy).  `StepResult.terminated` remains the core term-group mask and
 never includes sink terminal env ids.
 
@@ -250,9 +250,10 @@ runtime hooks, not part of the public Sink surface or custom-Sink examples.
 
 The removed `mode:` and top-level `benchmark:` config keys fail with teaching
 `ConfigError`s: there is no compatibility alias and no built-in
-benchmark/evaluation sink is selected by core.  Core has one physical deadline
-authority, the core episode clock in `StepResult.reset_env_ids`; a custom sink
-that needs a time or step budget ends episodes through its terminal requests.
+benchmark/evaluation sink is selected by core.  Core owns no episode clock:
+`EnvStep.reset_env_ids` is a backend-owned due channel (empty when no backend
+due exists), and a custom sink that needs a time or step budget ends episodes
+through its terminal requests.
 
 `CollectSink` is built from a read-only facts snapshot (the resolved control
 rows plus `{articulation: facts}`) and stores no live env.  During `on_step` it
