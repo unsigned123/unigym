@@ -185,6 +185,7 @@ tests/
 │   ├── contacts/
 │   ├── terminations/
 │   ├── robots/
+│   ├── packs/
 │   ├── assets/
 │   ├── adapters/
 │   ├── backends/                # framework-level registry tests only
@@ -259,6 +260,7 @@ Applied once by `tests/_support/markers.py`, called from the root
 | `domain_assets` | `tests/unit/assets/**` |
 | `domain_backends` | `tests/unit/backends/**` |
 | `domain_evaluation` | `tests/unit/evaluation/**` |
+| `domain_packs` | `tests/unit/packs/**` (stored pack model and pack-set index) |
 | `domain_sim` | `tests/unit/sim/**` |
 | `domain_initializers` | `tests/unit/initializers/**` |
 | `backend_agnostic` | no specific backend |

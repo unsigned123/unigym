@@ -12,10 +12,13 @@ import yaml
 
 import unigym.pack_api as pack_api
 from unigym.pack_api import (
-    CatalogEntry,
-    PackCatalog,
-    PackManifestV1,
-    ProvidedItem,
+    EntrypointLocator,
+    Face,
+    ItemStatus,
+    Pack,
+    PackItem,
+    PackSet,
+    ResourceLocator,
     load_manifest_v1,
 )
 from unigym.packs import PackError
@@ -48,7 +51,7 @@ def _touch(root: Path, rel: str) -> Path:
     return path
 
 
-def _pack(base: Path, name: str, provides: dict[str, list[dict[str, object]]]) -> PackManifestV1:
+def _pack(base: Path, name: str, provides: dict[str, list[dict[str, object]]]) -> Pack:
     root = base / name
     for items in provides.values():
         for item in items:
@@ -75,7 +78,7 @@ def test_content_manifest_loads(tmp_path: Path) -> None:
 
     manifest = load_manifest_v1(root)
 
-    assert isinstance(manifest, PackManifestV1)
+    assert isinstance(manifest, Pack)
     assert manifest.schema == "unigym.pack/1"
     assert manifest.name == "acme"
     assert manifest.version == "1.2.0"
@@ -83,14 +86,21 @@ def test_content_manifest_loads(tmp_path: Path) -> None:
     assert manifest.trust == "content"
     assert manifest.entrypoint is None
     assert dict(manifest.requires) == {}
-    assert manifest.provides["scene_presets"] == (
-        ProvidedItem(
-            id="acme.tabletop",
-            resource="scene_presets/tabletop.yaml",
-            entrypoint=None,
+    assert manifest.items_for(face=Face.SCENE_PRESETS) == (
+        PackItem(
+            pack="acme",
+            face=Face.SCENE_PRESETS,
             kind=None,
+            name="acme.tabletop",
+            locator=ResourceLocator("scene_presets/tabletop.yaml"),
+            params=None,
+            origin=manifest.items[0].origin,
         ),
     )
+    assert manifest.items[0].status is ItemStatus.DECLARED
+    assert manifest.items[0].origin.item_id == "acme.tabletop"
+    assert manifest.origin.kind == "pack"
+    assert manifest.origin.discovered_by == "unknown"
     assert manifest.root == root.resolve()
 
 
@@ -101,7 +111,9 @@ def test_code_manifest_with_entrypoint_loads(tmp_path: Path) -> None:
     manifest = load_manifest_v1(root)
 
     assert manifest.trust == "code"
-    assert manifest.entrypoint == "acme_unigym:register"
+    assert manifest.entrypoint == EntrypointLocator(
+        module="acme_unigym", attribute="register", raw="acme_unigym:register"
+    )
 
 
 def test_provider_item_with_kind_and_entrypoint_loads(tmp_path: Path) -> None:
@@ -124,9 +136,12 @@ def test_provider_item_with_kind_and_entrypoint_loads(tmp_path: Path) -> None:
 
     manifest = load_manifest_v1(root)
 
-    item = manifest.provides["providers"][0]
+    item = manifest.item(Face.PROVIDERS, "acme.dynamic_assets")
     assert item.resource is None
     assert item.entrypoint == "acme_unigym.assets:register"
+    assert item.locator == EntrypointLocator(
+        module="acme_unigym.assets", attribute="register", raw="acme_unigym.assets:register"
+    )
     assert item.kind == "asset_generator"
     assert item.params is None
 
@@ -156,7 +171,7 @@ def test_scene_provider_item_loads_with_an_inline_params_schema(tmp_path: Path) 
 
     manifest = load_manifest_v1(root)
 
-    item = manifest.provides["providers"][0]
+    item = manifest.item(Face.PROVIDERS, "acme.table_top")
     assert item.params == {
         "style": {"type": "int", "default": 1},
         "seed": {"type": "int"},
@@ -246,8 +261,8 @@ def test_face_specific_item_rules(
         load_manifest_v1(root)
 
 
-def test_catalog_entry_carries_the_provider_params_schema(tmp_path: Path) -> None:
-    """The flattened catalog keeps the scene-provider schema."""
+def test_pack_item_carries_the_provider_params_schema(tmp_path: Path) -> None:
+    """The stored item keeps the scene-provider schema."""
     root = tmp_path / "acme"
     _write(
         root,
@@ -267,9 +282,7 @@ def test_catalog_entry_carries_the_provider_params_schema(tmp_path: Path) -> Non
     )
     manifest = load_manifest_v1(root)
 
-    catalog = PackCatalog((manifest,))
-
-    entry = catalog.entry("providers", "acme.table_top")
+    entry = PackSet((manifest,)).item(Face.PROVIDERS, "acme.table_top")
     assert entry.params == {"style": {"type": "int", "default": 1}}
 
 
@@ -301,7 +314,7 @@ def test_scene_provider_params_nested_sequences_are_deep_frozen(tmp_path: Path) 
 
     manifest = load_manifest_v1(root)
 
-    item = manifest.provides["providers"][0]
+    item = manifest.item(Face.PROVIDERS, "acme.table_top")
     assert item.params is not None
     declaration = item.params["layout"]
     assert declaration["default"] == (("a",), "b")
@@ -316,8 +329,8 @@ def test_scene_provider_params_nested_sequences_are_deep_frozen(tmp_path: Path) 
     assert item.params["layout"]["default"] == (("a",), "b")
 
 
-def test_catalog_entry_params_are_deep_frozen(tmp_path: Path) -> None:
-    """The catalog re-freezes nested sequences and never exposes a mutable list."""
+def test_stored_item_params_are_deep_frozen(tmp_path: Path) -> None:
+    """The stored item re-freezes nested sequences and never exposes a mutable list."""
     root = tmp_path / "acme"
     _write(
         root,
@@ -341,9 +354,7 @@ def test_catalog_entry_params_are_deep_frozen(tmp_path: Path) -> None:
             },
         ),
     )
-    catalog = PackCatalog((load_manifest_v1(root),))
-
-    entry = catalog.entry("providers", "acme.table_top")
+    entry = PackSet((load_manifest_v1(root),)).item(Face.PROVIDERS, "acme.table_top")
 
     assert entry.params is not None
     declaration = entry.params["layout"]
@@ -600,37 +611,27 @@ def test_catalog_preserves_order_and_filters(tmp_path: Path) -> None:
         {"scene_presets": [{"id": "beta.one", "resource": "one.yaml"}]},
     )
 
-    catalog = PackCatalog((alpha, beta))
+    pack_set = PackSet((alpha, beta))
 
-    assert catalog.packs() == ("alpha", "beta")
-    assert [entry.id for entry in catalog.entries()] == [
+    assert [pack.name for pack in pack_set.packs()] == ["alpha", "beta"]
+    assert [item.name for item in pack_set.items()] == [
         "alpha.one",
         "alpha.two",
         "alpha.demo",
         "beta.one",
     ]
-    assert [entry.id for entry in catalog.entries("scene_presets")] == [
+    assert [item.name for item in pack_set.items(face=Face.SCENE_PRESETS)] == [
         "alpha.one",
         "alpha.two",
         "beta.one",
     ]
-    assert catalog.entries("runs") == (
-        CatalogEntry(
-            pack="alpha",
-            face="runs",
-            id="alpha.demo",
-            resource="demo.yaml",
-            entrypoint=None,
-            kind=None,
-            params=None,
-        ),
-    )
-    assert catalog.get("beta") is beta
+    assert pack_set.items(face=Face.RUNS) == (alpha.item(Face.RUNS, "alpha.demo"),)
+    assert pack_set.get("beta") is beta
 
     with pytest.raises(PackError, match="unknown pack"):
-        catalog.get("missing")
+        pack_set.get("missing")
     with pytest.raises(PackError, match="unknown pack face"):
-        catalog.entries("widgets")
+        pack_set.items(face="widgets")
 
 
 def test_catalog_rejects_duplicate_pack_names(tmp_path: Path) -> None:
@@ -638,7 +639,7 @@ def test_catalog_rejects_duplicate_pack_names(tmp_path: Path) -> None:
     second = _pack(tmp_path / "right", "acme", {})
 
     with pytest.raises(PackError, match="duplicate pack name"):
-        PackCatalog((first, second))
+        PackSet((first, second))
 
 
 def test_catalog_rejects_duplicate_face_id(tmp_path: Path) -> None:
@@ -654,7 +655,7 @@ def test_catalog_rejects_duplicate_face_id(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PackError, match="duplicate 'scene_presets' id"):
-        PackCatalog((first, second))
+        PackSet((first, second))
 
 
 def test_validate_unique_materializes_one_shot_iterables(tmp_path: Path) -> None:
@@ -674,17 +675,17 @@ def test_validate_unique_materializes_one_shot_iterables(tmp_path: Path) -> None
         validate_unique(iter((first, second)))
 
 
-def test_catalog_and_manifest_are_immutable(tmp_path: Path) -> None:
+def test_pack_set_and_manifest_are_immutable(tmp_path: Path) -> None:
     manifest = _pack(
         tmp_path,
         "alpha",
         {"scene_presets": [{"id": "alpha.one", "resource": "one.yaml"}]},
     )
-    catalog = PackCatalog((manifest,))
+    pack_set = PackSet((manifest,))
 
-    assert isinstance(catalog.manifests, tuple)
+    assert isinstance(pack_set.packs(), tuple)
     with pytest.raises(FrozenInstanceError):
-        setattr(catalog, "manifests", ())
+        setattr(pack_set, "_packs", ())
     with pytest.raises(FrozenInstanceError):
         setattr(manifest, "name", "other")
     with pytest.raises(TypeError):
@@ -700,21 +701,22 @@ def test_public_pack_api_exports() -> None:
         "AssetContext",
         "BackendRegistrationPolicy",
         "AssetResourceRef",
-        "CatalogEntry",
-        "PackCatalog",
+        "EntrypointLocator",
+        "Face",
+        "ItemStatus",
+        "Locator",
+        "Pack",
         "PackContext",
         "PackFace",
-        "PackInfo",
-        "PackManifestV1",
+        "PackItem",
         "PackRuntime",
         "PackSet",
         "PhaseWindow",
-        "ProvidedItem",
         "ProviderInfo",
         "ProviderOrigin",
         "RegistrationGate",
         "RegistrationPhase",
-        "ResourceInfo",
+        "ResourceLocator",
         "ScenePresetRef",
         "SceneProvider",
         "SceneProviderContext",
@@ -758,5 +760,7 @@ def test_manifest_load_does_not_import_pack_code(
 
     manifest = load_manifest_v1(root)
 
-    assert manifest.entrypoint == "acme_sentinel:register"
+    assert manifest.entrypoint == EntrypointLocator(
+        module="acme_sentinel", attribute="register", raw="acme_sentinel:register"
+    )
     assert "acme_sentinel" not in sys.modules

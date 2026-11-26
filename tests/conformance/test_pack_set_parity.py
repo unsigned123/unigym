@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.packs import PackInfo, PackSet, discover_set, installed, require
+from unigym.packs import Pack, PackSet, discover_set, installed, require
 from unigym.provenance import ProviderOrigin
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -24,7 +24,7 @@ CODE_ROOT = PACKS_ROOT / "acme_code"
 ROOTS = (CONTENT_ROOT, CODE_ROOT)
 
 
-def _pack_projection(pack: PackInfo) -> tuple[object, ...]:
+def _pack_projection(pack: Pack) -> tuple[object, ...]:
     """Every observable pack fact except the discovery label."""
     return (
         pack.name,
@@ -32,30 +32,12 @@ def _pack_projection(pack: PackInfo) -> tuple[object, ...]:
         pack.api,
         pack.trust,
         str(pack.root),
-        tuple(pack.face_counts.items()),
-        tuple((ref.id, ref.kind, ref.resource, ref.entrypoint) for ref in pack.robots()),
-        tuple((ref.id, ref.kind, ref.resource) for ref in pack.assets()),
-        tuple((ref.id, ref.resource) for ref in pack.scene_presets()),
+        tuple((face.value, count) for face, count in pack.face_counts.items()),
         tuple(
-            (ref.id, ref.entrypoint, _schema_projection(ref.params_schema))
-            for ref in pack.scene_providers()
-        ),
-        tuple(
-            (info.name, info.kind, info.face, info.resource, info.entrypoint, info.active)
-            for info in pack.providers()
-        ),
-        tuple(
-            (info.face, info.id, info.kind, info.resource, str(info.path))
-            for info in pack.resources()
+            (item.face.value, item.name, item.kind, item.resource, item.entrypoint)
+            for item in pack.items
         ),
     )
-
-
-def _schema_projection(schema) -> object:
-    """Normalize an optional provider parameter schema for comparison."""
-    if schema is None:
-        return None
-    return tuple((name, repr(spec)) for name, spec in schema.items())
 
 
 def _set_projection(view: PackSet) -> tuple[object, ...]:
@@ -64,14 +46,15 @@ def _set_projection(view: PackSet) -> tuple[object, ...]:
 
 
 def _cross_projection(view: PackSet) -> tuple[object, ...]:
-    """The cross-pack aggregate views of one pack set."""
+    """The cross-pack aggregate item and origin views of one pack set."""
     return (
-        tuple((ref.pack, ref.id, ref.resource) for ref in view.robots()),
-        tuple((ref.pack, ref.id, ref.resource) for ref in view.scene_presets()),
-        tuple((ref.pack, ref.id, ref.entrypoint) for ref in view.scene_providers()),
-        tuple((ref.pack, ref.id, ref.resource) for ref in view.assets()),
-        tuple((info.name, info.kind, info.pack, info.face) for info in view.providers()),
-        tuple((info.face, info.id, str(info.path)) for info in view.resources()),
+        tuple(
+            (item.pack, item.face.value, item.name, item.kind, item.resource, item.entrypoint)
+            for item in view.items()
+        ),
+        tuple((origin.kind, origin.pack) for origin in view.origins()),
+        tuple((item.pack, item.name) for item in view.providers()),
+        tuple((item.pack, item.name) for item in view.resources()),
     )
 
 

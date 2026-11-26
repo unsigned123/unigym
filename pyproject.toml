@@ -345,6 +345,7 @@ markers = [
     "domain_initializers: reset initializer and primitive tests",
     "domain_query: runtime-query contract and facade tests",
     "domain_evaluation: read-only live evaluation-context tests",
+    "domain_packs: stored pack model and pack-set index tests",
     "backend_agnostic: tests that do not target one specific backend",
     "backend_mujoco: MuJoCo backend tests",
     "backend_mjwarp: MuJoCo Warp backend tests",

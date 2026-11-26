@@ -18,12 +18,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from unigym.actuator_law import ActuatorLawDescriptor
-from unigym.packs.catalog import CatalogEntry, PackCatalog
 from unigym.packs.packset import (
     AssetResourceRef,
-    PackInfo,
     PackSet,
-    ResourceInfo,
     ScenePresetRef,
     SceneProviderRef,
     discover_set,
@@ -37,7 +34,16 @@ from unigym.packs.runtime import (
     PackRuntime,
     discover,
 )
-from unigym.packs.schema import PackManifestV1, ProvidedItem, load_manifest_v1
+from unigym.packs.schema import (
+    EntrypointLocator,
+    Face,
+    ItemStatus,
+    Locator,
+    Pack,
+    PackItem,
+    ResourceLocator,
+    load_manifest_v1,
+)
 from unigym.provenance import ProviderInfo, ProviderOrigin
 from unigym.registration import (
     BackendRegistrationPolicy,
@@ -147,17 +153,18 @@ __all__ = [
     "ActuatorLawDescriptor",
     "AssetContext",
     "AssetResourceRef",
-    "CatalogEntry",
-    "PackCatalog",
+    "EntrypointLocator",
+    "Face",
+    "ItemStatus",
+    "Locator",
+    "Pack",
     "PackContext",
-    "PackInfo",
-    "PackManifestV1",
+    "PackItem",
     "PackRuntime",
     "PackSet",
-    "ProvidedItem",
     "ProviderInfo",
     "ProviderOrigin",
-    "ResourceInfo",
+    "ResourceLocator",
     "ScenePresetRef",
     "SceneProvider",
     "SceneProviderContext",

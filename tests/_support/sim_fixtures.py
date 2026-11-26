@@ -100,4 +100,4 @@ def write_sim_pack(
     )
 
     pack_set = discover_set([root])
-    return pack_set, pack_set.pack(pack_name).robot(robot_id)
+    return pack_set, pack_set.robot(robot_id)

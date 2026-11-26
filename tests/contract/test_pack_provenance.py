@@ -180,9 +180,8 @@ def test_installed_never_activates_a_trap_pack(
     assert "trap_pack" not in sys.modules
     for view in views:
         assert [pack.name for pack in view.packs()] == ["trap_pack"]
-        provider = view.pack("trap_pack").providers()[0]
+        provider = view.pack("trap_pack").items_for(face="providers")[0]
         assert provider.name == "trap_pack.thing"
-        assert provider.active is None
         assert provider.origin.entrypoint == "trap_pack:register"
 
 
@@ -309,10 +308,10 @@ def test_resource_only_robot_ref_resolves_without_python(
     assert not (root / "python").exists()
 
     packs = require("acme_robots")
-    robot = packs.pack("acme_robots").robot("acme.arm")
+    robot = packs.robot("acme.arm")
     assert robot.name == "acme.arm"
     assert packs.robot("acme.arm") == robot
-    provider = packs.pack("acme_robots").providers("robot")[0]
+    provider = packs.pack("acme_robots").items_for(face="providers", kind="robot")[0]
     assert provider.entrypoint is None
     assert provider.origin.pack == "acme_robots"
     assert provider.origin.pack_version == "2.1.0"
@@ -332,12 +331,11 @@ def test_string_edge_and_canonical_handles_only(monkeypatch: pytest.MonkeyPatch)
     """Strings resolve at the edge; packs expose methods, never attributes."""
     packs = _fixture_view(monkeypatch)
 
-    pack = packs.pack("acme_content")
-    preset = pack.scene_preset("acme_content.tabletop")
+    preset = packs.scene_preset("acme_content.tabletop")
     assert isinstance(preset, ScenePresetRef)
     assert preset == packs.scene_preset("acme_content.tabletop")
 
-    provider = packs.pack("acme_code").scene_provider("acme_code.table_top")
+    provider = packs.scene_provider("acme_code.table_top")
     assert isinstance(provider, SceneProviderRef)
     assert provider == packs.scene_provider("acme_code.table_top")
 

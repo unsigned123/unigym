@@ -44,6 +44,7 @@ UNIT_DOMAIN_MARKERS: dict[str, str] = {
     "initializers": "domain_initializers",
     "query": "domain_query",
     "evaluation": "domain_evaluation",
+    "packs": "domain_packs",
 }
 
 BACKEND_MARKERS: dict[str, str] = {

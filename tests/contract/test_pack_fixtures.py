@@ -14,10 +14,10 @@ import pytest
 import yaml
 
 from unigym.pack_api import (
-    CatalogEntry,
-    PackCatalog,
-    PackManifestV1,
-    ProvidedItem,
+    Face,
+    ItemStatus,
+    Pack,
+    PackSet,
     load_manifest_v1,
 )
 
@@ -57,10 +57,10 @@ def _string_values(node: object) -> list[str]:
     return values
 
 
-def test_content_fixture_loads_with_exact_entries() -> None:
+def test_content_fixture_loads_with_exact_items() -> None:
     manifest = load_manifest_v1(CONTENT_ROOT)
 
-    assert isinstance(manifest, PackManifestV1)
+    assert isinstance(manifest, Pack)
     assert manifest.schema == "unigym.pack/1"
     assert manifest.name == "acme_content"
     assert manifest.version == "1.0.0"
@@ -69,35 +69,22 @@ def test_content_fixture_loads_with_exact_entries() -> None:
     assert manifest.entrypoint is None
     assert dict(manifest.requires) == {}
     assert manifest.root == CONTENT_ROOT.resolve()
-    assert dict(manifest.provides) == {
-        "runs": (
-            ProvidedItem(
-                id="acme_content.demo",
-                resource="runs/demo.yaml",
-                entrypoint=None,
-                kind=None,
-                params=None,
-            ),
+    assert [
+        (item.face, item.name, item.kind, item.resource, item.entrypoint, item.params)
+        for item in manifest.items
+    ] == [
+        (Face.RUNS, "acme_content.demo", None, "runs/demo.yaml", None, None),
+        (
+            Face.SCENE_PRESETS,
+            "acme_content.tabletop",
+            None,
+            "scene_presets/tabletop.yaml",
+            None,
+            None,
         ),
-        "scene_presets": (
-            ProvidedItem(
-                id="acme_content.tabletop",
-                resource="scene_presets/tabletop.yaml",
-                entrypoint=None,
-                kind=None,
-                params=None,
-            ),
-        ),
-        "assets": (
-            ProvidedItem(
-                id="acme_content.cup",
-                resource="assets/cup/asset.yaml",
-                entrypoint=None,
-                kind=None,
-                params=None,
-            ),
-        ),
-    }
+        (Face.ASSETS, "acme_content.cup", None, "assets/cup/asset.yaml", None, None),
+    ]
+    assert all(item.status is ItemStatus.DECLARED for item in manifest.items)
 
 
 def test_code_fixture_loads_with_trust_and_provider_entrypoint() -> None:
@@ -108,112 +95,89 @@ def test_code_fixture_loads_with_trust_and_provider_entrypoint() -> None:
     assert manifest.version == "1.0.0"
     assert manifest.api == 1
     assert manifest.trust == "code"
-    assert manifest.entrypoint == "acme_pack:register"
+    assert manifest.entrypoint is not None
+    assert manifest.entrypoint.raw == "acme_pack:register"
     assert manifest.root == CODE_ROOT.resolve()
-    assert dict(manifest.provides) == {
-        "providers": (
-            ProvidedItem(
-                id="acme_code.dynamic_assets",
-                resource=None,
-                entrypoint="acme_pack:register",
-                kind="asset_generator",
-                params=None,
-            ),
-            ProvidedItem(
-                id="acme_code.table_top",
-                resource=None,
-                entrypoint="acme_pack:table_top",
-                kind="scene",
-                params={
-                    "style": {"type": "int", "default": 1},
-                    "seed": {"type": "int"},
-                },
-            ),
-        )
-    }
-
-
-def test_catalog_combines_fixtures_in_order_and_filters_by_face() -> None:
-    content = load_manifest_v1(CONTENT_ROOT)
-    code = load_manifest_v1(CODE_ROOT)
-
-    catalog = PackCatalog((content, code))
-
-    assert catalog.packs() == ("acme_content", "acme_code")
-    assert catalog.get("acme_content") is content
-    assert catalog.get("acme_code") is code
-    assert catalog.entries() == (
-        CatalogEntry(
-            pack="acme_content",
-            face="runs",
-            id="acme_content.demo",
-            resource="runs/demo.yaml",
-            entrypoint=None,
-            kind=None,
-            params=None,
+    assert [
+        (item.face, item.name, item.kind, item.resource, item.entrypoint, item.params)
+        for item in manifest.items
+    ] == [
+        (
+            Face.PROVIDERS,
+            "acme_code.dynamic_assets",
+            "asset_generator",
+            None,
+            "acme_pack:register",
+            None,
         ),
-        CatalogEntry(
-            pack="acme_content",
-            face="scene_presets",
-            id="acme_content.tabletop",
-            resource="scene_presets/tabletop.yaml",
-            entrypoint=None,
-            kind=None,
-            params=None,
-        ),
-        CatalogEntry(
-            pack="acme_content",
-            face="assets",
-            id="acme_content.cup",
-            resource="assets/cup/asset.yaml",
-            entrypoint=None,
-            kind=None,
-            params=None,
-        ),
-        CatalogEntry(
-            pack="acme_code",
-            face="providers",
-            id="acme_code.dynamic_assets",
-            resource=None,
-            entrypoint="acme_pack:register",
-            kind="asset_generator",
-            params=None,
-        ),
-        CatalogEntry(
-            pack="acme_code",
-            face="providers",
-            id="acme_code.table_top",
-            resource=None,
-            entrypoint="acme_pack:table_top",
-            kind="scene",
-            params={
+        (
+            Face.PROVIDERS,
+            "acme_code.table_top",
+            "scene",
+            None,
+            "acme_pack:table_top",
+            {
                 "style": {"type": "int", "default": 1},
                 "seed": {"type": "int"},
             },
         ),
-    )
-    assert catalog.entries(face="scene_presets") == (
-        CatalogEntry(
-            pack="acme_content",
-            face="scene_presets",
-            id="acme_content.tabletop",
-            resource="scene_presets/tabletop.yaml",
-            entrypoint=None,
-            kind=None,
-            params=None,
+    ]
+
+
+def test_pack_set_combines_fixtures_in_order_and_filters_by_face() -> None:
+    content = load_manifest_v1(CONTENT_ROOT)
+    code = load_manifest_v1(CODE_ROOT)
+
+    pack_set = PackSet((content, code))
+
+    assert [pack.name for pack in pack_set.packs()] == ["acme_content", "acme_code"]
+    assert pack_set.get("acme_content") is content
+    assert pack_set.get("acme_code") is code
+    assert [
+        (item.pack, item.face, item.name, item.kind, item.resource, item.entrypoint)
+        for item in pack_set.items()
+    ] == [
+        ("acme_content", Face.RUNS, "acme_content.demo", None, "runs/demo.yaml", None),
+        (
+            "acme_content",
+            Face.SCENE_PRESETS,
+            "acme_content.tabletop",
+            None,
+            "scene_presets/tabletop.yaml",
+            None,
         ),
+        ("acme_content", Face.ASSETS, "acme_content.cup", None, "assets/cup/asset.yaml", None),
+        (
+            "acme_code",
+            Face.PROVIDERS,
+            "acme_code.dynamic_assets",
+            "asset_generator",
+            None,
+            "acme_pack:register",
+        ),
+        (
+            "acme_code",
+            Face.PROVIDERS,
+            "acme_code.table_top",
+            "scene",
+            None,
+            "acme_pack:table_top",
+        ),
+    ]
+    assert pack_set.items(face=Face.SCENE_PRESETS) == (
+        content.item(Face.SCENE_PRESETS, "acme_content.tabletop"),
     )
-    assert [entry.id for entry in catalog.entries(face="providers")] == [
+    assert [item.name for item in pack_set.items(face=Face.PROVIDERS)] == [
         "acme_code.dynamic_assets",
         "acme_code.table_top",
     ]
-    assert catalog.entries(face="terminations") == ()
+    assert pack_set.items(face=Face.TERMINATIONS) == ()
 
 
-def test_catalog_fixture_entries_are_unique_by_face_and_id() -> None:
-    catalog = PackCatalog((load_manifest_v1(CONTENT_ROOT), load_manifest_v1(CODE_ROOT)))
+def test_fixture_items_are_unique_by_face_and_name() -> None:
+    pack_set = PackSet((load_manifest_v1(CONTENT_ROOT), load_manifest_v1(CODE_ROOT)))
 
-    keys = [(entry.face, entry.id) for entry in catalog.entries()]
+    keys = [(item.face, item.name) for item in pack_set.items()]
 
     assert len(keys) == len(set(keys)) == 5
 
@@ -225,9 +189,10 @@ def test_manifest_and_catalog_loading_does_not_import_pack_python() -> None:
 
     content = load_manifest_v1(CONTENT_ROOT)
     code = load_manifest_v1(CODE_ROOT)
-    catalog = PackCatalog((content, code))
+    pack_set = PackSet((content, code))
 
-    assert catalog.get("acme_code").entrypoint == "acme_pack:register"
+    entrypoint = pack_set.get("acme_code").entrypoint
+    assert entrypoint is not None and entrypoint.raw == "acme_pack:register"
     assert "acme_pack" not in sys.modules
 
 
@@ -257,13 +222,12 @@ def test_fixture_yaml_contains_no_absolute_or_parent_paths() -> None:
 def test_fixture_resources_resolve_under_their_pack_roots() -> None:
     for root in FIXTURE_ROOTS:
         manifest = load_manifest_v1(root)
-        for items in manifest.provides.values():
-            for item in items:
-                if item.resource is None:
-                    continue
-                resource = root / item.resource
-                assert resource.is_file()
-                assert resource.resolve().is_relative_to(root.resolve())
+        for item in manifest.items:
+            if item.resource is None:
+                continue
+            resource = root / item.resource
+            assert resource.is_file()
+            assert resource.resolve().is_relative_to(root.resolve())
 
 
 def test_fixtures_live_under_support_and_are_not_collected_as_tests(

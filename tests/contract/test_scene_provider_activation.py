@@ -23,12 +23,14 @@ from unigym.adapters import (
 )
 from unigym.pack_api import (
     ActivationHandle,
-    PackCatalog,
-    PackManifestV1,
+    Face,
+    Pack,
+    PackItem,
     PackRuntime,
-    ProvidedItem,
+    ResourceLocator,
     discover,
 )
+from unigym.packs.catalog import PackCatalog
 from unigym.packs import PackError
 from unigym.robots import (
     ROBOT_REGISTRY,
@@ -513,25 +515,40 @@ def test_hand_built_scene_item_with_a_resource_is_rejected(tmp_path: Path) -> No
     root = tmp_path / "scene_resource"
     (root / "python").mkdir(parents=True)
     (root / "value.yaml").write_text("kind: scene\n", encoding="utf-8")
-    manifest = PackManifestV1(
+    manifest = Pack(
         schema="unigym.pack/1",
         name="scene_resource",
         version="1.0.0",
         api=1,
         trust="code",
+        root=root.resolve(),
         entrypoint=None,
         requires={},
-        provides={
-            "providers": (
-                ProvidedItem(
-                    id="acme.table_top",
+        items=(
+            PackItem(
+                pack="scene_resource",
+                face=Face.PROVIDERS,
+                kind="scene",
+                name="acme.table_top",
+                locator=ResourceLocator("value.yaml"),
+                params=None,
+                origin=ProviderOrigin(
+                    kind="manifest",
+                    pack="scene_resource",
+                    pack_version="1.0.0",
+                    root=str(root.resolve()),
+                    face="providers",
+                    item_id="acme.table_top",
                     resource="value.yaml",
-                    entrypoint="scene_resource_module:table_top",
-                    kind="scene",
                 ),
-            )
-        },
-        root=root.resolve(),
+            ),
+        ),
+        origin=ProviderOrigin(
+            kind="pack",
+            pack="scene_resource",
+            pack_version="1.0.0",
+            root=str(root.resolve()),
+        ),
     )
     runtime = PackRuntime(
         catalog=PackCatalog((manifest,)),

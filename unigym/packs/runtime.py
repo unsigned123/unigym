@@ -32,7 +32,16 @@ from unigym.provenance import ProviderOrigin, RegistrySnapshot, attribution
 
 from . import PackError
 from .catalog import PackCatalog, validate_unique
-from .schema import PROVIDER_ID_RE, PackManifestV1, ProvidedItem, load_manifest_v1
+from .schema import (
+    PROVIDER_ID_RE,
+    EntrypointLocator,
+    Pack,
+    PackItem,
+    load_manifest_v1,
+    pack_origin,
+    provider_param_declarations,
+    with_pack_origin,
+)
 
 if TYPE_CHECKING:
     from unigym.adapters.base import Adapter
@@ -98,7 +107,13 @@ class ActivationHandle:
     actuator_laws: tuple[str, ...] = ()
 
 
-def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) -> Path:
+def _pack_entrypoint(manifest: Pack) -> str | None:
+    """Return the exact manifest entrypoint spelling, or ``None``."""
+    locator: EntrypointLocator | None = manifest.entrypoint
+    return None if locator is None else locator.raw
+
+
+def _import_boundary(manifest: Pack, entrypoint: str | None = None) -> Path:
     """Return a code pack's explicit ``python/`` import boundary.
 
     The directory is required: importing the entrypoint from an ambient
@@ -106,7 +121,7 @@ def _import_boundary(manifest: PackManifestV1, entrypoint: str | None = None) ->
     """
     python_dir = manifest.root / "python"
     if not python_dir.is_dir():
-        declared = entrypoint if entrypoint is not None else manifest.entrypoint
+        declared = entrypoint if entrypoint is not None else _pack_entrypoint(manifest)
         raise PackError(
             f"pack {manifest.name!r} entrypoint {declared!r} needs the pack's "
             f"python/ import boundary, but it is missing: {python_dir}"
@@ -149,7 +164,7 @@ def _resolve_entrypoint(entrypoint: str) -> Callable[..., Any]:
 
 
 def _activate_adapter_providers(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
 ) -> tuple[str, ...]:
     """Import and register manifest-declared ``kind: adapter`` providers.
@@ -181,7 +196,7 @@ def _activate_adapter_providers(
     python_dir = _import_boundary(manifest, items[0].entrypoint)
     _add_to_sys_path(python_dir)
 
-    validated: list[tuple[ProvidedItem, type[Adapter]]] = []
+    validated: list[tuple[PackItem, type[Adapter]]] = []
     proposed: set[str] = set()
     for item in items:
         where = f"pack {manifest.name!r} provider id {item.id!r}"
@@ -248,7 +263,7 @@ def _constant_robot_factory(where: str, profile: RobotProfile) -> Callable[..., 
     return factory
 
 
-def _activate_robot_providers(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[str, ...]:
+def _activate_robot_providers(manifest: Pack, runtime: PackRuntime) -> tuple[str, ...]:
     """Load and register manifest-declared ``kind: robot`` providers.
 
     The item id becomes the robot name a run config selects.  An item is
@@ -285,7 +300,7 @@ def _activate_robot_providers(manifest: PackManifestV1, runtime: PackRuntime) ->
         python_dir = _import_boundary(manifest, first_entrypoint)
         _add_to_sys_path(python_dir)
 
-    validated: list[tuple[ProvidedItem, Callable[..., RobotProfile]]] = []
+    validated: list[tuple[PackItem, Callable[..., RobotProfile]]] = []
     for item in items:
         where = f"pack {manifest.name!r} provider id {item.id!r}"
         if item.entrypoint is not None:
@@ -370,9 +385,9 @@ def _provider_schema_diff(
 
 
 def _manifest_provider_origin(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
-    item: ProvidedItem,
+    item: PackItem,
 ) -> ProviderOrigin:
     """Build the exact provenance record for one manifest provider item."""
     discovered_by = runtime.origins.get(manifest.name, "unknown")
@@ -386,13 +401,13 @@ def _manifest_provider_origin(
         item_id=item.id,
         resource=item.resource,
         entrypoint=item.entrypoint,
-        activation_entrypoint=manifest.entrypoint,
+        activation_entrypoint=_pack_entrypoint(manifest),
         # An entry-point root may load its target during discovery (§2.1).
         location_imported=discovered_by == "entry-point",
     )
 
 
-def _pack_code_origin(manifest: PackManifestV1, runtime: PackRuntime) -> ProviderOrigin:
+def _pack_code_origin(manifest: Pack, runtime: PackRuntime) -> ProviderOrigin:
     """Build the activation-window origin for pack-code registrations."""
     discovered_by = runtime.origins.get(manifest.name, "unknown")
     return ProviderOrigin(
@@ -402,13 +417,13 @@ def _pack_code_origin(manifest: PackManifestV1, runtime: PackRuntime) -> Provide
         root=str(manifest.root),
         discovered_by=discovered_by,
         item_id=None,
-        activation_entrypoint=manifest.entrypoint,
+        activation_entrypoint=_pack_entrypoint(manifest),
         location_imported=discovered_by == "entry-point",
     )
 
 
 def _attribute_pack_code_robots(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: RegistrySnapshot[Callable[..., RobotProfile]],
 ) -> None:
@@ -424,7 +439,7 @@ def _attribute_pack_code_robots(
 
 
 def _attribute_pack_code_adapters(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: RegistrySnapshot[type[Adapter]],
 ) -> None:
@@ -438,7 +453,7 @@ def _attribute_pack_code_adapters(
 
 
 def _attribute_pack_code_scene_providers(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: SceneProviderRegistrySnapshot,
 ) -> None:
@@ -461,7 +476,7 @@ def _attribute_pack_code_scene_providers(
 
 
 def _attribute_pack_code_content_fillers(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: SceneContentFillerRegistrySnapshot,
 ) -> None:
@@ -482,7 +497,7 @@ def _attribute_pack_code_content_fillers(
 
 
 def _attribute_pack_code_prop_templates(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: PropTemplateRegistrySnapshot,
 ) -> None:
@@ -503,7 +518,7 @@ def _attribute_pack_code_prop_templates(
 
 
 def _attribute_pack_code_initializers(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: InitializerRegistrySnapshot,
 ) -> None:
@@ -524,7 +539,7 @@ def _attribute_pack_code_initializers(
 
 
 def _attribute_pack_code_terminations(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     before: TerminationRegistrySnapshot,
 ) -> None:
@@ -545,7 +560,7 @@ def _attribute_pack_code_terminations(
 
 
 def _activate_scene_provider_providers(
-    manifest: PackManifestV1,
+    manifest: Pack,
     runtime: PackRuntime,
     *,
     window_names: frozenset[str],
@@ -601,7 +616,7 @@ def _activate_scene_provider_providers(
 
     snapshot = snapshot_scene_providers()
     validated: list[
-        tuple[ProvidedItem, SceneProvider, Mapping[str, ProviderParamSpec] | None, bool]
+        tuple[PackItem, SceneProvider, Mapping[str, ProviderParamSpec] | None, bool]
     ] = []
     proposed: set[str] = set()
     for item in items:
@@ -638,7 +653,9 @@ def _activate_scene_provider_providers(
             raise PackError(f"{where} entrypoint {item.entrypoint!r} target must have a docstring")
         try:
             manifest_schema = (
-                normalize_manifest_params(item.params) if item.params is not None else None
+                normalize_manifest_params(provider_param_declarations(item.params))
+                if item.params is not None
+                else None
             )
         except SceneProviderParamError as err:
             raise PackError(f"{where} params declaration is invalid: {err}") from err
@@ -848,7 +865,7 @@ class PackRuntime:
         entry = self.catalog.entry(face, id)
         if entry.resource is None:
             raise PackError(
-                f"pack {entry.pack!r} face {entry.face!r} id {entry.id!r} "
+                f"pack {entry.pack!r} face {entry.face.value!r} id {entry.id!r} "
                 f"declares entrypoint {entry.entrypoint!r}, not a resource; "
                 f"use runtime.activate({entry.pack!r}) to activate the pack"
             )
@@ -954,7 +971,7 @@ class PackRuntime:
 
         at_least_phase(RegistrationPhase.ACTIVATE)
         manifest = self.catalog.get(pack)
-        entrypoint = manifest.entrypoint
+        entrypoint = _pack_entrypoint(manifest)
         adapter_items = tuple(
             item for item in manifest.provides.get("providers", ()) if item.kind == "adapter"
         )
@@ -1370,7 +1387,7 @@ def discover(
         selected, labels, entry_names = roots, {}, {}
         default_label = "explicit-root"
 
-    manifests: list[PackManifestV1] = []
+    manifests: list[Pack] = []
     root_by_pack: dict[str, Path] = {}
     origin_by_pack: dict[str, str] = {}
     seen: set[Path] = set()
@@ -1386,17 +1403,17 @@ def discover(
             if entry_name is None:
                 raise
             raise PackError(f"pack entry point {entry_name!r} resolved to {root}: {err}") from err
+        label = labels.get(root, default_label)
         owner = root_by_pack.get(manifest.name)
         if owner is not None:
-            label = labels.get(root, default_label)
             raise PackError(
                 f"duplicate pack name {manifest.name!r} discovered at roots "
                 f"{owner} and {manifest.root} (discovered_by "
                 f"{origin_by_pack[manifest.name]!r} and {label!r})"
             )
         root_by_pack[manifest.name] = manifest.root
-        origin_by_pack[manifest.name] = labels.get(root, default_label)
-        manifests.append(manifest)
+        origin_by_pack[manifest.name] = label
+        manifests.append(with_pack_origin(manifest, pack_origin(manifest, label)))
     validate_unique(manifests, origin_by_pack)
     return PackRuntime(
         catalog=PackCatalog(tuple(manifests)),

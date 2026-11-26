@@ -1,9 +1,13 @@
-"""Public pack catalog over validated ``unigym.pack/1`` manifests.
+"""Temporary internal catalog adapter over the stored pack model.
 
-The catalog is a pure, immutable view of what a set of manifests declares.
-It preserves pack order and per-pack item order, rejects duplicate pack names
-and duplicate ``(face, id)`` pairs, and never discovers, scans or imports a
-pack.
+:class:`PackSet` is the public ordered index over :class:`~unigym.packs.schema.Pack`
+values.  The runtime still exposes this small compatibility view because
+existing consumers read ``runtime.catalog``; it holds references to the same
+``Pack``/``PackItem`` objects and never copies or flattens item data.
+
+This module is internal for the C1 transition.  C7 deletes it when the runtime
+becomes the loader and consumers use :class:`~unigym.packs.packset.PackSet`
+directly.
 """
 
 from __future__ import annotations
@@ -11,169 +15,108 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from unigym._typing import JsonValue
-
 from . import PackError
-from .schema import (
-    FACE_NAMES,
-    PackManifestV1,
-    ProvidedItem,
-    _freeze_json,
-    freeze_provider_params,
-)
+from .schema import FACE_NAMES, Face, Pack, PackItem, coerce_face
 
 
-@dataclass(frozen=True)
-class CatalogEntry:
-    """One provided item flattened into the cross-pack catalog.
-
-    ``params`` is the scene-provider parameter schema, deep-frozen by the same
-    boundary the manifest uses (read-only mappings, tuple sequences); it is
-    ``None`` for every other item.
-    """
-
-    pack: str
-    face: str
-    id: str
-    resource: str | None
-    entrypoint: str | None
-    kind: str | None
-    params: Mapping[str, JsonValue] | Mapping[str, Mapping[str, JsonValue]] | None = None
-
-    def __post_init__(self) -> None:
-        """Deep-freeze the optional provider parameter declaration."""
-        if self.params is None:
-            return
-        if self.kind == "actuator_implementation":
-            frozen = _freeze_json(self.params)
-            if not isinstance(frozen, Mapping):
-                raise PackError(f"catalog entry {self.pack}:{self.id} params must be a mapping")
-            object.__setattr__(self, "params", frozen)
-            return
-        object.__setattr__(self, "params", freeze_provider_params(self.params))
+def _label(origins: Mapping[str, str] | None, pack: Pack) -> str:
+    """The discovery label for *pack*, or ``"unknown"`` when not recorded."""
+    if origins is not None:
+        return origins.get(pack.name, "unknown")
+    return pack.origin.discovered_by or "unknown"
 
 
-def _entry(pack: str, face: str, item: ProvidedItem) -> CatalogEntry:
-    """Flatten one provided item into a catalog entry."""
-    return CatalogEntry(
-        pack=pack,
-        face=face,
-        id=item.id,
-        resource=item.resource,
-        entrypoint=item.entrypoint,
-        kind=item.kind,
-        params=item.params,
-    )
-
-
-def _require_face(face: str) -> None:
-    """Reject a name outside the declared face vocabulary."""
-    if face not in FACE_NAMES:
-        raise PackError(f"unknown pack face {face!r}; known faces: {list(FACE_NAMES)}")
-
-
-def _label(origins: Mapping[str, str] | None, name: str) -> str:
-    """The discovery label for *name*, or ``"unknown"`` when not recorded."""
-    if origins is None:
-        return "unknown"
-    return origins.get(name, "unknown")
-
-
-def validate_unique(
-    manifests: Iterable[PackManifestV1], origins: Mapping[str, str] | None = None
-) -> None:
-    """Reject duplicate pack names and duplicate ``(face, id)`` pairs.
+def validate_unique(packs: Iterable[Pack], origins: Mapping[str, str] | None = None) -> None:
+    """Reject duplicate pack names and duplicate ``(face, name)`` pairs.
 
     The error names both packs, both pack roots and both discovery labels
-    (``origins`` keys pack names; ``None`` reports ``"unknown"``).  There is no
-    first-match resolution.  This is the one ambiguity check shared by
-    :class:`PackCatalog` and :func:`unigym.packs.runtime.discover`.
+    (``origins`` keys pack names; otherwise each pack's own origin is used).
+    There is no first-match resolution.  This is the one ambiguity check
+    shared by :class:`PackCatalog`,
+    :class:`~unigym.packs.packset.PackSet` and discovery.
     """
-    manifests = tuple(manifests)
-    seen_packs: dict[str, PackManifestV1] = {}
-    for manifest in manifests:
-        owner = seen_packs.get(manifest.name)
+    materialized = tuple(packs)
+    seen_packs: dict[str, Pack] = {}
+    for pack in materialized:
+        owner = seen_packs.get(pack.name)
         if owner is not None:
             raise PackError(
-                f"duplicate pack name {manifest.name!r} discovered at roots "
-                f"{owner.root} and {manifest.root} (discovered_by "
-                f"{_label(origins, owner.name)!r} and "
-                f"{_label(origins, manifest.name)!r})"
+                f"duplicate pack name {pack.name!r} discovered at roots "
+                f"{owner.root} and {pack.root} (discovered_by "
+                f"{_label(origins, owner)!r} and {_label(origins, pack)!r})"
             )
-        seen_packs[manifest.name] = manifest
-    seen_items: dict[tuple[str, str], tuple[str, PackManifestV1]] = {}
-    for manifest in manifests:
-        for face, items in manifest.provides.items():
-            for item in items:
-                key = (face, item.id)
-                owner = seen_items.get(key)
-                if owner is not None:
-                    owner_pack, owner_manifest = owner
-                    raise PackError(
-                        f"duplicate {face!r} id {item.id!r} in catalog: provided by "
-                        f"packs {owner_pack!r} (root {owner_manifest.root}, "
-                        f"discovered_by {_label(origins, owner_pack)!r}) and "
-                        f"{manifest.name!r} (root {manifest.root}, discovered_by "
-                        f"{_label(origins, manifest.name)!r})"
-                    )
-                seen_items[key] = (manifest.name, manifest)
+        seen_packs[pack.name] = pack
+    seen_items: dict[tuple[Face, str], tuple[str, Pack]] = {}
+    for pack in materialized:
+        for item in pack.items:
+            key = (item.face, item.name)
+            owner = seen_items.get(key)
+            if owner is not None:
+                owner_pack, owner_record = owner
+                raise PackError(
+                    f"duplicate {item.face.value!r} id {item.name!r} in catalog: "
+                    f"provided by packs {owner_pack!r} (root {owner_record.root}, "
+                    f"discovered_by {_label(origins, owner_record)!r}) and "
+                    f"{pack.name!r} (root {pack.root}, discovered_by "
+                    f"{_label(origins, pack)!r})"
+                )
+            seen_items[key] = (pack.name, pack)
 
 
 @dataclass(frozen=True)
 class PackCatalog:
-    """An ordered, duplicate-free view over validated manifests."""
+    """An ordered, duplicate-free compatibility view over stored packs."""
 
-    manifests: tuple[PackManifestV1, ...]
+    manifests: tuple[Pack, ...]
 
     def __post_init__(self) -> None:
-        """Freeze the manifest tuple and validate catalog uniqueness."""
+        """Freeze the pack tuple and validate catalog uniqueness."""
         object.__setattr__(self, "manifests", tuple(self.manifests))
         validate_unique(self.manifests)
 
     def packs(self) -> tuple[str, ...]:
         """Return pack names in declaration order."""
-        return tuple(manifest.name for manifest in self.manifests)
+        return tuple(pack.name for pack in self.manifests)
 
-    def get(self, name: str) -> PackManifestV1:
-        """Return the named manifest or fail with the known pack names."""
-        for manifest in self.manifests:
-            if manifest.name == name:
-                return manifest
-        known = sorted(manifest.name for manifest in self.manifests)
+    def get(self, name: str) -> Pack:
+        """Return the named pack or fail with the known pack names."""
+        for pack in self.manifests:
+            if pack.name == name:
+                return pack
+        known = sorted(pack.name for pack in self.manifests)
         raise PackError(f"unknown pack {name!r}; known packs: {known}")
 
-    def entries(self, face: str | None = None) -> tuple[CatalogEntry, ...]:
-        """Return provided items, optionally restricted to one declared face."""
-        if face is not None:
-            _require_face(face)
-        entries: list[CatalogEntry] = []
-        for manifest in self.manifests:
-            for item_face, items in manifest.provides.items():
-                if face is not None and item_face != face:
-                    continue
-                for item in items:
-                    entries.append(_entry(manifest.name, item_face, item))
-        return tuple(entries)
+    def entries(self, face: str | Face | None = None) -> tuple[PackItem, ...]:
+        """Return stored items, optionally restricted to one declared face."""
+        face_value = None if face is None else coerce_face(face)
+        return tuple(
+            item
+            for pack in self.manifests
+            for item in pack.items
+            if face_value is None or item.face == face_value
+        )
 
-    def entry(self, face: str, id: str) -> CatalogEntry:
-        """Return the entry for an exact ``(face, id)`` pair.
+    def entry(self, face: str | Face | None, id: str) -> PackItem:
+        """Return the item for an exact ``(face, id)`` pair.
 
-        This is a pure lookup over already-loaded manifests: it validates
-        ``face`` against the declared vocabulary and searches that face. It
-        never discovers, scans, parses or imports a pack.
+        This is a pure lookup over already-loaded packs: it validates ``face``
+        against the declared vocabulary and searches that face.  It never
+        discovers, scans, parses or imports a pack.
 
         Raises:
             PackError: The face is not declared, or no item on that face has
                 the requested id. The message names the input and the known
                 choices.
         """
-        _require_face(face)
-        items = self.entries(face)
+        if face is None:
+            raise PackError(f"unknown pack face None; known faces: {list(FACE_NAMES)}")
+        face_value = coerce_face(face)
+        items = self.entries(face_value)
         for entry in items:
-            if entry.id == id:
+            if entry.name == id:
                 return entry
-        known = sorted(entry.id for entry in items)
-        raise PackError(f"unknown id {id!r} on pack face {face!r}; known ids: {known}")
+        known = sorted(entry.name for entry in items)
+        raise PackError(f"unknown id {id!r} on pack face {face_value.value!r}; known ids: {known}")
 
 
-__all__ = ["CatalogEntry", "PackCatalog", "validate_unique"]
+__all__ = ["PackCatalog", "validate_unique"]

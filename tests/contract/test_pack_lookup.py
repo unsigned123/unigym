@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.pack_api import CatalogEntry, PackRuntime, discover
+from unigym.pack_api import Face, PackRuntime, ResourceLocator, discover
 from unigym.packs import PackError
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -41,22 +41,20 @@ def _runtime() -> PackRuntime:
     return discover([CONTENT_ROOT, CODE_ROOT])
 
 
-def test_catalog_entry_returns_the_immutable_declared_entry() -> None:
+def test_catalog_entry_returns_the_immutable_declared_item() -> None:
     catalog = _runtime().catalog
 
     entry = catalog.entry("scene_presets", "acme_content.tabletop")
 
-    assert entry == CatalogEntry(
-        pack="acme_content",
-        face="scene_presets",
-        id="acme_content.tabletop",
-        resource="scene_presets/tabletop.yaml",
-        entrypoint=None,
-        kind=None,
-        params=None,
-    )
+    assert entry.pack == "acme_content"
+    assert entry.face is Face.SCENE_PRESETS
+    assert entry.name == "acme_content.tabletop"
+    assert entry.locator == ResourceLocator("scene_presets/tabletop.yaml")
+    assert entry.entrypoint is None
+    assert entry.kind is None
+    assert entry.params is None
     with pytest.raises(FrozenInstanceError):
-        setattr(entry, "id", "changed")
+        setattr(entry, "name", "changed")
 
 
 def test_catalog_entry_unknown_face_names_the_known_faces() -> None:

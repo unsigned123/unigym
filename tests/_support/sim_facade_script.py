@@ -42,24 +42,12 @@ articulation (the body group), so the acceptance articulation is labelled
 
 def _robot_profile(pack_set: PackSet, robot_id: str) -> RobotProfile:
     """The one declared robot profile with this id, across the explicit pack set."""
-    matches = [
-        (pack.name, profile)
-        for pack in pack_set.packs()
-        for profile in pack.robots()
-        if profile.name == robot_id
-    ]
-    if not matches:
-        declared = sorted(profile.name for pack in pack_set.packs() for profile in pack.robots())
-        raise AssertionError(
-            f"facade acceptance robot {robot_id!r} is not declared by the pack set; "
-            f"declared robots: {declared}"
-        )
-    if len(matches) > 1:
-        raise AssertionError(
-            f"facade acceptance robot {robot_id!r} is declared by several packs: "
-            f"{sorted(pack for pack, _profile in matches)}"
-        )
-    return matches[0][1]
+    from unigym.packs import PackError
+
+    try:
+        return pack_set.robot(robot_id)
+    except PackError as err:
+        raise AssertionError(f"facade acceptance robot {robot_id!r}: {err}") from err
 
 
 def _position_target(joint_count: int, step: int, num_envs: int) -> torch.Tensor:

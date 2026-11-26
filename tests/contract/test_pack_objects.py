@@ -1,10 +1,11 @@
-"""Contract for pack objects: ``PackSet``, ``PackInfo`` and scene handles.
+"""Contract for pack objects: ``PackSet``, ``Pack`` and scene handles.
 
-Handles are read-only values minted from manifest catalogs.  Acquisition is
-canonical (``packs.pack(name).scene_preset(id)``), has no attribute sugar and
-never activates a pack, imports pack Python or reads a resource path while
-minting.  ``resource_path`` resolves a preset resource and refuses an
-entrypoint-backed provider with the "activate the pack" teaching error.
+Handles are read-only values minted from one stored item.  Acquisition is
+canonical (``packs.scene_preset(id)`` / ``packs.scene_provider(id)``), has no
+attribute sugar and never activates a pack, imports pack Python or reads a
+resource path while minting.  ``resource_path`` resolves a preset resource and
+refuses an entrypoint-backed provider with the "activate the pack" teaching
+error.
 """
 
 from __future__ import annotations
@@ -19,11 +20,11 @@ import yaml
 
 from unigym.packs import (
     AssetResourceRef,
+    Face,
     PackError,
+    PackItem,
     PackSet,
-    ProviderInfo,
     ProviderOrigin,
-    ResourceInfo,
     ScenePresetRef,
     SceneProviderRef,
     installed,
@@ -113,7 +114,7 @@ def test_scene_preset_ref_is_a_value_with_manifest_origin(packs: PackSet) -> Non
     assert pack.origin.pack_version == "1.0.0"
     assert pack.root == CONTENT_ROOT.resolve()
 
-    ref = pack.scene_preset("acme_content.tabletop")
+    ref = packs.scene_preset("acme_content.tabletop")
     assert isinstance(ref, ScenePresetRef)
     assert (ref.pack, ref.pack_version, ref.id) == (
         "acme_content",
@@ -129,15 +130,13 @@ def test_scene_preset_ref_is_a_value_with_manifest_origin(packs: PackSet) -> Non
     assert ref.origin.root == str(CONTENT_ROOT.resolve())
 
     assert ref == packs.scene_preset("acme_content.tabletop")
-    assert hash(ref) == hash(packs.pack("acme_content").scene_preset("acme_content.tabletop"))
-    assert pack.scene_presets() == (ref,)
+    assert hash(ref) == hash(packs.scene_preset("acme_content.tabletop"))
     assert packs.scene_presets() == (ref,)
 
 
 def test_scene_provider_ref_carries_normalized_params(packs: PackSet) -> None:
     """Provider handles expose entrypoint, normalized schema and origin."""
-    pack = packs.pack("acme_code")
-    ref = pack.scene_provider("acme_code.table_top")
+    ref = packs.scene_provider("acme_code.table_top")
     assert isinstance(ref, SceneProviderRef)
     assert (ref.pack, ref.pack_version, ref.id) == (
         "acme_code",
@@ -153,13 +152,12 @@ def test_scene_provider_ref_carries_normalized_params(packs: PackSet) -> None:
     assert ref.params_schema is not None
     assert ref.params_schema["style"] == ProviderParamSpec(type="int", required=False, default=1)
     assert ref.params_schema["seed"] == ProviderParamSpec(type="int", required=True)
-    assert pack.scene_providers() == (ref,)
     assert packs.scene_providers() == (ref,)
     assert ref == packs.scene_provider("acme_code.table_top")
     assert hash(ref) == hash(packs.scene_provider("acme_code.table_top"))
 
     with pytest.raises(PackError, match="not 'scene'"):
-        pack.scene_provider("acme_code.dynamic_assets")
+        packs.scene_provider("acme_code.dynamic_assets")
 
 
 def test_provider_without_params_has_no_schema(
@@ -193,7 +191,7 @@ def test_provider_without_params_has_no_schema(
     monkeypatch.setenv("UNIGYM_PACKS", str(root))
     monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
 
-    ref = require("acme_bare").pack("acme_bare").scene_provider("acme_bare.plain")
+    ref = require("acme_bare").scene_provider("acme_bare.plain")
     assert ref.params_schema is None
     assert ref.origin.root == str(root.resolve())
     assert "acme_bare" not in sys.modules
@@ -202,16 +200,15 @@ def test_provider_without_params_has_no_schema(
 def test_pack_scoped_and_cross_pack_lookup(packs: PackSet) -> None:
     """Pack-scoped lookup owns only its pack; PackSet is the edge lookup."""
     with pytest.raises(PackError, match="declares no 'providers' id"):
-        packs.pack("acme_content").scene_provider("acme_code.table_top")
-    assert packs.scene_provider("acme_code.table_top") == packs.pack("acme_code").scene_provider(
-        "acme_code.table_top"
-    )
+        packs.pack("acme_content").item(Face.PROVIDERS, "acme_code.table_top")
+    provider = packs.scene_provider("acme_code.table_top")
+    assert provider.pack == "acme_code"
 
     with pytest.raises(PackError, match="unknown pack"):
         packs.pack("missing_pack")
-    with pytest.raises(PackError, match="unknown scene preset id"):
+    with pytest.raises(PackError, match="unknown id .* on pack face 'scene_presets'"):
         packs.scene_preset("missing_preset")
-    with pytest.raises(PackError, match="unknown scene provider id"):
+    with pytest.raises(PackError, match="unknown id .* on pack face 'providers'"):
         packs.scene_provider("missing_provider")
 
 
@@ -230,8 +227,8 @@ def test_refs_never_activate_import_or_resolve_a_path(
     monkeypatch.setattr(PackRuntime, "resource", _boom)
     monkeypatch.setattr(PackRuntime, "resource_for", _boom)
 
-    preset = packs.pack("acme_content").scene_preset("acme_content.tabletop")
-    provider = packs.pack("acme_code").scene_provider("acme_code.table_top")
+    preset = packs.scene_preset("acme_content.tabletop")
+    provider = packs.scene_provider("acme_code.table_top")
     assert preset == packs.scene_preset("acme_content.tabletop")
     assert provider == packs.scene_provider("acme_code.table_top")
     assert preset.origin.pack == "acme_content"
@@ -244,11 +241,11 @@ def test_refs_never_activate_import_or_resolve_a_path(
 
 def test_resource_path_preset_and_provider(packs: PackSet) -> None:
     """Only preset handles resolve a path; providers direct to activation."""
-    preset = packs.pack("acme_content").scene_preset("acme_content.tabletop")
+    preset = packs.scene_preset("acme_content.tabletop")
     expected = (CONTENT_ROOT / "scene_presets" / "tabletop.yaml").resolve()
     assert packs.resource_path(preset) == expected
 
-    provider = packs.pack("acme_code").scene_provider("acme_code.table_top")
+    provider = packs.scene_provider("acme_code.table_top")
     with pytest.raises(PackError, match="activate the pack") as raised:
         packs.resource_path(provider)
     assert "acme_code.table_top" in str(raised.value)
@@ -264,8 +261,8 @@ def test_resource_path_preset_and_provider(packs: PackSet) -> None:
 def test_world_and_loader_accept_refs(packs: PackSet) -> None:
     """``World`` and ``load_scene_preset`` accept the pack-object handles."""
     runtime = packs.to_runtime()
-    preset = packs.pack("acme_content").scene_preset("acme_content.tabletop")
-    provider = packs.pack("acme_code").scene_provider("acme_code.table_top")
+    preset = packs.scene_preset("acme_content.tabletop")
+    provider = packs.scene_provider("acme_code.table_top")
 
     assert World.from_preset(preset, runtime=runtime).fragment() == {
         "scene_preset": "acme_content.tabletop"
@@ -284,24 +281,27 @@ def test_pack_and_set_provider_resource_queries(packs: PackSet) -> None:
     """Providers, resources and face counts expose the declared catalog items."""
     content = packs.pack("acme_content")
     assert content.face_counts == {"runs": 1, "scene_presets": 1, "assets": 1}
-    assert content.providers() == ()
-    asset_infos = content.resources(face="assets")
-    assert len(asset_infos) == 1
-    assert isinstance(asset_infos[0], ResourceInfo)
-    assert asset_infos[0].id == "acme_content.cup"
-    assert asset_infos[0].path == (CONTENT_ROOT / "assets" / "cup" / "asset.yaml").resolve()
-    assert asset_infos[0].origin.face == "assets"
-    assert asset_infos[0].origin.item_id == "acme_content.cup"
+    assert content.items_for(face=Face.PROVIDERS) == ()
+    asset_items = content.items_for(face=Face.ASSETS)
+    assert len(asset_items) == 1
+    assert isinstance(asset_items[0], PackItem)
+    assert asset_items[0].name == "acme_content.cup"
+    assert asset_items[0].resource == "assets/cup/asset.yaml"
+    assert asset_items[0].origin.face == "assets"
+    assert asset_items[0].origin.item_id == "acme_content.cup"
 
     code = packs.pack("acme_code")
-    provider_ids = [info.name for info in code.providers()]
+    provider_ids = [item.name for item in code.items_for(face=Face.PROVIDERS)]
     assert provider_ids == ["acme_code.dynamic_assets", "acme_code.table_top"]
-    assert all(isinstance(info, ProviderInfo) for info in code.providers())
-    assert all(info.active is None for info in code.providers())
-    assert [info.name for info in code.providers(kind="scene")] == ["acme_code.table_top"]
-    assert [info.name for info in packs.providers(kind="scene")] == ["acme_code.table_top"]
+    assert all(isinstance(item, PackItem) for item in code.items_for(face=Face.PROVIDERS))
+    assert [item.name for item in code.items_for(face=Face.PROVIDERS, kind="scene")] == [
+        "acme_code.table_top"
+    ]
+    assert [item.name for item in packs.providers(kind="scene")] == ["acme_code.table_top"]
 
-    assert [info.id for info in packs.resources(face="scene_presets")] == ["acme_content.tabletop"]
+    assert [item.name for item in packs.resources(face=Face.SCENE_PRESETS)] == [
+        "acme_content.tabletop"
+    ]
     with pytest.raises(PackError, match="scene presets are declared under 'scene_presets'"):
         packs.resources(face="scenes")
 
@@ -350,7 +350,7 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
     registry_before = snapshot_robots()
     packs = require("acme_robot")
     pack = packs.pack("acme_robot")
-    robot = pack.robot("acme.arm")
+    robot = packs.robot("acme.arm")
     assert snapshot_robots() == registry_before
     assert "acme.arm" not in ROBOT_REGISTRY
     assert isinstance(robot, RobotProfile)
@@ -358,14 +358,14 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
     assert robot.joint_sets == {"body": ("shoulder",)}
     assert packs.robot("acme.arm") == robot
     assert packs.robots() == (robot,)
-    provider = pack.providers("robot")[0]
+    provider = pack.items_for(face=Face.PROVIDERS, kind="robot")[0]
     assert provider.name == "acme.arm"
     assert provider.origin.kind == "manifest"
     assert provider.origin.item_id == "acme.arm"
     assert provider.origin.resource == "robots/acme_arm.yaml"
     assert provider.resource == "robots/acme_arm.yaml"
 
-    asset = pack.asset("acme.cup")
+    asset = packs.asset("acme.cup")
     assert isinstance(asset, AssetResourceRef)
     assert asset.origin.face == "assets"
     assert packs.asset("acme.cup") == asset
@@ -374,10 +374,10 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
     assert pack.face_counts == {"providers": 1, "assets": 1}
 
     with pytest.raises(PackError, match="has no robot id 'acme.missing'"):
-        pack.robot("acme.missing")
+        pack.provider("robot", "acme.missing")
     with pytest.raises(PackError, match="unknown robot id 'acme.missing'"):
         packs.robot("acme.missing")
-    with pytest.raises(PackError, match="unknown asset id 'acme.missing'"):
+    with pytest.raises(PackError, match="unknown id 'acme.missing'"):
         packs.asset("acme.missing")
 
 
@@ -486,7 +486,7 @@ def test_pack_robot_entrypoint_calls_the_factory_without_registry_mutation(
     from unigym.robots import ROBOT_REGISTRY, snapshot_robots
 
     before = snapshot_robots()
-    robot = require("entry_robot").pack("entry_robot").robot("acme.entry")
+    robot = require("entry_robot").robot("acme.entry")
     assert isinstance(robot, RobotProfile)
     assert robot.name == "acme.entry"
     assert snapshot_robots() == before

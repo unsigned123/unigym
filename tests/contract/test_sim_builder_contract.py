@@ -338,8 +338,6 @@ def test_fixture_pack_set_is_explicit(tmp_path: Path) -> None:
     """The fixture pack set exposes exactly the written pack and profile."""
     pack_set, profile = write_sim_pack(tmp_path)
 
-    assert any(
-        profile.name == declared.name for pack in pack_set.packs() for declared in pack.robots()
-    )
+    assert any(profile.name == declared.name for declared in pack_set.robots())
     assert isinstance(profile, RobotProfile)
     assert profile.assets is None

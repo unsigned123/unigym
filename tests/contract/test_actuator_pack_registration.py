@@ -369,14 +369,24 @@ def test_materialization_rejects_non_canonical_backend_without_schema() -> None:
     from types import SimpleNamespace
 
     from unigym.packs.actuators import materialize_actuator_implementations
-    from unigym.packs.schema import ProvidedItem
+    from unigym.packs.schema import EntrypointLocator, Face, PackItem
+    from unigym.provenance import ProviderOrigin
 
-    item = ProvidedItem(
-        id="bad.impl",
-        resource=None,
-        entrypoint="a:b",
+    item = PackItem(
+        pack="bad_pack",
+        face=Face.PROVIDERS,
         kind="actuator_implementation",
+        name="bad.impl",
+        locator=EntrypointLocator(module="a", attribute="b", raw="a:b"),
         params={"law": "acme.law", "backend": "MuJoCo"},
+        origin=ProviderOrigin(
+            kind="manifest",
+            pack="bad_pack",
+            pack_version="1.0.0",
+            face="providers",
+            item_id="bad.impl",
+            entrypoint="a:b",
+        ),
     )
     manifest = SimpleNamespace(
         name="bad_pack",

@@ -172,7 +172,7 @@ def _manifest_origin(
         item_id=item.id,
         resource=item.resource,
         entrypoint=item.entrypoint,
-        activation_entrypoint=manifest.entrypoint,
+        activation_entrypoint=manifest.entrypoint.raw if manifest.entrypoint is not None else None,
     )
 
 
