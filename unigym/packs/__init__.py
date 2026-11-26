@@ -15,7 +15,7 @@ resource path resolution belong to :class:`PackLoader`.
 
 from __future__ import annotations
 
-from unigym.provenance import ProviderInfo, ProviderOrigin
+from unigym.provenance import ProviderOrigin, ProviderRef
 
 
 class PackError(ValueError):
@@ -56,8 +56,8 @@ __all__ = [
     "PackItem",
     "PackLoader",
     "PackSet",
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "ResourceLocator",
     "ScenePresetRef",
     "SceneProviderRef",

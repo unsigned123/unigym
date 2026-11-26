@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 from unigym._typing import JsonValue
 from unigym.provenance import (
     OriginTable,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     RegistrySnapshot,
 )
 
@@ -163,8 +163,8 @@ def robot_origin(name: str) -> ProviderOrigin:
     return _ROBOT_ORIGINS.origin(name)
 
 
-def robot_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered robots as live :class:`ProviderInfo` records.
+def robot_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered robots as live :class:`ProviderRef` records.
 
     ``kind`` selects the provider kind; the robot registry owns only
     ``"robot"``, so any other kind returns an empty tuple (``None`` returns
@@ -173,7 +173,7 @@ def robot_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
     if kind is not None and kind != "robot":
         return ()
     return tuple(
-        ProviderInfo(name=name, kind="robot", origin=_ROBOT_ORIGINS.origin(name))
+        ProviderRef(name=name, kind="robot", origin=_ROBOT_ORIGINS.origin(name))
         for name in sorted(ROBOT_REGISTRY)
     )
 
@@ -289,8 +289,8 @@ __all__ = [
     "BodyBinding",
     "BodyBindingError",
     "CanonicalBodyId",
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "RobotProfile",
     "RobotRegistrySnapshot",
     "asset_options_for",

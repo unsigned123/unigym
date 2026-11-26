@@ -54,8 +54,8 @@ from .primitives import (
     SphereShape,
 )
 from .providers import (
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     SceneProvider,
     SceneProviderContext,
     build_scene_from_provider,
@@ -222,8 +222,8 @@ __all__ = [
     "PayloadSet",
     "PlaneShape",
     "Pose",
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "Region",
     "RegionDefinition",
     "Resolution",

@@ -24,6 +24,8 @@ from unigym.adapters import (
     restore_adapter_registry,
     snapshot_adapter_registry,
 )
+from unigym.actuator_law import ACTUATOR_LAW_REGISTRY, actuator_law_providers
+from unigym.initializers.base import initializer_providers
 from unigym.pack_api import PackLoader, discover
 from unigym.packs import PackError
 from unigym.props.templates import (
@@ -33,7 +35,7 @@ from unigym.props.templates import (
     restore_prop_templates,
     snapshot_prop_templates,
 )
-from unigym.provenance import ProviderInfo, ProviderOrigin
+from unigym.provenance import ProviderOrigin, ProviderRef
 from unigym.robots import (
     ROBOT_REGISTRY,
     register_robot,
@@ -202,7 +204,32 @@ def test_manual_adapter_is_a_core_origin() -> None:
     manual = next(info for info in adapter_providers() if info.name == "manual")
     assert manual.kind == "adapter"
     assert manual.origin == ProviderOrigin(kind="core")
-    assert manual.active is True
+    assert manual.live is True
+    assert not hasattr(manual, "active")
+
+
+def test_every_registry_query_returns_live_provider_refs() -> None:
+    """Each registry exposes one uniform live query with no active state."""
+    queries = [
+        (adapter_providers, "adapter"),
+        (robot_providers, "robot"),
+        (termination_providers, "termination"),
+        (scene_content_filler_providers, "content_filler"),
+        (prop_template_providers, "prop_template"),
+        (initializer_providers, "initializer"),
+        (actuator_law_providers, "actuator_law"),
+    ]
+
+    for query, kind in queries:
+        refs = query()
+        assert all(isinstance(ref, ProviderRef) for ref in refs)
+        assert all(ref.kind == kind for ref in refs)
+        assert all(ref.live is True for ref in refs)
+        assert all(not hasattr(ref, "active") for ref in refs)
+        assert query(f"not_{kind}") == ()
+
+    assert ACTUATOR_LAW_REGISTRY
+    assert any(ref.origin == ProviderOrigin(kind="core") for ref in actuator_law_providers())
 
 
 def test_core_termination_seeds_are_core_origins() -> None:
@@ -264,7 +291,9 @@ def test_live_registry_origins_round_trip_and_unknown_fallback() -> None:
     ]
     assert scene_content_filler_providers("robot") == ()
     assert prop_template_providers("robot") == ()
-    assert all(isinstance(info, ProviderInfo) for info in termination_providers())
+    assert all(isinstance(info, ProviderRef) for info in termination_providers())
+    assert all(info.live is True for info in termination_providers())
+    assert all(not hasattr(info, "active") for info in termination_providers())
 
 
 def test_robot_origin_round_trip_and_unknown_fallback() -> None:

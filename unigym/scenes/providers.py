@@ -36,8 +36,7 @@ from types import MappingProxyType
 from typing import cast
 
 from unigym._typing import JsonValue
-from unigym.provenance import ProviderInfo as _ProviderInfo
-from unigym.provenance import ProviderOrigin
+from unigym.provenance import ProviderOrigin, ProviderRef
 
 from .provider_params import (
     ProviderParamSpec,
@@ -47,8 +46,8 @@ from .provider_params import (
 from .scene_ir import Scene, validate_scene
 
 __all__ = [
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "SceneProvider",
     "SceneProviderContext",
     "SceneProviderRegistrySnapshot",
@@ -88,18 +87,6 @@ class SceneProviderContext:
 
     name: str
     preset: str | None = None
-
-
-@dataclass(frozen=True)
-class ProviderInfo(_ProviderInfo):
-    """One registered scene provider, with origin and parameter schema.
-
-    ``ProviderOrigin`` and the live-record base class are owned by
-    :mod:`unigym.provenance`; this specialization adds the scene provider's
-    normalized parameter declaration.
-    """
-
-    params_schema: Mapping[str, ProviderParamSpec] | None = None
 
 
 @dataclass(frozen=True)
@@ -339,21 +326,22 @@ def scene_provider_origin(name: str) -> ProviderOrigin:
     return _SCENE_PROVIDER_ORIGINS.get(name, ProviderOrigin.unknown())
 
 
-def scene_provider_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered scene providers as :class:`ProviderInfo` records.
+def scene_provider_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered scene providers as live :class:`ProviderRef` records.
 
     Inline providers are excluded.  ``kind`` selects the provider kind; the
     scene registry owns only ``"scene"``, so any other kind returns an empty
-    tuple (``None`` returns every record).
+    tuple (``None`` returns every record).  The normalized parameter schema is
+    carried by the installed ``PackItem`` / ``SceneProviderRef``, not by this
+    live reference.
     """
     if kind is not None and kind != "scene":
         return ()
     return tuple(
-        ProviderInfo(
+        ProviderRef(
             name=name,
             kind="scene",
             origin=_SCENE_PROVIDER_ORIGINS.get(name, ProviderOrigin.unknown()),
-            params_schema=_SCENE_PROVIDER_PARAMS.get(name),
         )
         for name in sorted(_SCENE_PROVIDERS)
     )

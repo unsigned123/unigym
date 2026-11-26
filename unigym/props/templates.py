@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..assets.manifest import SCHEMA, validate_manifest
-from ..provenance import ProviderInfo, ProviderOrigin
+from ..provenance import ProviderOrigin, ProviderRef
 from .asset_ir import AssetDefinition, validate_asset_definition
 
 if TYPE_CHECKING:
@@ -218,8 +218,8 @@ def prop_template_origin(name: str) -> ProviderOrigin:
     return _TEMPLATE_ORIGINS.get(name, ProviderOrigin.unknown())
 
 
-def prop_template_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered prop templates as live :class:`ProviderInfo` records.
+def prop_template_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered prop templates as live :class:`ProviderRef` records.
 
     ``kind`` selects the provider kind; the prop-template registry owns only
     ``"prop_template"``, so any other kind returns an empty tuple (``None``
@@ -228,7 +228,7 @@ def prop_template_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]
     if kind is not None and kind != "prop_template":
         return ()
     return tuple(
-        ProviderInfo(
+        ProviderRef(
             name=name,
             kind="prop_template",
             origin=_TEMPLATE_ORIGINS.get(name, ProviderOrigin.unknown()),

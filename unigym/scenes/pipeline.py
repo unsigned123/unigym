@@ -31,7 +31,7 @@ from types import MappingProxyType
 from typing import Protocol, TypeGuard, overload
 
 from unigym._typing import JsonValue
-from unigym.provenance import OriginTable, ProviderInfo, ProviderOrigin, RegistrySnapshot
+from unigym.provenance import OriginTable, ProviderOrigin, ProviderRef, RegistrySnapshot
 
 from .generators import registered_generators
 from .scene_ir import AssetInstance, Instance, Scene, validate_scene
@@ -324,8 +324,8 @@ def scene_content_filler_origin(name: str) -> ProviderOrigin:
     return _SCENE_CONTENT_FILLER_ORIGINS.origin(name)
 
 
-def scene_content_filler_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered content fillers as live :class:`ProviderInfo` records.
+def scene_content_filler_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered content fillers as live :class:`ProviderRef` records.
 
     ``kind`` selects the provider kind; the content-filler registry owns only
     ``"content_filler"``, so any other kind returns an empty tuple (``None``
@@ -334,7 +334,7 @@ def scene_content_filler_providers(kind: str | None = None) -> tuple[ProviderInf
     if kind is not None and kind != "content_filler":
         return ()
     return tuple(
-        ProviderInfo(
+        ProviderRef(
             name=name,
             kind="content_filler",
             origin=_SCENE_CONTENT_FILLER_ORIGINS.origin(name),

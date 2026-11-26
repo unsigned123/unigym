@@ -27,6 +27,7 @@ from unigym.pack_api import (
     Pack,
     PackItem,
     PackLoader,
+    ProviderRef,
     ResourceLocator,
     discover,
 )
@@ -155,9 +156,17 @@ def test_fixture_scene_provider_activation_records_exact_origin_and_schema() -> 
         entrypoint="acme_pack:table_top",
         activation_entrypoint="acme_pack:register",
     )
+    assert isinstance(info, ProviderRef)
+    assert type(info) is ProviderRef
+    assert info.kind == "scene"
+    assert info.live is True
+    assert not hasattr(info, "active")
+    assert not hasattr(info, "params_schema")
     assert info.origin == expected
     assert scene_provider_origin("acme_code.table_top") == expected
-    assert info.params_schema == {
+
+    ref = runtime.pack_set.scene_provider("acme_code.table_top")
+    assert ref.params_schema == {
         "style": ProviderParamSpec(type="int", required=False, default=1),
         "seed": ProviderParamSpec(type="int", required=True),
     }
@@ -399,6 +408,8 @@ def test_matching_pack_code_mirror_is_adopted_with_manifest_provenance(
     origin = scene_provider_origin("acme.table_top")
     assert origin.kind == "manifest"
     assert origin.item_id == "acme.table_top"
+    ref = runtime.pack_set.scene_provider("acme.table_top")
+    assert ref.params_schema == {"style": ProviderParamSpec(type="int", required=False, default=1)}
     assert build_scene_from_provider("acme.table_top", {}).name == "tabletop"
 
 

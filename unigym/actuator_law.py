@@ -19,6 +19,7 @@ from types import MappingProxyType
 from unigym.provenance import (
     OriginTable,
     ProviderOrigin,
+    ProviderRef,
     RegistrySnapshot,
 )
 from unigym.registration import PackFace, require_registration
@@ -36,6 +37,7 @@ __all__ = [
     "actuator_law",
     "attribute_actuator_law",
     "actuator_law_origin",
+    "actuator_law_providers",
     "register_actuator_law",
     "restore_actuator_laws",
     "snapshot_actuator_laws",
@@ -239,6 +241,25 @@ def attribute_actuator_law(name: str, origin: ProviderOrigin) -> None:
 def actuator_law_origin(name: str) -> ProviderOrigin:
     """Return the origin of one registered law (never ``None``)."""
     return ACTUATOR_LAW_ORIGINS.origin(name)
+
+
+def actuator_law_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered actuator laws as live :class:`ProviderRef` records.
+
+    ``kind`` selects the provider kind; the actuator-law registry owns only
+    ``"actuator_law"``, so any other kind returns an empty tuple (``None``
+    returns every record).  Records are ordered by name.
+    """
+    if kind is not None and kind != "actuator_law":
+        return ()
+    return tuple(
+        ProviderRef(
+            name=name,
+            kind="actuator_law",
+            origin=ACTUATOR_LAW_ORIGINS.origin(name),
+        )
+        for name in sorted(ACTUATOR_LAW_REGISTRY)
+    )
 
 
 def snapshot_actuator_laws() -> ActuatorLawSnapshot:

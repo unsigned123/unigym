@@ -10,8 +10,8 @@ from typing import cast
 from unigym._typing import JsonValue
 from unigym.provenance import (
     OriginTable,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     RegistrySnapshot,
 )
 
@@ -121,8 +121,8 @@ def adapter_origin(name: str) -> ProviderOrigin:
     return _ADAPTER_ORIGINS.origin(name)
 
 
-def adapter_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered adapters as live :class:`ProviderInfo` records.
+def adapter_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered adapters as live :class:`ProviderRef` records.
 
     ``kind`` selects the provider kind; the adapter registry owns only
     ``"adapter"``, so any other kind returns an empty tuple (``None`` returns
@@ -131,7 +131,7 @@ def adapter_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
     if kind is not None and kind != "adapter":
         return ()
     return tuple(
-        ProviderInfo(name=name, kind="adapter", origin=_ADAPTER_ORIGINS.origin(name))
+        ProviderRef(name=name, kind="adapter", origin=_ADAPTER_ORIGINS.origin(name))
         for name in sorted(ADAPTER_REGISTRY)
     )
 

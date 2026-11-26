@@ -49,7 +49,7 @@ from typing import Any, Callable, ClassVar, Dict, Optional
 
 import numpy as np
 
-from unigym.provenance import OriginTable, ProviderOrigin, RegistrySnapshot
+from unigym.provenance import OriginTable, ProviderOrigin, ProviderRef, RegistrySnapshot
 
 __all__ = [
     "CollisionPairSpec",
@@ -64,6 +64,7 @@ __all__ = [
     "register",
     "attribute_initializer",
     "initializer_origin",
+    "initializer_providers",
     "snapshot_initializers",
     "restore_initializers",
     "build_initializer",
@@ -619,6 +620,25 @@ def attribute_initializer(name: str, origin: ProviderOrigin) -> None:
 def initializer_origin(name: str) -> ProviderOrigin:
     """Return the origin of one registered initializer (never ``None``)."""
     return _INITIALIZER_ORIGINS.origin(name)
+
+
+def initializer_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered initializers as live :class:`ProviderRef` records.
+
+    ``kind`` selects the provider kind; the initializer registry owns only
+    ``"initializer"``, so any other kind returns an empty tuple (``None``
+    returns every record).  Records are ordered by name.
+    """
+    if kind is not None and kind != "initializer":
+        return ()
+    return tuple(
+        ProviderRef(
+            name=name,
+            kind="initializer",
+            origin=_INITIALIZER_ORIGINS.origin(name),
+        )
+        for name in sorted(INITIALIZER_REGISTRY)
+    )
 
 
 def snapshot_initializers() -> InitializerRegistrySnapshot:

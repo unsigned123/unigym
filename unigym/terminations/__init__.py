@@ -32,8 +32,8 @@ from collections.abc import Callable
 
 from unigym.provenance import (
     OriginTable,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     RegistrySnapshot,
 )
 
@@ -172,8 +172,8 @@ def termination_origin(name: str) -> ProviderOrigin:
     return _TERMINATION_ORIGINS.origin(name)
 
 
-def termination_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
-    """Return the registered terminations as live :class:`ProviderInfo` records.
+def termination_providers(kind: str | None = None) -> tuple[ProviderRef, ...]:
+    """Return the registered terminations as live :class:`ProviderRef` records.
 
     ``kind`` selects the provider kind; the termination registry owns only
     ``"termination"``, so any other kind returns an empty tuple (``None``
@@ -182,7 +182,7 @@ def termination_providers(kind: str | None = None) -> tuple[ProviderInfo, ...]:
     if kind is not None and kind != "termination":
         return ()
     return tuple(
-        ProviderInfo(
+        ProviderRef(
             name=name,
             kind="termination",
             origin=_TERMINATION_ORIGINS.origin(name),

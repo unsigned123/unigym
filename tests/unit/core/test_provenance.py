@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unigym.provenance import (
     OriginTable,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     RegistrySnapshot,
     attribution,
 )
@@ -141,10 +141,11 @@ def test_attribution_labels_only_names_new_in_the_window() -> None:
     assert labels == {"acme.arm": origin}
 
 
-def test_provider_info_is_a_live_record() -> None:
-    """The shared live-provider record defaults to active and is comparable."""
+def test_provider_ref_is_a_live_record_without_active_state() -> None:
+    """A live provider reference defaults to ``live`` and has no active field."""
     origin = ProviderOrigin(kind="manifest", pack="acme")
-    info = ProviderInfo(name="acme.arm", kind="robot", origin=origin)
+    ref = ProviderRef(name="acme.arm", kind="robot", origin=origin)
 
-    assert info.active is True
-    assert info == ProviderInfo(name="acme.arm", kind="robot", origin=origin, active=True)
+    assert ref.live is True
+    assert ref == ProviderRef(name="acme.arm", kind="robot", origin=origin, live=True)
+    assert not hasattr(ref, "active")

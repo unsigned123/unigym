@@ -43,7 +43,7 @@ from unigym.packs.schema import (
     ResourceLocator,
     load_manifest_v1,
 )
-from unigym.provenance import ProviderInfo, ProviderOrigin
+from unigym.provenance import ProviderOrigin, ProviderRef
 from unigym.registration import (
     BackendRegistrationPolicy,
     PackFace,
@@ -160,8 +160,8 @@ __all__ = [
     "PackItem",
     "PackLoader",
     "PackSet",
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "ResourceLocator",
     "ScenePresetRef",
     "SceneProvider",

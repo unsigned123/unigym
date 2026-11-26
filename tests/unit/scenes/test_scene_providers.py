@@ -15,7 +15,7 @@ from unigym.scenes import (
     scene_provider_providers,
     snapshot_scene_providers,
 )
-from unigym.scenes.provider_params import ProviderParamSpec, SceneProviderParamError
+from unigym.scenes.provider_params import SceneProviderParamError
 from unigym.scenes.scene_ir import Scene
 from unigym.world import World
 
@@ -134,11 +134,7 @@ def test_registration_params_schema_fills_defaults_and_rejects_unknown_keys() ->
 
     infos = scene_provider_providers()
     assert [info.name for info in infos] == ["acme.styled"]
-    schema = infos[0].params_schema
-    assert schema is not None
-    assert schema["style"] == ProviderParamSpec(type="int", required=False, default=1)
-    assert schema["seed"].required
-    assert schema["layout"].choices == ("default", "dense")
+    assert infos[0].live is True
 
     with pytest.raises(SceneProviderParamError, match="unknown parameter"):
         build_scene_from_provider("acme.styled", {"seed": 3, "extra": 1})
@@ -231,9 +227,8 @@ def test_snapshot_and_restore_are_total() -> None:
 
     assert registered_scene_providers() == ["acme.table_top"]
     assert scene_provider_origin("acme.table_top") == origin
-    assert scene_provider_providers()[0].params_schema == {
-        "style": ProviderParamSpec(type="int", required=False, default=1)
-    }
+    with pytest.raises(SceneProviderParamError, match="unknown parameter"):
+        build_scene_from_provider("acme.table_top", {"style": 1, "extra": 1})
     assert build_scene_from_provider(inline_name, {}).name == "inline_scene"
     assert scene_provider_origin(inline_name) == ProviderOrigin.inline()
     with pytest.raises(ValueError, match="not registered"):

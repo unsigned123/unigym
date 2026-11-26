@@ -56,8 +56,8 @@ from unigym.pack_api import (
     PackLoader,
     PackSet,
     PhaseWindow,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     RegistrationGate,
     RegistrationPhase,
     ResourceLocator,
@@ -93,8 +93,8 @@ from unigym.packs import (
     PackItem,
     PackLoader,
     PackSet,
-    ProviderInfo,
     ProviderOrigin,
+    ProviderRef,
     ResourceLocator,
     ScenePresetRef,
     SceneProviderRef,
@@ -1014,7 +1014,7 @@ authoritative name -> factory mapping; origins live in a private side table:
   contextvar, stack inspection or import hook;
 - `robot_origin(name)` returns the recorded origin (unknown names keep the
   existing unknown-robot `AttributeError`); `robot_providers(kind=None)`
-  returns live `ProviderInfo(name=..., kind="robot", origin=..., active=True)`
+  returns live `ProviderRef(name=..., kind="robot", origin=..., live=True)`
   records;
 - `snapshot_robot_registry()` / `restore_robot_registry()` capture and restore
   factories **and** origins; activation rollback uses this pair.  The legacy
@@ -1511,8 +1511,10 @@ one-sided declaration (only the manifest or only the code registration declares
 `params`), is a teaching `PackError` naming the provider, both schemas and the
 differing keys.
 
-`scene_provider_providers(kind="scene")` returns `ProviderInfo(name, kind,
-origin, params_schema, *, active=True)` records; `scene_provider_origin(name)`
+`scene_provider_providers(kind="scene")` returns live `ProviderRef(name, kind,
+origin, live=True)` records; the normalized parameter schema is carried by the
+installed `PackItem` / `SceneProviderRef`, not by the live reference.
+`scene_provider_origin(name)`
 returns one provider's origin. `PackLoader.origins` carries the discovery label per pack
 (`explicit-root`, `env:UNIGYM_PACKS`, `local-yaml`, `entry-point`, `deps-root`);
 a hand-built runtime reports `unknown`. A failed activation restores the
@@ -1583,7 +1585,7 @@ Adapter registry provenance uses the same side-table model as robots:
   `unknown()`;
 - `adapter_origin(name)` returns the recorded origin and
   `adapter_providers(kind=None)` returns live
-  `ProviderInfo(name=..., kind="adapter", origin=..., active=True)` records;
+  `ProviderRef(name=..., kind="adapter", origin=..., live=True)` records;
 - `snapshot_adapter_registry()` / `restore_adapter_registry()` restore classes
   **and** origins together; activation rollback uses this pair.
 
@@ -1598,7 +1600,9 @@ use the same side-table model:
   `termination_origin(name)` never return `None`; an unknown name raises the
   registry's teaching error, and an unattributed entry reports `unknown()`;
 - `scene_content_filler_providers(kind=None)`, `prop_template_providers(kind=None)`
-  and `termination_providers(kind=None)` return live `ProviderInfo` records;
+  and `termination_providers(kind=None)` return live `ProviderRef` records;
+  `initializer_providers(kind=None)` and `actuator_law_providers(kind=None)` use
+  the same uniform live query;
 - a registration made by pack code during an activation window gets
   `kind="pack-code"` with `item_id=None`; outside any window it is `unknown()`;
 - `snapshot_scene_content_fillers()` / `restore_scene_content_fillers()`,

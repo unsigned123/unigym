@@ -18,7 +18,7 @@ run config, ledger or shard output.
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Generic, TypeVar
 
@@ -74,25 +74,20 @@ class ProviderOrigin:
 
 
 @dataclass(frozen=True)
-class ProviderInfo:
-    """One provider entry: its kind, origin and (for installed items) catalog facts.
+class ProviderRef:
+    """One live provider: its registry name, kind and recorded origin.
 
-    ``active`` describes a live registry query: ``True`` for an entry returned
-    by a registry query and ``None`` for an installed-catalog query.  A live
-    entry leaves the installed-only fields (``pack``, ``pack_version``,
-    ``face``, ``resource``, ``entrypoint``) unset; an installed entry fills
-    them from the manifest and leaves ``active=None``.
+    A reference describes a registry entry observed at query time; installed
+    providers are stored :class:`~unigym.packs.schema.PackItem` values, not
+    references.  ``live`` is always ``True`` for a registry query and makes
+    that distinction explicit; there is no inactive/installed-catalog record
+    with a shared shape.
     """
 
     name: str
     kind: str | None
     origin: ProviderOrigin
-    active: bool | None = field(default=True, kw_only=True)
-    pack: str | None = None
-    pack_version: str | None = None
-    face: str | None = None
-    resource: str | None = None
-    entrypoint: str | None = None
+    live: bool = True
 
 
 class OriginTable:
@@ -190,8 +185,8 @@ def attribution(
 
 __all__ = [
     "OriginTable",
-    "ProviderInfo",
     "ProviderOrigin",
+    "ProviderRef",
     "RegistrySnapshot",
     "attribution",
 ]
