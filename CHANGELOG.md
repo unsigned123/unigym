@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.110.0
 
 Breaking release: the pack model v2 cutover removes the transitional pack
 modules and names. There is no compatibility shim.
