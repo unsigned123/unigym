@@ -22,7 +22,6 @@ from unigym.pack_api import (
     load_manifest_v1,
 )
 from unigym.packs import PackError
-from unigym.packs.catalog import validate_unique
 
 
 def _document(**overrides: object) -> dict[str, object]:
@@ -658,7 +657,7 @@ def test_catalog_rejects_duplicate_face_id(tmp_path: Path) -> None:
         PackSet((first, second))
 
 
-def test_validate_unique_materializes_one_shot_iterables(tmp_path: Path) -> None:
+def test_pack_set_materializes_one_shot_iterables(tmp_path: Path) -> None:
     """A generator is consumed once, so the second item pass still sees duplicates."""
     first = _pack(
         tmp_path / "left",
@@ -672,7 +671,7 @@ def test_validate_unique_materializes_one_shot_iterables(tmp_path: Path) -> None
     )
 
     with pytest.raises(PackError, match="duplicate 'scene_presets' id"):
-        validate_unique(iter((first, second)))
+        PackSet(iter((first, second)))
 
 
 def test_pack_set_and_manifest_are_immutable(tmp_path: Path) -> None:
@@ -691,7 +690,8 @@ def test_pack_set_and_manifest_are_immutable(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         operator.setitem(manifest.requires, "unigym", ">=0")
     with pytest.raises(TypeError):
-        operator.setitem(manifest.provides, "scene_presets", ())
+        operator.setitem(manifest.items, 0, None)
+    assert not hasattr(manifest, "provides")
 
 
 def test_public_pack_api_exports() -> None:

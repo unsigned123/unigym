@@ -95,9 +95,6 @@ ignore_imports = [
     "unigym.core.** -> unigym.backends.**",
     "unigym.core.** -> unigym.adapters",
     "unigym.core.** -> unigym.scripts.**",
-    # TYPE_CHECKING-only asset context handle; the expansion function owns no
-    # runtime dependency on the pack layer.
-    "unigym.core.paths -> unigym.packs.loader",
     "unigym.core.paths -> unigym.errors",
     # repo_root() resolves the checkout root through the package object.
     "unigym.core.paths -> unigym",
@@ -117,6 +114,30 @@ source_modules = ["unigym.backends"]
 forbidden_modules = ["unigym.core.paths", "unigym.assets.refs"]
 
 [[tool.importlinter.contracts]]
+name = "pack data modules never import engines, runtime registries or the loader"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.packs.schema", "unigym.packs.packset"]
+forbidden_modules = [
+    "unigym.adapters",
+    "unigym.backends",
+    "unigym.backends.**",
+    "unigym.packs.loader",
+    "unigym.robots",
+    "unigym.scenes",
+    "unigym.scenes.**",
+]
+ignore_imports = [
+    # Manifest parsing validates actuator backend spellings against the
+    # canonical backend id table; that leaf is stdlib-only.
+    "unigym.packs.schema -> unigym.backends.registry",
+    # The provider parameter normalizer is the data-only scene leaf; the
+    # scene runtime package must stay out of the data layer.
+    "unigym.packs.schema -> unigym.scenes.provider_params",
+    "unigym.packs.packset -> unigym.scenes.provider_params",
+]
+
+[[tool.importlinter.contracts]]
 name = "props neutral zone never imports backends (design §12.2)"
 type = "forbidden"
 source_modules = ["unigym.props"]
@@ -124,9 +145,6 @@ forbidden_modules = ["unigym.backends.**"]
 ignore_imports = [
     "unigym.props.base -> unigym.backends.registry",
     "unigym.props.base -> unigym.core.quat",
-    # TYPE_CHECKING-only request type; import-linter cannot distinguish it
-    # from a runtime edge.
-    "unigym.props.base -> unigym.adapters.base",
     # Function-local config expansion through the neutral path-token leaf.
     "unigym.props.templates -> unigym.core.paths",
     # TYPE_CHECKING-only asset-plan handles.

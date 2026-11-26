@@ -7,7 +7,7 @@ rules, then returns one immutable :class:`Pack` with a single ordered
 paths but never imports pack Python, so a manifest can be enumerated without
 activating a pack.
 
-The schema is the only manifest contract: discovery, catalog lookup and
+The schema is the only manifest contract: discovery, pack-set lookup and
 activation in :mod:`unigym.packs.loader` all read it.
 """
 
@@ -227,8 +227,8 @@ class PackItem:
     snapshot metadata: it never mutates in place and a failed activation never
     stores ``FAILED``.
 
-    ``resource``/``entrypoint``/``id`` are temporary read projections over
-    ``locator``/``name`` for the C1 transition; C7 removes the flattened view.
+    ``resource``/``entrypoint``/``id`` are read-only projections over
+    ``locator``/``name``; the stored field remains ``locator``.
     """
 
     pack: str
@@ -410,24 +410,6 @@ class Pack:
         for item in self.items:
             counts[item.face] = counts.get(item.face, 0) + 1
         return MappingProxyType({face: counts[face] for face in MANIFEST_FACES if face in counts})
-
-    @property
-    def provides(self) -> Mapping[str, tuple[PackItem, ...]]:
-        """Temporary face-keyed projection of :attr:`items` for the C1 transition.
-
-        C7 removes this flattened view after activation and consumers move to
-        :meth:`items_for`.
-        """
-        grouped: dict[str, list[PackItem]] = {}
-        for item in self.items:
-            grouped.setdefault(item.face.value, []).append(item)
-        return MappingProxyType({face: tuple(items) for face, items in grouped.items()})
-
-
-# Temporary C1 aliases for modules the data-model card does not own.  Both
-# disappear in C7 when activation and its tests move to Pack/PackItem.
-PackManifestV1 = Pack
-ProvidedItem = PackItem
 
 
 def _read_document(root: Path) -> dict[str, object]:

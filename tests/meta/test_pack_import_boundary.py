@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import subprocess
 import sys
@@ -34,6 +35,19 @@ _LEGACY_NAMES = (
     "registered_content_providers",
     "PROVIDER_WHENS",
 )
+_REMOVED_PACK_NAMES = (
+    "ActivationHandle",
+    "AssetContext",
+    "CatalogEntry",
+    "PackCatalog",
+    "PackInfo",
+    "PackManifestV1",
+    "PackRuntime",
+    "ProvidedItem",
+    "ProviderInfo",
+    "ResourceInfo",
+)
+_REMOVED_PACK_MODULES = ("unigym.packs.catalog", "unigym.packs.runtime")
 
 
 @pytest.mark.subprocess
@@ -224,6 +238,23 @@ def test_public_facades_advertise_no_legacy_scene_names(name: str) -> None:
     for facade in (pack_api, packs, scene_presets, scenes):
         assert name not in getattr(facade, "__all__", ()), f"{facade.__name__}.__all__"
         assert not hasattr(facade, name), f"{facade.__name__}.{name}"
+
+
+@pytest.mark.parametrize("name", _REMOVED_PACK_NAMES)
+def test_pack_facades_advertise_no_removed_names(name: str) -> None:
+    """The pack public surface and the schema expose no removed pack names."""
+    import unigym.packs.schema as schema
+
+    for facade in (pack_api, packs, schema):
+        assert name not in getattr(facade, "__all__", ()), f"{facade.__name__}.__all__"
+        assert not hasattr(facade, name), f"{facade.__name__}.{name}"
+
+
+@pytest.mark.parametrize("module", _REMOVED_PACK_MODULES)
+def test_removed_pack_modules_are_not_importable(module: str) -> None:
+    """The old catalog and runtime modules are deleted; no shim remains."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module)
 
 
 @pytest.mark.parametrize("name", ["from_pack", "from_generator"])

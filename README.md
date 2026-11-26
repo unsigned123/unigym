@@ -48,7 +48,10 @@ document or entrypoint factory) without mutating the robot registry.
 stored `PackItem` values; each ref has a `from_item(item)` classmethod and no
 manifest is imported or resource path read while minting. `packs.items()` /
 `.providers()` / `.scene_presets()` are the cross-pack views; `packs.origins()`
-reports where each pack was discovered. See
+reports where each pack was discovered. The old `unigym.packs.catalog` and
+`unigym.packs.runtime` modules and the `PackCatalog`/`PackRuntime` names are
+gone: `PackSet` owns cross-pack lookup and uniqueness, and `PackLoader` owns
+discovery, resources and activation. See
 [`docs/pack_api.md`](docs/pack_api.md#pack-objects) for the full query surface.
 
 ## Backend support levels

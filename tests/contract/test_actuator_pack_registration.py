@@ -78,7 +78,7 @@ def _write_pack(root: Path, *, law_id: str = "acme.compliant_pd") -> None:
 
 def test_manifest_accepts_actuator_law_and_implementation_items() -> None:
     manifest = load_manifest_v1(_FIXTURE)
-    law, implementation = manifest.provides["providers"]
+    law, implementation = manifest.items_for(face=Face.PROVIDERS)
     assert law.kind == "actuator_law"
     assert law.resource == "actuators/compliant_pd.law.yaml"
     assert law.entrypoint is None

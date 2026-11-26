@@ -25,6 +25,7 @@ from unigym.packs.schema import MANIFEST_NAME
 _CODE_MODULE = "cli_code_pack"
 
 _DELETED_MODULES = (
+    "unigym.packs.catalog",
     "unigym.packs.load",
     "unigym.packs.runtime",
     "unigym.packs.manifest",

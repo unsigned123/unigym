@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Breaking release: the pack model v2 cutover removes the transitional pack
+modules and names. There is no compatibility shim.
+
+- Removed the `unigym.packs.catalog` and `unigym.packs.runtime` modules and the
+  `PackCatalog`, `CatalogEntry`, `PackInfo`, `ResourceInfo`, `ActivationHandle`,
+  `ProviderInfo`, `AssetContext`, `PackManifestV1`, `ProvidedItem` and
+  `PackRuntime` names. Packs are `Pack` values, stored items are `PackItem`
+  values, live providers are `ProviderRef` projections, and the searchable,
+  resource-resolving, activating owner is `PackLoader`.
+- `PackSet` now owns the duplicate pack-name and duplicate `(face, name)` rule
+  that lived in the deleted catalog module. `PackSet` stays a pure index; the
+  loader owns `from_pack_set`, resources and activation.
+- Removed `Pack.provides`; read `Pack.items` or call `Pack.items_for(...)`.
+  `PackItem.resource`/`.entrypoint`/`.id` remain read-only projections over the
+  stored locator and name.
+- `unigym.pack_api` and `unigym.packs` export none of the removed names.
+
 ## 0.109.0
 
 Additive release: the run-scoped `ValueStore` gains a synchronous

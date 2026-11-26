@@ -386,7 +386,7 @@ Rules:
 - `entry_points=True` with explicit roots is a teaching `PackError`, not a
   silently ignored keyword.
 
-There is no implicit repository mount in this runtime. A resource is addressed
+There is no implicit repository mount in this loader. A resource is addressed
 through an explicit pack root or an absolute path outside the catalog; the
 checkout itself is not added as a hidden fallback pack.
 
@@ -401,26 +401,26 @@ name exactly the pack set's packs.
 
 ### Resources
 
-`runtime.resource(pack, rel)` returns an absolute `Path` inside that pack's
+`loader.resource(pack, rel)` returns an absolute `Path` inside that pack's
 root. It applies the same rules as the schema: `rel` must be non-empty and
 relative, must not contain `..`, must resolve inside the root and must exist.
 Errors name both the pack and the path.
 
-`runtime.resource_for(item)` takes one stored `PackItem` and resolves its
-declared `resource` through `runtime.resource(item.pack, item.resource)`,
+`loader.resource_for(item)` takes one stored `PackItem` and resolves its
+declared `resource` through `loader.resource(item.pack, item.resource)`,
 preserving the same path and existence checks. It returns the absolute resource
-`Path`. `runtime.resolve(face, id)` is the face/name convenience over the same
+`Path`. `loader.resolve(face, id)` is the face/name convenience over the same
 stored item.
 
 Lookup is pack-set-only: `resource_for` never activates or imports pack code. An
 entrypoint-only item has no resource path, so it raises `PackError` naming the
 pack, face, id and entrypoint and pointing the caller at
-`runtime.activate(pack)`. An item owned by a pack outside this loader fails with
+`loader.activate(pack)`. An item owned by a pack outside this loader fails with
 the unknown-pack error.
 
 ### Asset references (Phase 7b-1 foundation)
 
-`runtime.asset_path(value)` resolves one declared asset reference to an absolute
+`loader.asset_path(value)` resolves one declared asset reference to an absolute
 `Path`:
 
 ```text
@@ -440,7 +440,7 @@ Rules:
   `unigym.assets.refs.canonical_asset_path` rule, so a texture leaf such as
   `assets/generators/tex/a/wood.png` names
   `assets/generators/tex/a/wood/wood.png` before the lookup;
-- the canonicalized reference then resolves through `runtime.resource(pack,
+- the canonicalized reference then resolves through `loader.resource(pack,
   rel)`, inheriting the non-empty, relative-only, `..`, inside-root, symlink
   escape and existence checks;
 - a bare relative reference is rejected because it has no owning pack; the
@@ -1024,21 +1024,21 @@ robots.
 runtime discovery is needed. There is no module-level runtime or cache.
 
 - `unigym asset file <id>` checks the id namespace against
-  `runtime.root_by_pack` and resolves the asset directory through
-  `runtime.resource`, so the inside-root, missing-resource and symlink checks
+  `loader.root_by_pack` and resolves the asset directory through
+  `loader.resource`, so the inside-root, missing-resource and symlink checks
   stay with the runtime owner. It never calls the removed `pack_roots()` /
   `repo_pack()` helpers. An unknown namespace is a teaching error naming the
   discovered packs. A generator id activates every catalog pack through
-  `runtime.activate_all()` before reading the template registry; the registry
+  `loader.activate_all()` before reading the template registry; the registry
   and its error behavior are unchanged, and an activation failure is a teaching
   CLI error rather than a traceback.
 - `unigym asset selection check` without `--dir` enumerates
-  `runtime.pack_set.items(face=Face.SELECTION)` and resolves each item through
-  `runtime.resource_for(item)`. A directory resource is the
+  `loader.pack_set.items(face=Face.SELECTION)` and resolves each item through
+  `loader.resource_for(item)`. A directory resource is the
   selection directory; a file resource uses its parent directory. Resolved
   directories are canonical-deduped and only directories are checked. There is
   no `<pack-root>/selection/` subdirectory scan.
-- An explicit `--dir` keeps its existing behavior and needs no runtime.
+- An explicit `--dir` keeps its existing behavior and needs no pack loader.
 - `unigym asset catalog build` and `catalog search` still run the external
   collector `tools/build_asset_catalog.py`. The public core does not
   reimplement the collector; an absent collector fails with the existing
@@ -1109,7 +1109,7 @@ values (unknown keys, types and choices) at load. A required parameter may be
 omitted from the preset and supplied by a run-level `scene_preset` override;
 dispatch still requires the complete mapping.
 
-Resolution goes through `runtime.resolve("scene_presets", <id>)` and
+Resolution goes through `loader.resolve("scene_presets", <id>)` and
 `unigym.scene_presets` (`load_scene_preset`, `resolve_scene_plan`,
 `apply_scene_preset`). The legacy `scenes` face, `scene:` / `scene_pack:` /
 `scenes:` run keys, `env.params.mj_scene` / `mj_scene_params`, preset
@@ -1211,7 +1211,7 @@ shared resolver for the CLI and the daemon. Its rules:
 
 - an absolute path or a `~` path is expanded, resolved and must be a file;
 - an exact `runs` catalog id resolves through
-  `runtime.resolve("runs", <id>)` and must be a file;
+  `loader.resolve("runs", <id>)` and must be a file;
 - a catalog id requires a runtime; without one the error names the spec and
   the accepted forms;
 - relative filesystem paths and globs are teaching errors naming only the two
@@ -1225,10 +1225,10 @@ as CLI teaching errors rather than tracebacks.
 
 `client.cmd_run` builds `discover(entry_points=True)` once, only when at least
 one spec is non-absolute. `cmd_debug` and `probe_cli.cmd_probe` build it only
-for a non-absolute spec. Absolute paths work without constructing a runtime.
+for a non-absolute spec. Absolute paths work without constructing a loader.
 
 The daemon owns one explicit `pack_runtime` built at `DaemonService`
-construction. `GET /api/configs` enumerates `runtime.pack_set.items(face=Face.RUNS)`:
+construction. `GET /api/configs` enumerates `loader.pack_set.items(face=Face.RUNS)`:
 resource-backed items carry `{id, path, relative: <id>, ...summary}`;
 entrypoint-only run items are reported in `unsupported` instead of being
 listed or silently dropped. `POST /api/start` calls the same
@@ -1417,7 +1417,7 @@ and it does not inspect the caller's frame.
 
 ### Activation
 
-`runtime.activate(pack)` is explicit and cached per runtime. It returns a new
+`loader.activate(pack)` is explicit and cached per loader. It returns a new
 immutable `Pack` snapshot whose `PackItem.status` values carry the outcome:
 
 - data faces (`runs`, `assets`, `scene_presets`, `props`, `terminations`,
@@ -1449,14 +1449,14 @@ immutable `Pack` snapshot whose `PackItem.status` values carry the outcome:
 - there is no AST restriction, custom module loader or sandbox. `trust: code`
   means trusted Python that may import `unigym.pack_api`;
 - repeated activation returns the same cached `Pack` object and does not
-  re-execute the entrypoint; `runtime.is_activated(name)` answers whether
+  re-execute the entrypoint; `loader.is_activated(name)` answers whether
   activation completed, including for a data-only pack;
 - an activation failure raises `PackError` naming the pack and entrypoint,
   with the original exception as its cause, restores every registry value and
   origin, and caches nothing (`FAILED` is never a stored item status), so a
   retry sees a clean registry.
 
-`runtime.activate_all()` activates every catalog pack in catalog order and
+`loader.activate_all()` activates every pack in pack-set order and
 returns a `tuple[Pack, ...]`. It uses the same per-runtime cache, so a repeated
 call returns the same activated objects without re-running an entrypoint.
 
@@ -1504,7 +1504,7 @@ installed `PackItem` / `SceneProviderRef`, not by the live reference.
 `scene_provider_origin(name)`
 returns one provider's origin. `PackLoader.origins` carries the discovery label per pack
 (`explicit-root`, `env:UNIGYM_PACKS`, `local-yaml`, `entry-point`, `deps-root`);
-a hand-built runtime reports `unknown`. A failed activation restores the
+a hand-built loader reports `unknown`. A failed activation restores the
 adapter, robot and scene-provider registries to their prior contents, including
 names the pack-level entrypoint registered itself.
 
@@ -1557,7 +1557,7 @@ Registration is process-global because the adapter registry is global.
 non-`Adapter` class and a duplicate name; a duplicate error names the class
 already registered under that name. One class owns exactly one adapter name:
 registering the same class under a second name is rejected as an alias.
-Activation is idempotent per runtime. The activated `Pack` records manifest
+Activation is idempotent per loader. The activated `Pack` records manifest
 `kind: adapter` items with `status=REGISTERED`, in declaration order. A dynamic
 registration and a manifest registration for the same name still fail loudly on
 the second registration.
@@ -1745,7 +1745,7 @@ Requirement (`requires`) resolution and attribute sugar are not implemented.
   prints each item's absolute resource path or its entrypoint;
 - `pack doctor [--name NAME] [--json]` revalidates the manifest schema,
   checks `BUILD_MANIFEST.txt` against the live tree and activates the pack
-  through the runtime. It performs no legacy mount, api/requires or mount-face
+  through the loader. It performs no legacy mount, api/requires or mount-face
   checks.
 
 There is no `repo` pack and no mount table. The CLI fails with the known packs
@@ -1777,11 +1777,15 @@ or known faces, never with an implicit checkout fallback.
   receives the `PackLoader`. `SimulationBuilder(pack_set=...)` binds it with
   `PackLoader.from_pack_set`; its documented `pack_runtime` accessor returns
   that loader and never rediscovers roots.
-- Pack model v2 cutover: `PackManifestV1`, `ProvidedItem`, `CatalogEntry`,
-  `PackCatalog`, `PackInfo`, `ResourceInfo`, `ActivationHandle` and
-  `AssetContext` are removed. Installed items are `PackItem` values, live
-  registry entries are `ProviderRef` projections, and `AssetPlan` takes the
-  `PackLoader` directly. `unigym.pack_api` exports no aliases for these names.
+- Pack model v2 cutover: `unigym.packs.catalog` is deleted; `PackCatalog`,
+  `CatalogEntry`, `PackManifestV1`, `ProvidedItem`, `PackInfo`, `ResourceInfo`,
+  `ActivationHandle`, `ProviderInfo`, `AssetContext` and `PackRuntime` are
+  removed. The duplicate pack-name and duplicate `(face, name)` rule is owned by
+  `PackSet` construction. Installed items are `PackItem` values, live registry
+  entries are `ProviderRef` projections, and `AssetPlan` takes the `PackLoader`
+  directly. `unigym.pack_api` exports no aliases for these names.
+- `Pack.provides` is removed; read the stored `Pack.items` tuple or call
+  `Pack.items_for(face=..., kind=..., status=...)` / `Pack.item(face, name)`.
 
 ### Removed scene vocabulary
 

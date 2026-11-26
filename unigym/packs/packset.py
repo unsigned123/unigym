@@ -24,7 +24,7 @@ path resolution and object loading belong to
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -36,7 +36,6 @@ from unigym.scenes.provider_params import (
 )
 
 from . import PackError
-from .catalog import validate_unique
 from .schema import (
     EntrypointLocator,
     Face,
@@ -54,6 +53,49 @@ __all__ = [
     "ScenePresetRef",
     "SceneProviderRef",
 ]
+
+
+def _label(origins: Mapping[str, str] | None, pack: Pack) -> str:
+    """The discovery label for *pack*, or ``"unknown"`` when not recorded."""
+    if origins is not None:
+        return origins.get(pack.name, "unknown")
+    return pack.origin.discovered_by or "unknown"
+
+
+def _validate_unique(packs: Iterable[Pack], origins: Mapping[str, str] | None = None) -> None:
+    """Reject duplicate pack names and duplicate ``(face, name)`` pairs.
+
+    The error names both packs, both pack roots and both discovery labels
+    (``origins`` keys pack names; otherwise each pack's own origin is used).
+    There is no first-match resolution.  This is the one ambiguity check used
+    by :class:`PackSet` construction.
+    """
+    materialized = tuple(packs)
+    seen_packs: dict[str, Pack] = {}
+    for pack in materialized:
+        owner = seen_packs.get(pack.name)
+        if owner is not None:
+            raise PackError(
+                f"duplicate pack name {pack.name!r} discovered at roots "
+                f"{owner.root} and {pack.root} (discovered_by "
+                f"{_label(origins, owner)!r} and {_label(origins, pack)!r})"
+            )
+        seen_packs[pack.name] = pack
+    seen_items: dict[tuple[Face, str], tuple[str, Pack]] = {}
+    for pack in materialized:
+        for item in pack.items:
+            key = (item.face, item.name)
+            owner = seen_items.get(key)
+            if owner is not None:
+                owner_pack, owner_record = owner
+                raise PackError(
+                    f"duplicate {item.face.value!r} id {item.name!r} in catalog: "
+                    f"provided by packs {owner_pack!r} (root {owner_record.root}, "
+                    f"discovered_by {_label(origins, owner_record)!r}) and "
+                    f"{pack.name!r} (root {pack.root}, discovered_by "
+                    f"{_label(origins, pack)!r})"
+                )
+            seen_items[key] = (pack.name, pack)
 
 
 def _provider_schema(item: PackItem, *, pack: str) -> Mapping[str, ProviderParamSpec] | None:
@@ -215,7 +257,7 @@ class PackSet:
     def __post_init__(self) -> None:
         """Freeze the pack tuple and reject duplicate pack or item owners."""
         object.__setattr__(self, "_packs", tuple(self._packs))
-        validate_unique(self._packs)
+        _validate_unique(self._packs)
 
     def packs(self) -> tuple[Pack, ...]:
         """Every pack in this set, in discovery order."""
