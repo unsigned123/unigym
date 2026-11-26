@@ -366,7 +366,7 @@ def _pack_robot_profiles(
 
     A config's ``params.profile`` selector (or articulation name) stays a
     registry lookup for registered robots; an unregistered selector falls back
-    to the pack runtime's declared ``kind: robot`` providers.  An articulation
+    to the loader's declared ``kind: robot`` providers.  An articulation
     that already has an explicitly injected profile is skipped entirely: the
     injected profile is used as-is, never replaced by a pack lookup.  The
     returned mapping is keyed by articulation name, the profile-injection
@@ -376,7 +376,6 @@ def _pack_robot_profiles(
     more than one pack fails with the shared ambiguity error instead of
     silently taking the first manifest.
     """
-    from unigym.packs.schema import Face
     from unigym.robots import ROBOT_REGISTRY
 
     injected = spec.robot_profiles or {}
@@ -390,12 +389,12 @@ def _pack_robot_profiles(
             wanted.setdefault(selector, []).append(art.name)
     if not wanted:
         return {}
-    available = {item.name for item in runtime.pack_set.items(face=Face.PROVIDERS, kind="robot")}
+    available = {item.name for item in runtime.pack_set.providers("robot")}
     resolved: dict[str, RobotProfile] = {}
     for selector, art_names in wanted.items():
         if selector not in available:
             continue
-        item = runtime.pack_set.provider("robot", selector)
+        item = runtime.provider("robot", selector)
         profile = runtime.robot_profile(item.pack, item.name)
         for art_name in art_names:
             resolved[art_name] = profile

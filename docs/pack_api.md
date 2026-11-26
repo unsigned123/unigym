@@ -1770,6 +1770,13 @@ or known faces, never with an implicit checkout fallback.
   `PackLoader.robot_profile()`; `PackSet.resource_path()` and the old 2-arg
   `resource_for(face, id)` move to `PackLoader.resource_for(item)` /
   `PackLoader.resolve(face, id)`.
+- C6 consumer migration (historical migration note): core consumers read the
+  loader directly -- run robot selectors resolve through
+  `PackLoader.provider("robot", id)` + `PackLoader.robot_profile()`, scene
+  presets and the asset CLI enumerate `loader.pack_set`, and `AssetPlan`
+  receives the `PackLoader`. `SimulationBuilder(pack_set=...)` binds it with
+  `PackLoader.from_pack_set`; its documented `pack_runtime` accessor returns
+  that loader and never rediscovers roots.
 - Pack model v2 cutover: `PackManifestV1`, `ProvidedItem`, `CatalogEntry`,
   `PackCatalog`, `PackInfo`, `ResourceInfo`, `ActivationHandle` and
   `AssetContext` are removed. Installed items are `PackItem` values, live

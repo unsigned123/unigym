@@ -199,7 +199,6 @@ class SimulationBuilder:
         self._substeps = decimation
         self._seed = seed
         self._num_envs = _positive_int(num_envs, "SimulationBuilder num_envs")
-        self._pack_set: PackSet | None = pack_set
         self._name = name
         self._steps = _positive_int(steps, "SimulationBuilder steps")
         self._artifacts = artifacts
@@ -211,7 +210,7 @@ class SimulationBuilder:
         self._owner = object()
         self._sealed = False
         self._sim: Simulation | None = None
-        self._pack_runtime: PackLoader | None = (
+        self._pack_loader: PackLoader | None = (
             None if pack_set is None else PackLoader.from_pack_set(pack_set)
         )
         self._config_mode = False
@@ -256,10 +255,10 @@ class SimulationBuilder:
         from unigym.packs.loader import PackLoader
         from unigym.run.api import Run
 
-        runtime = None if pack_set is None else PackLoader.from_pack_set(pack_set)
+        loader = None if pack_set is None else PackLoader.from_pack_set(pack_set)
         run = Run.from_config(
             path,
-            pack_runtime=runtime,
+            pack_runtime=loader,
             discover_runtime=False,
             backend=backend,
             device=device,
@@ -292,8 +291,7 @@ class SimulationBuilder:
         builder._substeps = decimation
         builder._seed = spec.seed
         builder._num_envs = spec.num_envs
-        builder._pack_set = pack_set
-        builder._pack_runtime = runtime
+        builder._pack_loader = loader
         builder._name = spec.run_name
         builder._steps = spec.total_steps
         builder._artifacts = spec.output.artifacts
@@ -328,14 +326,19 @@ class SimulationBuilder:
 
     @property
     def pack_runtime(self) -> PackLoader:
-        """The activation-capable runtime over this builder's explicit pack set."""
-        runtime = self._pack_runtime
-        if runtime is None:
+        """The loader bound to this builder's explicit pack set.
+
+        The property name is retained for the documented facade contract; the
+        value is the ``PackLoader.from_pack_set`` binding, not a ``PackSet``
+        runtime bridge.  Construction never rediscovers roots.
+        """
+        loader = self._pack_loader
+        if loader is None:
             raise SimulationConfigError(
-                "this config-mode builder has no pack runtime; pass pack_set= to "
+                "this config-mode builder has no pack loader; pass pack_set= to "
                 "SimulationBuilder.from_config for a config that references a pack"
             )
-        return runtime
+        return loader
 
     @property
     def articulations(self) -> tuple[ArticulationHandle, ...]:
@@ -654,7 +657,7 @@ class SimulationBuilder:
         run = Run(
             cfg,
             world=world,
-            pack_runtime=self._pack_runtime,
+            pack_runtime=self._pack_loader,
             robot_profiles={handle.name: handle.profile for handle in self._articulations},
             no_artifacts=not self._artifacts,
             device=self._device,

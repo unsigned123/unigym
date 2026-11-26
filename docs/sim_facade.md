@@ -36,10 +36,11 @@ of band instead of returning the stale cache.
 ```python
 import torch
 import unigym
-from unigym.packs import require
+from unigym.packs import PackLoader, require
 from unigym.world import World
 
 packs = require("acme_robots")                 # one explicit PackSet
+loader = PackLoader.from_pack_set(packs)       # loader over that same set
 control = unigym.Control.position_pd(
     joint_set="body",
     kp=20.0,
@@ -54,7 +55,7 @@ builder = unigym.SimulationBuilder(
 )
 builder.world = World.base(mjcf="robot_scene.xml")  # the world owns the asset
 robot = builder.add_articulation(
-    packs.pack("acme_robots").robot("acme.arm"),
+    loader.robot_profile("acme_robots", "acme.arm"),
     control=control,
 )
 group = robot.action_groups["body"]    # the ordered action template group
@@ -151,16 +152,19 @@ packs = unigym.packs.require("acme", entry_points=False)  # manifest-only
 packs = unigym.packs.discover_set(["/path/to/pack/root"])
 ```
 
-`packs.pack(name).robot(id)` returns the complete `RobotProfile` (a resource
-document is read directly; an entrypoint factory must return a profile) without
-activating the pack or mutating the robot registry.
+`PackLoader.from_pack_set(packs).robot_profile(pack, id)` returns the complete
+`RobotProfile` (a resource document is read directly; an entrypoint factory
+must return a profile) without activating the pack or mutating the robot
+registry.
 `SimulationBuilder.add_articulation(profile, control=...)` consumes that
 profile directly: no pack lookup, no activation and no implicit default
 control. A renamed articulation (`name=...`) emits the existing
 `params.profile` selector from `profile.name`.
 
-`builder.pack_runtime` is the activation-capable runtime over the same set. A
-world preset is declared explicitly:
+`builder.pack_runtime` is the `PackLoader` bound to the same explicit set with
+`PackLoader.from_pack_set` (the property name is part of the facade contract;
+it is not a `PackSet` runtime bridge and never rediscovers roots). A world
+preset is declared explicitly:
 
 ```python
 builder.world = World.from_preset(preset, runtime=builder.pack_runtime)

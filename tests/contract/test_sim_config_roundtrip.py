@@ -68,8 +68,13 @@ def test_from_config_without_pack_set_refuses_discovery(
         SimulationBuilder.from_config(path)
 
 
-def test_from_config_uses_the_explicit_pack_set(tmp_path: Path) -> None:
+def test_from_config_uses_the_explicit_pack_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A pack-referencing config is loaded through the caller's explicit pack set."""
+    from unigym.packs import PackLoader
+
+    monkeypatch.setattr("unigym.pack_api.discover", _forbidden_discovery)
     pack_set, ref = write_sim_pack(tmp_path / "pack")
     cfg = dict(_CONFIG)
     cfg["articulations"] = [{"name": "body", "params": {"profile": ref.name}}]
@@ -88,6 +93,7 @@ def test_from_config_uses_the_explicit_pack_set(tmp_path: Path) -> None:
 
     builder = SimulationBuilder.from_config(path, pack_set=pack_set)
 
+    assert isinstance(builder.pack_runtime, PackLoader)
     assert builder.pack_runtime.pack_set == pack_set
 
 

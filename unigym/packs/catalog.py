@@ -1,13 +1,14 @@
 """Temporary internal catalog adapter over the stored pack model.
 
-:class:`PackSet` is the public ordered index over :class:`~unigym.packs.schema.Pack`
-values.  The runtime still exposes this small compatibility view because
-existing consumers read ``runtime.catalog``; it holds references to the same
-``Pack``/``PackItem`` objects and never copies or flattens item data.
+:class:`PackSet` is the public ordered index over
+:class:`~unigym.packs.schema.Pack` values.  No production consumer reads
+``runtime.catalog`` any more: scene presets, the asset CLI and the daemon
+enumerate ``loader.pack_set`` items directly.  This module now only retains the
+shared :func:`validate_unique` ambiguity rule used by ``PackSet``
+construction; :class:`PackCatalog` itself has no production reader.
 
-This module is internal for the C1 transition.  C7 deletes it when the runtime
-becomes the loader and consumers use :class:`~unigym.packs.packset.PackSet`
-directly.
+This module is internal for the C1 transition.  C7 folds
+``validate_unique`` into the pack-set module and deletes the rest.
 """
 
 from __future__ import annotations

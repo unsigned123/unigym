@@ -378,7 +378,7 @@ def _validate_provider_reference(
     provider = preset.provider
     if provider is None:
         return
-    manifest = runtime.pack(pack)
+    manifest = runtime.pack_set.pack(pack)
     match = next(
         (
             item

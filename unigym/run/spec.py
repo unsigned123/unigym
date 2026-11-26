@@ -165,7 +165,7 @@ class RunSpec:
     #: isaaclab backend maps to native static colliders; empty for
     #: config-backed runs.  Not serialized into the yaml config today.
     static_shapes: tuple[JsonValue, ...] = ()
-    #: the caller's pack runtime (non-serialized): scene/asset catalogs and
+    #: the caller's pack loader (non-serialized): scene/asset lookups and
     #: robot profile resolution read through it.  Never written to cfg/ledger.
     pack_runtime: PackLoader | None = None
     #: complete RobotProfile objects injected by the programmatic profile

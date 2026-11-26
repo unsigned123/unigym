@@ -1782,18 +1782,19 @@ def _build_bridge_and_wiring(
 
 
 def _boundary_asset_plan(
-    pack_runtime: PackLoader | None,
+    loader: PackLoader | None,
     env_cfg: Mapping[str, JsonValue],
 ) -> AssetPlan | None:
     """Resolve the run's one asset boundary.
 
-    A pack runtime owns every reference.  Without one, a routed scene provider
-    still needs a boundary so absolute asset references resolve; an empty
-    discovery does that and fails ``pack:`` references honestly at resolution.
-    A run with neither has nothing to resolve, so the plan stays ``None``.
+    A pack loader owns every reference.  Without one, a routed scene provider
+    still needs a boundary so absolute asset references resolve; an explicit
+    empty discovery does that and fails ``pack:`` references honestly at
+    resolution.  A run with neither has nothing to resolve, so the plan stays
+    ``None``.
 
     Args:
-        pack_runtime: The run's pack runtime, or ``None``.
+        loader: The run's pack loader, or ``None``.
         env_cfg: The run's ``env`` config section.
 
     Returns:
@@ -1802,8 +1803,8 @@ def _boundary_asset_plan(
     from unigym.assets.plan import AssetPlan
     from unigym.packs.loader import discover
 
-    if pack_runtime is not None:
-        return AssetPlan(pack_runtime)
+    if loader is not None:
+        return AssetPlan(loader)
     params = env_cfg.get("params")
     if isinstance(params, dict) and params.get("scene_provider") is not None:
         return AssetPlan(discover([]))
@@ -1853,7 +1854,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         info = backend_info(canonical)
         backend_label = canonical
         _materialize_pack_actuators(spec, info.name)
-    pack_runtime = spec.pack_runtime
+    loader = spec.pack_runtime
     # Normalize the one sink selection surface BEFORE any engine allocation:
     # an explicit ``sinks:`` list wins, a custom ``sink:`` shorthand is the sole
     # sink, and an absent selection keeps the historical single collect sink.
@@ -1898,7 +1899,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     env_spacing = _config_float(env_cfg.get("env_spacing", 4.0))
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
 
-    asset_plan = _boundary_asset_plan(pack_runtime, env_cfg)
+    asset_plan = _boundary_asset_plan(loader, env_cfg)
     spec = _prepare_articulation_models(spec, info, asset_plan)
 
     robot = _build_robot_and_props(
