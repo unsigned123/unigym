@@ -157,7 +157,7 @@ def cartpole_usd(pack_runtime) -> Path:
     """Resolve the Cartpole USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 3 PhysX lane")
     runtime = pack_runtime("isaaclab_cartpole")
-    return runtime.resource_for("assets", "isaaclab_cartpole.usd")
+    return runtime.resolve("assets", "isaaclab_cartpole.usd")
 
 
 @pytest.fixture

@@ -171,7 +171,7 @@ def cartpole_usd(pack_runtime) -> Path:
     """Resolve the Cartpole USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     runtime = pack_runtime("isaaclab_cartpole")
-    return runtime.resource_for("assets", "isaaclab_cartpole.usd")
+    return runtime.resolve("assets", "isaaclab_cartpole.usd")
 
 
 @pytest.fixture
@@ -198,7 +198,7 @@ def g1_usd(pack_runtime) -> Path:
     """Resolve the 43-DoF G1 USD through the installed test pack."""
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     runtime = pack_runtime("g1")
-    return runtime.resource_for("assets", "g1.usd")
+    return runtime.resolve("assets", "g1.usd")
 
 
 @pytest.fixture

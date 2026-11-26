@@ -122,7 +122,7 @@ def _isolate_discovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         importlib.metadata, "entry_points", lambda: importlib.metadata.EntryPoints(())
     )
-    monkeypatch.setattr("unigym.packs.runtime.repo_root", lambda: tmp_path)
+    monkeypatch.setattr("unigym.packs.loader.repo_root", lambda: tmp_path)
 
 
 @pytest.fixture

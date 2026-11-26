@@ -5,7 +5,7 @@ the same two forms:
 
 ```text
 /absolute/path/to/run.yaml     -> used verbatim (must be a file)
-acme.demo                      -> exact PackRuntime "runs" catalog id
+acme.demo                      -> exact PackLoader "runs" catalog id
 ```
 
 There is no implicit ``config/`` directory, no CWD-relative path, no glob
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from unigym.packs import PackError
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
 
 __all__ = ["RunConfigRefError", "resolve_run_config"]
 
@@ -61,7 +61,7 @@ def _require_file(path: Path, spec: str) -> Path:
     return path
 
 
-def resolve_run_config(spec: str, runtime: PackRuntime | None = None) -> Path:
+def resolve_run_config(spec: str, runtime: PackLoader | None = None) -> Path:
     """Resolve *spec* to one run config file.
 
     Args:
@@ -105,7 +105,7 @@ def resolve_run_config(spec: str, runtime: PackRuntime | None = None) -> Path:
         )
 
     try:
-        path = runtime.resource_for("runs", spec)
+        path = runtime.resolve("runs", spec)
     except PackError as error:
         if _looks_like_path(spec):
             raise _rejected(spec, "relative paths are not resolved") from error

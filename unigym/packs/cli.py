@@ -1,7 +1,7 @@
 """``unigym pack`` CLI: list, path and doctor over the pack runtime.
 
 The launcher owns the argparse wiring; this module owns the three read-only
-commands.  Everything goes through :func:`unigym.packs.runtime.discover`, so
+commands.  Everything goes through :func:`unigym.packs.loader.discover`, so
 the CLI sees the same manifests, resources and activation the rest of the
 system uses.  There is no implicit repository pack and no legacy mount table.
 
@@ -21,9 +21,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import PackError
-from .packset import PackSet
-from .runtime import PackRuntime, discover
-from .schema import FACE_NAMES, MANIFEST_NAME, PackManifestV1, load_manifest_v1
+from .loader import PackLoader, discover
+from .schema import FACE_NAMES, MANIFEST_NAME, Face, Pack, load_manifest_v1
 
 INVENTORY_NAME = "BUILD_MANIFEST.txt"
 """Per-pack tree inventory written by the external pack build tool."""
@@ -35,7 +34,7 @@ SKIP_DIRS = frozenset({".git", "__pycache__"})
 """Directories the pack inventory never counts (VCS and bytecode)."""
 
 
-def _runtime() -> PackRuntime:
+def _loader() -> PackLoader:
     """Discover the configured packs, including installed entry points."""
     return discover(entry_points=True)
 
@@ -52,11 +51,11 @@ def cmd_list(a, extra: list[str] | None = None) -> int:
     the CLI runtime; there is no second discovery or provenance path.
     """
     try:
-        runtime = _runtime()
+        loader = _loader()
     except PackError as err:
         print(f"[unigym pack] FAIL discovery: {err}")
         return 1
-    pack_set = PackSet.from_runtime(runtime)
+    pack_set = loader.pack_set
     rows = []
     for pack in pack_set.packs():
         rows.append(
@@ -152,7 +151,7 @@ def _inventory_diff(root: Path) -> tuple[bool, str, list[str]]:
     return False, detail, mismatches[:_MISMATCH_LIMIT]
 
 
-def _doctor_one(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[list[str], int]:
+def _doctor_one(manifest: Pack, loader: PackLoader) -> tuple[list[str], int]:
     """Validate one runtime manifest; return ``(report lines, fail count)``."""
     lines: list[str] = []
     fails = 0
@@ -176,7 +175,7 @@ def _doctor_one(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[list[st
         lines.append(f"       {row}")
 
     try:
-        handle = runtime.activate(manifest.name)
+        handle = loader.activate(manifest.name)
     except PackError as err:
         check("activation", False, str(err))
     else:
@@ -188,21 +187,21 @@ def _doctor_one(manifest: PackManifestV1, runtime: PackRuntime) -> tuple[list[st
 def cmd_doctor(a, extra: list[str] | None = None) -> int:
     """``unigym pack doctor [--name NAME]`` -- per-pack runtime validation."""
     try:
-        runtime = _runtime()
+        loader = _loader()
     except PackError as err:
         print(f"[unigym pack] FAIL discovery: {err}")
         return 1
-    names = list(runtime.catalog.packs())
+    names = [pack.name for pack in loader.pack_set.packs()]
     wanted = getattr(a, "name", None)
     if wanted is not None and wanted not in names:
         print(f"[unigym pack] unknown pack {wanted!r}; known packs: {names}")
         return 1
     report = []
     total = 0
-    for manifest in runtime.catalog.manifests:
+    for manifest in loader.pack_set.packs():
         if wanted is not None and manifest.name != wanted:
             continue
-        lines, fails = _doctor_one(manifest, runtime)
+        lines, fails = _doctor_one(manifest, loader)
         total += fails
         report.append(
             {
@@ -226,12 +225,12 @@ def cmd_doctor(a, extra: list[str] | None = None) -> int:
 def cmd_path(a, extra: list[str] | None = None) -> int:
     """``unigym pack path <name> [face]`` -- pack root or face resources."""
     try:
-        runtime = _runtime()
+        loader = _loader()
     except PackError as err:
         print(f"[unigym pack] FAIL discovery: {err}")
         return 1
     try:
-        manifest = runtime.catalog.get(a.name)
+        manifest = loader.pack(a.name)
     except PackError as err:
         print(f"[unigym pack] {err}")
         return 1
@@ -242,14 +241,14 @@ def cmd_path(a, extra: list[str] | None = None) -> int:
     if face not in FACE_NAMES:
         print(f"[unigym pack] unknown face {face!r}; known faces: {list(FACE_NAMES)}")
         return 1
-    items = manifest.provides.get(face, ())
+    items = manifest.items_for(face=Face(face))
     if not items:
-        available = [name for name in FACE_NAMES if name in manifest.provides]
+        available = [name for name in FACE_NAMES if manifest.items_for(face=Face(name))]
         print(f"[unigym pack] pack {a.name!r} has no {face!r} face; faces: {available}")
         return 1
     for item in items:
         if item.resource is not None:
-            print(f"{item.id}: {runtime.resource(manifest.name, item.resource)}")
+            print(f"{item.id}: {loader.resource(manifest.name, item.resource)}")
         else:
             print(f"{item.id}: {item.entrypoint}")
     return 0

@@ -1,9 +1,10 @@
 """The ordered pack set: a pure index over stored packs and items.
 
-:func:`installed` enumerates the whole configured scope and :func:`require`
-returns the filtered view over exactly the named packs.  Both return a
-:class:`PackSet`, the cross-pack query handle.  A pack's scene presets and scene
-providers are acquired through the canonical pack-scoped item form::
+:func:`unigym.packs.installed` enumerates the whole configured scope and
+:func:`unigym.packs.require` returns the filtered view over exactly the named
+packs.  Both return a :class:`PackSet`, the cross-pack query handle.  A pack's
+scene presets and scene providers are acquired through the canonical
+pack-scoped item form::
 
     packs = unigym.packs.require("acme")
     preset = packs.pack("acme").item(Face.SCENE_PRESETS, "acme.tabletop")  # PackItem
@@ -16,16 +17,16 @@ unique ``(face, name)`` pairs and never activates, imports pack Python, resolves
 a resource path or mutates a registry.  The typed refs
 (:class:`AssetResourceRef`, :class:`ScenePresetRef`, :class:`SceneProviderRef`)
 are frozen projections minted from one :class:`~unigym.packs.schema.PackItem`;
-they carry that item's manifest provenance and read no filesystem.
+they carry that item's manifest provenance and read no filesystem.  Resource
+path resolution and object loading belong to
+:class:`~unigym.packs.loader.PackLoader`, not to this index.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
+from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING
 
 from unigym.provenance import ProviderOrigin
 from unigym.scenes.provider_params import (
@@ -35,8 +36,7 @@ from unigym.scenes.provider_params import (
 )
 
 from . import PackError
-from .catalog import PackCatalog, validate_unique
-from .runtime import PackRuntime, discover
+from .catalog import validate_unique
 from .schema import (
     Face,
     ItemStatus,
@@ -44,22 +44,14 @@ from .schema import (
     PackItem,
     ResourceLocator,
     coerce_face,
-    pack_origin,
     provider_param_declarations,
-    with_pack_origin,
 )
-
-if TYPE_CHECKING:
-    from unigym.robots.base import RobotProfile
 
 __all__ = [
     "AssetResourceRef",
     "PackSet",
     "ScenePresetRef",
     "SceneProviderRef",
-    "discover_set",
-    "installed",
-    "require",
 ]
 
 
@@ -110,36 +102,6 @@ class SceneProviderRef:
     def __hash__(self) -> int:
         """Hash the handle identity; the schema is derived from that identity."""
         return hash((self.pack, self.pack_version, self.id, self.entrypoint, self.origin))
-
-
-def _normalize_origin_override(pack: Pack, value: ProviderOrigin | str) -> ProviderOrigin:
-    """Normalize one ``from_runtime(origins=...)`` value to a pack origin."""
-    if isinstance(value, str):
-        return pack_origin(pack, value)
-    if not isinstance(value, ProviderOrigin):
-        raise PackError(
-            f"origin for pack {pack.name!r} must be a ProviderOrigin or a "
-            f"discovery label string, got {type(value).__name__}"
-        )
-    if value.kind == "pack":
-        facts = (
-            ("pack", value.pack, pack.name),
-            ("pack_version", value.pack_version, pack.version),
-            ("root", value.root, str(pack.root)),
-        )
-        for field_name, actual, expected in facts:
-            if actual != expected:
-                raise PackError(
-                    f"origin for pack {pack.name!r} has {field_name} "
-                    f"{actual!r}, expected {expected!r}"
-                )
-        return value
-    if value.kind == "unknown":
-        return pack_origin(pack, "unknown")
-    raise PackError(
-        f"origin for pack {pack.name!r} must be a pack-level ProviderOrigin "
-        f"(kind='pack'), got kind {value.kind!r}"
-    )
 
 
 def _provider_schema(item: PackItem, *, pack: str) -> Mapping[str, ProviderParamSpec] | None:
@@ -210,57 +172,16 @@ def _provider_ref(item: PackItem) -> SceneProviderRef:
 class PackSet:
     """An ordered, duplicate-free index over discovered or hand-built packs.
 
-    Equality is by the ordered pack tuple; the optional C1 runtime adapter is
-    not part of the value.  Construction performs no filesystem access.
+    Equality is by the ordered pack tuple.  Construction performs no filesystem
+    access, resolves no resource path and loads no pack object.
     """
 
     _packs: tuple[Pack, ...]
-    _runtime: PackRuntime | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Freeze the pack tuple and reject duplicate pack or item owners."""
         object.__setattr__(self, "_packs", tuple(self._packs))
         validate_unique(self._packs)
-
-    @classmethod
-    def from_runtime(
-        cls,
-        runtime: PackRuntime,
-        *,
-        origins: Mapping[str, ProviderOrigin | str] | None = None,
-    ) -> PackSet:
-        """Build a pack set over an existing runtime without rediscovering roots.
-
-        ``origins`` overrides the pack-level discovery origin per pack name.
-        A string is a discovery label (``discovered_by``); a
-        :class:`~unigym.provenance.ProviderOrigin` must be pack-level
-        (``kind="pack"``) or the explicit ``unknown()`` record.  Omitted packs
-        keep the runtime's own label.
-
-        Construction is pure: it reads the runtime catalog and relabels the
-        already-loaded packs; it never resolves entry points, imports pack
-        Python or activates a pack.
-        """
-        overrides: dict[str, ProviderOrigin] = {}
-        packs = runtime.catalog.manifests
-        if origins is not None:
-            names = set(runtime.catalog.packs())
-            unknown = sorted(set(origins) - names)
-            if unknown:
-                raise PackError(
-                    f"origins name unknown packs {unknown}; known packs: {sorted(names)}"
-                )
-            by_name = {pack.name: pack for pack in packs}
-            for name, value in origins.items():
-                overrides[name] = _normalize_origin_override(by_name[name], value)
-        relabeled: list[Pack] = []
-        for pack in packs:
-            desired = overrides.get(pack.name)
-            if desired is None:
-                label = runtime.origins.get(pack.name)
-                desired = pack_origin(pack, "unknown" if label is None else str(label))
-            relabeled.append(with_pack_origin(pack, desired))
-        return cls(tuple(relabeled), _runtime=runtime)
 
     def packs(self) -> tuple[Pack, ...]:
         """Every pack in this set, in discovery order."""
@@ -330,27 +251,6 @@ class PackSet:
             f"known {kind} ids: {known}"
         )
 
-    def _require_runtime(self) -> PackRuntime:
-        """Return the C1 runtime adapter or explain that this set is data-only."""
-        if self._runtime is None:
-            raise PackError(
-                "this PackSet has no loader runtime; build it with "
-                "PackSet.from_runtime(...) for robot profile resolution"
-            )
-        return self._runtime
-
-    def robot(self, id: str) -> RobotProfile:
-        """Cross-pack edge lookup for one ``kind: robot`` provider id."""
-        item = self.provider("robot", id)
-        return self._require_runtime().robot_profile(item.pack, item.name)
-
-    def robots(self) -> tuple[RobotProfile, ...]:
-        """Every robot profile in this set, pack order then manifest order."""
-        runtime = self._require_runtime()
-        return tuple(
-            runtime.robot_profile(item.pack, item.name) for item in self.providers("robot")
-        )
-
     def asset(self, id: str) -> AssetResourceRef:
         """Cross-pack edge lookup for one resource-backed ``assets`` item."""
         item = self.item(Face.ASSETS, id)
@@ -392,103 +292,3 @@ class PackSet:
     def scene_providers(self) -> tuple[SceneProviderRef, ...]:
         """Every ``kind: scene`` provider handle in this set, in discovery order."""
         return tuple(_provider_ref(item) for item in self.providers("scene"))
-
-    def resource_path(
-        self,
-        ref: ScenePresetRef | SceneProviderRef | AssetResourceRef,
-    ) -> Path:
-        """Resolve a resource-backed handle's declared resource under its pack root.
-
-        Entrypoint-backed handles have no resource path, so they raise the
-        existing "activate the pack" teaching error.  This C1 adapter delegates
-        to the runtime's resource rules; C2 moves the method to the loader.
-        """
-        if isinstance(ref, SceneProviderRef):
-            raise PackError(
-                f"pack {ref.pack!r} face 'providers' id {ref.id!r} declares "
-                f"entrypoint {ref.entrypoint!r}, not a resource; use "
-                f"runtime.activate({ref.pack!r}) to activate the pack"
-            )
-        if isinstance(ref, ScenePresetRef):
-            face = Face.SCENE_PRESETS
-        elif isinstance(ref, AssetResourceRef):
-            face = Face.ASSETS
-        else:
-            raise PackError(
-                "resource_path requires a ScenePresetRef, SceneProviderRef "
-                f"or AssetResourceRef, got {type(ref).__name__}"
-            )
-        item = self.item(face, ref.id)
-        if item.pack != ref.pack:
-            raise PackError(
-                f"{face.value} id {ref.id!r} is declared by pack {item.pack!r}, "
-                f"not {ref.pack!r}"
-            )
-        if not isinstance(item.locator, ResourceLocator):
-            raise PackError(
-                f"pack {ref.pack!r} face {face.value!r} id {ref.id!r} declares an "
-                "entrypoint, not a resource"
-            )
-        return self._require_runtime().resource(item.pack, item.locator.path)
-
-    def to_runtime(self) -> PackRuntime:
-        """The activation-capable C1 runtime over this same catalog; never activates."""
-        return self._require_runtime()
-
-
-def _filtered_runtime(runtime: PackRuntime, names: set[str]) -> PackRuntime:
-    """A runtime over exactly the named packs, preserving discovery order."""
-    packs = tuple(pack for pack in runtime.catalog.manifests if pack.name in names)
-    kept = {pack.name for pack in packs}
-    return PackRuntime(
-        catalog=PackCatalog(packs),
-        root_by_pack={name: runtime.root_by_pack[name] for name in kept},
-        origins={name: runtime.origins[name] for name in kept if name in runtime.origins},
-    )
-
-
-def discover_set(
-    roots: Iterable[str | Path] | None = None,
-    *,
-    config_path: str | Path | None = None,
-    entry_points: bool = False,
-) -> PackSet:
-    """Build the read-only pack set over explicit roots or configured discovery."""
-    return PackSet.from_runtime(discover(roots, config_path=config_path, entry_points=entry_points))
-
-
-def installed() -> PackSet:
-    """Enumerate every pack in the configured manifest-only discovery scope.
-
-    Installed ``unigym.packs`` entry points are not resolved here: this scope
-    never imports pack Python.  Use :meth:`PackSet.to_runtime` for an
-    activation-capable runtime over the same catalog.
-    """
-    return PackSet.from_runtime(discover())
-
-
-def require(*names: str, entry_points: bool = True) -> PackSet:
-    """Return the filtered pack set over exactly *names* in the installed scope.
-
-    Requirement resolution is not performed: each name must be installed in
-    the same configured discovery scope.  A missing name fails before any
-    handle exists and names the installed packs.
-
-    Installed ``unigym.packs`` entry points are resolved by default (the UX
-    for ``pip install``-ed packs such as ``unigym-robots``); pass
-    ``entry_points=False`` for the manifest-only scope :func:`installed`
-    exposes.
-    """
-    invalid = [name for name in names if not isinstance(name, str) or not name]
-    if invalid:
-        raise PackError(f"required pack names must be non-empty strings, got {invalid!r}")
-    runtime = discover(entry_points=entry_points)
-    full = PackSet.from_runtime(runtime)
-    available = {pack.name for pack in full.packs()}
-    missing = [name for name in names if name not in available]
-    if missing:
-        raise PackError(
-            f"pack {missing[0]!r} is not installed in this scope; "
-            f"required/installed packs: {sorted(available)}"
-        )
-    return PackSet.from_runtime(_filtered_runtime(runtime, set(names)))

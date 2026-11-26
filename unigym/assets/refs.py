@@ -2,7 +2,7 @@
 
 These helpers are pure path arithmetic over a declared asset spelling; they
 perform no I/O and own no resolution context.
-:class:`unigym.packs.runtime.PackRuntime` applies them while resolving a
+:class:`unigym.packs.loader.PackLoader` applies them while resolving a
 ``pack:`` reference, and the closure/reporting tools apply the same rule when
 they predict a texture's pack destination.
 """

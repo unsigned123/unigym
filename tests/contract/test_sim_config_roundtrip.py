@@ -88,7 +88,7 @@ def test_from_config_uses_the_explicit_pack_set(tmp_path: Path) -> None:
 
     builder = SimulationBuilder.from_config(path, pack_set=pack_set)
 
-    assert builder.pack_runtime is pack_set.to_runtime()
+    assert builder.pack_runtime.pack_set == pack_set
 
 
 def test_from_config_rejects_the_removed_episode_clock_key(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from unigym.camera import Camera
+from unigym.packs.loader import PackLoader
 from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.sim import (
@@ -93,7 +94,7 @@ def test_constructor_derives_substeps_from_physics_dt(tmp_path: Path) -> None:
 
     builder = _builder(pack_set)
 
-    assert builder.pack_runtime is pack_set.to_runtime()
+    assert builder.pack_runtime.pack_set == pack_set
 
 
 def test_constructor_derives_physics_dt_from_substeps(tmp_path: Path) -> None:
@@ -102,7 +103,7 @@ def test_constructor_derives_physics_dt_from_substeps(tmp_path: Path) -> None:
 
     builder = _builder(pack_set, physics_dt=None, substeps=4)
 
-    assert builder.pack_runtime is pack_set.to_runtime()
+    assert builder.pack_runtime.pack_set == pack_set
 
 
 def test_num_envs_two_is_accepted(tmp_path: Path) -> None:
@@ -338,6 +339,8 @@ def test_fixture_pack_set_is_explicit(tmp_path: Path) -> None:
     """The fixture pack set exposes exactly the written pack and profile."""
     pack_set, profile = write_sim_pack(tmp_path)
 
-    assert any(profile.name == declared.name for declared in pack_set.robots())
+    loader = PackLoader.from_pack_set(pack_set)
+    pack = pack_set.packs()[0]
+    assert loader.robot_profile(pack.name, profile.name).name == profile.name
     assert isinstance(profile, RobotProfile)
     assert profile.assets is None

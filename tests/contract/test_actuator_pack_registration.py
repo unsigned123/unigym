@@ -21,7 +21,7 @@ from unigym.actuators.implementations import (
 )
 from unigym.packs.actuators import materialize_actuator_implementations
 from unigym.packs import PackError
-from unigym.packs.runtime import discover
+from unigym.packs.loader import discover
 from unigym.packs.schema import load_manifest_v1
 from unigym.registration import (
     RegistrationPhase,
@@ -273,7 +273,7 @@ def test_activate_leaves_implementations_module_unimported_in_a_fresh_process(
     )
     code = (
         "import sys\n"
-        "import unigym.packs.runtime as runtime_mod\n"
+        "import unigym.packs.loader as runtime_mod\n"
         "from unigym.packs.actuators import materialize_actuator_implementations\n"
         "from unigym.registration import RegistrationPhase, enter_phase\n"
         f"runtime = runtime_mod.discover([{str(root)!r}])\n"
@@ -388,22 +388,25 @@ def test_materialization_rejects_non_canonical_backend_without_schema() -> None:
             entrypoint="a:b",
         ),
     )
-    manifest = SimpleNamespace(
+
+    class _Manifest(SimpleNamespace):
+        def items_for(self, *, face=None, kind=None, status=None):
+            if kind == "actuator_implementation":
+                return (item,)
+            return ()
+
+    manifest = _Manifest(
         name="bad_pack",
         version="1.0.0",
         root=Path("."),
         entrypoint=None,
-        provides={"providers": (item,)},
     )
 
-    class _Catalog:
+    class _PackSet:
         def packs(self):
-            return ("bad_pack",)
+            return (manifest,)
 
-        def get(self, name):
-            return manifest
-
-    runtime = SimpleNamespace(catalog=_Catalog(), origins={})
+    runtime = SimpleNamespace(pack_set=_PackSet(), origins={})
     enter_phase(RegistrationPhase.BACKEND_BUILD)
     with pytest.raises(PackError, match="not canonical"):
         materialize_actuator_implementations(runtime, "mujoco")

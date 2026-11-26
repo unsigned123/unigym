@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.packs import PackError, PackSet
+from unigym.packs import PackError, PackLoader, PackSet
 from unigym.packs.schema import (
     MANIFEST_FACES,
     EntrypointLocator,
@@ -336,12 +336,17 @@ def test_pack_set_equality_includes_item_data() -> None:
     assert PackSet((alpha, beta)) != PackSet((alpha, changed_beta))
 
 
-def test_pack_set_requires_a_runtime_for_object_loading() -> None:
-    """Pure construction stays data-only; robot loading needs the C1 runtime."""
+def test_pack_set_is_pure_and_object_loading_lives_on_the_loader() -> None:
+    """Pure construction stays data-only; the loader owns object loading."""
     pack_set = PackSet((_pack(),))
+    loader = PackLoader.from_pack_set(pack_set)
 
-    with pytest.raises(PackError, match="no loader runtime"):
-        pack_set.robots()
+    assert loader.pack_set is pack_set
+    assert not hasattr(pack_set, "to_runtime")
+    assert not hasattr(pack_set, "from_runtime")
+    assert not hasattr(pack_set, "resource_path")
+    assert not hasattr(pack_set, "robot")
+    assert not hasattr(pack_set, "robots")
 
 
 def test_pack_schema_alias_is_not_part_of_the_public_vocabulary() -> None:

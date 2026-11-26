@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from unigym.pack_api import discover
-from unigym.packs import PackSet
 
 pytestmark = pytest.mark.subprocess
 
@@ -49,7 +48,7 @@ def _run_pack_list(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 def _pack_set_projection(runtime) -> list[dict[str, object]]:
     """The same rows the CLI projects, straight from ``PackSet``."""
     rows: list[dict[str, object]] = []
-    for pack in PackSet.from_runtime(runtime).packs():
+    for pack in runtime.pack_set.packs():
         rows.append(
             {
                 "name": pack.name,

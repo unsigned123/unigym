@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from unigym.packs import discover_set
+from unigym.packs.loader import PackLoader
 from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
@@ -48,7 +49,8 @@ def _isolate_robot_registry() -> Iterator[None]:
 def _facade_pack() -> tuple[PackSet, RobotProfile]:
     """The lane-owned acceptance pack and its one tiny-arm robot ref."""
     pack_set = discover_set([FACADE_PACK])
-    return pack_set, pack_set.pack("facade_mjcf").robot(ROBOT_ID)
+    loader = PackLoader.from_pack_set(pack_set)
+    return pack_set, loader.robot_profile("facade_mjcf", ROBOT_ID)
 
 
 def _build_sim(

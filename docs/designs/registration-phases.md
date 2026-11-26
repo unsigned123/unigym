@@ -27,7 +27,7 @@ mutation.
 - `_build_env_and_sampler` advances to `BACKEND_BUILD`.
 - `build_instance` calls `seal_runtime()` immediately before returning the
   `RunInstance`.
-- `PackRuntime.activate` advances to at least `ACTIVATE` around the
+- `PackLoader.activate` advances to at least `ACTIVATE` around the
   entrypoint and manifest provider registration.  An explicitly injected
   runtime is activated when the config needs a pack.
 

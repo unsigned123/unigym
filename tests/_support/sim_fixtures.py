@@ -16,7 +16,8 @@ from pathlib import Path
 
 import yaml
 
-from unigym.packs.packset import PackSet, discover_set
+from unigym.packs.loader import PackLoader, discover_set
+from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 
 __all__ = ["write_sim_pack"]
@@ -100,4 +101,5 @@ def write_sim_pack(
     )
 
     pack_set = discover_set([root])
-    return pack_set, pack_set.robot(robot_id)
+    loader = PackLoader.from_pack_set(pack_set)
+    return pack_set, loader.robot_profile(pack_name, robot_id)

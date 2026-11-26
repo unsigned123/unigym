@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
     from unigym.io.writer import ShardWriter
     from unigym.language.base import LanguageGenerator
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
     from unigym.props.base import PropManager
     from unigym.recorder import Recorder
     from unigym.robots.base import CanonicalBodyId, RobotProfile
@@ -1782,7 +1782,7 @@ def _build_bridge_and_wiring(
 
 
 def _boundary_asset_plan(
-    pack_runtime: PackRuntime | None,
+    pack_runtime: PackLoader | None,
     env_cfg: Mapping[str, JsonValue],
 ) -> AssetPlan | None:
     """Resolve the run's one asset boundary.
@@ -1800,7 +1800,7 @@ def _boundary_asset_plan(
         The boundary :class:`AssetPlan`, or ``None``.
     """
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.runtime import AssetContext, discover
+    from unigym.packs.loader import AssetContext, discover
 
     if pack_runtime is not None:
         return AssetPlan(AssetContext(pack_runtime))

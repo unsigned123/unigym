@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.pack_api import ActivationHandle, PackContext, PackRuntime, discover
+from unigym.pack_api import ActivationHandle, PackContext, PackLoader, discover
 from unigym.packs import PackError
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -88,9 +88,9 @@ def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 def test_discover_content_and_code_roots_in_order() -> None:
     runtime = discover([CONTENT_ROOT, CODE_ROOT])
 
-    assert isinstance(runtime, PackRuntime)
-    assert runtime.catalog.packs() == ("acme_content", "acme_code")
-    assert [entry.id for entry in runtime.catalog.entries()] == [
+    assert isinstance(runtime, PackLoader)
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_content", "acme_code")
+    assert [entry.id for entry in runtime.pack_set.items()] == [
         "acme_content.demo",
         "acme_content.tabletop",
         "acme_content.cup",
@@ -118,8 +118,8 @@ def test_resource_resolves_under_the_pack_root() -> None:
 def test_discover_dedupes_canonical_duplicate_roots() -> None:
     runtime = discover([CONTENT_ROOT, CONTENT_ROOT, f"{CONTENT_ROOT}/."])
 
-    assert runtime.catalog.packs() == ("acme_content",)
-    assert len(runtime.catalog.manifests) == 1
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_content",)
+    assert len(runtime.pack_set.packs()) == 1
 
 
 def test_discover_rejects_duplicate_pack_names(tmp_path: Path) -> None:
@@ -209,7 +209,7 @@ def test_code_activation_imports_and_calls_entrypoint(
     assert isinstance(context, PackContext)
     assert context.pack == "acme_code"
     assert context.root == CODE_ROOT.resolve()
-    assert context.runtime is runtime
+    assert context._loader is runtime
     assert str(CODE_PYTHON_ROOT) in sys.path
 
 
@@ -320,11 +320,11 @@ def test_activation_does_not_fall_back_to_a_zero_argument_entrypoint(tmp_path: P
     assert isinstance(info.value.__cause__, TypeError)
 
 
-def test_runtime_module_has_no_legacy_loader_bindings() -> None:
-    import unigym.packs.runtime as runtime_module
+def test_loader_module_has_no_legacy_loader_bindings() -> None:
+    import unigym.packs.loader as loader_module
 
     for name in ("MountedPack", "load_pack_code", "mount", "pack_roots"):
-        assert name not in runtime_module.__dict__
+        assert name not in loader_module.__dict__
 
 
 _ROBOT_SOURCE = (

@@ -709,7 +709,7 @@ def test_public_pack_api_exports() -> None:
         "PackContext",
         "PackFace",
         "PackItem",
-        "PackRuntime",
+        "PackLoader",
         "PackSet",
         "PhaseWindow",
         "ProviderInfo",

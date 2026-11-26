@@ -24,7 +24,7 @@ from unigym.adapters import (
     restore_adapter_registry,
     snapshot_adapter_registry,
 )
-from unigym.pack_api import PackRuntime, discover
+from unigym.pack_api import PackLoader, discover
 from unigym.packs import PackError
 from unigym.props.templates import (
     prop_template_origin,
@@ -547,9 +547,8 @@ def test_entry_point_location_seam_is_reported_on_live_origins(tmp_path: Path) -
         ),
     )
     base = discover([root])
-    runtime = PackRuntime(
-        catalog=base.catalog,
-        root_by_pack=base.root_by_pack,
+    runtime = PackLoader.from_pack_set(
+        base.pack_set,
         origins={"acme_seam": "entry-point"},
     )
 

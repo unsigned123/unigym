@@ -83,7 +83,7 @@ if TYPE_CHECKING:
         ResolvedControl,
         ResolvedControlPlan,
     )
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
     from unigym.robots.base import RobotProfile
     from unigym.run.instance import RunInstance
     from unigym.runner.base import Runner, StepResult
@@ -107,7 +107,7 @@ class _FromConfigKwargs(TypedDict, total=False):
     adapter_params: dict[str, JsonValue] | None
     no_artifacts: bool
     inspect: bool
-    pack_runtime: PackRuntime | None
+    pack_runtime: PackLoader | None
     discover_runtime: bool
     sink: SinkInput
     sinks: Sequence[CollectSinkSpec | SinkSpec] | None
@@ -360,7 +360,7 @@ def _policy_payload(value: object) -> list[JsonValue]:
 
 def _pack_robot_profiles(
     spec: RunSpec,
-    runtime: PackRuntime,
+    runtime: PackLoader,
 ) -> dict[str, RobotProfile]:
     """Load pack robot profiles for config selectors the registry does not own.
 
@@ -371,12 +371,12 @@ def _pack_robot_profiles(
     injected profile is used as-is, never replaced by a pack lookup.  The
     returned mapping is keyed by articulation name, the profile-injection
     identity; several articulations may share one selector and each receives
-    the same resolved profile.  The cross-pack lookup goes through
-    :class:`~unigym.packs.packset.PackSet`, so a robot id declared by more than
-    one pack fails with the shared ambiguity error instead of silently taking
-    the first manifest.
+    the same resolved profile.  The cross-pack lookup goes through the
+    loader's :class:`~unigym.packs.packset.PackSet`, so a robot id declared by
+    more than one pack fails with the shared ambiguity error instead of
+    silently taking the first manifest.
     """
-    from unigym.packs.packset import PackSet
+    from unigym.packs.schema import Face
     from unigym.robots import ROBOT_REGISTRY
 
     injected = spec.robot_profiles or {}
@@ -390,13 +390,13 @@ def _pack_robot_profiles(
             wanted.setdefault(selector, []).append(art.name)
     if not wanted:
         return {}
-    packs = PackSet.from_runtime(runtime)
-    available = {info.name for info in packs.providers("robot")}
+    available = {item.name for item in runtime.pack_set.items(face=Face.PROVIDERS, kind="robot")}
     resolved: dict[str, RobotProfile] = {}
     for selector, art_names in wanted.items():
         if selector not in available:
             continue
-        profile = packs.robot(selector)
+        item = runtime.pack_set.provider("robot", selector)
+        profile = runtime.robot_profile(item.pack, item.name)
         for art_name in art_names:
             resolved[art_name] = profile
     return resolved
@@ -723,7 +723,7 @@ class Run:
         adapter_params: dict[str, JsonValue] | None = None,
         no_artifacts: bool = False,
         inspect: bool = False,
-        pack_runtime: PackRuntime | None = None,
+        pack_runtime: PackLoader | None = None,
         discover_runtime: bool = True,
         sink: SinkInput = None,
         sinks: Sequence[CollectSinkSpec | SinkSpec] | None = None,
@@ -851,7 +851,7 @@ class Run:
         self._no_artifacts = bool(no_artifacts)
         self._camera_set = CameraSet(raw.get("cameras") or [])
         self._spec: RunSpec | None = None
-        self._pack_runtime: PackRuntime | None = pack_runtime
+        self._pack_runtime: PackLoader | None = pack_runtime
         profile = _robot_profile(robot)
         injected: dict[str, RobotProfile] = {}
         if profile is not None:
@@ -988,7 +988,7 @@ class Run:
         adapter_params: dict[str, JsonValue] | None = None,
         no_artifacts: bool = False,
         inspect: bool = False,
-        pack_runtime: PackRuntime | None = None,
+        pack_runtime: PackLoader | None = None,
         discover_runtime: bool = True,
         sink: SinkInput = None,
         sinks: Sequence[CollectSinkSpec | SinkSpec] | None = None,
@@ -1145,7 +1145,7 @@ class Run:
                     # scene_provider* routing keys do not exist yet: only
                     # apply_scene_preset writes them.)
                     cfg.pop("scene_preset", None)
-        runtime: PackRuntime | None = self._pack_runtime
+        runtime: PackLoader | None = self._pack_runtime
         from unigym.run.spec import requires_pack_runtime
 
         needs_runtime = requires_pack_runtime(cfg)

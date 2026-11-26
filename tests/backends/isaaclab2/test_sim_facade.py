@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from unigym.packs import discover_set
+from unigym.packs.loader import PackLoader
 from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
@@ -77,7 +78,8 @@ def _write_fixture_pack(
         yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
     )
     pack_set = discover_set([root])
-    return pack_set, pack_set.pack(pack_name).robot(robot_id), body_order
+    loader = PackLoader.from_pack_set(pack_set)
+    return pack_set, loader.robot_profile(pack_name, robot_id), body_order
 
 
 def test_isaaclab2_runs_the_shared_facade_acceptance_script(
@@ -86,7 +88,7 @@ def test_isaaclab2_runs_the_shared_facade_acceptance_script(
     g1_usd: Path,
 ) -> None:
     """The shared body builds, observes, acts and steps on the real G1 USD."""
-    source_robot = pack_runtime("g1").resource_for("providers", "g1")
+    source_robot = pack_runtime("g1").resolve("providers", "g1")
     pack_set, robot, body_order = _write_fixture_pack(
         tmp_path, source_robot=source_robot, usd=g1_usd
     )

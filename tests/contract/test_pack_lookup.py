@@ -1,8 +1,8 @@
-"""Contract for catalog and runtime lookup by ``(face, id)``.
+"""Contract for pack-set lookup by ``(face, id)`` and loader resource resolution.
 
-Lookup is a pure catalog operation plus the existing resource resolution. It
-never discovers, activates or imports pack Python, and an entrypoint-only item
-fails with a teaching error that points at activation.
+Lookup is a pure pack-set operation plus the existing loader resource
+resolution. It never discovers, activates or imports pack Python, and an
+entrypoint-only item fails with a teaching error that points at activation.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.pack_api import Face, PackRuntime, ResourceLocator, discover
+from unigym.pack_api import Face, PackLoader, ResourceLocator, discover
 from unigym.packs import PackError
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -37,14 +37,14 @@ def _isolate_pack_modules() -> None:
         del sys.modules[name]
 
 
-def _runtime() -> PackRuntime:
+def _loader() -> PackLoader:
     return discover([CONTENT_ROOT, CODE_ROOT])
 
 
-def test_catalog_entry_returns_the_immutable_declared_item() -> None:
-    catalog = _runtime().catalog
+def test_pack_set_item_returns_the_immutable_declared_item() -> None:
+    loader = _loader()
 
-    entry = catalog.entry("scene_presets", "acme_content.tabletop")
+    entry = loader.item("scene_presets", "acme_content.tabletop")
 
     assert entry.pack == "acme_content"
     assert entry.face is Face.SCENE_PRESETS
@@ -57,35 +57,35 @@ def test_catalog_entry_returns_the_immutable_declared_item() -> None:
         setattr(entry, "name", "changed")
 
 
-def test_catalog_entry_unknown_face_names_the_known_faces() -> None:
-    catalog = _runtime().catalog
+def test_pack_set_item_unknown_face_names_the_known_faces() -> None:
+    loader = _loader()
 
     with pytest.raises(PackError) as info:
-        catalog.entry("widgets", "acme_content.tabletop")
+        loader.item("widgets", "acme_content.tabletop")
 
     message = str(info.value)
     assert "unknown pack face 'widgets'" in message
     assert "scene_presets" in message
 
 
-def test_catalog_entry_rejects_none_face_and_resource_for_delegates() -> None:
-    runtime = _runtime()
+def test_pack_set_item_rejects_none_face_and_resolve_delegates() -> None:
+    loader = _loader()
 
     with pytest.raises(PackError) as info:
-        runtime.catalog.entry(None, "acme_content.tabletop")
+        loader.item(None, "acme_content.tabletop")  # type: ignore[arg-type]
 
     assert "unknown pack face None" in str(info.value)
     assert "scene_presets" in str(info.value)
 
     with pytest.raises(PackError, match="unknown pack face None"):
-        runtime.resource_for(None, "acme_content.tabletop")
+        loader.resolve(None, "acme_content.tabletop")  # type: ignore[arg-type]
 
 
-def test_catalog_entry_unknown_id_names_the_face_id_and_known_ids() -> None:
-    catalog = _runtime().catalog
+def test_pack_set_item_unknown_id_names_the_face_id_and_known_ids() -> None:
+    loader = _loader()
 
     with pytest.raises(PackError) as info:
-        catalog.entry("scene_presets", "acme_content.missing")
+        loader.item("scene_presets", "acme_content.missing")
 
     message = str(info.value)
     assert "unknown id 'acme_content.missing'" in message
@@ -101,10 +101,10 @@ def test_catalog_entry_unknown_id_names_the_face_id_and_known_ids() -> None:
         ("assets", "acme_content.cup", "assets/cup/asset.yaml"),
     ],
 )
-def test_resource_for_resolves_resource_backed_items(face: str, item_id: str, rel: str) -> None:
-    runtime = _runtime()
+def test_resolve_returns_resource_backed_items(face: str, item_id: str, rel: str) -> None:
+    loader = _loader()
 
-    resource = runtime.resource_for(face, item_id)
+    resource = loader.resolve(face, item_id)
 
     assert resource == (CONTENT_ROOT / rel).resolve()
     assert resource.is_absolute()
@@ -113,40 +113,51 @@ def test_resource_for_resolves_resource_backed_items(face: str, item_id: str, re
 
 
 def test_resource_for_entrypoint_only_item_points_at_activation() -> None:
-    runtime = _runtime()
+    loader = _loader()
+    item = loader.item("providers", "acme_code.dynamic_assets")
 
     with pytest.raises(PackError) as info:
-        runtime.resource_for("providers", "acme_code.dynamic_assets")
+        loader.resource_for(item)
 
     message = str(info.value)
     assert "pack 'acme_code'" in message
     assert "face 'providers'" in message
     assert "id 'acme_code.dynamic_assets'" in message
     assert "entrypoint 'acme_pack:register'" in message
-    assert "runtime.activate('acme_code')" in message
+    assert "loader.activate('acme_code')" in message
     assert "acme_pack" not in sys.modules
 
 
-def test_repeated_lookups_are_deterministic_and_do_not_mutate_the_catalog() -> None:
-    catalog = _runtime().catalog
-    manifests_before = catalog.manifests
-    entries_before = catalog.entries()
+def test_repeated_lookups_are_deterministic_and_do_not_mutate_the_pack_set() -> None:
+    loader = _loader()
+    pack_set = loader.pack_set
+    packs_before = pack_set.packs()
+    items_before = pack_set.items()
 
-    first = catalog.entry("assets", "acme_content.cup")
-    second = catalog.entry("assets", "acme_content.cup")
+    first = loader.item("assets", "acme_content.cup")
+    second = loader.item("assets", "acme_content.cup")
 
     assert first == second
-    assert catalog.manifests is manifests_before
-    assert catalog.entries() == entries_before
+    assert pack_set.packs() is packs_before
+    assert pack_set.items() == items_before
+
+
+def test_resource_for_rejects_an_item_from_another_loader_scope() -> None:
+    """A foreign item cannot resolve through a loader that does not own its pack."""
+    code_loader = discover([CODE_ROOT])
+    foreign_item = discover([CONTENT_ROOT]).item("assets", "acme_content.cup")
+
+    with pytest.raises(PackError, match="unknown pack 'acme_content'"):
+        code_loader.resource_for(foreign_item)
 
 
 def test_lookup_does_not_import_pack_python() -> None:
-    runtime = _runtime()
+    loader = _loader()
     assert "acme_pack" not in sys.modules
 
-    runtime.catalog.entry("providers", "acme_code.dynamic_assets")
-    runtime.resource_for("scene_presets", "acme_content.tabletop")
+    loader.item("providers", "acme_code.dynamic_assets")
+    loader.resolve("scene_presets", "acme_content.tabletop")
     with pytest.raises(PackError):
-        runtime.resource_for("providers", "acme_code.dynamic_assets")
+        loader.resource_for(loader.item("providers", "acme_code.dynamic_assets"))
 
     assert "acme_pack" not in sys.modules

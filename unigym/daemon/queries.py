@@ -25,6 +25,7 @@ import yaml
 
 from unigym.core import registry as core_registry
 from unigym.core import run_ops
+from unigym.packs.schema import Face
 from unigym.core.session import SessionError, SessionOpError, attach
 from unigym.runtime.bridge import hb_alive, probe_heartbeat
 from unigym.run.config_ref import resolve_run_config
@@ -294,7 +295,7 @@ def list_configs(svc) -> tuple[int, dict]:
     runtime = svc.pack_runtime
     configs: list[dict] = []
     unsupported: list[dict] = []
-    for catalog_entry in runtime.catalog.entries("runs"):
+    for catalog_entry in runtime.pack_set.items(face=Face.RUNS):
         if catalog_entry.resource is None:
             unsupported.append(
                 {
@@ -304,7 +305,7 @@ def list_configs(svc) -> tuple[int, dict]:
                 }
             )
             continue
-        path = runtime.resource_for("runs", catalog_entry.id)
+        path = runtime.resource_for(catalog_entry)
         if not path.is_file():
             unsupported.append(
                 {

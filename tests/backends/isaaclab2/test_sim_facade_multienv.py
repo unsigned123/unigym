@@ -10,6 +10,7 @@ import torch
 import yaml
 
 from unigym.packs import discover_set
+from unigym.packs.loader import PackLoader
 from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.robots import restore_robot_registry, snapshot_robot_registry
@@ -98,7 +99,8 @@ def _write_fixture_pack(
         yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
     )
     pack_set = discover_set([root])
-    return pack_set, pack_set.pack(pack_name).robot(robot_id), body_order
+    loader = PackLoader.from_pack_set(pack_set)
+    return pack_set, loader.robot_profile(pack_name, robot_id), body_order
 
 
 def _world(tmp_path: Path) -> World:
@@ -113,7 +115,7 @@ def test_isaaclab2_runs_the_shared_facade_script_for_two_envs(
     g1_usd: Path,
 ) -> None:
     """The shared body builds, observes, acts and steps two real G1 clones."""
-    source_robot = pack_runtime("g1").resource_for("providers", "g1")
+    source_robot = pack_runtime("g1").resolve("providers", "g1")
     pack_set, robot, body_order = _write_fixture_pack(
         tmp_path, source_robot=source_robot, usd=g1_usd
     )
@@ -147,7 +149,7 @@ def test_isaaclab2_reset_subset_restores_only_the_named_row(
     g1_usd: Path,
 ) -> None:
     """reset(env_ids=[1]) rolls one G1 clone back and leaves the other alone."""
-    source_robot = pack_runtime("g1").resource_for("providers", "g1")
+    source_robot = pack_runtime("g1").resolve("providers", "g1")
     pack_set, robot, body_order = _write_fixture_pack(
         tmp_path, source_robot=source_robot, usd=g1_usd
     )
@@ -238,7 +240,7 @@ def test_isaaclab2_rebuilds_the_facade_in_one_process(
     """
     import omni.timeline
 
-    source_robot = pack_runtime("g1").resource_for("providers", "g1")
+    source_robot = pack_runtime("g1").resolve("providers", "g1")
     pack_set, robot, body_order = _write_fixture_pack(
         tmp_path, source_robot=source_robot, usd=g1_usd
     )

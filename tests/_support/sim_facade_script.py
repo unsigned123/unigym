@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import torch
 
+from unigym.packs.loader import PackLoader
 from unigym.packs.packset import PackSet
 from unigym.robots.base import RobotProfile
 from unigym.sim import Control, PendingActionError, SimulationBuilder
@@ -44,8 +45,10 @@ def _robot_profile(pack_set: PackSet, robot_id: str) -> RobotProfile:
     """The one declared robot profile with this id, across the explicit pack set."""
     from unigym.packs import PackError
 
+    loader = PackLoader.from_pack_set(pack_set)
     try:
-        return pack_set.robot(robot_id)
+        item = loader.provider("robot", robot_id)
+        return loader.robot_profile(item.pack, item.name)
     except PackError as err:
         raise AssertionError(f"facade acceptance robot {robot_id!r}: {err}") from err
 

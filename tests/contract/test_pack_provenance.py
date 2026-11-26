@@ -31,7 +31,7 @@ from unigym.packs import (
     installed,
     require,
 )
-from unigym.packs.runtime import PackRuntime
+from unigym.packs.loader import PackLoader
 from unigym.props.templates import (
     restore_prop_templates,
     snapshot_prop_templates,
@@ -171,7 +171,7 @@ def test_installed_never_activates_a_trap_pack(
         installed(),
         require("trap_pack"),
         discover_set([root]),
-        PackSet.from_runtime(discover([root])),
+        discover([root]).pack_set,
     )
 
     after = _snapshot_registries()
@@ -308,9 +308,10 @@ def test_resource_only_robot_ref_resolves_without_python(
     assert not (root / "python").exists()
 
     packs = require("acme_robots")
-    robot = packs.robot("acme.arm")
+    loader = PackLoader.from_pack_set(packs)
+    robot = loader.robot_profile("acme_robots", "acme.arm")
     assert robot.name == "acme.arm"
-    assert packs.robot("acme.arm") == robot
+    assert loader.robot_profile("acme_robots", "acme.arm") == robot
     provider = packs.pack("acme_robots").items_for(face="providers", kind="robot")[0]
     assert provider.entrypoint is None
     assert provider.origin.pack == "acme_robots"
@@ -348,18 +349,17 @@ def test_string_edge_and_canonical_handles_only(monkeypatch: pytest.MonkeyPatch)
         packs.pack("missing_pack")
 
 
-def test_from_runtime_is_pure_and_keeps_runtime_labels(
+def test_from_pack_set_is_pure_and_keeps_loader_labels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``from_runtime`` wraps an existing runtime without rediscovery."""
+    """``from_pack_set`` binds a loader without rediscovery."""
     packs = _fixture_view(monkeypatch)
-    runtime = packs.to_runtime()
+    loader = PackLoader.from_pack_set(packs)
 
-    wrapped = PackSet.from_runtime(runtime)
-    assert wrapped == packs
-    assert wrapped.to_runtime() is runtime
+    wrapped = PackLoader.from_pack_set(loader.pack_set)
+    assert wrapped.pack_set is loader.pack_set
 
-    explicit = PackSet.from_runtime(runtime, origins={"acme_content": "wheel"})
+    explicit = PackLoader.from_pack_set(packs, origins={"acme_content": "wheel"}).pack_set
     assert explicit.pack("acme_content").origin.discovered_by == "wheel"
     assert explicit.pack("acme_content").origin.kind == "pack"
     assert explicit.pack("acme_code").origin.discovered_by == "env:UNIGYM_PACKS"
@@ -371,14 +371,14 @@ def test_from_runtime_is_pure_and_keeps_runtime_labels(
         root=str(CODE_ROOT.resolve()),
         discovered_by="deployed",
     )
-    overridden = PackSet.from_runtime(runtime, origins={"acme_code": origin})
+    overridden = PackLoader.from_pack_set(packs, origins={"acme_code": origin}).pack_set
     assert overridden.pack("acme_code").origin == origin
 
     with pytest.raises(PackError, match="origins name unknown packs"):
-        PackSet.from_runtime(runtime, origins={"missing": "wheel"})
+        PackLoader.from_pack_set(packs, origins={"missing": "wheel"})
     with pytest.raises(PackError, match="must be a pack-level ProviderOrigin"):
-        PackSet.from_runtime(
-            runtime,
+        PackLoader.from_pack_set(
+            packs,
             origins={
                 "acme_code": ProviderOrigin(
                     kind="manifest", pack="acme_code", item_id="acme_code.table_top"
@@ -394,39 +394,39 @@ def test_from_runtime_is_pure_and_keeps_runtime_labels(
             root=str(CODE_ROOT.parent) if field == "root" else str(CODE_ROOT.resolve()),
         )
         with pytest.raises(PackError, match=f"has {field} "):
-            PackSet.from_runtime(runtime, origins={"acme_code": origin})
+            PackLoader.from_pack_set(packs, origins={"acme_code": origin})
 
 
-def test_from_runtime_reports_unknown_when_the_runtime_has_no_labels(
+def test_loader_reports_unknown_when_a_pack_origin_has_no_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A hand-built runtime honestly reports ``unknown``, never a guess."""
-    packs = _fixture_view(monkeypatch)
-    source = packs.to_runtime()
-    bare = PackRuntime(
-        catalog=source.catalog,
-        root_by_pack=source.root_by_pack,
-        origins={},
-    )
+    """A pack without a discovery label honestly reports ``unknown``."""
+    from unigym.packs.schema import pack_origin, with_pack_origin
 
-    view = PackSet.from_runtime(bare)
-    for pack in view.packs():
+    packs = _fixture_view(monkeypatch)
+    bare_packs = PackSet(
+        tuple(with_pack_origin(pack, pack_origin(pack, "unknown")) for pack in packs.packs())
+    )
+    loader = PackLoader.from_pack_set(bare_packs)
+
+    for pack in loader.pack_set.packs():
         assert pack.origin.kind == "pack"
         assert pack.origin.discovered_by == "unknown"
         assert pack.origin.location_imported is False
         assert pack.origin.pack == pack.name
         assert pack.origin.root == str(pack.root)
+    assert set(loader.origins.values()) == {"unknown"}
 
 
-def test_from_runtime_does_not_call_discovery(
+def test_from_pack_set_does_not_call_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``from_runtime`` never re-walks roots or re-reads manifests."""
+    """``from_pack_set`` never re-walks roots or re-reads manifests."""
     packs = _fixture_view(monkeypatch)
-    runtime = packs.to_runtime()
+    loader = PackLoader.from_pack_set(packs)
 
     def boom(*args: object, **kwargs: object) -> None:
-        raise AssertionError("from_runtime must not rediscover")
+        raise AssertionError("from_pack_set must not rediscover")
 
-    monkeypatch.setattr("unigym.packs.packset.discover", boom)
-    assert PackSet.from_runtime(runtime).packs() == packs.packs()
+    monkeypatch.setattr("unigym.packs.loader.discover", boom)
+    assert PackLoader.from_pack_set(loader.pack_set).pack_set.packs() == packs.packs()

@@ -39,7 +39,8 @@ from .simulation import Simulation
 
 if TYPE_CHECKING:
     from unigym.env.backends.base import EnvBackend
-    from unigym.packs.packset import PackRuntime, PackSet
+    from unigym.packs.loader import PackLoader
+    from unigym.packs.packset import PackSet
     from unigym.robots.base import RobotProfile
     from unigym.run.api import Run
     from unigym.run.spec import RunSpec
@@ -140,6 +141,7 @@ class SimulationBuilder:
                 f"SimulationBuilder backend must be a non-empty string, got {backend!r}"
             )
         from unigym.backends.registry import BackendSelectionError, backend_info
+        from unigym.packs.loader import PackLoader
 
         try:
             info = backend_info(backend)
@@ -209,7 +211,9 @@ class SimulationBuilder:
         self._owner = object()
         self._sealed = False
         self._sim: Simulation | None = None
-        self._pack_runtime: PackRuntime | None = None if pack_set is None else pack_set.to_runtime()
+        self._pack_runtime: PackLoader | None = (
+            None if pack_set is None else PackLoader.from_pack_set(pack_set)
+        )
         self._config_mode = False
         self._run: Run | None = None
         self._spec: RunSpec | None = None
@@ -249,9 +253,10 @@ class SimulationBuilder:
         ``Run.from_config`` path.  A config-mode builder declares nothing:
         its handles are re-adopted from the live instance after ``build()``.
         """
+        from unigym.packs.loader import PackLoader
         from unigym.run.api import Run
 
-        runtime = None if pack_set is None else pack_set.to_runtime()
+        runtime = None if pack_set is None else PackLoader.from_pack_set(pack_set)
         run = Run.from_config(
             path,
             pack_runtime=runtime,
@@ -322,7 +327,7 @@ class SimulationBuilder:
         return self._world.terrain
 
     @property
-    def pack_runtime(self) -> PackRuntime:
+    def pack_runtime(self) -> PackLoader:
         """The activation-capable runtime over this builder's explicit pack set."""
         runtime = self._pack_runtime
         if runtime is None:
@@ -352,8 +357,9 @@ class SimulationBuilder:
         """Declare one robot profile and resolve every control group against it.
 
         The argument is the complete :class:`~unigym.robots.base.RobotProfile`
-        (for example ``packs.pack("unigym_robots").robot("go2")``); the builder
-        performs no pack lookup and needs no pack scope.
+        (for example ``PackLoader.from_pack_set(packs).robot_profile(
+        "unigym_robots", "go2")``); the builder performs no pack lookup and
+        needs no pack scope.
         """
         self._check_declarable("add_articulation")
         from unigym.robots.base import RobotProfile

@@ -8,7 +8,7 @@ paths but never imports pack Python, so a manifest can be enumerated without
 activating a pack.
 
 The schema is the only manifest contract: discovery, catalog lookup and
-activation in :mod:`unigym.packs.runtime` all read it.
+activation in :mod:`unigym.packs.loader` all read it.
 """
 
 from __future__ import annotations

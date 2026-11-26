@@ -25,13 +25,13 @@ from unigym.actuator_law import (
     register_actuator_law,
 )
 from unigym.packs import PackError
-from unigym.packs.runtime import (
-    PackRuntime,
+from unigym.packs.loader import (
+    PackLoader,
     _add_to_sys_path,
     _import_boundary,
     _resolve_entrypoint,
 )
-from unigym.packs.schema import PackManifestV1, ProvidedItem
+from unigym.packs.schema import Face, Pack, PackItem
 from unigym.provenance import ProviderOrigin
 from unigym.registration import PackFace, require_registration
 
@@ -159,9 +159,7 @@ def load_actuator_law_resource(path: str | Path, *, name: str) -> ActuatorLawDes
     )
 
 
-def _manifest_origin(
-    runtime: PackRuntime, manifest: PackManifestV1, item: ProvidedItem
-) -> ProviderOrigin:
+def _manifest_origin(runtime: PackLoader, manifest: Pack, item: PackItem) -> ProviderOrigin:
     return ProviderOrigin(
         kind="manifest",
         pack=manifest.name,
@@ -176,15 +174,11 @@ def _manifest_origin(
     )
 
 
-def _law_items(manifest: PackManifestV1) -> tuple[ProvidedItem, ...]:
-    return tuple(
-        item for item in manifest.provides.get("providers", ()) if item.kind == "actuator_law"
-    )
+def _law_items(manifest: Pack) -> tuple[PackItem, ...]:
+    return manifest.items_for(face=Face.PROVIDERS, kind="actuator_law")
 
 
-def activate_actuator_law_providers(
-    manifest: PackManifestV1, runtime: PackRuntime
-) -> tuple[str, ...]:
+def activate_actuator_law_providers(manifest: Pack, runtime: PackLoader) -> tuple[str, ...]:
     """Load and register every ``kind: actuator_law`` item for one pack."""
     items = _law_items(manifest)
     if not items:
@@ -237,16 +231,12 @@ def activate_actuator_law_providers(
     return tuple(item.id for item in items)
 
 
-def actuator_implementation_items(manifest: PackManifestV1) -> tuple[ProvidedItem, ...]:
+def actuator_implementation_items(manifest: Pack) -> tuple[PackItem, ...]:
     """Every ``kind: actuator_implementation`` item declared by *manifest*."""
-    return tuple(
-        item
-        for item in manifest.provides.get("providers", ())
-        if item.kind == "actuator_implementation"
-    )
+    return manifest.items_for(face=Face.PROVIDERS, kind="actuator_implementation")
 
 
-def _implementation_selector(item: ProvidedItem) -> tuple[str, str, str | None]:
+def _implementation_selector(item: PackItem) -> tuple[str, str, str | None]:
     params = item.params
     if not isinstance(params, Mapping):
         raise PackError(f"actuator implementation {item.id!r} requires flat law/backend params")
@@ -263,7 +253,7 @@ def _implementation_selector(item: ProvidedItem) -> tuple[str, str, str | None]:
 
 
 def materialize_actuator_implementations(
-    runtime: PackRuntime | None, backend: str
+    runtime: PackLoader | None, backend: str
 ) -> tuple[str, ...]:
     """Import and register the implementation items selected for *backend*.
 
@@ -286,8 +276,8 @@ def materialize_actuator_implementations(
         )
     ensure_core_implementations(backend)
     materialized: list[str] = []
-    for pack in runtime.catalog.packs():
-        manifest = runtime.catalog.get(pack)
+    for pack in runtime.pack_set.packs():
+        manifest = pack
         items = actuator_implementation_items(manifest)
         if not items:
             continue

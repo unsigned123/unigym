@@ -23,7 +23,7 @@ Tokens:
 ``${UNIGYM_ASSET_ROOT}`` and ``${UNIGYM_ASSET_PACK}`` were removed from
 the known-token vocabulary: an asset is addressed by a ``pack:`` reference
 or an absolute path, resolved once at the composition boundary through an
-:class:`unigym.packs.runtime.AssetContext`.  A ``pack:`` reference without
+:class:`unigym.packs.loader.AssetContext`.  A ``pack:`` reference without
 a context is a :class:`PlaceholderError`; there is no bare-relative or
 legacy-token fallback.
 
@@ -53,7 +53,7 @@ from unigym._typing import JsonValue
 from unigym.errors import ConfigError
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import AssetContext
+    from unigym.packs.loader import AssetContext
 
 DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
 DEPS_YAML_KEY = "unigym_deps_root"

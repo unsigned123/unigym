@@ -96,8 +96,8 @@ def test_env_roots_are_ordered_and_canonically_deduped(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml")
 
-    assert runtime.catalog.packs() == ("acme_content", "acme_code")
-    assert len(runtime.catalog.manifests) == 2
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_content", "acme_code")
+    assert len(runtime.pack_set.packs()) == 2
     assert runtime.root_by_pack["acme_content"] == CONTENT_ROOT.resolve()
     assert runtime.root_by_pack["acme_code"] == CODE_ROOT.resolve()
 
@@ -116,7 +116,11 @@ def test_configured_sources_are_collected_in_documented_order(
 
     runtime = discover(config_path=overlay)
 
-    assert runtime.catalog.packs() == ("env_pack", "yaml_pack", "deps_pack")
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == (
+        "env_pack",
+        "yaml_pack",
+        "deps_pack",
+    )
     assert runtime.root_by_pack["yaml_pack"] == yaml_root.resolve()
     assert runtime.origins == {
         "env_pack": "env:UNIGYM_PACKS",
@@ -137,7 +141,7 @@ def test_explicit_roots_ignore_configured_sources(
 
     runtime = discover([CONTENT_ROOT], config_path=overlay)
 
-    assert runtime.catalog.packs() == ("acme_content",)
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_content",)
 
 
 def test_deps_root_discovers_sorted_pack_directories(
@@ -151,7 +155,7 @@ def test_deps_root_discovers_sorted_pack_directories(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml")
 
-    assert runtime.catalog.packs() == ("acme_code", "acme_content")
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_code", "acme_content")
     assert runtime.root_by_pack["acme_content"] == (top / "acme_content").resolve()
 
 
@@ -167,7 +171,7 @@ def test_missing_deps_sources_yield_no_roots(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml")
 
-    assert runtime.catalog.packs() == ()
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ()
     assert dict(runtime.root_by_pack) == {}
 
 
@@ -217,7 +221,7 @@ def test_local_yaml_packs_resolve_relative_to_the_yaml(tmp_path: Path) -> None:
 
     runtime = discover(config_path=overlay)
 
-    assert runtime.catalog.packs() == ("acme_code", "acme_content")
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_code", "acme_content")
     assert runtime.root_by_pack["acme_content"] == (config_dir / "packs" / "acme_content").resolve()
 
 
@@ -246,7 +250,7 @@ def test_configured_discovery_does_not_import_pack_python(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml")
 
-    assert runtime.catalog.packs() == ("acme_code", "acme_content")
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_code", "acme_content")
     assert "acme_pack" not in sys.modules
     assert CODE_PYTHON_ROOT not in {Path(entry or ".").resolve() for entry in sys.path}
 
@@ -285,7 +289,7 @@ def test_empty_explicit_roots_do_not_fall_back_to_the_overlay(
 
     runtime = discover([], config_path=overlay)
 
-    assert runtime.catalog.packs() == ()
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ()
     assert dict(runtime.root_by_pack) == {}
 
 
@@ -302,7 +306,7 @@ def test_default_discovery_ignores_installed_entry_points(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml")
 
-    assert runtime.catalog.packs() == ()
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ()
     assert calls == []
 
 
@@ -327,7 +331,7 @@ def test_entry_point_opt_in_joins_the_configured_order(
 
     runtime = discover(config_path=overlay, entry_points=True)
 
-    assert runtime.catalog.packs() == (
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == (
         "env_pack",
         "yaml_pack",
         "alpha_pack",
@@ -405,5 +409,5 @@ def test_duplicate_entry_point_roots_are_canonically_deduped(
 
     runtime = discover(config_path=tmp_path / "unigym.local.yaml", entry_points=True)
 
-    assert runtime.catalog.packs() == ("acme_content",)
-    assert len(runtime.catalog.manifests) == 1
+    assert tuple(pack.name for pack in runtime.pack_set.packs()) == ("acme_content",)
+    assert len(runtime.pack_set.packs()) == 1

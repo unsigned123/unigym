@@ -54,7 +54,7 @@ def _asset_scene(
 
 def _asset_plan(cartpole_pack):
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.runtime import AssetContext
+    from unigym.packs.loader import AssetContext
 
     return AssetPlan(AssetContext(cartpole_pack))
 
@@ -70,7 +70,7 @@ def _provider(scene: Scene) -> str:
 
 
 def _resolved(cartpole_pack, asset_id: str) -> Path:
-    return cartpole_pack.resource_for("assets", asset_id)
+    return cartpole_pack.resolve("assets", asset_id)
 
 
 def _zero_action(env):

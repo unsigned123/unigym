@@ -17,7 +17,7 @@ import yaml
 
 from unigym.assets.plan import AssetPlan
 from unigym.core.paths import PlaceholderError, expand_placeholders
-from unigym.pack_api import AssetContext, PackRuntime, discover
+from unigym.pack_api import AssetContext, PackLoader, discover
 from unigym.props.asset_ir import AssetDefinition, Body, MeshDef, TextureDef
 from unigym.run.spec import build_spec
 
@@ -55,12 +55,12 @@ def _write_pack(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def runtime(tmp_path: Path) -> PackRuntime:
+def runtime(tmp_path: Path) -> PackLoader:
     return discover([_write_pack(tmp_path)])
 
 
 @pytest.fixture()
-def plan(runtime: PackRuntime) -> AssetPlan:
+def plan(runtime: PackLoader) -> AssetPlan:
     return AssetPlan(AssetContext(runtime))
 
 
@@ -74,7 +74,7 @@ def _asset() -> AssetDefinition:
 
 
 def test_asset_plan_resolves_pack_mesh_and_texture_to_absolute(
-    plan: AssetPlan, runtime: PackRuntime
+    plan: AssetPlan, runtime: PackLoader
 ) -> None:
     """A pack-qualified mesh and texture resolve to absolute package paths."""
     resolved = plan.resolve_definition(_asset())
@@ -98,7 +98,7 @@ def test_asset_plan_preserves_every_other_definition_field(plan: AssetPlan) -> N
 
 
 def test_asset_plan_resolves_document_placeholders_and_pack_leaves(
-    plan: AssetPlan, runtime: PackRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    plan: AssetPlan, runtime: PackLoader, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A document expands its token and resolves its ``pack:`` file leaf."""
     monkeypatch.setenv("UNIGYM_DEPS_ROOT", str(tmp_path))
@@ -127,7 +127,7 @@ def test_asset_plan_resolves_document_placeholders_and_pack_leaves(
     ids=["double-space", "single", "single-space"],
 )
 def test_asset_plan_resolves_tolerantly_spelled_pack_leaves(
-    plan: AssetPlan, runtime: PackRuntime, attribute: str, quote: str
+    plan: AssetPlan, runtime: PackLoader, attribute: str, quote: str
 ) -> None:
     """Whitespace and single/double quotes around ``file=`` all resolve."""
     document = (
@@ -203,7 +203,7 @@ def test_run_config_pack_reference_without_runtime_is_a_teaching_error(tmp_path:
 
 
 def test_run_config_pack_reference_expands_with_a_runtime(
-    tmp_path: Path, runtime: PackRuntime
+    tmp_path: Path, runtime: PackLoader
 ) -> None:
     """With a runtime, the run config's pack reference expands to an absolute path."""
     args = Namespace(config=str(tmp_path / "run.yaml"))
@@ -262,7 +262,7 @@ def _template_config(name: str) -> dict:
 
 
 def test_prop_template_resolves_generated_asset_files(
-    pack_template: str, plan: AssetPlan, runtime: PackRuntime
+    pack_template: str, plan: AssetPlan, runtime: PackLoader
 ) -> None:
     """A template's pack-qualified mesh and texture become absolute at the boundary."""
     from unigym.props.templates import resolve_prop_entries
@@ -278,7 +278,7 @@ def test_prop_template_resolves_generated_asset_files(
 
 
 def test_prop_manager_stores_absolute_generated_asset_files(
-    pack_template: str, plan: AssetPlan, runtime: PackRuntime, tmp_path: Path
+    pack_template: str, plan: AssetPlan, runtime: PackLoader, tmp_path: Path
 ) -> None:
     """PropManager.asset_definitions carries the boundary-resolved files."""
     from unigym.props import build_prop_manager

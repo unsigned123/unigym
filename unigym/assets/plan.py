@@ -5,10 +5,10 @@ boundary, into an :class:`AssetPlan`.  Backend render code receives only
 absolute paths and resolved MJCF text -- it never resolves a placeholder,
 a ``pack:`` reference or a legacy asset token.
 
-The plan is a thin adapter over :class:`unigym.packs.runtime.AssetContext`:
+The plan is a thin adapter over :class:`unigym.packs.loader.AssetContext`:
 :meth:`AssetPlan.resolve` expands the remaining known path placeholders and
 then delegates the final path decision to the context.  The context (and the
-:class:`~unigym.packs.runtime.PackRuntime` it owns) stays the sole resolver.
+:class:`~unigym.packs.loader.PackLoader` it owns) stays the sole resolver.
 There is no module-level or ambient runtime.
 """
 
@@ -24,7 +24,7 @@ from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
 from unigym.core.paths import expand_placeholders
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import AssetContext
+    from unigym.packs.loader import AssetContext
     from unigym.props.asset_ir import AssetDefinition
 
 _FILE_ATTR_RE = re.compile(r"""(file\s*=\s*)(["'])(.*?)\2""")

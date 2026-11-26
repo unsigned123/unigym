@@ -9,12 +9,12 @@ import pytest
 
 from unigym._typing import JsonValue
 from unigym.errors import ConfigError
-from unigym.pack_api import PackRuntime, discover
+from unigym.pack_api import PackLoader, discover
 from unigym.packs import PackError
 from unigym.run.api import Run, load
 
 
-def _runtime_lacking_the_preset() -> PackRuntime:
+def _runtime_lacking_the_preset() -> PackLoader:
     """An explicit empty runtime: its catalog cannot resolve any preset."""
     return discover([])
 
@@ -100,7 +100,7 @@ def test_none_preserves_the_ambient_discovery_fallback(
     runtime = _runtime_lacking_the_preset()
     calls: list[bool] = []
 
-    def _spy_discovery(*, entry_points: bool = False) -> PackRuntime:
+    def _spy_discovery(*, entry_points: bool = False) -> PackLoader:
         calls.append(entry_points)
         return runtime
 

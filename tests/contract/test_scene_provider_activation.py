@@ -26,12 +26,11 @@ from unigym.pack_api import (
     Face,
     Pack,
     PackItem,
-    PackRuntime,
+    PackLoader,
     ResourceLocator,
     discover,
 )
-from unigym.packs.catalog import PackCatalog
-from unigym.packs import PackError
+from unigym.packs import PackError, PackSet
 from unigym.robots import (
     ROBOT_REGISTRY,
     restore_robot_registry,
@@ -550,8 +549,8 @@ def test_hand_built_scene_item_with_a_resource_is_rejected(tmp_path: Path) -> No
             root=str(root.resolve()),
         ),
     )
-    runtime = PackRuntime(
-        catalog=PackCatalog((manifest,)),
+    runtime = PackLoader(
+        PackSet((manifest,)),
         root_by_pack={"scene_resource": root.resolve()},
     )
 

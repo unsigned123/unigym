@@ -1,6 +1,6 @@
 """Contract for run config references through absolute paths or catalog ids.
 
-A run config ref is either an absolute file path or an exact PackRuntime
+A run config ref is either an absolute file path or an exact PackLoader
 ``runs`` catalog id. Relative paths and globs are rejected; the CLI and daemon
 share the same resolver.
 """

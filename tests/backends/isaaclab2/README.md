@@ -31,7 +31,7 @@ The same Cartpole pack also ships the tiny file-backed asset-scene fixtures:
 `assets/jointless_cube.urdf` (one link, no `<joint>`) and
 `assets/jointed_cube.urdf` (the articulation-in-scene refusal). The asset-scene
 tests resolve them through
-`pack_runtime("isaaclab_cartpole").resource_for("assets", <id>)` and pass
+`pack_runtime("isaaclab_cartpole").resolve("assets", <id>)` and pass
 `AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`.
 
 ```bash

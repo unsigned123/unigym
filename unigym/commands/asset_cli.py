@@ -42,10 +42,10 @@ from unigym.assets.manifest import (
     split_asset_id,
 )
 from unigym.core.paths import deps_root, repo_root
-from unigym.packs import PackError
+from unigym.packs import Face, PackError
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
 
 REPO_ROOT = Path(repo_root())
 """The checkout that owns ``tools/``; the collector script lives there."""
@@ -216,11 +216,11 @@ def _find_entry(document: dict, asset_id: str) -> dict:
     raise AssetCliError("\n".join(lines))
 
 
-def _pack_root(namespace: str, asset_id: str, runtime: PackRuntime) -> Path:
+def _pack_root(namespace: str, asset_id: str, runtime: PackLoader) -> Path:
     """The pack-resolved asset directory for one id namespace.
 
     The namespace selects the owning pack; the id path resolves through
-    :meth:`PackRuntime.resource`, so the inside-root, missing-resource and
+    :meth:`PackLoader.resource`, so the inside-root, missing-resource and
     symlink checks stay with the runtime.  The manifest sits at
     ``<asset dir>/asset.yaml``.
     """
@@ -273,7 +273,7 @@ def _payload_base(document: Mapping, asset_dir: Path) -> Path:
     return asset_dir
 
 
-def _payload_path(entry: dict, runtime: PackRuntime) -> Path:
+def _payload_path(entry: dict, runtime: PackLoader) -> Path:
     """Resolve one file asset's primary payload to an absolute path.
 
     The id path is relative to the owning pack root, so the
@@ -308,7 +308,7 @@ def _payload_path(entry: dict, runtime: PackRuntime) -> Path:
     return payload
 
 
-def _generator_template(name: str, runtime: PackRuntime) -> tuple[str, list[str]]:
+def _generator_template(name: str, runtime: PackLoader) -> tuple[str, list[str]]:
     """Resolve a generator name to ``(qualified template, param keys)``.
 
     The template registry is the single truth for a computed payload: the
@@ -332,7 +332,7 @@ def _generator_template(name: str, runtime: PackRuntime) -> tuple[str, list[str]
     return f"{module}:{qualname}", sorted(schema)
 
 
-def _print_generator(asset_id: str, runtime: PackRuntime) -> int:
+def _print_generator(asset_id: str, runtime: PackLoader) -> int:
     """Print the registered template behind a generator asset id."""
     _namespace, path = split_asset_id(asset_id)
     name = path[len("generator/") :]
@@ -427,7 +427,7 @@ def _orphan_locks(directory: Path, specs: list[Path]) -> list[str]:
     ]
 
 
-def _selection_dirs(explicit: str | None, runtime: PackRuntime | None) -> list[Path]:
+def _selection_dirs(explicit: str | None, runtime: PackLoader | None) -> list[Path]:
     """The selection faces to check: ``--dir`` or every declared runtime one."""
     if explicit:
         directory = Path(explicit).expanduser().resolve()
@@ -446,9 +446,9 @@ def _selection_dirs(explicit: str | None, runtime: PackRuntime | None) -> list[P
 
     found: list[Path] = []
     seen: set[Path] = set()
-    for entry in runtime.catalog.entries("selection"):
+    for entry in runtime.pack_set.items(face=Face.SELECTION):
         try:
-            resource = runtime.resource_for("selection", entry.id)
+            resource = runtime.resource_for(entry)
         except PackError as exc:
             raise AssetCliError(f"{entry.id}: {exc}") from exc
         directory = resource if resource.is_dir() else resource.parent

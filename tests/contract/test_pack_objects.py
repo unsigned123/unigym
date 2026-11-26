@@ -3,7 +3,7 @@
 Handles are read-only values minted from one stored item.  Acquisition is
 canonical (``packs.scene_preset(id)`` / ``packs.scene_provider(id)``), has no
 attribute sugar and never activates a pack, imports pack Python or reads a
-resource path while minting.  ``resource_path`` resolves a preset resource and
+resource path while minting.  The loader resolves a resource-backed item and
 refuses an entrypoint-backed provider with the "activate the pack" teaching
 error.
 """
@@ -30,7 +30,7 @@ from unigym.packs import (
     installed,
     require,
 )
-from unigym.packs.runtime import PackRuntime
+from unigym.packs.loader import PackLoader
 from unigym.robots.base import RobotProfile
 from unigym.scene_presets import ScenePresetError, load_scene_preset
 from unigym.scenes.provider_params import ProviderParamSpec
@@ -223,9 +223,9 @@ def test_refs_never_activate_import_or_resolve_a_path(
     packs: PackSet, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Minting, comparing and reading provenance stay catalog-only."""
-    monkeypatch.setattr(PackRuntime, "activate", _boom)
-    monkeypatch.setattr(PackRuntime, "resource", _boom)
-    monkeypatch.setattr(PackRuntime, "resource_for", _boom)
+    monkeypatch.setattr(PackLoader, "activate", _boom)
+    monkeypatch.setattr(PackLoader, "resource", _boom)
+    monkeypatch.setattr(PackLoader, "resource_for", _boom)
 
     preset = packs.scene_preset("acme_content.tabletop")
     provider = packs.scene_provider("acme_code.table_top")
@@ -234,33 +234,28 @@ def test_refs_never_activate_import_or_resolve_a_path(
     assert preset.origin.pack == "acme_content"
     assert provider.params_schema is not None
 
-    runtime = packs.to_runtime()
-    assert runtime.catalog.packs() == ("acme_content", "acme_code")
+    loader = PackLoader.from_pack_set(packs)
+    assert [pack.name for pack in loader.pack_set.packs()] == ["acme_content", "acme_code"]
     assert "acme_pack" not in sys.modules
 
 
-def test_resource_path_preset_and_provider(packs: PackSet) -> None:
-    """Only preset handles resolve a path; providers direct to activation."""
-    preset = packs.scene_preset("acme_content.tabletop")
+def test_loader_resource_for_preset_and_provider(packs: PackSet) -> None:
+    """Only resource-backed items resolve a path; providers direct to activation."""
+    loader = PackLoader.from_pack_set(packs)
+    preset_item = packs.item(Face.SCENE_PRESETS, "acme_content.tabletop")
     expected = (CONTENT_ROOT / "scene_presets" / "tabletop.yaml").resolve()
-    assert packs.resource_path(preset) == expected
+    assert loader.resource_for(preset_item) == expected
+    assert loader.resolve(Face.SCENE_PRESETS, "acme_content.tabletop") == expected
 
-    provider = packs.scene_provider("acme_code.table_top")
+    provider_item = packs.item(Face.PROVIDERS, "acme_code.table_top")
     with pytest.raises(PackError, match="activate the pack") as raised:
-        packs.resource_path(provider)
+        loader.resource_for(provider_item)
     assert "acme_code.table_top" in str(raised.value)
-
-    foreign = replace(preset, pack="acme_code")
-    with pytest.raises(PackError, match="declared by pack 'acme_content', not 'acme_code'"):
-        packs.resource_path(foreign)
-
-    with pytest.raises(PackError, match="requires a ScenePresetRef, SceneProviderRef"):
-        packs.resource_path("acme_content.tabletop")  # type: ignore[arg-type]
 
 
 def test_world_and_loader_accept_refs(packs: PackSet) -> None:
     """``World`` and ``load_scene_preset`` accept the pack-object handles."""
-    runtime = packs.to_runtime()
+    runtime = PackLoader.from_pack_set(packs)
     preset = packs.scene_preset("acme_content.tabletop")
     provider = packs.scene_provider("acme_code.table_top")
 
@@ -349,15 +344,15 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
 
     registry_before = snapshot_robots()
     packs = require("acme_robot")
+    loader = PackLoader.from_pack_set(packs)
     pack = packs.pack("acme_robot")
-    robot = packs.robot("acme.arm")
+    robot = loader.robot_profile("acme_robot", "acme.arm")
     assert snapshot_robots() == registry_before
     assert "acme.arm" not in ROBOT_REGISTRY
     assert isinstance(robot, RobotProfile)
     assert robot.name == "acme.arm"
     assert robot.joint_sets == {"body": ("shoulder",)}
-    assert packs.robot("acme.arm") == robot
-    assert packs.robots() == (robot,)
+    assert loader.robot_profile("acme_robot", "acme.arm") == robot
     provider = pack.items_for(face=Face.PROVIDERS, kind="robot")[0]
     assert provider.name == "acme.arm"
     assert provider.origin.kind == "manifest"
@@ -370,13 +365,14 @@ def test_robot_and_asset_refs_are_minted_from_the_catalog(
     assert asset.origin.face == "assets"
     assert packs.asset("acme.cup") == asset
     assert packs.assets() == (asset,)
-    assert packs.resource_path(asset) == (root / "assets" / "cup.yaml").resolve()
+    asset_item = packs.item(Face.ASSETS, "acme.cup")
+    assert loader.resource_for(asset_item) == (root / "assets" / "cup.yaml").resolve()
     assert pack.face_counts == {"providers": 1, "assets": 1}
 
     with pytest.raises(PackError, match="has no robot id 'acme.missing'"):
         pack.provider("robot", "acme.missing")
-    with pytest.raises(PackError, match="unknown robot id 'acme.missing'"):
-        packs.robot("acme.missing")
+    with pytest.raises(PackError, match="has no robot id 'acme.missing'"):
+        loader.robot_profile("acme_robot", "acme.missing")
     with pytest.raises(PackError, match="unknown id 'acme.missing'"):
         packs.asset("acme.missing")
 
@@ -486,7 +482,9 @@ def test_pack_robot_entrypoint_calls_the_factory_without_registry_mutation(
     from unigym.robots import ROBOT_REGISTRY, snapshot_robots
 
     before = snapshot_robots()
-    robot = require("entry_robot").robot("acme.entry")
+    robot = PackLoader.from_pack_set(require("entry_robot")).robot_profile(
+        "entry_robot", "acme.entry"
+    )
     assert isinstance(robot, RobotProfile)
     assert robot.name == "acme.entry"
     assert snapshot_robots() == before
@@ -517,7 +515,7 @@ def test_require_can_extend_scope_with_installed_entry_points(
     monkeypatch.delenv("UNIGYM_PACKS", raising=False)
     monkeypatch.delenv("UNIGYM_DEPS_ROOT", raising=False)
     monkeypatch.setattr(
-        "unigym.packs.runtime._entry_point_roots",
+        "unigym.packs.loader._entry_point_roots",
         lambda: [(root, "entry_pack")],
     )
 

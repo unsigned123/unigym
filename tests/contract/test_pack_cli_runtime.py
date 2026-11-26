@@ -26,6 +26,7 @@ _CODE_MODULE = "cli_code_pack"
 
 _DELETED_MODULES = (
     "unigym.packs.load",
+    "unigym.packs.runtime",
     "unigym.packs.manifest",
     "unigym.packs.mount",
     "unigym.packs.resolve",
@@ -248,6 +249,7 @@ def test_legacy_pack_modules_are_not_importable() -> None:
         "Pack",
         "PackError",
         "PackItem",
+        "PackLoader",
         "PackSet",
         "ProviderInfo",
         "ProviderOrigin",
@@ -272,13 +274,13 @@ def test_production_tree_has_no_legacy_loader_references() -> None:
             pattern = rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])"
             if re.search(pattern, text):
                 offenders.append(f"{path.relative_to(root)}: {token}")
-        for module in _DELETED_MODULES:
-            if module in text:
-                offenders.append(f"{path.relative_to(root)}: {module}")
+            for module in _DELETED_MODULES:
+                if re.search(rf"\b{re.escape(module)}\b", text):
+                    offenders.append(f"{path.relative_to(root)}: {module}")
     assert offenders == []
 
 
 def test_pack_error_is_still_the_public_pack_error() -> None:
-    from unigym.packs.runtime import PackError as runtime_error
+    from unigym.packs.loader import PackError as runtime_error
 
     assert runtime_error is PackError

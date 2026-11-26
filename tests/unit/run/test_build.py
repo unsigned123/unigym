@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from unigym.packs import PackError
-from unigym.packs.runtime import discover
+from unigym.packs.loader import discover
 from unigym.run.build import _boundary_asset_plan
 
 

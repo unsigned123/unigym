@@ -97,7 +97,7 @@ ignore_imports = [
     "unigym.core.** -> unigym.scripts.**",
     # TYPE_CHECKING-only asset context handle; the expansion function owns no
     # runtime dependency on the pack layer.
-    "unigym.core.paths -> unigym.packs.runtime",
+    "unigym.core.paths -> unigym.packs.loader",
     "unigym.core.paths -> unigym.errors",
     # repo_root() resolves the checkout root through the package object.
     "unigym.core.paths -> unigym",

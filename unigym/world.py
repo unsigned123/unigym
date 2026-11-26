@@ -6,7 +6,7 @@ engine object.  It produces only the existing config schema consumed by
 
 * a ``scene_preset`` catalog reference for
   :meth:`World.from_preset` / :meth:`World.from_config`, resolved through a
-  :class:`~unigym.packs.runtime.PackRuntime`;
+  :class:`~unigym.packs.loader.PackLoader`;
 * the inline ``scene_preset: {provider: ..., params: ...}`` form for
   :meth:`World.from_provider`;
 * a unique runtime scene provider for :meth:`World.inline`;
@@ -63,7 +63,7 @@ from unigym.world_primitives import (
 )
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
 
 __all__ = ["World", "Box", "Sphere", "Cylinder", "Capsule", "Plane"]
 
@@ -252,7 +252,7 @@ class World:
         cls,
         ref: str | ScenePresetRef,
         *,
-        runtime: PackRuntime,
+        runtime: PackLoader,
     ) -> World:
         """Use a scene preset by catalog id or pack-object handle.
 
@@ -302,7 +302,7 @@ class World:
         cls,
         source: dict[str, JsonValue] | str | Path,
         *,
-        runtime: PackRuntime | None = None,
+        runtime: PackLoader | None = None,
     ) -> World:
         """Extract the world half of a run config or scene preset catalog id.
 
@@ -336,14 +336,14 @@ class World:
                 raise ValueError(
                     f"World.from_config: {str(source)!r} is a scene preset "
                     f"file, not a scene reference; scene refs are exact "
-                    f"PackRuntime 'scene_presets' catalog ids (e.g. "
+                    f"PackLoader 'scene_presets' catalog ids (e.g. "
                     f"'acme.tabletop') resolved with runtime=..."
                 )
             return cls._from_run_cfg(doc, runtime)
         if runtime is None:
             raise ValueError(
                 f"World.from_config: scene preset ref {str(source)!r} requires a pack "
-                f"runtime | hint: scene preset refs are exact PackRuntime "
+                f"runtime | hint: scene preset refs are exact PackLoader "
                 f"'scene_presets' catalog ids"
             )
         return cls.from_preset(str(source), runtime=runtime)
@@ -352,7 +352,7 @@ class World:
     def _from_run_cfg(
         cls,
         cfg: dict[str, JsonValue],
-        runtime: PackRuntime | None = None,
+        runtime: PackLoader | None = None,
     ) -> World:
         """Extract a world declaration from a run-config mapping."""
         from unigym.scene_presets import load_scene_preset
@@ -368,7 +368,7 @@ class World:
                 if runtime is None:
                     raise ValueError(
                         f"World.from_config: scene preset ref {ref!r} requires a pack "
-                        f"runtime | hint: scene preset refs are exact PackRuntime "
+                        f"runtime | hint: scene preset refs are exact PackLoader "
                         f"'scene_presets' catalog ids"
                     )
                 load_scene_preset(ref, runtime)

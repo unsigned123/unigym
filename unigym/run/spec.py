@@ -76,7 +76,7 @@ _ASSET_REF_MARKERS = ("${UNIGYM_ASSET_ROOT}", "${UNIGYM_ASSET_PACK}")
 _TERMINATION_MODES = ("core", "external")
 
 if TYPE_CHECKING:
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
     from unigym.scenes.terrain import Terrain
 
 
@@ -167,7 +167,7 @@ class RunSpec:
     static_shapes: tuple[JsonValue, ...] = ()
     #: the caller's pack runtime (non-serialized): scene/asset catalogs and
     #: robot profile resolution read through it.  Never written to cfg/ledger.
-    pack_runtime: PackRuntime | None = None
+    pack_runtime: PackLoader | None = None
     #: complete RobotProfile objects injected by the programmatic profile
     #: path, keyed by articulation name.  Non-serialized: these bypass the
     #: registry factory lookup only.
@@ -822,7 +822,7 @@ def build_spec(
     cfg: dict[str, JsonValue],
     args: Namespace | SimpleNamespace,
     *,
-    runtime: PackRuntime | None = None,
+    runtime: PackLoader | None = None,
     robot_profiles: Mapping[str, RobotProfile] | None = None,
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec.
@@ -830,7 +830,7 @@ def build_spec(
     The run's ``scene_preset`` resolves through *runtime* after the backend is
     selected (its ``BackendBinding`` drives world-format and backend-param
     selection).  A ``pack:`` / asset reference expands through an
-    :class:`~unigym.packs.runtime.AssetContext` built from the same runtime.
+    :class:`~unigym.packs.loader.AssetContext` built from the same runtime.
     The removed ``mode`` / ``benchmark`` config keys are rejected with teaching
     errors: sink selection is ``sinks:`` (or the one-custom-sink ``sink:``
     shorthand), and the built-in benchmark/evaluation path no longer lives in
@@ -880,7 +880,7 @@ def build_spec(
     )
     context = None
     if runtime is not None:
-        from unigym.packs.runtime import AssetContext
+        from unigym.packs.loader import AssetContext
 
         context = AssetContext(runtime)
     cfg = _require_config(expand_placeholders(cfg, context), "placeholders")

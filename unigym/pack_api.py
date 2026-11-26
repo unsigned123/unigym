@@ -1,13 +1,13 @@
 """The only import surface pack code may use.
 
-Pack Python modules receive a :class:`PackContext` from the runtime and use
+Pack Python modules receive a :class:`PackContext` from the loader and use
 this module to register providers through the existing closed registries.
-Discovery, catalog lookup, resource resolution and activation live in
-:mod:`unigym.packs.runtime`; this module only re-exports the public contract
+Discovery, pack-set lookup, resource resolution and activation live in
+:mod:`unigym.packs.loader`; this module only re-exports the public contract
 and owns the registration helpers.
 
 The ``unigym.pack/1`` manifest schema, its loaded types, the read-only pack
-catalog and the explicit runtime are the public pack contract.  Discovery and
+set and the explicit loader are the public pack contract.  Discovery and
 activation stay lazy: importing this module never imports pack Python.
 """
 
@@ -18,21 +18,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from unigym.actuator_law import ActuatorLawDescriptor
+from unigym.packs.loader import (
+    ActivationHandle,
+    AssetContext,
+    PackContext,
+    PackLoader,
+    discover,
+    discover_set,
+    installed,
+    require,
+)
 from unigym.packs.packset import (
     AssetResourceRef,
     PackSet,
     ScenePresetRef,
     SceneProviderRef,
-    discover_set,
-    installed,
-    require,
-)
-from unigym.packs.runtime import (
-    ActivationHandle,
-    AssetContext,
-    PackContext,
-    PackRuntime,
-    discover,
 )
 from unigym.packs.schema import (
     EntrypointLocator,
@@ -160,7 +160,7 @@ __all__ = [
     "Pack",
     "PackContext",
     "PackItem",
-    "PackRuntime",
+    "PackLoader",
     "PackSet",
     "ProviderInfo",
     "ProviderOrigin",

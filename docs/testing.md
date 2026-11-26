@@ -638,7 +638,7 @@ The same Cartpole pack ships the file-backed asset-scene fixtures:
 - `assets/jointed_cube.urdf` - the articulation-in-scene refusal fixture.
 
 The tests resolve them through
-`pack_runtime("isaaclab_cartpole").resource_for("assets", <id>)` and pass
+`pack_runtime("isaaclab_cartpole").resolve("assets", <id>)` and pass
 `AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`; they never read an asset
 environment variable and never download assets. The lane is strict
 (`ci/compat.toml` `[lanes.isaaclab2]`, selector `tests/backends/isaaclab2`,

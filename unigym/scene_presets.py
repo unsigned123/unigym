@@ -26,6 +26,7 @@ import yaml
 
 from unigym._typing import JsonValue
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
+from unigym.packs.schema import Face
 from unigym.scenes.provider_params import (
     SceneProviderParamError,
     fill_and_validate,
@@ -35,7 +36,7 @@ from unigym.scenes.recipe import normalize_content_keys
 
 if TYPE_CHECKING:
     from unigym.packs.packset import ScenePresetRef
-    from unigym.packs.runtime import PackRuntime
+    from unigym.packs.loader import PackLoader
 
 __all__ = [
     "SCHEMA_ID",
@@ -363,7 +364,7 @@ def _validate_provider_reference(
     *,
     ref: str,
     pack: str,
-    runtime: PackRuntime,
+    runtime: PackLoader,
 ) -> None:
     """Enforce same-pack ownership and manifest-schema validation at load.
 
@@ -377,22 +378,18 @@ def _validate_provider_reference(
     provider = preset.provider
     if provider is None:
         return
-    manifest = runtime.catalog.get(pack)
+    manifest = runtime.pack(pack)
     match = next(
         (
             item
-            for item in manifest.provides.get("providers", ())
-            if item.kind == "scene" and item.id == provider
+            for item in manifest.items_for(face=Face.PROVIDERS, kind="scene")
+            if item.id == provider
         ),
         None,
     )
     if match is None:
         owners = sorted(
-            {
-                entry.pack
-                for entry in runtime.catalog.entries("providers")
-                if entry.kind == "scene" and entry.id == provider
-            }
+            {entry.pack for entry in runtime.pack_set.providers("scene") if entry.id == provider}
         )
         if owners:
             raise ScenePresetError(
@@ -439,21 +436,21 @@ def _scene_preset_identity(ref: object) -> tuple[str, str | None]:
     return ref, None
 
 
-def load_scene_preset(ref: str | ScenePresetRef, runtime: PackRuntime) -> ScenePreset:
+def load_scene_preset(ref: str | ScenePresetRef, runtime: PackLoader) -> ScenePreset:
     """Resolve one exact ``scene_presets`` catalog id or handle to its preset."""
     ref_id, declared_pack = _scene_preset_identity(ref)
     if runtime is None:
         raise ScenePresetError(
             f"scene preset ref {ref_id!r} requires a pack runtime: pass runtime=... | "
-            "hint: scene preset refs are exact PackRuntime 'scene_presets' catalog ids"
+            "hint: scene preset refs are exact PackLoader 'scene_presets' catalog ids"
         )
-    entry = runtime.catalog.entry("scene_presets", ref_id)
+    entry = runtime.item("scene_presets", ref_id)
     if declared_pack is not None and entry.pack != declared_pack:
         raise ScenePresetError(
             f"scene preset id {ref_id!r} is declared by pack {entry.pack!r}, "
             f"not {declared_pack!r}"
         )
-    path: Path = runtime.resource_for("scene_presets", ref_id)
+    path: Path = runtime.resource_for(entry)
     try:
         raw_doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as err:
@@ -505,7 +502,7 @@ def _normalize_objects_block(
 def _scene_preset_value(
     cfg: Mapping[str, JsonValue],
     *,
-    runtime: PackRuntime | None,
+    runtime: PackLoader | None,
     source: str,
 ) -> tuple[ScenePreset | None, Mapping[str, JsonValue], str | None]:
     """Resolve the run's ``scene_preset`` value to a preset and its overrides."""
@@ -591,7 +588,7 @@ def _scene_preset_value(
 def resolve_scene_plan(
     cfg: dict[str, JsonValue],
     *,
-    runtime: PackRuntime | None,
+    runtime: PackLoader | None,
     binding: BackendBinding,
     source: str = "",
 ) -> ScenePlan | None:
@@ -727,7 +724,7 @@ def resolve_scene_plan(
 def apply_scene_preset(
     cfg: dict[str, JsonValue],
     *,
-    runtime: PackRuntime | None = None,
+    runtime: PackLoader | None = None,
     binding: BackendBinding | None = None,
     source: str = "",
 ) -> dict[str, JsonValue]:

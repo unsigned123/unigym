@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.pack_api import AssetContext, PackRuntime, discover
+from unigym.pack_api import AssetContext, PackLoader, discover
 from unigym.packs import PackError
 
 PACK = "acme_assets"
@@ -56,18 +56,18 @@ def _write_pack(
 
 
 @pytest.fixture()
-def runtime(tmp_path: Path) -> PackRuntime:
+def runtime(tmp_path: Path) -> PackLoader:
     return discover([_write_pack(tmp_path)])
 
 
-def test_pack_qualified_mesh_resolves_under_the_pack_root(runtime: PackRuntime) -> None:
+def test_pack_qualified_mesh_resolves_under_the_pack_root(runtime: PackLoader) -> None:
     """A pack-qualified mesh resolves inside its owning pack root."""
     expected = runtime.root_by_pack[PACK] / "assets" / "meshes" / "cup.stl"
 
     assert runtime.asset_path(MESH_REF) == expected
 
 
-def test_pack_qualified_texture_leaf_is_canonicalized(runtime: PackRuntime) -> None:
+def test_pack_qualified_texture_leaf_is_canonicalized(runtime: PackLoader) -> None:
     """A declared texture leaf resolves to its own canonical asset directory."""
     expected = runtime.resource(PACK, CANONICAL_TEXTURE)
 
@@ -79,7 +79,7 @@ def test_pack_qualified_texture_leaf_is_canonicalized(runtime: PackRuntime) -> N
 
 
 def test_absolute_asset_path_passes_through_without_existence(
-    runtime: PackRuntime, tmp_path: Path
+    runtime: PackLoader, tmp_path: Path
 ) -> None:
     """An absolute path is a run-owned asset and needs no pack or existence."""
     own = tmp_path / "run" / "own_texture.png"
@@ -89,7 +89,7 @@ def test_absolute_asset_path_passes_through_without_existence(
 
 
 def test_home_relative_asset_path_expands_to_an_absolute_path(
-    runtime: PackRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    runtime: PackLoader, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A ``~`` path is expanded to an absolute path without a pack lookup."""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -98,7 +98,7 @@ def test_home_relative_asset_path_expands_to_an_absolute_path(
 
 
 @pytest.mark.parametrize("value", ["assets/meshes/cup.stl", "assets/generators/tex/a/wood.png"])
-def test_bare_relative_asset_path_is_rejected(runtime: PackRuntime, value: str) -> None:
+def test_bare_relative_asset_path_is_rejected(runtime: PackLoader, value: str) -> None:
     """A bare relative reference has no owning pack and is rejected."""
     with pytest.raises(PackError) as info:
         runtime.asset_path(value)
@@ -111,14 +111,14 @@ def test_bare_relative_asset_path_is_rejected(runtime: PackRuntime, value: str) 
 
 @pytest.mark.parametrize("value", ["", None, 0, Path("assets/meshes/cup.stl")])
 def test_non_string_or_empty_asset_reference_is_rejected(
-    runtime: PackRuntime, value: object
+    runtime: PackLoader, value: object
 ) -> None:
     """Only a non-empty string is a valid asset reference."""
     with pytest.raises(PackError, match="non-empty string"):
         runtime.asset_path(value)
 
 
-def test_missing_resource_names_the_pack_and_reference(runtime: PackRuntime) -> None:
+def test_missing_resource_names_the_pack_and_reference(runtime: PackLoader) -> None:
     """An absent pack resource fails naming the pack and the original ref."""
     ref = f"pack:{PACK}/assets/meshes/absent.stl"
 
@@ -131,7 +131,7 @@ def test_missing_resource_names_the_pack_and_reference(runtime: PackRuntime) -> 
     assert "does not exist" in message
 
 
-def test_unknown_pack_names_the_pack_and_reference(runtime: PackRuntime) -> None:
+def test_unknown_pack_names_the_pack_and_reference(runtime: PackLoader) -> None:
     """An unknown pack in an asset reference fails naming pack and ref."""
     ref = "pack:absent_pack/assets/meshes/cup.stl"
 
@@ -143,7 +143,7 @@ def test_unknown_pack_names_the_pack_and_reference(runtime: PackRuntime) -> None
     assert ref in message
 
 
-def test_asset_context_delegates_to_runtime_asset_path(runtime: PackRuntime) -> None:
+def test_asset_context_delegates_to_runtime_asset_path(runtime: PackLoader) -> None:
     """``AssetContext.resolve`` returns the same path as ``runtime.asset_path``."""
     context = AssetContext(runtime=runtime)
 

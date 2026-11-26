@@ -1,15 +1,18 @@
-"""Static-root pack runtime: discover, resolve resources, activate.
+"""Static-root pack loader: discover, resolve resources, activate.
 
-The runtime is a Phase 3 contract over ``unigym.pack/1``.  :func:`discover`
+The loader is the Phase 3 contract over ``unigym.pack/1``.  :func:`discover`
 reads explicit roots, or the configured sources when the caller names none,
-loads their manifests without importing pack Python, and returns an immutable
-catalog plus each pack's root.  Resources resolve under their own pack root.
+loads their manifests without importing pack Python, and returns a loader that
+owns the pure :class:`~unigym.packs.packset.PackSet`, each pack's root and the
+per-pack activation cache.  Resources resolve under their own pack root.
 A code pack activates through normal Python: its ``python/`` directory is the
 explicit import boundary, the manifest entrypoint is imported and called with
-one :class:`PackContext`, and the handle is cached per runtime.
+one :class:`PackContext`, and the handle is cached per loader.
 
 This is the only pack loader.  There is no implicit repository mount, no
-mount order and no separate code loader.
+mount order and no separate code loader.  The declaration/index model lives in
+:mod:`unigym.packs.schema` and :mod:`unigym.packs.packset`; it never imports
+this module.
 """
 
 from __future__ import annotations
@@ -31,12 +34,14 @@ from unigym.core.paths import repo_root
 from unigym.provenance import ProviderOrigin, RegistrySnapshot, attribution
 
 from . import PackError
-from .catalog import PackCatalog, validate_unique
+from .packset import PackSet
 from .schema import (
     PROVIDER_ID_RE,
     EntrypointLocator,
+    Face,
     Pack,
     PackItem,
+    ResourceLocator,
     load_manifest_v1,
     pack_origin,
     provider_param_declarations,
@@ -68,19 +73,20 @@ _ENTRY_POINT_GROUP = "unigym.packs"
 class PackContext:
     """The explicit handle a pack entrypoint receives on activation.
 
-    It names the activated pack, its root and the runtime that owns the
-    catalog, so pack code never infers ambient state.  :meth:`resource`
-    delegates to :meth:`PackRuntime.resource` and therefore applies the same
-    inside-root path rules.
+    It names the activated pack, its root and the loader that owns resource
+    resolution, so pack code never infers ambient state.  The loader stays
+    private: pack code gets resource resolution, not discovery or activation
+    authority.  :meth:`resource` delegates to :meth:`PackLoader.resource` and
+    therefore applies the same inside-root path rules.
     """
 
     pack: str
     root: Path
-    runtime: PackRuntime
+    _loader: PackLoader = field(repr=False, compare=False)
 
     def resource(self, rel: str) -> Path:
-        """Resolve *rel* inside this pack's root through the owning runtime."""
-        return self.runtime.resource(self.pack, rel)
+        """Resolve *rel* inside this pack's root through the owning loader."""
+        return self._loader.resource(self.pack, rel)
 
 
 @dataclass(frozen=True)
@@ -165,7 +171,7 @@ def _resolve_entrypoint(entrypoint: str) -> Callable[..., Any]:
 
 def _activate_adapter_providers(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
 ) -> tuple[str, ...]:
     """Import and register manifest-declared ``kind: adapter`` providers.
 
@@ -179,7 +185,7 @@ def _activate_adapter_providers(
     at runtime-module import time.  Other provider kinds stay inert in this
     phase.
     """
-    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "adapter")
+    items = manifest.items_for(face=Face.PROVIDERS, kind="adapter")
     if not items:
         return ()
 
@@ -263,7 +269,7 @@ def _constant_robot_factory(where: str, profile: RobotProfile) -> Callable[..., 
     return factory
 
 
-def _activate_robot_providers(manifest: Pack, runtime: PackRuntime) -> tuple[str, ...]:
+def _activate_robot_providers(manifest: Pack, runtime: PackLoader) -> tuple[str, ...]:
     """Load and register manifest-declared ``kind: robot`` providers.
 
     The item id becomes the robot name a run config selects.  An item is
@@ -283,7 +289,7 @@ def _activate_robot_providers(manifest: Pack, runtime: PackRuntime) -> tuple[str
     checked here because the document is already loaded.  Other registration
     helpers are imported lazily here.
     """
-    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "robot")
+    items = manifest.items_for(face=Face.PROVIDERS, kind="robot")
     if not items:
         return ()
 
@@ -386,7 +392,7 @@ def _provider_schema_diff(
 
 def _manifest_provider_origin(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     item: PackItem,
 ) -> ProviderOrigin:
     """Build the exact provenance record for one manifest provider item."""
@@ -407,7 +413,7 @@ def _manifest_provider_origin(
     )
 
 
-def _pack_code_origin(manifest: Pack, runtime: PackRuntime) -> ProviderOrigin:
+def _pack_code_origin(manifest: Pack, runtime: PackLoader) -> ProviderOrigin:
     """Build the activation-window origin for pack-code registrations."""
     discovered_by = runtime.origins.get(manifest.name, "unknown")
     return ProviderOrigin(
@@ -424,7 +430,7 @@ def _pack_code_origin(manifest: Pack, runtime: PackRuntime) -> ProviderOrigin:
 
 def _attribute_pack_code_robots(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: RegistrySnapshot[Callable[..., RobotProfile]],
 ) -> None:
     """Label robots the pack registered itself during the activation window."""
@@ -440,7 +446,7 @@ def _attribute_pack_code_robots(
 
 def _attribute_pack_code_adapters(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: RegistrySnapshot[type[Adapter]],
 ) -> None:
     """Label adapters the pack registered itself during the activation window."""
@@ -454,7 +460,7 @@ def _attribute_pack_code_adapters(
 
 def _attribute_pack_code_scene_providers(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: SceneProviderRegistrySnapshot,
 ) -> None:
     """Label scene providers the pack registered itself during activation."""
@@ -477,7 +483,7 @@ def _attribute_pack_code_scene_providers(
 
 def _attribute_pack_code_content_fillers(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: SceneContentFillerRegistrySnapshot,
 ) -> None:
     """Label content fillers the pack registered itself during activation."""
@@ -498,7 +504,7 @@ def _attribute_pack_code_content_fillers(
 
 def _attribute_pack_code_prop_templates(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: PropTemplateRegistrySnapshot,
 ) -> None:
     """Label prop templates the pack registered itself during activation."""
@@ -519,7 +525,7 @@ def _attribute_pack_code_prop_templates(
 
 def _attribute_pack_code_initializers(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: InitializerRegistrySnapshot,
 ) -> None:
     """Label initializers the pack registered itself during activation."""
@@ -540,7 +546,7 @@ def _attribute_pack_code_initializers(
 
 def _attribute_pack_code_terminations(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     before: TerminationRegistrySnapshot,
 ) -> None:
     """Label terminations the pack registered itself during activation."""
@@ -561,7 +567,7 @@ def _attribute_pack_code_terminations(
 
 def _activate_scene_provider_providers(
     manifest: Pack,
-    runtime: PackRuntime,
+    runtime: PackLoader,
     *,
     window_names: frozenset[str],
 ) -> tuple[str, ...]:
@@ -591,7 +597,7 @@ def _activate_scene_provider_providers(
     Raises:
         PackError: A scene provider item or its parameter schema is invalid.
     """
-    items = tuple(item for item in manifest.provides.get("providers", ()) if item.kind == "scene")
+    items = manifest.items_for(face=Face.PROVIDERS, kind="scene")
     if not items:
         return ()
 
@@ -725,46 +731,190 @@ def _activate_scene_provider_providers(
     return tuple(item.id for item in items)
 
 
-@dataclass(frozen=True)
-class PackRuntime:
-    """An immutable catalog plus the resolved root of every discovered pack.
-
-    ``root_by_pack`` must name exactly the catalog's packs; the constructor
-    fails fast instead of letting a later resource or activation lookup miss.
-    ``origins`` is the discovery label per pack (``explicit-root``,
-    ``env:UNIGYM_PACKS``, ``local-yaml``, ``entry-point`` or ``deps-root``);
-    a hand-built runtime without labels reports ``unknown`` provenance.
-    ``_handles`` is the private per-runtime activation cache.
-    """
-
-    catalog: PackCatalog
-    root_by_pack: Mapping[str, Path]
-    origins: Mapping[str, str] = field(default_factory=dict)
-    _handles: dict[str, ActivationHandle] = field(
-        default_factory=dict, init=False, compare=False, repr=False
+def _normalize_origin_override(pack: Pack, value: ProviderOrigin | str) -> ProviderOrigin:
+    """Normalize one ``from_pack_set(origins=...)`` value to a pack origin."""
+    if isinstance(value, str):
+        return pack_origin(pack, value)
+    if not isinstance(value, ProviderOrigin):
+        raise PackError(
+            f"origin for pack {pack.name!r} must be a ProviderOrigin or a "
+            f"discovery label string, got {type(value).__name__}"
+        )
+    if value.kind == "pack":
+        facts = (
+            ("pack", value.pack, pack.name),
+            ("pack_version", value.pack_version, pack.version),
+            ("root", value.root, str(pack.root)),
+        )
+        for field_name, actual, expected in facts:
+            if actual != expected:
+                raise PackError(
+                    f"origin for pack {pack.name!r} has {field_name} "
+                    f"{actual!r}, expected {expected!r}"
+                )
+        return value
+    if value.kind == "unknown":
+        return pack_origin(pack, "unknown")
+    raise PackError(
+        f"origin for pack {pack.name!r} must be a pack-level ProviderOrigin "
+        f"(kind='pack'), got kind {value.kind!r}"
     )
 
-    def __post_init__(self) -> None:
-        """Freeze the root/origin mappings and verify they match the catalog."""
-        names = self.catalog.packs()
-        provided = set(self.root_by_pack)
+
+class PackLoader:
+    """Discovery result, current pack set, roots/origins, activation cache.
+
+    The loader is explicitly stateful: it owns the current
+    :class:`~unigym.packs.packset.PackSet` snapshot, each pack's resolved root,
+    the discovery label per pack (``explicit-root``, ``env:UNIGYM_PACKS``,
+    ``local-yaml``, ``entry-point`` or ``deps-root``) and the per-pack
+    activation cache.  It is the only owner of resource path resolution and
+    object loading; the declaration model never imports this class.
+
+    ``root_by_pack`` must name exactly the pack set's packs; the constructor
+    fails fast instead of letting a later resource or activation lookup miss.
+    A loader built from a hand-built pack set without labels reports
+    ``unknown`` provenance.
+    """
+
+    def __init__(
+        self,
+        pack_set: PackSet,
+        *,
+        root_by_pack: Mapping[str, Path] | None = None,
+        origins: Mapping[str, str] | None = None,
+    ) -> None:
+        """Bind a pure pack set to its roots, discovery labels and cache."""
+        if not isinstance(pack_set, PackSet):
+            raise PackError(f"PackLoader requires a PackSet, got {type(pack_set).__name__}")
+        names = tuple(pack.name for pack in pack_set.packs())
+        roots_input = (
+            {pack.name: pack.root for pack in pack_set.packs()}
+            if root_by_pack is None
+            else {str(name): Path(root) for name, root in root_by_pack.items()}
+        )
         expected = set(names)
-        if provided != expected:
+        if set(roots_input) != expected:
             raise PackError(
-                f"pack runtime roots {sorted(provided)} do not match "
+                f"pack loader roots {sorted(roots_input)} do not match "
                 f"catalog packs {sorted(expected)}"
             )
-        roots = {name: Path(self.root_by_pack[name]).resolve() for name in names}
-        labels = {str(name): str(label) for name, label in self.origins.items()}
+        roots = {name: roots_input[name].resolve() for name in names}
+        labels = (
+            {pack.name: str(pack.origin.discovered_by or "unknown") for pack in pack_set.packs()}
+            if origins is None
+            else {str(name): str(label) for name, label in origins.items()}
+        )
         unknown = sorted(set(labels) - expected)
         if unknown:
             raise PackError(
-                f"pack runtime origin labels {unknown} do not match "
+                f"pack loader origin labels {unknown} do not match "
                 f"catalog packs {sorted(expected)}"
             )
-        object.__setattr__(self, "root_by_pack", MappingProxyType(roots))
-        object.__setattr__(self, "origins", MappingProxyType(labels))
-        object.__setattr__(self, "_handles", {})
+        self._pack_set = pack_set
+        self._root_by_pack: Mapping[str, Path] = MappingProxyType(roots)
+        self._origins: Mapping[str, str] = MappingProxyType(labels)
+        self._handles: dict[str, ActivationHandle] = {}
+
+    @classmethod
+    def discover(
+        cls,
+        roots: Iterable[str | Path] | None = None,
+        *,
+        config_path: str | Path | None = None,
+        entry_points: bool = False,
+    ) -> PackLoader:
+        """Discover packs from explicit roots or the configured sources.
+
+        A non-``None`` *roots* iterable is authoritative: only those roots are
+        read, in order, and configured sources are ignored.  ``discover([])``
+        is therefore an explicit empty discovery.
+
+        ``roots=None`` reads, in order, the ``UNIGYM_PACKS`` entries, the
+        ``packs:`` entries of the local overlay (``<repo>/unigym.local.yaml``
+        by default), installed ``unigym.packs`` entry points when
+        *entry_points* is true, and the sorted
+        ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
+
+        Canonical duplicate roots are visited once.  Every root must carry a
+        valid ``unigym.pack.yaml``; duplicate pack names fail.  Default
+        discovery reads manifests only and never imports pack Python.
+        """
+        return _discover_loader(cls, roots, config_path=config_path, entry_points=entry_points)
+
+    @classmethod
+    def from_pack_set(
+        cls,
+        pack_set: PackSet,
+        *,
+        origins: Mapping[str, ProviderOrigin | str] | None = None,
+    ) -> PackLoader:
+        """Build a loader over an existing pack set without rediscovering roots.
+
+        ``origins`` overrides the pack-level discovery origin per pack name.
+        A string is a discovery label (``discovered_by``); a
+        :class:`~unigym.provenance.ProviderOrigin` must be pack-level
+        (``kind="pack"``) or the explicit ``unknown()`` record.  Omitted packs
+        keep their own label.
+
+        Construction is pure: it relabels the already-loaded packs and builds
+        the root/label tables; it never resolves entry points, imports pack
+        Python or activates a pack.
+        """
+        if not isinstance(pack_set, PackSet):
+            raise PackError(f"from_pack_set requires a PackSet, got {type(pack_set).__name__}")
+        selected = pack_set
+        labels = {
+            pack.name: str(pack.origin.discovered_by or "unknown") for pack in pack_set.packs()
+        }
+        if origins is not None:
+            names = {pack.name for pack in pack_set.packs()}
+            unknown = sorted(set(origins) - names)
+            if unknown:
+                raise PackError(
+                    f"origins name unknown packs {unknown}; known packs: {sorted(names)}"
+                )
+            by_name = {pack.name: pack for pack in pack_set.packs()}
+            relabeled: list[Pack] = []
+            for pack in pack_set.packs():
+                value = origins.get(pack.name)
+                desired = (
+                    pack_origin(pack, labels[pack.name])
+                    if value is None
+                    else _normalize_origin_override(by_name[pack.name], value)
+                )
+                relabeled.append(with_pack_origin(pack, desired))
+                labels[pack.name] = str(desired.discovered_by or "unknown")
+            selected = PackSet(tuple(relabeled))
+        roots = {pack.name: pack.root for pack in selected.packs()}
+        return cls(selected, root_by_pack=roots, origins=labels)
+
+    @property
+    def pack_set(self) -> PackSet:
+        """The current pure pack-set snapshot."""
+        return self._pack_set
+
+    @property
+    def root_by_pack(self) -> Mapping[str, Path]:
+        """Resolved pack root per pack name."""
+        return self._root_by_pack
+
+    @property
+    def origins(self) -> Mapping[str, str]:
+        """Discovery label per pack name."""
+        return self._origins
+
+    def pack(self, name: str) -> Pack:
+        """Return the named pack or fail with the known pack names."""
+        return self._pack_set.pack(name)
+
+    def item(self, face: Face | str, name: str) -> PackItem:
+        """Return the unique stored ``(face, name)`` item across the set."""
+        return self._pack_set.item(face, name)
+
+    def provider(self, kind: str, name: str) -> PackItem:
+        """Return the unique ``providers`` item for an exact ``(kind, name)`` pair."""
+        return self._pack_set.provider(kind, name)
 
     def resource(self, pack: str, rel: str) -> Path:
         """Resolve *rel* to an absolute path inside the named pack's root.
@@ -776,8 +926,8 @@ class PackRuntime:
             PackError: The pack is unknown, the path is illegal, or it does
                 not exist.  The message names both the pack and the path.
         """
-        self.catalog.get(pack)
-        root = self.root_by_pack[pack]
+        self._pack_set.pack(pack)
+        root = self._root_by_pack[pack]
         where = f"pack {pack!r} resource {rel!r}"
         if not isinstance(rel, str) or not rel:
             raise PackError(f"{where} must be a non-empty relative path")
@@ -850,26 +1000,34 @@ class PackRuntime:
         except PackError as err:
             raise PackError(f"asset reference {value!r}: {err}") from err
 
-    def resource_for(self, face: str, id: str) -> Path:
-        """Resolve the declared resource of the ``(face, id)`` catalog item.
+    def resource_for(self, item: PackItem) -> Path:
+        """Resolve one stored item's declared resource under its pack root.
 
         The lookup is catalog-only: it never activates or imports pack code.
         An entrypoint-only item has no resource path, so it raises a teaching
         error that points at :meth:`activate` instead.
 
         Raises:
-            PackError: The face/id is unknown, the item declares an entrypoint
-                rather than a resource, or the declared resource fails the
-                existing path checks.
+            PackError: The item declares an entrypoint rather than a resource,
+                or the declared resource fails the existing path checks.
         """
-        entry = self.catalog.entry(face, id)
-        if entry.resource is None:
+        if not isinstance(item, PackItem):
+            raise PackError(f"resource_for requires a PackItem, got {type(item).__name__}")
+        if not isinstance(item.locator, ResourceLocator):
             raise PackError(
-                f"pack {entry.pack!r} face {entry.face.value!r} id {entry.id!r} "
-                f"declares entrypoint {entry.entrypoint!r}, not a resource; "
-                f"use runtime.activate({entry.pack!r}) to activate the pack"
+                f"pack {item.pack!r} face {item.face.value!r} id {item.name!r} "
+                f"declares entrypoint {item.entrypoint!r}, not a resource; "
+                f"use loader.activate({item.pack!r}) to activate the pack"
             )
-        return self.resource(entry.pack, entry.resource)
+        return self.resource(item.pack, item.locator.path)
+
+    def resolve(self, face: Face | str, name: str) -> Path:
+        """Resolve the declared resource of the ``(face, name)`` stored item.
+
+        This is the face/name convenience over :meth:`resource_for`; new code
+        should pass a :class:`PackItem` directly.
+        """
+        return self.resource_for(self._pack_set.item(face, name))
 
     def robot_profile(self, pack: str, item_id: str) -> RobotProfile:
         """Load the complete robot profile of one ``kind: robot`` provider.
@@ -883,15 +1041,15 @@ class PackRuntime:
         from unigym.robots import load_robot_profile
         from unigym.robots.base import RobotProfile
 
-        manifest = self.catalog.get(pack)
+        manifest = self._pack_set.pack(pack)
         items = tuple(
             item
-            for item in manifest.provides.get("providers", ())
-            if item.kind == "robot" and item.id == item_id
+            for item in manifest.items_for(face=Face.PROVIDERS, kind="robot")
+            if item.id == item_id
         )
         if not items:
             known = sorted(
-                item.id for item in manifest.provides.get("providers", ()) if item.kind == "robot"
+                item.id for item in manifest.items_for(face=Face.PROVIDERS, kind="robot")
             )
             raise PackError(
                 f"pack {pack!r} has no robot id {item_id!r}; known robot ids "
@@ -932,6 +1090,11 @@ class PackRuntime:
             )
         return profile
 
+    def is_activated(self, pack: str) -> bool:
+        """Whether :meth:`activate` already completed for *pack*."""
+        self._pack_set.pack(pack)
+        return pack in self._handles
+
     def activate(self, pack: str) -> ActivationHandle:
         """Activate *pack* once and return the cached handle.
 
@@ -970,20 +1133,12 @@ class PackRuntime:
         from unigym.registration import RegistrationPhase, at_least_phase
 
         at_least_phase(RegistrationPhase.ACTIVATE)
-        manifest = self.catalog.get(pack)
+        manifest = self._pack_set.pack(pack)
         entrypoint = _pack_entrypoint(manifest)
-        adapter_items = tuple(
-            item for item in manifest.provides.get("providers", ()) if item.kind == "adapter"
-        )
-        robot_items = tuple(
-            item for item in manifest.provides.get("providers", ()) if item.kind == "robot"
-        )
-        scene_items = tuple(
-            item for item in manifest.provides.get("providers", ()) if item.kind == "scene"
-        )
-        law_items = tuple(
-            item for item in manifest.provides.get("providers", ()) if item.kind == "actuator_law"
-        )
+        adapter_items = manifest.items_for(face=Face.PROVIDERS, kind="adapter")
+        robot_items = manifest.items_for(face=Face.PROVIDERS, kind="robot")
+        scene_items = manifest.items_for(face=Face.PROVIDERS, kind="scene")
+        law_items = manifest.items_for(face=Face.PROVIDERS, kind="actuator_law")
         # Importing any pack module can register through ``unigym.pack_api``,
         # not only modules pulled in by their own provider kind: a scene item
         # import may register an adapter or robot.  Snapshot every registry
@@ -1095,7 +1250,7 @@ class PackRuntime:
 
         try:
             if entrypoint is not None:
-                context = PackContext(pack=pack, root=manifest.root, runtime=self)
+                context = PackContext(pack=pack, root=manifest.root, _loader=self)
                 python_dir = _import_boundary(manifest, entrypoint)
                 _add_to_sys_path(python_dir)
                 target = _resolve_entrypoint(entrypoint)
@@ -1171,27 +1326,28 @@ class PackRuntime:
         return handle
 
     def activate_all(self) -> tuple[ActivationHandle, ...]:
-        """Activate every catalog pack in catalog order and return the handles.
+        """Activate every pack in pack-set order and return the handles.
 
         Repeated calls return the same cached handles because each pack is
-        activated at most once per runtime.
+        activated at most once per loader.
 
         Raises:
             PackError: Any pack fails to activate.
         """
-        return tuple(self.activate(pack) for pack in self.catalog.packs())
+        return tuple(self.activate(pack.name) for pack in self._pack_set.packs())
 
 
 @dataclass(frozen=True)
 class AssetContext:
     """The explicit asset-path handle render and template code receives.
 
-    It carries the runtime that owns asset resolution, so a consumer never
-    infers a global asset face.  :meth:`resolve` delegates to
-    :meth:`PackRuntime.asset_path` and owns no second resolution rule.
+    It is a one-line wrapper over the :class:`PackLoader` that owns asset
+    resolution, so a consumer never infers a global asset face.  :meth:`resolve`
+    delegates to :meth:`PackLoader.asset_path` and owns no second resolution
+    rule.
     """
 
-    runtime: PackRuntime
+    runtime: PackLoader
 
     def resolve(self, value: str) -> str:
         """Resolve *value* to an absolute asset path string."""
@@ -1340,40 +1496,14 @@ def _configured_roots(
     return roots, labels, entry_names
 
 
-def discover(
+def _discover_loader(
+    loader_cls: type[PackLoader],
     roots: Iterable[str | Path] | None = None,
     *,
     config_path: str | Path | None = None,
     entry_points: bool = False,
-) -> PackRuntime:
-    """Discover packs from explicit roots or the configured sources.
-
-    A non-``None`` *roots* iterable is authoritative: only those roots are
-    read, in order, and configured sources are ignored.  ``discover([])`` is
-    therefore an explicit empty discovery.
-
-    ``roots=None`` reads, in order, the ``UNIGYM_PACKS`` entries, the
-    ``packs:`` entries of the local overlay (``<repo>/unigym.local.yaml`` by
-    default), installed ``unigym.packs`` entry points when *entry_points* is
-    true, and the sorted ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
-
-    *config_path* overrides the local-overlay path for embedding and tests;
-    ``None`` keeps the repository overlay.
-
-    *entry_points* is an explicit opt-in that only affects configured
-    discovery.  Passing it with explicit roots is a teaching error rather than
-    a silent ignore.  Resolving an entry point loads and may import the target;
-    default discovery never reads installed entry points.
-
-    Canonical duplicate roots are visited once.  Every root must carry a valid
-    ``unigym.pack.yaml``; duplicate pack names fail.  Default discovery reads
-    manifests only and never imports pack Python.
-
-    Raises:
-        PackError: A configured declaration is malformed, a root has no valid
-            manifest, two roots name the same pack, or *entry_points* is
-            combined with explicit roots.
-    """
+) -> PackLoader:
+    """Build one loader from explicit roots or the configured sources."""
     if roots is not None and entry_points:
         raise PackError(
             "discover(entry_points=True) only extends configured discovery; "
@@ -1414,12 +1544,104 @@ def discover(
         root_by_pack[manifest.name] = manifest.root
         origin_by_pack[manifest.name] = label
         manifests.append(with_pack_origin(manifest, pack_origin(manifest, label)))
-    validate_unique(manifests, origin_by_pack)
-    return PackRuntime(
-        catalog=PackCatalog(tuple(manifests)),
+    return loader_cls(
+        PackSet(tuple(manifests)),
         root_by_pack=root_by_pack,
         origins=origin_by_pack,
     )
 
 
-__all__ = ["ActivationHandle", "AssetContext", "PackContext", "PackRuntime", "discover"]
+def discover(
+    roots: Iterable[str | Path] | None = None,
+    *,
+    config_path: str | Path | None = None,
+    entry_points: bool = False,
+) -> PackLoader:
+    """Discover packs from explicit roots or the configured sources.
+
+    A non-``None`` *roots* iterable is authoritative: only those roots are
+    read, in order, and configured sources are ignored.  ``discover([])`` is
+    therefore an explicit empty discovery.
+
+    ``roots=None`` reads, in order, the ``UNIGYM_PACKS`` entries, the
+    ``packs:`` entries of the local overlay (``<repo>/unigym.local.yaml`` by
+    default), installed ``unigym.packs`` entry points when *entry_points* is
+    true, and the sorted ``<UNIGYM_DEPS_ROOT>/unigym_packs/*`` directories.
+
+    *config_path* overrides the local-overlay path for embedding and tests;
+    ``None`` keeps the repository overlay.
+
+    *entry_points* is an explicit opt-in that only affects configured
+    discovery.  Passing it with explicit roots is a teaching error rather than
+    a silent ignore.  Resolving an entry point loads and may import the target;
+    default discovery never reads installed entry points.
+
+    Canonical duplicate roots are visited once.  Every root must carry a valid
+    ``unigym.pack.yaml``; duplicate pack names fail.  Default discovery reads
+    manifests only and never imports pack Python.
+
+    Raises:
+        PackError: A configured declaration is malformed, a root has no valid
+            manifest, two roots name the same pack, or *entry_points* is
+            combined with explicit roots.
+    """
+    return PackLoader.discover(roots, config_path=config_path, entry_points=entry_points)
+
+
+def discover_set(
+    roots: Iterable[str | Path] | None = None,
+    *,
+    config_path: str | Path | None = None,
+    entry_points: bool = False,
+) -> PackSet:
+    """Build the read-only pack set over explicit roots or configured discovery."""
+    return discover(roots, config_path=config_path, entry_points=entry_points).pack_set
+
+
+def installed() -> PackSet:
+    """Enumerate every pack in the configured manifest-only discovery scope.
+
+    Installed ``unigym.packs`` entry points are not resolved here: this scope
+    never imports pack Python.  Use :func:`discover` for an activation-capable
+    loader over the same pack set.
+    """
+    return discover().pack_set
+
+
+def require(*names: str, entry_points: bool = True) -> PackSet:
+    """Return the filtered pack set over exactly *names* in the installed scope.
+
+    Requirement resolution is not performed: each name must be installed in
+    the same configured discovery scope.  A missing name fails before any
+    handle exists and names the installed packs.
+
+    Installed ``unigym.packs`` entry points are resolved by default (the UX
+    for ``pip install``-ed packs such as ``unigym-robots``); pass
+    ``entry_points=False`` for the manifest-only scope :func:`installed`
+    exposes.
+    """
+    invalid = [name for name in names if not isinstance(name, str) or not name]
+    if invalid:
+        raise PackError(f"required pack names must be non-empty strings, got {invalid!r}")
+    full = discover(entry_points=entry_points).pack_set
+    available = {pack.name for pack in full.packs()}
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise PackError(
+            f"pack {missing[0]!r} is not installed in this scope; "
+            f"required/installed packs: {sorted(available)}"
+        )
+    selected = tuple(pack for pack in full.packs() if pack.name in names)
+    return PackSet(selected)
+
+
+__all__ = [
+    "ActivationHandle",
+    "AssetContext",
+    "PackContext",
+    "PackLoader",
+    "discover",
+    "discover_set",
+    "installed",
+    "require",
+]

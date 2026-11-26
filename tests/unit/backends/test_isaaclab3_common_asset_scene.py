@@ -23,7 +23,7 @@ from unigym.backends.shared.isaaclab3_common.asset_scene.inspect import (
 )
 from unigym.contacts.base import ENV_PREFIX_SENTINEL
 from unigym.core.quat import to_isaaclab_cfg, to_xyzw
-from unigym.packs.runtime import AssetContext, discover
+from unigym.packs.loader import AssetContext, discover
 from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
 from unigym.scenes.engine import SceneEngine
 from unigym.scenes.scene_ir import AssetInstance, Instance, Pose, Scene
