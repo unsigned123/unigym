@@ -22,8 +22,8 @@ from unigym.adapters import (
     snapshot_adapter_registry,
 )
 from unigym.pack_api import (
-    ActivationHandle,
     Face,
+    ItemStatus,
     Pack,
     PackItem,
     PackLoader,
@@ -114,6 +114,13 @@ def _manifest(
     return document
 
 
+def _scene_ids(pack, status: ItemStatus) -> tuple[str, ...]:
+    """Derive the old scene-provider handle list from item status and kind."""
+    return tuple(
+        item.id for item in pack.items_for(face=Face.PROVIDERS, kind="scene", status=status)
+    )
+
+
 _PROVIDER_SOURCE = (
     '"""Scene provider activation fixture."""\n\n'
     "from __future__ import annotations\n\n"
@@ -128,13 +135,12 @@ def test_fixture_scene_provider_activation_records_exact_origin_and_schema() -> 
     """The manifest item produces one exact origin and its normalized schema."""
     runtime = discover([CODE_ROOT])
 
-    handle = runtime.activate("acme_code")
+    activated = runtime.activate("acme_code")
 
-    assert handle == ActivationHandle(
-        pack="acme_code",
-        entrypoint="acme_pack:register",
-        scene_providers=("acme_code.table_top",),
-    )
+    assert activated.name == "acme_code"
+    assert activated.entrypoint is not None
+    assert activated.entrypoint.raw == "acme_pack:register"
+    assert _scene_ids(activated, ItemStatus.REGISTERED) == ("acme_code.table_top",)
     assert str(CODE_PYTHON_ROOT) in sys.path
     infos = scene_provider_providers(kind="scene")
     info = next(record for record in infos if record.name == "acme_code.table_top")
@@ -188,9 +194,10 @@ def test_pack_code_only_scene_provider_reports_pack_code_origin(tmp_path: Path) 
     )
     runtime = discover([root])
 
-    handle = runtime.activate("scene_pack_code")
+    activated = runtime.activate("scene_pack_code")
 
-    assert handle.scene_providers == ()
+    assert _scene_ids(activated, ItemStatus.REGISTERED) == ()
+    assert "acme.dynamic" not in {item.id for item in activated.items}
     assert "acme.dynamic" in registered_scene_providers()
     assert scene_provider_origin("acme.dynamic") == ProviderOrigin(
         kind="pack-code",
@@ -385,9 +392,10 @@ def test_matching_pack_code_mirror_is_adopted_with_manifest_provenance(
     )
     runtime = discover([root])
 
-    handle = runtime.activate("scene_pack_mirror")
+    activated = runtime.activate("scene_pack_mirror")
 
-    assert handle.scene_providers == ("acme.table_top",)
+    assert _scene_ids(activated, ItemStatus.ADOPTED) == ("acme.table_top",)
+    assert _scene_ids(activated, ItemStatus.REGISTERED) == ()
     origin = scene_provider_origin("acme.table_top")
     assert origin.kind == "manifest"
     assert origin.item_id == "acme.table_top"

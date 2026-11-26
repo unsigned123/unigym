@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.pack_api import ActivationHandle, PackContext, PackLoader, discover
+from unigym.pack_api import Face, ItemStatus, PackContext, PackLoader, discover
 from unigym.packs import PackError
 
 PACKS_ROOT = Path(__file__).resolve().parents[1] / "_support" / "packs"
@@ -63,6 +63,15 @@ def _isolate_scene_providers():
     snapshot = snapshot_scene_providers()
     yield
     restore_scene_providers(snapshot)
+
+
+def _provider_ids(
+    pack,
+    kind: str,
+    status: ItemStatus = ItemStatus.REGISTERED,
+) -> tuple[str, ...]:
+    """Derive the old activation handle lists from item status and kind."""
+    return tuple(item.id for item in pack.items_for(face=Face.PROVIDERS, kind=kind, status=status))
 
 
 def _spy_entrypoint(monkeypatch: pytest.MonkeyPatch) -> list[object]:
@@ -197,13 +206,12 @@ def test_code_activation_imports_and_calls_entrypoint(
     contexts = _spy_entrypoint(monkeypatch)
     runtime = discover([CODE_ROOT])
 
-    handle = runtime.activate("acme_code")
+    activated = runtime.activate("acme_code")
 
-    assert handle == ActivationHandle(
-        pack="acme_code",
-        entrypoint="acme_pack:register",
-        scene_providers=("acme_code.table_top",),
-    )
+    assert activated.name == "acme_code"
+    assert activated.entrypoint is not None
+    assert activated.entrypoint.raw == "acme_pack:register"
+    assert _provider_ids(activated, "scene") == ("acme_code.table_top",)
     assert len(contexts) == 1
     context = contexts[0]
     assert isinstance(context, PackContext)
@@ -231,21 +239,24 @@ def test_activation_context_resolves_resources_inside_the_pack(
 def test_fixture_code_entrypoint_accepts_a_pack_context() -> None:
     runtime = discover([CODE_ROOT])
 
-    handle = runtime.activate("acme_code")
+    activated = runtime.activate("acme_code")
 
-    assert handle == ActivationHandle(
-        pack="acme_code",
-        entrypoint="acme_pack:register",
-        scene_providers=("acme_code.table_top",),
-    )
+    assert activated.name == "acme_code"
+    assert activated.entrypoint is not None
+    assert activated.entrypoint.raw == "acme_pack:register"
+    assert _provider_ids(activated, "scene") == ("acme_code.table_top",)
 
 
 def test_content_activation_is_a_noop() -> None:
     runtime = discover([CONTENT_ROOT])
 
-    handle = runtime.activate("acme_content")
+    assert runtime.is_activated("acme_content") is False
+    activated = runtime.activate("acme_content")
 
-    assert handle == ActivationHandle(pack="acme_content", entrypoint=None)
+    assert runtime.is_activated("acme_content") is True
+    assert activated.name == "acme_content"
+    assert activated.entrypoint is None
+    assert all(item.status is ItemStatus.DECLARED for item in activated.items)
     assert "acme_pack" not in sys.modules
 
 
@@ -271,7 +282,7 @@ def test_activation_failure_wraps_pack_and_entrypoint(tmp_path: Path) -> None:
     assert isinstance(info.value.__cause__, RuntimeError)
 
 
-def test_repeated_activation_returns_the_cached_handle(
+def test_repeated_activation_returns_the_cached_activated_pack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _spy_entrypoint(monkeypatch)
@@ -293,7 +304,7 @@ def test_activate_all_activates_catalog_order_and_is_idempotent(
     first = runtime.activate_all()
     second = runtime.activate_all()
 
-    assert [handle.pack for handle in first] == ["acme_content", "acme_code"]
+    assert [pack.name for pack in first] == ["acme_content", "acme_code"]
     assert first == second
     assert all(earlier is later for earlier, later in zip(first, second, strict=True))
     assert len(calls) == 1
@@ -415,11 +426,11 @@ def test_manifest_robot_provider_registers_a_factory(tmp_path: Path) -> None:
     )
 
     runtime = discover([root])
-    handle = runtime.activate("robot_pack")
+    activated = runtime.activate("robot_pack")
 
     from unigym.robots import ROBOT_REGISTRY, build_robot_profile
 
-    assert handle.robots == ("acme.arm",)
+    assert _provider_ids(activated, "robot") == ("acme.arm",)
     assert "acme.arm" in ROBOT_REGISTRY
     assert build_robot_profile({"name": "acme.arm"}).name == "acme.arm"
 
@@ -440,11 +451,11 @@ def test_manifest_robot_resource_registers_without_pack_python(tmp_path: Path) -
     assert not (root / "python").exists()
     runtime = discover([root])
 
-    handle = runtime.activate("robot_resource")
+    activated = runtime.activate("robot_resource")
 
     from unigym.robots import ROBOT_REGISTRY, build_robot_profile
 
-    assert handle.robots == ("acme.arm",)
+    assert _provider_ids(activated, "robot") == ("acme.arm",)
     assert "acme.arm" in ROBOT_REGISTRY
     profile = build_robot_profile({"name": "acme.arm"})
     assert profile.name == "acme.arm"
@@ -573,11 +584,11 @@ def test_manifest_robot_mixed_resources_and_entrypoints_register_in_order(
     _write_robot_resource(root, "robots/acme_legs.yaml", name="acme.legs")
     runtime = discover([root])
 
-    handle = runtime.activate("robot_mixed_success")
+    activated = runtime.activate("robot_mixed_success")
 
     from unigym.robots import ROBOT_REGISTRY, build_robot_profile
 
-    assert handle.robots == ("acme.legs", "acme.arm")
+    assert _provider_ids(activated, "robot") == ("acme.legs", "acme.arm")
     assert "acme.legs" in ROBOT_REGISTRY
     assert "acme.arm" in ROBOT_REGISTRY
     assert build_robot_profile({"name": "acme.legs"}).name == "acme.legs"
@@ -789,8 +800,10 @@ def test_entrypoint_registered_robot_rolls_back_on_robot_provider_failure(
     assert "already registered" not in str(second.value)
 
 
-def test_entrypoint_registered_robot_does_not_appear_in_the_handle(tmp_path: Path) -> None:
-    """handle.robots records manifest kind: robot ids only, in declaration order."""
+def test_entrypoint_registered_robot_does_not_appear_in_the_activated_pack(
+    tmp_path: Path,
+) -> None:
+    """Pack items record manifest kind: robot ids only, in declaration order."""
     source = _ROBOT_SOURCE + (
         "\n\nfrom unigym.pack_api import register_robot\n"
         "from unigym.robots.base import RobotProfile\n\n\n"
@@ -821,9 +834,10 @@ def test_entrypoint_registered_robot_does_not_appear_in_the_handle(tmp_path: Pat
     )
     runtime = discover([root])
 
-    handle = runtime.activate("robot_handle")
+    activated = runtime.activate("robot_handle")
 
-    assert handle.robots == ("acme.arm",)
+    assert _provider_ids(activated, "robot") == ("acme.arm",)
+    assert "acme.dynamic" not in {item.id for item in activated.items}
 
     from unigym.robots import ROBOT_REGISTRY
 
@@ -880,11 +894,11 @@ def test_manifest_scene_provider_registers_and_reports_the_handle(tmp_path: Path
     )
     runtime = discover([root])
 
-    handle = runtime.activate("scene_pack")
+    activated = runtime.activate("scene_pack")
 
     from unigym.scenes.providers import build_scene_from_provider, registered_scene_providers
 
-    assert handle.scene_providers == ("acme.table_top",)
+    assert _provider_ids(activated, "scene") == ("acme.table_top",)
     assert "acme.table_top" in registered_scene_providers()
     assert build_scene_from_provider("acme.table_top", {}).name == "tabletop"
 

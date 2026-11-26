@@ -696,7 +696,6 @@ def test_pack_set_and_manifest_are_immutable(tmp_path: Path) -> None:
 
 def test_public_pack_api_exports() -> None:
     expected = {
-        "ActivationHandle",
         "ActuatorLawDescriptor",
         "AssetContext",
         "BackendRegistrationPolicy",

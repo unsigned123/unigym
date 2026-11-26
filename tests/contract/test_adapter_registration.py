@@ -23,7 +23,7 @@ from unigym.adapters import (
     restore_adapter_registry,
     snapshot_adapter_registry,
 )
-from unigym.pack_api import discover
+from unigym.pack_api import Face, ItemStatus, discover
 from unigym.packs import PackError
 from unigym.provenance import ProviderOrigin
 from unigym.robots import ROBOT_REGISTRY, restore_robot_registry, snapshot_robot_registry
@@ -153,10 +153,16 @@ def test_manifest_adapter_provider_registers_under_item_id(tmp_path: Path) -> No
     )
 
     runtime = discover([root])
-    handles = runtime.activate_all()
+    activated = runtime.activate_all()
     runtime.activate_all()
 
-    assert handles[0].adapters == ("acme.static",)
+    adapters = tuple(
+        item.id
+        for item in activated[0].items_for(
+            face=Face.PROVIDERS, kind="adapter", status=ItemStatus.REGISTERED
+        )
+    )
+    assert adapters == ("acme.static",)
     registered = ADAPTER_REGISTRY["acme.static"]
     assert issubclass(registered, Adapter)
     adapter = build_adapter({"name": "acme.static"}, num_envs=1, device="cpu")

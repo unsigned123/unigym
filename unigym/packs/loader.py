@@ -7,7 +7,7 @@ owns the pure :class:`~unigym.packs.packset.PackSet`, each pack's root and the
 per-pack activation cache.  Resources resolve under their own pack root.
 A code pack activates through normal Python: its ``python/`` directory is the
 explicit import boundary, the manifest entrypoint is imported and called with
-one :class:`PackContext`, and the handle is cached per loader.
+one :class:`PackContext`, and the activated Pack snapshot is cached per loader.
 
 This is the only pack loader.  There is no implicit repository mount, no
 mount order and no separate code loader.  The declaration/index model lives in
@@ -22,7 +22,7 @@ import importlib.metadata
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -39,6 +39,7 @@ from .schema import (
     PROVIDER_ID_RE,
     EntrypointLocator,
     Face,
+    ItemStatus,
     Pack,
     PackItem,
     ResourceLocator,
@@ -89,28 +90,34 @@ class PackContext:
         return self._loader.resource(self.pack, rel)
 
 
-@dataclass(frozen=True)
-class ActivationHandle:
-    """The cached result of activating one pack.
+_REGISTERED_PROVIDER_KINDS = frozenset({"adapter", "robot", "scene", "actuator_law"})
 
-    ``entrypoint`` is the manifest-level entrypoint (``None`` for a content
-    pack or a code pack that declares none).  ``adapters`` names the manifest
-    ``kind: adapter`` items this activation registered, in declaration order.
-    ``robots`` names the manifest ``kind: robot`` items this activation
-    registered, in declaration order; robots registered by the manifest-level
-    entrypoint itself are not recorded here.  ``scene_providers`` names the
-    manifest ``kind: scene`` items this activation registered or adopted from
-    a pack-code mirror, in declaration order.  Manifest providers are still
-    activated when the manifest-level entrypoint is absent; this handle caches
-    the whole activation, not one entrypoint.
+
+def _activated_item_status(item: PackItem, adopted_scene_ids: frozenset[str]) -> ItemStatus:
+    """Return the post-activation status of one declared item.
+
+    Data faces stay declared because they resolve on demand.  Registered
+    provider kinds report ``REGISTERED``; a scene provider that adopted an
+    identical pack-code registration reports ``ADOPTED``.  Actuator
+    implementations, asset generators and unknown provider kinds are not
+    executed by activation and therefore report ``INERT``.
     """
+    if item.face is not Face.PROVIDERS:
+        return ItemStatus.DECLARED
+    if item.kind == "scene" and item.id in adopted_scene_ids:
+        return ItemStatus.ADOPTED
+    if item.kind in _REGISTERED_PROVIDER_KINDS:
+        return ItemStatus.REGISTERED
+    return ItemStatus.INERT
 
-    pack: str
-    entrypoint: str | None
-    adapters: tuple[str, ...] = ()
-    robots: tuple[str, ...] = ()
-    scene_providers: tuple[str, ...] = ()
-    actuator_laws: tuple[str, ...] = ()
+
+def _activated_pack(manifest: Pack, adopted_scene_ids: frozenset[str]) -> Pack:
+    """Build the immutable activated snapshot for *manifest*."""
+    items = tuple(
+        replace(item, status=_activated_item_status(item, adopted_scene_ids))
+        for item in manifest.items
+    )
+    return replace(manifest, items=items)
 
 
 def _pack_entrypoint(manifest: Pack) -> str | None:
@@ -814,7 +821,7 @@ class PackLoader:
         self._pack_set = pack_set
         self._root_by_pack: Mapping[str, Path] = MappingProxyType(roots)
         self._origins: Mapping[str, str] = MappingProxyType(labels)
-        self._handles: dict[str, ActivationHandle] = {}
+        self._activated: dict[str, Pack] = {}
 
     @classmethod
     def discover(
@@ -1093,40 +1100,47 @@ class PackLoader:
     def is_activated(self, pack: str) -> bool:
         """Whether :meth:`activate` already completed for *pack*."""
         self._pack_set.pack(pack)
-        return pack in self._handles
+        return pack in self._activated
 
-    def activate(self, pack: str) -> ActivationHandle:
-        """Activate *pack* once and return the cached handle.
+    def activate(self, pack: str) -> Pack:
+        """Activate *pack* once and return its cached activated snapshot.
 
         A manifest-level entrypoint is imported normally and called with
         exactly one :class:`PackContext` argument; there is no zero-argument
         fallback.  After it (or without it), ``providers`` items with
-        ``kind: adapter`` are imported and registered under their item id,
-        then ``kind: robot`` items are registered through the robot registry,
-        then ``kind: scene`` items are registered through the scene-provider
+        ``kind: actuator_law`` are loaded and registered, then ``kind:
+        adapter`` items are imported and registered under their item id, then
+        ``kind: robot`` items are registered through the robot registry, then
+        ``kind: scene`` items are registered through the scene-provider
         registry.  A robot item is either an entrypoint factory or a resource
         pointing at one ``unigym.robot/1`` document; a resource-only robot list
         needs no ``python/`` directory and never mutates ``sys.path``, while a
         mixed list takes its import boundary from the first entrypoint item.
         Scene provider items are entrypoint-only; their manifest ``params``
         schema is authoritative and must not drift from a pack-code mirror.
-        Every item set is validated before any registration.  Other provider
-        kinds stay inert.  Any imported pack module can register through
+        Every item set is validated before any registration.  Actuator
+        implementations, asset generators and unknown provider kinds stay
+        inert.  Any imported pack module can register through
         ``unigym.pack_api`` at import time, regardless of the kind that pulled
         it in, so the adapter, robot, scene-provider, content-filler,
-        prop-template and termination registries are all snapshotted before
-        the first import or provider registration.  Failures are wrapped with
-        the pack, item id and locator named; a failed activation restores all
-        of those registries to their prior contents, including names and
-        origins pack code registered itself.  Manifest provider items write
-        exact ``kind="manifest"`` origins; names a pack registered itself
-        during this activation window are labeled ``kind="pack-code"`` with
-        ``item_id=None``.
+        prop-template, termination, actuator-law and initializer registries are
+        all snapshotted before the first import or provider registration.
+        Failures are wrapped with the pack, item id and locator named; a
+        failed activation restores all of those registries to their prior
+        contents, including names and origins pack code registered itself.
+        Manifest provider items write exact ``kind="manifest"`` origins; names
+        a pack registered itself during this activation window are labeled
+        ``kind="pack-code"`` with ``item_id=None``.
+
+        The returned :class:`Pack` is a new immutable snapshot whose
+        :class:`~unigym.packs.schema.PackItem` statuses carry the activation
+        outcome.  Repeated calls return the same object from the per-pack
+        cache; a failed activation caches nothing.
 
         Raises:
             PackError: The pack is unknown or activation failed.
         """
-        cached = self._handles.get(pack)
+        cached = self._activated.get(pack)
         if cached is not None:
             return cached
 
@@ -1267,14 +1281,10 @@ class PackLoader:
             if law_items:
                 from unigym.packs.actuators import activate_actuator_law_providers
 
-                actuator_laws = activate_actuator_law_providers(manifest, self)
-            else:
-                actuator_laws = ()
-            adapters = _activate_adapter_providers(manifest, self)
-            robots = _activate_robot_providers(manifest, self)
-            scene_providers = _activate_scene_provider_providers(
-                manifest, self, window_names=window_names
-            )
+                activate_actuator_law_providers(manifest, self)
+            _activate_adapter_providers(manifest, self)
+            _activate_robot_providers(manifest, self)
+            _activate_scene_provider_providers(manifest, self, window_names=window_names)
             if adapters_before is not None:
                 _attribute_pack_code_adapters(manifest, self, adapters_before)
             if robots_before is not None:
@@ -1314,21 +1324,15 @@ class PackLoader:
                 f"pack {pack!r} entrypoint {entrypoint!r} failed to activate: {err}"
             ) from err
 
-        handle = ActivationHandle(
-            pack=pack,
-            entrypoint=entrypoint,
-            adapters=adapters,
-            robots=robots,
-            scene_providers=scene_providers,
-            actuator_laws=actuator_laws,
-        )
-        self._handles[pack] = handle
-        return handle
+        adopted_scene_ids = frozenset(item.id for item in scene_items if item.id in window_names)
+        activated = _activated_pack(manifest, adopted_scene_ids)
+        self._activated[pack] = activated
+        return activated
 
-    def activate_all(self) -> tuple[ActivationHandle, ...]:
-        """Activate every pack in pack-set order and return the handles.
+    def activate_all(self) -> tuple[Pack, ...]:
+        """Activate every pack in pack-set order and return activated snapshots.
 
-        Repeated calls return the same cached handles because each pack is
+        Repeated calls return the same cached objects because each pack is
         activated at most once per loader.
 
         Raises:
@@ -1613,7 +1617,7 @@ def require(*names: str, entry_points: bool = True) -> PackSet:
 
     Requirement resolution is not performed: each name must be installed in
     the same configured discovery scope.  A missing name fails before any
-    handle exists and names the installed packs.
+    activation occurs and names the installed packs.
 
     Installed ``unigym.packs`` entry points are resolved by default (the UX
     for ``pip install``-ed packs such as ``unigym-robots``); pass
@@ -1636,7 +1640,6 @@ def require(*names: str, entry_points: bool = True) -> PackSet:
 
 
 __all__ = [
-    "ActivationHandle",
     "AssetContext",
     "PackContext",
     "PackLoader",

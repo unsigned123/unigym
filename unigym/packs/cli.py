@@ -175,11 +175,13 @@ def _doctor_one(manifest: Pack, loader: PackLoader) -> tuple[list[str], int]:
         lines.append(f"       {row}")
 
     try:
-        handle = loader.activate(manifest.name)
+        activated = loader.activate(manifest.name)
     except PackError as err:
         check("activation", False, str(err))
     else:
-        detail = "no manifest entrypoint" if handle.entrypoint is None else handle.entrypoint
+        detail = (
+            "no manifest entrypoint" if activated.entrypoint is None else activated.entrypoint.raw
+        )
         check("activation", True, detail)
     return lines, fails
 

@@ -22,7 +22,7 @@ from unigym.actuators.implementations import (
 from unigym.packs.actuators import materialize_actuator_implementations
 from unigym.packs import PackError
 from unigym.packs.loader import discover
-from unigym.packs.schema import load_manifest_v1
+from unigym.packs.schema import Face, ItemStatus, load_manifest_v1
 from unigym.registration import (
     RegistrationPhase,
     enter_phase,
@@ -154,9 +154,22 @@ def test_manifest_rejects_bad_actuator_item_shapes(tmp_path: Path) -> None:
 def test_activation_registers_law_and_leaves_implementation_inert() -> None:
     enter_phase(RegistrationPhase.ACTIVATE)
     runtime = discover([_FIXTURE])
-    handle = runtime.activate("acme_actuators")
+    activated = runtime.activate("acme_actuators")
 
-    assert handle.actuator_laws == ("acme.compliant_pd",)
+    laws = tuple(
+        item.id
+        for item in activated.items_for(
+            face=Face.PROVIDERS, kind="actuator_law", status=ItemStatus.REGISTERED
+        )
+    )
+    implementations = tuple(
+        item.id
+        for item in activated.items_for(
+            face=Face.PROVIDERS, kind="actuator_implementation", status=ItemStatus.INERT
+        )
+    )
+    assert laws == ("acme.compliant_pd",)
+    assert implementations == ("acme.compliant_pd.mujoco",)
     descriptor = ACTUATOR_LAW_REGISTRY["acme.compliant_pd"]
     assert descriptor.requires_implementation
     assert descriptor.gain_keys == frozenset({"kp", "kd"})

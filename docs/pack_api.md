@@ -41,7 +41,6 @@ The pack contract is exported from `unigym.pack_api`:
 
 ```python
 from unigym.pack_api import (
-    ActivationHandle,
     ActuatorLawDescriptor,
     AssetContext,
     AssetResourceRef,
@@ -1025,11 +1024,12 @@ authoritative name -> factory mapping; origins live in a private side table:
 
 
 Manifest robot providers are processed after the pack-level entrypoint and
-after adapter providers (or without a pack-level entrypoint). The activation
-handle's `robots` field records the manifest `kind: robot` item ids in
+after adapter providers (or without a pack-level entrypoint). The activated
+`Pack` records the manifest `kind: robot` items with `status=REGISTERED` in
 declaration order; robots registered by the manifest-level entrypoint itself
-are not recorded. A failed activation restores the robot registry exactly on
-both failure branches, including entrypoint-registered robots.
+are pack-code names and have no `PackItem`. A failed activation restores the
+robot registry exactly on both failure branches, including entrypoint-registered
+robots.
 
 ### Asset CLI and selection (Phase 7b-3)
 
@@ -1430,21 +1430,30 @@ and it does not inspect the caller's frame.
 
 ### Activation
 
-`runtime.activate(pack)` is explicit and cached per runtime:
+`runtime.activate(pack)` is explicit and cached per runtime. It returns a new
+immutable `Pack` snapshot whose `PackItem.status` values carry the outcome:
 
-- a content pack, or a code pack with no manifest entrypoint and no adapter or
-  robot providers, returns a no-op `ActivationHandle(pack=..., entrypoint=None)`;
+- data faces (`runs`, `assets`, `scene_presets`, `props`, `terminations`,
+  `selection`) remain `DECLARED`;
+- `kind: adapter`, `kind: robot`, `kind: scene` and `kind: actuator_law`
+  providers become `REGISTERED`;
+- a `kind: scene` provider that adopts an identical pack-code registration
+  becomes `ADOPTED`;
+- `kind: actuator_implementation`, asset generators and unknown provider kinds
+  become `INERT`; they are not executed by activation;
+- a content pack, or a code pack with no manifest entrypoint and no providers,
+  returns an activated snapshot with all items still `DECLARED`;
 - a code pack's `entrypoint` is split into `module:attribute`, imported with
   normal `importlib`, and called with one `PackContext` argument;
-- after the manifest entrypoint (or without it), manifest `kind: adapter` items
-  are imported and registered, then `kind: robot` items are registered, then
-  `kind: scene` items are registered. A robot
-  item is entrypoint-backed or resource-backed; a resource-only robot list
-  needs no `python/` directory and never mutates `sys.path`, while a mixed list
-  adds the first entrypoint item's `python/` boundary. All robot items are
-  loaded and validated before registration. Scene provider items are
-  entrypoint-only; all of them are validated before any registration and a
-  manifest/code schema drift is an activation error;
+- after the manifest entrypoint (or without it), manifest `kind: actuator_law`
+  items are loaded and registered, then `kind: adapter` items, then
+  `kind: robot` items, then `kind: scene` items. A robot item is
+  entrypoint-backed or resource-backed; a resource-only robot list needs no
+  `python/` directory and never mutates `sys.path`, while a mixed list adds the
+  first entrypoint item's `python/` boundary. All robot items are loaded and
+  validated before registration. Scene provider items are entrypoint-only; all
+  of them are validated before any registration and a manifest/code schema
+  drift is an activation error;
 - there is no zero-argument fallback: a legacy `register()` entrypoint fails
   to activate and is not supported;
 - the pack root's `python/` directory is the explicit import boundary. It is
@@ -1452,22 +1461,25 @@ and it does not inspect the caller's frame.
   may import its own submodules later;
 - there is no AST restriction, custom module loader or sandbox. `trust: code`
   means trusted Python that may import `unigym.pack_api`;
-- repeated activation returns the same cached handle and does not re-execute
-  the entrypoint;
+- repeated activation returns the same cached `Pack` object and does not
+  re-execute the entrypoint; `runtime.is_activated(name)` answers whether
+  activation completed, including for a data-only pack;
 - an activation failure raises `PackError` naming the pack and entrypoint,
-  with the original exception as its cause.
+  with the original exception as its cause, restores every registry value and
+  origin, and caches nothing (`FAILED` is never a stored item status), so a
+  retry sees a clean registry.
 
 `runtime.activate_all()` activates every catalog pack in catalog order and
-returns a `tuple[ActivationHandle, ...]`. It uses the same per-runtime cache,
-so a repeated call returns the same handles without re-running an entrypoint.
-Content packs remain no-ops.
+returns a `tuple[Pack, ...]`. It uses the same per-runtime cache, so a repeated
+call returns the same activated objects without re-running an entrypoint.
 
 ### Scene provider activation and provenance
 
 Manifest `kind: scene` items are the declarable scene-provider face. Activation
 imports each item entrypoint through the pack `python/` boundary and registers
-the target under the item id (`ActivationHandle.scene_providers` records the
-item ids in declaration order). Validation happens before any registration:
+the target under the item id (the activated `Pack` records those items with
+`status=REGISTERED`, or `status=ADOPTED` for a pack-code mirror, in declaration
+order). Validation happens before any registration:
 the entrypoint resolves, the target is a documented callable and not a `Scene`
 instance, the id is a free adapter-grammar name, and the inline parameter
 schema is valid. A later invalid item leaves no earlier scene provider
@@ -1556,10 +1568,10 @@ Registration is process-global because the adapter registry is global.
 non-`Adapter` class and a duplicate name; a duplicate error names the class
 already registered under that name. One class owns exactly one adapter name:
 registering the same class under a second name is rejected as an alias.
-Activation is idempotent per runtime through `ActivationHandle`, whose
-`adapters` field records the manifest adapter ids that activation registered.
-A dynamic registration and a manifest registration for the same name still
-fail loudly on the second registration.
+Activation is idempotent per runtime. The activated `Pack` records manifest
+`kind: adapter` items with `status=REGISTERED`, in declaration order. A dynamic
+registration and a manifest registration for the same name still fail loudly on
+the second registration.
 
 Adapter registry provenance uses the same side-table model as robots:
 
