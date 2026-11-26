@@ -18,6 +18,8 @@ modules and names. There is no compatibility shim.
   `PackItem.resource`/`.entrypoint`/`.id` remain read-only projections over the
   stored locator and name.
 - `unigym.pack_api` and `unigym.packs` export none of the removed names.
+- Added the packaged `unigym.examples.manual_driver` quickstart: run it with
+  `python -m unigym.examples.manual_driver`; the tiny MJCF ships as package data.
 
 ## 0.109.0
 

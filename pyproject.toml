@@ -9,6 +9,25 @@ description = "Multi-backend robot simulation and evaluation framework"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "UniGym contributors"}]
+keywords = [
+    "robotics",
+    "simulation",
+    "MuJoCo",
+    "Isaac Lab",
+    "humanoid",
+    "reinforcement learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26,<3",
@@ -21,6 +40,8 @@ dependencies = [
 Homepage = "https://github.com/unsigned123/unigym"
 Repository = "https://github.com/unsigned123/unigym"
 Issues = "https://github.com/unsigned123/unigym/issues"
+Documentation = "https://github.com/unsigned123/unigym/tree/main/docs"
+Changelog = "https://github.com/unsigned123/unigym/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 daemon = [
@@ -317,6 +338,7 @@ include = ["unigym*"]
 [tool.setuptools.package-data]
 "unigym" = ["py.typed"]
 "unigym.assets" = ["worlds/*.xml"]
+"unigym.examples" = ["*.xml"]
 "unigym.webui" = ["*.html", "assets/*"]
 "unigym.props" = ["*.urdf"]
 
