@@ -211,7 +211,11 @@ _COMMANDS: dict[str, tuple[str, str, str]] = {
         "add_doctor_subparser",
         "health check / env discovery / local-overlay writer",
     ),
-    "pack": ("unigym.packs.cli", "add_pack_subparser", "pack registry: list / doctor / path"),
+    "pack": (
+        "unigym.packs.cli",
+        "add_pack_subparser",
+        "pack registry: list / show / path / doctor",
+    ),
     "asset": (
         "unigym.commands.asset_cli",
         "add_asset_subparser",

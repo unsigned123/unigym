@@ -1741,12 +1741,32 @@ Requirement (`requires`) resolution and attribute sugar are not implemented.
   `activation_entrypoint`, `location_imported`). The rows are a projection of
   `discover(entry_points=True).pack_set`; the CLI owns no second
   discovery or provenance path;
+- `pack show <name> [--json]` prints one pack's complete declaration
+  inventory: name, version, api, trust, root, entrypoint, `requires`, per-face
+  counts, and every declared item in `MANIFEST_FACES` order with its id, kind,
+  resource or entrypoint, params, status and manifest origin. The default does
+  not activate pack code: it reads manifests only through discovery, and
+  entry-point discovery may still load or import its declared target before the
+  manifest is read. `--json` emits the `unigym.pack_inventory/1` document with
+  `runtime: null`;
+- `pack show <name> --runtime [--json]` activates the pack once through the
+  loader and adds a `runtime` section grouped by registry
+  (`adapters`, `robots`, `scene_providers`, `scene_content_fillers`,
+  `prop_templates`, `terminations`, `initializers`, `actuator_laws`). Each live
+  record carries its `ProviderRef` origin, so provenance distinguishes
+  `manifest` from `pack-code`; a `pack-code` record has `item_id=None`
+  because the registration call carries no item id. `--runtime` explicitly
+  executes pack code. No `PackItem` is synthesized for a dynamic registration;
 - `pack path <name> [face]` prints the pack root, or for one declared face
   prints each item's absolute resource path or its entrypoint;
-- `pack doctor [--name NAME] [--json]` revalidates the manifest schema,
-  checks `BUILD_MANIFEST.txt` against the live tree and activates the pack
-  through the loader. It performs no legacy mount, api/requires or mount-face
-  checks.
+- `pack doctor [--name NAME] [--strict] [--json]` revalidates the manifest
+  schema, checks `BUILD_MANIFEST.txt` against the live tree and activates the
+  pack through the loader. It performs no legacy mount, api/requires or
+  mount-face checks. `--strict` is opt-in and additionally audits the live
+  registrations activation left behind: it fails on any `pack-code`
+  registration owned by the pack, naming the registry, live name and
+  `item_id=None`, and treats `manifest` origins as declared (not failures).
+  Like `--runtime`, `--strict` activates and may execute pack code.
 
 There is no `repo` pack and no mount table. The CLI fails with the known packs
 or known faces, never with an implicit checkout fallback.

@@ -1,15 +1,22 @@
-"""``unigym pack`` CLI: list, path and doctor over the pack runtime.
+"""``unigym pack`` CLI: list, show, path and doctor over the pack runtime.
 
-The launcher owns the argparse wiring; this module owns the three read-only
+The launcher owns the argparse wiring; this module owns the read-only
 commands.  Everything goes through :func:`unigym.packs.loader.discover`, so
 the CLI sees the same manifests, resources and activation the rest of the
 system uses.  There is no implicit repository pack and no legacy mount table.
 
-``list`` renders the runtime catalog, ``path`` prints a pack root or the
-declared resources/entrypoints of one face, and ``doctor`` revalidates each
-manifest, checks ``BUILD_MANIFEST.txt`` against the live tree and activates
-the pack through the runtime.  Every failure names the legal choices (known
-packs / known faces) so the CLI stays fail-closed and teachable.
+``list`` renders the runtime catalog, ``show`` renders one pack's complete
+declaration inventory (optionally its live registrations), ``path`` prints a
+pack root or the declared resources/entrypoints of one face, and ``doctor``
+revalidates each manifest, checks ``BUILD_MANIFEST.txt`` against the live tree
+and activates the pack through the runtime.  Every failure names the legal
+choices (known packs / known faces) so the CLI stays fail-closed and
+teachable.
+
+Default ``show`` does not activate pack code: it reads manifests only through
+discovery, and entry-point discovery may load or import its declared target
+before the manifest is read.  ``show --runtime`` and ``doctor --strict``
+explicitly activate and may execute pack code.
 """
 
 from __future__ import annotations
@@ -20,13 +27,18 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
+from unigym.provenance import ProviderRef
+
 from . import PackError
+from .inventory import runtime_registrations
 from .loader import PackLoader, discover
 from .schema import (
     FACE_NAMES,
+    MANIFEST_FACES,
     MANIFEST_NAME,
     Face,
     Pack,
+    PackItem,
     ResourceLocator,
     load_manifest_v1,
 )
@@ -85,6 +97,158 @@ def cmd_list(a, extra: list[str] | None = None) -> int:
             f"{row['name']:<16} {row['version']:<9} {row['api']:<4} "
             f"{row['trust']:<8} {_provides_text(row['provides'])} {row['root']}"
         )
+    return 0
+
+
+def _provider_ref_document(ref: ProviderRef) -> dict[str, object]:
+    """JSON projection of one live registry record."""
+    return {
+        "name": ref.name,
+        "kind": ref.kind,
+        "live": ref.live,
+        "origin": asdict(ref.origin),
+    }
+
+
+def _pack_document(pack: Pack) -> dict[str, object]:
+    """JSON projection of the pack-level metadata."""
+    return {
+        "name": pack.name,
+        "version": pack.version,
+        "api": pack.api,
+        "trust": pack.trust,
+        "root": str(pack.root),
+        "entrypoint": None if pack.entrypoint is None else pack.entrypoint.raw,
+        "requires": dict(pack.requires),
+        "face_counts": {face.value: count for face, count in pack.face_counts.items()},
+        "origin": asdict(pack.origin),
+    }
+
+
+def _item_document(item: PackItem) -> dict[str, object]:
+    """JSON projection of one declared item; dynamic items are never minted."""
+    return {
+        "face": item.face.value,
+        "kind": item.kind,
+        "id": item.id,
+        "resource": item.resource,
+        "entrypoint": item.entrypoint,
+        "params": {} if item.params is None else item.params,
+        "status": item.status.value,
+        "origin": asdict(item.origin),
+    }
+
+
+def _runtime_document(
+    registrations: Mapping[str, tuple[ProviderRef, ...]],
+) -> dict[str, object]:
+    """JSON projection of the live registrations attributed to one pack."""
+    return {
+        "activated": True,
+        "registrations": {
+            label: [_provider_ref_document(ref) for ref in records]
+            for label, records in registrations.items()
+        },
+    }
+
+
+def _item_line(item: PackItem) -> str:
+    """One compact text line for a declared item."""
+    parts = [item.id]
+    if item.kind is not None:
+        parts.append(f"kind={item.kind}")
+    if item.resource is not None:
+        parts.append(f"resource={item.resource}")
+    else:
+        parts.append(f"entrypoint={item.entrypoint}")
+    if item.params is not None:
+        parts.append(f"params={json.dumps(item.params, default=dict, sort_keys=True)}")
+    parts.append(f"status={item.status.value}")
+    parts.append(f"origin={item.origin.kind}/{item.origin.item_id or '-'}")
+    return " ".join(parts)
+
+
+def _print_show_text(
+    pack: Pack,
+    registrations: Mapping[str, tuple[ProviderRef, ...]] | None,
+) -> None:
+    """Render the text inventory for one pack."""
+    entrypoint = None if pack.entrypoint is None else pack.entrypoint.raw
+    counts = {face.value: count for face, count in pack.face_counts.items()}
+    print(f"pack: {pack.name}")
+    print(f"version: {pack.version}")
+    print(f"api: {pack.api}")
+    print(f"trust: {pack.trust}")
+    print(f"root: {pack.root}")
+    print(f"entrypoint: {entrypoint or '-'}")
+    print(f"requires: {dict(pack.requires) or '-'}")
+    print(f"faces: {_provides_text(counts)}")
+    print(f"origin: {pack.origin.kind}/{pack.origin.discovered_by or '-'}")
+    for face in MANIFEST_FACES:
+        items = pack.items_for(face=face)
+        if not items:
+            continue
+        print(f"[{face.value}]")
+        for item in items:
+            print(f"  {_item_line(item)}")
+    if registrations is None:
+        return
+    print("[runtime]")
+    if not registrations:
+        print("  none")
+        return
+    for label, records in registrations.items():
+        print(f"  {label}:")
+        for ref in records:
+            print(
+                f"    {ref.name} kind={ref.kind} live={ref.live} "
+                f"origin={ref.origin.kind}/{ref.origin.item_id or '-'}"
+            )
+
+
+def cmd_show(a, extra: list[str] | None = None) -> int:
+    """``unigym pack show <name> [--runtime] [--json]`` -- one pack inventory.
+
+    Without ``--runtime`` this does not activate pack code: it reads manifests
+    only through discovery.  Entry-point discovery may still load or import
+    its declared target before the manifest is read.  With ``--runtime`` it
+    activates the pack once and adds the live registrations whose provenance
+    names this pack.
+    """
+    try:
+        loader = _loader()
+    except PackError as err:
+        print(f"[unigym pack] FAIL discovery: {err}")
+        return 1
+    try:
+        manifest = loader.pack(a.name)
+    except PackError as err:
+        print(f"[unigym pack] {err}")
+        return 1
+
+    registrations: Mapping[str, tuple[ProviderRef, ...]] | None = None
+    if getattr(a, "runtime", False):
+        try:
+            manifest = loader.activate(a.name)
+        except PackError as err:
+            print(f"[unigym pack] {err}")
+            return 1
+        registrations = runtime_registrations(manifest)
+
+    items = [
+        _item_document(item) for face in MANIFEST_FACES for item in manifest.items_for(face=face)
+    ]
+    if getattr(a, "json", False):
+        document = {
+            "schema": "unigym.pack_inventory/1",
+            "ok": True,
+            "pack": _pack_document(manifest),
+            "items": items,
+            "runtime": None if registrations is None else _runtime_document(registrations),
+        }
+        print(json.dumps(document, default=dict))
+        return 0
+    _print_show_text(manifest, registrations)
     return 0
 
 
@@ -158,7 +322,12 @@ def _inventory_diff(root: Path) -> tuple[bool, str, list[str]]:
     return False, detail, mismatches[:_MISMATCH_LIMIT]
 
 
-def _doctor_one(manifest: Pack, loader: PackLoader) -> tuple[list[str], int]:
+def _doctor_one(
+    manifest: Pack,
+    loader: PackLoader,
+    *,
+    strict: bool = False,
+) -> tuple[list[str], int]:
     """Validate one runtime manifest; return ``(report lines, fail count)``."""
     lines: list[str] = []
     fails = 0
@@ -181,20 +350,46 @@ def _doctor_one(manifest: Pack, loader: PackLoader) -> tuple[list[str], int]:
     for row in mismatches:
         lines.append(f"       {row}")
 
+    activation: Pack | None = None
     try:
         activated = loader.activate(manifest.name)
     except PackError as err:
         check("activation", False, str(err))
     else:
+        activation = activated
         detail = (
             "no manifest entrypoint" if activated.entrypoint is None else activated.entrypoint.raw
         )
         check("activation", True, detail)
+
+    if strict and activation is not None:
+        registrations = runtime_registrations(activation)
+        offenders = [
+            (label, ref)
+            for label, records in registrations.items()
+            for ref in records
+            if ref.origin.kind == "pack-code"
+        ]
+        if offenders:
+            check(
+                "strict",
+                False,
+                f"{len(offenders)} undeclared pack-code registration(s)",
+            )
+            for label, ref in offenders:
+                lines.append(f"       {label}: {ref.name} item_id={ref.origin.item_id}")
+        else:
+            check("strict", True, "no undeclared pack-code registrations")
     return lines, fails
 
 
 def cmd_doctor(a, extra: list[str] | None = None) -> int:
-    """``unigym pack doctor [--name NAME]`` -- per-pack runtime validation."""
+    """``unigym pack doctor [--name NAME] [--strict]`` -- runtime validation.
+
+    ``--strict`` additionally audits the live registrations activation left
+    behind: any ``pack-code`` record owned by the pack is an undeclared
+    registration and fails the doctor run.
+    """
     try:
         loader = _loader()
     except PackError as err:
@@ -210,7 +405,7 @@ def cmd_doctor(a, extra: list[str] | None = None) -> int:
     for manifest in loader.pack_set.packs():
         if wanted is not None and manifest.name != wanted:
             continue
-        lines, fails = _doctor_one(manifest, loader)
+        lines, fails = _doctor_one(manifest, loader, strict=getattr(a, "strict", False))
         total += fails
         report.append(
             {
@@ -265,7 +460,7 @@ def cmd_path(a, extra: list[str] | None = None) -> int:
 
 def add_pack_subparser(sub) -> None:
     """Register the ``pack`` command group on the launcher parser."""
-    pack = sub.add_parser("pack", help="pack registry: list / path / doctor")
+    pack = sub.add_parser("pack", help="pack registry: list / show / path / doctor")
     pack_sub = pack.add_subparsers(dest="pack_cmd", required=True)
 
     listing = pack_sub.add_parser(
@@ -276,6 +471,20 @@ def add_pack_subparser(sub) -> None:
     listing.add_argument("--json", action="store_true", help="single JSON document on stdout")
     listing.set_defaults(fn=cmd_list)
 
+    show = pack_sub.add_parser(
+        "show",
+        help="one pack's declaration inventory; --runtime adds live registrations",
+    )
+    show.add_argument("name", help="pack name")
+    show.add_argument(
+        "--runtime",
+        action="store_true",
+        help="activate the pack and include its live registry registrations "
+        "(activation executes pack code)",
+    )
+    show.add_argument("--json", action="store_true", help="single JSON document on stdout")
+    show.set_defaults(fn=cmd_show)
+
     doctor = pack_sub.add_parser(
         "doctor",
         help="validate packs: manifest, BUILD_MANIFEST.txt, runtime activation "
@@ -283,6 +492,13 @@ def add_pack_subparser(sub) -> None:
     )
     doctor.add_argument(
         "--name", default=None, help="only this pack (default: every discovered pack)"
+    )
+    doctor.add_argument(
+        "--strict",
+        action="store_true",
+        help="audit live pack-code registrations after activation: any registry "
+        "record the pack registered for itself fails the check (activation "
+        "executes pack code)",
     )
     doctor.add_argument("--json", action="store_true", help="single JSON document on stdout")
     doctor.set_defaults(fn=cmd_doctor)
@@ -298,4 +514,5 @@ __all__ = [
     "cmd_doctor",
     "cmd_list",
     "cmd_path",
+    "cmd_show",
 ]
