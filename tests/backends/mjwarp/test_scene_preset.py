@@ -20,9 +20,9 @@ from unigym.scenes.scene_ir import Scene
 def _asset_plan():
     """An explicit empty asset boundary (the scene has no asset leaves)."""
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.loader import AssetContext, discover
+    from unigym.packs.loader import discover
 
-    return AssetPlan(AssetContext(discover([])))
+    return AssetPlan(discover([]))
 
 
 @pytest.fixture

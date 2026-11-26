@@ -35,9 +35,9 @@ DYNAMIC_MJCF = """<mujoco model="dynamic_asset">
 def _asset_plan():
     """A real empty asset boundary (absolute fixture paths need no pack)."""
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.loader import AssetContext, discover
+    from unigym.packs.loader import discover
 
-    return AssetPlan(AssetContext(discover([])))
+    return AssetPlan(discover([]))
 
 
 def _write_mjcf(tmp_path: Path, name: str, text: str) -> Path:

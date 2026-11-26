@@ -38,6 +38,7 @@ from unigym.scenes.provider_params import (
 from . import PackError
 from .catalog import validate_unique
 from .schema import (
+    EntrypointLocator,
     Face,
     ItemStatus,
     Pack,
@@ -55,9 +56,28 @@ __all__ = [
 ]
 
 
+def _provider_schema(item: PackItem, *, pack: str) -> Mapping[str, ProviderParamSpec] | None:
+    """Normalize one provider item's manifest parameter declaration."""
+    if item.params is None:
+        return None
+    try:
+        schema = normalize_manifest_params(provider_param_declarations(item.params))
+    except SceneProviderParamError as err:
+        raise PackError(
+            f"pack {pack!r} scene provider id {item.name!r} params are invalid: {err}"
+        ) from err
+    return MappingProxyType(schema)
+
+
 @dataclass(frozen=True)
 class AssetResourceRef:
-    """An inert handle for one resource-backed ``assets`` manifest item."""
+    """An inert handle for one resource-backed ``assets`` manifest item.
+
+    A handle is a flat projection of exactly one stored
+    :class:`~unigym.packs.schema.PackItem`; :meth:`from_item` is the single
+    minting path.  Minting validates the item's face and locator and reads no
+    filesystem.
+    """
 
     pack: str
     pack_version: str
@@ -66,10 +86,38 @@ class AssetResourceRef:
     resource: str
     origin: ProviderOrigin
 
+    @classmethod
+    def from_item(cls, item: PackItem) -> AssetResourceRef:
+        """Project one stored ``assets`` item into its inert handle."""
+        if item.face is not Face.ASSETS:
+            raise PackError(
+                f"pack {item.pack!r} item id {item.name!r} is on face "
+                f"{item.face.value!r}, not 'assets'"
+            )
+        if not isinstance(item.locator, ResourceLocator):
+            raise PackError(
+                f"pack {item.pack!r} asset id {item.name!r} declares entrypoint "
+                f"{item.entrypoint!r}, not a resource; assets are resource-backed"
+            )
+        return cls(
+            pack=item.pack,
+            pack_version=item.origin.pack_version or "",
+            id=item.name,
+            kind=item.kind,
+            resource=item.locator.path,
+            origin=item.origin,
+        )
+
 
 @dataclass(frozen=True)
 class ScenePresetRef:
-    """An inert handle for one ``scene_presets`` manifest resource."""
+    """An inert handle for one ``scene_presets`` manifest resource.
+
+    A handle is a flat projection of exactly one stored
+    :class:`~unigym.packs.schema.PackItem`; :meth:`from_item` is the single
+    minting path.  Minting validates the item's face and locator and reads no
+    filesystem.
+    """
 
     pack: str
     pack_version: str
@@ -77,14 +125,38 @@ class ScenePresetRef:
     resource: str
     origin: ProviderOrigin
 
+    @classmethod
+    def from_item(cls, item: PackItem) -> ScenePresetRef:
+        """Project one stored ``scene_presets`` item into its inert handle."""
+        if item.face is not Face.SCENE_PRESETS:
+            raise PackError(
+                f"pack {item.pack!r} item id {item.name!r} is on face "
+                f"{item.face.value!r}, not 'scene_presets'"
+            )
+        if not isinstance(item.locator, ResourceLocator):
+            raise PackError(
+                f"pack {item.pack!r} scene preset id {item.name!r} declares no resource"
+            )
+        return cls(
+            pack=item.pack,
+            pack_version=item.origin.pack_version or "",
+            id=item.name,
+            resource=item.locator.path,
+            origin=item.origin,
+        )
+
 
 @dataclass(frozen=True)
 class SceneProviderRef:
     """An inert handle for one ``kind: scene`` manifest entrypoint.
 
-    ``params_schema`` is the normalized manifest parameter declaration, or
-    ``None`` when the provider declares no parameters.  Acquiring the handle
-    does not import the entrypoint.
+    A handle is a flat projection of exactly one stored
+    :class:`~unigym.packs.schema.PackItem`; :meth:`from_item` is the single
+    minting path.  ``params_schema`` is the normalized manifest parameter
+    declaration, or ``None`` when the provider declares no parameters.
+    Minting validates the item's face, kind and locator, normalizes the declared
+    parameters and reads no filesystem.  Acquiring the handle does not import
+    the entrypoint.
     """
 
     pack: str
@@ -103,69 +175,31 @@ class SceneProviderRef:
         """Hash the handle identity; the schema is derived from that identity."""
         return hash((self.pack, self.pack_version, self.id, self.entrypoint, self.origin))
 
-
-def _provider_schema(item: PackItem, *, pack: str) -> Mapping[str, ProviderParamSpec] | None:
-    """Normalize one provider item's manifest parameter declaration."""
-    if item.params is None:
-        return None
-    try:
-        schema = normalize_manifest_params(provider_param_declarations(item.params))
-    except SceneProviderParamError as err:
-        raise PackError(
-            f"pack {pack!r} scene provider id {item.name!r} params are invalid: {err}"
-        ) from err
-    return MappingProxyType(schema)
-
-
-def _asset_ref(item: PackItem) -> AssetResourceRef:
-    """Mint one asset handle from a stored asset item."""
-    if not isinstance(item.locator, ResourceLocator):
-        raise PackError(
-            f"pack {item.pack!r} asset id {item.name!r} declares entrypoint "
-            f"{item.entrypoint!r}, not a resource; assets are resource-backed"
+    @classmethod
+    def from_item(cls, item: PackItem) -> SceneProviderRef:
+        """Project one stored ``kind: scene`` provider item into its handle."""
+        if item.face is not Face.PROVIDERS:
+            raise PackError(
+                f"pack {item.pack!r} item id {item.name!r} is on face "
+                f"{item.face.value!r}, not 'providers'"
+            )
+        if item.kind != "scene":
+            raise PackError(
+                f"pack {item.pack!r} provider id {item.name!r} declares kind "
+                f"{item.kind!r}, not 'scene'"
+            )
+        if not isinstance(item.locator, EntrypointLocator):
+            raise PackError(
+                f"pack {item.pack!r} scene provider id {item.name!r} declares " "no entrypoint"
+            )
+        return cls(
+            pack=item.pack,
+            pack_version=item.origin.pack_version or "",
+            id=item.name,
+            entrypoint=item.locator.raw,
+            params_schema=_provider_schema(item, pack=item.pack),
+            origin=item.origin,
         )
-    return AssetResourceRef(
-        pack=item.pack,
-        pack_version=item.origin.pack_version or "",
-        id=item.name,
-        kind=item.kind,
-        resource=item.locator.path,
-        origin=item.origin,
-    )
-
-
-def _preset_ref(item: PackItem) -> ScenePresetRef:
-    """Mint one preset handle from a stored preset item."""
-    if not isinstance(item.locator, ResourceLocator):
-        raise PackError(f"pack {item.pack!r} scene preset id {item.name!r} declares no resource")
-    return ScenePresetRef(
-        pack=item.pack,
-        pack_version=item.origin.pack_version or "",
-        id=item.name,
-        resource=item.locator.path,
-        origin=item.origin,
-    )
-
-
-def _provider_ref(item: PackItem) -> SceneProviderRef:
-    """Mint one ``kind: scene`` provider handle from a stored provider item."""
-    if item.kind != "scene":
-        raise PackError(
-            f"pack {item.pack!r} provider id {item.name!r} declares kind "
-            f"{item.kind!r}, not 'scene'"
-        )
-    if item.entrypoint is None:
-        raise PackError(
-            f"pack {item.pack!r} scene provider id {item.name!r} declares no entrypoint"
-        )
-    return SceneProviderRef(
-        pack=item.pack,
-        pack_version=item.origin.pack_version or "",
-        id=item.name,
-        entrypoint=item.entrypoint,
-        params_schema=_provider_schema(item, pack=item.pack),
-        origin=item.origin,
-    )
 
 
 @dataclass(frozen=True)
@@ -254,11 +288,11 @@ class PackSet:
     def asset(self, id: str) -> AssetResourceRef:
         """Cross-pack edge lookup for one resource-backed ``assets`` item."""
         item = self.item(Face.ASSETS, id)
-        return _asset_ref(item)
+        return AssetResourceRef.from_item(item)
 
     def assets(self) -> tuple[AssetResourceRef, ...]:
         """Every resource-backed asset handle in this set, in discovery order."""
-        return tuple(_asset_ref(item) for item in self._resources(Face.ASSETS))
+        return tuple(AssetResourceRef.from_item(item) for item in self._resources(Face.ASSETS))
 
     def providers(self, kind: str | None = None) -> tuple[PackItem, ...]:
         """Every ``providers`` item in this set, optionally filtered by kind."""
@@ -279,16 +313,16 @@ class PackSet:
 
     def scene_preset(self, id: str) -> ScenePresetRef:
         """Cross-pack edge lookup for one ``scene_presets`` item id."""
-        return _preset_ref(self.item(Face.SCENE_PRESETS, id))
+        return ScenePresetRef.from_item(self.item(Face.SCENE_PRESETS, id))
 
     def scene_presets(self) -> tuple[ScenePresetRef, ...]:
         """Every preset handle in this set, pack order then manifest order."""
-        return tuple(_preset_ref(item) for item in self._resources(Face.SCENE_PRESETS))
+        return tuple(ScenePresetRef.from_item(item) for item in self._resources(Face.SCENE_PRESETS))
 
     def scene_provider(self, id: str) -> SceneProviderRef:
         """Cross-pack edge lookup for one ``kind: scene`` provider item id."""
-        return _provider_ref(self.item(Face.PROVIDERS, id))
+        return SceneProviderRef.from_item(self.item(Face.PROVIDERS, id))
 
     def scene_providers(self) -> tuple[SceneProviderRef, ...]:
         """Every ``kind: scene`` provider handle in this set, in discovery order."""
-        return tuple(_provider_ref(item) for item in self.providers("scene"))
+        return tuple(SceneProviderRef.from_item(item) for item in self.providers("scene"))

@@ -54,9 +54,8 @@ def _asset_scene(
 
 def _asset_plan(cartpole_pack):
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.loader import AssetContext
 
-    return AssetPlan(AssetContext(cartpole_pack))
+    return AssetPlan(cartpole_pack)
 
 
 def _provider(scene: Scene) -> str:

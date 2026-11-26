@@ -830,7 +830,7 @@ def build_spec(
     The run's ``scene_preset`` resolves through *runtime* after the backend is
     selected (its ``BackendBinding`` drives world-format and backend-param
     selection).  A ``pack:`` / asset reference expands through an
-    :class:`~unigym.packs.loader.AssetContext` built from the same runtime.
+    :class:`~unigym.assets.plan.AssetPlan` built from the same runtime.
     The removed ``mode`` / ``benchmark`` config keys are rejected with teaching
     errors: sink selection is ``sinks:`` (or the one-custom-sink ``sink:``
     shorthand), and the built-in benchmark/evaluation path no longer lives in
@@ -880,9 +880,9 @@ def build_spec(
     )
     context = None
     if runtime is not None:
-        from unigym.packs.loader import AssetContext
+        from unigym.assets.plan import AssetPlan
 
-        context = AssetContext(runtime)
+        context = AssetPlan(runtime)
     cfg = _require_config(expand_placeholders(cfg, context), "placeholders")
     # run label (display metadata): fail-fast teaching gate BEFORE any
     # build work -- same rule the daemon's RunSpec.validate enforces.

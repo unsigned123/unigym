@@ -697,7 +697,6 @@ def test_pack_set_and_manifest_are_immutable(tmp_path: Path) -> None:
 def test_public_pack_api_exports() -> None:
     expected = {
         "ActuatorLawDescriptor",
-        "AssetContext",
         "BackendRegistrationPolicy",
         "AssetResourceRef",
         "EntrypointLocator",
@@ -736,7 +735,23 @@ def test_public_pack_api_exports() -> None:
         "registered_scene_providers",
         "require",
     }
-    removed = {"asset_path", "code_pack_root", "find", "load_table", "resolve"}
+    removed = {
+        "ActivationHandle",
+        "AssetContext",
+        "CatalogEntry",
+        "PackCatalog",
+        "PackInfo",
+        "PackManifestV1",
+        "PackRuntime",
+        "ProvidedItem",
+        "ProviderInfo",
+        "ResourceInfo",
+        "asset_path",
+        "code_pack_root",
+        "find",
+        "load_table",
+        "resolve",
+    }
 
     assert set(pack_api.__all__) == expected
     for name in expected:

@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 from unigym.actuator_law import ActuatorLawDescriptor
 from unigym.packs.loader import (
-    AssetContext,
     PackContext,
     PackLoader,
     discover,
@@ -149,7 +148,6 @@ __all__ = [
     "RegistrationGate",
     "RegistrationPhase",
     "ActuatorLawDescriptor",
-    "AssetContext",
     "AssetResourceRef",
     "EntrypointLocator",
     "Face",

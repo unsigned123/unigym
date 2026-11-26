@@ -1341,23 +1341,6 @@ class PackLoader:
         return tuple(self.activate(pack.name) for pack in self._pack_set.packs())
 
 
-@dataclass(frozen=True)
-class AssetContext:
-    """The explicit asset-path handle render and template code receives.
-
-    It is a one-line wrapper over the :class:`PackLoader` that owns asset
-    resolution, so a consumer never infers a global asset face.  :meth:`resolve`
-    delegates to :meth:`PackLoader.asset_path` and owns no second resolution
-    rule.
-    """
-
-    runtime: PackLoader
-
-    def resolve(self, value: str) -> str:
-        """Resolve *value* to an absolute asset path string."""
-        return str(self.runtime.asset_path(value))
-
-
 def _env_pack_roots() -> list[Path]:
     """Roots named by ``UNIGYM_PACKS``, in declaration order.
 
@@ -1640,7 +1623,6 @@ def require(*names: str, entry_points: bool = True) -> PackSet:
 
 
 __all__ = [
-    "AssetContext",
     "PackContext",
     "PackLoader",
     "discover",

@@ -1,4 +1,4 @@
-# Pack API: manifest schema, catalog and runtime
+# Pack API: manifest schema, pack set and loader
 
 Status: Phases 1 through 9 and the ScenePreset/SceneProvider cutover are
 implemented. `unigym.pack/1` plus `PackLoader` is the only pack loader:
@@ -42,7 +42,6 @@ The pack contract is exported from `unigym.pack_api`:
 ```python
 from unigym.pack_api import (
     ActuatorLawDescriptor,
-    AssetContext,
     AssetResourceRef,
     BackendRegistrationPolicy,
     EntrypointLocator,
@@ -449,26 +448,13 @@ Rules:
 - an unknown pack, illegal path or absent resource is a `PackError` that names
   both the pack and the original reference.
 
-`AssetContext` is the frozen low-level path resolver:
-
-```python
-@dataclass(frozen=True)
-class AssetContext:
-    runtime: PackLoader
-
-    def resolve(self, value: str) -> str: ...
-```
-
-`AssetContext.resolve` delegates to `runtime.asset_path` and returns the path as
-a string. It owns no second resolution rule and carries no module-level or
-ambient state.
-
 ### Boundary-resolved assets (Phase 7b-2)
 
-`unigym.assets.plan.AssetPlan` is the one asset boundary:
+`unigym.assets.plan.AssetPlan` is the one asset boundary. It takes the loader
+that owns `asset_path`; there is no separate asset-context type:
 
 ```python
-plan = AssetPlan(AssetContext(runtime))
+plan = AssetPlan(loader)
 plan.resolve("pack:acme/assets/meshes/cup.stl")
 plan.resolve_definition(asset)   # all mesh/texture files absolute
 plan.resolve_document(mjcf_text) # placeholders + pack: file leaves resolved
@@ -476,10 +462,10 @@ plan.resolve_document(mjcf_text) # placeholders + pack: file leaves resolved
 
 Rules:
 
-- `RunSpec.pack_runtime` carries the runtime without serialization;
+- `RunSpec.pack_runtime` carries the loader without serialization;
   `build_instance` builds the plan from it and hands it to `PropManager` and
   the env backend;
-- `build_spec(..., runtime=...)` builds an `AssetContext` and passes it to
+- `build_spec(..., runtime=...)` builds an `AssetPlan` and passes it to
   `expand_placeholders`; `Run`, `collect_cli` and `describe_cli` build
   `discover(entry_points=True)` at their composition boundary when the config
   declares a scene or carries any `pack:` / asset-reference string;
@@ -537,7 +523,7 @@ from unigym.backends.registry import backend_info
 
 fmt, path = resolve_asset_instance(
     instance.asset,
-    AssetPlan(AssetContext(runtime)),
+    AssetPlan(runtime),
     backend_info("isaaclab2").asset_formats,
 )
 ```
@@ -599,7 +585,8 @@ Rules:
 - `${UNIGYM_ASSET_ROOT}` and `${UNIGYM_ASSET_PACK}` stay teaching
   `PlaceholderError`s rather than becoming unknown-token typos;
 - a whole-string `pack:<pack>/<rel>` reference still requires an explicit
-  `AssetContext`; expansion without one is a teaching `PlaceholderError`;
+  asset boundary (an `AssetPlan` over the loader); expansion without one is a
+  teaching `PlaceholderError`;
 - placeholders expand once at the run/template/asset boundary, recursively over
   the parsed document; backend render code never expands them;
 - `PackLoader.asset_path` applies `assets.refs.canonical_asset_path` before its
@@ -1698,11 +1685,15 @@ fails with the `scene_presets` replacement hint.
 `AssetResourceRef`, `ScenePresetRef` and `SceneProviderRef` are frozen
 dataclasses, equal by value, holding `pack`, `pack_version`, `id` and a
 `ProviderOrigin` (kind `manifest`, pack/version/root, face, item id, resource
-or entrypoint). `ScenePresetRef.resource` names the declared resource;
-`SceneProviderRef.entrypoint` names the declared entrypoint and
-`SceneProviderRef.params_schema` is the normalized manifest parameter schema
-(or `None` when the provider declares no parameters). Minting, comparing and
-reading these handles never activates, imports or reads the filesystem.
+or entrypoint). Each is an explicit projection of one stored `PackItem`:
+`AssetResourceRef.from_item(item)`, `ScenePresetRef.from_item(item)` and
+`SceneProviderRef.from_item(item)` are the single minting paths, and the
+`PackSet` lookup helpers call them. `ScenePresetRef.resource` names the
+declared resource; `SceneProviderRef.entrypoint` names the declared entrypoint
+and `SceneProviderRef.params_schema` is the normalized manifest parameter
+schema (or `None` when the provider declares no parameters). Handles are not
+stored in `Pack`/`PackSet`; minting, comparing and reading them never activates,
+imports or reads the filesystem.
 
 A stored item is one `PackItem` (`pack`, `face`, `kind`, `name`, `locator`,
 `params`, `origin`, `status`). Resource-backed and entrypoint-backed items both
@@ -1779,6 +1770,11 @@ or known faces, never with an implicit checkout fallback.
   `PackLoader.robot_profile()`; `PackSet.resource_path()` and the old 2-arg
   `resource_for(face, id)` move to `PackLoader.resource_for(item)` /
   `PackLoader.resolve(face, id)`.
+- Pack model v2 cutover: `PackManifestV1`, `ProvidedItem`, `CatalogEntry`,
+  `PackCatalog`, `PackInfo`, `ResourceInfo`, `ActivationHandle` and
+  `AssetContext` are removed. Installed items are `PackItem` values, live
+  registry entries are `ProviderRef` projections, and `AssetPlan` takes the
+  `PackLoader` directly. `unigym.pack_api` exports no aliases for these names.
 
 ### Removed scene vocabulary
 

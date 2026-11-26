@@ -30,21 +30,26 @@ Those are separate artifacts; the public docs are being rewritten.
 Packs are acquired explicitly; there is no attribute sugar.
 
 ```python
-import unigym.packs
+from unigym.pack_api import Face
+from unigym.packs import PackLoader, require
 
-packs = unigym.packs.require("acme_robots")   # filtered scope, or installed()
-pack = packs.pack("acme_robots")              # the only pack handle
-robot = pack.robot("acme.arm")                # RobotProfile, no activation
-path = packs.resource_path(pack.asset("acme.cup"))  # declared resource path
+packs = require("acme_robots")                # filtered scope, or installed()
+pack = packs.pack("acme_robots")              # the stored Pack declaration
+loader = PackLoader.from_pack_set(packs)      # object loading + resources
+robot = loader.robot_profile("acme_robots", "acme.arm")  # RobotProfile
+item = pack.item(Face.ASSETS, "acme.cup")     # the stored PackItem
+path = loader.resource_for(item)              # declared resource path
 ```
 
-`packs.pack(name).robot(id)` loads the complete `RobotProfile` (resource
+`loader.robot_profile(pack, id)` loads the complete `RobotProfile` (resource
 document or entrypoint factory) without mutating the robot registry.
-`.asset(id)` / `.scene_preset(id)` / `.scene_provider(id)` mint inert refs from
-manifests without importing pack Python. `packs.robots()` / `.scene_presets()` / `.providers()` are
-the cross-pack views; `packs.origins()` reports where each pack was discovered.
-See [`docs/pack_api.md`](docs/pack_api.md#pack-objects) for the full query
-surface.
+`packs.asset(id)` / `.scene_preset(id)` / `.scene_provider(id)` mint inert
+`AssetResourceRef` / `ScenePresetRef` / `SceneProviderRef` projections from
+stored `PackItem` values; each ref has a `from_item(item)` classmethod and no
+manifest is imported or resource path read while minting. `packs.items()` /
+`.providers()` / `.scene_presets()` are the cross-pack views; `packs.origins()`
+reports where each pack was discovered. See
+[`docs/pack_api.md`](docs/pack_api.md#pack-objects) for the full query surface.
 
 ## Backend support levels
 

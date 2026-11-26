@@ -17,7 +17,7 @@ import yaml
 
 from unigym.assets.plan import AssetPlan
 from unigym.core.paths import PlaceholderError, expand_placeholders
-from unigym.pack_api import AssetContext, PackLoader, discover
+from unigym.pack_api import PackLoader, discover
 from unigym.props.asset_ir import AssetDefinition, Body, MeshDef, TextureDef
 from unigym.run.spec import build_spec
 
@@ -61,7 +61,7 @@ def runtime(tmp_path: Path) -> PackLoader:
 
 @pytest.fixture()
 def plan(runtime: PackLoader) -> AssetPlan:
-    return AssetPlan(AssetContext(runtime))
+    return AssetPlan(runtime)
 
 
 def _asset() -> AssetDefinition:
@@ -154,7 +154,7 @@ def test_pack_reference_without_context_is_a_teaching_error() -> None:
 def test_removed_asset_tokens_are_rejected(token: str, plan: AssetPlan) -> None:
     """The removed asset anchors are a teaching error, even with a context."""
     with pytest.raises(PlaceholderError, match="was removed by the asset cutover"):
-        expand_placeholders("${" + token + "}/generators/x.png", plan.context)
+        expand_placeholders("${" + token + "}/generators/x.png", plan)
 
 
 @pytest.mark.parametrize("marker", ["${UNIGYM_REPO}", "pack:" + PACK + "/assets/meshes/cup.stl"])

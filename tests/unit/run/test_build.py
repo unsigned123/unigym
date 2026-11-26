@@ -40,4 +40,4 @@ def test_pack_runtime_owns_the_boundary_even_without_a_scene_provider() -> None:
     plan = _boundary_asset_plan(runtime, {})
 
     assert plan is not None
-    assert plan.context.runtime is runtime
+    assert plan.loader is runtime

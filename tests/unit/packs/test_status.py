@@ -37,12 +37,18 @@ ACTUATORS_ROOT = Path(__file__).resolve().parents[2] / "fixtures" / "packs" / "a
 
 @pytest.fixture(autouse=True)
 def _isolate_registry_state():
-    """Restore the registries and import state activation can mutate."""
+    """Restore the registries and the pack modules activation can import.
+
+    Third-party modules imported during a test stay loaded: some of them guard
+    against re-initialization (torch refuses a second import in one process),
+    and none of them carries pack or registry state.
+    """
     path_snapshot = list(sys.path)
     scene_snapshot = snapshot_scene_providers()
     laws_snapshot = snapshot_actuator_laws()
     implementations_snapshot = snapshot_actuator_implementations()
     modules_snapshot = set(sys.modules)
+    venv_prefix = Path(sys.prefix).resolve()
     reset_registration()
     yield
     sys.path[:] = path_snapshot
@@ -51,6 +57,15 @@ def _isolate_registry_state():
     restore_actuator_implementations(implementations_snapshot)
     reset_registration()
     for name in set(sys.modules) - modules_snapshot:
+        module = sys.modules.get(name)
+        origin = getattr(module, "__file__", None)
+        if origin is not None:
+            try:
+                Path(origin).resolve().relative_to(venv_prefix)
+            except ValueError:
+                pass
+            else:
+                continue
         del sys.modules[name]
 
 

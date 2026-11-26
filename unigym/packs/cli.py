@@ -22,7 +22,14 @@ from pathlib import Path
 
 from . import PackError
 from .loader import PackLoader, discover
-from .schema import FACE_NAMES, MANIFEST_NAME, Face, Pack, load_manifest_v1
+from .schema import (
+    FACE_NAMES,
+    MANIFEST_NAME,
+    Face,
+    Pack,
+    ResourceLocator,
+    load_manifest_v1,
+)
 
 INVENTORY_NAME = "BUILD_MANIFEST.txt"
 """Per-pack tree inventory written by the external pack build tool."""
@@ -249,10 +256,10 @@ def cmd_path(a, extra: list[str] | None = None) -> int:
         print(f"[unigym pack] pack {a.name!r} has no {face!r} face; faces: {available}")
         return 1
     for item in items:
-        if item.resource is not None:
-            print(f"{item.id}: {loader.resource(manifest.name, item.resource)}")
+        if isinstance(item.locator, ResourceLocator):
+            print(f"{item.name}: {loader.resource_for(item)}")
         else:
-            print(f"{item.id}: {item.entrypoint}")
+            print(f"{item.name}: {item.entrypoint}")
     return 0
 
 

@@ -14,25 +14,25 @@ from unigym.assets.asset_ref import AssetRef, AssetRefError
 from unigym.assets.plan import AssetPlan, resolve_asset_instance
 
 
-class _PathContext:
-    """AssetContext boundary that resolves exactly the references it is given."""
+class _PathLoader:
+    """Loader boundary that resolves exactly the references it is given."""
 
     def __init__(self, resolutions: dict[str, str]) -> None:
         self._resolutions = resolutions
         self.requests: list[str] = []
 
-    def resolve(self, value: str) -> str:
+    def asset_path(self, value: str) -> Path:
         """Record one boundary request and return its mapped path."""
         self.requests.append(value)
         try:
-            return self._resolutions[value]
+            return Path(self._resolutions[value])
         except KeyError:
             raise AssertionError(f"unexpected asset reference {value!r}") from None
 
 
 def _plan(resolutions: dict[str, str]) -> AssetPlan:
     """Build an asset plan over an explicit reference-to-path boundary."""
-    return AssetPlan(_PathContext(resolutions))
+    return AssetPlan(_PathLoader(resolutions))
 
 
 def _files(tmp_path: Path) -> dict[str, str]:
@@ -167,12 +167,12 @@ def test_resolve_asset_instance_delegates_a_pack_reference_to_the_boundary(
     target = tmp_path / "cup.mjcf"
     target.write_text("asset\n", encoding="utf-8")
     ref = "pack:acme/models/cup.mjcf"
-    context = _PathContext({ref: str(target), str(target): str(target)})
+    loader = _PathLoader({ref: str(target), str(target): str(target)})
 
-    fmt, path = resolve_asset_instance(AssetRef(mjcf=ref), AssetPlan(context), ("mjcf",))
+    fmt, path = resolve_asset_instance(AssetRef(mjcf=ref), AssetPlan(loader), ("mjcf",))
 
     assert (fmt, path) == ("mjcf", str(target))
-    assert context.requests[0] == ref
+    assert loader.requests[0] == ref
 
 
 def test_resolve_asset_instance_expands_a_known_placeholder(

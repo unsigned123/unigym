@@ -160,6 +160,32 @@ def test_scene_provider_ref_carries_normalized_params(packs: PackSet) -> None:
         packs.scene_provider("acme_code.dynamic_assets")
 
 
+def test_refs_are_explicit_pack_item_projections(packs: PackSet) -> None:
+    """Every typed ref is minted from one stored PackItem and keeps its origin."""
+    asset_item = packs.item(Face.ASSETS, "acme_content.cup")
+    preset_item = packs.item(Face.SCENE_PRESETS, "acme_content.tabletop")
+    provider_item = packs.item(Face.PROVIDERS, "acme_code.table_top")
+
+    assert AssetResourceRef.from_item(asset_item) == packs.asset("acme_content.cup")
+    assert ScenePresetRef.from_item(preset_item) == packs.scene_preset("acme_content.tabletop")
+    assert SceneProviderRef.from_item(provider_item) == packs.scene_provider("acme_code.table_top")
+
+    changed = replace(preset_item, origin=replace(preset_item.origin, discovered_by="other"))
+    assert ScenePresetRef.from_item(changed) != packs.scene_preset("acme_content.tabletop")
+
+    for pack in packs.packs():
+        assert all(isinstance(item, PackItem) for item in pack.items)
+    assert not hasattr(packs.pack("acme_content"), "asset")
+    assert not hasattr(packs.pack("acme_content"), "scene_presets")
+
+    with pytest.raises(PackError, match="not 'assets'"):
+        AssetResourceRef.from_item(preset_item)
+    with pytest.raises(PackError, match="not 'scene_presets'"):
+        ScenePresetRef.from_item(asset_item)
+    with pytest.raises(PackError, match="not 'providers'"):
+        SceneProviderRef.from_item(preset_item)
+
+
 def test_provider_without_params_has_no_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

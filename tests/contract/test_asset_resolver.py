@@ -2,7 +2,7 @@
 
 A temporary ``unigym.pack/1`` content pack proves pack-qualified mesh and
 texture resolution, absolute pass-through, teaching errors and the delegating
-``AssetContext``.  No production consumer is switched here.
+``AssetPlan`` boundary.
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from unigym.pack_api import AssetContext, PackLoader, discover
+from unigym.assets.plan import AssetPlan
+from unigym.pack_api import PackLoader, discover
 from unigym.packs import PackError
 
 PACK = "acme_assets"
@@ -143,11 +144,11 @@ def test_unknown_pack_names_the_pack_and_reference(runtime: PackLoader) -> None:
     assert ref in message
 
 
-def test_asset_context_delegates_to_runtime_asset_path(runtime: PackLoader) -> None:
-    """``AssetContext.resolve`` returns the same path as ``runtime.asset_path``."""
-    context = AssetContext(runtime=runtime)
+def test_asset_plan_delegates_to_runtime_asset_path(runtime: PackLoader) -> None:
+    """``AssetPlan.resolve`` returns the same path as ``runtime.asset_path``."""
+    plan = AssetPlan(runtime)
 
-    assert context.resolve(TEXTURE_REF) == str(runtime.asset_path(TEXTURE_REF))
+    assert plan.resolve(TEXTURE_REF) == str(runtime.asset_path(TEXTURE_REF))
 
 
 def test_asset_resolution_does_not_import_pack_python(tmp_path: Path) -> None:

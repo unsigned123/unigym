@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.packs import PackError, PackLoader, PackSet
+from unigym.packs import AssetResourceRef, PackError, PackLoader, PackSet
 from unigym.packs.schema import (
     MANIFEST_FACES,
     EntrypointLocator,
@@ -324,6 +324,19 @@ def test_pack_set_construction_touches_no_filesystem() -> None:
     pack_set = PackSet((pack,))
 
     assert pack_set.item(Face.ASSETS, "alpha.one") is pack.items[0]
+
+
+def test_refs_project_stored_items_without_reading_the_filesystem() -> None:
+    """A typed ref is minted from a stored item and is never stored itself."""
+    pack = _pack(items=(_item(locator=ResourceLocator("missing/never.yaml")),))
+    item = pack.items[0]
+
+    ref = AssetResourceRef.from_item(item)
+
+    assert ref.resource == "missing/never.yaml"
+    assert ref.origin is item.origin
+    assert all(isinstance(stored, PackItem) for stored in pack.items)
+    assert ref != item
 
 
 def test_pack_set_equality_includes_item_data() -> None:

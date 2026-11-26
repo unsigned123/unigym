@@ -5,11 +5,11 @@ boundary, into an :class:`AssetPlan`.  Backend render code receives only
 absolute paths and resolved MJCF text -- it never resolves a placeholder,
 a ``pack:`` reference or a legacy asset token.
 
-The plan is a thin adapter over :class:`unigym.packs.loader.AssetContext`:
+The plan is a thin adapter over :class:`unigym.packs.loader.PackLoader`:
 :meth:`AssetPlan.resolve` expands the remaining known path placeholders and
-then delegates the final path decision to the context.  The context (and the
-:class:`~unigym.packs.loader.PackLoader` it owns) stays the sole resolver.
-There is no module-level or ambient runtime.
+then delegates the final path decision to ``PackLoader.asset_path``.  The loader
+stays the sole resolver; there is no module-level or ambient runtime and no
+second path rule.
 """
 
 from __future__ import annotations
@@ -18,14 +18,33 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
 from unigym.core.paths import expand_placeholders
 
 if TYPE_CHECKING:
-    from unigym.packs.loader import AssetContext
     from unigym.props.asset_ir import AssetDefinition
+
+
+class _AssetPathResolver(Protocol):
+    """The narrow loader surface the plan needs: one asset reference rule."""
+
+    def asset_path(self, value: str) -> Path:
+        """Resolve one declared asset reference to an absolute path."""
+        ...
+
+
+@dataclass(frozen=True)
+class _ExpansionContext:
+    """Adapt the loader's asset rule to the placeholder expansion boundary."""
+
+    loader: _AssetPathResolver
+
+    def resolve(self, value: str) -> str:
+        """Resolve one whole-string ``pack:`` reference through the loader."""
+        return str(self.loader.asset_path(value))
+
 
 _FILE_ATTR_RE = re.compile(r"""(file\s*=\s*)(["'])(.*?)\2""")
 """MJCF ``file=`` attributes carry the asset leaves of a parsed document."""
@@ -35,22 +54,26 @@ _FILE_ATTR_RE = re.compile(r"""(file\s*=\s*)(["'])(.*?)\2""")
 class AssetPlan:
     """One asset resolution boundary for a run or a composed scene.
 
-    ``context`` owns path resolution; the plan exposes the narrow operations
-    backend-adjacent code needs, so no backend imports the legacy asset
-    anchor layer.
+    ``loader`` owns path resolution; the plan exposes the narrow operations
+    backend-adjacent code needs, so no backend imports the loader or the
+    legacy asset anchor layer.
     """
 
-    context: AssetContext
+    loader: _AssetPathResolver
+
+    @property
+    def _context(self) -> _ExpansionContext:
+        """The placeholder boundary over the one loader resolver."""
+        return _ExpansionContext(self.loader)
 
     def resolve(self, value: str) -> str:
         """Resolve one asset reference to an absolute path string.
 
         Known path placeholders are expanded first; the resulting reference
-        then delegates to :meth:`AssetContext.resolve`.  A bare relative
-        reference or a ``pack:`` reference without an owning runtime fails
-        there with the teaching error.
+        then delegates to ``PackLoader.asset_path``.  A bare relative reference
+        has no owning pack and fails there with the teaching error.
         """
-        return self.context.resolve(expand_placeholders(value, self.context))
+        return str(self.loader.asset_path(expand_placeholders(value, self._context)))
 
     def resolve_definition(self, asset: AssetDefinition) -> AssetDefinition:
         """Return a copy of *asset* with every mesh/texture file absolute.
@@ -72,7 +95,7 @@ class AssetPlan:
         value is left verbatim (including a file-relative path, whose
         resolution belongs to the engine's document loader).
         """
-        expanded = expand_placeholders(text, self.context)
+        expanded = expand_placeholders(text, self._context)
         return _FILE_ATTR_RE.sub(lambda match: self._resolve_file_attr(match), expanded)
 
     def _resolve_file_attr(self, match: re.Match[str]) -> str:

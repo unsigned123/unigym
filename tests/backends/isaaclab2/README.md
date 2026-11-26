@@ -32,7 +32,7 @@ The same Cartpole pack also ships the tiny file-backed asset-scene fixtures:
 `assets/jointed_cube.urdf` (the articulation-in-scene refusal). The asset-scene
 tests resolve them through
 `pack_runtime("isaaclab_cartpole").resolve("assets", <id>)` and pass
-`AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`.
+`AssetPlan(runtime)` to `IsaaclabEnv`.
 
 ```bash
 conda run --no-capture-output -n unigym-isaaclab232 \

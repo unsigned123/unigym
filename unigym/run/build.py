@@ -1800,13 +1800,13 @@ def _boundary_asset_plan(
         The boundary :class:`AssetPlan`, or ``None``.
     """
     from unigym.assets.plan import AssetPlan
-    from unigym.packs.loader import AssetContext, discover
+    from unigym.packs.loader import discover
 
     if pack_runtime is not None:
-        return AssetPlan(AssetContext(pack_runtime))
+        return AssetPlan(pack_runtime)
     params = env_cfg.get("params")
     if isinstance(params, dict) and params.get("scene_provider") is not None:
-        return AssetPlan(AssetContext(discover([])))
+        return AssetPlan(discover([]))
     return None
 
 

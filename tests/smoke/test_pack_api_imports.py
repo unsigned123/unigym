@@ -38,6 +38,21 @@ def test_pack_api_public_names_import() -> None:
     assert callable(World.from_preset)
     assert callable(World.from_provider)
 
+    for name in (
+        "ActivationHandle",
+        "AssetContext",
+        "CatalogEntry",
+        "PackCatalog",
+        "PackInfo",
+        "PackManifestV1",
+        "PackRuntime",
+        "ProvidedItem",
+        "ProviderInfo",
+        "ResourceInfo",
+    ):
+        assert not hasattr(pack_api, name), name
+        assert not hasattr(packs, name), name
+
 
 @pytest.mark.subprocess
 @pytest.mark.parametrize(

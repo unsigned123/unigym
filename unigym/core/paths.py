@@ -23,8 +23,8 @@ Tokens:
 ``${UNIGYM_ASSET_ROOT}`` and ``${UNIGYM_ASSET_PACK}`` were removed from
 the known-token vocabulary: an asset is addressed by a ``pack:`` reference
 or an absolute path, resolved once at the composition boundary through an
-:class:`unigym.packs.loader.AssetContext`.  A ``pack:`` reference without
-a context is a :class:`PlaceholderError`; there is no bare-relative or
+:class:`unigym.assets.plan.AssetPlan`.  A ``pack:`` reference without a
+context is a :class:`PlaceholderError`; there is no bare-relative or
 legacy-token fallback.
 
 Semantics: deep expansion over the whole parsed yaml document
@@ -45,15 +45,21 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, overload
+from typing import Protocol, overload
 
 import yaml
 
 from unigym._typing import JsonValue
 from unigym.errors import ConfigError
 
-if TYPE_CHECKING:
-    from unigym.packs.loader import AssetContext
+
+class _PackRefResolver(Protocol):
+    """The narrow boundary that resolves one whole ``pack:`` reference."""
+
+    def resolve(self, value: str) -> str:
+        """Resolve one asset reference to an absolute path string."""
+        ...
+
 
 DEPS_ENV_VAR = "UNIGYM_DEPS_ROOT"
 DEPS_YAML_KEY = "unigym_deps_root"
@@ -120,18 +126,19 @@ def known_tokens() -> dict:
 _REMOVED_ASSET_TOKENS = frozenset({"UNIGYM_ASSET_ROOT", "UNIGYM_ASSET_PACK"})
 
 
-def _resolve_pack_ref(value: str, context: AssetContext | None) -> str:
+def _resolve_pack_ref(value: str, context: _PackRefResolver | None) -> str:
     """Resolve one whole-string ``pack:`` reference through *context*."""
     if context is None:
         raise PlaceholderError(
             f"asset reference {value!r} requires an explicit asset context: "
-            "build a pack runtime at the composition boundary and pass its "
-            "AssetContext to expansion; there is no ambient or global runtime"
+            "build an AssetPlan from the pack loader at the composition "
+            "boundary and pass it to expansion; there is no ambient or global "
+            "runtime"
         )
     return context.resolve(value)
 
 
-def _expand_str(s: str, tokens: dict, context: AssetContext | None) -> str:
+def _expand_str(s: str, tokens: dict, context: _PackRefResolver | None) -> str:
     for _ in range(_MAX_PASSES):
         m = _PLACEHOLDER_RE.search(s)
         if m is None:
@@ -156,26 +163,26 @@ def _expand_str(s: str, tokens: dict, context: AssetContext | None) -> str:
 
 
 @overload
-def expand_placeholders(obj: str, context: AssetContext | None = None) -> str: ...
+def expand_placeholders(obj: str, context: _PackRefResolver | None = None) -> str: ...
 
 
 @overload
 def expand_placeholders(
-    obj: dict[str, JsonValue], context: AssetContext | None = None
+    obj: dict[str, JsonValue], context: _PackRefResolver | None = None
 ) -> dict[str, JsonValue]: ...
 
 
 @overload
 def expand_placeholders(
-    obj: list[JsonValue], context: AssetContext | None = None
+    obj: list[JsonValue], context: _PackRefResolver | None = None
 ) -> list[JsonValue]: ...
 
 
 @overload
-def expand_placeholders(obj: JsonValue, context: AssetContext | None = None) -> JsonValue: ...
+def expand_placeholders(obj: JsonValue, context: _PackRefResolver | None = None) -> JsonValue: ...
 
 
-def expand_placeholders(obj: JsonValue, context: AssetContext | None = None) -> JsonValue:
+def expand_placeholders(obj: JsonValue, context: _PackRefResolver | None = None) -> JsonValue:
     """Deep-expand every ``${TOKEN}`` in a parsed yaml document
     (dict/list/str tree).  Non-strings pass through; unknown tokens
     raise :class:`PlaceholderError`.

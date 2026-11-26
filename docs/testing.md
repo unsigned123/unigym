@@ -639,7 +639,7 @@ The same Cartpole pack ships the file-backed asset-scene fixtures:
 
 The tests resolve them through
 `pack_runtime("isaaclab_cartpole").resolve("assets", <id>)` and pass
-`AssetPlan(AssetContext(runtime))` to `IsaaclabEnv`; they never read an asset
+`AssetPlan(runtime)` to `IsaaclabEnv`; they never read an asset
 environment variable and never download assets. The lane is strict
 (`ci/compat.toml` `[lanes.isaaclab2]`, selector `tests/backends/isaaclab2`,
 `pytest_args = ["--strict-test-packs"]`): a missing Cartpole pack or fixture

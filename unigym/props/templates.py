@@ -448,9 +448,9 @@ def resolve_prop_entries(
 ) -> list[tuple[dict, AssetDefinition | None]]:
     """Resolve static and templated entries to ``(entry, asset)`` pairs.
 
-    Entries are placeholder-expanded with the plan's context: providers may
-    spell host paths with ``${UNIGYM_REPO}`` and asset references with
-    ``pack:``, and the plan's context is the one resolver.  A generated
+    Entries are placeholder-expanded through the plan: providers may spell
+    host paths with ``${UNIGYM_REPO}`` and asset references with ``pack:``, and
+    the plan's loader-backed resolver is the one boundary.  A generated
     payload's mesh/texture files are resolved to absolute paths through
     :meth:`unigym.assets.plan.AssetPlan.resolve_definition`.  A static entry
     without references passes through unchanged (and never carries a
@@ -458,7 +458,7 @@ def resolve_prop_entries(
     """
     from ..core.paths import expand_placeholders
 
-    context = asset_plan.context if asset_plan is not None else None
+    context = asset_plan
     raw_types = config.get("types", [])
     if not isinstance(raw_types, list):
         raise ValueError("props/types must be a list")
