@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from tests._support.markers import (
     is_fast_lane,
     markers_for_path,
 )
+
+pytest_plugins = ("tests._support.fakes.isaaclab",)
 
 _TESTS_ROOT = Path(__file__).resolve().parent
 _DATA_ROOT = _TESTS_ROOT / "_support" / "data"
@@ -90,23 +93,28 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool 
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Apply the central path-to-marker policy to every collected item."""
+    """Apply the central path-to-marker policy and the GPU availability rule."""
+    gpu_skip = pytest.mark.skip(
+        reason="gpu test requires an explicit non-empty CUDA_VISIBLE_DEVICES"
+    )
+    gpu_available = bool(os.environ.get("CUDA_VISIBLE_DEVICES"))
     for item in items:
         parts = _relative_parts(item.path)
-        if parts is None:
-            continue
+        if parts is not None:
+            try:
+                markers = markers_for_path(parts)
+            except UnknownTestPathError as exc:
+                raise pytest.UsageError(str(exc)) from exc
 
-        try:
-            markers = markers_for_path(parts)
-        except UnknownTestPathError as exc:
-            raise pytest.UsageError(str(exc)) from exc
+            for name in markers:
+                _add_marker(item, name)
 
-        for name in markers:
-            _add_marker(item, name)
+            if not any(name.startswith(BACKEND_MARKER_PREFIX) for name in _marker_names(item)):
+                _add_marker(item, "backend_agnostic")
 
-        if not any(name.startswith(BACKEND_MARKER_PREFIX) for name in _marker_names(item)):
-            _add_marker(item, "backend_agnostic")
+            layer = next(name for name in markers if name.startswith("layer_"))
+            if is_fast_lane(layer, _marker_names(item)):
+                _add_marker(item, "fast")
 
-        layer = next(name for name in markers if name.startswith("layer_"))
-        if is_fast_lane(layer, _marker_names(item)):
-            _add_marker(item, "fast")
+        if not gpu_available and "gpu" in _marker_names(item):
+            item.add_marker(gpu_skip)

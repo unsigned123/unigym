@@ -90,6 +90,7 @@ def test_run_owned_articulation_supplies_actuation_on_flat_world(tiny_mjcf: Path
         adapter="manual",
         observations={"robot": ["tiny"]},
         inspect=True,
+        backend="mujoco",
     )
     try:
         instance = run.build()

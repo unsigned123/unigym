@@ -2,45 +2,17 @@
 
 from __future__ import annotations
 
-import sys
 import types
 
 import pytest
 import torch
 
+from tests._support.fakes.isaaclab import _Cfg, _RigidObjectCfg
 from unigym.backends.shared.isaaclab3_common.contacts import (
     MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM,
     IsaacLabContactBackend,
 )
 from unigym.contacts.manager import build_contact_manager
-
-
-class _Cfg:
-    def __init__(self, **kwargs):
-        self.kw = kwargs
-
-
-class _InitialStateCfg(_Cfg):
-    pass
-
-
-class _RigidObjectCfg(_Cfg):
-    InitialStateCfg = _InitialStateCfg
-
-
-class _SensorCfg(_Cfg):
-    pass
-
-
-@pytest.fixture
-def fake_isaaclab(monkeypatch):
-    package = types.ModuleType("isaaclab")
-    sensors = types.ModuleType("isaaclab.sensors")
-    sensors.ContactSensorCfg = _SensorCfg
-    package.sensors = sensors
-    monkeypatch.setitem(sys.modules, "isaaclab", package)
-    monkeypatch.setitem(sys.modules, "isaaclab.sensors", sensors)
-    return sensors
 
 
 def _manager(groups, *, props=None, articulated=None, names=("tiny",)):

@@ -300,7 +300,7 @@ def test_nightly_includes_isaaclab3_physx(registry):
 
 
 def test_nightly_includes_c1_variant_lanes(registry):
-    """The nightly matrix runs both empirically verified C1 variants."""
+    """The nightly matrix runs both supported NumPy-floor C1 variants."""
     nightly = _nested_table(registry, "nightly")
     value = nightly.get("lanes")
     assert isinstance(value, list), "nightly.lanes must be a list"

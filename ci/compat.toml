@@ -12,7 +12,7 @@ extras = ["dev"]
 python = "3.12"
 
 # Clean C1 environment: a separate clean venv provisioned from the pinned
-# manifest.  ``no_sync`` keeps ``uv run`` from resyncing it to the 4.0 lock.
+# manifest.  ``no_sync`` keeps ``uv run`` from resyncing it to the primary lock.
 [environments.base-c1]
 provision = "uv"
 python = "3.11"
@@ -132,9 +132,9 @@ pytest_args = ["--strict-test-packs"]
 environment = "isaaclab3_newton"
 selectors = ["tests/backends/isaaclab3_newton"]
 
-# Lanes the nightly workflow runs.  C1 is the empirically verified oldest
-# MuJoCo/NumPy pair (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4); it is nightly
-# only and is not a PR gate.  The PhysX IsaacLab 3 lane joins nightly with its
+# Lanes the nightly workflow runs.  C1 is the supported NumPy-floor lane
+# (Python 3.11 / MuJoCo 4.0.0 / NumPy 1.26.4); it is nightly only and is not a
+# PR gate.  The PhysX IsaacLab 3 lane joins nightly with its
 # self-hosted job; Newton stays out until P3 capability coverage.
 [nightly]
 lanes = ["d0-py312", "mujoco-py312", "d0-c1", "mujoco-c1", "mjwarp", "isaaclab2", "isaaclab3_physx"]

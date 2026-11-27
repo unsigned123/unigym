@@ -53,7 +53,7 @@ jobs:
         run: .venv/bin/python tools/ci/run_lane.py --lane mujoco-py312
 
   c1:
-    name: c1 lane (Python 3.11 / MuJoCo 3.1.1 / NumPy 1.26.4)
+    name: c1 lane (Python 3.11 / MuJoCo 4.0.0 / NumPy 1.26.4)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -74,7 +74,7 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu 'torch==2.15.0+cpu'
           uv pip install --python .venv/bin/python \
             'PyYAML>=6.0,<7.0' 'pytest>=8.0,<10.0' \
-            mujoco==3.1.1 numpy==1.26.4
+            mujoco==4.0.0 numpy==1.26.4
       - name: Run C1 lanes
         run: |
           .venv/bin/python tools/ci/run_lane.py --lane d0-c1
