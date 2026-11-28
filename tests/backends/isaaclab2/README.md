@@ -71,6 +71,14 @@ the authored inventory only to discover the per-parent sensor prim scopes
 binds one row per live body; collisionless bodies stay as zero rows. The
 sensor coverage is asserted set-equal to the live body set.
 
+`robot.data.body_names` is the single live runtime body source for IsaacLab2
+and IsaacLab3: `articulation.body_names` is only a convenience over the same
+PhysX view and `asset.body_names` is never a live fallback. An absent or empty
+live `data.body_names` fails fast in the runtime body table, the runtime query
+and the env-site resolver (the kit-free `tests/unit/backends/test_isaaclab_bodies.py`
+covers the env-site fail-fast). The authored USD inventory is used only for
+asset inspection and the pre-clone sensor scopes above.
+
 Planned coverage:
 
 - backend construction and `EnvBackend` contract;

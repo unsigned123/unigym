@@ -41,7 +41,7 @@ from isaaclab.utils import math as math_utils
 
 from unigym._typing import JsonValue, is_json_object
 from unigym.backends.isaaclab2.robots import articulation_cfg
-from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
+from unigym.backends.shared.isaaclab_bodies import resolve_site_body_index
 from unigym.core import quat
 
 from unigym.env.native import NativeHandle
@@ -88,19 +88,6 @@ class _IsaacObsSite:
     body_index: int
     local_pos: tuple[float, float, float]
     local_quat: tuple[float, float, float, float]
-
-
-def _site_body_index(body_names: Sequence[str], usd_name: str, site_name: str) -> int:
-    """Resolve one profile USD body name against the live articulation order."""
-    names = tuple(str(name) for name in body_names)
-    matches = body_binding_candidates(names, usd_name)
-    if len(matches) == 1:
-        return matches[0]
-    raise ValueError(
-        f"observations.site {site_name!r}: body binding {usd_name!r} does not "
-        f"resolve to exactly one live body; candidates {list(matches)}; "
-        f"live bodies: {list(names)}"
-    )
 
 
 def _base_z_obs(env):
@@ -1071,16 +1058,13 @@ class IsaaclabEnv(ManagerBasedEnv):
                     )
                 asset = self.robot
             data = getattr(asset, "data", None)
-            raw_names = getattr(data, "body_names", None)
-            body_names = () if raw_names is None else tuple(str(n) for n in raw_names)
-            if not body_names:
-                raise ValueError(
-                    f"isaaclab2 backend: observations.site {name!r} owner "
-                    f"articulation {entry.owner!r} exposes no live "
-                    f"data.body_names; cannot resolve the site body "
-                    f"{binding.names['usd']!r}"
-                )
-            body_index = _site_body_index(body_names, binding.names["usd"], name)
+            body_index = resolve_site_body_index(
+                data,
+                usd_name=binding.names["usd"],
+                site_name=name,
+                owner=entry.owner,
+                backend="isaaclab2 backend",
+            )
             handles.append(
                 _IsaacObsSite(
                     name=name,

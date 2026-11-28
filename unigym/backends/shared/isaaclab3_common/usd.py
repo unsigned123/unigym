@@ -1,15 +1,20 @@
-"""Lazy OpenUSD rigid-body inventory for pre-clone contact sensors.
+"""Authored-only USD rigid-body inventory (test-only legacy traversal).
 
-The IsaacLab contact-sensor objects must exist BEFORE scene cloning, while
-the post-spawn ``robot.data.body_names`` does not exist yet.  This module owns
-the pre-clone inventory: it walks the robot asset's USD subtree and reports
-every rigid body with a robot-relative sensor path and its collision
-capability, applying the static authored fixed-joint merge rule.
+.. deprecated:: B4
+   This is an authored, static USD view and is **not** runtime truth.  It is
+   kept only because ``tests/backends/isaaclab3_physx/test_contacts.py`` still
+   imports ``robot_rigid_bodies`` to compute an expected body count for the
+   Cartpole asset.  New code must use the IsaacLab2 authored inventory
+   (``unigym.backends.isaaclab2.body_inventory.robot_body_inventory``) for
+   authored asset inspection and the live ``data.body_names`` for runtime body
+   order.  The IsaacLab3 contact backend does not read this module.
 
-The fixed-joint merge is a static USD authoring inference.  It is not the live
-PhysX body universe: live articulation bodies are measured from
-``robot.data.body_names`` after spawn and may still include a link that a USD
-fixed joint declares merged.  Do not treat this inventory as runtime truth.
+This module walks the robot asset's USD subtree and reports every rigid body
+with a robot-relative sensor path and its collision capability, applying the
+static authored fixed-joint merge rule.  That rule is a static USD authoring
+inference: it is not the live PhysX body universe.  Live articulation bodies
+are measured from ``robot.data.body_names`` after spawn and may still include a
+link that a USD fixed joint declares merged.
 
 OpenUSD (``pxr``) is an Isaac Lab / Kit dependency and is imported lazily
 inside the traversal functions only.  Importing this module in the base
@@ -23,7 +28,6 @@ from dataclasses import dataclass
 __all__ = [
     "UsdRigidBody",
     "robot_rigid_bodies",
-    "robot_relative_body_paths",
 ]
 
 
@@ -135,8 +139,3 @@ def robot_rigid_bodies(asset_path: str) -> list[UsdRigidBody]:
             f"under {root_path!r}"
         )
     return bodies
-
-
-def robot_relative_body_paths(asset_path: str) -> list[str]:
-    """The robot-relative rigid-body sensor paths in inventory order."""
-    return [body.path for body in robot_rigid_bodies(asset_path)]

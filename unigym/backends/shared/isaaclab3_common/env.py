@@ -53,7 +53,7 @@ from isaaclab.utils import configclass
 from unigym._typing import JsonValue, is_json_object
 from unigym.backends.obs_schema import build_schema
 from unigym.backends.shared.isaaclab3_common.engines import EngineProfile
-from unigym.backends.shared.isaaclab_bodies import body_binding_candidates
+from unigym.backends.shared.isaaclab_bodies import resolve_site_body_index
 from unigym.backends.shared.isaaclab3_common.init_pose import (
     build_init_pose_cfg,
     sample_init_pose,
@@ -99,19 +99,6 @@ class _IsaacObsSite:
     body_index: int
     local_pos: tuple[float, float, float]
     local_quat: tuple[float, float, float, float]
-
-
-def _site_body_index(body_names: Sequence[str], usd_name: str, site_name: str) -> int:
-    """Resolve one profile USD body name against the live articulation order."""
-    names = tuple(str(name) for name in body_names)
-    matches = body_binding_candidates(names, usd_name)
-    if len(matches) == 1:
-        return matches[0]
-    raise ValueError(
-        f"observations.site {site_name!r}: body binding {usd_name!r} does not "
-        f"resolve to exactly one live body; candidates {list(matches)}; "
-        f"live bodies: {list(names)}"
-    )
 
 
 def _torch_view(value):
@@ -1155,16 +1142,13 @@ class Isaaclab3EnvBase(ManagerBasedEnv):
                     )
                 asset = self.robot
             data = getattr(asset, "data", None)
-            raw_names = getattr(data, "body_names", None)
-            body_names = () if raw_names is None else tuple(str(n) for n in raw_names)
-            if not body_names:
-                raise ValueError(
-                    f"{self.backend_name}: observations.site {name!r} owner "
-                    f"articulation {entry.owner!r} exposes no live "
-                    f"data.body_names; cannot resolve the site body "
-                    f"{binding.names['usd']!r}"
-                )
-            body_index = _site_body_index(body_names, binding.names["usd"], name)
+            body_index = resolve_site_body_index(
+                data,
+                usd_name=binding.names["usd"],
+                site_name=name,
+                owner=entry.owner,
+                backend=self.backend_name,
+            )
             handles.append(
                 _IsaacObsSite(
                     name=name,

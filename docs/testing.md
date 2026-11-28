@@ -621,6 +621,11 @@ environment variable is read. The G1 contact-all test is part of this lane: a
 inventory (`unigym/backends/isaaclab2/body_inventory.py`) only to discover the
 pre-clone per-parent sensor prim scopes; it resolves and asserts against the
 measured live PhysX body set, which is 46 bodies and includes both palm links.
+`robot.data.body_names` is the single live body source; the authored inventory
+is asset inspection only and the sensor union is asserted set-equal to the live
+set. The kit-free `tests/unit/backends/test_isaaclab_bodies.py` covers the
+shared env-site resolver's fail-fast on empty `data.body_names` for both
+IsaacLab2 and IsaacLab3 labels.
 The lane also builds a two-articulation Cartpole + G1 env with one
 `body: "*"` robot ref per articulation: each group must read its own runtime
 body universe in its own prim scope (`Robot` vs `Robot_g1`) and never a union,

@@ -741,11 +741,18 @@ articulations:
 
 - A robot ref with `body: "*"` resolves against the articulation's measured
   runtime body set at bind (the compiled MuJoCo model bodies, or the live
-  PhysX articulation bodies on IsaacLab2). The authored USD inventory is used
-  only for the pre-clone per-parent sensor prim scopes on IsaacLab2; it is
-  asset inspection, not runtime truth, and is never used to remove fixed-joint
-  authored links such as the G1 palms at bind. Declared `contacts:` groups and
-  the profile `body_sets` are available as `body_set` names.
+  PhysX articulation bodies on IsaacLab2). On IsaacLab2 and IsaacLab3 the live
+  runtime source is exactly `robot.data.body_names`; `articulation.body_names`
+  is only a convenience over the same PhysX view and `asset.body_names` is not
+  a live source. An absent or empty `data.body_names` fails fast.
+- The authored USD inventory
+  (`unigym/backends/isaaclab2/body_inventory.py`) is used only for the pre-clone
+  per-parent sensor prim scopes on IsaacLab2 (`Robot/(.*)`,
+  `Robot/left_hand/(.*)`, `Robot/right_hand/(.*)`); it is asset inspection, not
+  runtime truth, and is never used to remove fixed-joint authored links such as
+  the G1 palms at bind. The contact sensor union is asserted set-equal to the
+  live `data.body_names` set. Declared `contacts:` groups and the profile
+  `body_sets` are available as `body_set` names.
 - `contacts: none` declares no body sets; explicit refs remain legal.
 - Adapter contact-observation requests never synthesize contact groups; they
   only pre-register requests on a manager built from the run config.

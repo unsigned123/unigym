@@ -111,3 +111,45 @@ def test_isaaclab_full_tree_prop_links_come_from_live_data_only(ops_factory):
     doc = ops_factory(env, robot_name="robot").full_tree()
 
     assert doc["props"]["box"]["links"] == ["prop_root", "prop_tip"]
+
+
+@pytest.mark.parametrize("ops_factory", _ISAACLAB_OPS)
+@pytest.mark.parametrize("prop_data", [None, types.SimpleNamespace()])
+def test_isaaclab_full_tree_missing_prop_live_names_reports_empty_links(ops_factory, prop_data):
+    """A prop with no live data block documents empty links, not a stale fallback."""
+    prop_asset = types.SimpleNamespace(
+        body_names=["stale_asset_only_body"],
+        data=prop_data,
+        joint_names=[],
+    )
+    handler = types.SimpleNamespace(
+        spec=types.SimpleNamespace(name="box", type="rigid"),
+        _asset=prop_asset,
+    )
+    env = types.SimpleNamespace(
+        articulations={
+            "robot": types.SimpleNamespace(base_body="base", joint_names=("j1",)),
+        },
+        robot=types.SimpleNamespace(data=types.SimpleNamespace(body_names=["base"])),
+        prop_manager=types.SimpleNamespace(_handlers=[handler]),
+    )
+
+    doc = ops_factory(env, robot_name="robot").full_tree()
+
+    assert doc["props"]["box"]["links"] == []
+
+
+@pytest.mark.parametrize("ops_factory", _ISAACLAB_OPS)
+def test_isaaclab_full_tree_missing_robot_live_names_reports_empty_links(ops_factory):
+    """The robot link list is the live ``data.body_names``; empty stays empty."""
+    env = types.SimpleNamespace(
+        articulations={
+            "robot": types.SimpleNamespace(base_body="base", joint_names=("j1",)),
+        },
+        robot=types.SimpleNamespace(data=types.SimpleNamespace(body_names=[])),
+        prop_manager=types.SimpleNamespace(_handlers=[]),
+    )
+
+    doc = ops_factory(env, robot_name="robot").full_tree()
+
+    assert doc["robot"]["links"] == []

@@ -5,7 +5,8 @@ import isaaclab (imports live inside the functions that need it, mirroring
 ``cameras/cfg.py``); the module itself is import-safe without the kit.  It
 never imports a concrete backend.
 
-Scheme A semantics (identical body resolution to the IsaacLab2 face):
+Scheme A semantics (body resolution matches the IsaacLab2 face; sensor-scope
+expansion does not yet):
 
 * A group's bodies come from explicit ``ContactBodyRef`` records only.  Robot
   refs are anchored at the owning articulation's prim leaf (``Robot`` for the
@@ -16,6 +17,13 @@ Scheme A semantics (identical body resolution to the IsaacLab2 face):
 * ``general`` groups -> one ContactSensorCfg per sensor ref; the raw array is
   ``data.net_normal_forces_w`` (N, B, 3), world frame natively.  The B axis is
   the concatenation of per-ref slices in declaration order.
+* Known gap (B4 ledger): unlike the IsaacLab2 backend this module does not yet
+  expand a robot ref into per-parent sensor scopes (``Robot/(.*)``,
+  ``Robot/left_hand/(.*)``, ...).  IsaacLab's prim matcher is single-segment, so
+  a nested body scope needs its own sensor; until that expansion lands, a
+  nested robot body ref must be declared as an explicit nested-scope ref.  The
+  runtime inventory still comes from each articulation's live
+  ``data.body_names``.
 * ``pairwise`` groups -> one ContactSensorCfg PER sensor ref with
   ``filter_prim_paths_expr`` flattened from the filter refs in declaration
   order (exact literals are emitted without regex grouping).  Each pairwise

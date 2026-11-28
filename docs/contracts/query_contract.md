@@ -959,5 +959,31 @@ Semantics:
   never records.  Outside an active transaction scratch it never mutates live
   simulator state; a transaction scratch restores the captured state on close.
 
+### `data.body_names` live semantics
+
+`robot.data.body_names` (IsaacLab2 and IsaacLab3) is the single live runtime
+body source.  It is an engine-owned articulation link list, not an authored
+asset inventory:
+
+- **live** — the post-spawn articulation order (`root_physx_view` link order),
+  used for runtime queries, state writes, model facts and contact resolution;
+- **authored** — the pre-clone USD rigid-body set
+  (`unigym.backends.isaaclab2.body_inventory.robot_body_inventory`), used only
+  for asset inspection and pre-clone per-parent sensor prim scopes.
+
+`articulation.body_names` is a convenience property over the same PhysX view
+and `asset.body_names` is not a live runtime source; neither is a fallback.  An
+absent or empty `data.body_names` is a backend failure that fails fast rather
+than reading a stale authored list.  MuJoCo has no equivalent: its single live
+source is the compiled `mjModel` (`mjModel.nbody` + `mjModel.body(i).name`).
+
+On IsaacLab2, a robot `body: "*"` contact group covers the live bodies through
+parent-grouped `ContactSensorCfg` scopes (`Robot/(.*)`,
+`Robot/left_hand/(.*)`, `Robot/right_hand/(.*)`), because IsaacLab's prim
+matcher is single-segment.  The authored inventory supplies those scopes; the
+measured live set supplies the body rows and the coverage assertion.  Asserting
+that the sensor union equals `data.body_names` is what makes `data.body_names`
+the single live source for both the runtime body table and contact coverage.
+
 The PhysX/Newton capability identity is unit-covered; the Newton real-env lane
 remains unverified until that lane environment is available.

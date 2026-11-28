@@ -327,6 +327,11 @@ class IsaacLabSceneOps:
         Robot/prop links and joints (the USD stage prim walk is not
         boundable here -- daemon_api_contract §1.23 declared diff); live
         poses live in :meth:`state`.
+
+        Links come only from each asset's live ``data.body_names``.  A prop
+        whose live data block is absent (for example a static or not-yet-spawned
+        prop) reports an empty ``links`` list; it is never a stale
+        ``asset.body_names`` fallback.  The robot's live names are required.
         """
         robot = self.env.robot
         doc: dict = {
