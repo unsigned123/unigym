@@ -1,14 +1,15 @@
-"""USD-derived robot body inventory with authored and simulated populations.
+"""USD-authored robot body inventory.
 
-The robot asset declares more rigid bodies than PhysX simulates.  Every prim
-carrying ``UsdPhysics.RigidBodyAPI`` is an authored body, but PhysX merges the
-child side of a fixed joint into its parent at articulation build time.  This
-module owns the single USD traversal and exposes the two populations:
+This module owns the single USD traversal for a robot asset and exposes the
+authored rigid-body population.  Every prim under the robot default prim that
+carries ``UsdPhysics.RigidBodyAPI`` is an authored body, including bodies that a
+fixed joint declares merged into a parent.
 
-* ``AUTHORED``: every rigid body under the robot default prim, in traversal
-  order, including fixed-joint merged children.
-* ``SIMULATED``: ``AUTHORED`` minus the fixed-joint merged children, which is
-  the body universe PhysX articulations and contact sensors see.
+The inventory is USD authoring truth only.  It deliberately exposes no
+``SIMULATED`` population: live PhysX articulation bodies are a B2 measurement
+from ``robot.data.body_names`` and must never be inferred by subtracting
+fixed-joint children from the USD graph.  ``merged_into`` is kept as diagnostic
+authoring metadata and never removes a body from this inventory.
 
 OpenUSD (``pxr``) is an Isaac Lab / Kit dependency and is imported lazily inside
 the traversal function only.  Importing this module in the base environment
@@ -18,36 +19,30 @@ must never import ``pxr``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
 __all__ = [
-    "BodyPopulation",
-    "BodyPopulationView",
     "RigidBody",
     "RobotBodyInventory",
     "robot_body_inventory",
 ]
 
 
-class BodyPopulation(StrEnum):
-    """The two body universes declared by one robot asset."""
-
-    AUTHORED = "authored"
-    SIMULATED = "simulated"
-
-
 @dataclass(frozen=True)
 class RigidBody:
-    """One rigid body under the robot asset root.
+    """One authored rigid body under the robot asset root.
 
     Attributes:
         path: robot-relative prim path (``pelvis`` or
-            ``left_hand/left_hand_index_0_link``).
-        name: the USD prim name (``prim.GetName()``), used for resolution.
-        collision: whether any descendant prim carries a collision schema.
-        merged_into: the robot-relative parent path when a fixed joint merges
-            this body into a parent, else ``None``.
+            ``left_hand/left_hand_index_0_link``).  This is the durable body
+            key; leaf prim names may collide across scopes.
+        name: the USD prim name (``prim.GetName()``), kept for display and for
+            unambiguous name lookup only.
+        collision: whether any descendant prim carries a collision schema,
+            including collision prims inside native instance prototypes.
+        merged_into: the robot-relative parent path when a fixed joint declares
+            this body merged into it, else ``None``.  Diagnostic authoring
+            metadata only; it never removes this body from the inventory.
     """
 
     path: str
@@ -57,72 +52,63 @@ class RigidBody:
 
 
 @dataclass(frozen=True)
-class BodyPopulationView:
-    """A frozen projection of one population over the inventory rows.
-
-    The view carries its population so downstream code resolves body names
-    without repeating a ``population=`` argument.
-    """
-
-    population: BodyPopulation
-    bodies: tuple[RigidBody, ...]
-
-    def __post_init__(self) -> None:
-        """Reject duplicate resolved names inside this population."""
-        seen: dict[str, str] = {}
-        for body in self.bodies:
-            previous = seen.get(body.name)
-            if previous is not None:
-                raise ValueError(
-                    f"{self.population.value} body inventory has duplicate name "
-                    f"{body.name!r}: {previous!r} and {body.path!r}"
-                )
-            seen[body.name] = body.path
-
-    def names(self) -> tuple[str, ...]:
-        """The resolved body names in inventory order."""
-        return tuple(body.name for body in self.bodies)
-
-    def resolve(self, name: str) -> RigidBody:
-        """Return the body named ``name``.
-
-        Raises:
-            KeyError: No body in this population has that name.
-        """
-        for body in self.bodies:
-            if body.name == name:
-                return body
-        raise KeyError(f"{self.population.value} body inventory has no body named {name!r}")
-
-    def contains(self, name: str) -> bool:
-        """Whether this population contains a body named ``name``."""
-        return any(body.name == name for body in self.bodies)
-
-
-@dataclass(frozen=True)
 class RobotBodyInventory:
-    """The single USD-derived inventory for one robot asset."""
+    """The authored USD body inventory for one robot asset."""
 
     asset_path: Path
     bodies: tuple[RigidBody, ...]
 
-    def population(self, population: BodyPopulation) -> BodyPopulationView:
-        """Project the inventory onto one body population.
+    def __post_init__(self) -> None:
+        """Reject duplicate durable body keys with both offending rows."""
+        seen: dict[str, RigidBody] = {}
+        for body in self.bodies:
+            previous = seen.get(body.path)
+            if previous is not None:
+                raise ValueError(
+                    "authored body inventory has duplicate path "
+                    f"{body.path!r}: name {previous.name!r} and name {body.name!r}"
+                )
+            seen[body.path] = body
+
+    def paths(self) -> tuple[str, ...]:
+        """The durable robot-relative body paths in inventory order."""
+        return tuple(body.path for body in self.bodies)
+
+    def names(self) -> tuple[str, ...]:
+        """The leaf body names in inventory order.
+
+        Different scopes may legitimately share a leaf name; use :meth:`paths`
+        for an unambiguous key.
+        """
+        return tuple(body.name for body in self.bodies)
+
+    def resolve(self, key: str) -> RigidBody:
+        """Return the body addressed by a durable path or a unique leaf name.
+
+        Paths always win over names.  A leaf name that matches several bodies is
+        ambiguous and rejected rather than resolved by traversal order.
 
         Raises:
-            ValueError: ``population`` is not a ``BodyPopulation`` member.
+            KeyError: No body has that path or name.
+            ValueError: The key matches several bodies by leaf name.
         """
-        if population is BodyPopulation.AUTHORED:
-            bodies = self.bodies
-        elif population is BodyPopulation.SIMULATED:
-            bodies = tuple(body for body in self.bodies if body.merged_into is None)
-        else:
-            raise ValueError(f"unknown body population {population!r}")
-        return BodyPopulationView(population=population, bodies=bodies)
+        for body in self.bodies:
+            if body.path == key:
+                return body
+        matches = [body for body in self.bodies if body.name == key]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise KeyError(f"authored body inventory has no body at path or name {key!r}")
+        paths = ", ".join(repr(body.path) for body in matches)
+        raise ValueError(
+            f"authored body inventory name {key!r} is ambiguous across paths {paths}; "
+            "use the full robot-relative path"
+        )
 
-    def names(self, population: BodyPopulation) -> tuple[str, ...]:
-        """The resolved body names for one population, in inventory order."""
-        return self.population(population).names()
+    def contains(self, key: str) -> bool:
+        """Whether any body path or leaf name equals ``key``."""
+        return any(body.path == key or body.name == key for body in self.bodies)
 
 
 def _usd_modules():
@@ -141,8 +127,12 @@ def _relative_path(path: str, root_path: str) -> str:
 
 
 def _has_collision(prim, Usd, UsdPhysics) -> bool:
-    """True when any descendant carries an OpenUSD collision schema."""
-    for child in Usd.PrimRange(prim):
+    """True when any descendant carries an OpenUSD collision schema.
+
+    Collision prims live inside native instance prototypes in the composed G1
+    asset, so the traversal must expand instance proxies.
+    """
+    for child in Usd.PrimRange(prim, Usd.TraverseInstanceProxies()):
         if child.HasAPI(UsdPhysics.CollisionAPI):
             return True
         if any("Collision" in schema for schema in child.GetAppliedSchemas()):
@@ -153,10 +143,13 @@ def _has_collision(prim, Usd, UsdPhysics) -> bool:
 def _fixed_merged_parents(stage, root, Sdf, Usd, UsdPhysics) -> dict[str, str]:
     """Absolute merged child path -> absolute parent path for fixed joints.
 
-    PhysX merges the child side of a fixed joint into the parent at
-    articulation build time.  ``body1`` is the child for the assembler joints
-    produced by the USD pipeline; a target outside the robot root is the world
-    and never merges a robot body.
+    A fixed joint records diagnostic authoring intent.  PhysX does not
+    necessarily merge the child into the parent, so this map never removes a
+    body from the authored inventory.
+
+    ``body1`` is the child for the assembler joints produced by the USD
+    pipeline; a target outside the robot root is the world and never merges a
+    robot body.
 
     The first fixed joint in traversal order owns the merge when several joints
     name the same child; the merged child set is unchanged either way.
@@ -186,16 +179,17 @@ def _fixed_merged_parents(stage, root, Sdf, Usd, UsdPhysics) -> dict[str, str]:
 
 
 def robot_body_inventory(asset_path: str | Path) -> RobotBodyInventory:
-    """Build the single body inventory for the robot asset at ``asset_path``.
+    """Build the authored body inventory for the robot asset at ``asset_path``.
 
-    The asset root is the stage's default prim.  ``AUTHORED`` lists every
-    ``UsdPhysics.RigidBodyAPI`` prim in traversal order; ``SIMULATED`` excludes
-    the fixed-joint merged children.  Both populations reject duplicate prim
-    names with both paths.
+    The asset root is the stage's default prim.  Every
+    ``UsdPhysics.RigidBodyAPI`` prim in traversal order is listed, including
+    bodies whose ``merged_into`` metadata names a fixed-joint parent.  Duplicate
+    durable paths are rejected with both body names; duplicate leaf names are
+    allowed but ambiguous name lookups are rejected.
 
     Raises:
-        ValueError: The stage/root cannot be opened or the asset declares no
-            rigid bodies.
+        ValueError: The stage/root cannot be opened, the asset declares no rigid
+            bodies, or two bodies share a durable path.
     """
     Sdf, Usd, UsdPhysics = _usd_modules()
     stage = Usd.Stage.Open(str(asset_path))
@@ -225,7 +219,4 @@ def robot_body_inventory(asset_path: str | Path) -> RobotBodyInventory:
             f"body inventory: USD asset {asset_path!r} declares no rigid bodies "
             f"under {root_path!r}"
         )
-    inventory = RobotBodyInventory(asset_path=Path(asset_path), bodies=tuple(bodies))
-    inventory.population(BodyPopulation.AUTHORED)
-    inventory.population(BodyPopulation.SIMULATED)
-    return inventory
+    return RobotBodyInventory(asset_path=Path(asset_path), bodies=tuple(bodies))
