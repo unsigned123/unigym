@@ -221,6 +221,21 @@ def test_isaaclab2_describe_body_universe_is_the_live_data_set() -> None:
     assert "stale_authored_only_body" not in ir.bodies
 
 
+def test_isaaclab2_describe_requires_live_data_body_names() -> None:
+    """An empty live data block fails instead of reading articulation names."""
+    from unigym.backends.isaaclab2.model import IsaacLabModelProvider
+    from unigym.model.errors import ModelIRError
+
+    articulation = SimpleNamespace(
+        data=SimpleNamespace(body_names=[]),
+        joint_names=[],
+        body_names=["stale_authored_only_body"],
+    )
+
+    with pytest.raises(ModelIRError, match="data.body_names"):
+        IsaacLabModelProvider().describe(articulation)
+
+
 class _PhysXViewProbe:
     """PhysX-view-shaped arrays with a one-shot inertia setter failure."""
 
@@ -267,7 +282,11 @@ def test_isaaclab2_mid_loop_failure_restores_every_touched_row() -> None:
     from unigym.model.errors import ModelEditError
 
     view = _PhysXViewProbe()
-    asset = SimpleNamespace(body_names=["first", "second"], root_physx_view=view)
+    asset = SimpleNamespace(
+        body_names=["stale_asset_only_body"],
+        data=SimpleNamespace(body_names=["first", "second"]),
+        root_physx_view=view,
+    )
     rebuild_calls: list[str] = []
     env = SimpleNamespace(
         robots={"cartpole": asset},
@@ -297,6 +316,29 @@ def test_isaaclab2_mid_loop_failure_restores_every_touched_row() -> None:
     assert view.coms.tolist() == coms_before.tolist()
     assert view.inertias.tolist() == inertias_before.tolist()
     assert rebuild_calls == []
+
+
+def test_isaaclab2_model_edit_requires_live_data_body_names() -> None:
+    """An empty live data block fails instead of reading view/asset names."""
+    from unigym.backends.isaaclab2.model_edit import IsaacLab2ModelEditProvider
+    from unigym.model.edit import BodyEdit
+    from unigym.model.errors import ModelEditCapabilityError
+
+    view = _PhysXViewProbe()
+    asset = SimpleNamespace(
+        body_names=["first", "second"],
+        data=SimpleNamespace(body_names=[]),
+        root_physx_view=view,
+    )
+    env = SimpleNamespace(
+        robots={"cartpole": asset},
+        _model_revision=0,
+        _rebuild_model_set=lambda: None,
+    )
+    edits = (BodyEdit("cartpole", "first", None, {ModelEditField.BODY_MASS: 2.0}),)
+
+    with pytest.raises(ModelEditCapabilityError, match="data.body_names"):
+        IsaacLab2ModelEditProvider().apply(env, edits, ())
     assert env._model_revision == 0
 
 

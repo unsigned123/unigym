@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from unigym.model.errors import ModelIRError
 from unigym.model.ir import (
     Actuator,
     Body,
@@ -652,8 +653,13 @@ class IsaacLabModelProvider:
         # never removes fixed-joint children such as the G1 palms from this set.
         body_names = _names(getattr(data, "body_names", None))
         if not body_names:
-            body_names = _names(getattr(articulation, "body_names", None))
-        root_body = body_names[0] if body_names else "root"
+            raise ModelIRError(
+                f"backend {self.backend!r} articulation "
+                f"{_scene_name(articulation)!r}: live data.body_names "
+                f"is absent or empty; the live PhysX body order is required (no "
+                f"articulation.body_names/asset.body_names fallback)"
+            )
+        root_body = body_names[0]
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)
         masses, inertias, iquats, coms = _mass_and_inertia(articulation, body_names)

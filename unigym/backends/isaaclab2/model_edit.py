@@ -37,14 +37,14 @@ def _names(value: object) -> list[str]:
     return []
 
 
-def _body_names(asset: object, view: object) -> list[str]:
-    """Return the body order used by the PhysX view getters/setters."""
-    names = _names(getattr(view, "body_names", None))
-    if names:
-        return names
-    names = _names(getattr(asset, "body_names", None))
-    if names:
-        return names
+def _body_names(asset: object) -> list[str]:
+    """Return the live body order used by the PhysX view getters/setters.
+
+    ``data.body_names`` is the live ``root_physx_view`` link order, the same
+    order the view getters/setters index.  It is the single live accessor:
+    neither the asset-level authored list nor a second view property is a
+    fallback.
+    """
     data = getattr(asset, "data", None)
     return _names(getattr(data, "body_names", None))
 
@@ -161,7 +161,13 @@ class IsaacLab2ModelEditProvider:
                     f"isaaclab2 model edit: articulation "
                     f"{edit.articulation!r} exposes no root_physx_view"
                 )
-            body_names = _body_names(asset, view)
+            body_names = _body_names(asset)
+            if not body_names:
+                raise ModelEditCapabilityError(
+                    f"isaaclab2 model edit: articulation "
+                    f"{edit.articulation!r} exposes no live data.body_names; "
+                    f"cannot resolve the PhysX view body index"
+                )
             try:
                 index = body_names.index(edit.body)
             except ValueError:

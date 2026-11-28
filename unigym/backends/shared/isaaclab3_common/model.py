@@ -750,10 +750,15 @@ class IsaacLabModelProvider:
         joint_names = _names(getattr(articulation, "joint_names", None))
         if not joint_names:
             joint_names = _names(getattr(data, "joint_names", None))
-        body_names = _names(getattr(articulation, "body_names", None))
+        body_names = _names(getattr(data, "body_names", None))
         if not body_names:
-            body_names = _names(getattr(data, "body_names", None))
-        root_body = body_names[0] if body_names else "root"
+            raise ModelIRError(
+                f"backend {self.backend!r} articulation "
+                f"{_scene_name(articulation)!r}: live data.body_names "
+                f"is absent or empty; the live PhysX body order is required (no "
+                f"articulation.body_names/asset.body_names fallback)"
+            )
+        root_body = body_names[0]
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)
         if joint_names and not facts["joint_type"]:

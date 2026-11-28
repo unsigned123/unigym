@@ -9,9 +9,11 @@ import pytest
 from unigym.backends.compose import backend_runtime
 from unigym.backends.isaaclab2.scene import IsaacLabSceneOps
 from unigym.backends.mujoco.scene import MujocoSceneOps
+from unigym.backends.shared.isaaclab3_common.scene import IsaacLabSceneOps as IsaacLab3SceneOps
 from unigym.runtime.scene import SceneFace, build_scene_ops
 
 _OPS = (MujocoSceneOps, IsaacLabSceneOps)
+_ISAACLAB_OPS = (IsaacLabSceneOps, IsaacLab3SceneOps)
 
 
 @pytest.mark.parametrize("ops_factory", _OPS)
@@ -84,3 +86,28 @@ def test_isaaclab_scene_contacts_flatten_sensors_by_ref_with_perms():
 
     assert ops._resolved_sensor_names(cm) == {"all": ["root", "left", "tail"]}
     assert ops._contacts_tree() == {"all": {"members": ["root", "left", "tail"]}}
+
+
+@pytest.mark.parametrize("ops_factory", _ISAACLAB_OPS)
+def test_isaaclab_full_tree_prop_links_come_from_live_data_only(ops_factory):
+    """A stale asset-level ``body_names`` is never a scene-link fallback."""
+    prop_asset = types.SimpleNamespace(
+        body_names=["stale_asset_only_body"],
+        data=types.SimpleNamespace(body_names=["prop_root", "prop_tip"]),
+        joint_names=[],
+    )
+    handler = types.SimpleNamespace(
+        spec=types.SimpleNamespace(name="box", type="rigid"),
+        _asset=prop_asset,
+    )
+    env = types.SimpleNamespace(
+        articulations={
+            "robot": types.SimpleNamespace(base_body="base", joint_names=("j1",)),
+        },
+        robot=types.SimpleNamespace(data=types.SimpleNamespace(body_names=["base"])),
+        prop_manager=types.SimpleNamespace(_handlers=[handler]),
+    )
+
+    doc = ops_factory(env, robot_name="robot").full_tree()
+
+    assert doc["props"]["box"]["links"] == ["prop_root", "prop_tip"]

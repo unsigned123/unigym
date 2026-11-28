@@ -1071,7 +1071,15 @@ class IsaaclabEnv(ManagerBasedEnv):
                     )
                 asset = self.robot
             data = getattr(asset, "data", None)
-            body_names = getattr(data, "body_names", None) or getattr(asset, "body_names", ())
+            raw_names = getattr(data, "body_names", None)
+            body_names = () if raw_names is None else tuple(str(n) for n in raw_names)
+            if not body_names:
+                raise ValueError(
+                    f"isaaclab2 backend: observations.site {name!r} owner "
+                    f"articulation {entry.owner!r} exposes no live "
+                    f"data.body_names; cannot resolve the site body "
+                    f"{binding.names['usd']!r}"
+                )
             body_index = _site_body_index(body_names, binding.names["usd"], name)
             handles.append(
                 _IsaacObsSite(

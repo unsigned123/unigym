@@ -492,7 +492,7 @@ class _StateQuery(_Subface):
         art_name = self._query._resolve_body_articulation("state.body_pose", name, articulation)
         asset = self._query._asset_for("state.body_pose", art_name)
         data = self._query._live_data("state.body_pose", asset, art_name)
-        names = self._query._body_names(asset, data)
+        names = self._query._body_names("state.body_pose", art_name, data)
         index = _index_of("state.body_pose", name, names)
         ids = _select_env(env, self._query._env.num_envs)
         pos = self._query._read_rows("state.body_pose", data, "body_pos_w", ids, index, 3, False)
@@ -571,7 +571,7 @@ class _StateQuery(_Subface):
             )
         asset = self._query._asset_for("state.com_pose", ref.articulation)
         data = self._query._live_data("state.com_pose", asset, ref.articulation)
-        names = self._query._body_names(asset, data)
+        names = self._query._body_names("state.com_pose", ref.articulation, data)
         index = _index_of("state.com_pose", body_name, names)
         ids = _select_env(env, self._query._env.num_envs)
         body_pos = self._query._read_rows(
@@ -1009,7 +1009,7 @@ class IsaacLabJacobianQuery(_Subface):
         art = self._query._articulation(art_name)
         asset = self._query._asset_for(op, art_name)
         data = self._query._live_data(op, asset, art_name)
-        return art, asset, self._query._body_names(asset, data), data
+        return art, asset, self._query._body_names(op, art_name, data), data
 
     def _fixed_root_index(
         self,
@@ -2024,11 +2024,24 @@ class IsaacLabQuery:
             )
         return data
 
-    def _body_names(self, asset: object, data: object) -> tuple[str, ...]:
-        """Return the live body name order for one asset."""
-        return _as_names(getattr(data, "body_names", None)) or _as_names(
-            getattr(asset, "body_names", None)
-        )
+    def _body_names(self, op: str, articulation: str, data: object) -> tuple[str, ...]:
+        """Return one articulation's live ``data.body_names`` order.
+
+        The live PhysX data block is the only runtime body-name source: an
+        articulation's ``body_names`` convenience and an asset-level authored
+        list are never fallbacks.  A live data block without names is a
+        backend failure, not a reason to read a stale view.
+        """
+        names = _as_names(getattr(data, "body_names", None))
+        if not names:
+            raise QueryCapabilityError(
+                self.backend,
+                op,
+                "unsupported",
+                f"live articulation {articulation!r} exposes no data.body_names; "
+                f"the live PhysX body order is required",
+            )
+        return names
 
     def _joint_names(self, asset: object, data: object) -> tuple[str, ...]:
         """Return the live joint name order for one asset."""
@@ -2053,7 +2066,7 @@ class IsaacLabQuery:
         for candidate in names:
             asset = self._asset_for(op, candidate)
             data = self._live_data(op, asset, candidate)
-            if name in self._body_names(asset, data):
+            if name in self._body_names(op, candidate, data):
                 matches.append(candidate)
         if len(matches) == 1:
             return matches[0]
@@ -2154,7 +2167,7 @@ class IsaacLabQuery:
             )
         asset = self._asset_for(op, entry.owner)
         data = self._live_data(op, asset, entry.owner)
-        names = self._body_names(asset, data)
+        names = self._body_names(op, entry.owner, data)
         index = _body_index(op, binding.names["usd"], names)
         local_pos = torch.tensor(entry.spec.pos, dtype=torch.float64)
         local_quat = torch.tensor(entry.spec.quat_wxyz, dtype=torch.float64)

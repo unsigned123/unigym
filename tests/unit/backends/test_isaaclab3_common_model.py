@@ -88,7 +88,7 @@ class _NewtonArticulation:
 
 def test_describe_without_root_physx_view_yields_none_mass():
     """Newton has no PhysX view: describe must not invent masses."""
-    articulation = _NewtonArticulation(body_names=["base"], data=_NewtonData())
+    articulation = _NewtonArticulation(body_names=["base"], data=_NewtonData(body_names=["base"]))
     provider = provider_for("isaaclab3_newton")()
 
     ir = provider.describe(articulation)
@@ -148,7 +148,19 @@ def test_resolve_root_prim_keeps_the_declared_path_without_a_view(monkeypatch):
 def test_describe_refuses_to_emit_unknown_joint_types(monkeypatch):
     """An unresolved root prim is a loud failure, never an ``unknown`` joint IR."""
     monkeypatch.setattr(model_module, "_usd_stage", lambda: None)
-    articulation = _NewtonArticulation(body_names=["base"], joint_names=["j1"], data=_NewtonData())
+    articulation = _NewtonArticulation(
+        body_names=["base"],
+        joint_names=["j1"],
+        data=_NewtonData(body_names=["base"]),
+    )
 
     with pytest.raises(ModelIRError, match="unknown"):
+        IsaacLabModelProvider("isaaclab3_newton").describe(articulation)
+
+
+def test_describe_requires_live_data_body_names():
+    """A stale articulation ``body_names`` is never a live fallback."""
+    articulation = _NewtonArticulation(body_names=["authored_only"], data=_NewtonData())
+
+    with pytest.raises(ModelIRError, match="data.body_names"):
         IsaacLabModelProvider("isaaclab3_newton").describe(articulation)

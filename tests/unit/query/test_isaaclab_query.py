@@ -456,6 +456,22 @@ def test_live_body_root_and_joint_state_matches_the_articulation_data(backend: s
     assert float(data.body_pos_w[0, 0, 0]) != 123.0
 
 
+@pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
+def test_empty_live_data_body_names_fails_without_asset_fallback(backend: str) -> None:
+    """A stale asset-level list never substitutes for live ``data.body_names``."""
+    query, env = _query(backend)
+    asset = env.robots["robot"]
+    asset.data.body_names = []
+    asset.body_names = ["base", "link"]
+
+    with pytest.raises(QueryCapabilityError, match="data.body_names") as caught:
+        query.state.body_pose("base")
+
+    assert caught.value.backend == backend
+    assert caught.value.op == "state.body_pose"
+    assert "robot" in caught.value.detail
+
+
 def test_com_pose_uses_the_ir_com_offset_and_identity_orientation() -> None:
     """A body COM is the body frame plus its published local COM offset."""
     query, _ = _query("isaaclab2")

@@ -342,10 +342,9 @@ class IsaacLabSceneOps:
             asset = getattr(h, "_asset", None)
             links: list[str] = []
             if asset is not None:
-                if hasattr(asset, "body_names"):
-                    links = [str(n) for n in asset.body_names]
-                elif hasattr(getattr(asset, "data", None), "body_names"):
-                    links = [str(n) for n in asset.data.body_names]
+                raw = getattr(getattr(asset, "data", None), "body_names", None)
+                if raw is not None:
+                    links = [str(n) for n in raw]
             doc["props"][h.spec.name] = {
                 "type": h.spec.type,
                 "links": links,
