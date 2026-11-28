@@ -302,15 +302,15 @@ def _resolve_live_binder(
     ir: ModelIR,
     env: object,
     label: str,
+    provider: Callable[[], type] | None,
 ) -> _LiveBinder:
-    """Resolve the backend's ``live_provider`` face (registry, lazy).
+    """Bind the injected ``live_provider`` face (injected by composition).
 
     The neutral layer names no engine: the binder class is imported only
-    when a ``BackendInfo.live_provider`` factory is actually invoked.  The
-    label must be an explicit canonical env backend -- there is no alias and
-    no default.
+    when the injected provider factory is actually invoked.  The label must
+    be an explicit canonical env backend -- there is no alias and no default.
     """
-    from unigym.backends.registry import CANONICAL_BACKENDS, backend_info, build_name
+    from unigym.capabilities.traits import CANONICAL_BACKENDS, build_name
 
     if not isinstance(label, str) or not label.strip():
         raise ValueError(
@@ -324,7 +324,6 @@ def _resolve_live_binder(
             f"live proxies: backend label {label!r} is not canonical; "
             f"choose one of: {', '.join(CANONICAL_BACKENDS)}"
         ) from exc
-    provider: Callable[[], type] | None = backend_info(canonical).live_provider
     if provider is None:
         raise NotImplementedError(
             f"live proxies: backend {canonical!r} has no live model binding "
@@ -341,19 +340,27 @@ class LiveModel:
 
     __slots__ = ("_ir", "_backend", "_binder", "_joints", "_bodies")
 
-    def __init__(self, ir: ModelIR, env: object) -> None:
+    def __init__(
+        self,
+        ir: ModelIR,
+        env: object,
+        *,
+        live_provider: Callable[[], type] | None = None,
+    ) -> None:
         """Bind *ir* to *env* without copying any static row.
 
         Args:
             ir: The assembled :class:`~unigym.model.ir.ModelIR`.
             env: The live backend env (weakly referenced by the binder).
+            live_provider: The injected zero-argument binder factory from the
+                run composition boundary (no registry lookup here).
 
         Raises:
             NotImplementedError: The backend has no live binding yet.
         """
         self._ir = ir
         self._backend = _backend_label(ir, env)
-        self._binder = _resolve_live_binder(ir, env, self._backend)
+        self._binder = _resolve_live_binder(ir, env, self._backend, live_provider)
         self._joints = LiveTable[LiveJoint]([LiveJoint(self, row) for row in ir.joints])
         self._bodies = LiveTable[LiveBody]([LiveBody(self, row) for row in ir.bodies])
 

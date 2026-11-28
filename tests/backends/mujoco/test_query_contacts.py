@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 from pathlib import Path
 
 import mujoco
@@ -58,6 +60,7 @@ def _manager(groups=None):
             }
         ],
         backend="mujoco",
+        contact_factory=backend_runtime("mujoco").bindings.contact_backend,
         articulation_names=("tiny",),
         prop_names=["crate"],
     )
@@ -101,6 +104,8 @@ def _prop_manager():
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 

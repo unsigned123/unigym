@@ -44,7 +44,7 @@ from pathlib import Path
 import yaml
 
 from unigym import runtime_dirs
-from unigym.backends.registry import CANONICAL_BACKENDS, build_name
+from unigym.capabilities.traits import CANONICAL_BACKENDS, build_name
 from unigym.executors import (  # noqa: F401 (docker synthesis home)
     Executor,
     collect_cli_in_container,
@@ -415,7 +415,7 @@ def log_tail(log: Path, n: int = 1500) -> str:
 def cmd_probe(a, extra: list[str]) -> int:
     cfg = load_cfg()
     module = f"unigym.scripts.probe_{a.name}"
-    from unigym.backends.registry import backend_info
+    from unigym.capabilities.specs import backend_spec
 
     if getattr(a, "backend", None) is None:
         raise SystemExit(
@@ -423,7 +423,7 @@ def cmd_probe(a, extra: list[str]) -> int:
             f"{', '.join(CANONICAL_BACKENDS)} "
             f"(canonical names only; 'isaaclab'/'isaaclab3' aliases were removed)"
         )
-    info = backend_info(a.backend)
+    info = backend_spec(a.backend)
     if info.probe_in_host:
         cmd = [cfg["venv_python"], "-m", module] + extra
         env = dict(os.environ)

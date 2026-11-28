@@ -68,13 +68,19 @@ class MujocoDirectorOps(_OpsBase):
                 self._free[name] = pb.free_addresses(name)
             self._arts = dict(pb.articulations())
         if gripper_cfg is not None:
-            from unigym.backends.registry import backend_info
             from unigym.director.gripper import build_gripper
 
             self.gripper = build_gripper(
-                self.env, gripper_cfg, gripper_backend=backend_info(self.backend).gripper_backend
+                self.env, gripper_cfg, gripper_backend=self._gripper_backend
             )
         return self.gripper
+
+    @staticmethod
+    def _gripper_backend():
+        """Return the same-family gripper class factory (lazy import)."""
+        from unigym.backends.mujoco.director.gripper import MujocoGripper
+
+        return MujocoGripper
 
     # ------------------------------------------------------------------ #
     # resolution

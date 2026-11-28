@@ -49,7 +49,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     import torch
@@ -201,56 +201,20 @@ def _prop_shape(spec) -> str:
     return "mesh"
 
 
-# --------------------------------------------------------------------------- #
-# backward-compatible lazy spawner names
-# --------------------------------------------------------------------------- #
-# The isaaclab builders moved to ``backends/isaaclab2/props/spawn.py``.  The
-# old names stay importable from here for existing callers/tests; the import is
-# resolved lazily (and dynamically) so this neutral module keeps no static
-# backend edge and imports no engine at module load.
-def _spawn_module():
-    """Load the isaaclab spawner module on first use."""
-    import importlib
-
-    return importlib.import_module("unigym.backends.isaaclab2.props.spawn")
-
-
-def _resolve(classes):
-    """Compat: the isaaclab cfg-class table (lazy import when classes is None)."""
-    return _spawn_module()._resolve(classes)
-
-
-def _build_urdf_spawn(spec: PropSpec, c: dict):
-    """Compat: build the isaaclab UrdfFileCfg spawn."""
-    return _spawn_module()._build_urdf_spawn(spec, c)
-
-
-def _build_usd_spawn(spec: PropSpec, c: dict):
-    """Compat: build the isaaclab UsdFileCfg spawn."""
-    return _spawn_module()._build_usd_spawn(spec, c)
-
-
-def _build_actuators(spec: PropSpec, c: dict) -> dict:
-    """Compat: build implicit actuator cfgs from spawn.joint_params."""
-    return _spawn_module()._build_actuators(spec, c)
-
-
-def _prop_backend(backend: str | None) -> PropBackendCap:
-    """Resolve a backend's prop face through the registry.
+def _prop_backend(backend: str | None, factory: Callable[[], object] | None) -> PropBackendCap:
+    """Resolve a backend's prop face from an injected zero-arg factory.
 
     ``backend`` is a required canonical env backend (no family alias and no
-    ``None`` default); the registry factory keeps every engine import inside
-    the backend module.
+    ``None`` default).  The factory is injected by the composition boundary;
+    a missing factory fails fast instead of resolving a backend here.
     """
-    from ..backends.registry import CANONICAL_BACKENDS, backend_info, build_name
+    from ..capabilities.traits import CANONICAL_BACKENDS, build_name
 
     if backend is None or not str(backend).strip():
         raise ValueError(
             f"props: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
         )
     canonical = build_name(backend)
-    info = backend_info(canonical)
-    factory = info.prop_backend
     if factory is None:
         raise ValueError(
             f"backend {canonical!r} has no prop backend face "
@@ -259,14 +223,35 @@ def _prop_backend(backend: str | None) -> PropBackendCap:
     return cast("PropBackendCap", factory())
 
 
-def _compat_class(name: str) -> type:
-    """Resolve a legacy public handler class name.
+#: The closed dynamic-prop type vocabulary (authoring validation only).
+KNOWN_PROP_TYPES: tuple[str, ...] = (
+    "sphere",
+    "rigid_object",
+    "usd",
+    "articulation",
+    "usd_articulation",
+    "free_articulation",
+    "container",
+    "table",
+    "box",
+    "cylinder",
+    "capsule",
+)
 
-    The legacy class-name vocabulary is the IsaacLab 2.x handler table, so
-    this compatibility surface pins the canonical ``isaaclab2`` backend
-    explicitly -- it is not an env-backend default or family alias.
+
+def validate_prop_type(spec: PropSpec) -> None:
+    """Fail fast when a dynamic prop declares an unknown ``type``.
+
+    This is the neutral authoring vocabulary check (no backend construction
+    face needed); the backend handler registry owns the actual construction.
     """
-    return _prop_backend("isaaclab2").compat(name)
+    if spec.type not in KNOWN_PROP_TYPES:
+        known = ", ".join(KNOWN_PROP_TYPES)
+        raise ValueError(
+            f"prop {spec.name!r}: unknown type {spec.type!r} "
+            f"(known: {known}); a plane is static scene geometry and "
+            f"cannot be a dynamic prop body"
+        )
 
 
 def _resolve_urdf_path(path: str, base_dir: str | None) -> str:
@@ -720,9 +705,12 @@ class PropManager:
         base_dir: str | None = None,
         backend: str | None = None,
         asset_plan: AssetPlan | None = None,
+        prop_backend: Callable[[], object] | None = None,
+        mujoco_prop_backend: Callable[[], object] | None = None,
     ):
         self.backend = backend
-        self._prop_backend: PropBackendCap = _prop_backend(backend)
+        self._prop_backend: PropBackendCap = _prop_backend(backend, prop_backend)
+        self._mujoco_prop_backend = mujoco_prop_backend
         self.num_envs = int(num_envs)
         self.env_spacing = float(env_spacing)
         self.device = device
@@ -782,13 +770,13 @@ class PropManager:
         was built through the isaaclab face (the historical dual-track seam:
         direct ``build_prop_manager`` callers then hand the manager to a
         mujoco env), so a non-mujoco manager routes this form through the
-        registry's mujoco prop face.
+        injected mujoco prop face supplied at composition time.
         """
         if not self._handlers:
             return
         face = self._prop_backend
         if not getattr(face, "injects_mjspec", False):
-            face = _prop_backend("mujoco")
+            face = _prop_backend("mujoco", self._mujoco_prop_backend)
         face.inject_spec(self, mjspec)
 
     # ------------------------------------------------------------------ #

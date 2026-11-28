@@ -2,8 +2,8 @@
 
 The shared ``isaaclab3_common`` package stays backend-neutral, so the
 concrete identity (name, profile) is injected here.  The stdlib-only
-registry imports this module lazily through its face factories, which keeps
-``import unigym.backends.registry`` free of any engine import.
+composition bindings import this module lazily through their face factories,
+which keeps ``import unigym.backends.bindings`` free of any engine import.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from unigym.backends.shared.isaaclab3_common import build as shared_build
 from unigym.backends.shared.isaaclab3_common.asset_scene.engine import AssetSceneEngine
 from unigym.backends.shared.isaaclab3_common.cameras.rigs import build_isaaclab_rig
 from unigym.backends.shared.isaaclab3_common.contacts import IsaacLabContactBackend
-from unigym.backends.shared.isaaclab3_common.director.gripper import IsaacLabGripper
 from unigym.backends.shared.isaaclab3_common.director_ops import IsaacLabDirectorOps
 from unigym.backends.shared.isaaclab3_common.launcher import kit_launcher
 from unigym.backends.shared.isaaclab3_common.model import provider_for
@@ -95,11 +94,6 @@ def scene_ops():
     return NewtonSceneOps
 
 
-def gripper_backend():
-    """Return this identity's director gripper class."""
-    return IsaacLabGripper
-
-
 def robot_realizer():
     """Return this identity's robot realizer closure."""
     return realizer_for(NAME)
@@ -114,7 +108,6 @@ __all__ = [
     "contact_backend",
     "director_ops",
     "env_kwargs",
-    "gripper_backend",
     "kit_launcher",
     "model_provider",
     "prop_backend",

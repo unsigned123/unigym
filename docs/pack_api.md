@@ -519,12 +519,12 @@ Resolve one scene's assets through the same boundary helpers:
 
 ```python
 from unigym.assets.plan import AssetPlan, resolve_asset_instance
-from unigym.backends.registry import backend_info
+from unigym.capabilities.specs import backend_spec
 
 fmt, path = resolve_asset_instance(
     instance.asset,
     AssetPlan(runtime),
-    backend_info("isaaclab2").asset_formats,
+    backend_spec("isaaclab2").asset_formats,
 )
 ```
 
@@ -666,7 +666,7 @@ passes actuation explicitly; it is never silently filled from a pack.
 `foot_bodies` is semantic metadata (it never implies a sensor). `body_bindings`
 is robot metadata, not backend logic: the backend's selected asset format picks
 the native name. Each backend declares an ordered, non-empty
-`BackendInfo.asset_formats` preference tuple: `("mjcf",)` for
+`BackendSpec.asset_formats` preference tuple: `("mjcf",)` for
 mujoco/mjwarp and `("usd", "urdf")` for isaaclab2/isaaclab3_*. For each
 articulation the run layer selects the first preferred format present on the
 effective `AssetRef` (`spec.model` when set, otherwise `profile.assets`). There
@@ -751,7 +751,7 @@ articulations:
 switch. There is no `with_isaaclab`, no `articulation_cfg`, no `body_parts`
 and no `RobotAsset` field.
 
-A backend that needs an engine object declares `BackendInfo.robot_realizer`:
+A backend that needs an engine object declares `BackendBindings.robot_realizer`:
 
 ```text
 realizer(profile, *, spec, params, asset_plan) -> backend realization
@@ -1831,7 +1831,7 @@ message names the replacement.
 | `SceneContext`, `register_scene`, `registered_scenes`, `build_scene_definition` | `SceneProviderContext`, `register_scene_provider`, `registered_scene_providers`, `build_scene_from_provider` |
 | `ContentProvider`, `register_content_provider`, `content_provider`, `registered_content_providers`, `PROVIDER_WHENS` | `SceneContentFiller`, `register_scene_content_filler`, `scene_content_filler`, `registered_scene_content_fillers`, `FILLER_WHENS` |
 | `World.from_pack`, `World.from_generator` | `World.from_preset`, `World.from_provider` |
-| `BackendInfo.mj_scene_consumer` | `BackendInfo.scene_provider_consumer` |
+| `BackendSpec.mj_scene_consumer` | `BackendSpec.scene_provider_consumer` |
 | `RunSpec.scene` field | the `scene_preset:` declaration; routed keys remain internal |
 
 `unigym_packs/robocasa` still uses the removed `faces:` schema and

@@ -20,7 +20,7 @@ from unigym.assets.asset_ref import AssetRef
 from unigym.assets.plan import AssetPlan, resolve_asset_instance
 from unigym.backends.isaaclab2.cfg_classes import IsaacLabCfgClasses
 from unigym.backends.isaaclab2.static_shapes import build_static_payload_fields
-from unigym.backends.registry import backend_info
+from unigym.capabilities.specs import backend_spec
 from unigym.scenes.artifacts import ASSET_SCENE_DIGEST_VERSION, asset_instance_rows
 from unigym.scenes.engine import register_scene_engine
 from unigym.scenes.generators import build_payload, generator_schema, registered_generators
@@ -201,7 +201,7 @@ class AssetSceneEngine:
                     f"mujoco-only)"
                 )
 
-        formats = tuple(backend_info("isaaclab2").asset_formats)
+        formats = tuple(backend_spec("isaaclab2").asset_formats)
         selected: dict[str, str] = {}
         fields: list[AssetFieldSpec] = []
         if scene.asset_instances:

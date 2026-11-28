@@ -322,7 +322,7 @@ def add_probe_subparser(sub) -> None:
         "instead (release: `unigym resume "
         "latest`).",
     )
-    from unigym.backends.registry import CANONICAL_BACKENDS
+    from unigym.capabilities.traits import CANONICAL_BACKENDS
 
     p.add_argument("config", help="run yaml (mujoco recommended for probes)")
     p.add_argument(

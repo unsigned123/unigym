@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from unigym.backends.compose import backend_runtime
 from unigym.props import build_prop_manager as _library_build_prop_manager
 from unigym.query import EntityRef, ContactManifold, DistanceScan, ObjectRef
 from unigym.runtime.actions import NamedAction
@@ -45,6 +46,8 @@ def build_prop_manager():
         env_spacing=2.0,
         device="cpu",
         backend="mjwarp",
+        prop_backend=backend_runtime("mjwarp").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 

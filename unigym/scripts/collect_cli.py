@@ -52,7 +52,8 @@ from pathlib import Path
 
 import yaml
 
-from unigym.backends.registry import CANONICAL_BACKENDS, backend_info
+from unigym.backends.compose import backend_runtime
+from unigym.capabilities.traits import CANONICAL_BACKENDS
 
 parser = argparse.ArgumentParser(description="General robot locomotion data collection")
 parser.add_argument("--config", type=str, required=True, help="path to run yaml")
@@ -377,12 +378,12 @@ def _warn_retired_flags(args_cli) -> None:
 
 
 simulation_app = None
-_kit_launcher = backend_info(backend_label).kit_launcher
+_kit_launcher = backend_runtime(backend_label).bindings.kit_launcher
 if _kit_launcher is not None:
     # kit backends: full AppLauncher CLI (add_app_launcher_args) and kit
     # launch BEFORE any kit-dependent builder runs (robot profiles import
     # isaaclab_assets, which requires the kit up).  The launcher lives in
-    # the backend package; this script only asks the registry face.
+    # the backend package; this script only asks the composition binding.
     simulation_app, args_cli = _kit_launcher()(parser, warn=_warn_retired_flags)
 else:
     # non-kit backends: keep the core CLI surface (--device/--headless/
@@ -453,7 +454,12 @@ def main():
     # the pure-data half of the old inline path (unigym/run/spec.py).
     from unigym.run.spec import build_spec
 
-    spec = build_spec(cfg, args_cli, runtime=runtime)
+    spec = build_spec(
+        cfg,
+        args_cli,
+        runtime=runtime,
+        content_router=backend_runtime(backend_label).bindings.content_router,
+    )
 
     # the run output dir resolves BEFORE the backend build: the recorded
     # scene artifacts are written during env construction

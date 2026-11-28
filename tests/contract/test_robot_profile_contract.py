@@ -7,7 +7,8 @@ import sys
 
 import pytest
 
-from unigym.backends.registry import BackendInfo, backend_info
+from unigym.backends.compose import backend_runtime
+from unigym.capabilities.specs import BackendSpec, backend_spec
 from unigym.robots import (
     build_robot_profile,
     register_robot,
@@ -56,17 +57,17 @@ def test_neutral_profile_carries_no_backend_object_or_switch():
     assert not hasattr(profile, "with_isaaclab")
     assert not hasattr(profile, "body_parts")
 
-    info_fields = {item.name for item in dataclasses.fields(BackendInfo)}
+    info_fields = {item.name for item in dataclasses.fields(BackendSpec)}
     assert "recipe_with_isaaclab" not in info_fields
 
 
 def test_backend_robot_realizer_is_the_only_backend_seam():
     """Only backends with an engine robot object declare a realizer."""
-    assert backend_info("mujoco").robot_realizer is None
-    assert backend_info("mjwarp").robot_realizer is None
-    assert backend_info("isaaclab2").robot_realizer is not None
-    assert backend_info("isaaclab3_physx").robot_realizer is not None
-    assert backend_info("isaaclab3_newton").robot_realizer is not None
+    assert backend_runtime("mujoco").bindings.robot_realizer is None
+    assert backend_runtime("mjwarp").bindings.robot_realizer is None
+    assert backend_runtime("isaaclab2").bindings.robot_realizer is not None
+    assert backend_runtime("isaaclab3_physx").bindings.robot_realizer is not None
+    assert backend_runtime("isaaclab3_newton").bindings.robot_realizer is not None
 
 
 def test_legacy_recipe_names_are_removed():
@@ -93,4 +94,4 @@ def test_legacy_recipe_names_are_removed():
 )
 def test_every_backend_declares_its_asset_formats(backend: str, asset_formats: tuple[str, ...]):
     """Each backend owns an ordered, non-empty asset-format preference list."""
-    assert backend_info(backend).asset_formats == asset_formats
+    assert backend_spec(backend).asset_formats == asset_formats

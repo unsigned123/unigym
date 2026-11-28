@@ -11,7 +11,7 @@ Tokens:
 
 ======================  ==============================================
 ``${UNIGYM_REPO}``        this checkout's repo root -- COMPUTED from
-                          ``unigym.__file__`` (follows the worktree /
+                          this module's file path (follows the worktree /
                           checkout automatically)
 ``${UNIGYM_DEPS_ROOT}``   external dependency root: env
                           ``UNIGYM_DEPS_ROOT`` > ``unigym_deps_root``
@@ -76,9 +76,7 @@ class PlaceholderError(ValueError):
 
 def repo_root() -> str:
     """The checkout's repo root (computed -- follows the worktree)."""
-    import unigym
-
-    return str(Path(unigym.__file__).resolve().parents[1])
+    return str(Path(__file__).resolve().parents[2])
 
 
 def deps_root(repo: str | None = None) -> str:

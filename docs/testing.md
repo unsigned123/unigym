@@ -212,7 +212,7 @@ unigym/terminations/articulation.py
                                   -> tests/unit/terminations/test_articulation.py
 unigym/backends/mujoco/env.py    -> tests/backends/mujoco/test_env.py
 unigym/model/edit.py             -> tests/unit/model/test_edit.py
-unigym/backends/registry.py      -> tests/unit/backends/test_model_edit_traits.py
+unigym/backends/compose.py       -> tests/unit/backends/test_model_edit_traits.py
 unigym/run/api.py (model-edit)   -> tests/unit/run/test_model_edit.py
 ```
 

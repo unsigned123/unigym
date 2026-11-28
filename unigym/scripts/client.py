@@ -1643,12 +1643,9 @@ def debug_preflight(
     import os
     import yaml as _yaml
 
-    from unigym.backends.registry import (
-        CANONICAL_BACKENDS,
-        BackendSelectionError,
-        backend_info,
-        select_backend,
-    )
+    from unigym.capabilities.selection import BackendSelectionError, select_backend
+    from unigym.capabilities.specs import backend_spec
+    from unigym.capabilities.traits import CANONICAL_BACKENDS
 
     warnings: list[str] = []
     if backend is None:
@@ -1672,7 +1669,7 @@ def debug_preflight(
         raise DebugPreflightError(f"{e.error}; hint: {e.hint}") from e
 
     try:
-        backend_faces = backend_info(backend)
+        backend_faces = backend_spec(backend)
     except BackendSelectionError as e:
         raise DebugPreflightError(
             f"unknown backend {backend!r}; choose one of: "

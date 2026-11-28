@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from unigym._typing import JsonValue
-from unigym.backends.registry import (
+from unigym.capabilities.traits import (
     ISAACLAB2_TRAITS,
     ISAACLAB3_NEWTON_TRAITS,
     ISAACLAB3_PHYSX_TRAITS,

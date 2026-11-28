@@ -29,7 +29,7 @@ model is byte-identical (regression red line).
 
 Backend mechanics (teleport/setvel/attach/host-pose addressing) live in
 per-backend :class:`director.ops.DirectorPropOps` implementations.  The
-ops face is INJECTED by the run layer through ``BackendInfo.director_ops``
+ops face is INJECTED by the run layer through ``BackendBindings.director_ops``
 and the former backend-name branches collapsed
 into one dispatch point, and the weld/kinematic split is a registry trait
 check (``Trait.DIRECTOR_ATTACH_WELD`` / ``..._SLAVE``), not a string
@@ -145,7 +145,7 @@ class Director:
         status_fn: zero-arg callable returning the current status dict
             (the bridge's read_status -- used to stamp ``tick`` into the
             command log); optional.
-        director_ops: the ``BackendInfo.director_ops`` zero-argument factory
+        director_ops: the ``BackendBindings.director_ops`` zero-argument factory
             injected by the run layer.  Required: the neutral
             Director never inspects ``env`` to discover a backend.
     """

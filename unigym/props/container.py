@@ -321,17 +321,3 @@ def generate_box_urdf(spec: PropSpec) -> str:
     if not path.exists():
         _write_atomic(path, xml)
     return str(path)
-
-
-def __getattr__(name: str):
-    """Lazy compat re-export of the isaaclab BoxProp handler (G4)."""
-    if name in ("BoxProp", "_build_cuboid_spawn", "_box_origin_offset"):
-        from .base import _compat_class
-
-        if name == "BoxProp":
-            return _compat_class("BoxProp")
-        from importlib import import_module
-
-        box = import_module("unigym.backends.isaaclab2.props.handlers.box")
-        return getattr(box, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

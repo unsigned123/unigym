@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -212,6 +214,8 @@ def crate_prop_manager() -> Callable[..., object]:
             env_spacing=4.0,
             device="cuda:0",
             backend="isaaclab3_physx",
+            prop_backend=backend_runtime("isaaclab3_physx").bindings.prop_backend,
+            mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
         )
 
     return make

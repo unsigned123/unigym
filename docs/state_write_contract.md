@@ -19,7 +19,7 @@ run.settle(env_ids=None) -> torch.Tensor
 ```
 
 The state-write face is an **optional registry trait**:
-`unigym.backends.registry.Trait.STATE_WRITE`, projected from
+`unigym.capabilities.traits.Trait.STATE_WRITE`, projected from
 `BackendCapabilities.state_write`.  The required `EnvBackend` validator does not
 include these methods, so a backend (or fake) that only collects remains valid.
 The three methods are ordinary backend methods, not a second Protocol.

@@ -113,12 +113,12 @@ source_modules = ["unigym.core"]
 forbidden_modules = ["unigym.*"]
 ignore_imports = [
     "unigym.core.** -> unigym.runtime.**",
-    "unigym.core.** -> unigym.backends.**",
     "unigym.core.** -> unigym.adapters",
     "unigym.core.** -> unigym.scripts.**",
+    # Pure stdlib capability/version leaves; core.quat probes the IsaacLab
+    # data convention here instead of reaching the backend composition graph.
+    "unigym.core.quat -> unigym.capabilities.versions",
     "unigym.core.paths -> unigym.errors",
-    # repo_root() resolves the checkout root through the package object.
-    "unigym.core.paths -> unigym",
     # Shared JSON/typing alias is a root-level leaf, not a higher layer.
     "unigym.core.paths -> unigym._typing",
     # Same root-level JSON alias; the termination facts own no pack dependency.
@@ -149,9 +149,6 @@ forbidden_modules = [
     "unigym.scenes.**",
 ]
 ignore_imports = [
-    # Manifest parsing validates actuator backend spellings against the
-    # canonical backend id table; that leaf is stdlib-only.
-    "unigym.packs.schema -> unigym.backends.registry",
     # The provider parameter normalizer is the data-only scene leaf; the
     # scene runtime package must stay out of the data layer.
     "unigym.packs.schema -> unigym.scenes.provider_params",
@@ -164,7 +161,6 @@ type = "forbidden"
 source_modules = ["unigym.props"]
 forbidden_modules = ["unigym.backends.**"]
 ignore_imports = [
-    "unigym.props.base -> unigym.backends.registry",
     "unigym.props.base -> unigym.core.quat",
     # Function-local config expansion through the neutral path-token leaf.
     "unigym.props.templates -> unigym.core.paths",
@@ -192,24 +188,34 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = [
     "unigym.model",
-    "unigym.run",
     "unigym.cameras",
     "unigym.contacts",
     "unigym.director",
+    # Only the truly neutral run modules; run.build/run.api are composition.
+    "unigym.run.spec",
+    "unigym.run.instance",
+    "unigym.run.sink",
 ]
-forbidden_modules = ["unigym.backends.**"]
-ignore_imports = [
-    "unigym.model.ir -> unigym.backends.registry",
-    "unigym.model.edit -> unigym.backends.registry",
-    "unigym.model.live -> unigym.backends.registry",
-    "unigym.cameras.capabilities -> unigym.backends.registry",
-    "unigym.cameras.manager -> unigym.backends.registry",
-    "unigym.cameras.rigs -> unigym.backends.registry",
-    "unigym.director.ops -> unigym.backends.registry",
-    "unigym.run.build -> unigym.backends.registry",
-    "unigym.run.spec -> unigym.backends.registry",
-    "unigym.run.api -> unigym.backends.registry",
-    "unigym.contacts.base -> unigym.backends.registry",
+forbidden_modules = ["unigym.backends", "unigym.backends.**"]
+
+[[tool.importlinter.contracts]]
+name = "run composition uses only the composition boundary"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["unigym.run.build", "unigym.run.api", "unigym.env.backends"]
+forbidden_modules = [
+    "unigym.backends.mujoco",
+    "unigym.backends.mujoco.**",
+    "unigym.backends.mjwarp",
+    "unigym.backends.mjwarp.**",
+    "unigym.backends.isaaclab2",
+    "unigym.backends.isaaclab2.**",
+    "unigym.backends.isaaclab3_physx",
+    "unigym.backends.isaaclab3_physx.**",
+    "unigym.backends.isaaclab3_newton",
+    "unigym.backends.isaaclab3_newton.**",
+    "unigym.backends.shared",
+    "unigym.backends.shared.**",
 ]
 
 [[tool.importlinter.contracts]]

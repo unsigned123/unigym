@@ -1,7 +1,7 @@
-"""IsaacLab 3 run-construction hooks (``BackendInfo`` faces).
+"""IsaacLab 3 run-construction hooks (``BackendBindings`` faces).
 
-The neutral ``unigym.run.build`` path calls these through the registry's
-lazy factories; every isaaclab-specific import (kit, terrain, actuators,
+The neutral ``unigym.run.build`` path calls these through the composition
+bindings; every isaaclab-specific import (kit, terrain, actuators,
 DR events) stays inside this module / this package.
 """
 

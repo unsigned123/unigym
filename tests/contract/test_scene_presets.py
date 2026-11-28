@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from unigym.assets.asset_ref import AssetRef
+from unigym.backends.compose import backend_runtime
 from unigym.errors import ConfigError
 from unigym.pack_api import discover
 from unigym.packs import PackError
@@ -250,7 +251,12 @@ def test_provider_backed_preset_routes_content_and_params(tmp_path: Path, _scene
     register_scene_provider("acme.table_top", _table_top)
     runtime = _runtime(tmp_path, PROVIDER_BACKED)
 
-    spec = build_spec(_cfg(scene_preset="acme_scene.tabletop"), _args(), runtime=runtime)
+    spec = build_spec(
+        _cfg(scene_preset="acme_scene.tabletop"),
+        _args(),
+        runtime=runtime,
+        content_router=backend_runtime("mujoco").bindings.content_router,
+    )
 
     assert spec.backend_params["scene_provider"] == "acme.table_top"
     assert spec.backend_params["scene_provider_params"] == {"style": 1}

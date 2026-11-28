@@ -29,6 +29,7 @@ def _load(name: str) -> dict:
 
 @pytest.mark.parametrize("name", CONFIGS)
 def test_first_party_contact_section_builds(name):
+    from tests._support.backends import contact_factory
     from unigym.contacts.manager import build_contact_manager
 
     cfg = _load(name)
@@ -53,6 +54,7 @@ def test_first_party_contact_section_builds(name):
         articulation_names=tuple(item["name"] for item in articulations),
         prop_names=props,
         articulated_props=articulated,
+        contact_factory=contact_factory("mujoco"),
     )
     assert manager is not None
     assert manager.keys()

@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from unigym.backends import registry
-from unigym.backends.registry import (
+from unigym.backends.compose import BackendRuntime, backend_runtime, validate_backend_runtime
+from unigym.capabilities.traits import (
     ISAACLAB2_TRAITS,
     ISAACLAB3_NEWTON_TRAITS,
     ISAACLAB3_PHYSX_TRAITS,
@@ -18,8 +18,6 @@ from unigym.backends.registry import (
     MUJOCO_TRAITS,
     ModelEditField,
     Trait,
-    backend_info,
-    validate_trait_rules,
 )
 from unigym.env.backends.base import BackendCapabilities
 
@@ -41,22 +39,23 @@ def test_model_edit_is_declared_on_the_three_real_backends() -> None:
 
 
 @pytest.mark.parametrize("backend", ["mujoco", "mjwarp", "isaaclab2"])
-def test_provider_fields_equal_the_registry_field_set(backend) -> None:
-    """A backend's writer declaration is the registry field set."""
-    info = backend_info(backend)
-    assert info.model_edit_provider is not None
-    assert info.model_edit_fields
-    assert info.model_edit_provider.fields == info.model_edit_fields
-    provider = info.model_edit_provider.loader()
-    assert getattr(provider, "fields") == info.model_edit_fields
+def test_provider_fields_equal_the_spec_field_set(backend) -> None:
+    """A backend's writer declaration is the spec field set."""
+    runtime = backend_runtime(backend)
+    provider = runtime.bindings.model_edit_provider
+    assert provider is not None
+    assert runtime.spec.model_edit_fields
+    assert provider.fields == runtime.spec.model_edit_fields
+    loaded = provider.loader()
+    assert getattr(loaded, "fields") == runtime.spec.model_edit_fields
 
 
 def test_isaaclab3_has_no_model_edit_registration() -> None:
     """The P1 skeletons declare neither the trait nor provider/fields."""
     for name in ("isaaclab3_physx", "isaaclab3_newton"):
-        info = backend_info(name)
-        assert info.model_edit_provider is None
-        assert info.model_edit_fields == frozenset()
+        runtime = backend_runtime(name)
+        assert runtime.bindings.model_edit_provider is None
+        assert runtime.spec.model_edit_fields == frozenset()
 
 
 def test_model_edit_field_sets_match_the_documented_matrix() -> None:
@@ -76,30 +75,28 @@ def test_model_edit_field_sets_match_the_documented_matrix() -> None:
         }
     assert set(matrix) == {field.value for field in ModelEditField}
     for backend in ("mujoco", "mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton"):
-        fields = backend_info(backend).model_edit_fields
+        fields = backend_runtime(backend).spec.model_edit_fields
         for field in ModelEditField:
             documented = matrix[field.value][backend]
             supported = documented != "no"
             assert (field in fields) == supported, (backend, field, documented)
 
 
-def test_validate_trait_rules_rejects_a_field_provider_mismatch() -> None:
-    """A provider/fields/trait inconsistency fails at registration validation."""
-    info = registry._STATIC_INFO["mujoco"]
-    provider = info.model_edit_provider
-    assert provider is not None
-    broken = replace(info, model_edit_fields=frozenset({ModelEditField.BODY_MASS}))
+def test_validate_backend_runtime_rejects_a_field_provider_mismatch() -> None:
+    """A provider/fields/trait inconsistency fails at composition validation."""
+    runtime = backend_runtime("mujoco")
+    spec = runtime.spec
+    bindings = runtime.bindings
+    assert bindings.model_edit_provider is not None
+    broken = replace(spec, model_edit_fields=frozenset({ModelEditField.BODY_MASS}))
     with pytest.raises(RuntimeError, match="model_edit_provider fields"):
-        validate_trait_rules({"mujoco": broken})
-    missing_provider = replace(info, model_edit_provider=None)
+        validate_backend_runtime(BackendRuntime(spec=broken, bindings=bindings))
+    missing_provider = replace(bindings, model_edit_provider=None)
     with pytest.raises(RuntimeError, match="model_edit_provider is None"):
-        validate_trait_rules({"mujoco": missing_provider})
-    sans_trait = replace(
-        info,
-        traits=frozenset(info.traits - {Trait.MODEL_EDIT}),
-    )
+        validate_backend_runtime(BackendRuntime(spec=spec, bindings=missing_provider))
+    sans_trait = replace(spec, traits=frozenset(spec.traits - {Trait.MODEL_EDIT}))
     with pytest.raises(RuntimeError, match="without the MODEL_EDIT trait"):
-        validate_trait_rules({"mujoco": sans_trait})
+        validate_backend_runtime(BackendRuntime(spec=sans_trait, bindings=bindings))
 
 
 def test_model_edit_module_stays_engine_free() -> None:

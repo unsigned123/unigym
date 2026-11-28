@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from unigym._typing import JsonValue
-from unigym.backends.registry import (
+from unigym.capabilities.traits import (
     ISAACLAB2_TRAITS,
     ISAACLAB3_NEWTON_TRAITS,
     ISAACLAB3_PHYSX_TRAITS,

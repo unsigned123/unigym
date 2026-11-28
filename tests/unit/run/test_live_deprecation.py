@@ -45,6 +45,8 @@ class _LiveEnv:
 
 
 def _instance() -> RunInstance:
+    from unigym.backends.compose import backend_runtime
+
     return RunInstance(
         spec=SimpleNamespace(backend="mujoco"),
         profile=None,
@@ -53,6 +55,7 @@ def _instance() -> RunInstance:
         term_group=None,
         env=_LiveEnv(),
         bridge=None,
+        live_provider=backend_runtime("mujoco").bindings.live_provider,
     )
 
 

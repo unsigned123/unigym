@@ -1,4 +1,4 @@
-"""IsaacLab 3 kit launcher (shared ``BackendInfo.kit_launcher`` face).
+"""IsaacLab 3 kit launcher (shared ``BackendBindings.kit_launcher`` face).
 
 Both IsaacLab 3 identities start Kit through the same ``AppLauncher`` path;
 the ``isaaclab.app`` import stays inside :func:`kit_launcher`, so importing

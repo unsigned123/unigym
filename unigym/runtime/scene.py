@@ -113,33 +113,38 @@ def build_scene_ops(
     backend: str,
     robot_name: str,
     camera_names: Iterable[str] | None = None,
+    *,
+    scene_ops_factory: Callable[[], object] | None = None,
 ) -> SceneOps:
     """Factory: the ops object for *env* (single dispatch point).
 
     ``robot_name`` is the caller-owned articulation name; it is required and
-    validated here before any backend import.  The implementations live in the
-    backend packages -- lazy function-body imports keep this module engine-free.
+    validated here before any backend lookup.  ``scene_ops_factory`` is the
+    zero-argument face injected by the composition boundary (no registry
+    lookup); the implementations live in the backend packages.
     """
-    from ..backends.registry import BackendSelectionError, CANONICAL_BACKENDS, backend_info
+    from ..capabilities.selection import BackendSelectionError
+    from ..capabilities.specs import backend_spec
+    from ..capabilities.traits import CANONICAL_BACKENDS
 
     name = require_robot_name(robot_name)
     try:
-        info = backend_info(backend)
+        backend_spec(backend)
     except BackendSelectionError as e:
         raise ValueError(
             f"scene face: unknown backend {backend!r}; choose one of: "
             f"{', '.join(CANONICAL_BACKENDS)}"
         ) from e
-    if info.scene_ops is None:
+    if scene_ops_factory is None:
         raise ValueError(f"scene face: backend {backend!r} declares no " "scene_ops face")
-    # The registry entry is a no-arg factory returning the backend's SceneOps
+    # The injected entry is a no-arg factory returning the backend's SceneOps
     # class; the runtime check establishes the callable invariant the type
-    # system cannot express across the registry's opaque factory boundary.
-    loaded = info.scene_ops()
+    # system cannot express across the opaque factory boundary.
+    loaded = scene_ops_factory()
     if not callable(loaded):
         raise TypeError(f"scene face: backend {backend!r} scene_ops factory is not callable")
-    scene_ops_factory = cast(Callable[..., SceneOps], loaded)
-    return scene_ops_factory(env, robot_name=name, camera_names=camera_names)
+    factory = cast(Callable[..., SceneOps], loaded)
+    return factory(env, robot_name=name, camera_names=camera_names)
 
 
 # --------------------------------------------------------------------------- #
@@ -278,11 +283,14 @@ class SceneFace:
         backend: str,
         robot_name: str,
         camera_names: Iterable[str] | None = None,
+        *,
+        scene_ops_factory: Callable[[], object] | None = None,
     ):
         self._env = env
         self._backend = str(backend)
         self._robot_name = require_robot_name(robot_name)
         self._camera_names = list(camera_names or [])
+        self._scene_ops_factory = scene_ops_factory
         self._ops: SceneOps | None = None
         self._tree: dict[str, JsonValue] | None = None
         self.n_queries = 0
@@ -296,6 +304,7 @@ class SceneFace:
                 self._backend,
                 robot_name=self._robot_name,
                 camera_names=self._camera_names,
+                scene_ops_factory=self._scene_ops_factory,
             )
         return self._ops
 
@@ -319,16 +328,28 @@ class SceneFace:
         return {"scene": {"tree": self.tree_face(), "state": self.ops.state()}}
 
 
-def attach(bridge: Bridge, env: object, backend: str, robot_name: str) -> SceneFace:
+def attach(
+    bridge: Bridge,
+    env: object,
+    backend: str,
+    robot_name: str,
+    *,
+    scene_ops_factory: Callable[[], object] | None = None,
+) -> SceneFace:
     """Wire the scene face onto the bridge (collect_cli face).
 
-    ``robot_name`` is the explicit articulation name (no fallback).  Registers
+    ``robot_name`` is the explicit articulation name (no fallback).
+    ``scene_ops_factory`` is the injected backend scene face.  Registers
     the cmd-16 handler via the bridge's extension surface (``register_command``
     -- the console/watchers/director pattern); camera names ride from the
     bridge's own camera manager view.
     """
     face = SceneFace(
-        env, backend, robot_name=robot_name, camera_names=getattr(bridge, "camera_names", None)
+        env,
+        backend,
+        robot_name=robot_name,
+        camera_names=getattr(bridge, "camera_names", None),
+        scene_ops_factory=scene_ops_factory,
     )
     bridge.register_command("scene", face.handle)
     return face

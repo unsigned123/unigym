@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.registry import Trait, backend_info
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import Trait
 from unigym.backends.shared.isaaclab3_common.query import (
     ISAACLAB3_NEWTON_QUERY_CAPABILITIES,
 )
@@ -20,7 +21,7 @@ pytestmark = pytest.mark.sim
 
 def test_newton_declares_native_and_synthetic_jacobian_levels() -> None:
     """Newton shares the IL3 Jacobian contract: native body/COM, synthetic site/point."""
-    info = backend_info("isaaclab3_newton")
+    info = backend_spec("isaaclab3_newton")
     caps = ISAACLAB3_NEWTON_QUERY_CAPABILITIES
 
     assert Trait.RUNTIME_QUERY in info.traits

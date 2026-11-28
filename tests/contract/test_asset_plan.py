@@ -281,8 +281,10 @@ def test_prop_manager_stores_absolute_generated_asset_files(
     pack_template: str, plan: AssetPlan, runtime: PackLoader, tmp_path: Path
 ) -> None:
     """PropManager.asset_definitions carries the boundary-resolved files."""
+    from tests._support.backends import prop_faces
     from unigym.props import build_prop_manager
 
+    prop_backend, mujoco_prop_backend = prop_faces("mujoco")
     manager = build_prop_manager(
         _template_config(pack_template),
         num_envs=1,
@@ -291,6 +293,8 @@ def test_prop_manager_stores_absolute_generated_asset_files(
         base_dir=str(tmp_path),
         backend="mujoco",
         asset_plan=plan,
+        prop_backend=prop_backend,
+        mujoco_prop_backend=mujoco_prop_backend,
     )
 
     assert manager is not None

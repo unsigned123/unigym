@@ -10,12 +10,12 @@ The handler implementations are backend-owned: the concrete
 IsaacLab handlers live in ``unigym.backends.isaaclab2.props.handlers`` and
 the MuJoCo side in ``unigym.backends.shared.mjfamily.props.props``.  This package keeps the
 neutral vocabulary (:class:`PropSpec`, :class:`PropManager`, placement,
-validation, geometry and the generated-URDF cache) and lazy compatibility
-re-exports for the long-standing public class names.
+validation, geometry and the generated-URDF cache).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .base import (
@@ -31,53 +31,8 @@ from .base import (
 # here; templates never imports providers, so the arrow is one-way)
 from . import providers  # noqa: F401
 
-#: legacy public class name -> backend handler module basename
-_COMPAT_NAMES = frozenset(
-    {
-        "BallProp",
-        "BoxProp",
-        "FreeArticulationProp",
-        "GenericProp",
-        "PrimitiveProp",
-        "PropArticulation",
-        "UsdArticulationProp",
-    }
-)
-
 if TYPE_CHECKING:
-    from typing import Any
-
     from unigym.assets.plan import AssetPlan
-
-    BallProp: Any
-    BoxProp: Any
-    FreeArticulationProp: Any
-    GenericProp: Any
-    PrimitiveProp: Any
-    PropArticulation: Any
-    UsdArticulationProp: Any
-
-
-def __getattr__(name: str):
-    """Lazy compatibility re-export of the backend handler classes (G4)."""
-    if name in _COMPAT_NAMES:
-        from .base import _compat_class
-
-        return _compat_class(name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def _dispatch_handler(spec: PropSpec) -> type[PropHandler]:
-    """Pick the handler class for a PropSpec through the backend registry.
-
-    The public class-name vocabulary is the IsaacLab 2.x handler table, so
-    this legacy compatibility surface pins the canonical ``isaaclab2``
-    backend explicitly (not an env-backend default or family alias).  It is
-    used for declaration validation only.
-    """
-    from .base import _prop_backend
-
-    return _prop_backend("isaaclab2").handler_for(spec)
 
 
 def build_prop_manager(
@@ -88,14 +43,17 @@ def build_prop_manager(
     base_dir: str | None = None,
     backend: str | None = None,
     asset_plan: AssetPlan | None = None,
+    prop_backend: Callable[[], object] | None = None,
+    mujoco_prop_backend: Callable[[], object] | None = None,
 ) -> PropManager | None:
     """Build a :class:`PropManager` from a yaml ``props:`` section.
 
     Returns ``None`` when the section is missing, ``enabled`` is false, or
     it declares no types -- so callers can treat the result uniformly.
     ``backend`` is the explicit canonical env backend (no alias and no
-    default).  ``asset_plan`` is the composition boundary that resolves
-    template-emitted asset files.
+    default).  ``prop_backend`` / ``mujoco_prop_backend`` are the injected
+    construction faces; ``asset_plan`` is the composition boundary that
+    resolves template-emitted asset files.
     """
     if not config:
         return None
@@ -104,7 +62,7 @@ def build_prop_manager(
     if not config.get("types"):
         return None
     if backend is None or not str(backend).strip():
-        from unigym.backends.registry import CANONICAL_BACKENDS
+        from unigym.capabilities.traits import CANONICAL_BACKENDS
 
         raise ValueError(
             f"props: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
@@ -117,6 +75,8 @@ def build_prop_manager(
         base_dir=base_dir,
         backend=backend,
         asset_plan=asset_plan,
+        prop_backend=prop_backend,
+        mujoco_prop_backend=mujoco_prop_backend,
     )
 
 
@@ -125,13 +85,6 @@ __all__ = [
     "PropSpec",
     "PropPlacement",
     "PropHandler",
-    "PropArticulation",
-    "UsdArticulationProp",
-    "FreeArticulationProp",
-    "BallProp",
-    "GenericProp",
-    "BoxProp",
-    "PrimitiveProp",
     "build_prop_manager",
     "quat_rotate",
     "quat_rotate_inverse",

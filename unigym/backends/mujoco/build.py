@@ -1,7 +1,7 @@
-"""MuJoCo run-construction hooks (``BackendInfo`` faces).
+"""MuJoCo run-construction hooks (``BackendBindings`` faces).
 
-The neutral ``unigym.run.build`` path calls these through the registry's
-lazy factories; the backend-name knowledge lives here, not there.
+The neutral ``unigym.run.build`` path calls these through the composition
+bindings; the backend-name knowledge lives here, not there.
 """
 
 from __future__ import annotations

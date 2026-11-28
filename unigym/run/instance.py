@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from unigym.backends.registry import CANONICAL_BACKENDS, Trait, backend_info
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import CANONICAL_BACKENDS, Trait
 from unigym.query.errors import QueryStaleError
 from unigym.sink import Sink
 
@@ -111,6 +112,8 @@ class RunInstance:
     artifacts_dir: Path | None = None
     out_dir: str | None = None
     reset_on_termination: bool = False
+    live_provider: Callable[[], type] | None = field(default=None, repr=False)
+    query_backend: Callable[[], Callable[..., Query]] | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
     _query: Query | None = field(default=None, init=False, repr=False)
 
@@ -134,7 +137,7 @@ class RunInstance:
         if self._query is not None:
             return self._query
         live = self.spec.backend
-        info = backend_info(live)
+        info = backend_spec(live)
         if Trait.RUNTIME_QUERY not in info.traits:
             raise NotImplementedError(
                 f"backend {live!r} does not declare the RUNTIME_QUERY trait "
@@ -144,11 +147,11 @@ class RunInstance:
         if env_query is not None:
             self._query = env_query
             return env_query
-        factory = info.query_backend
+        factory = self.query_backend
         if factory is None:
             raise NotImplementedError(
                 f"backend {live!r} declares RUNTIME_QUERY but exposes no "
-                f"env.query and the registry declares no query_backend factory"
+                f"env.query and composition injected no query_backend factory"
             )
         self._query = factory()(self.env)
         return self._query
@@ -222,7 +225,7 @@ class RunInstance:
             ir = next(iter(model.articulations.values()))
         else:
             ir = model[name]
-        return LiveModel(ir, self.env)
+        return LiveModel(ir, self.env, live_provider=self.live_provider)
 
     @property
     def live(self) -> LiveModel:
@@ -287,7 +290,7 @@ class RunInstance:
                 f"native(backend={backend!r}) does not match this run's live "
                 f"backend {live!r} (canonical requested {requested!r})"
             )
-        if Trait.NATIVE_HANDLE not in backend_info(live).traits:
+        if Trait.NATIVE_HANDLE not in backend_spec(live).traits:
             raise NotImplementedError(
                 f"backend {live!r} does not declare the NATIVE_HANDLE trait "
                 f"(env.native is an external-pack-only escape hatch)"
@@ -314,7 +317,7 @@ class RunInstance:
         if self._closed:
             raise RuntimeError("RunInstance is closed: model edits need a live backend")
         live = self.spec.backend
-        if Trait.MODEL_EDIT not in backend_info(live).traits:
+        if Trait.MODEL_EDIT not in backend_spec(live).traits:
             raise NotImplementedError(
                 f"backend {live!r} does not declare the MODEL_EDIT trait "
                 f"(run.model_edit is optional and this backend declares it absent)"

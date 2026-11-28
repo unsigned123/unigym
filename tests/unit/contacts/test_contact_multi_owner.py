@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from tests._support.backends import contact_factory
 from unigym.contacts.base import ContactGroupSpec
 from unigym.contacts.manager import build_contact_manager
 from unigym.contacts.refs import ContactBodyRef
@@ -143,6 +144,7 @@ def test_single_articulation_robot_ref_without_owner_is_legal():
         ],
         backend="isaaclab2",
         articulation_names=("cartpole",),
+        contact_factory=contact_factory("isaaclab2"),
     )
     assert manager is not None
     assert manager.specs[0].sensor_refs[0].articulation is None

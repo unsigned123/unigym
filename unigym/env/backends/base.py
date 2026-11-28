@@ -78,7 +78,7 @@ Failure semantics
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -89,27 +89,9 @@ from ..obs import ObsSnapshot
 from ...runtime.actions import NamedAction
 
 if TYPE_CHECKING:
-    from ...backends.registry import Trait, TraitScope
+    from ...capabilities.specs import BackendSpec
+    from ...capabilities.traits import Trait
     from ...runtime.controllers import ArticulationRuntime, ControlRuntime
-
-
-@runtime_checkable
-class _BackendInfoLike(Protocol):
-    """The registry-info surface the capability gate reads."""
-
-    @property
-    def traits(self) -> frozenset[Trait]: ...
-
-    def blocked(
-        self,
-        traits: Iterable[Trait],
-        num_envs: int | None = None,
-    ) -> Sequence[tuple[Trait, TraitScope]]: ...
-
-
-def _as_backend_info(value: object) -> _BackendInfoLike | None:
-    """View a registry info object through the gate's protocol."""
-    return value if isinstance(value, _BackendInfoLike) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -170,14 +152,14 @@ class BackendCapabilities:
         )
 
     def traits(self) -> frozenset[Trait]:
-        """Trait view of the capability bits (unigym.backends.registry).
+        """Trait view of the capability bits (unigym.capabilities.traits).
 
         The booleans are the low-bit projection of the central Trait
         enum; ``gate_capabilities`` consumes this view so the gate and the
         registry can never drift.  Each bit maps to a group of traits
         (``props`` is satisfied by any PROPS_* trait).
         """
-        from ...backends.registry import Trait
+        from ...capabilities.traits import Trait
 
         groups: dict[str, tuple[Trait, ...]] = {
             "events": (Trait.EVENTS_DR,),
@@ -592,7 +574,9 @@ def gate_capabilities(
     enables the v096 ``TraitScope`` check (``None`` = no scope check, so
     fake/unit callers keep working).
     """
-    from . import known_backends  # local: avoids a package-import cycle
+    from ...capabilities.selection import BackendSelectionError
+    from ...capabilities.specs import backend_spec
+    from ...capabilities.traits import Trait, known_backends
 
     trait_view: frozenset[Trait]
     if isinstance(caps, BackendCapabilities):
@@ -601,12 +585,11 @@ def gate_capabilities(
         trait_view = frozenset(getattr(caps, "traits")())
     else:
         trait_view = frozenset(caps)
-    from ...backends.registry import BackendSelectionError, Trait, backend_info
 
-    info_view: _BackendInfoLike | None = None
+    info_view: BackendSpec | None = None
     if num_envs is not None:
         try:
-            info_view = _as_backend_info(backend_info(backend_label))
+            info_view = backend_spec(backend_label)
         except BackendSelectionError:  # unregistered fake names: no scopes
             info_view = None
 

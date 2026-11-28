@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 from pathlib import Path
 
 import pytest
@@ -43,6 +45,7 @@ def test_mjwarp_object_sensor_and_environment_filter(tmp_path, tiny_env_factory)
             }
         ],
         backend="mjwarp",
+        contact_factory=backend_runtime("mjwarp").bindings.contact_backend,
         articulation_names=("tiny",),
         prop_names=["crate"],
     )
@@ -71,6 +74,7 @@ def test_mjwarp_declaration_order_across_owner_scopes(tmp_path, tiny_env_factory
             }
         ],
         backend="mjwarp",
+        contact_factory=backend_runtime("mjwarp").bindings.contact_backend,
         articulation_names=("tiny",),
         prop_names=["crate"],
     )
@@ -91,4 +95,5 @@ def test_mjwarp_rejects_legacy_syntax():
         build_contact_manager(
             [{"name": "x", "sensor_bodies": ["tip"], "frame": "world"}],
             backend="mjwarp",
+            contact_factory=backend_runtime("mjwarp").bindings.contact_backend,
         )

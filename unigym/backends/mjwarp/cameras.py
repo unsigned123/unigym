@@ -52,19 +52,15 @@ from ..shared.mjfamily.cameras.helpers import (
 
 
 def _cpu_rig_factory() -> Any:
-    """Load the N=1 CPU-mirror rig builder without importing the backend.
+    """Load the N=1 CPU-mirror rig builder from the MuJoCo family.
 
     The concrete ``mujoco.Renderer`` rig implementation stays in
-    ``backends/mujoco/cameras.py``; the neutral registry is the
-    sanctioned lazy hub, so mjwarp reuses the exact same rig classes while
-    importing no other backend module.
+    ``backends/mujoco/cameras.py``; the mujoco family is the owner of that
+    face, so mjwarp reuses the exact same rig classes directly.
     """
-    from unigym.backends.registry import backend_info
+    from unigym.backends.mujoco.cameras import build_mj_rig
 
-    factory = backend_info("mujoco").camera_backend
-    if factory is None:
-        raise RuntimeError("mjwarp cameras: the mujoco backend declares no camera backend")
-    return factory()
+    return build_mj_rig
 
 
 __all__ = ["MjwarpRig", "build_mjwarp_rig"]

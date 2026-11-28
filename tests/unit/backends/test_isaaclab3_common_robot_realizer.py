@@ -8,11 +8,8 @@ import pytest
 
 from unigym.actuators.ir import ActuationGroup
 from unigym.assets.asset_ref import AssetRefError
-from unigym.backends.registry import BackendInfo
 from unigym.scenes.articulation import ArticulationSpec
 from tests._support.profiles import fixture_profile
-
-_ISAACLAB3 = BackendInfo("isaaclab3_physx", (3, 1), frozenset(), asset_formats=("usd", "urdf"))
 
 
 def _spec() -> ArticulationSpec:
@@ -32,13 +29,11 @@ def _spec() -> ArticulationSpec:
 def _patch_realizer(monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]) -> None:
     """Replace the cfg builder and the backend probe (no engine import)."""
     import unigym.backends.shared.isaaclab3_common.robots.builder as builder
-    import unigym.backends.registry as registry
 
     def _fake_build(profile: object, **kwargs: object) -> str:
         captured["asset_format"] = kwargs["asset_format"]
         return "cfg"
 
-    monkeypatch.setattr(registry, "backend_info", lambda _name: _ISAACLAB3)
     monkeypatch.setattr(builder, "build_articulation_cfg", _fake_build)
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import numpy as np
 import pytest
 import torch
@@ -53,7 +55,7 @@ def _device_warmstart(env, e: int) -> np.ndarray:
 
 def test_mjwarp_declares_state_write_capability() -> None:
     """The trait bit and the env capability bit are declared together."""
-    from unigym.backends.registry import MJWARP_TRAITS, Trait
+    from unigym.capabilities.traits import MJWARP_TRAITS, Trait
 
     assert Trait.STATE_WRITE in MJWARP_TRAITS
     assert Trait.STATE_WRITE in BACKEND_CAPABILITIES.traits()
@@ -373,6 +375,7 @@ def test_settle_refreshes_obs_contacts_and_keeps_episode_bookkeeping(tiny_env_fa
             }
         ],
         backend="mjwarp",
+        contact_factory=backend_runtime("mjwarp").bindings.contact_backend,
         articulation_names=(ARTICULATION,),
     )
     env = tiny_env_factory(contact_manager=manager)
@@ -493,6 +496,8 @@ def test_free_rigid_prop_root_state_roundtrip(tiny_env_factory):
         env_spacing=2.0,
         device="cpu",
         backend="mjwarp",
+        prop_backend=backend_runtime("mjwarp").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
     assert manager is not None
     env = tiny_env_factory(prop_manager=manager)

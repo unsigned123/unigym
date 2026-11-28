@@ -5,7 +5,7 @@ standby pose, the canonical base/feet/body-set facts, the per-format body
 bindings, declared assets and named extra action sets.  It carries no backend
 object and no backend switch; a backend that needs an engine-specific
 realization builds it from this profile at its own boundary
-(``BackendInfo.robot_realizer``).
+(``BackendBindings.robot_realizer``).
 
 The profile supplies the robot facts consumed by controls, observations and
 the mujoco-family backends.  The isaaclab backends consume it through their

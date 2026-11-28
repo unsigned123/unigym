@@ -1,49 +1,65 @@
-"""Central backend registry package (backend-traits architecture).
+"""Backend composition package.
 
 Layout (docs/designs/backend-traits.md §R.2):
 
-* ``unigym/backends/registry.py`` — the Trait enum, ``BackendInfo``,
-  the per-backend trait tables and canonical-only backend selection
-  (``mujoco`` / ``mjwarp`` / ``isaaclab2`` / ``isaaclab3_physx`` /
-  ``isaaclab3_newton`` — equal backends, no aliases).
+* :mod:`unigym.capabilities` — pure backend vocabulary (traits, specs,
+  version probes, canonical selection); no concrete backend imports.
+* ``unigym/backends/bindings.py`` — the flat ``BackendBindings`` table of
+  lazy concrete construction callables (every engine import stays inside a
+  factory).
+* ``unigym/backends/compose.py`` — ``BackendRuntime`` + ``backend_runtime()``,
+  the composition-facing value object (spec + bindings).
 * ``unigym/backends/<backend>/`` — that backend's implementation of the
   per-capability Protocols (which live on the capability side, e.g.
   ``unigym/env/backends/base.py``, ``unigym/cameras/base.py``).
 
-Dependency direction is one-way: capability packages never import
-``unigym.backends`` at module level (registry is stdlib-only and safe to
-import anywhere, lazily), and everything under ``backends/<backend>/`` is
-where module-level engine imports (mujoco/isaaclab/omni) are allowed —
-nowhere else in ``unigym/`` (see ``tests/test_arch.py``).
+Neutral layers import :mod:`unigym.capabilities` only; composition code
+imports :mod:`unigym.backends.compose` / :mod:`unigym.backends.bindings`.
+Everything under ``backends/<backend>/`` is where module-level engine imports
+(mujoco/isaaclab/omni) are allowed — nowhere else in ``unigym/``.
 """
 
 from __future__ import annotations
 
-from .registry import (
-    CANONICAL_BACKENDS,
-    BackendInfo,
+from unigym.backends.bindings import BackendBindings, ModelEditProvider
+from unigym.backends.compose import (
+    BackendRuntime,
+    backend_runtime,
+    validate_backend_runtime,
+    validate_backend_runtimes,
+)
+from unigym.capabilities.selection import (
     BackendSelectionError,
     StackProbe,
-    Trait,
-    backend_info,
-    build_name,
+    select_backend,
+    selection_error,
+)
+from unigym.capabilities.specs import (
+    BackendSpec,
+    backend_spec,
+    validate_backend_options,
+    validate_trait_specs,
+)
+from unigym.capabilities.traits import CANONICAL_BACKENDS, Trait, build_name, known_backends
+from unigym.capabilities.versions import (
     isaaclab_version,
-    known_backends,
     mujoco_version,
     mujoco_warp_version,
     newton_version,
-    select_backend,
-    selection_error,
     warp_version,
 )
 
 __all__ = [
     "CANONICAL_BACKENDS",
-    "BackendInfo",
+    "BackendBindings",
+    "BackendRuntime",
     "BackendSelectionError",
+    "BackendSpec",
+    "ModelEditProvider",
     "StackProbe",
     "Trait",
-    "backend_info",
+    "backend_runtime",
+    "backend_spec",
     "build_name",
     "isaaclab_version",
     "known_backends",
@@ -52,5 +68,9 @@ __all__ = [
     "newton_version",
     "select_backend",
     "selection_error",
+    "validate_backend_options",
+    "validate_backend_runtime",
+    "validate_backend_runtimes",
+    "validate_trait_specs",
     "warp_version",
 ]

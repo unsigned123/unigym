@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import pytest
 
 pytestmark = [
@@ -166,6 +168,7 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
             },
         ],
         backend="isaaclab2",
+        contact_factory=backend_runtime("isaaclab2").bindings.contact_backend,
         articulation_names=(CARTPOLE, G1),
     )
     assert manager is not None

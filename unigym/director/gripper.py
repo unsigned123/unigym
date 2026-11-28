@@ -16,9 +16,8 @@ The backend implementations live in the backend packages:
   base KINEMATIC rigid cuboid (scene cfg field).
 
 This module stays engine-free at module level: the runtime class is
-INJECTED as the :attr:`unigym.backends.registry.BackendInfo.gripper_backend`
-factory by the backend ops that already knows its identity --
-no env attribute sniffing, no compatibility shim.
+INJECTED as a zero-argument gripper class factory by the backend ops that
+already knows its identity -- no env attribute sniffing, no compatibility shim.
 """
 
 from __future__ import annotations
@@ -87,9 +86,9 @@ class Gripper(Protocol):
 def build_gripper(env, cfg: dict | None, gripper_backend) -> Gripper | None:
     """Construct the backend gripper from a NORMALIZED cfg (or None).
 
-    ``gripper_backend`` is the :attr:`BackendInfo.gripper_backend`
-    zero-argument factory injected by the caller (the backend ops object
-    that already knows its identity).  This module never sniffs ``env``.
+    ``gripper_backend`` is the zero-argument gripper class factory injected
+    by the caller (the backend ops object that already knows its identity).
+    This module never sniffs ``env``.
     """
     if cfg is None:
         return None

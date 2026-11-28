@@ -1,7 +1,7 @@
 """IsaacLab prop backend face.
 
 The neutral ``unigym.props`` manager resolves this object through
-:attr:`BackendInfo.prop_backend`; it owns the type -> handler registry, the
+:attr:`BackendBindings.prop_backend`; it owns the type -> handler registry, the
 scene-cfg builder (``scene_fields``) and the lazy cfg-class resolver.
 """
 

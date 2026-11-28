@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -69,6 +71,7 @@ def _manager():
             }
         ],
         backend="mujoco",
+        contact_factory=backend_runtime("mujoco").bindings.contact_backend,
         articulation_names=("tiny",),
     )
     assert manager is not None

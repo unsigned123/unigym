@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import numpy as np
 import pytest
 import torch
@@ -329,6 +331,8 @@ def test_free_rigid_prop_root_state_roundtrip(tiny_env_factory):
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
     assert manager is not None
     env = tiny_env_factory(prop_manager=manager)

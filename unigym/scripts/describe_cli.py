@@ -73,7 +73,7 @@ def _spec_args(config: str, output_dir: str) -> SimpleNamespace:
 
 def _summary(model) -> str:
     """Return the human summary block for one IR (metadata + counts)."""
-    from unigym.backends.registry import Trait
+    from unigym.capabilities.traits import Trait
 
     lines = [repr(model)]
     source = model.meta.get("source")
@@ -138,22 +138,22 @@ def _compiled_model(instance):
     Raises:
         SystemExit: The backend exposes no compiled model handle.
     """
-    from unigym.backends.registry import backend_info
+    from unigym.backends.compose import backend_runtime
 
-    info = backend_info(instance.spec.backend)
-    if info.model_handle is None:
+    bindings = backend_runtime(instance.spec.backend).bindings
+    if bindings.model_handle is None:
         raise SystemExit(
             f"[describe] error: --compiled is unavailable for backend "
             f"{instance.spec.backend!r} | hint: drop --compiled for the "
             f"declared IR"
         )
-    model = info.model_handle()(instance.env)
+    model = bindings.model_handle()(instance.env)
     if model is None:
         raise SystemExit(
             f"[describe] error: backend {instance.spec.backend!r} exposed no "
             f"compiled model | hint: drop --compiled for the declared IR"
         )
-    factory = info.model_provider
+    factory = bindings.model_provider
     if factory is None:
         raise SystemExit(
             f"[describe] error: backend {instance.spec.backend!r} declares " f"no model provider"
@@ -174,11 +174,18 @@ def cmd_describe(a: argparse.Namespace, extra: list[str]) -> int:
     tmp_dir = tempfile.mkdtemp(prefix="unigym_describe_")
     instance = None
     try:
+        from unigym.backends.compose import backend_runtime
         from unigym.run.build import build_instance
-        from unigym.run.spec import build_spec
+        from unigym.run.spec import build_spec, require_backend
 
+        backend = require_backend(cfg["env"], a.config)
         with contextlib.redirect_stdout(sys.stderr):
-            spec = build_spec(cfg, _spec_args(a.config, tmp_dir), runtime=runtime)
+            spec = build_spec(
+                cfg,
+                _spec_args(a.config, tmp_dir),
+                runtime=runtime,
+                content_router=backend_runtime(backend).bindings.content_router,
+            )
             instance = build_instance(spec)
         if a.compiled:
             model = _compiled_model(instance)

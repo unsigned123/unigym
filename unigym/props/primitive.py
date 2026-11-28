@@ -1,10 +1,8 @@
 """Dynamic primitive props: cylinder / capsule (S2c).
 
 The content/props path owns dynamic free bodies (a freejoint plus
-mass/inertia).  Sphere and box already have handlers with that behaviour
-(:class:`~unigym.props.ball.BallProp` and
-:class:`~unigym.props.container.BoxProp`); this module adds the missing
-cylinder and capsule kinds with the SAME declaration vocabulary:
+mass/inertia).  Sphere and box are backend-owned handlers; this module adds
+the missing cylinder and capsule kinds with the SAME declaration vocabulary:
 
     objects:
       types:
@@ -142,13 +140,3 @@ def validate_primitive_spec(spec: PropSpec) -> None:
     spec.radius = _dimension(spec, "radius")
     spec.half_height = _dimension(spec, "half_height")
     resolve_mass(spec)  # validates mass/density exclusivity + positivity
-
-
-def __getattr__(name: str):
-    """Lazy compat re-export of the isaaclab primitive handler (G4)."""
-    if name in ("PrimitiveProp", "_build_primitive_spawn"):
-        from importlib import import_module
-
-        handler = import_module("unigym.backends.isaaclab2.props.handlers.primitive")
-        return getattr(handler, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

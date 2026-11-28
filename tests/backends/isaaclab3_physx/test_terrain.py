@@ -16,7 +16,7 @@ ENV_SPACING = 4.0
 
 def test_flat_terrain_preset_builds_the_ground_entity(env_factory):
     """The flat preset's ``ground`` entity is part of the constructed scene."""
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
     from unigym.backends.shared.isaaclab3_common.terrains import build_terrain
 
     assert Trait.TERRAIN in ISAACLAB3_PHYSX_TRAITS
@@ -50,7 +50,7 @@ def test_flat_terrain_preset_builds_the_ground_entity(env_factory):
 
 def test_steps_terrain_preset_builds_the_terrain_entity_and_steps(env_factory):
     """The steps mesh preset's ``terrain`` entity builds and the env steps once."""
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
     from unigym.backends.shared.isaaclab3_common.terrains import build_terrain
     from unigym.runtime.actions import NamedAction
 

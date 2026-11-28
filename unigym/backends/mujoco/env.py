@@ -863,7 +863,7 @@ class MujocoEnv:
     def mj_model(self):
         """The live ``mujoco.MjModel`` (camera rigs + director ops).
 
-        backend-internal; neutral code must use ``BackendInfo.model_handle``
+        backend-internal; neutral code must use ``BackendBindings.model_handle``
         (``env.mj_model`` is a backend handle, never a neutral surface).
         External packs must use ``env.native("mujoco")``.
         """

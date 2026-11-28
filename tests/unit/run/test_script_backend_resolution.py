@@ -1,7 +1,7 @@
 """Backend resolution at the launcher/CLI boundary is canonical-only.
 
 ``spawn_spec.resolve_backend`` validates both the override and the yaml value
-through ``registry.build_name``: the five canonical names pass, while the
+through ``capabilities.build_name``: the five canonical names pass, while the
 removed ``isaaclab``/``isaaclab3`` aliases, unknown spellings and a missing
 ``env.backend`` raise a teaching ``ValueError``.  ``launch`` duplicates the
 name tuple for its import-light ``--help`` path; the two must stay identical.
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from unigym.backends import registry
+from unigym.capabilities.traits import CANONICAL_BACKENDS
 from unigym.scripts import launch
 from unigym.scripts.spawn_spec import resolve_backend
 
@@ -28,7 +28,7 @@ def _write_cfg(tmp_path: Path, backend: str | None, name: str = "run.yaml") -> P
     return path
 
 
-@pytest.mark.parametrize("backend", registry.CANONICAL_BACKENDS)
+@pytest.mark.parametrize("backend", CANONICAL_BACKENDS)
 def test_resolve_backend_accepts_each_canonical_name(tmp_path: Path, backend: str) -> None:
     cfg_path = _write_cfg(tmp_path, backend)
 
@@ -45,7 +45,7 @@ def test_resolve_backend_rejects_removed_aliases_and_unknown_names(
         resolve_backend(cfg_path, None)
 
     message = str(excinfo.value)
-    for canonical in registry.CANONICAL_BACKENDS:
+    for canonical in CANONICAL_BACKENDS:
         assert canonical in message
     assert "aliases were removed" in message
 
@@ -58,7 +58,7 @@ def test_resolve_backend_requires_env_backend(tmp_path: Path) -> None:
 
     message = str(excinfo.value)
     assert "env.backend" in message
-    for canonical in registry.CANONICAL_BACKENDS:
+    for canonical in CANONICAL_BACKENDS:
         assert canonical in message
 
 
@@ -84,7 +84,7 @@ def test_launch_canonical_names_match_the_registry() -> None:
     names = getattr(launch, "_CANONICAL_BACKENDS", None)
 
     assert names is not None, "launch._CANONICAL_BACKENDS is missing"
-    assert tuple(names) == registry.CANONICAL_BACKENDS
+    assert tuple(names) == CANONICAL_BACKENDS
 
 
 def _load_collect_cli(valid_cfg: Path):

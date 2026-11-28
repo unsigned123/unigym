@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 import pytest
 
 from unigym.assets.asset_ref import AssetRef, AssetRefError
-from unigym.backends.registry import BackendInfo
+from unigym.capabilities.specs import BackendSpec
 from unigym.robots.base import BodyBinding, RobotProfile
 from unigym.runtime.controllers import (
     ArticulationRuntime,
@@ -60,8 +60,8 @@ def _profile() -> RobotProfile:
     )
 
 
-def _info(asset_format: str) -> BackendInfo:
-    return BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=(asset_format,))
+def _info(asset_format: str) -> BackendSpec:
+    return BackendSpec("mujoco", frozenset(), asset_formats=(asset_format,))
 
 
 def _build(profile: RobotProfile, spec: ArticulationSpec, asset_format: str) -> dict:
@@ -114,7 +114,7 @@ def test_none_spec_fields_inherit_the_profile():
 
 def test_asset_format_selection_is_per_articulation():
     """Each articulation selects its own first compatible declared format."""
-    info = BackendInfo("isaaclab2", (2, 3), frozenset(), asset_formats=("usd", "urdf", "mjcf"))
+    info = BackendSpec("isaaclab2", frozenset(), asset_formats=("usd", "urdf", "mjcf"))
 
     usd_profile, usd_format = _effective_profile(
         ArticulationSpec(name="usd_arm", model=AssetRef(usd="/assets/arm.usd")),
@@ -137,7 +137,7 @@ def test_asset_format_selection_is_per_articulation():
 
 def test_no_effective_asset_uses_the_first_declared_binding_format():
     """A provider/scene-owned asset has no AssetRef; the binding key is the head."""
-    info = BackendInfo("fixture", (0, 0), frozenset(), asset_formats=("usd", "urdf", "mjcf"))
+    info = BackendSpec("fixture", frozenset(), asset_formats=("usd", "urdf", "mjcf"))
 
     effective, asset_format = _effective_profile(ArticulationSpec(name="arm"), _profile(), info)
 
@@ -337,7 +337,7 @@ def test_effective_profile_respects_asset_backends() -> None:
         assets=AssetRef(mjcf="/assets/arm.xml", usd="/assets/arm.usd"),
         asset_backends={"mjcf": ("mjwarp",), "usd": ("mujoco",)},
     )
-    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf", "usd"))
+    info = BackendSpec("mujoco", frozenset(), asset_formats=("mjcf", "usd"))
 
     effective, asset_format = _effective_profile(ArticulationSpec(name="arm"), profile, info)
 
@@ -353,7 +353,7 @@ def test_effective_profile_rejects_formats_restricted_to_other_backends() -> Non
         assets=AssetRef(mjcf="/assets/arm.xml"),
         asset_backends={"mjcf": ("isaaclab2",)},
     )
-    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+    info = BackendSpec("mujoco", frozenset(), asset_formats=("mjcf",))
 
     with pytest.raises(AssetRefError, match="restrictions"):
         _effective_profile(ArticulationSpec(name="arm"), profile, info)
@@ -368,7 +368,7 @@ def test_effective_profile_drops_metadata_for_undefined_override_formats() -> No
         asset_options={"usd": {"scale": 1.0}},
     )
     spec = ArticulationSpec(name="arm", model=AssetRef(mjcf="/override/arm.xml"))
-    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+    info = BackendSpec("mujoco", frozenset(), asset_formats=("mjcf",))
 
     effective, asset_format = _effective_profile(spec, profile, info)
 
@@ -404,7 +404,7 @@ def test_prepare_articulation_models_respects_asset_backends() -> None:
         articulations=(ArticulationSpec(name="arm"),),
         robot_profiles={"arm": profile},
     )
-    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf", "usd"))
+    info = BackendSpec("mujoco", frozenset(), asset_formats=("mjcf", "usd"))
 
     prepared = _prepare_articulation_models(spec, info, _Plan())
 
@@ -425,7 +425,7 @@ def test_prepare_articulation_models_leaves_forbidden_formats_uncomposed() -> No
         articulations=(ArticulationSpec(name="arm"),),
         robot_profiles={"arm": profile},
     )
-    info = BackendInfo("mujoco", (0, 0), frozenset(), asset_formats=("mjcf",))
+    info = BackendSpec("mujoco", frozenset(), asset_formats=("mjcf",))
 
     prepared = _prepare_articulation_models(spec, info, _Plan())
 

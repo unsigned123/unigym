@@ -19,7 +19,7 @@ import unigym.packs as packs
 import unigym.scene_presets as scene_presets
 import unigym.scenes as scenes
 import unigym.world as world
-from unigym.backends.registry import BackendInfo
+from unigym.capabilities.specs import BackendSpec
 from unigym.errors import ConfigError
 from unigym.pack_api import discover, load_manifest_v1
 from unigym.packs import PackError
@@ -167,8 +167,8 @@ def test_removed_preset_document_keys_name_the_replacements(
 
 
 def test_removed_backend_trait_is_replaced_not_aliased() -> None:
-    """``BackendInfo.mj_scene_consumer`` is gone; the provider trait owns it."""
-    fields = {field.name for field in dataclasses.fields(BackendInfo)}
+    """``BackendSpec.mj_scene_consumer`` is gone; the provider trait owns it."""
+    fields = {field.name for field in dataclasses.fields(BackendSpec)}
 
     assert "mj_scene_consumer" not in fields
     assert "scene_provider_consumer" in fields

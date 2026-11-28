@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,6 +127,8 @@ def test_generated_prop_site_reads_the_native_mjcf_pose(tiny_env_factory, tiny_m
             env_spacing=4.0,
             device="cpu",
             backend="mujoco",
+            prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+            mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
             asset_plan=plan,
         )
         env = tiny_env_factory(

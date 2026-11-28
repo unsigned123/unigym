@@ -32,7 +32,7 @@ from typing import NoReturn
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from unigym.backends.registry import CANONICAL_BACKENDS
+from unigym.capabilities.traits import CANONICAL_BACKENDS
 
 
 # --------------------------------------------------------------------------- #

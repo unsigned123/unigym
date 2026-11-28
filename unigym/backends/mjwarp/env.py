@@ -211,8 +211,8 @@ def _reject_removed_gain_params(params: dict, *, source: str) -> None:
 class MjwarpEnv(WarpBatchMixin):
     """MuJoCo Warp backend (N batched worlds, N CPU mirror read faces).
 
-    Director dispatch is injected by the run layer (``BackendInfo.
-    director_ops``); this env advertises no backend name.
+    Director dispatch is injected by the run layer
+    (``BackendBindings.director_ops``); this env advertises no backend name.
     ``MjwarpDirectorOps`` adds the mirror->device push per write.
 
     Args (``build_env_backend`` kwargs; backend-specific keys come from the
@@ -856,7 +856,7 @@ class MjwarpEnv(WarpBatchMixin):
     def mj_model(self):
         """The live ``mujoco.MjModel`` (camera rigs + director ops).
 
-        backend-internal; neutral code must use ``BackendInfo.model_handle``
+        backend-internal; neutral code must use ``BackendBindings.model_handle``
         (``env.mj_model`` is a backend handle, never a neutral surface).
         External packs must use ``env.native("mjwarp")``.
         """

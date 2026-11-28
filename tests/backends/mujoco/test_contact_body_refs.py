@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 from pathlib import Path
 
 import pytest
@@ -39,6 +41,7 @@ def _manager(groups, *, props=None, articulated=None, names=("tiny",)):
     manager = build_contact_manager(
         groups,
         backend="mujoco",
+        contact_factory=backend_runtime("mujoco").bindings.contact_backend,
         articulation_names=names,
         prop_names=props,
         articulated_props=articulated,
@@ -237,7 +240,11 @@ def test_robot_wildcard_keeps_model_order_and_collisionless_rows(tiny_env):
 )
 def test_legacy_syntax_is_rejected(entry):
     with pytest.raises(ValueError, match="removed keys"):
-        build_contact_manager([entry], backend="mujoco")
+        build_contact_manager(
+            [entry],
+            backend="mujoco",
+            contact_factory=backend_runtime("mujoco").bindings.contact_backend,
+        )
 
 
 FREE_ARTICULATION_PROP = """    <body name=\"Prop_laptop\" pos=\"0.6 0 0.2\">

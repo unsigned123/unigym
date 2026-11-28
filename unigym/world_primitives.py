@@ -451,8 +451,7 @@ def _validate_dynamic_entry(entry: Mapping[str, JsonValue]) -> None:
     constructing a handler (no temp URDF side effect).  The heavy import is
     local so ``import unigym`` stays light.
     """
-    from unigym.props import _dispatch_handler
-    from unigym.props.base import PropPlacement, PropSpec
+    from unigym.props.base import PropPlacement, PropSpec, validate_prop_type
     from unigym.props.primitive import resolve_mass, validate_primitive_spec
 
     if not _is_dynamic_decl(entry):
@@ -460,7 +459,7 @@ def _validate_dynamic_entry(entry: Mapping[str, JsonValue]) -> None:
             f"dynamic declaration must carry a string 'name' and 'type', " f"got {entry!r}"
         )
     spec = PropSpec(**entry)
-    _dispatch_handler(spec)  # unknown type -> teaching error
+    validate_prop_type(spec)  # unknown type -> teaching error
     PropPlacement(entry.get("placement"))  # malformed placement -> early error
     if spec.type in ("cylinder", "capsule"):
         validate_primitive_spec(spec)

@@ -7,26 +7,28 @@ import sys
 
 import pytest
 
-from unigym.backends.registry import Trait, backend_info
+from unigym.backends.compose import backend_runtime
+from unigym.capabilities.traits import Trait
 
 
 def test_isaaclab2_declares_scene_compose_capability():
     """The backend declares scene composition without content/world-base faces."""
-    info = backend_info("isaaclab2")
+    runtime = backend_runtime("isaaclab2")
+    spec = runtime.spec
 
-    assert info.has(Trait.SCENE_COMPOSE)
-    assert info.scene_provider_consumer is True
-    assert info.scene_engine is not None
-    assert info.asset_formats == ("usd", "urdf")
-    assert info.content_router is None
-    assert info.world_base_consumer is False
+    assert spec.has(Trait.SCENE_COMPOSE)
+    assert spec.scene_provider_consumer is True
+    assert runtime.bindings.scene_engine is not None
+    assert spec.asset_formats == ("usd", "urdf")
+    assert spec.content_fill is False
+    assert spec.world_base_consumer is False
 
 
 def test_isaaclab2_scene_engine_factory_returns_a_protocol_engine():
-    """The registry factory builds an engine satisfying the neutral protocol."""
+    """The composed factory builds an engine satisfying the neutral protocol."""
     from unigym.scenes.engine import SceneEngine
 
-    factory = backend_info("isaaclab2").scene_engine
+    factory = backend_runtime("isaaclab2").bindings.scene_engine
     assert factory is not None
 
     engine = factory()
@@ -52,7 +54,7 @@ def test_registry_import_is_lazy_and_imports_no_engine():
     """Importing the registry registers no engine and loads no heavy module."""
     code = (
         "import sys\n"
-        "import unigym.backends.registry as registry\n"
+        "from unigym.backends.compose import backend_runtime\n"
         "from unigym.scenes.engine import registered_scene_engines\n"
         "registered = registered_scene_engines()\n"
         "assert registered == [], registered\n"
@@ -62,7 +64,7 @@ def test_registry_import_is_lazy_and_imports_no_engine():
         "    if any(name == root or name.startswith(root + '.') for root in roots)\n"
         ")\n"
         "assert not loaded, loaded\n"
-        "assert registry.backend_info('isaaclab2').scene_engine is not None\n"
+        "assert backend_runtime('isaaclab2').bindings.scene_engine is not None\n"
     )
 
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)

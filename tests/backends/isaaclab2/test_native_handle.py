@@ -26,7 +26,7 @@ def test_isaaclab2_native_returns_the_live_handles(cartpole_env) -> None:
     assert handle.require("scene") is cartpole_env.scene
 
     from unigym.backends.isaaclab2.env import BACKEND_CAPABILITIES
-    from unigym.backends.registry import Trait
+    from unigym.capabilities.traits import Trait
 
     assert Trait.NATIVE_HANDLE in BACKEND_CAPABILITIES.traits()
 

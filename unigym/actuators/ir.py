@@ -73,10 +73,8 @@ _UNSERVED_DRIVES = frozenset({"effort", "current"})
 
 def _canonical_backends() -> frozenset[str]:
     """The backend vocabulary used to derive the compatibility capability view."""
-    try:
-        from unigym.backends.registry import CANONICAL_BACKENDS
-    except Exception:  # pragma: no cover - registry is core and stdlib-only
-        return frozenset({"isaaclab2", "isaaclab3_physx", "isaaclab3_newton", "mujoco", "mjwarp"})
+    from unigym.capabilities.traits import CANONICAL_BACKENDS
+
     return frozenset(CANONICAL_BACKENDS)
 
 

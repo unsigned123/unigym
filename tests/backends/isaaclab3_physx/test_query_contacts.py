@@ -11,6 +11,8 @@ prove its orientation.
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import math
 
 import pytest
@@ -62,6 +64,8 @@ def _two_crate_props(num_envs: int = 1):
         env_spacing=4.0,
         device="cuda:0",
         backend="isaaclab3_physx",
+        prop_backend=backend_runtime("isaaclab3_physx").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 
@@ -79,6 +83,7 @@ def _crate_pair_manager():
             }
         ],
         backend="isaaclab3_physx",
+        contact_factory=backend_runtime("isaaclab3_physx").bindings.contact_backend,
         articulation_names=(ARTICULATION,),
         prop_names=[SENSOR_PROP, FILTER_PROP],
     )

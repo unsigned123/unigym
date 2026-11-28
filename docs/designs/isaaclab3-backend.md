@@ -34,7 +34,7 @@ capability gating, no silent fallback, and one implementation to maintain.
   the shared package and does not touch its behaviour.
 - No new `Trait` enum values. Capability differences are expressed by two
   backend identities and their trait tables.
-- No new public `BackendInfo` fields unless the P0 probe proves a gap that
+- No new public `BackendSpec` fields unless the P0 probe proves a gap that
   existing fields cannot express.
 - No Kamino / XPBD / VBD as separate backends; the solver is a Newton option.
 - No kitless Newton in this slice. Newton first runs inside the same Kit launch
@@ -214,14 +214,14 @@ unigym/backends/shared/isaaclab3_common/                  - shared IsaacLab 3.x 
   terrains/custom/{__init__,_compat,gap,pit,slope_rough,unidirectional}.py
 
 unigym/backends/isaaclab3_physx/                          - PhysX backend identity
-  __init__.py                                             - BACKEND_INFO, lazy env factory
+  __init__.py                                             - BACKEND_SPEC, lazy env factory
   env.py                                                  - Isaaclab3PhysxEnv + BACKEND_CAPABILITIES
   profile.py                                              - PHYSX EngineProfile values
   launcher.py                                             - kit launcher (AppLauncher)
   registry_faces.py                                       - engine-owned factories (camera/contact/director/...)
 
 unigym/backends/isaaclab3_newton/                         - Newton backend identity
-  __init__.py                                             - BACKEND_INFO, lazy env factory
+  __init__.py                                             - BACKEND_SPEC, lazy env factory
   env.py                                                  - Isaaclab3NewtonEnv + BACKEND_CAPABILITIES
   profile.py                                              - NEWTON EngineProfile values
   launcher.py                                             - kit launcher (same launch path in this slice)
@@ -229,8 +229,10 @@ unigym/backends/isaaclab3_newton/                         - Newton backend ident
 
 unigym/backends/isaaclab3/                                - REMOVED in P1a; replaced by the two
                                                              canonical backend packages
-unigym/backends/registry.py                               - trait tables, factories, canonical-only
-                                                             names, StackProbe/selection_error
+unigym/capabilities/traits.py                             - trait tables, canonical-only names
+unigym/capabilities/selection.py                          - StackProbe/selection_error
+unigym/backends/bindings.py                               - lazy construction faces
+unigym/backends/compose.py                                - BackendRuntime composition root
 unigym/backends/__init__.py                               - dependency-direction docs
 pyproject.toml                                            - import-linter contracts
 ci/compat.toml                                            - environments + lanes (nightly in P4)
@@ -238,7 +240,7 @@ ci/envs/isaaclab3_physx.toml                              - pinned 3.x lane mani
 ci/envs/isaaclab3_newton.toml                             - pinned 3.x + newton lane manifest
 tests/backends/isaaclab3_physx/**                         - PhysX backend lane
 tests/backends/isaaclab3_newton/**                        - Newton backend lane
-tests/unit/backends/test_isaaclab3_*.py                   - trait/registry/profile unit tests
+tests/unit/backends/test_isaaclab3_*.py                   - trait/spec/profile unit tests
 tests/meta/test_isaaclab3_import_isolation.py             - import isolation
 docs/testing.md                                           - lane/env/marker table
 ```
@@ -276,7 +278,7 @@ docs/testing.md                                           - lane/env/marker tabl
   the capability gate reads `env_cls.__module__`
   (`unigym/env/backends/__init__.py:67`).
 - **`ISAACLAB3_PHYSX_TRAITS` / `ISAACLAB3_NEWTON_TRAITS`** (changed,
-  `registry.py`): per-backend trait tables. No new `Trait` values.
+  `capabilities/traits.py`): per-backend trait tables. No new `Trait` values.
   - PhysX P1 start: `_CORE | {ENV_LAYOUT_TILED, MULTI_ENV, STATE_WRITE,
     MODEL_USD_PRIMS}`. P2 adds camera/contact/props/director/terrain/events
     traits only as each capability lands with a backend test.
@@ -303,7 +305,7 @@ docs/testing.md                                           - lane/env/marker tabl
 - **Build boundary**: `build_instance` verifies the explicitly chosen
   backend's stack before constructing any env; `env_kwargs` constructs the
   real env and reports teaching errors, never an internal `TypeError`.
-- **`BackendInfo`** (unchanged fields in this slice): both entries fill
+- **`BackendSpec`** (unchanged fields in this slice): both entries fill
   `options_schema` (Newton: solver/substeps; PhysX: empty), `scopes` only where
   `max_envs` genuinely narrows, `camera_enable_required` (True for PhysX;
   Newton decided by P3 probe), `scene_provider_consumer=True`.
@@ -314,8 +316,8 @@ docs/testing.md                                           - lane/env/marker tabl
 
 ```text
 yaml/run spec
-  -> registry.select_backend(canonical)       # explicit stack/newton probe
-  -> registry.BACKEND_INFO[canonical].traits  # fail-fast capability gate
+  -> capabilities.selection.select_backend(canonical)  # explicit stack/newton probe
+  -> capabilities.specs.backend_spec(canonical).traits  # fail-fast capability gate
   -> backend package factories (env_kwargs, terrain, events, cameras, contacts,
      props, director, robot realizer, kit launcher)
   -> backend env class (thin) -> shared env base(profile)
@@ -401,7 +403,7 @@ Invalid input / failure behaviour:
 - **Docs pass**: one docs pass (`docs/testing.md`, backend READMEs, contracts
   that name `isaaclab3` as a stub). Tests that assert the empty il3 trait set
   or the old canonical name are updated in the same change.
-- **Rollback**: remove the two backend packages, their lanes and registry
+- **Rollback**: remove the two backend packages, their lanes and composition
   entries to restore the previous state. Configs must already name a canonical
   backend; there is no alias fallback to preserve.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import numpy as np
 import pytest
 import torch
@@ -79,6 +81,8 @@ def _prop_manager():
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 

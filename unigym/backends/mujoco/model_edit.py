@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from unigym.backends.registry import MUJOCO_MODEL_EDIT_FIELDS, ModelEditField
 from unigym.backends.shared.mjfamily.model_edit import (
     MujocoModelEditWriter,
     published_state,
@@ -12,6 +11,7 @@ from unigym.backends.shared.mjfamily.model_edit import (
     restore_published_state,
 )
 from unigym.backends.shared.mjfamily.model.provider import MujocoModelProvider
+from unigym.capabilities.traits import MUJOCO_MODEL_EDIT_FIELDS, ModelEditField
 from unigym.model.edit import BodyEdit, GeomEdit, ModelEditResult
 
 __all__ = ["MujocoModelEditProvider"]

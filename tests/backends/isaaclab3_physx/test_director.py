@@ -28,13 +28,13 @@ IDENTITY_WXYZ = (1.0, 0.0, 0.0, 0.0)
 
 def _director(env):
     """Mount the neutral Director with this backend's injected ops face."""
-    from unigym.backends.registry import backend_info
+    from unigym.backends.compose import backend_runtime
     from unigym.director import Director
 
     return Director(
         env,
         cfg=DIRECTOR_CFG,
-        director_ops=backend_info("isaaclab3_physx").director_ops,
+        director_ops=backend_runtime("isaaclab3_physx").bindings.director_ops,
     )
 
 
@@ -271,7 +271,7 @@ def test_gripper_where_and_move_roundtrip_through_the_scene_asset(env_factory, c
 
 def test_physx_declares_the_lane_proven_director_traits():
     """Only the traits with passing PhysX lane coverage are declared."""
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
 
     proven = {
         Trait.DIRECTOR_TELEPORT,

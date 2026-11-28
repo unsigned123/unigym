@@ -23,7 +23,6 @@ import sys
 
 import unigym.backends.isaaclab3_newton
 import unigym.backends.isaaclab3_physx
-import unigym.backends.registry
 import unigym.backends.shared.isaaclab3_common
 import unigym.backends.shared.isaaclab3_common.actuators.plan
 import unigym.backends.shared.isaaclab3_common.asset_scene
@@ -101,7 +100,7 @@ def test_importing_the_backend_package_loads_no_engine() -> None:
 
 def test_canonical_backends_include_both_identities() -> None:
     """The registry names both identities and rejects the removed aliases."""
-    from unigym.backends.registry import CANONICAL_BACKENDS, build_name, known_backends
+    from unigym.capabilities.traits import CANONICAL_BACKENDS, build_name, known_backends
 
     names = known_backends()
     assert list(CANONICAL_BACKENDS) == [

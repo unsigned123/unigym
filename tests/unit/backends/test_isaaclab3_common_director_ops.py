@@ -6,7 +6,8 @@ import pytest
 import torch
 from types import SimpleNamespace
 
-from unigym.backends.registry import Trait, backend_info
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import Trait
 from unigym.backends.shared.isaaclab3_common.director.gripper import IsaacLabGripper
 from unigym.backends.shared.isaaclab3_common.director_ops import IsaacLabDirectorOps
 
@@ -55,7 +56,7 @@ def test_has_weld_is_a_static_boolean_after_the_subclass_sets_the_identity() -> 
 
     assert ops.backend == "isaaclab3_physx"
     assert isinstance(result, bool)
-    assert result == backend_info("isaaclab3_physx").has(Trait.DIRECTOR_ATTACH_WELD)
+    assert result == backend_spec("isaaclab3_physx").has(Trait.DIRECTOR_ATTACH_WELD)
     assert result is False
 
 

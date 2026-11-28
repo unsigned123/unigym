@@ -5,8 +5,8 @@ A fixed-base KINEMATIC rigid cuboid
 ``{ENV_REGEX_NS}/Director_<name>``; move =
 ``write_root_link_pose_to_sim_index``.
 
-The scene Cfg classes are resolved through the neutral props ``_resolve``
-table (G4); isaaclab/torch imports stay function-local so this module is
+The scene Cfg classes come from this family's props spawn ``_resolve``
+table; isaaclab/torch imports stay function-local so this module is
 import-safe without the kit.  The gripper cfg ``quat`` is repo-internal wxyz
 and is converted with :func:`unigym.core.quat.to_isaaclab_cfg` before it
 enters the IsaacLab 3 ``InitialStateCfg`` (xyzw); runtime reads reorder
@@ -34,7 +34,9 @@ def isaaclab_scene_fields(gripper_cfg: dict, classes: dict | None = None) -> dic
     """
     g = gripper_cfg
     if classes is None:
-        from unigym.props.base import _resolve as _resolve_classes
+        from unigym.backends.shared.isaaclab3_common.props.spawn import (
+            _resolve as _resolve_classes,
+        )
 
         table = dict(_resolve_classes(None))
     else:

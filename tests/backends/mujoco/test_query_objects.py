@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import mujoco
 import numpy as np
 import pytest
@@ -50,6 +52,8 @@ def _prop_manager(names: tuple[str, ...] = ("crate",), num_envs: int = 1):
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 
@@ -91,6 +95,8 @@ def _free_articulation_manager(tmp_path):
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 
@@ -461,6 +467,8 @@ def _fixed_articulation_manager(tmp_path):
         env_spacing=2.0,
         device="cpu",
         backend="mujoco",
+        prop_backend=backend_runtime("mujoco").bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
 
 

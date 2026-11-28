@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from unigym.backends.registry import Trait, backend_info, validate_trait_rules
+from unigym.backends.compose import BackendRuntime, backend_runtime, validate_backend_runtime
+from unigym.capabilities.traits import Trait
 from unigym.query.errors import QueryStaleError
 from unigym.run.instance import RunInstance
 
@@ -30,38 +31,46 @@ def _instance(backend: str, env: object = None) -> RunInstance:
 def test_all_backends_declare_runtime_query_with_a_factory() -> None:
     """The trait and its lazy factory are declared together on every backend."""
     for name in _QUERY_BACKENDS:
-        info = backend_info(name)
-        assert Trait.RUNTIME_QUERY in info.traits
-        assert info.query_backend is not None
+        runtime = backend_runtime(name)
+        assert Trait.RUNTIME_QUERY in runtime.spec.traits
+        assert runtime.bindings.query_backend is not None
 
 
 def test_trait_without_factory_fails_registration() -> None:
     """A backend cannot advertise the trait without a query factory."""
-    broken = replace(backend_info("mujoco"), query_backend=None)
+    runtime = backend_runtime("mujoco")
+    broken = BackendRuntime(
+        spec=runtime.spec, bindings=replace(runtime.bindings, query_backend=None)
+    )
 
     with pytest.raises(RuntimeError, match="RUNTIME_QUERY.*query_backend"):
-        validate_trait_rules({"mujoco": broken})
+        validate_backend_runtime(broken)
 
 
 def test_factory_without_trait_fails_registration() -> None:
     """A backend cannot carry a query factory without the trait."""
-    info = backend_info("isaaclab2")
-    without_trait = frozenset(trait for trait in info.traits if trait is not Trait.RUNTIME_QUERY)
-    broken = replace(info, traits=without_trait, query_backend=info.query_backend)
+    runtime = backend_runtime("isaaclab2")
+    without_trait = frozenset(
+        trait for trait in runtime.spec.traits if trait is not Trait.RUNTIME_QUERY
+    )
+    broken = BackendRuntime(
+        spec=replace(runtime.spec, traits=without_trait), bindings=runtime.bindings
+    )
 
     with pytest.raises(RuntimeError, match="query_backend.*RUNTIME_QUERY"):
-        validate_trait_rules({"isaaclab2": broken})
+        validate_backend_runtime(broken)
 
 
 def test_run_query_is_gated_by_the_registry_trait(monkeypatch: pytest.MonkeyPatch) -> None:
     """A backend without the trait raises a teaching NotImplementedError."""
     import unigym.run.instance as instance_module
+    from unigym.capabilities.specs import backend_spec as real_backend_spec
 
-    info = backend_info("isaaclab2")
+    info = real_backend_spec("isaaclab2")
     without_trait = frozenset(trait for trait in info.traits if trait is not Trait.RUNTIME_QUERY)
     monkeypatch.setattr(
         instance_module,
-        "backend_info",
+        "backend_spec",
         lambda _name: replace(info, traits=without_trait),
     )
 

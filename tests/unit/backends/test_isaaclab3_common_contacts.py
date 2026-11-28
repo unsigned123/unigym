@@ -7,6 +7,7 @@ import types
 import pytest
 import torch
 
+from tests._support.backends import contact_factory
 from tests._support.fakes.isaaclab import _Cfg, _RigidObjectCfg
 from unigym.backends.shared.isaaclab3_common.contacts import (
     MANIFOLD_MAX_CONTACT_DATA_COUNT_PER_PRIM,
@@ -22,6 +23,7 @@ def _manager(groups, *, props=None, articulated=None, names=("tiny",)):
         articulation_names=names,
         prop_names=props,
         articulated_props=articulated,
+        contact_factory=contact_factory("isaaclab3_physx"),
     )
     assert manager is not None
     assert manager.backend.backend_key == "isaaclab3_physx"
@@ -94,6 +96,7 @@ def test_body_set_expands_to_a_union_path(fake_isaaclab):
         backend="isaaclab3_physx",
         articulation_names=("g1",),
         articulation_body_sets={"g1": {"grasp": ("index_0", "thumb_2")}},
+        contact_factory=contact_factory("isaaclab3_physx"),
     )
     assert manager is not None
     assert (
@@ -177,6 +180,7 @@ def test_single_articulation_body_set_omits_the_owner(fake_isaaclab):
         backend="isaaclab3_physx",
         articulation_names=("tiny",),
         articulation_body_sets={"tiny": {"grasp": ("tip", "base")}},
+        contact_factory=contact_factory("isaaclab3_physx"),
     )
     assert manager is not None
     assert (

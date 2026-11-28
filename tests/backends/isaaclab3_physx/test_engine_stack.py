@@ -6,9 +6,11 @@ import argparse
 
 import pytest
 
-from unigym.backends import registry
+from unigym.capabilities.selection import BackendSelectionError, select_backend
+from unigym.capabilities.traits import CANONICAL_BACKENDS, build_name
+from unigym.capabilities.versions import isaaclab_version
 from unigym.backends.isaaclab3_physx.profile import PHYSX_PROFILE
-from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS
+from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS
 
 
 @pytest.mark.sim
@@ -30,22 +32,22 @@ def test_backend_capabilities_are_a_subset_of_the_registry_traits(
 
 
 def test_registry_probes_isaaclab_3() -> None:
-    version = registry.isaaclab_version()
+    version = isaaclab_version()
     assert version is not None
     assert version[0] >= 3
 
 
 def test_registry_selects_the_physx_identity() -> None:
-    assert registry.select_backend("isaaclab3_physx") == "isaaclab3_physx"
-    assert registry.build_name("isaaclab3_physx") == "isaaclab3_physx"
-    assert "isaaclab3" not in registry.CANONICAL_BACKENDS
-    assert "isaaclab" not in registry.CANONICAL_BACKENDS
+    assert select_backend("isaaclab3_physx") == "isaaclab3_physx"
+    assert build_name("isaaclab3_physx") == "isaaclab3_physx"
+    assert "isaaclab3" not in CANONICAL_BACKENDS
+    assert "isaaclab" not in CANONICAL_BACKENDS
 
     for alias in ("isaaclab3", "isaaclab"):
         with pytest.raises(ValueError, match=r"aliases were removed"):
-            registry.build_name(alias)
-        with pytest.raises(registry.BackendSelectionError):
-            registry.select_backend(alias)
+            build_name(alias)
+        with pytest.raises(BackendSelectionError):
+            select_backend(alias)
 
 
 def test_physx_physics_cfg_constructs() -> None:

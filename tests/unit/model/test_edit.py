@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from unigym.backends.registry import ModelEditField
+from unigym.capabilities.traits import ModelEditField
 from unigym.model import (
     Body,
     BodyEdit,

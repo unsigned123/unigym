@@ -118,12 +118,12 @@ def build_robot_realization(
             groups.
     """
     from unigym.actuators.ir import resolve_group_joints
-    from unigym.backends.registry import backend_info
+    from unigym.capabilities.specs import backend_spec
 
     from ..actuators.plan import build_actuator_plan
     from .builder import build_articulation_cfg
 
-    info = backend_info(backend)
+    info = backend_spec(backend)
     if spec.model is None or spec.model == profile.assets:
         asset_format, _ = select_robot_asset(
             profile, backend=info.name, backend_formats=info.asset_formats

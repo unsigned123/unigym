@@ -4,9 +4,9 @@ A fixed-base KINEMATIC rigid cuboid
 (``RigidBodyPropertiesCfg(kinematic_enabled=True)``) under
 ``{ENV_REGEX_NS}/Director_<name>``; move = ``write_root_pose_to_sim``.
 
-The scene Cfg classes are resolved through the neutral props ``_resolve``
-table (G4); isaaclab/torch imports stay function-local so this module is
-import-safe without the kit.
+The scene Cfg classes come from this backend family's props spawn
+``_resolve`` table; isaaclab/torch imports stay function-local so this module
+is import-safe without the kit.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def isaaclab_scene_fields(gripper_cfg: dict, classes: dict | None = None) -> dic
     """
     g = gripper_cfg
     if classes is None:
-        from unigym.props.base import _resolve as _resolve_classes
+        from unigym.backends.isaaclab2.props.spawn import _resolve as _resolve_classes
 
         classes = _resolve_classes(None)
     if "CuboidCfg" not in classes:

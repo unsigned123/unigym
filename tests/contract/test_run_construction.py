@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.registry import BackendSelectionError, isaaclab_version
+from unigym.capabilities.selection import BackendSelectionError
+from unigym.capabilities.versions import isaaclab_version
 from unigym.errors import ConfigError
 from unigym.robots import register_robot, restore_robot_registry, snapshot_robot_registry
 from unigym.run.api import Run

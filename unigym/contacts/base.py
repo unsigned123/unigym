@@ -47,11 +47,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from typing import ClassVar, Mapping, Optional, Protocol, Sequence, cast
+from typing import Callable, ClassVar, Mapping, Optional, Protocol, Sequence, cast
 
 import numpy as np
 import torch
 
+from ..capabilities.selection import BackendSelectionError, canonical_or_error
+from ..capabilities.traits import CANONICAL_BACKENDS
 from .refs import ContactBodyRef
 
 FORMATS = ("raw", "norm", "contact")
@@ -379,7 +381,7 @@ def _ref_list(value, arg: str, name: str, *, required: bool) -> list[ContactBody
 # --------------------------------------------------------------------------- #
 #: Canonical env backends that expose a contact face (no ``isaaclab`` /
 #: ``isaaclab3`` aliases: those family spellings are not selectable).
-BACKENDS = ("mujoco", "mjwarp", "isaaclab2", "isaaclab3_physx", "isaaclab3_newton")
+BACKENDS = CANONICAL_BACKENDS
 
 
 class _ContactBackendFace(Protocol):
@@ -399,24 +401,23 @@ class _ContactBackendFace(Protocol):
     ) -> None: ...
 
 
-def _contact_face(backend: str) -> type[_ContactBackendFace]:
-    """Resolve the backend contact face lazily through the registry."""
-    from ..backends.registry import BackendSelectionError, backend_info
-
+def _contact_face(
+    backend: str, contact_factory: Callable[[], object] | None
+) -> type[_ContactBackendFace]:
+    """Resolve the injected contact face for a canonical backend."""
     try:
-        info = backend_info(backend)
+        canonical_or_error(backend)
     except BackendSelectionError as err:
         raise NotImplementedError(
             f"contacts are not implemented for backend {backend!r} "
             f"(available: {', '.join(BACKENDS)})"
         ) from err
-    factory = info.contact_backend
-    if factory is None:
+    if contact_factory is None:
         raise NotImplementedError(
             f"contacts are not implemented for backend {backend!r} "
             f"(available: {', '.join(BACKENDS)})"
         )
-    return cast("type[_ContactBackendFace]", factory())
+    return cast("type[_ContactBackendFace]", contact_factory())
 
 
 def build_contact_backend(
@@ -428,9 +429,10 @@ def build_contact_backend(
     prop_names: Sequence[str] | None = None,
     articulated_props: Sequence[str] | None = None,
     contact_assets: Mapping[str, str] | None = None,
+    contact_factory: Callable[[], object] | None = None,
 ) -> _ContactBackendFace:
-    """Construct the backend contact object for *specs* (registry face)."""
-    return _contact_face(backend)(
+    """Construct the backend contact object for *specs* (injected face)."""
+    return _contact_face(backend, contact_factory)(
         specs,
         articulation_names=articulation_names,
         articulation_body_sets=articulation_body_sets,

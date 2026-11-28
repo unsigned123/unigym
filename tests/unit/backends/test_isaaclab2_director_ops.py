@@ -8,7 +8,8 @@ answer from the static trait table, not raise ``BackendSelectionError``.
 from __future__ import annotations
 
 from unigym.backends.isaaclab2.director_ops import IsaacLabDirectorOps
-from unigym.backends.registry import Trait, backend_info
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import Trait
 
 
 class _EnvCarrier:
@@ -31,11 +32,11 @@ def test_has_weld_is_a_static_boolean_without_an_engine() -> None:
     result = ops.has_weld()
 
     assert isinstance(result, bool)
-    assert result == backend_info("isaaclab2").has(Trait.DIRECTOR_ATTACH_WELD)
+    assert result == backend_spec("isaaclab2").has(Trait.DIRECTOR_ATTACH_WELD)
 
 
-def test_backend_info_resolves_the_isaaclab2_identity() -> None:
-    info = backend_info("isaaclab2")
+def test_backend_spec_resolves_the_isaaclab2_identity() -> None:
+    info = backend_spec("isaaclab2")
 
     assert info.name == "isaaclab2"
     assert info.has(Trait.ENV_STEP_RESET)

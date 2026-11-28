@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from unigym.actuators import ActuationGroup
-from unigym.backends.registry import backend_info
+from unigym.backends.bindings import BackendBindings
+from unigym.backends.compose import backend_runtime
 from unigym.run.build import _realize_profiles
 from unigym.scenes.articulation import ArticulationSpec
 from tests._support.profiles import fixture_profile
@@ -29,15 +30,12 @@ def test_mujoco_has_no_robot_realization() -> None:
         }
     }
 
-    assert _realize_profiles(backend_info("mujoco"), builds, None) is None
+    assert _realize_profiles(backend_runtime("mujoco").bindings, builds, None) is None
 
 
 def test_realizer_receives_profile_spec_params_and_asset_plan() -> None:
     """A backend realizer gets the profile/spec/params/asset plan."""
     seen: list[tuple[object, object, object, object]] = []
-
-    class _Info:
-        robot_realizer = staticmethod(lambda: realizer)
 
     def realizer(profile, *, spec, params, asset_plan):
         seen.append((profile, spec, params, asset_plan))
@@ -60,7 +58,7 @@ def test_realizer_receives_profile_spec_params_and_asset_plan() -> None:
         }
     }
 
-    result = _realize_profiles(_Info(), builds, None)
+    result = _realize_profiles(BackendBindings(robot_realizer=lambda: realizer), builds, None)
 
     assert result == {"arm": "realized"}
     assert seen[0][0] is builds["arm"]["profile"]

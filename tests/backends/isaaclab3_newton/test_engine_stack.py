@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unigym.backends.isaaclab3_newton.env import Isaaclab3NewtonEnv
 from unigym.backends.isaaclab3_newton.profile import NEWTON_PROFILE
-from unigym.backends.registry import ISAACLAB3_NEWTON_TRAITS
+from unigym.capabilities.traits import ISAACLAB3_NEWTON_TRAITS
 
 
 def test_env_shell_wiring() -> None:
@@ -18,10 +18,11 @@ def test_backend_capabilities_are_a_subset_of_the_registry_traits() -> None:
 
 
 def test_registry_selects_the_newton_identity() -> None:
-    from unigym.backends import registry
+    from unigym.capabilities.selection import select_backend
+    from unigym.capabilities.versions import newton_version
 
-    assert registry.select_backend("isaaclab3_newton") == "isaaclab3_newton"
-    assert registry.newton_version() is not None
+    assert select_backend("isaaclab3_newton") == "isaaclab3_newton"
+    assert newton_version() is not None
 
 
 def test_newton_physics_cfg_constructs() -> None:

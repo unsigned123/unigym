@@ -31,7 +31,7 @@ from .errors import (
 from .table import Table
 
 if TYPE_CHECKING:
-    from unigym.backends.registry import Trait
+    from unigym.capabilities.traits import Trait
     from unigym.core.quat_types import QuatWXYZ
 
     from .diff import ModelDiff
@@ -914,17 +914,17 @@ class ModelIR:
         """Return True when *self.backend* declares every requested trait."""
         if self.backend is None:
             return False
-        from unigym.backends.registry import backend_info
+        from unigym.capabilities.specs import backend_spec
 
-        return backend_info(self.backend).has(*traits)
+        return backend_spec(self.backend).has(*traits)
 
     def explain_missing(self, *traits: Trait) -> str:
         """Return a one-line explanation of missing traits (empty if none)."""
         if self.backend is None:
             return "model IR has no backend: capabilities cannot be resolved"
-        from unigym.backends.registry import backend_info
+        from unigym.capabilities.specs import backend_spec
 
-        missing = backend_info(self.backend).missing(*traits)
+        missing = backend_spec(self.backend).missing(*traits)
         if not missing:
             return ""
         names = ", ".join(trait.name for trait in missing)

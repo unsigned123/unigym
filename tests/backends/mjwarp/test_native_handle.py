@@ -36,6 +36,6 @@ def test_mjwarp_native_rejects_another_backend_name(tiny_env_factory) -> None:
 def test_mjwarp_backend_capabilities_project_the_trait() -> None:
     """The capability bit and the registry trait cannot drift."""
     from unigym.backends.mjwarp.env import BACKEND_CAPABILITIES
-    from unigym.backends.registry import Trait
+    from unigym.capabilities.traits import Trait
 
     assert Trait.NATIVE_HANDLE in BACKEND_CAPABILITIES.traits()

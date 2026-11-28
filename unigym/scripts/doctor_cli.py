@@ -31,7 +31,7 @@ from pathlib import Path
 import yaml
 
 from unigym import executors as ex
-from unigym.backends.registry import MJWARP_BACKEND
+from unigym.capabilities.traits import MJWARP_BACKEND
 from unigym.scripts import spawn_spec as ss
 
 _PROBE_TIMEOUT = 60.0  # isaaclab lazy import must not wake Kit
@@ -151,12 +151,8 @@ def _warp_lane_diag() -> ex.Diag:
     version, or the fail-fast reason + install hint when the stack is
     absent (never a silent fallback).
     """
-    from unigym.backends.registry import (
-        BackendSelectionError,
-        mujoco_version,
-        mujoco_warp_version,
-        select_backend,
-    )
+    from unigym.capabilities.selection import BackendSelectionError, select_backend
+    from unigym.capabilities.versions import mujoco_version, mujoco_warp_version
 
     try:
         select_backend("mjwarp")

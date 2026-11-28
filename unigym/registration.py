@@ -13,8 +13,8 @@ checked against the face window.
 ``RUNTIME`` is terminal and sticky: once a live run has been built no pack
 registry may mutate.  :func:`seal_runtime` records that state.
 
-This module is standard-library only: the backend registry is imported lazily
-and only when a backend-specific registration policy is asked for.
+This module is standard-library only: it owns the pure registration policy
+data and imports no backend module (no composition cycle).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from types import MappingProxyType
 
 __all__ = [
     "ACTUATOR_IMPLEMENTATION_WINDOWS",
+    "BACKEND_REGISTRATION_POLICIES",
     "FACE_WINDOWS",
     "GATE",
     "BackendRegistrationPolicy",
@@ -195,13 +196,20 @@ ACTUATOR_IMPLEMENTATION_WINDOWS: Mapping[str, PhaseWindow] = MappingProxyType(
     }
 )
 
+#: Canonical backend -> registration policy (only implementations narrow).
+BACKEND_REGISTRATION_POLICIES: Mapping[str, BackendRegistrationPolicy] = MappingProxyType(
+    {
+        backend: BackendRegistrationPolicy(
+            backend=backend,
+            windows={PackFace.ACTUATOR_IMPLEMENTATION: window},
+        )
+        for backend, window in ACTUATOR_IMPLEMENTATION_WINDOWS.items()
+    }
+)
+
 
 def _backend_policy(backend: str) -> BackendRegistrationPolicy | None:
-    """Return the canonical policy for *backend* (lazy backend import)."""
-    try:
-        from unigym.backends.registry import BACKEND_REGISTRATION_POLICIES
-    except Exception:  # pragma: no cover - backend registry is core
-        return None
+    """Return the canonical policy for *backend* (no backend import)."""
     return BACKEND_REGISTRATION_POLICIES.get(backend)
 
 

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from unigym.backends.registry import ModelEditField
+from unigym.capabilities.traits import ModelEditField
 from unigym.model.errors import ModelEditError
 from unigym.runtime.actions import NamedAction
 

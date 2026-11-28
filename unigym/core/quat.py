@@ -8,8 +8,8 @@ conventions are explicit at the boundary only:
 * ``from_isaaclab_data`` / ``to_isaaclab_cfg`` — the ONLY version-aware
   conversion points (IsaacLab 2.3 data/cfg are wxyz-native: identity;
   IsaacLab 3.x is xyzw: reorder).  The isaaclab variant is probed through
-  the central backend registry — per-variant backends convert at their own
-  boundary and conventions never mix (design §R.2).
+  the pure capabilities version probe — per-variant backends convert at their
+  own boundary and conventions never mix (design §R.2).
 
 Pure torch+numpy; zero engine imports (``core/`` is in the agnostic strong
 guard).  Math functions are dual-dtype: numpy in / numpy out, torch in /
@@ -378,7 +378,7 @@ def _isaaclab_is_xyzw() -> bool:
     """True when the probed isaaclab major version is >= 3 (xyzw data/cfg)."""
     # Data-convention probe only (wxyz vs xyzw at the IsaacLab boundary);
     # this is NOT an env-backend selection and never picks a backend.
-    from ..backends.registry import isaaclab_version
+    from ..capabilities.versions import isaaclab_version
 
     ver = isaaclab_version()
     return ver is not None and ver[0] >= 3

@@ -468,7 +468,7 @@ def _actuator_implementation_params(
                 f"non-empty string {key!r}"
             )
     backend = raw["backend"]
-    from unigym.backends.registry import CANONICAL_BACKENDS
+    from unigym.capabilities.traits import CANONICAL_BACKENDS
 
     if backend not in CANONICAL_BACKENDS:
         raise PackError(

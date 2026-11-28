@@ -8,7 +8,7 @@ largest branch cluster in the repo).  This module is the convergence
 point: a :class:`DirectorPropOps` object owns ALL backend mechanics, the
 Director dispatches to it, and the weld/kinematic semantic split becomes
 a registry trait check
-(:attr:`unigym.backends.registry.Trait.DIRECTOR_ATTACH_WELD`)
+(:attr:`unigym.capabilities.traits.Trait.DIRECTOR_ATTACH_WELD`)
 instead of a string comparison.
 
 director-console: the kinematic primitives (pin/follow/release)
@@ -32,7 +32,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..backends.registry import Trait, backend_info
+from ..capabilities.specs import backend_spec
+from ..capabilities.traits import Trait
 
 # kinematic-console: the ``hand`` host alias resolves to the FIRST
 # resolvable candidate (G1 finger-link naming, right hand primary -- the
@@ -206,7 +207,7 @@ class _OpsBase:
     backend = ""
 
     def has_weld(self) -> bool:
-        return backend_info(self.backend).has(Trait.DIRECTOR_ATTACH_WELD)
+        return backend_spec(self.backend).has(Trait.DIRECTOR_ATTACH_WELD)
 
     def after_gripper_move(self) -> None:
         pass
@@ -215,7 +216,7 @@ class _OpsBase:
 def build_ops(env, director_ops) -> DirectorPropOps:
     """Factory: instantiate the INJECTED per-backend ops face.
 
-    ``director_ops`` is the zero-argument ``BackendInfo.director_ops``
+    ``director_ops`` is the zero-argument ``BackendBindings.director_ops``
     factory resolved by the run layer.  This helper never
     inspects ``env`` to guess a backend.
     """

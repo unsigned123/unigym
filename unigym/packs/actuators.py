@@ -267,7 +267,7 @@ def materialize_actuator_implementations(
         ensure_core_implementations,
         register_actuator_implementation,
     )
-    from unigym.backends.registry import CANONICAL_BACKENDS
+    from unigym.capabilities.traits import CANONICAL_BACKENDS
 
     if backend not in CANONICAL_BACKENDS:
         raise PackError(

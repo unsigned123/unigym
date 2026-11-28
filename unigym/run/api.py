@@ -58,7 +58,8 @@ from unigym._typing import (
     is_json_object,
     is_object_sequence,
 )
-from unigym.backends.registry import Trait, backend_info
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import Trait
 from unigym.run.passive import declare_passive_joints as _declare_passive_joints
 from unigym.camera import CameraSet
 from unigym.run.sink import (
@@ -1099,7 +1100,7 @@ class Run:
             cfg = copy.deepcopy(cfg)
             _section(cfg, "env")["backend"] = self._backend
         backend = require_backend(_existing_section(cfg, "env"), self._config_path)
-        info = backend_info(backend)
+        info = backend_spec(backend)
         if (
             self._world is not None
             and self._world.is_flat
@@ -1129,7 +1130,7 @@ class Run:
                     "(`World.base(...)` or `World.from_preset(...)`) instead"
                 )
         static_shapes: tuple[JsonValue, ...] = ()
-        if self._world is not None and not backend_info(backend).scene_provider_consumer:
+        if self._world is not None and not backend_spec(backend).scene_provider_consumer:
             if not self._world.unmapped_static_scene:
                 static_shapes = tuple(self._world.static_declarations())
                 if static_shapes:
@@ -1168,11 +1169,14 @@ class Run:
             # An explicitly injected runtime is activated here too: a config
             # that needs a pack must not reach SPEC with an inert runtime.
             runtime.activate_all()
+        from unigym.backends.compose import backend_runtime
+
         spec = build_spec(
             cfg,
             self._args(),
             runtime=runtime,
             robot_profiles=self._robot_profiles,
+            content_router=backend_runtime(backend).bindings.content_router,
         )
         if runtime is not None:
             resolved = _pack_robot_profiles(spec, runtime)
@@ -1603,7 +1607,7 @@ class Run:
     def _state_write_env(self) -> EnvBackend:
         """The live env, gated on the optional ``STATE_WRITE`` trait."""
         env = self.build().env
-        if Trait.STATE_WRITE not in backend_info(self.spec.backend).traits:
+        if Trait.STATE_WRITE not in backend_spec(self.spec.backend).traits:
             raise NotImplementedError(
                 f"backend {self.spec.backend!r} does not declare the "
                 f"STATE_WRITE trait (set_root_state / set_joint_state / "

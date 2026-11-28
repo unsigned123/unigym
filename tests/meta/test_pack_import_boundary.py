@@ -265,14 +265,14 @@ def test_world_has_no_legacy_factory(name: str) -> None:
 
 @pytest.mark.subprocess
 def test_registration_module_is_stdlib_only() -> None:
-    """``unigym.registration`` imports no engine and no backend registry."""
+    """``unigym.registration`` imports no engine and no backend package."""
     code = (
         "import sys\n"
         "import unigym.registration\n"
         "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
         f"{sorted(_HEAVY_ROOTS)!r})\n"
         "assert not heavy, heavy\n"
-        "assert 'unigym.backends.registry' not in sys.modules\n"
+        "assert 'unigym.backends' not in sys.modules\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -280,7 +280,7 @@ def test_registration_module_is_stdlib_only() -> None:
 
 @pytest.mark.subprocess
 def test_actuator_law_module_is_stdlib_only() -> None:
-    """``unigym.actuator_law`` imports no engine, numpy or actuators package."""
+    """``unigym.actuator_law`` imports no engine, numpy, actuators or backend package."""
     code = (
         "import sys\n"
         "import unigym.actuator_law\n"
@@ -288,7 +288,7 @@ def test_actuator_law_module_is_stdlib_only() -> None:
         f"{sorted(_HEAVY_ROOTS)!r})\n"
         "assert not heavy, heavy\n"
         "assert 'unigym.actuators' not in sys.modules\n"
-        "assert 'unigym.backends.registry' not in sys.modules\n"
+        "assert 'unigym.backends' not in sys.modules\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

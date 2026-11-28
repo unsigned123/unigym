@@ -46,8 +46,8 @@ MANIFEST -> ACTIVATE -> SPEC -> ASSEMBLE -> BACKEND_BUILD -> RUNTIME
 | `isaaclab3_physx` / `isaaclab3_newton` | `ASSEMBLE .. ASSEMBLE` |
 
 A backend policy may only narrow a global window, never widen it.  The
-canonical mapping lives in `unigym.backends.registry.BACKEND_REGISTRATION_POLICIES`
-and each `BackendInfo` carries its `registration_policy`.
+canonical mapping lives in `unigym.registration.BACKEND_REGISTRATION_POLICIES`
+(registration-owned pure policy data; no backend graph).
 
 ## Key API
 

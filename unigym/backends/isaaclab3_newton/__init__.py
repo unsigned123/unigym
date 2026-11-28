@@ -9,13 +9,8 @@ lazily so importing this package stays engine-free.
 
 from __future__ import annotations
 
-from unigym.backends.registry import ISAACLAB3_NEWTON_TRAITS, BackendInfo
+from unigym.capabilities.specs import backend_spec
 
-BACKEND_INFO = BackendInfo(
-    "isaaclab3_newton",
-    (3, 0),
-    ISAACLAB3_NEWTON_TRAITS,
-    asset_formats=("usd", "urdf"),
-)
+BACKEND_SPEC = backend_spec("isaaclab3_newton")
 
-__all__ = ["BACKEND_INFO"]
+__all__ = ["BACKEND_SPEC"]

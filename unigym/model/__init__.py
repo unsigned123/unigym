@@ -51,19 +51,6 @@ from unigym.sites import SiteEntry, SiteSpec
 if TYPE_CHECKING:
     from .live import LiveBody, LiveJoint, LiveModel, LiveTable
 
-    class MujocoModelProvider:
-        """Typing stub for the lazily imported MuJoCo model provider."""
-
-        def __init__(self, backend: str | None = None) -> None: ...
-
-        def build(self, mjspec: object) -> ModelIR:
-            """Build the declared IR from a native spec."""
-            ...
-
-        def describe(self, mjmodel: object) -> ModelIR:
-            """Fill the compiled IR from a native model."""
-            ...
-
 
 def __getattr__(name: str) -> object:
     """Resolve the MuJoCo provider lazily (keeps this import engine-free).
@@ -77,11 +64,6 @@ def __getattr__(name: str) -> object:
     Raises:
         AttributeError: The name is not exported by this package.
     """
-    if name == "MujocoModelProvider":
-        from importlib import import_module
-
-        module = import_module("unigym.backends.shared.mjfamily.model.provider")
-        return module.MujocoModelProvider
     if name in {"LiveModel", "LiveTable", "LiveJoint", "LiveBody"}:
         from . import live
 
@@ -118,7 +100,6 @@ __all__ = [
     "ModelIRError",
     "ModelSet",
     "ModelSetError",
-    "MujocoModelProvider",
     "Site",
     "SiteEntry",
     "SiteSpec",

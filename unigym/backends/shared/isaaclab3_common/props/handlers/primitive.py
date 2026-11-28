@@ -1,10 +1,8 @@
 """Dynamic primitive props: cylinder / capsule (S2c).
 
 The content/props path owns dynamic free bodies (a freejoint plus
-mass/inertia).  Sphere and box already have handlers with that behaviour
-(:class:`~unigym.props.ball.BallProp` and
-:class:`~unigym.props.container.BoxProp`); this module adds the missing
-cylinder and capsule kinds with the SAME declaration vocabulary:
+mass/inertia).  Sphere and box are backend-owned handlers; this module adds
+the missing cylinder and capsule kinds with the SAME declaration vocabulary:
 
     objects:
       types:

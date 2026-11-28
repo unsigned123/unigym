@@ -10,16 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.registry import (
-    CANONICAL_BACKENDS,
-    BackendSelectionError,
-    StackProbe,
-    backend_info,
-    build_name,
-    known_backends,
-    selection_error,
-    validate_backend_options,
-)
+from unigym.capabilities.selection import BackendSelectionError, StackProbe, selection_error
+from unigym.capabilities.specs import backend_spec, validate_backend_options
+from unigym.capabilities.traits import CANONICAL_BACKENDS, build_name, known_backends
 
 CANONICAL = (
     "mujoco",
@@ -50,15 +43,15 @@ def test_build_name_rejects_none_empty_aliases_and_unknown(name: str | None) -> 
 
 
 @pytest.mark.parametrize("name", CANONICAL)
-def test_backend_info_accepts_every_canonical_name(name: str) -> None:
-    info = backend_info(name)
+def test_backend_spec_accepts_every_canonical_name(name: str) -> None:
+    info = backend_spec(name)
     assert info.name == name
 
 
 @pytest.mark.parametrize("name", [None, *REMOVED_ALIASES, "bogus"])
-def test_backend_info_rejects_aliases_none_and_unknown(name: str | None) -> None:
+def test_backend_spec_rejects_aliases_none_and_unknown(name: str | None) -> None:
     with pytest.raises(BackendSelectionError, match=r"unknown env backend"):
-        backend_info(name)
+        backend_spec(name)
 
 
 _SATISFIED = StackProbe(
@@ -158,8 +151,9 @@ def test_validate_backend_options_rejects_foreign_alias_option_namespaces(
     ["isaaclab3_physx", "isaaclab3_newton"],
 )
 def test_isaaclab3_env_kwargs_factory_is_wired(backend: str) -> None:
+    from unigym.backends.compose import backend_runtime
     from unigym.backends.shared.isaaclab3_common.build import env_kwargs
 
-    info = backend_info(backend)
-    assert info.env_kwargs is not None
-    assert info.env_kwargs() is env_kwargs
+    bindings = backend_runtime(backend).bindings
+    assert bindings.env_kwargs is not None
+    assert bindings.env_kwargs() is env_kwargs

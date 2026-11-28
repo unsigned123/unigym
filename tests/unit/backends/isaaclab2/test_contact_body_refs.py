@@ -6,6 +6,7 @@ import types
 
 import pytest
 
+from tests._support.backends import contact_factory
 from tests._support.fakes.isaaclab import _Cfg, _RigidObjectCfg
 from unigym.contacts.manager import build_contact_manager
 
@@ -17,6 +18,7 @@ def _manager(groups, *, props=None, articulated=None):
         articulation_names=("tiny",),
         prop_names=props,
         articulated_props=articulated,
+        contact_factory=contact_factory("isaaclab2"),
     )
     assert manager is not None
     return manager
@@ -74,6 +76,7 @@ def test_single_articulation_body_set_omits_the_owner(fake_isaaclab):
         backend="isaaclab2",
         articulation_names=("tiny",),
         articulation_body_sets={"tiny": {"grasp": ("tip", "base")}},
+        contact_factory=contact_factory("isaaclab2"),
     )
     assert manager is not None
     assert (
@@ -154,13 +157,17 @@ def test_prop_manager_activates_contact_sensors_on_referenced_props():
 
 
 def test_require_contact_sensors_sets_the_internal_flag_and_validates_names():
+    from tests._support.backends import prop_faces
     from unigym.props.base import PropManager
 
+    prop_backend, mujoco_prop_backend = prop_faces("mujoco")
     manager = PropManager(
         {"types": [{"name": "crate", "type": "rigid_object", "urdf_path": "/tmp/crate.urdf"}]},
         num_envs=1,
         env_spacing=1.0,
         backend="mujoco",
+        prop_backend=prop_backend,
+        mujoco_prop_backend=mujoco_prop_backend,
     )
     assert manager.require_contact_sensors(["crate"]) == ("crate",)
     assert getattr(manager.specs[0], "_contact_sensor", False) is True

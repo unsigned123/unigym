@@ -55,13 +55,16 @@ CAMERAS = [
 
 
 def _manager():
+    from unigym.backends.compose import backend_runtime
     from unigym.cameras.manager import build_camera_manager
 
+    camera_face = backend_runtime("isaaclab3_physx").bindings.camera_backend
     return build_camera_manager(
         CAMERAS,
         obs_cameras=("cam", "eye", "side"),
         enable_cameras=True,
         backend="isaaclab3_physx",
+        rig_builder=camera_face() if camera_face is not None else None,
     )
 
 
@@ -165,7 +168,7 @@ def test_recorder_captures_and_writes_the_declared_camera(env_factory, tmp_path)
 def test_physx_declares_only_the_lane_proven_camera_traits():
     """The camera rigs and MP4 recorder are proven; depth aliases are deferred."""
     from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
 
     proven = {
         Trait.CAMERAS_RGB,

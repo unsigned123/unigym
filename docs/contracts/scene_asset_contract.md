@@ -95,9 +95,9 @@ re-placement.
 The backend format preference is declared by the registry:
 
 ```python
-backend_info("mujoco").asset_formats   # ("mjcf",)
-backend_info("mjwarp").asset_formats   # ("mjcf",)
-backend_info("isaaclab2").asset_formats  # ("usd", "urdf")
+backend_spec("mujoco").asset_formats   # ("mjcf",)
+backend_spec("mjwarp").asset_formats   # ("mjcf",)
+backend_spec("isaaclab2").asset_formats  # ("usd", "urdf")
 ```
 
 `isaaclab3_physx` / `isaaclab3_newton` declare the same `("usd", "urdf")`

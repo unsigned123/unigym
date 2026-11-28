@@ -42,11 +42,9 @@ from contextlib import contextmanager
 import numpy as np
 import torch
 
-from unigym.backends.registry import (
-    BackendSelectionError,
-    CANONICAL_BACKENDS,
-    backend_info,
-)
+from unigym.capabilities.selection import BackendSelectionError
+from unigym.capabilities.specs import backend_spec
+from unigym.capabilities.traits import CANONICAL_BACKENDS
 
 from .base import (
     apply_rate_keys,
@@ -732,6 +730,7 @@ def build_camera_manager(
     render_groups=None,
     policy_hz: float | None = None,
     num_envs: int | None = None,
+    rig_builder: Callable[..., object] | None = None,
 ) -> CameraManager | None:
     """Build a :class:`CameraManager` from yaml + the obs declaration.
 
@@ -762,6 +761,8 @@ def build_camera_manager(
             per-tick counter semantics (probe scripts).
         num_envs: the run's environment count for the ``TraitScope``
             availability check (``None`` = no scope check).
+        rig_builder: the backend camera rig factory injected by the
+            composition boundary (no registry lookup here).
 
     Returns ``None`` when nothing is requested (no-camera runs are
     untouched); raises ``ValueError`` on unknown keys, duplicate names,
@@ -774,7 +775,7 @@ def build_camera_manager(
             f"cameras: env backend is required; choose one of: " f"{', '.join(CANONICAL_BACKENDS)}"
         )
     try:
-        info = backend_info(backend)
+        backend_spec_obj = backend_spec(backend)
     except BackendSelectionError as e:
         raise ValueError(
             f"unknown camera backend {backend!r}; choose one of: "
@@ -801,7 +802,7 @@ def build_camera_manager(
     # registry).
     obs_served = set(obs_names)
     included: list[CameraSpec] = []
-    if info.bind_all_declared_cameras:
+    if backend_spec_obj.bind_all_declared_cameras:
         # declared-camera availability (camera unification): every
         # declared rig is bound -- an injected camera costs nothing
         # until rendered (render-on-demand), so the camera faces can
@@ -828,7 +829,7 @@ def build_camera_manager(
 
     if not included:
         return None
-    if info.camera_enable_required and not enable_cameras:
+    if backend_spec_obj.camera_enable_required and not enable_cameras:
         raise ValueError(
             "cameras requested (yaml cameras/adapter image obs) but "
             "--enable_cameras was not passed: the backend camera sensors "
@@ -839,7 +840,10 @@ def build_camera_manager(
 
         validate_render_groups(render_groups)
 
-    check_camera_capabilities(backend, included, num_envs=num_envs)
+    check_camera_capabilities(backend_spec_obj, included, num_envs=num_envs)
 
-    rigs = [build_rig(s, backend=backend, render_groups=render_groups) for s in included]
+    rigs = [
+        build_rig(s, backend=backend, render_groups=render_groups, rig_builder=rig_builder)
+        for s in included
+    ]
     return CameraManager(included, rigs, obs_served=obs_served, policy_hz=policy_hz)

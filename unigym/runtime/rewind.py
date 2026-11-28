@@ -231,9 +231,10 @@ class RewindController:
     # two-level capability gate (§1.4)
     # ---------------------------------------------------------------- #
     def _gate(self) -> None:
-        from ..backends.registry import Trait, backend_info
+        from ..capabilities.specs import backend_spec
+        from ..capabilities.traits import Trait
 
-        info = backend_info(self.backend_label)
+        info = backend_spec(self.backend_label)
         if not info.has(Trait.SNAPSHOT):
             raise RewindGateError(
                 f"backend '{self.backend_label}' does not implement the "

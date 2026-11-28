@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypeGuard, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, TypeGuard, TypedDict
 
 import numpy as np
 
@@ -33,7 +33,10 @@ from unigym.actuators.ir import (
     validate_actuation_group,
     validate_drive_law_matrix,
 )
-from unigym.backends.registry import BackendInfo, backend_info, select_backend
+from unigym.backends.bindings import BackendBindings
+from unigym.backends.compose import BackendRuntime, backend_runtime
+from unigym.capabilities.selection import select_backend
+from unigym.capabilities.specs import BackendSpec, backend_spec
 from unigym.core.identity import RobotIdentity, RunIdentity
 from unigym.env.backends import build_env_backend
 from unigym.logger import DataCollectLogger
@@ -78,7 +81,6 @@ if TYPE_CHECKING:
         ArticulationSpec,
         ContactSensorInventory,
     )
-    from unigym.scenes.terrain import Terrain
     from unigym.trace.replay import TraceReplay
     from unigym.values import ValuePublisher
     from unigym.watchers.timeline import EventLog, TimelineSink
@@ -92,59 +94,6 @@ if TYPE_CHECKING:
 #: ``BackendSelectionError``).  The mujoco family keeps its historical build
 #: path: a d0-style run must stay buildable without an engine probe.
 _ISAACLAB_FAMILY_BACKENDS = frozenset({"isaaclab2", "isaaclab3_physx", "isaaclab3_newton"})
-
-
-@runtime_checkable
-class _EnvKwargsBuilder(Protocol):
-    """Backend ``env_kwargs`` builder (registry factory -> opaque callable)."""
-
-    def __call__(
-        self,
-        env_cfg: dict[str, JsonValue],
-        artifacts_dir: Path | None,
-        world_base: JsonValue,
-        spec: RunSpec,
-        *,
-        controls: Sequence[ControlRuntime] | None,
-        profiles: Mapping[str, RobotProfile] | None,
-        robot_realizations: Mapping[str, object] | None,
-        backend_options: dict[str, JsonValue],
-        actuation_plans: Mapping[str, tuple[ResolvedActuationGroup, ...]] | None = None,
-    ) -> dict[str, object]: ...
-
-
-@runtime_checkable
-class _TerrainBuilder(Protocol):
-    """Backend terrain factory (registry factory -> opaque callable)."""
-
-    def __call__(
-        self,
-        cfg: dict[str, JsonValue],
-        num_envs: int,
-        env_spacing: float,
-        terrain: JsonValue | Terrain | None,
-    ) -> object: ...
-
-
-@runtime_checkable
-class _EventsBuilder(Protocol):
-    """Backend DR events factory (registry factory -> callable)."""
-
-    def __call__(self, section: JsonValue) -> object: ...
-
-
-@runtime_checkable
-class _RobotRealizer(Protocol):
-    """Backend robot realizer: neutral profile -> backend-owned object."""
-
-    def __call__(
-        self,
-        profile: RobotProfile,
-        *,
-        spec: ArticulationSpec,
-        params: Mapping[str, JsonValue],
-        asset_plan: AssetPlan | None,
-    ) -> object: ...
 
 
 class _ProfileSeed(TypedDict):
@@ -606,7 +555,7 @@ def _required_body_ids(
 def _effective_profile(
     art: ArticulationSpec,
     profile: RobotProfile,
-    info: BackendInfo,
+    spec: BackendSpec,
 ) -> tuple[RobotProfile, str]:
     """Apply run-level overrides and select one backend-compatible format.
 
@@ -644,10 +593,10 @@ def _effective_profile(
         body_sets=art.body_sets if art.body_sets is not None else profile.body_sets,
     )
     if effective.assets is None:
-        asset_format = info.asset_formats[0]
+        asset_format = spec.asset_formats[0]
     else:
         asset_format, _ = select_robot_asset(
-            effective, backend=info.name, backend_formats=info.asset_formats
+            effective, backend=spec.name, backend_formats=spec.asset_formats
         )
     required = _required_body_ids(effective, art.contacts)
     validate_body_bindings(effective.body_bindings, required_ids=required, formats=None)
@@ -674,7 +623,7 @@ def _effective_profile(
 
 
 def _prepare_articulation_models(
-    spec: RunSpec, info: BackendInfo, asset_plan: AssetPlan | None
+    spec: RunSpec, backend: BackendSpec, asset_plan: AssetPlan | None
 ) -> RunSpec:
     """Select and resolve the backend's asset format for every articulation.
 
@@ -704,7 +653,7 @@ def _prepare_articulation_models(
         assets = art.model
         if assets is not None:
             try:
-                asset_format = select_asset_format(assets, info.asset_formats)
+                asset_format = select_asset_format(assets, backend.asset_formats)
             except AssetRefError:
                 prepared.append(art)
                 continue
@@ -716,7 +665,7 @@ def _prepare_articulation_models(
             assets = profile.assets
             try:
                 asset_format, _ = select_robot_asset(
-                    profile, backend=info.name, backend_formats=info.asset_formats
+                    profile, backend=backend.name, backend_formats=backend.asset_formats
                 )
             except AssetRefError:
                 prepared.append(art)
@@ -821,7 +770,7 @@ def _contact_declarations(
     return body_sets, contact_assets
 
 
-def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBuild]:
+def _control_profiles(spec: RunSpec, backend: BackendSpec) -> dict[str, _ProfileBuild]:
     """Build the effective profile of every profile-backed control articulation."""
     builds: dict[str, _ProfileBuild] = {}
     injected = spec.robot_profiles
@@ -834,7 +783,7 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
             # profile-set selector); the run still needs one profile-backed
             # robot articulation (checked by the caller).
             continue
-        profile, asset_format = _effective_profile(art, seed["profile"], info)
+        profile, asset_format = _effective_profile(art, seed["profile"], backend)
         spec_art = seed["spec"]
         if spec_art.actuation is None and profile.actuation:
             spec_art = replace(spec_art, actuation=profile.actuation)
@@ -848,20 +797,18 @@ def _control_profiles(spec: RunSpec, info: BackendInfo) -> dict[str, _ProfileBui
 
 
 def _realize_profiles(
-    info: BackendInfo,
+    bindings: BackendBindings,
     builds: dict[str, _ProfileBuild],
     asset_plan: AssetPlan | None,
 ) -> dict[str, object] | None:
-    """Build every backend robot realization through the registry seam.
+    """Build every backend robot realization through the injected seam.
 
     ``None`` means the backend consumes the neutral profiles directly.
     """
-    factory = info.robot_realizer
+    factory = bindings.robot_realizer
     if factory is None:
         return None
     realizer = factory()
-    if not isinstance(realizer, _RobotRealizer):
-        raise TypeError("backend robot realizer is not callable")
     return {
         name: realizer(
             build["profile"], spec=build["spec"], params=build["params"], asset_plan=asset_plan
@@ -943,7 +890,7 @@ def _build_actuation_plans(
 def _build_robot_and_props(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
-    info: BackendInfo,
+    runtime: BackendRuntime,
     device: str,
     num_envs: int,
     env_spacing: float,
@@ -951,10 +898,10 @@ def _build_robot_and_props(
     asset_plan: AssetPlan | None,
 ) -> _RobotBundle:
     """Step 1: policy profile(s) + actuator/terrain/prop + adapter."""
-    backend_label = info.name
+    backend_label = runtime.spec.name
     # Every robot factory returns neutral data; backends that need an
     # engine object build it through their explicit robot realizer seam.
-    builds = _control_profiles(spec, info)
+    builds = _control_profiles(spec, runtime.spec)
     if not builds:
         raise ValueError(
             "no profile-backed control articulation: declare an `action_spec:` "
@@ -966,16 +913,14 @@ def _build_robot_and_props(
     first_name = next(iter(builds))
     profile = builds[first_name]["profile"]
     profiles = {name: build["profile"] for name, build in builds.items()}
-    robot_realizations = _realize_profiles(info, builds, asset_plan)
+    robot_realizations = _realize_profiles(runtime.bindings, builds, asset_plan)
     # terrain preset is a backend construction face; backends without one
     # serve their own ground (e.g. the floor geom of the MJ XML scene).  A
     # programmatic ``Run(world=World.terrain...)`` carries the native
     # Terrain IR on the spec and the backend builds the preset itself.
     terrain: object | None = None
-    if info.build_terrain is not None:
-        terrain_factory = info.build_terrain()
-        if not isinstance(terrain_factory, _TerrainBuilder):
-            raise TypeError("backend terrain factory is not callable")
+    if runtime.bindings.build_terrain is not None:
+        terrain_factory = runtime.bindings.build_terrain()
         terrain = terrain_factory(cfg, num_envs, env_spacing, spec.terrain)
     from unigym.adapters import build_adapter
     from unigym.props import build_prop_manager
@@ -988,6 +933,8 @@ def _build_robot_and_props(
         base_dir=config_dir,
         backend=backend_label,
         asset_plan=asset_plan,
+        prop_backend=runtime.bindings.prop_backend,
+        mujoco_prop_backend=backend_runtime("mujoco").bindings.prop_backend,
     )
     if prop_manager is not None:
         print(f"[collect] props enabled: " f"{[s.name for s in prop_manager.specs]}", flush=True)
@@ -1065,7 +1012,7 @@ def _camera_base_mount(
 def _build_sensing(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
-    info: BackendInfo,
+    runtime: BackendRuntime,
     device: str,
     num_envs: int,
     profiles: Mapping[str, RobotProfile],
@@ -1078,7 +1025,7 @@ def _build_sensing(
     observations,
 ) -> _SensingBundle:
     """Step 2: camera/contact managers + lighting/director/events/recorder."""
-    backend_label = info.name
+    backend_label = runtime.spec.name
     # camera manager built from the declared cameras + observations.camera
     # (sensors must join the scene cfg prior to cloning; also feeds the
     # backend capability gate).  Requires --enable_cameras (kit camera
@@ -1092,6 +1039,8 @@ def _build_sensing(
     rec_cfg = _config_dict(cfg.get("recorder")) or {}
     rec_ref = rec_cfg.get("camera_ref") if rec_cfg.get("enabled") else None
     cameras_cfg = _camera_base_mount(cfg.get("cameras"), profiles, asset_formats)
+    camera_face = runtime.bindings.camera_backend
+    rig_builder = camera_face() if camera_face is not None else None
     camera_manager = build_camera_manager(
         cameras_cfg,
         observations.camera,
@@ -1100,6 +1049,7 @@ def _build_sensing(
         backend=backend_label,
         policy_hz=_policy_hz(policy_dt),
         num_envs=num_envs,
+        rig_builder=rig_builder,
     )
     if camera_manager is not None:
         print(
@@ -1123,6 +1073,7 @@ def _build_sensing(
         prop_names=([s.name for s in prop_manager.specs] if prop_manager is not None else None),
         articulated_props=(_fixture_prop_names(prop_manager) if prop_manager is not None else None),
         contact_assets=dict(contact_assets),
+        contact_factory=runtime.bindings.contact_backend,
     )
     if contact_manager is not None and prop_manager is not None:
         # object props used as contact sensors must activate the physics
@@ -1137,11 +1088,11 @@ def _build_sensing(
     effective_lighting: JsonValue = env_section.get("lighting")
     if (
         effective_lighting is None
-        and info.default_lighting is not None
+        and runtime.spec.default_lighting is not None
         and prop_manager is not None
         and prop_manager.has_usd_props
     ):
-        effective_lighting = _lighting_json(info.default_lighting)
+        effective_lighting = _lighting_json(runtime.spec.default_lighting)
         print(
             "[collect] usd prop default lights: dome 600 + distant " "(override via env.lighting)",
             flush=True,
@@ -1179,13 +1130,11 @@ def _build_sensing(
     randomization = _config_dict(cfg.get("randomization")) or {}
     events_section = randomization.get("events")
     if events_section:
-        if info.build_events is None:
+        if runtime.bindings.build_events is None:
             raise ValueError(
                 f"the '{backend_label}' backend does not implement " "randomization.events"
             )
-        events_factory = info.build_events()
-        if not isinstance(events_factory, _EventsBuilder):
-            raise TypeError("backend events factory is not callable")
+        events_factory = runtime.bindings.build_events()
         events_cfg = events_factory(events_section)
     # the recorder binds an explicitly declared in-scene camera
     # only (recorder.camera_ref REQUIRED; no self-built camera path).  The
@@ -1212,7 +1161,7 @@ def _build_env_and_sampler(
     spec: RunSpec,
     cfg: dict[str, JsonValue],
     env_cfg: dict[str, JsonValue],
-    info: BackendInfo,
+    runtime: BackendRuntime,
     device: str,
     num_envs: int,
     profile: RobotProfile,
@@ -1237,8 +1186,8 @@ def _build_env_and_sampler(
     from unigym.registration import RegistrationPhase, at_least_phase
 
     at_least_phase(RegistrationPhase.BACKEND_BUILD)
-    if info.name not in _ISAACLAB_FAMILY_BACKENDS:
-        _materialize_pack_actuators(spec, info.name)
+    if runtime.spec.name not in _ISAACLAB_FAMILY_BACKENDS:
+        _materialize_pack_actuators(spec, runtime.spec.name)
     # the run output dir resolves BEFORE the backend build: the recorded
     # scene artifacts are written during env construction
     # and land under <run output dir>/scene/.  The daemon drops the run.json
@@ -1255,12 +1204,10 @@ def _build_env_and_sampler(
     artifacts_dir = (
         Path(spec.output.artifacts_dir) if spec.output.artifacts_dir is not None else None
     )
-    env_kwargs_factory = info.env_kwargs
+    env_kwargs_factory = runtime.bindings.env_kwargs
     if env_kwargs_factory is None:
-        raise TypeError(f"backend {info.name!r} declares no env_kwargs factory")
+        raise TypeError(f"backend {runtime.spec.name!r} declares no env_kwargs factory")
     env_kwargs_builder = env_kwargs_factory()
-    if not isinstance(env_kwargs_builder, _EnvKwargsBuilder):
-        raise TypeError("backend env_kwargs builder is not callable")
     extra_kwargs = env_kwargs_builder(
         env_cfg,
         artifacts_dir,
@@ -1273,7 +1220,7 @@ def _build_env_and_sampler(
         actuation_plans=actuation_plans,
     )
     env: RunEnv = build_env_backend(
-        info.name,
+        runtime.spec.name,
         robot_profile=profile,
         adapter=adapter,
         terrain_cfg=terrain,
@@ -1533,16 +1480,14 @@ def _build_sinks(
     # status_fn wires in after the bridge exists
     director: Director | None = None
     if spec.direct:
-        from unigym.backends.registry import backend_info
         from unigym.director import Director
 
-        info = backend_info(spec.backend)
         director = Director(
             env=env,
             contact_manager=contact_manager,
             cfg=_config_dict(cfg.get("director")) or {},
             out_dir=out_dir,
-            director_ops=info.director_ops,
+            director_ops=backend_runtime(spec.backend).bindings.director_ops,
         )
 
     # timeline (§3): the unified events.jsonl stream + shared writer
@@ -1655,6 +1600,7 @@ def _build_bridge_and_wiring(
     watch_specs: list[dict[str, JsonValue]] | None,
     stop_when: Callable[[], bool] | None,
     num_envs: int,
+    scene_ops_factory: Callable[[], object] | None = None,
 ) -> _WiringBundle:
     """Step 6: replay + bridge + runtime attach + rewind providers."""
     from unigym.runner.sinks import FanOutSink
@@ -1708,7 +1654,13 @@ def _build_bridge_and_wiring(
             "scene face: the env exposes no articulation name; the run must "
             "declare at least one articulation (no implicit robot name)"
         )
-    attach_scene(bridge, env, backend_label, robot_name=robot_name)
+    attach_scene(
+        bridge,
+        env,
+        backend_label,
+        robot_name=robot_name,
+        scene_ops_factory=scene_ops_factory,
+    )
     # watchers: cmd-15 handler + per-tick hook (before the step gate);
     # born-armed specs came from --watch (fail-fast parsed above).
     # watcher artifacts live under <runtime_dir>/watch/<run_id>/
@@ -1843,17 +1795,17 @@ def build_instance(spec: RunSpec) -> RunInstance:
     cfg = spec.cfg
     backend_label = spec.backend
     _reject_removed_actuator_sources(cfg)
-    info = backend_info(backend_label)
     # Explicit selection is verified at the build boundary for the isaaclab
     # family: a missing stack / wrong major / missing newton extra raises
     # ``BackendSelectionError`` here instead of surfacing later as a
     # ``TypeError`` on ``env_kwargs is None``.  The returned canonical name is
     # re-resolved so downstream faces use the verified identity.
-    if info.name in _ISAACLAB_FAMILY_BACKENDS:
-        canonical = select_backend(info.name)
-        info = backend_info(canonical)
+    spec_backend = backend_spec(backend_label)
+    if spec_backend.name in _ISAACLAB_FAMILY_BACKENDS:
+        canonical = select_backend(spec_backend.name)
         backend_label = canonical
-        _materialize_pack_actuators(spec, info.name)
+        _materialize_pack_actuators(spec, canonical)
+    runtime = backend_runtime(backend_label)
     loader = spec.pack_runtime
     # Normalize the one sink selection surface BEFORE any engine allocation:
     # an explicit ``sinks:`` list wins, a custom ``sink:`` shorthand is the sole
@@ -1900,10 +1852,10 @@ def build_instance(spec: RunSpec) -> RunInstance:
     config_dir = os.path.dirname(os.path.abspath(spec.config_path))
 
     asset_plan = _boundary_asset_plan(loader, env_cfg)
-    spec = _prepare_articulation_models(spec, info, asset_plan)
+    spec = _prepare_articulation_models(spec, runtime.spec, asset_plan)
 
     robot = _build_robot_and_props(
-        spec, cfg, info, device, num_envs, env_spacing, config_dir, asset_plan
+        spec, cfg, runtime, device, num_envs, env_spacing, config_dir, asset_plan
     )
     profile = robot["profile"]
     profiles = robot["profiles"]
@@ -1919,7 +1871,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         spec.articulations,
         profiles,
         spec.action_spec,
-        info.name,
+        runtime.spec.name,
     )
     control_runtimes = build_control_runtimes(
         spec.action_spec,
@@ -1935,7 +1887,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
     sensing = _build_sensing(
         spec,
         cfg,
-        info,
+        runtime,
         device,
         num_envs,
         profiles,
@@ -1951,7 +1903,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         spec,
         cfg,
         env_cfg,
-        info,
+        runtime,
         device,
         num_envs,
         profile,
@@ -2136,6 +2088,7 @@ def build_instance(spec: RunSpec) -> RunInstance:
         sinks["watch_specs"],
         sinks["stop_when"],
         num_envs,
+        scene_ops_factory=runtime.bindings.scene_ops,
     )
 
     seal_runtime()
@@ -2170,6 +2123,8 @@ def build_instance(spec: RunSpec) -> RunInstance:
         logger=logger,
         replay=wiring["replay"],
         rewind_providers=wiring["rewind_providers"],
+        live_provider=runtime.bindings.live_provider,
+        query_backend=runtime.bindings.query_backend,
         stop_when=wiring["stop_when"],
         artifacts_dir=built["artifacts_dir"],
         out_dir=built["out_dir"],

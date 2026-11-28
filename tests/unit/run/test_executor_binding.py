@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.registry import CANONICAL_BACKENDS
+from unigym.capabilities.traits import CANONICAL_BACKENDS
 from unigym.executors import executor_for
 
 _HOST = "/usr/bin/python3"

@@ -566,7 +566,7 @@ def rig_type(spec: CameraSpec) -> str:
 class CameraRig(Protocol):
     """Structural protocol for one camera mounting (world-component style).
 
-    Capability trait: :attr:`unigym.backends.registry.Trait.CAMERAS_RGB`
+    Capability trait: :attr:`unigym.capabilities.traits.Trait.CAMERAS_RGB`
     (rig-level depth is ``CAMERAS_DEPTH_RIG``).  Per-backend rig
     implementations: ``cameras/rigs.py`` (isaaclab sensors) +
     ``backends/mujoco/cameras.build_mj_rig`` (MjSpec-injected cameras).

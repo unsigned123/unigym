@@ -1,10 +1,11 @@
-"""Env backend registry (engine imports lazy via the central registry).
+"""Env backend composition (engine imports lazy via the bindings table).
 
-``unigym.backends.registry`` is the single backend truth: it owns the
-canonical names, the build-name alias and every backend's lazy env factory.
-This module keeps only the build face (``build_env_backend``) and the
-PEP 562 materialization of ``BACKEND_REGISTRY``; importing it never imports
-an engine (the factories perform those imports on first use).
+Canonical names, the build-name spelling and the pure spec metadata live in
+:mod:`unigym.capabilities`; the lazy env factory comes from
+:mod:`unigym.backends.compose`.  This module keeps only the build face
+(``build_env_backend``) and the PEP 562 materialization of
+``BACKEND_REGISTRY``; importing it never imports an engine (the factories
+perform those imports on first use).
 
 Usage (collect.py):
 
@@ -23,27 +24,27 @@ import importlib
 import sys
 from typing import Any
 
-from unigym.backends.registry import backend_info, build_name
-from unigym.backends.registry import known_backends as _registry_known
+from unigym.backends.compose import backend_runtime
+from unigym.capabilities.traits import build_name, known_backends as _runtime_known
 
 
 def known_backends() -> list[str]:
     """Registered canonical backend names (no engine import)."""
-    return sorted(_registry_known())
+    return sorted(_runtime_known())
 
 
 def _env_class(name: str) -> type:
-    """Resolve *name*'s env class through the registry factory (lazy)."""
-    info = backend_info(name)
-    if info.env_class is None:
+    """Resolve *name*'s env class through the composition bindings (lazy)."""
+    env_class = backend_runtime(name).bindings.env_class
+    if env_class is None:
         raise ValueError(f"env backend {name!r} declares no env_class factory")
-    return info.env_class()
+    return env_class()
 
 
 def __getattr__(name: str) -> Any:
     if name == "BACKEND_REGISTRY":
         # materialized {canonical name: env class} — imports every backend
-        registry = {key: _env_class(key) for key in _registry_known()}
+        registry = {key: _env_class(key) for key in _runtime_known()}
         globals()["BACKEND_REGISTRY"] = registry
         return registry
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

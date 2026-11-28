@@ -8,7 +8,7 @@ and the mujoco/mjwarp rigs already lived in their backends.
 
 The module is **torch-only at import time** and imports no backend at
 module level: both :func:`build_rig` and :func:`build_neutral_rig` resolve
-the backend factory lazily through :attr:`BackendInfo.camera_backend`.
+the backend factory lazily through :attr:`BackendBindings.camera_backend`.
 """
 
 from __future__ import annotations
@@ -67,31 +67,43 @@ def _quat_mul_batch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return cast(torch.Tensor, quat.mul(a, b))
 
 
-def build_neutral_rig(spec: CameraSpec, backend: str, render_groups=None):
+def build_neutral_rig(
+    spec: CameraSpec,
+    backend: str,
+    render_groups=None,
+    *,
+    rig_builder: Callable[..., object] | None = None,
+):
     """Engine-neutral compatibility name for the rig builders.
 
     Kept neutral in the sense that it names no engine: the rig classes live
-    in the backend packages and this name resolves *backend*'s factory
-    through the registry, exactly like :func:`build_rig`.  The backend is
-    explicit (canonical; no alias and no default).
+    in the backend packages and this name uses the *injected* rig builder,
+    exactly like :func:`build_rig`.  The backend is explicit (canonical; no
+    alias and no default).
     """
-    return build_rig(spec, backend=backend, render_groups=render_groups)
+    return build_rig(spec, backend=backend, render_groups=render_groups, rig_builder=rig_builder)
 
 
-def build_rig(spec: CameraSpec, backend: str, render_groups=None) -> CameraRig:
+def build_rig(
+    spec: CameraSpec,
+    backend: str,
+    render_groups=None,
+    *,
+    rig_builder: Callable[..., object] | None = None,
+) -> CameraRig:
     """Factory: rig instance from the spec's ``rig.type``.
 
-    ``backend`` (required canonical env backend) selects the sensor stack
-    through the registry's lazy ``camera_backend`` face: ``mujoco`` (M2b:
-    MjSpec-injected ``<camera>`` + ``mujoco.Renderer``), ``mjwarp`` (C3:
-    N=1 delegates to that same mirror renderer, N>1 uses the native warp
-    batch renderer) or the IsaacLab identities (``isaaclab2`` /
-    ``isaaclab3_physx`` / ``isaaclab3_newton``; the backend CameraCfg /
-    TiledCameraCfg rigs).  There is no family alias and no default.
+    ``backend`` (required canonical env backend) names the sensor stack:
+    ``mujoco`` (M2b: MjSpec-injected ``<camera>`` + ``mujoco.Renderer``),
+    ``mjwarp`` (C3: N=1 delegates to that same mirror renderer, N>1 uses
+    the native warp batch renderer) or the IsaacLab identities
+    (``isaaclab2`` / ``isaaclab3_physx`` / ``isaaclab3_newton``; the
+    backend CameraCfg / TiledCameraCfg rigs).  ``rig_builder`` is the
+    backend rig factory injected by composition (no registry lookup).
     ``render_groups``: optional per-config geom-class override for the
     capture flags face (camera_contract §14; mujoco-only in v1).
     """
-    from ..backends.registry import CANONICAL_BACKENDS, backend_info, build_name
+    from ..capabilities.traits import CANONICAL_BACKENDS, build_name
 
     if backend is None or not str(backend).strip():
         raise ValueError(
@@ -99,14 +111,12 @@ def build_rig(spec: CameraSpec, backend: str, render_groups=None) -> CameraRig:
             f"{', '.join(CANONICAL_BACKENDS)}"
         )
     canonical = build_name(backend)
-    factory = backend_info(canonical).camera_backend
-    if factory is None:
+    if rig_builder is None:
         raise ValueError(
             f"camera {spec.name!r}: backend {canonical!r} has no camera "
             f"rig factory (available: {', '.join(CANONICAL_BACKENDS)})"
         )
-    rig_factory = cast(Callable[..., object], factory())
-    return cast(CameraRig, rig_factory(spec, render_groups=render_groups))
+    return cast(CameraRig, rig_builder(spec, render_groups=render_groups))
 
 
 def lookat_quat(pos, lookat) -> np.ndarray:

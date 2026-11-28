@@ -19,9 +19,9 @@ from dataclasses import replace
 import mujoco
 import numpy as np
 
+from unigym.capabilities.traits import ModelEditField
 from unigym.model.edit import BodyEdit, GeomEdit
 from unigym.model.errors import ModelEditError
-from unigym.backends.registry import ModelEditField
 
 __all__ = [
     "MujocoModelEditWriter",

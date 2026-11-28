@@ -48,7 +48,7 @@ def _pole_com(env) -> torch.Tensor:
 def test_reset_com_event_applies_at_construction(env_factory):
     """Two reset-mode CoM ranges shift the pole CoM by their configured delta."""
     from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
 
     assert Trait.EVENTS_DR in ISAACLAB3_PHYSX_TRAITS
     assert "EVENTS_DR" in {trait.name for trait in Isaaclab3PhysxEnv.BACKEND_CAPABILITIES.traits()}

@@ -17,7 +17,7 @@ import copy
 import json
 import os
 from argparse import Namespace
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -29,12 +29,8 @@ from unigym._typing import (
     is_pair,
 )
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
-from unigym.backends.registry import (
-    CANONICAL_BACKENDS,
-    backend_info,
-    known_backends,
-    validate_backend_options,
-)
+from unigym.capabilities.specs import backend_spec, validate_backend_options
+from unigym.capabilities.traits import CANONICAL_BACKENDS, known_backends
 from unigym.core.paths import expand_placeholders
 from unigym.env.obs import ObservationConfig, ObsConfigError
 from unigym.run.sink import (
@@ -181,15 +177,17 @@ def _route_content(
     cfg: dict[str, JsonValue],
     env_cfg: dict[str, JsonValue],
     backend_label: str,
+    content_router: Callable[[], Callable[..., object]] | None,
 ) -> None:
     """Route the run's content spec into ``env.params.content``.
 
     The spec was split out of the run's ``objects:`` block by
     :func:`unigym.scenes.recipe.normalize_content_keys`; a backend with a
-    ``content_router`` consumes it.  A fill always needs a composed scene
+    ``content_fill`` capability consumes it through the injected router
+    factory.  A fill always needs a composed scene
     (``env.params.scene_provider``, written only by
     :func:`unigym.scene_presets.apply_scene_preset`) and a backend with a
-    ``content_router``; either missing fails closed here, before any env is
+    content router; either missing fails closed here, before any env is
     constructed, instead of being silently dropped.
     """
     from unigym.errors import ConfigError
@@ -205,14 +203,13 @@ def _route_content(
             "scene | hint: declare 'scene_preset:' with a provider or drop the "
             "content keys (objects.filler)"
         )
-    info = backend_info(backend_label)
-    if info.content_router is None:
+    if not backend_spec(backend_label).content_fill or content_router is None:
         raise ConfigError(
             f"the 'objects:' content spec is not supported by the {backend_label!r} "
             f"backend | hint: declare a backend with a content fill or drop the "
             f"content keys (objects.filler)"
         )
-    info.content_router()(spec, env_cfg)
+    content_router()(spec, env_cfg)
 
 
 _STATIC_SHAPE_HINT = (
@@ -226,7 +223,7 @@ def _guard_scene_provider_support(
     backend_label: str,
 ) -> None:
     """Fail fast when a run declares a scene provider its backend cannot consume."""
-    if backend_info(backend_label).scene_provider_consumer:
+    if backend_spec(backend_label).scene_provider_consumer:
         return
     params = env_cfg.get("params")
     scene_name = params.get("scene_provider") if isinstance(params, dict) else None
@@ -262,7 +259,7 @@ def _validate_world_base(
             "`world_base: {mjcf: <path>}` or a scene preset `world:` instead "
             "-- there is no alias and no fallback"
         )
-    info = backend_info(backend_label)
+    info = backend_spec(backend_label)
     world_base = cfg.get("world_base")
     if world_base is None:
         if info.world_base_consumer:
@@ -824,6 +821,7 @@ def build_spec(
     *,
     runtime: PackLoader | None = None,
     robot_profiles: Mapping[str, RobotProfile] | None = None,
+    content_router: Callable[[], Callable[..., object]] | None = None,
 ) -> RunSpec:
     """Validate/normalize one run config + CLI overrides into a RunSpec.
 
@@ -831,6 +829,8 @@ def build_spec(
     selected (its ``BackendBinding`` drives world-format and backend-param
     selection).  A ``pack:`` / asset reference expands through an
     :class:`~unigym.assets.plan.AssetPlan` built from the same runtime.
+    ``content_router`` is the injected backend content-fill face (composition);
+    a spec with ``objects:`` content needs it.
     The removed ``mode`` / ``benchmark`` config keys are rejected with teaching
     errors: sink selection is ``sinks:`` (or the one-custom-sink ``sink:``
     shorthand), and the built-in benchmark/evaluation path no longer lives in
@@ -865,7 +865,7 @@ def build_spec(
         raise ConfigError(f"{args.config}: {exc}") from exc
     early_env = _require_config(cfg.get("env"), "env")
     backend_label = require_backend(early_env, args.config)
-    info = backend_info(backend_label)
+    info = backend_spec(backend_label)
     binding = BackendBinding(
         name=info.name,
         asset_formats=info.asset_formats,
@@ -990,7 +990,7 @@ def build_spec(
     except ValueError as exc:
         raise ConfigError(f"{args.config}: {exc}") from exc
     _guard_scene_provider_support(env_cfg, backend_label)
-    _route_content(cfg, env_cfg, backend_label)
+    _route_content(cfg, env_cfg, backend_label, content_router)
     world_base = _validate_world_base(cfg, env_cfg, backend_label)
     articulations = _normalize_articulations(cfg, args.config)
     try:

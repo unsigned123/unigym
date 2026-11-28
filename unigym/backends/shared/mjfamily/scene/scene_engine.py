@@ -99,32 +99,26 @@ class MujocoSceneEngine:
 
 
 def resolve_scene_engine(name: str = NAME) -> MujocoSceneEngine:
-    """Resolve a backend's scene engine through the backend registry.
+    """Resolve the shared MuJoCo-family scene engine.
+
+    Both ``mujoco`` and ``mjwarp`` use :class:`MujocoSceneEngine`; the name
+    is validated so a non-family identity fails fast instead of silently
+    reusing the MuJoCo engine.
 
     Args:
-        name: The canonical backend name (default: this backend).
+        name: The canonical backend name (default: ``mujoco``).
 
     Returns:
-        A fresh engine instance from the backend record's factory.
+        A fresh engine instance.
 
     Raises:
-        RuntimeError: The backend record declares no scene engine.
+        RuntimeError: *name* is not a MuJoCo-family backend.
     """
-    from unigym.backends.registry import backend_info
-
-    factory = backend_info(name).scene_engine
-    if factory is None:
+    if name not in ("mujoco", "mjwarp"):
         raise RuntimeError(
-            f"backend {name!r}: the backend registry declares no scene engine "
-            f"-- register one before composing a scene"
+            f"backend {name!r}: the MuJoCo scene engine only serves the " f"mujoco/mjwarp family"
         )
-    engine = factory()
-    if not isinstance(engine, MujocoSceneEngine):
-        raise RuntimeError(
-            f"backend {name!r}: the registered scene engine is not a "
-            f"MujocoSceneEngine ({type(engine).__name__})"
-        )
-    return engine
+    return MujocoSceneEngine()
 
 
 def compose_and_attach(

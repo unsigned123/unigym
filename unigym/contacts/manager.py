@@ -48,7 +48,7 @@ from .base import (
 class ContactBackend(Protocol):
     """Structural protocol both backend objects satisfy.
 
-    Capability trait: :attr:`unigym.backends.registry.Trait.CONTACTS_GROUPS`
+    Capability trait: :attr:`unigym.capabilities.traits.Trait.CONTACTS_GROUPS`
     (a backend without it never receives a ContactManager).  ``setup_scene``
     exists on both (mujoco: returns {} — contacts need no scene elements);
     ``read_raw`` returns a FRESHLY allocated array (numpy for mujoco, torch
@@ -288,6 +288,7 @@ def build_contact_manager(
     prop_names: Optional[list] = None,
     articulated_props: Optional[set] = None,
     contact_assets: Optional[Mapping[str, str]] = None,
+    contact_factory: Callable[[], object] | None = None,
 ) -> Optional[ContactManager]:
     """collect_cli entry point.
 
@@ -310,6 +311,8 @@ def build_contact_manager(
             fixtures (owner ``fixture``).
         contact_assets: per-articulation resolved selected asset path used by
             the IsaacLab pre-clone inventory for ``body: "*"``.
+        contact_factory: the injected zero-argument contact-face factory from
+            the composition boundary (no registry lookup here).
     """
     if not cfg:
         return None
@@ -327,5 +330,6 @@ def build_contact_manager(
         prop_names=prop_names,
         articulated_props=articulated_props,
         contact_assets=contact_assets,
+        contact_factory=contact_factory,
     )
     return ContactManager(specs, be, device=device)

@@ -214,12 +214,3 @@ def validate_latch(spec: PropSpec, joints: dict[str, dict]) -> dict | None:
         },
         "unlocked": unlocked,
     }
-
-
-def __getattr__(name: str):
-    """Lazy compat re-export of the isaaclab articulation handlers (G4)."""
-    if name in ("PropArticulation", "UsdArticulationProp", "FreeArticulationProp"):
-        from .base import _compat_class
-
-        return _compat_class(name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import pytest
 import torch
 
@@ -42,7 +44,7 @@ def _raised_ground():
 def test_contact_all_world_group_reads_world_forces(cartpole_usd, env_factory):
     """A robot ``body: "*"`` world group reports a world-frame normal force."""
     from unigym.backends.isaaclab3_physx.env import Isaaclab3PhysxEnv
-    from unigym.backends.registry import ISAACLAB3_PHYSX_TRAITS, Trait
+    from unigym.capabilities.traits import ISAACLAB3_PHYSX_TRAITS, Trait
     from unigym.backends.shared.isaaclab3_common.usd import robot_rigid_bodies
     from unigym.contacts.manager import build_contact_manager
     from unigym.runtime.actions import NamedAction
@@ -61,6 +63,7 @@ def test_contact_all_world_group_reads_world_forces(cartpole_usd, env_factory):
             }
         ],
         backend="isaaclab3_physx",
+        contact_factory=backend_runtime("isaaclab3_physx").bindings.contact_backend,
         articulation_names=(ARTICULATION,),
     )
     assert manager.backend.backend_key == "isaaclab3_physx"

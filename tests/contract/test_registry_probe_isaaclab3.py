@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from unigym.backends.registry import (
+from unigym.capabilities.selection import (
     BackendSelectionError,
     StackProbe,
-    isaaclab_version,
     select_backend,
     selection_error,
 )
+from unigym.capabilities.versions import isaaclab_version
 
 
 def _message(exc: BackendSelectionError) -> str:

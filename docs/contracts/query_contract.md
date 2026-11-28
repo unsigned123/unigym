@@ -18,7 +18,7 @@ observation channel:
   `step`/`reset` (the backend adds no lock).
 
 `obs` is unchanged.  Query is opt-in through the backend trait and the
-`BackendInfo.query_backend` lazy factory.
+`BackendBindings.query_backend` lazy factory.
 
 ## 0. Scope (P0A + P0B-1 + P1A-2 + P1B-1 + P1B-2 + P1C-1 + P1C-2 + P1C-3 + P2-0 + P2-A + P2-B + P2-C + P2-D + P2-E)
 
@@ -107,9 +107,9 @@ env.query      # optional backend face (MuJoCo/mjWarp/IsaacLab implement it)
 
 `RunInstance.query`:
 
-- reads the registry truth (`backend_info(backend).traits`), never `hasattr`;
+- reads the pure spec truth (`backend_spec(backend).traits`), never `hasattr`;
 - reuses ``env.query`` as the single live instance when the backend exposes it,
-  otherwise falls back to ``BackendInfo.query_backend``;
+  otherwise falls back to the injected ``BackendBindings.query_backend``;
 - caches the object for the live env instance;
 - raises a teaching `NotImplementedError` when the backend does not declare
   `Trait.RUNTIME_QUERY`;

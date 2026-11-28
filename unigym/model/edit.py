@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, cast
 
-from unigym.backends.registry import Trait, ModelEditField
+from unigym.capabilities.traits import ModelEditField, Trait
 from unigym.model.errors import ModelEditCapabilityError, ModelEditError
 
 if TYPE_CHECKING:
@@ -690,9 +690,9 @@ def trait_required(backend: str) -> None:
     Small shared helper for the run/env facades; keeps the error text in one
     place.
     """
-    from unigym.backends.registry import backend_info
+    from unigym.capabilities.specs import backend_spec
 
-    if Trait.MODEL_EDIT not in backend_info(backend).traits:
+    if Trait.MODEL_EDIT not in backend_spec(backend).traits:
         raise NotImplementedError(
             f"backend {backend!r} does not declare the MODEL_EDIT trait "
             f"(run.model_edit is optional and this backend declares it absent)"

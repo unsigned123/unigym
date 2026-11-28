@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from unigym.backends.compose import backend_runtime
 from unigym.backends.isaaclab2.scene import IsaacLabSceneOps
 from unigym.backends.mujoco.scene import MujocoSceneOps
 from unigym.runtime.scene import SceneFace, build_scene_ops
@@ -35,8 +36,13 @@ def test_build_scene_ops_requires_explicit_robot_name(robot_name):
 
 
 def test_build_scene_ops_forwards_explicit_robot_name():
-    """The factory forwards a valid name to the backend ops object."""
-    ops = build_scene_ops(object(), "mujoco", robot_name="robot")
+    """The factory forwards a valid name to the injected backend ops object."""
+    ops = build_scene_ops(
+        object(),
+        "mujoco",
+        robot_name="robot",
+        scene_ops_factory=backend_runtime("mujoco").bindings.scene_ops,
+    )
 
     assert ops.robot_name == "robot"
 

@@ -103,9 +103,9 @@ def build_isaaclab_rig(
 ):
     """IsaacLab 3 rig factory: rig instance from the spec's ``rig.type``.
 
-    Resolved through :attr:`BackendInfo.camera_backend` for
+    Resolved through :attr:`BackendBindings.camera_backend` for
     ``isaaclab3_physx``/``isaaclab3_newton``; ``render_groups`` is accepted
-    for the registry face signature (mujoco-only in v1).
+    for the injected rig-builder signature (mujoco-only in v1).
 
     ``renderer_cfg`` is the backend profile's explicit renderer (required
     for scene construction) and ``depth_background`` its "no hit" sentinel.

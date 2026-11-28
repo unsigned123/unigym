@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping
 
-from unigym.backends.registry import ISAACLAB2_MODEL_EDIT_FIELDS, ModelEditField
+from unigym.capabilities.traits import ISAACLAB2_MODEL_EDIT_FIELDS, ModelEditField
 from unigym.model.edit import BodyEdit, GeomEdit, ModelEditResult
 from unigym.model.errors import ModelEditCapabilityError, ModelEditError
 

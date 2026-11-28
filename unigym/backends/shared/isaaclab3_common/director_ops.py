@@ -10,9 +10,9 @@ function-body imports (agnostic zone convention).
 
 The ``backend`` attribute stays empty in the shared library; the backend
 identity subclass sets it to ``"isaaclab3_physx"`` / ``"isaaclab3_newton"``.
-``backend_info`` is consulted only when that identity is present, and the
-``*_index`` write variants plus the ``.torch``/quaternion boundary replace the
-IsaacLab 2 write caches.
+A missing identity fails fast before a gripper is mounted; the ``*_index``
+write variants plus the ``.torch``/quaternion boundary replace the IsaacLab 2
+write caches.
 """
 
 from __future__ import annotations
@@ -75,12 +75,12 @@ class IsaacLabDirectorOps(_OpsBase):
             from unigym.director.gripper import build_gripper
 
             self.gripper = build_gripper(
-                self.env, gripper_cfg, gripper_backend=self._gripper_backend()
+                self.env, gripper_cfg, gripper_backend=self._gripper_backend
             )
         return self.gripper
 
     def _gripper_backend(self):
-        """Lazy gripper factory for this identity's ``BackendInfo``.
+        """Return the shared IsaacLab 3 gripper class (lazy same-family import).
 
         The shared class carries no backend identity (``backend == ""``): the
         canonical name is set by the backend subclass, so a bare shared ops
@@ -93,9 +93,11 @@ class IsaacLabDirectorOps(_OpsBase):
                 "to 'isaaclab3_physx' or 'isaaclab3_newton' before mounting a "
                 "gripper"
             )
-        from unigym.backends.registry import backend_info
+        from unigym.backends.shared.isaaclab3_common.director.gripper import (
+            IsaacLabGripper,
+        )
 
-        return backend_info(self.backend).gripper_backend
+        return IsaacLabGripper
 
     # ------------------------------------------------------------------ #
     # resolution

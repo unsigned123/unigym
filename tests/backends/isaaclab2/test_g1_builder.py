@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unigym.backends.compose import backend_runtime
+
 import importlib.util
 import math
 from dataclasses import replace
@@ -274,6 +276,7 @@ def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
             }
         ],
         backend="isaaclab2",
+        contact_factory=backend_runtime("isaaclab2").bindings.contact_backend,
         articulation_names=("g1",),
     )
     assert manager is not None

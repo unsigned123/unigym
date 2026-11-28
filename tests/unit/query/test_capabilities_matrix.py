@@ -16,7 +16,7 @@ from dataclasses import fields
 
 import pytest
 
-from unigym.backends.registry import Trait
+from unigym.capabilities.traits import Trait
 from unigym.env.backends.base import BackendCapabilities
 from unigym.query.capabilities import QueryCapabilities
 from unigym.query.errors import QueryCapabilityError

@@ -140,11 +140,12 @@ class SimulationBuilder:
             raise SimulationConfigError(
                 f"SimulationBuilder backend must be a non-empty string, got {backend!r}"
             )
-        from unigym.backends.registry import BackendSelectionError, backend_info
+        from unigym.capabilities.selection import BackendSelectionError
+        from unigym.capabilities.specs import backend_spec
         from unigym.packs.loader import PackLoader
 
         try:
-            info = backend_info(backend)
+            info = backend_spec(backend)
         except (BackendSelectionError, ValueError) as err:
             raise SimulationConfigError(
                 f"SimulationBuilder backend {backend!r} is not registered: {err}"
