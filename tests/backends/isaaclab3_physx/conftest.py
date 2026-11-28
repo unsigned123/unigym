@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unigym.backends.compose import backend_runtime
-
 import os
 from collections.abc import Callable, Iterator
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -19,6 +18,29 @@ os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
 
+#: Process-lifetime strong references to the Kit launcher/app.  Kit must start
+#: before collection (test-module imports may load ``pxr``/``omni`` first), and
+#: ``SimulationApp.close()`` ends the process natively, so it is never closed.
+_LAUNCHER = None
+_APP = None
+
+
+def _kit_modules_available() -> bool:
+    """Whether the lane's optional Kit modules can be imported."""
+    return all(find_spec(name) is not None for name in ("isaaclab", "isaaclab_physx"))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Launch Kit before collection so test imports cannot load ``pxr`` first."""
+    del config
+    global _LAUNCHER, _APP
+    if _APP is not None or not _kit_modules_available():
+        return
+    from isaaclab.app import AppLauncher
+
+    _LAUNCHER = AppLauncher(headless=True, enable_cameras=True)
+    _APP = _LAUNCHER.app
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _stack() -> None:
@@ -27,14 +49,11 @@ def _stack() -> None:
 
 
 @pytest.fixture(scope="session")
-def simulation_app() -> Iterator[object]:
-    """Launch Kit headless before importing isaaclab-dependent unigym modules."""
-    require_optional_module("isaaclab", reason="the IsaacLab 3 PhysX lane")
-    from isaaclab.app import AppLauncher
-
-    launcher = AppLauncher(headless=True, enable_cameras=True)
-    yield launcher.app
-    launcher.app.close()
+def simulation_app() -> object:
+    """The process-wide Kit app launched in :func:`pytest_configure`."""
+    if _APP is None:
+        pytest.fail("the IsaacLab 3 PhysX Kit app was not launched in pytest_configure")
+    return _APP
 
 
 def _cartpole_articulation_cfg(usd: Path):
@@ -190,6 +209,8 @@ def crate_prop_manager() -> Callable[..., object]:
     from unigym.props import build_prop_manager
 
     def make(num_envs: int = 2):
+        from unigym.backends.compose import backend_runtime
+
         return build_prop_manager(
             {
                 "types": [

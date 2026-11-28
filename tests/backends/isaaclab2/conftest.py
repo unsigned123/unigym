@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
@@ -13,10 +13,19 @@ from tests._support.envs import require_optional_module
 ARTICULATION = "cartpole"
 JOINT_ORDER = ("slider_to_cart", "cart_to_pole")
 
+#: Process-lifetime strong reference to the Kit app.  ``SimulationApp.close()``
+#: ends the process natively (``exit_group(0)``) during fixture teardown, which
+#: drops pytest's final summary, so the lane deliberately never closes it.  The
+#: module keeps the app alive instead of relying on the fixture frame.
+_APP = None
+
 
 @pytest.fixture(scope="session")
-def simulation_app() -> Iterator[object]:
-    """Start Kit before importing any isaaclab-dependent unigym module."""
+def simulation_app() -> object:
+    """Start Kit once for the process lifetime; it is intentionally unclosed."""
+    global _APP
+    if _APP is not None:
+        return _APP
     require_optional_module("isaaclab", reason="the IsaacLab 2 backend lane")
     from isaaclab.app import AppLauncher
 
@@ -25,8 +34,8 @@ def simulation_app() -> Iterator[object]:
     args = parser.parse_args([])
     args.headless = True
     launcher = AppLauncher(args)
-    yield launcher.app
-    launcher.app.close()
+    _APP = launcher.app
+    return _APP
 
 
 @pytest.fixture

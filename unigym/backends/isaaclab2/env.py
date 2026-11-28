@@ -1578,6 +1578,19 @@ class IsaaclabEnv(ManagerBasedEnv):
         if self._closed or self._closing:
             raise RuntimeError("isaaclab2 backend: environment is closed")
 
+    def __del__(self) -> None:
+        """Skip the parent finalizer when construction never reached ``sim``.
+
+        A refused build can leave an instance without the parent-initialized
+        ``sim`` attribute.  ``ManagerBasedEnv.__del__`` calls ``close()``
+        unconditionally, which touches ``self.sim``; returning early here only
+        covers that unconstructed case.  Any other finalizer error still
+        propagates unchanged, and this never closes the Kit application.
+        """
+        if not hasattr(self, "sim"):
+            return
+        super().__del__()
+
     def close(self) -> None:
         """Release the inherited managers/sim (idempotent, not retryable).
 
