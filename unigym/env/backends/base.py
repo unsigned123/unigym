@@ -85,7 +85,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import torch
 
 from ...core import quat
-from ..obs import ObsSnapshot
+from ..obs import ObservationRegistry, ObsSnapshot
 from ...runtime.actions import NamedAction
 
 if TYPE_CHECKING:
@@ -227,7 +227,7 @@ class EnvBackend(Protocol):
     # attributes (populated by the backend implementation)
     num_envs: int
     device: str | torch.device
-    obs: object
+    obs: ObservationRegistry
     controls: dict[tuple[str, str], ControlRuntime]
     articulations: dict[str, ArticulationRuntime]
     perm_il2pol: torch.Tensor

@@ -19,7 +19,7 @@ from typing import Any, Protocol
 import torch
 
 from .._typing import JsonValue
-from ..env.obs import ObsSnapshot
+from ..env.obs import ObservationRegistry, ObsSnapshot
 from ..runtime.actions import NamedAction
 
 
@@ -28,7 +28,7 @@ class AdapterEnv(Protocol):
 
     num_envs: int
     device: str | torch.device
-    obs: object
+    obs: ObservationRegistry
 
 
 class Adapter(ABC):

@@ -77,6 +77,7 @@ from unigym.runtime.bridge import AckResult, RewindInfo
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only
     from unigym.adapters.base import Adapter
+    from unigym.env.obs import ObservationRegistry
     from unigym.runtime.bridge import Bridge
 
 MAX_SNAPSHOTS = 64
@@ -117,6 +118,8 @@ class RewindRecord(TypedDict):
 
 class _SnapshotBackend(Protocol):
     """The engine snapshot/restore face the rewind controller requires."""
+
+    obs: ObservationRegistry
 
     def snapshot(self) -> SnapshotValue: ...
 

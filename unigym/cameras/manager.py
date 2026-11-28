@@ -35,13 +35,15 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from contextlib import contextmanager
+from typing import Any, cast
 
 import numpy as np
 import torch
 
+from unigym._typing import JsonValue
 from unigym.capabilities.selection import BackendSelectionError
 from unigym.capabilities.specs import backend_spec
 from unigym.capabilities.traits import CANONICAL_BACKENDS
@@ -116,6 +118,20 @@ def validate_image_frame(req: CameraFrameSpec, val: torch.Tensor, num_envs: int)
         raise ValueError(f"camera obs '{req.key}' dtype {val.dtype} != expected " f"{req.dtype}")
 
 
+def _float_param(value: object) -> float:
+    """Convert one live-property value to float (runtime-checked)."""
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    raise TypeError(f"{type(value).__name__} is not a number")
+
+
+def _int_param(value: object) -> int:
+    """Convert one live-property value to int (runtime-checked)."""
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    raise TypeError(f"{type(value).__name__} is not an integer")
+
+
 class CameraManager:
     """World-component manager for the declared camera rigs.
 
@@ -171,11 +187,11 @@ class CameraManager:
         """Instantiated rig names."""
         return [s.name for s in self.specs]
 
-    def obs_keys(self) -> set:
+    def obs_keys(self) -> set[str]:
         """All served frame keys (``cam/<name>/<rgb|depth>``)."""
         return set(self._requests)
 
-    def camera_keys(self) -> set:
+    def camera_keys(self) -> set[str]:
         """Manager-native keys only (``cam/<name>/<type>``)."""
         return {k for k in self._requests if k.startswith("cam/")}
 
@@ -322,7 +338,7 @@ class CameraManager:
             return None
         return val[env_idx].detach().cpu().numpy()
 
-    def render_state(self, name: str) -> dict | None:
+    def render_state(self, name: str) -> dict[str, JsonValue] | None:
         """One rig's current live render state (the ``render`` live
         key; the publish loop's ONLY render state).  ``None`` = the plain
         publish path (unset / explicitly reset / non-mujoco rig).  The
@@ -382,7 +398,13 @@ class CameraManager:
             )
         return idx
 
-    def get_view(self, name: str, env_id: int | None = None, pos=None, lookat=None) -> np.ndarray:
+    def get_view(
+        self,
+        name: str,
+        env_id: int | None = None,
+        pos: JsonValue = None,
+        lookat: JsonValue = None,
+    ) -> np.ndarray:
         """Single-frame primitive (SHM/stream/grab all sit on this).
 
         isaaclab: the most recent sensor output for that env slice (no
@@ -423,8 +445,14 @@ class CameraManager:
     # RenderSpec capture (camera_contract §14)
     # ------------------------------------------------------------------ #
     def capture(
-        self, name: str, env_id: int | None = None, pos=None, lookat=None, *, render
-    ) -> dict:
+        self,
+        name: str,
+        env_id: int | None = None,
+        pos: JsonValue = None,
+        lookat: JsonValue = None,
+        *,
+        render: JsonValue,
+    ) -> dict[str, Any]:
         """Per-request RenderSpec capture (the ONLY capture face).
 
         ``render``: ``{"view": name}`` (optionally + complementary
@@ -472,7 +500,7 @@ class CameraManager:
     # transient world pose (ux-7)
     # ------------------------------------------------------------------ #
     @contextmanager
-    def transient_world_pose(self, name: str, pos, lookat):
+    def transient_world_pose(self, name: str, pos: JsonValue, lookat: JsonValue):
         """One-shot world-frame pose override around a single render.
 
         Saves the rig's current pose, applies ``pos`` with the camera
@@ -507,7 +535,7 @@ class CameraManager:
             self._refresh_render(rig)
 
     @staticmethod
-    def _check_pose_vec(name: str, v) -> list[float]:
+    def _check_pose_vec(name: str, v: object) -> list[float]:
         if (
             not isinstance(v, (list, tuple))
             or len(v) != 3
@@ -536,7 +564,7 @@ class CameraManager:
         if update is not None:
             update(0)
 
-    def get_world_pose(self, name: str) -> dict:
+    def get_world_pose(self, name: str) -> dict[str, JsonValue]:
         """Read-back face (ux-7 acceptance/forensics; freecam +
         ``camera get`` op face): one rig's current world pose
         (Isaac convention, wxyz quat) plus ``lookat = pos + R(q) @ X̂``
@@ -559,7 +587,9 @@ class CameraManager:
             "render_state": state,
         }
 
-    def apply_properties(self, name: str, params: dict, env_id: int | None = None) -> None:
+    def apply_properties(
+        self, name: str, params: Mapping[str, JsonValue], env_id: int | None = None
+    ) -> None:
         """Live-update one camera's whitelisted properties.
 
         Whitelist : ``pose_offset`` (mount-frame ``[dx, dy, dz]``),
@@ -634,9 +664,10 @@ class CameraManager:
             default = rspec == _DEFAULT_RENDER
             rig.render_spec = None if default else rspec
             rig.render_source = None if default else label
-        pose_kwargs = {}
+        pose_kwargs: dict[str, object] = {}
         if "pose_offset" in params:
-            off = [float(x) for x in params["pose_offset"]]
+            offset = cast("Iterable[object]", params["pose_offset"])
+            off = [_float_param(x) for x in offset]
             if len(off) != 3:
                 raise ValueError(
                     f"camera '{name}': pose_offset must be " f"[dx, dy, dz], got {off}"
@@ -645,13 +676,13 @@ class CameraManager:
         for k in ("yaw_deg", "pitch_deg", "roll_deg"):
             if k in params:
                 try:
-                    pose_kwargs[k] = float(params[k])
+                    pose_kwargs[k] = _float_param(params[k])
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"camera '{name}': {k} must be a " f"number, got {params[k]!r}"
                     ) from None
         if "target_env" in params:
-            t = int(params["target_env"])
+            t = _int_param(params["target_env"])
             if not 0 <= t < int(self.num_envs):
                 raise ValueError(
                     f"camera '{name}': target_env {t} out of " f"range for {self.num_envs} env(s)"
@@ -660,12 +691,19 @@ class CameraManager:
         if pose_kwargs:
             rig.apply_properties(env_ids=apply_env_ids, **pose_kwargs)
 
-    def _apply_rate_keys(self, name: str, spec: CameraSpec, params: dict) -> None:
+    def _apply_rate_keys(
+        self, name: str, spec: CameraSpec, params: Mapping[str, JsonValue]
+    ) -> None:
         """The rate keys of one live write (§16; pure in base)."""
-        apply_rate_keys(spec, name, params, self.policy_hz)
+        apply_rate_keys(spec, name, dict(params), self.policy_hz)
 
     def _apply_absolute_pose(
-        self, name: str, spec: CameraSpec, rig: CameraRig, params: dict, env_id: int | None
+        self,
+        name: str,
+        spec: CameraSpec,
+        rig: CameraRig,
+        params: Mapping[str, JsonValue],
+        env_id: int | None,
     ) -> None:
         """Freecam face: persistent absolute world-frame pose.
 

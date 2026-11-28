@@ -72,7 +72,7 @@ class ContactBackend(Protocol):
 class ContactManager:
     """Holds the group specs + the backend; serves ``contact/<name>`` keys."""
 
-    def __init__(self, specs: list[ContactGroupSpec], backend, device="cpu"):
+    def __init__(self, specs: list[ContactGroupSpec], backend: ContactBackend, device="cpu"):
         names = [s.name for s in specs]
         if len(set(names)) != len(names):
             dupes = sorted({n for n in names if names.count(n) > 1})
@@ -161,7 +161,7 @@ class ContactManager:
         raise KeyError(name)
 
     # ---- per-step read ---------------------------------------------------- #
-    def read(self) -> dict:
+    def read(self) -> dict[str, torch.Tensor]:
         """``{contact/<name>: (N, ...) torch tensor on self.device}``.
 
         dtype: float32 for raw/norm, bool for contact.  Values are freshly

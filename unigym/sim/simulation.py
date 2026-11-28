@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     import torch
 
     from unigym.env.backends.base import EnvBackend
+    from unigym.env.obs import ObsSnapshot
     from unigym.run.api import Run
     from unigym.runner.base import Runner, StepResult
     from unigym.runtime.actions import NamedAction, OrderedActionGroup, OrderedActionSpec
@@ -168,7 +169,7 @@ class Simulation:
         run: Run,
         owner: object,
         state: Mapping[str, object],
-        obs: object,
+        obs: ObsSnapshot,
         t: int,
     ) -> None:
         import torch
@@ -251,7 +252,7 @@ class Simulation:
         self._action_groups = action_groups
         self._pending = PendingActions()
         self._state: dict[str, object] = dict(state)
-        self._obs = obs
+        self._obs: ObsSnapshot = obs
         self._reset_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
         self._reset_due_env_ids = torch.empty(0, dtype=torch.int64, device=env.device)
         self._terminated: torch.Tensor | None = None

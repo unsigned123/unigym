@@ -36,6 +36,8 @@ from .errors import ObservationError
 if TYPE_CHECKING:
     import torch
 
+    from unigym.env.obs import ObsSnapshot
+
     from .handles import ArticulationHandle, CameraHandle
 
 __all__ = ["ArticulationObservation", "CameraFrame", "Observation", "build_observation"]
@@ -74,7 +76,7 @@ class Observation:
     reset_due_env_ids: torch.Tensor
     terminated: torch.Tensor | None
     record: Mapping[str, torch.Tensor | bool]
-    obs: object
+    obs: ObsSnapshot
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "articulations", MappingProxyType(dict(self.articulations)))
@@ -173,7 +175,7 @@ def _vector(state: Mapping[str, object], key: str, width: int, rows: int) -> tor
     return value
 
 
-def _optional_cached(snapshot, key: str, num_envs: int) -> torch.Tensor | None:
+def _optional_cached(snapshot: ObsSnapshot, key: str, num_envs: int) -> torch.Tensor | None:
     """Read one optional projected ``(N, ...)`` snapshot tensor (absent -> None)."""
     import torch
 
@@ -225,7 +227,7 @@ def _default_positions(
 def _articulation_record(
     handle: ArticulationHandle,
     state: Mapping[str, object],
-    snapshot,
+    snapshot: ObsSnapshot,
     num_envs: int,
 ) -> ArticulationObservation:
     """Project one articulation's namespaced state into its typed record."""
@@ -305,7 +307,7 @@ def build_observation(
     t: int,
     num_envs: int,
     state: Mapping[str, object],
-    snapshot,
+    snapshot: ObsSnapshot,
     handles: Sequence[ArticulationHandle],
     cameras: Sequence[CameraHandle],
     reset_env_ids: torch.Tensor,

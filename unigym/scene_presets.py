@@ -26,7 +26,8 @@ import yaml
 
 from unigym._typing import JsonValue
 from unigym.assets.asset_ref import AssetRef, AssetRefError, select_asset_format
-from unigym.packs.schema import Face
+from unigym.packs import PackError
+from unigym.packs.schema import Face, provider_param_declarations
 from unigym.scenes.provider_params import (
     SceneProviderParamError,
     fill_and_validate,
@@ -405,8 +406,8 @@ def _validate_provider_reference(
     if match.params is None:
         return
     try:
-        schema = normalize_manifest_params(match.params)
-    except SceneProviderParamError as err:
+        schema = normalize_manifest_params(provider_param_declarations(match.params))
+    except (SceneProviderParamError, PackError) as err:
         raise ScenePresetError(
             f"scene preset {ref!r}: provider {provider!r} manifest params are invalid: {err}"
         ) from err

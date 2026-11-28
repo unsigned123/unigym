@@ -1070,7 +1070,7 @@ class Bridge:
         # daemon's display/preflight face.  port/auth/webui_url/curl_base/
         # tunnel_hint are RETIRED (the run has no port and no token).
         self._state_path = None
-        state = {
+        state: dict[str, JsonValue] = {
             "schema": REGISTRY_SCHEMA,
             "run_id": self.run_id,
             "pid": os.getpid(),
@@ -1078,11 +1078,11 @@ class Bridge:
             "output_dir": out_dir,
             "log_path": log_path,
             "start_ts": time.time(),
-            "cameras": names,
+            "cameras": list[JsonValue](names),
             "camera": self.camera,
             "config": config,
             "gpu": os.environ.get("CUDA_VISIBLE_DEVICES") or None,
-            "observation_keys": self.observation_keys,
+            "observation_keys": list[JsonValue](self.observation_keys),
             "started": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         # default registry home is <runtime_dir>/serve;
@@ -1127,7 +1127,7 @@ class Bridge:
 
     def on_run_end(self) -> dict[str, JsonValue]:
         """Sink hook: final summary + :meth:`close` (idempotent)."""
-        summary = {
+        summary: dict[str, JsonValue] = {
             "run_id": self.run_id,
             "shm": self.shm_name,
             "frames_published": self._frame_count,
@@ -1471,7 +1471,8 @@ class Bridge:
         self._dispatch(rid, cmd, payload)
 
     def _dispatch(self, rid: int, cmd: int, payload: bytes) -> None:
-        status, result = ACK_OK, AckResult()
+        status = ACK_OK
+        result: AckResult = AckResult()
         try:
             params: dict[str, JsonValue] = json.loads(payload) if payload else {}
             handler = self._handlers.get(cmd)
@@ -1620,6 +1621,7 @@ class Bridge:
     def _cmd_get_view(self, params: dict[str, JsonValue]) -> AckResult:
         if self.camera_manager is None:
             raise BridgeError("no cameras in this run")
+        result: AckResult
         pos, lookat = params.get("pos"), params.get("lookat")
         posed = pos is not None or lookat is not None
         # ux-7: a posed snapshot defaults to the debug fly camera "free"
