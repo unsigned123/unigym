@@ -628,6 +628,11 @@ class IsaacLabModelProvider:
     def describe(self, articulation):
         """Fill the compiled model IR from a live IsaacLab ``Articulation``.
 
+        The body table is the measured live PhysX body universe
+        (``robot.data.body_names``), including authored links that a USD fixed
+        joint declares merged (for example the G1 palms).  It is never derived
+        from the static USD rigid-body inventory.
+
         Args:
             articulation: The constructed ``Articulation`` (env 0 values
                 are read; the IR describes the shared asset, not a clone).
@@ -641,9 +646,13 @@ class IsaacLabModelProvider:
         joint_names = _names(getattr(articulation, "joint_names", None))
         if not joint_names:
             joint_names = _names(getattr(data, "joint_names", None))
-        body_names = _names(getattr(articulation, "body_names", None))
+        # The runtime body universe is the measured live PhysX articulation
+        # (``data.body_names``), not a static USD fixed-joint inventory.  The
+        # authored inventory in ``body_inventory`` is asset inspection only and
+        # never removes fixed-joint children such as the G1 palms from this set.
+        body_names = _names(getattr(data, "body_names", None))
         if not body_names:
-            body_names = _names(getattr(data, "body_names", None))
+            body_names = _names(getattr(articulation, "body_names", None))
         root_body = body_names[0] if body_names else "root"
         root_prim = _resolve_root_prim(articulation)
         facts = _usd_facts(root_prim, joint_names, body_names)

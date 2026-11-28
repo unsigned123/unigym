@@ -739,10 +739,13 @@ articulations:
     #   - {name: feet, bodies: [left_ankle_roll, right_ankle_roll]}
 ```
 
-- A robot ref with `body: "*"` expands the articulation's native inventory at
-  bind (MuJoCo model bodies) or from the pre-clone USD inventory (IsaacLab2).
-  Declared `contacts:` groups and the profile `body_sets` are available as
-  `body_set` names.
+- A robot ref with `body: "*"` resolves against the articulation's measured
+  runtime body set at bind (the compiled MuJoCo model bodies, or the live
+  PhysX articulation bodies on IsaacLab2). The authored USD inventory is used
+  only for the pre-clone per-parent sensor prim scopes on IsaacLab2; it is
+  asset inspection, not runtime truth, and is never used to remove fixed-joint
+  authored links such as the G1 palms at bind. Declared `contacts:` groups and
+  the profile `body_sets` are available as `body_set` names.
 - `contacts: none` declares no body sets; explicit refs remain legal.
 - Adapter contact-observation requests never synthesize contact groups; they
   only pre-register requests on a manager built from the run config.

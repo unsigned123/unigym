@@ -3,8 +3,13 @@
 The IsaacLab contact-sensor objects must exist BEFORE scene cloning, while
 the post-spawn ``robot.data.body_names`` does not exist yet.  This module owns
 the pre-clone inventory: it walks the robot asset's USD subtree and reports
-every rigid body with a robot-relative sensor path, its collision capability
-and the fixed-joint merged links excluded.
+every rigid body with a robot-relative sensor path and its collision
+capability, applying the static authored fixed-joint merge rule.
+
+The fixed-joint merge is a static USD authoring inference.  It is not the live
+PhysX body universe: live articulation bodies are measured from
+``robot.data.body_names`` after spawn and may still include a link that a USD
+fixed joint declares merged.  Do not treat this inventory as runtime truth.
 
 OpenUSD (``pxr``) is an Isaac Lab / Kit dependency and is imported lazily
 inside the traversal functions only.  Importing this module in the base
@@ -60,10 +65,12 @@ def _has_collision(prim, Usd, UsdPhysics) -> bool:
 def _fixed_merged_paths(stage, root, Sdf, Usd, UsdPhysics) -> set[str]:
     """Absolute prim paths merged into a parent by a fixed joint.
 
-    PhysX merges the child side of a fixed joint into the parent at
-    articulation build time.  ``body1`` is the child for the assembler joints
-    produced by the USD pipeline; a target outside the robot root is the
-    world and never merges a robot body.
+    This is the static authored fixed-joint rule used to build pre-clone
+    sensor scopes.  PhysX does not necessarily merge that child into the
+    parent, so this set is never the live articulation body universe.
+    ``body1`` is the child for the assembler joints produced by the USD
+    pipeline; a target outside the robot root is the world and never merges a
+    robot body.
     """
     root_path = str(root.GetPath())
     merged: set[str] = set()
@@ -92,10 +99,12 @@ def _fixed_merged_paths(stage, root, Sdf, Usd, UsdPhysics) -> set[str]:
 def robot_rigid_bodies(asset_path: str) -> list[UsdRigidBody]:
     """Enumerate the robot asset's rigid bodies in USD traversal order.
 
-    The asset root is the stage's default prim.  Fixed-joint merged links are
-    excluded (they do not exist as PhysX bodies); everything else under the
-    root that carries ``PhysicsRigidBodyAPI`` is included, including bodies
-    without collision geometry (their contact channels read zero).
+    The asset root is the stage's default prim.  Links that the static
+    authored fixed-joint rule declares merged are excluded for pre-clone
+    sensor scope construction; this is not a claim about the live PhysX body
+    set.  Everything else under the root that carries ``PhysicsRigidBodyAPI``
+    is included, including bodies without collision geometry (their contact
+    channels read zero).
 
     Raises:
         ValueError: The stage/root cannot be opened or the asset declares no

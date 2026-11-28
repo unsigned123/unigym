@@ -251,14 +251,14 @@ def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.env.obs import ObservationConfig
-    from unigym.backends.isaaclab2.usd import robot_rigid_bodies
+    from unigym.backends.isaaclab2.body_inventory import robot_body_inventory
     from unigym.contacts.manager import build_contact_manager
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.runtime.actions import OrderedActionGroup, OrderedActionSpec, PolicyBinding
     from unigym.runtime.controllers import build_control_runtimes
 
-    inventory = robot_rigid_bodies(str(g1_usd))
-    paths = [body.path for body in inventory]
+    inventory = robot_body_inventory(g1_usd)
+    paths = inventory.paths()
     assert len(paths) == 46
     assert "pelvis" in paths
     assert "left_ankle_roll_link" in paths
@@ -417,9 +417,21 @@ def test_g1_builds_and_resets_a_real_isaaclab_env(g1_usd):
         assert len(env.controls[(ARTICULATION, ARTICULATION)].joint_names) == 29
 
         bodies = [body.name for body in env.model_set.articulations[ARTICULATION].bodies]
+        live = tuple(str(name) for name in env.robots[ARTICULATION].data.body_names)
+        assert len(live) == 46
+        assert "left_hand_palm_link" in live
+        assert "right_hand_palm_link" in live
+        assert bodies == list(live)
         assert "pelvis" in bodies
         assert "left_ankle_roll_link" in bodies
         assert "right_ankle_roll_link" in bodies
+
+        from unigym.query import QueryReferenceError
+
+        assert env.query.model.body("left_hand_palm_link").name == "left_hand_palm_link"
+        with pytest.raises(QueryReferenceError) as caught:
+            env.query.model.body("left_hand_authored_only_link")
+        assert "left_hand_palm_link" in str(caught.value)
 
         assert env.reset_all().tolist() == [0]
     finally:

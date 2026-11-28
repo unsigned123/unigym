@@ -904,6 +904,16 @@ Semantics:
   `run.model` exposes them; `model.geom` and `model.site` raise
   `QueryCapabilityError` because the IsaacLab IR carries no geom/site facts and
   P0B-2 does not synthesize them;
+- the `ModelIR` body table is the backend's **runtime** body universe: the live
+  articulation bodies reported by the engine (on IsaacLab2, the measured PhysX
+  `robot.data.body_names`, including authored links that a USD fixed joint
+  declares merged, such as the G1 palms).  `model.body` and
+  `state.body_pose` resolve against that live set, never a static fixed-joint
+  merge.  The USD authored inventory
+  (`unigym.backends.isaaclab2.body_inventory.robot_body_inventory`) is asset
+  inspection only.  An authored-only or unknown body name raises
+  `QueryReferenceError` naming the available runtime bodies; it is never
+  silently mapped to a merged parent;
 - the live IsaacLab 3 IR is compiled from the env-0 articulation asset root,
   normalizing `{ENV_REGEX_NS}`, `/World/envs/env_.*`, `/World/envs/env_[^/]+`
   and concrete `/World/envs/env_<n>` spellings.  If the declared prim is absent

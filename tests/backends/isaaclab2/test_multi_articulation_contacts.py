@@ -126,7 +126,7 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
     from unigym.adapters.manual import ManualAdapter
     from unigym.backends.isaaclab2.env import IsaaclabEnv
     from unigym.env.obs import ObservationConfig
-    from unigym.backends.isaaclab2.usd import robot_rigid_bodies
+    from unigym.backends.isaaclab2.body_inventory import robot_body_inventory
     from unigym.contacts.manager import build_contact_manager
     from unigym.actuators.ir import resolve_actuation_groups
     from unigym.runtime.actions import OrderedActionSpec, PolicyBinding
@@ -221,18 +221,18 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         contact_manager=manager,
     )
     try:
-        cart_inventory = robot_rigid_bodies(str(cartpole_usd))
-        g1_inventory = robot_rigid_bodies(str(g1_usd))
-        assert len(g1_inventory) == 46
-        assert len(g1_inventory) > len(cart_inventory)
-        g1_paths = [body.path for body in g1_inventory]
+        cart_inventory = robot_body_inventory(cartpole_usd)
+        g1_inventory = robot_body_inventory(g1_usd)
+        assert len(g1_inventory.bodies) == 46
+        assert len(g1_inventory.bodies) > len(cart_inventory.bodies)
+        g1_paths = list(g1_inventory.paths())
         assert "left_hand/left_hand_index_0_link" in g1_paths
         assert "left_hand/left_hand_palm_link" in g1_paths
         assert "right_hand/right_hand_palm_link" in g1_paths
 
         cart_live = [str(name) for name in env.scene["robot"].data.body_names]
         g1_live = [str(name) for name in env.scene["robot_g1"].data.body_names]
-        assert len(cart_live) == len(cart_inventory)
+        assert len(cart_live) == len(cart_inventory.bodies)
         assert len(g1_live) == 46
         assert "left_hand_palm_link" in g1_live
         assert "right_hand_palm_link" in g1_live

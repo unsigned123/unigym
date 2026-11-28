@@ -400,6 +400,21 @@ def test_model_facts_come_from_the_published_ir() -> None:
         query.model.body("bogus")
 
 
+def test_model_body_missing_body_names_the_runtime_universe() -> None:
+    """An authored-only/nonexistent body fails against the runtime body set."""
+    query, env = _query("isaaclab2")
+    runtime = tuple(env.model_set.merged.bodies.names())
+    assert runtime == ("base", "link")
+
+    with pytest.raises(QueryReferenceError) as caught:
+        query.model.body("left_hand_palm_link")
+
+    assert caught.value.available == runtime
+    assert caught.value.reference == "left_hand_palm_link"
+    assert "left_hand_palm_link" in str(caught.value)
+    assert "'base'" in str(caught.value) and "'link'" in str(caught.value)
+
+
 @pytest.mark.parametrize("backend", ("isaaclab2", "isaaclab3_physx", "isaaclab3_newton"))
 def test_geom_contact_is_typed_unsupported(backend: str) -> None:
     """Every IsaacLab identity rejects geom contact parameters with a typed error."""

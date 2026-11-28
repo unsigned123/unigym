@@ -116,21 +116,19 @@ def test_importing_body_inventory_does_not_import_pxr() -> None:
     assert result.stdout.strip() == "False"
 
 
-def test_robot_rigid_bodies_wrapper_returns_authored_bodies(g1_usd: Path) -> None:
-    """The compatibility wrapper preserves authored slots, palms included."""
+def test_authored_inventory_is_the_only_authored_surface(g1_usd: Path) -> None:
+    """The old ``robot_rigid_bodies`` compatibility alias is retired."""
+    import importlib.util
+
     from unigym.backends.isaaclab2.body_inventory import robot_body_inventory
-    from unigym.backends.isaaclab2.usd import robot_rigid_bodies
 
     inventory = robot_body_inventory(g1_usd)
-    legacy = robot_rigid_bodies(str(g1_usd))
+    assert len(inventory.bodies) == G1_AUTHORED_BODIES
+    paths = inventory.paths()
+    assert "left_hand/left_hand_palm_link" in paths
+    assert "right_hand/right_hand_palm_link" in paths
 
-    assert len(legacy) == G1_AUTHORED_BODIES
-    assert [(body.path, body.collision) for body in legacy] == [
-        (body.path, body.collision) for body in inventory.bodies
-    ]
-    legacy_paths = [body.path for body in legacy]
-    assert "left_hand/left_hand_palm_link" in legacy_paths
-    assert "right_hand/right_hand_palm_link" in legacy_paths
+    assert importlib.util.find_spec("unigym.backends.isaaclab2.usd") is None
 
 
 def test_duplicate_durable_paths_fail_with_both_names() -> None:

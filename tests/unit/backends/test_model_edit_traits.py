@@ -186,6 +186,41 @@ def test_isaaclab2_describe_publishes_com_and_inertia_quat() -> None:
     assert tip.iquat == (1.0, 0.0, 0.0, 0.0)
 
 
+def test_isaaclab2_describe_body_universe_is_the_live_data_set() -> None:
+    """describe() publishes the measured live PhysX bodies, not a static list."""
+    from unigym.backends.isaaclab2.model import IsaacLabModelProvider
+
+    live = ["pelvis", "left_hand/left_hand_palm_link"]
+    data = SimpleNamespace(
+        joint_names=[],
+        body_names=list(live),
+        body_pos_w=[[0.0, 0.0, 1.0], [0.0, 0.0, 0.5]],
+        body_quat_w=[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+        joint_pos_limits=[],
+        joint_vel_limits=[],
+        default_joint_pos=[],
+    )
+    view = SimpleNamespace(
+        body_names=list(live),
+        get_masses=lambda: [[1.0, 1.0]],
+        get_inertias=lambda: [[[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]] * 2],
+        get_coms=lambda: [[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]],
+    )
+    articulation = SimpleNamespace(
+        data=data,
+        joint_names=[],
+        # A stale/static authored list must never define the runtime universe.
+        body_names=["stale_authored_only_body"],
+        root_physx_view=view,
+        actuators={},
+    )
+
+    ir = IsaacLabModelProvider().describe(articulation)
+
+    assert tuple(ir.bodies.names()) == tuple(live)
+    assert "stale_authored_only_body" not in ir.bodies
+
+
 class _PhysXViewProbe:
     """PhysX-view-shaped arrays with a one-shot inertia setter failure."""
 

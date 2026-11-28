@@ -59,12 +59,17 @@ prove.
 
 ## Contact inventory and ``contacts: all``
 
-Contact sensors must exist before the scene clone. `unigym/backends/isaaclab2/usd.py`
-is the lazy OpenUSD inventory owner: it walks the robot asset root, returns the
-robot-relative rigid-body paths in traversal order, flags collision coverage,
-and excludes links merged by a fixed joint (the G1 palm links). `contacts: all`
-materializes one `ContactSensorCfg` per inventory body and binds one row per
-body; collisionless bodies stay as zero rows. There is no wildcard all sensor.
+Contact sensors must exist before the scene clone. `unigym/backends/isaaclab2/body_inventory.py`
+is the lazy OpenUSD authored-inventory owner: it walks the robot asset root,
+returns the robot-relative rigid-body entries in traversal order and flags
+collision coverage. It is asset inspection only: a fixed joint records
+`merged_into` as diagnostic metadata but never removes the link (the G1 palms
+stay authored bodies). At bind, `contacts: all` resolves against the measured
+live PhysX bodies (`robot.data.body_names`, 46 including both palms) and uses
+the authored inventory only to discover the per-parent sensor prim scopes
+(`Robot/(.*)`, `Robot/left_hand/(.*)`, `Robot/right_hand/(.*)`). Each group
+binds one row per live body; collisionless bodies stay as zero rows. The
+sensor coverage is asserted set-equal to the live body set.
 
 Planned coverage:
 
@@ -72,11 +77,11 @@ Planned coverage:
 - IsaacLab scene and articulation setup;
 - named-action step / obs / extra;
 - reset subset and reset-all;
-- model IR topology;
+- model IR topology (the runtime body universe, palms included);
 - action-group and kind failure paths;
 - close lifecycle;
-- G1 contact-all per-body sensor rows (nested finger links, merged palms
-  excluded);
+- G1 contact-all per-body sensor rows (nested finger links and both palms,
+  unioning to the live 46-body set);
 - two real articulations (Cartpole + G1) with one contact group per
   articulation: per-articulation `all` inventories and `Robot` /
   `Robot_<name>` prim scopes, never a global union.
