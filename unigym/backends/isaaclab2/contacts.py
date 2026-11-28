@@ -11,9 +11,14 @@ Scheme A semantics:
   refs are anchored at the owning articulation's prim leaf (``Robot`` for the
   first declared articulation, ``Robot_<name>`` otherwise).  Object/fixture
   refs address the declared prop's root prim ``{ENV}/Prop_<name>``.
-* ``general`` groups -> one ContactSensorCfg per sensor ref; the raw array is
+* ``general`` groups -> one ContactSensorCfg per sensor ref, except robot refs
+  whose coverage needs the authored inventory: those expand to one sensor per
+  parent prim scope (``Robot/(.*)``, ``Robot/left_hand/(.*)``, ...) because the
+  IsaacLab prim matcher is single-segment.  The raw array is
   ``data.net_forces_w`` (N, B, 3), world frame natively.  The B axis is the
-  concatenation of per-ref slices in declaration order.
+  concatenation of per-ref slices in declaration order; each ref slice follows
+  the measured live ``robot.data.body_names`` order through an explicit
+  sensor-name -> concat-axis permutation (sensor order is PhysX-owned).
 * ``pairwise`` groups -> one ContactSensorCfg PER sensor ref with
   ``filter_prim_paths_expr`` flattened from the filter refs in declaration
   order (exact literals are emitted without regex grouping).  Each sensor ref
@@ -32,12 +37,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Optional
 
 from unigym.contacts.base import ENV_PREFIX_SENTINEL, ContactGroupSpec
 from unigym.contacts.inventory import ContactBodyAddress, ContactInventory, resolve_refs
 from unigym.contacts.refs import ContactBodyRef, is_wildcard
 
+from .body_inventory import RigidBody, RobotBodyInventory, robot_body_inventory
 from .naming import articulation_prim_leaf, articulation_scene_field
 
 _REGEX_META = re.compile(r"[.^$*+?{}\[\]\\|()]")
@@ -56,6 +63,14 @@ def _union(names: Sequence[str]) -> str:
     if len(uniq) == 1:
         return uniq[0]
     return "(" + "|".join(uniq) + ")"
+
+
+def _dedupe_bodies(bodies: Sequence[RigidBody]) -> list[RigidBody]:
+    """De-duplicate authored bodies by durable path, keeping first occurrence."""
+    seen: dict[str, RigidBody] = {}
+    for body in bodies:
+        seen.setdefault(body.path, body)
+    return list(seen.values())
 
 
 class IsaacLabContactBackend:
@@ -86,7 +101,8 @@ class IsaacLabContactBackend:
         self._sensors: dict[str, dict] = {}
         self._perm: dict[str, list[list[int]]] = {}
         self._filters: dict[str, list[ContactBodyAddress]] = {}
-        self._fields: dict[str, list[str]] = {}
+        self._fields: dict[str, list[list[str]]] = {}
+        self._authored: dict[str, RobotBodyInventory] = {}
         self.inventory: Optional[ContactInventory] = None
         self._bound = False
 
@@ -175,6 +191,130 @@ class IsaacLabContactBackend:
             f"{sorted(self._articulation_body_sets)}"
         )
 
+    def _ref_articulation(self, ref: ContactBodyRef) -> Optional[str]:
+        """Resolved articulation name for a robot ref (or ``None``)."""
+        if ref.articulation is not None:
+            return ref.articulation
+        if self._articulation_names is not None and len(self._articulation_names) == 1:
+            return self._articulation_names[0]
+        return None
+
+    def _authored_inventory(self, articulation: str) -> RobotBodyInventory:
+        """Authored asset inventory used only for pre-clone prim scopes.
+
+        Contact semantics still use the measured live PhysX body set; the USD
+        inventory contributes the parent prim paths needed to address nested
+        bodies before the scene exists.
+        """
+        cached = self._authored.get(articulation)
+        if cached is not None:
+            return cached
+        asset_path = self._contact_assets.get(articulation)
+        if not asset_path:
+            raise ValueError(
+                f"contact coverage for articulation {articulation!r} needs its "
+                f"authored robot asset path, but contact_assets has no entry; "
+                f"pass contact_assets={{{articulation!r}: '<robot.usd>'}} to "
+                f"build_contact_manager. Contact bodies are always resolved "
+                f"from the runtime/simulated body set; the asset is only used "
+                f"to discover per-parent sensor prim scopes"
+            )
+        suffix = Path(str(asset_path)).suffix.lower()
+        if suffix not in (".usd", ".usda", ".usdc", ".usdz"):
+            raise ValueError(
+                f"contact coverage for articulation {articulation!r} requires "
+                f"a USD robot asset, but contact_assets[{articulation!r}] is "
+                f"{asset_path!r} ({suffix or 'no extension'}); the isaaclab2 "
+                f"contact sensor prim scopes are USD-only. Supply the "
+                f"articulation's USD asset in contact_assets"
+            )
+        inventory = robot_body_inventory(asset_path)
+        self._authored[articulation] = inventory
+        return inventory
+
+    def _authored_bodies(
+        self,
+        inventory: RobotBodyInventory,
+        ref: ContactBodyRef,
+        articulation: str,
+    ) -> list[RigidBody]:
+        """Authored bodies selected by one robot ref (for sensor prim paths)."""
+        if ref.body_set is not None:
+            sets = self._articulation_body_sets.get(articulation)
+            bodies = None if sets is None else sets.get(ref.body_set)
+            if bodies is None:
+                raise ValueError(
+                    f"contact ref {ref.label()!r}: body_set {ref.body_set!r} is "
+                    f"not declared for articulation {articulation!r}; declare it "
+                    f"in the profile body_sets or the articulation contacts inventory"
+                )
+            selected: list[RigidBody] = []
+            for body in bodies:
+                selected.extend(self._resolve_authored(inventory, str(body), ref))
+            return _dedupe_bodies(selected)
+        body = ref.body
+        assert body is not None
+        if is_wildcard(body, ref.match):
+            return list(inventory.bodies)
+        return self._resolve_authored(inventory, body, ref)
+
+    @staticmethod
+    def _resolve_authored(
+        inventory: RobotBodyInventory,
+        body: str,
+        ref: ContactBodyRef,
+    ) -> list[RigidBody]:
+        if "/" in body or ref.match == "exact" or not _REGEX_META.search(body):
+            try:
+                return [inventory.resolve(body)]
+            except KeyError:
+                raise ValueError(
+                    f"contact ref {ref.label()!r}: authored robot inventory has "
+                    f"no body at path or name {body!r}; available paths: "
+                    f"{list(inventory.paths())}"
+                ) from None
+        try:
+            matches = [row for row in inventory.bodies if re.fullmatch(body, row.name)]
+        except re.error as exc:
+            raise ValueError(f"invalid contact body regex {body!r}: {exc}") from exc
+        if not matches:
+            raise ValueError(
+                f"contact ref {ref.label()!r}: authored robot inventory has no "
+                f"body matching {body!r}; available paths: {list(inventory.paths())}"
+            )
+        return matches
+
+    def _authored_sensor_paths(self, ref: ContactBodyRef) -> list[str]:
+        """One sensor prim path per parent scope selected by a robot ref.
+
+        IsaacLab's sensor prim matcher is single-segment, so a root wildcard
+        cannot cover nested hand bodies.  Grouping the authored bodies by their
+        parent scope produces one cfg per scope; bind_env later asserts that
+        the union is exactly the measured live body set.
+        """
+        articulation = self._ref_articulation(ref)
+        if articulation is None:
+            raise ValueError(
+                f"contact ref {ref.label()!r}: robot coverage requires an "
+                f"articulation name; declare articulation on the ref"
+            )
+        inventory = self._authored_inventory(articulation)
+        bodies = self._authored_bodies(inventory, ref, articulation)
+        groups: dict[str, list[RigidBody]] = {}
+        for body in bodies:
+            scope = body.path.rsplit("/", 1)[0] if "/" in body.path else ""
+            groups.setdefault(scope, []).append(body)
+        wildcard = is_wildcard(ref.body, ref.match)
+        leaf = self._leaf(ref)
+        paths: list[str] = []
+        for scope in sorted(groups):
+            prefix = f"{ENV_PREFIX_SENTINEL}/{leaf}"
+            if scope:
+                prefix = f"{prefix}/{scope}"
+            expr = "(.*)" if wildcard else _union([body.name for body in groups[scope]])
+            paths.append(f"{prefix}/{expr}")
+        return paths
+
     def _validate_declared_prop_refs(self, spec: ContactGroupSpec) -> None:
         """Object/fixture refs must name declared props (no synthesized rows)."""
         declared = set(self._prop_names)
@@ -184,6 +324,45 @@ class IsaacLabContactBackend:
                     f"contact group {spec.name!r}: ref {ref.label()!r} names an "
                     f"undeclared {ref.owner} prop {ref.name!r}; declared props "
                     f"are {sorted(declared)}"
+                )
+
+    def _validate_robot_assets(self, spec: ContactGroupSpec) -> None:
+        """Every robot ref requires its articulation's authored USD asset.
+
+        Contact semantics use the measured live body set, but the pre-clone
+        sensor prim paths cannot be discovered without the articulation asset.
+        Validate this before any Kit/env construction, regardless of whether
+        the ref is wildcard, single-body or pairwise.
+        """
+        for ref in (*spec.sensor_refs, *spec.filter_refs):
+            if ref.owner != "robot":
+                continue
+            articulation = self._ref_articulation(ref)
+            if articulation is None:
+                raise ValueError(
+                    f"contact group {spec.name!r}: robot ref {ref.label()!r} "
+                    f"must name an articulation when the run declares several; "
+                    f"declared: {list(self._articulation_names or ())}"
+                )
+            asset_path = self._contact_assets.get(articulation)
+            if not asset_path:
+                raise ValueError(
+                    f"contact group {spec.name!r}: robot ref {ref.label()!r} "
+                    f"requires the authored USD asset path for articulation "
+                    f"{articulation!r}, but contact_assets has no entry; pass "
+                    f"contact_assets={{{articulation!r}: '<robot.usd>'}} to "
+                    f"build_contact_manager. The asset is required before "
+                    f"cloning to discover sensor prim scopes; contact bodies "
+                    f"are still resolved from the runtime/simulated body set"
+                )
+            suffix = Path(str(asset_path)).suffix.lower()
+            if suffix not in (".usd", ".usda", ".usdc", ".usdz"):
+                raise ValueError(
+                    f"contact group {spec.name!r}: robot ref {ref.label()!r} "
+                    f"requires a USD asset for articulation {articulation!r}, "
+                    f"but contact_assets[{articulation!r}] is {asset_path!r} "
+                    f"({suffix or 'no extension'}); the isaaclab2 contact "
+                    f"sensor prim scopes are USD-only"
                 )
 
     def _prop_path(self, ref: ContactBodyRef) -> str:
@@ -232,30 +411,58 @@ class IsaacLabContactBackend:
     def setup_scene(self) -> dict:
         """``{scene_field: ContactSensorCfg}`` for every group.
 
-        One cfg per sensor ref (``contact_<name>_s<i>``); pairwise cfgs carry
-        the flattened filter prim paths in F order.
+        General robot wildcard/body_set refs expand to one cfg per parent prim
+        scope (``contact_<name>_s<i>_p<j>``).  Pairwise and explicit
+        single-path refs keep one cfg per sensor ref
+        (``contact_<name>_s<i>``); pairwise cfgs carry the flattened filter
+        prim paths in F order.
         """
+        for spec in self.specs:
+            self._validate_declared_prop_refs(spec)
+            self._validate_robot_assets(spec)
+
         from isaaclab.sensors import ContactSensorCfg
 
         fields_cfg: dict = {}
         for spec in self.specs:
-            self._validate_declared_prop_refs(spec)
-            names: list[str] = []
+            ref_fields: list[list[str]] = []
             filter_exprs = [self._ref_path(ref) for ref in spec.filter_refs]
             for i, ref in enumerate(spec.sensor_refs):
-                field = f"contact_{spec.name}_s{i}"
-                kwargs = {"prim_path": self._ref_path(ref), "history_length": 1}
-                if spec.mode == "pairwise":
-                    kwargs["filter_prim_paths_expr"] = filter_exprs
-                self._add_field(
-                    fields_cfg,
-                    field,
-                    ContactSensorCfg(**kwargs),
-                    spec.name,
-                )
-                names.append(field)
-            self._fields[spec.name] = names
+                paths = self._general_sensor_paths(ref, spec.mode)
+                if paths is None:
+                    field = f"contact_{spec.name}_s{i}"
+                    kwargs = {"prim_path": self._ref_path(ref), "history_length": 1}
+                    if spec.mode == "pairwise":
+                        kwargs["filter_prim_paths_expr"] = filter_exprs
+                    self._add_field(
+                        fields_cfg,
+                        field,
+                        ContactSensorCfg(**kwargs),
+                        spec.name,
+                    )
+                    ref_fields.append([field])
+                    continue
+                fields: list[str] = []
+                for j, prim_path in enumerate(paths):
+                    field = f"contact_{spec.name}_s{i}_p{j}"
+                    self._add_field(
+                        fields_cfg,
+                        field,
+                        ContactSensorCfg(prim_path=prim_path, history_length=1),
+                        spec.name,
+                    )
+                    fields.append(field)
+                ref_fields.append(fields)
+            self._fields[spec.name] = ref_fields
         return fields_cfg
+
+    def _general_sensor_paths(self, ref: ContactBodyRef, mode: str) -> Optional[list[str]]:
+        """Per-parent prim paths for a general robot ref (``None``: old path)."""
+        if mode != "general" or ref.owner != "robot" or ref.path is not None:
+            return None
+        if is_wildcard(ref.body, ref.match) or ref.body_set is not None:
+            return self._authored_sensor_paths(ref)
+        return None
 
     # ---------------------------------------------------------------- #
     # bind (after construction)
@@ -287,39 +494,113 @@ class IsaacLabContactBackend:
                         f"ref must address exactly one body"
                     )
             self._filters[spec.name] = filter_rows
-            fields = self._fields.get(spec.name) or [
-                f"contact_{spec.name}_s{i}" for i in range(len(sensor_rows))
-            ]
-            pieces, perms = [], []
-            cursor = 0
-            for index, field in enumerate(fields):
-                sensor = env.scene[field]
-                ref_rows = self.inventory.resolve(spec.sensor_refs[index])
-                cursor += len(ref_rows)
-                names = [str(n) for n in sensor.body_names]
-                idx: list[int] = []
-                for row in ref_rows:
-                    native = row.native if row.native in names else row.body
-                    if native not in names:
+            ref_fields = self._fields.get(spec.name)
+            if ref_fields is None:
+                ref_fields = [[f"contact_{spec.name}_s{i}"] for i in range(len(sensor_rows))]
+            sensors_per_ref, perms = [], []
+            for index, ref in enumerate(spec.sensor_refs):
+                fields = ref_fields[index]
+                sensors = [env.scene[field] for field in fields]
+                ref_rows = self.inventory.resolve(ref)
+                if spec.mode == "pairwise":
+                    if len(sensors) != 1:
                         raise ValueError(
-                            f"contact group {spec.name!r}: sensor ref "
-                            f"{spec.sensor_refs[index].label()!r} resolved "
-                            f"{row.key!r} but the spawned sensor reports "
-                            f"bodies {names}"
+                            f"contact group {spec.name!r}: pairwise sensor ref "
+                            f"{ref.label()!r} expanded to {len(sensors)} scene "
+                            f"sensors; pairwise refs keep exactly one sensor"
                         )
-                    idx.append(names.index(native))
-                if spec.mode == "pairwise" and len(idx) != 1:
-                    raise ValueError(
-                        f"contact group {spec.name!r}: pairwise sensor ref "
-                        f"{spec.sensor_refs[index].label()!r} resolved "
-                        f"{len(idx)} bodies; PhysX filtered reporting is "
-                        f"one-to-many only (use one body per sensor ref)"
-                    )
-                pieces.append(sensor)
-                perms.append(idx)
-            self._sensors[spec.name] = {"mode": spec.mode, "sensors": pieces}
+                    sensor = sensors[0]
+                    names = [str(n) for n in sensor.body_names]
+                    idx: list[int] = []
+                    for row in ref_rows:
+                        native = row.native if row.native in names else row.body
+                        if native not in names:
+                            raise ValueError(
+                                f"contact group {spec.name!r}: sensor ref "
+                                f"{ref.label()!r} resolved {row.key!r} but the "
+                                f"spawned sensor reports bodies {names}"
+                            )
+                        idx.append(names.index(native))
+                    if len(idx) != 1:
+                        raise ValueError(
+                            f"contact group {spec.name!r}: pairwise sensor ref "
+                            f"{ref.label()!r} resolved {len(idx)} bodies; PhysX "
+                            f"filtered reporting is one-to-many only (use one "
+                            f"body per sensor ref)"
+                        )
+                    sensors_per_ref.append(sensors)
+                    perms.append(idx)
+                    continue
+                perm = self._general_permutation(spec.name, ref, fields, sensors, ref_rows)
+                sensors_per_ref.append(sensors)
+                perms.append(perm)
+            self._sensors[spec.name] = {
+                "mode": spec.mode,
+                "sensors_by_ref": sensors_per_ref,
+            }
             self._perm[spec.name] = perms
         self._bound = True
+
+    def _general_permutation(
+        self,
+        group: str,
+        ref: ContactBodyRef,
+        fields: Sequence[str],
+        sensors: Sequence,
+        ref_rows: Sequence[ContactBodyAddress],
+    ) -> list[int]:
+        """Map concatenated sensor axes to the live body order for one ref.
+
+        The sensor axis order is PhysX-owned and per-parent scopes concatenate
+        in field order, so the B axis must be permuted by body name into the
+        measured ``robot.data.body_names`` order.  Robot refs require exact
+        set equality (no silent subset or duplicate); object/fixture refs keep
+        the historical subset mapping (their root body may not own every prop
+        body).
+        """
+        concat_names: list[str] = []
+        for field, sensor in zip(fields, sensors):
+            names = [str(n) for n in sensor.body_names]
+            prim_path = getattr(getattr(sensor, "cfg", None), "prim_path", field)
+            if not names:
+                raise ValueError(
+                    f"contact group {group!r}: sensor field {field!r} "
+                    f"({prim_path!r}) resolved no bodies; the authored prim "
+                    f"path must match at least one live PhysX body"
+                )
+            concat_names.extend(names)
+        name_to_index: dict[str, int] = {}
+        for position, name in enumerate(concat_names):
+            if name in name_to_index:
+                raise ValueError(
+                    f"contact group {group!r}: sensor ref {ref.label()!r} "
+                    f"reports duplicate body {name!r} across its parent-scope "
+                    f"sensors {list(fields)}"
+                )
+            name_to_index[name] = position
+        expected = [row.body for row in ref_rows]
+        if len(set(expected)) != len(expected):
+            raise ValueError(
+                f"contact group {group!r}: sensor ref {ref.label()!r} resolved "
+                f"duplicate live bodies {expected}"
+            )
+        expected_set = set(expected)
+        missing = [name for name in expected if name not in name_to_index]
+        extra = [name for name in concat_names if name not in expected_set]
+        if ref.owner == "robot" and (missing or extra):
+            raise ValueError(
+                f"contact group {group!r}: sensor ref {ref.label()!r} does not "
+                f"cover the measured live robot body set exactly; missing from "
+                f"sensors={missing}, unexpected in sensors={extra}, sensor "
+                f"fields={list(fields)}, live bodies={expected}"
+            )
+        if missing:
+            raise ValueError(
+                f"contact group {group!r}: sensor ref {ref.label()!r} resolved "
+                f"bodies {missing} that the spawned sensors {list(fields)} do "
+                f"not report (sensor bodies={concat_names})"
+            )
+        return [name_to_index[name] for name in expected]
 
     def _runtime_inventory(self, env) -> ContactInventory:
         rows: list[ContactBodyAddress] = []
@@ -331,8 +612,16 @@ class IsaacLabContactBackend:
             else:
                 field = "robot" if index == 0 else f"robot_{articulation}"
             robot = env.scene[field]
+            live_names: list[str] = []
             for name in robot.data.body_names:
                 native = str(name)
+                if native in live_names:
+                    raise ValueError(
+                        f"contact runtime inventory: articulation "
+                        f"{articulation!r} reports duplicate live body name "
+                        f"{native!r} in robot.data.body_names={live_names}"
+                    )
+                live_names.append(native)
                 rows.append(
                     ContactBodyAddress(
                         owner="robot",
@@ -401,16 +690,20 @@ class IsaacLabContactBackend:
         import torch
 
         entry = self._sensors[spec.name]
-        perm = self._perm[spec.name]
+        perms = self._perm[spec.name]
         if entry["mode"] == "general":
-            pieces = [s.data.net_forces_w[:, p, :] for s, p in zip(entry["sensors"], perm)]
+            pieces = []
+            for sensors, perm in zip(entry["sensors_by_ref"], perms):
+                concat = torch.cat([s.data.net_forces_w for s in sensors], dim=1)
+                pieces.append(concat[:, perm, :])
             if len(pieces) == 1:
                 return pieces[0].clone()
             return torch.cat(pieces, dim=1).clone()
         expected_f = len(self._filters.get(spec.name, ()))
         pieces = []
-        for sensor, p in zip(entry["sensors"], perm):
-            matrix = sensor.data.force_matrix_w[:, p, :, :]
+        for sensors, perm in zip(entry["sensors_by_ref"], perms):
+            sensor = sensors[0]
+            matrix = sensor.data.force_matrix_w[:, perm, :, :]
             if int(matrix.shape[2]) != expected_f:
                 raise AssertionError(
                     f"contact group {spec.name!r}: sensor F axis "
@@ -427,6 +720,7 @@ class IsaacLabContactBackend:
         self._perm.clear()
         self._filters.clear()
         self._fields.clear()
+        self._authored.clear()
         self.inventory = None
         self._bound = False
 

@@ -170,6 +170,7 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
         backend="isaaclab2",
         contact_factory=backend_runtime("isaaclab2").bindings.contact_backend,
         articulation_names=(CARTPOLE, G1),
+        contact_assets={CARTPOLE: str(cartpole_usd), G1: str(g1_usd)},
     )
     assert manager is not None
 
@@ -222,40 +223,60 @@ def test_two_real_articulations_read_independent_per_articulation_contact_all(
     try:
         cart_inventory = robot_rigid_bodies(str(cartpole_usd))
         g1_inventory = robot_rigid_bodies(str(g1_usd))
+        assert len(g1_inventory) == 46
         assert len(g1_inventory) > len(cart_inventory)
         g1_paths = [body.path for body in g1_inventory]
         assert "left_hand/left_hand_index_0_link" in g1_paths
-        assert "left_hand/left_hand_palm_link" not in g1_paths
+        assert "left_hand/left_hand_palm_link" in g1_paths
+        assert "right_hand/right_hand_palm_link" in g1_paths
 
-        assert manager.backend.group_axes(manager.specs[0]) == (len(cart_inventory), 0)
-        assert manager.backend.group_axes(manager.specs[1]) == (len(g1_inventory), 0)
+        cart_live = [str(name) for name in env.scene["robot"].data.body_names]
+        g1_live = [str(name) for name in env.scene["robot_g1"].data.body_names]
+        assert len(cart_live) == len(cart_inventory)
+        assert len(g1_live) == 46
+        assert "left_hand_palm_link" in g1_live
+        assert "right_hand_palm_link" in g1_live
+
+        assert manager.backend.group_axes(manager.specs[0]) == (len(cart_live), 0)
+        assert manager.backend.group_axes(manager.specs[1]) == (len(g1_live), 0)
         assert manager.backend.group_axes(manager.specs[2]) == (2, 0)
 
-        cart_names = {body.path.rsplit("/", 1)[-1] for body in cart_inventory}
-        g1_names = {body.path.rsplit("/", 1)[-1] for body in g1_inventory}
+        cart_names = set(cart_live)
+        g1_names = set(g1_live)
         assert cart_names.isdisjoint(g1_names)
 
-        cart_sensor = env.scene["contact_cart_all_s0"]
-        assert set(cart_sensor.body_names) == cart_names
-        assert "/Robot/" in cart_sensor.cfg.prim_path
-        g1_sensor = env.scene["contact_humanoid_all_s0"]
-        assert set(g1_sensor.body_names) == g1_names
-        assert "/Robot_g1/" in g1_sensor.cfg.prim_path
+        cart_fields = manager.backend._fields["cart_all"][0]
+        cart_sensor_names = [
+            str(name) for field in cart_fields for name in env.scene[field].body_names
+        ]
+        assert set(cart_sensor_names) == cart_names
+        assert any("/Robot/" in env.scene[field].cfg.prim_path for field in cart_fields)
+
+        g1_fields = manager.backend._fields["humanoid_all"][0]
+        assert len(g1_fields) == 3
+        g1_sensor_paths = [env.scene[field].cfg.prim_path for field in g1_fields]
+        assert any(path.endswith("/Robot_g1/(.*)") for path in g1_sensor_paths)
+        assert any(path.endswith("/Robot_g1/left_hand/(.*)") for path in g1_sensor_paths)
+        assert any(path.endswith("/Robot_g1/right_hand/(.*)") for path in g1_sensor_paths)
+        g1_sensor_names = [str(name) for field in g1_fields for name in env.scene[field].body_names]
+        assert len(g1_sensor_names) == 46
+        assert len(set(g1_sensor_names)) == len(g1_sensor_names)
+        assert set(g1_sensor_names) == g1_names
 
         values = manager.read()
-        assert tuple(values["contact/cart_all"].shape) == (1, len(cart_inventory), 3)
-        assert tuple(values["contact/humanoid_all"].shape) == (1, len(g1_inventory), 3)
+        assert tuple(values["contact/cart_all"].shape) == (1, len(cart_live), 3)
+        assert tuple(values["contact/humanoid_all"].shape) == (1, len(g1_live), 3)
         assert tuple(values["contact/humanoid_feet"].shape) == (1, 2, 3)
         assert tuple(values["contact/cart_all"].shape) != (
             1,
-            len(cart_inventory) + len(g1_inventory),
+            len(cart_live) + len(g1_live),
             3,
         )
 
         assert env.reset_all().tolist() == [0]
         after_reset = manager.read()
-        assert tuple(after_reset["contact/cart_all"].shape) == (1, len(cart_inventory), 3)
-        assert tuple(after_reset["contact/humanoid_all"].shape) == (1, len(g1_inventory), 3)
+        assert tuple(after_reset["contact/cart_all"].shape) == (1, len(cart_live), 3)
+        assert tuple(after_reset["contact/humanoid_all"].shape) == (1, len(g1_live), 3)
         assert tuple(after_reset["contact/humanoid_feet"].shape) == (1, 2, 3)
     finally:
         env.close()

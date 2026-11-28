@@ -232,12 +232,13 @@ class IsaacLabSceneOps:
             return {}
         body_names = [str(n) for n in robot.data.body_names]
         out: dict[str, list[str]] = {}
-        for name, pieces in sensors.items():
+        for name, entry in sensors.items():
             names: list[str] = []
-            for piece, perm in zip(pieces["sensors"], perms.get(name, [])):
+            for parts, perm in zip(entry["sensors_by_ref"], perms.get(name, [])):
+                concat = [str(body) for part in parts for body in part.body_names]
                 for idx in perm:
                     try:
-                        names.append(piece.body_names[idx])
+                        names.append(concat[idx])
                     except (IndexError, TypeError):
                         pass
             # sensor body names are robot-qualified frames; keep the

@@ -259,13 +259,14 @@ def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
 
     inventory = robot_rigid_bodies(str(g1_usd))
     paths = [body.path for body in inventory]
+    assert len(paths) == 46
     assert "pelvis" in paths
     assert "left_ankle_roll_link" in paths
     assert "right_ankle_roll_link" in paths
     assert "left_hand/left_hand_index_0_link" in paths
     assert "right_hand/right_hand_thumb_2_link" in paths
-    assert "left_hand/left_hand_palm_link" not in paths
-    assert "right_hand/right_hand_palm_link" not in paths
+    assert "left_hand/left_hand_palm_link" in paths
+    assert "right_hand/right_hand_palm_link" in paths
 
     manager = build_contact_manager(
         [
@@ -278,6 +279,7 @@ def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
         backend="isaaclab2",
         contact_factory=backend_runtime("isaaclab2").bindings.contact_backend,
         articulation_names=("g1",),
+        contact_assets={"g1": str(g1_usd)},
     )
     assert manager is not None
 
@@ -324,15 +326,33 @@ def test_g1_contact_all_materializes_the_robot_inventory(g1_usd):
         contact_manager=manager,
     )
     try:
-        assert manager.backend.group_axes(manager.specs[0]) == (len(paths), 0)
+        live = [str(name) for name in env.scene["robot"].data.body_names]
+        assert len(live) == 46
+        assert "left_hand_palm_link" in live
+        assert "right_hand_palm_link" in live
+
+        assert manager.backend.group_axes(manager.specs[0]) == (len(live), 0)
+
+        sensor_fields = manager.backend._fields["all"][0]
+        assert len(sensor_fields) == 3
+        sensor_paths = [env.scene[field].cfg.prim_path for field in sensor_fields]
+        assert any(path.endswith("/Robot/(.*)") for path in sensor_paths)
+        assert any(path.endswith("/Robot/left_hand/(.*)") for path in sensor_paths)
+        assert any(path.endswith("/Robot/right_hand/(.*)") for path in sensor_paths)
+        sensor_names = [
+            str(name) for field in sensor_fields for name in env.scene[field].body_names
+        ]
+        assert len(sensor_names) == 46
+        assert len(set(sensor_names)) == len(sensor_names)
+        assert set(sensor_names) == set(live)
 
         value = manager.read()["contact/all"]
-        assert tuple(value.shape) == (1, len(paths), 3)
+        assert tuple(value.shape) == (1, len(live), 3)
 
         assert env.reset_all().tolist() == [0]
         after_reset = manager.read()["contact/all"]
-        assert tuple(after_reset.shape) == (1, len(paths), 3)
-        assert after_reset[0, paths.index("pelvis")].tolist() == [0.0, 0.0, 0.0]
+        assert tuple(after_reset.shape) == (1, len(live), 3)
+        assert after_reset[0, live.index("pelvis")].tolist() == [0.0, 0.0, 0.0]
     finally:
         env.close()
 

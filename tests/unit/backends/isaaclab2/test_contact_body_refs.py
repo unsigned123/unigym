@@ -10,14 +10,17 @@ from tests._support.backends import contact_factory
 from tests._support.fakes.isaaclab import _Cfg, _RigidObjectCfg
 from unigym.contacts.manager import build_contact_manager
 
+_DEFAULT_CONTACT_ASSETS = {"tiny": "/tmp/tiny.usd"}
 
-def _manager(groups, *, props=None, articulated=None):
+
+def _manager(groups, *, props=None, articulated=None, contact_assets=_DEFAULT_CONTACT_ASSETS):
     manager = build_contact_manager(
         groups,
         backend="isaaclab2",
         articulation_names=("tiny",),
         prop_names=props,
         articulated_props=articulated,
+        contact_assets=contact_assets,
         contact_factory=contact_factory("isaaclab2"),
     )
     assert manager is not None
@@ -64,7 +67,21 @@ def test_general_robot_ref_builds_a_union_path(fake_isaaclab):
     assert fields["contact_hand_s1"].kw["prim_path"] == "{ENV_REGEX_NS}/Robot/(right_.*)"
 
 
-def test_single_articulation_body_set_omits_the_owner(fake_isaaclab):
+def test_single_articulation_body_set_omits_the_owner(fake_isaaclab, monkeypatch):
+    from pathlib import Path
+
+    from unigym.backends.isaaclab2 import contacts as contacts_module
+    from unigym.backends.isaaclab2.body_inventory import RigidBody, RobotBodyInventory
+
+    inventory = RobotBodyInventory(
+        Path("/tmp/tiny.usd"),
+        (
+            RigidBody("tip", "tip", True, None),
+            RigidBody("base", "base", True, None),
+        ),
+    )
+    monkeypatch.setattr(contacts_module, "robot_body_inventory", lambda path: inventory)
+
     manager = build_contact_manager(
         [
             {
@@ -76,11 +93,12 @@ def test_single_articulation_body_set_omits_the_owner(fake_isaaclab):
         backend="isaaclab2",
         articulation_names=("tiny",),
         articulation_body_sets={"tiny": {"grasp": ("tip", "base")}},
+        contact_assets={"tiny": "/tmp/tiny.usd"},
         contact_factory=contact_factory("isaaclab2"),
     )
     assert manager is not None
     assert (
-        manager.setup_scene()["contact_grasp_s0"].kw["prim_path"]
+        manager.setup_scene()["contact_grasp_s0_p0"].kw["prim_path"]
         == "{ENV_REGEX_NS}/Robot/(tip|base)"
     )
 
@@ -275,3 +293,148 @@ def test_frame_body_remains_unsupported_on_isaaclab2():
     )
     with pytest.raises(NotImplementedError, match="frame='body'"):
         manager.bind_env(_env())
+
+
+@pytest.mark.parametrize(
+    ("group", "props"),
+    [
+        (
+            {
+                "name": "single",
+                "sensor_refs": [{"owner": "robot", "articulation": "tiny", "body": "tip"}],
+                "frame": "world",
+            },
+            None,
+        ),
+        (
+            {
+                "name": "wildcard",
+                "sensor_refs": [{"owner": "robot", "articulation": "tiny", "body": "*"}],
+                "frame": "world",
+            },
+            None,
+        ),
+        (
+            {
+                "name": "pairwise",
+                "sensor_refs": [{"owner": "object", "name": "crate"}],
+                "filter_refs": [{"owner": "robot", "articulation": "tiny", "body": "tip"}],
+                "frame": "world",
+            },
+            ["crate"],
+        ),
+    ],
+)
+def test_every_robot_ref_requires_contact_assets_before_scene(group, props):
+    manager = _manager([group], props=props, contact_assets=None)
+
+    with pytest.raises(ValueError, match="contact_assets has no entry"):
+        manager.setup_scene()
+
+
+def test_contact_assets_for_robot_must_be_a_usd_asset(fake_isaaclab):
+    manager = _manager(
+        [
+            {
+                "name": "all",
+                "sensor_refs": [{"owner": "robot", "articulation": "tiny", "body": "*"}],
+                "frame": "world",
+            }
+        ],
+        contact_assets={"tiny": "/tmp/tiny.urdf"},
+    )
+
+    with pytest.raises(ValueError, match="USD-only"):
+        manager.setup_scene()
+
+
+def test_general_wildcard_fields_are_parent_scope_parts(fake_isaaclab, monkeypatch):
+    from pathlib import Path
+
+    from unigym.backends.isaaclab2 import contacts as contacts_module
+    from unigym.backends.isaaclab2.body_inventory import RigidBody, RobotBodyInventory
+
+    inventory = RobotBodyInventory(
+        Path("/tmp/tiny.usd"),
+        (
+            RigidBody("pelvis", "pelvis", True, None),
+            RigidBody("left_hand/index", "index", True, None),
+            RigidBody("right_hand/index", "index", True, None),
+        ),
+    )
+    monkeypatch.setattr(contacts_module, "robot_body_inventory", lambda path: inventory)
+    manager = _manager(
+        [
+            {
+                "name": "all",
+                "sensor_refs": [{"owner": "robot", "articulation": "tiny", "body": "*"}],
+                "frame": "world",
+            }
+        ]
+    )
+
+    fields = manager.setup_scene()
+
+    assert set(fields) == {
+        "contact_all_s0_p0",
+        "contact_all_s0_p1",
+        "contact_all_s0_p2",
+    }
+    assert [fields[key].kw["prim_path"] for key in sorted(fields)] == [
+        "{ENV_REGEX_NS}/Robot/(.*)",
+        "{ENV_REGEX_NS}/Robot/left_hand/(.*)",
+        "{ENV_REGEX_NS}/Robot/right_hand/(.*)",
+    ]
+
+
+def _general_backend(fields):
+    from unigym.backends.isaaclab2.contacts import IsaacLabContactBackend
+    from unigym.contacts.base import ContactGroupSpec
+
+    spec = ContactGroupSpec.from_yaml(
+        {
+            "name": "all",
+            "sensor_refs": [{"owner": "robot", "articulation": "tiny", "body": "*"}],
+            "frame": "world",
+        }
+    )
+    backend = IsaacLabContactBackend([spec], articulation_names=("tiny",))
+    backend._fields[spec.name] = fields
+    return backend, spec
+
+
+def test_general_sensor_permutation_maps_into_live_body_order():
+    import torch
+
+    backend, spec = _general_backend([["contact_all_s0", "contact_all_s1"]])
+    env = _env(("a", "b", "c", "d"))
+    env.scene["contact_all_s0"] = _Sensor(
+        ["c", "a"], forces=torch.tensor([[[30.0, 0.0, 0.0], [10.0, 0.0, 0.0]]])
+    )
+    env.scene["contact_all_s1"] = _Sensor(
+        ["d", "b"], forces=torch.tensor([[[40.0, 0.0, 0.0], [20.0, 0.0, 0.0]]])
+    )
+
+    backend.bind_env(env)
+
+    assert backend._perm["all"] == [[1, 3, 0, 2]]
+    out = backend.read_raw(spec)
+    assert out[0, :, 0].tolist() == [10.0, 20.0, 30.0, 40.0]
+
+
+def test_general_sensor_missing_live_body_fails():
+    backend, _ = _general_backend([["contact_all_s0"]])
+    env = _env(("a", "b", "c"))
+    env.scene["contact_all_s0"] = _Sensor(["a", "b"])
+
+    with pytest.raises(ValueError, match="does not cover the measured live robot body set"):
+        backend.bind_env(env)
+
+
+def test_general_sensor_extra_body_fails():
+    backend, _ = _general_backend([["contact_all_s0"]])
+    env = _env(("a", "b"))
+    env.scene["contact_all_s0"] = _Sensor(["a", "b", "ghost"])
+
+    with pytest.raises(ValueError, match="unexpected in sensors"):
+        backend.bind_env(env)
